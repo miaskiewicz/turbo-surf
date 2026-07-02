@@ -84,14 +84,79 @@ pub fn stylesheet_hrefs(html: &str) -> Vec<String> {
             && !rel_val.split_whitespace().any(|t| t == "alternate");
         if is_sheet {
             if let Some(href) = attr_value(tag, tag_lower, "href") {
-                if !href.trim().is_empty() {
-                    hrefs.push(href.trim().to_string());
+                let href = html_unescape(href.trim());
+                if !href.is_empty() {
+                    hrefs.push(href);
                 }
             }
         }
         cursor = end + 1;
     }
     hrefs
+}
+
+/// Decode the HTML entities that appear in URL attributes — chiefly `&amp;`,
+/// which HTML *requires* in an `href`/`src` query string (`?a=1&amp;b=2`). Left
+/// undecoded, the fetched URL carries a literal `&amp;` and the server sees a
+/// bogus `amp;b` parameter (this is why Wikipedia's `load.php?...&amp;only=styles`
+/// stylesheet returned a stub instead of the skin CSS). Covers the named entities
+/// URLs use plus numeric (`&#38;` / `&#x26;`) forms; unknown entities pass through.
+fn html_unescape(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'&' {
+            out.push(bytes[i] as char);
+            i += 1;
+            continue;
+        }
+        match s[i..].find(';').map(|semi| &s[i + 1..i + semi]) {
+            Some(entity) => {
+                push_entity(entity, &mut out);
+                i += entity.len() + 2; // '&' + entity + ';'
+            }
+            None => {
+                out.push('&');
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Append the character for one entity body (between `&` and `;`) to `out`, or the
+/// verbatim `&entity;` if it isn't one we decode.
+fn push_entity(entity: &str, out: &mut String) {
+    let decoded = match entity {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" | "#39" => Some('\''),
+        _ => numeric_entity(entity),
+    };
+    match decoded {
+        Some(c) => out.push(c),
+        None => {
+            out.push('&');
+            out.push_str(entity);
+            out.push(';');
+        }
+    }
+}
+
+/// A numeric character reference: `#38` (decimal) or `#x26` (hex).
+fn numeric_entity(entity: &str) -> Option<char> {
+    let digits = entity.strip_prefix('#')?;
+    let code = match digits.strip_prefix(['x', 'X']) {
+        Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+        None => digits.parse::<u32>().ok()?,
+    };
+    char::from_u32(code)
 }
 
 /// Every image reference the layout engine can paint, in source order and
@@ -127,8 +192,9 @@ fn img_srcs(html: &str, out: &mut Vec<String>) {
             .map(|g| tag_start + g)
             .unwrap_or(html.len());
         if let Some(src) = attr_value(&html[tag_start..end], &lower[tag_start..end], "src") {
-            if !src.trim().is_empty() {
-                out.push(src.trim().to_string());
+            let src = html_unescape(src.trim());
+            if !src.is_empty() {
+                out.push(src);
             }
         }
         cursor = end + 1;
@@ -168,7 +234,7 @@ fn background_image_urls(html: &str, out: &mut Vec<String>) {
             .trim_matches(['"', '\''])
             .trim();
         if !name.is_empty() {
-            out.push(name.to_string());
+            out.push(html_unescape(name));
         }
         cursor = inner_start + close + 1;
     }
@@ -295,6 +361,27 @@ mod tests {
             hrefs,
             vec!["/a.css", "https://cdn.example/b.css", "bare.css"]
         );
+    }
+
+    #[test]
+    fn stylesheet_hrefs_decode_html_entities() {
+        use super::stylesheet_hrefs;
+        // HTML requires `&` in an href to be written `&amp;`; the returned href
+        // must be the real URL (`&`), not the escaped source, or the fetch 404s /
+        // drops query params (Wikipedia's load.php skin CSS bug).
+        let html =
+            r#"<link rel="stylesheet" href="/w/load.php?lang=en&amp;only=styles&amp;skin=vector">"#;
+        assert_eq!(
+            stylesheet_hrefs(html),
+            vec!["/w/load.php?lang=en&only=styles&skin=vector"]
+        );
+    }
+
+    #[test]
+    fn image_urls_decode_html_entities() {
+        use super::image_urls;
+        let html = r#"<img src="/img?w=100&amp;h=50&amp;fmt=webp">"#;
+        assert_eq!(image_urls(html), vec!["/img?w=100&h=50&fmt=webp"]);
     }
 
     #[test]

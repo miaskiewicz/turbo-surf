@@ -1,7 +1,8 @@
 //! Vector painter: walk a [`Fragment`] galley into a standalone SVG document.
-//! Same document-order walk as the raster painter, so the two agree. Glyphs are
+//! Same stacking-order walk as the raster painter, so the two agree. Glyphs are
 //! emitted as filled `<path>` outlines (self-contained — no viewer font needed),
-//! boxes/borders as `<rect>`, and `<img>` boxes as neutral placeholders.
+//! boxes/borders as `<rect>`, and images as base64 PNG `data:` URI `<image>`s
+//! (any decoded source format; unknown formats fall back to a placeholder rect).
 
 use std::fmt::Write;
 
@@ -9,6 +10,7 @@ use turbo_html2pdf_core::layout::value::{BorderEdges, BorderSide};
 use turbo_html2pdf_core::{Fragment, FragmentContent, PositionedGlyph, Rgba};
 
 use crate::glyph::{self, Pen, Tracer};
+use crate::image_paint::{self, DecodedAssets};
 
 const IMAGE_PLACEHOLDER: Rgba = Rgba {
     r: 220,
@@ -19,7 +21,13 @@ const IMAGE_PLACEHOLDER: Rgba = Rgba {
 
 /// Paint `galley` into a `width × height` SVG document string over a `bg` canvas
 /// fill (the propagated root/body background).
-pub fn paint(galley: &Fragment, width: u32, height: u32, bg: Rgba) -> String {
+pub fn paint(
+    galley: &Fragment,
+    width: u32,
+    height: u32,
+    bg: Rgba,
+    images: &DecodedAssets,
+) -> String {
     let mut svg = String::with_capacity(4096);
     let _ = writeln!(
         svg,
@@ -27,12 +35,12 @@ pub fn paint(galley: &Fragment, width: u32, height: u32, bg: Rgba) -> String {
          viewBox=\"0 0 {width} {height}\">\n<rect width=\"{width}\" height=\"{height}\" {}/>",
         fill_attrs(bg)
     );
-    paint_fragment(&mut svg, galley);
+    paint_fragment(&mut svg, galley, images);
     svg.push_str("</svg>\n");
     svg
 }
 
-fn paint_fragment(svg: &mut String, f: &Fragment) {
+fn paint_fragment(svg: &mut String, f: &Fragment, images: &DecodedAssets) {
     match &f.content {
         FragmentContent::Box { background, border } => {
             if let Some(bg) = background {
@@ -54,13 +62,31 @@ fn paint_fragment(svg: &mut String, f: &Fragment) {
             *font_size,
             *color,
         ),
-        FragmentContent::Image(_) => rect(svg, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER),
+        FragmentContent::Image(placement) => paint_image(svg, f, &placement.name, images),
         FragmentContent::Directive(_) => {}
     }
     // Paint children back-to-front in CSS stacking order (§9.9), not raw DOM
     // order, so `position`/`z-index` boxes (menus, modals) layer correctly.
     for &i in &f.paint_order() {
-        paint_fragment(svg, &f.children[i]);
+        paint_fragment(svg, &f.children[i], images);
+    }
+}
+
+/// Embed an image as a base64 `data:` URI `<image>` filling its layout box; fall
+/// back to a neutral placeholder rect when the bytes are absent or unrecognized.
+/// `preserveAspectRatio="none"` because layout already sized the box to the
+/// image's aspect ratio.
+fn paint_image(svg: &mut String, f: &Fragment, name: &str, images: &DecodedAssets) {
+    match images.get(name).and_then(image_paint::data_uri) {
+        Some(uri) => {
+            let _ = writeln!(
+                svg,
+                "<image x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" \
+                 preserveAspectRatio=\"none\" href=\"{uri}\"/>",
+                f.x, f.y, f.width, f.height
+            );
+        }
+        None => rect(svg, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER),
     }
 }
 

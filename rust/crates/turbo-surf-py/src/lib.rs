@@ -128,6 +128,62 @@ fn screenshot_svg_with_css(
         .map_err(TurboSurfError::new_err)
 }
 
+/// Every image reference in `html` (`<img src>` + `background-image: url(...)`),
+/// verbatim + de-duplicated (`data:` skipped). Fetch each yourself (resolving
+/// against the page URL) and pass a `{ref: bytes}` dict to `*_with_assets`.
+#[pyfunction]
+fn image_urls(html: &str) -> Vec<String> {
+    raster::image_urls(html)
+}
+
+/// PNG screenshot of `html` with caller-fetched `external_css` and `images` (a
+/// `{ref: bytes}` dict from `image_urls`). PNG/JPEG images are painted; others
+/// fall back to a placeholder. Returns PNG `bytes`.
+#[pyfunction]
+#[pyo3(signature = (html, external_css, images, width=None, height=None, full_page=false))]
+fn screenshot_with_assets<'py>(
+    py: Python<'py>,
+    html: &str,
+    external_css: &str,
+    images: std::collections::HashMap<String, Vec<u8>>,
+    width: Option<u32>,
+    height: Option<u32>,
+    full_page: bool,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let bytes = raster::screenshot_png_with_assets(
+        html,
+        external_css,
+        viewport(width, height),
+        &images,
+        full_page,
+    )
+    .map_err(TurboSurfError::new_err)?;
+    Ok(PyBytes::new(py, &bytes))
+}
+
+/// SVG screenshot of `html` with caller-fetched `external_css` and `images`
+/// (images embed as base64 `data:` URIs) → document `str`. `full_page` grows the
+/// height to the full content height instead of clipping to the viewport.
+#[pyfunction]
+#[pyo3(signature = (html, external_css, images, width=None, height=None, full_page=false))]
+fn screenshot_svg_with_assets(
+    html: &str,
+    external_css: &str,
+    images: std::collections::HashMap<String, Vec<u8>>,
+    width: Option<u32>,
+    height: Option<u32>,
+    full_page: bool,
+) -> PyResult<String> {
+    raster::screenshot_svg_with_assets(
+        html,
+        external_css,
+        viewport(width, height),
+        &images,
+        full_page,
+    )
+    .map_err(TurboSurfError::new_err)
+}
+
 /// The document `<title>` (trimmed; empty if none).
 #[pyfunction]
 fn title(html: &str) -> String {
@@ -285,6 +341,9 @@ fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(stylesheet_hrefs, m)?)?;
     m.add_function(wrap_pyfunction!(screenshot_with_css, m)?)?;
     m.add_function(wrap_pyfunction!(screenshot_svg_with_css, m)?)?;
+    m.add_function(wrap_pyfunction!(image_urls, m)?)?;
+    m.add_function(wrap_pyfunction!(screenshot_with_assets, m)?)?;
+    m.add_function(wrap_pyfunction!(screenshot_svg_with_assets, m)?)?;
     m.add_function(wrap_pyfunction!(title, m)?)?;
     m.add_function(wrap_pyfunction!(html, m)?)?;
     m.add_function(wrap_pyfunction!(links, m)?)?;

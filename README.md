@@ -381,10 +381,12 @@ an `expect(locator)` chain is batched into one crossing).
 
 `page.screenshot()` renders a **synthetic** image (PNG or SVG) from a native
 layout+paint of the current HTML — no browser, no Chromium. It's *reasonably
-representative*, not pixel-faithful (`position`/`z-index` are honored for block
-flow via CSS stacking order; `<img>` draws as a placeholder). Runs only when asked,
-over any HTML snapshot; the viewport is configurable. See the `screenshot` MCP
-tool + `screenshot`/`screenshotSvg` napi functions.
+representative*, not pixel-faithful (`position`/`z-index` are honored via CSS
+stacking order; `<img>` + `background-image` are fetched and painted —
+PNG/JPEG/GIF/WebP + SVG, unknown formats fall back to a placeholder). `full_page`
+grows to the content height. Runs only when asked, over any HTML snapshot; the
+viewport is configurable. See the `screenshot` MCP tool + `screenshot`/`screenshotSvg`
+napi functions.
 
 What a no-browser engine **physically can't do fails honestly** (it throws or
 no-ops — never a silent pass):

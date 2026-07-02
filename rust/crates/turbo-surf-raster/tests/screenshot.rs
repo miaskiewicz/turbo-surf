@@ -1,6 +1,19 @@
 //! Offline end-to-end: an HTML string renders into a valid PNG and a valid SVG.
 
-use turbo_surf_raster::{screenshot_png, screenshot_svg, Format, Viewport};
+use std::collections::HashMap;
+
+use turbo_surf_raster::{
+    image_urls, screenshot_png, screenshot_png_with_assets, screenshot_svg,
+    screenshot_svg_with_assets, Format, ImageAssets, Viewport,
+};
+
+/// A `w × h` solid-colour RGBA PNG fixture (built with tiny-skia so the test
+/// needs no committed binary).
+fn solid_png(w: u32, h: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
+    let mut pm = tiny_skia::Pixmap::new(w, h).unwrap();
+    pm.fill(tiny_skia::Color::from_rgba8(r, g, b, 255));
+    pm.encode_png().unwrap()
+}
 
 const PAGE: &str = r#"<html><head>
     <style>.card{background-color:#3366cc;padding:16px} p{color:#ffffff;font-size:24px}</style>
@@ -58,6 +71,124 @@ fn format_dispatch_matches_direct() {
     };
     let via_enum = turbo_surf_raster::screenshot(PAGE, vp, Format::Png).expect("png");
     assert_eq!(&via_enum[..4], &[0x89, b'P', b'N', b'G']);
+}
+
+#[test]
+fn image_urls_lists_img_and_background_refs() {
+    let html = r#"<img src="/logo.png"><div style="background-image:url(bg.jpg)"></div>"#;
+    assert_eq!(image_urls(html), vec!["/logo.png", "bg.jpg"]);
+}
+
+#[test]
+fn png_paints_supplied_image_bytes_not_a_placeholder() {
+    // A 40×40 red `<img>` whose bytes the caller supplies must render as red
+    // pixels (the fixture colour), not the grey placeholder or the white canvas.
+    let mut assets: ImageAssets = HashMap::new();
+    assets.insert("r.png".to_string(), solid_png(4, 4, 255, 0, 0));
+    let page = r#"<html><body style="margin:0">
+        <img src="r.png" style="width:40px;height:40px">
+      </body></html>"#;
+    let vp = Viewport {
+        width: 100,
+        height: 100,
+    };
+    let png = screenshot_png_with_assets(page, "", vp, &assets, false).expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode output");
+    // Sample the middle of the image box (~20,20).
+    let px = pm.pixel(20, 20).expect("pixel");
+    assert!(
+        px.red() > 200 && px.green() < 60 && px.blue() < 60,
+        "image box should be red, got ({},{},{})",
+        px.red(),
+        px.green(),
+        px.blue()
+    );
+}
+
+#[test]
+fn png_falls_back_to_placeholder_without_bytes() {
+    // Same page, no supplied bytes: the `<img>` box lays out but paints nothing
+    // (no Image fragment), so the middle stays the white canvas — definitely not
+    // red.
+    let page = r#"<html><body style="margin:0">
+        <img src="r.png" style="width:40px;height:40px">
+      </body></html>"#;
+    let vp = Viewport {
+        width: 100,
+        height: 100,
+    };
+    let png = screenshot_png_with_assets(page, "", vp, &ImageAssets::new(), false).expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    let px = pm.pixel(20, 20).expect("pixel");
+    assert!(
+        px.red() > 200 && px.green() > 200 && px.blue() > 200,
+        "no image → canvas stays light"
+    );
+}
+
+#[test]
+fn full_page_grows_height_to_content() {
+    // Content taller than the viewport: a viewport-clipped shot is exactly the
+    // viewport height, while `full_page` grows to fit the whole content.
+    let page = r#"<html><body style="margin:0">
+        <div style="height:2000px;background:#eee"></div>
+      </body></html>"#;
+    let vp = Viewport {
+        width: 400,
+        height: 300,
+    };
+    let clipped =
+        screenshot_png_with_assets(page, "", vp, &ImageAssets::new(), false).expect("png");
+    let full = screenshot_png_with_assets(page, "", vp, &ImageAssets::new(), true).expect("png");
+    let hc = u32::from_be_bytes([clipped[20], clipped[21], clipped[22], clipped[23]]);
+    let hf = u32::from_be_bytes([full[20], full[21], full[22], full[23]]);
+    let wf = u32::from_be_bytes([full[16], full[17], full[18], full[19]]);
+    assert_eq!(hc, 300, "clipped keeps the viewport height");
+    assert_eq!(wf, 400, "full page keeps the viewport width");
+    assert!(
+        hf >= 2000,
+        "full page grows to the content height, got {hf}"
+    );
+}
+
+#[test]
+fn svg_source_image_is_rasterized_and_painted() {
+    // An `<img>` whose bytes are an SVG must be rasterized (resvg) and painted —
+    // proving the normalize-any-format-to-RGBA path sizes + paints non-PNG/JPEG
+    // sources end-to-end (turbo-html2pdf only ever sees the re-encoded PNG).
+    let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="#0000ff"/></svg>"##;
+    let mut assets: ImageAssets = HashMap::new();
+    assets.insert("logo.svg".to_string(), svg.to_vec());
+    let page = r#"<html><body style="margin:0">
+        <img src="logo.svg" style="width:40px;height:40px">
+      </body></html>"#;
+    let vp = Viewport {
+        width: 100,
+        height: 100,
+    };
+    let png = screenshot_png_with_assets(page, "", vp, &assets, false).expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    let px = pm.pixel(20, 20).expect("pixel");
+    assert!(
+        px.blue() > 200 && px.red() < 60 && px.green() < 60,
+        "SVG box should be blue, got ({},{},{})",
+        px.red(),
+        px.green(),
+        px.blue()
+    );
+}
+
+#[test]
+fn svg_embeds_supplied_image_as_data_uri() {
+    let mut assets: ImageAssets = HashMap::new();
+    assets.insert("r.png".to_string(), solid_png(2, 2, 0, 128, 0));
+    let page = r#"<body style="margin:0"><img src="r.png" style="width:30px;height:30px"></body>"#;
+    let svg = screenshot_svg_with_assets(page, "", Viewport::DEFAULT, &assets, false).expect("svg");
+    assert!(svg.contains("<image "), "expected an <image> element");
+    assert!(
+        svg.contains("href=\"data:image/png;base64,"),
+        "expected a base64 PNG data URI"
+    );
 }
 
 #[test]

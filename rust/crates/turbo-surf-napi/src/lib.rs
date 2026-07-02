@@ -125,6 +125,65 @@ pub fn screenshot_svg_with_css(
         .map_err(Error::from_reason)
 }
 
+/// Every image reference in `html` (`<img src>` + `background-image: url(...)`),
+/// verbatim + de-duplicated (`data:` skipped). The caller resolves each against
+/// the page URL, fetches the bytes, and passes them as the `images` map to
+/// `*WithAssets`.
+#[napi]
+pub fn image_urls(html: String) -> Vec<String> {
+    raster::image_urls(&html)
+}
+
+/// Convert a JS `{ ref: Buffer }` image map into the raster's asset map.
+fn to_assets(images: std::collections::HashMap<String, Buffer>) -> raster::ImageAssets {
+    images.into_iter().map(|(k, v)| (k, v.to_vec())).collect()
+}
+
+/// PNG screenshot of `html` with caller-fetched `external_css` and `images` (a
+/// map from each `imageUrls` ref to its fetched bytes). PNG/JPEG images are
+/// painted into their layout box; others fall back to a placeholder.
+#[napi]
+pub fn screenshot_with_assets(
+    html: String,
+    external_css: String,
+    images: std::collections::HashMap<String, Buffer>,
+    width: Option<u32>,
+    height: Option<u32>,
+    full_page: Option<bool>,
+) -> Result<Buffer> {
+    raster::screenshot_png_with_assets(
+        &html,
+        &external_css,
+        viewport(width, height),
+        &to_assets(images),
+        full_page.unwrap_or(false),
+    )
+    .map(Buffer::from)
+    .map_err(Error::from_reason)
+}
+
+/// SVG screenshot of `html` with caller-fetched `external_css` and `images`;
+/// images embed as base64 `data:` URIs. `fullPage` grows the height to the full
+/// content height instead of clipping to the viewport. → document string.
+#[napi]
+pub fn screenshot_svg_with_assets(
+    html: String,
+    external_css: String,
+    images: std::collections::HashMap<String, Buffer>,
+    width: Option<u32>,
+    height: Option<u32>,
+    full_page: Option<bool>,
+) -> Result<String> {
+    raster::screenshot_svg_with_assets(
+        &html,
+        &external_css,
+        viewport(width, height),
+        &to_assets(images),
+        full_page.unwrap_or(false),
+    )
+    .map_err(Error::from_reason)
+}
+
 #[napi]
 pub fn text(html: String) -> String {
     let tree = parsed(&html);
@@ -720,6 +779,22 @@ async fn do_fetch_headers(
 #[napi]
 pub async fn fetch_html(url: String) -> Result<String> {
     do_fetch(&url, None, None, None).await
+}
+
+/// Fetch a URL as raw bytes (no charset decode) → a `Buffer`. For binary
+/// resources — images for `screenshotWithAssets` — that a `fetchHtml` string
+/// would corrupt. Uses the shared pooled client; non-HTML content types allowed.
+#[napi]
+pub async fn fetch_bytes(url: String) -> Result<Buffer> {
+    let opts = FetchOptions {
+        allow_non_html: true,
+        client: Some(shared_client()),
+        ..Default::default()
+    };
+    let (_final_url, bytes, _status) = turbo_surf_core::net::fetch_bytes(&url, opts)
+        .await
+        .map_err(|e| Error::from_reason(e.to_string()))?;
+    Ok(Buffer::from(bytes))
 }
 
 /// Fetch with an explicit method/body (e.g. a POST form submission).

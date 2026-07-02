@@ -4,7 +4,7 @@ All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
 ## [0.3.2]
-Screenshot fidelity: CSS positioning + z-index stacking.
+Screenshot fidelity: CSS positioning + z-index stacking, image rendering, full-page.
 
 ### Added
 - **`position` + `z-index` in synthetic screenshots** — screenshots now honor
@@ -14,10 +14,26 @@ Screenshot fidelity: CSS positioning + z-index stacking.
   order (CSS 2.2 §9.9) instead of raw DOM order, so overlapping menus/modals layer
   correctly. Powered by the layout work in turbo-html2pdf 0.2.5, consumed via the
   new `Fragment::paint_order` in `turbo-surf-raster`'s PNG + SVG paint walks.
+- **Image rendering** — `<img>` and `background-image` boxes now paint real
+  pixels: **PNG, JPEG, GIF, WebP, and SVG** (SVG rasterized via resvg). The raster
+  normalizes every decoded image to RGBA and hands turbo-html2pdf a re-encoded PNG
+  purely for sizing, so format support lives entirely in the raster. The
+  `screenshot` MCP tool and the Playwright shim fetch the page's image bytes over
+  the session client (impersonation + cookies apply), `{ images: false }` opts
+  out; the raster scales them into the layout box (PNG output) or embeds a base64
+  PNG `data:` URI (SVG output). New `image_urls` + `screenshot*_with_assets`
+  across raster/napi/Python for callers that fetch the bytes themselves; new
+  `net::fetch_bytes` (+ napi `fetchBytes`) returns raw bytes without charset
+  decode. Unknown formats fall back to a placeholder.
+- **Full-page screenshots** — `full_page` (MCP `full_page`, shim `fullPage`,
+  napi/Python `full_page`) grows the image height to the full laid-out content
+  height (viewport width still drives layout), clamped to 24k px. The `screenshot`
+  reply reports the true image `width`/`height`.
 
 ### Changed
-- `turbo-surf-raster` now depends on `turbo-html2pdf-core` **0.2.5** (positioning
-  + `paint_order`).
+- `turbo-surf-raster` now depends on `turbo-html2pdf-core` **0.2.5** (positioning,
+  `paint_order`, `layout_html_with_images`), the `image` crate (PNG/JPEG/GIF/WebP
+  decode), and `resvg` (SVG rasterization).
 
 ## [0.3.1]
 Screenshot fidelity: external stylesheets + root-background propagation.

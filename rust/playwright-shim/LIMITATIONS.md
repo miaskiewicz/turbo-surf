@@ -26,12 +26,14 @@ rendering surface and no input hardware**. So three buckets are out of reach:
   is supported via a *synthetic* native layout+paint (see below) — a
   representative render, not a browser-faithful capture. It fetches the page's
   external `<link>` stylesheets and cascades them (`{externalCss:false}` opts
-  out), and propagates the root/body background to the canvas. It models
-  `position:absolute/fixed/relative` and `z-index` for block flow (out-of-flow
-  boxes are placed against their containing block and painted back-to-front per
-  CSS stacking order), but does **not** run JS-driven visuals (a `<canvas>`
-  gradient background is absent), render image bytes (`<img>` draws as a
-  placeholder), or crop to an element — `locator.screenshot()` still throws.
+  out), fetches + paints `<img>`/`background-image` bytes (PNG/JPEG/GIF/WebP +
+  SVG; `{images:false}` opts out, unknown formats fall back to a placeholder),
+  models
+  `position:absolute/fixed/relative` + `z-index` for block flow (painted
+  back-to-front per CSS stacking order), propagates the root/body background, and
+  supports `{fullPage:true}`. It does **not** run JS-driven visuals (a `<canvas>`
+  gradient background is absent) or crop to an element — `locator.screenshot()`
+  still throws.
 - **Synthetic input devices** — `mouse`, `keyboard`, `touchscreen`, `hover`,
   `dragTo`. There is no pointer/keyboard hardware to drive; the engine acts on the
   DOM directly (`click` resolves a link/submit intent; `fill` sets the value).

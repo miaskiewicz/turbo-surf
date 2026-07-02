@@ -94,6 +94,86 @@ pub fn stylesheet_hrefs(html: &str) -> Vec<String> {
     hrefs
 }
 
+/// Every image reference the layout engine can paint, in source order and
+/// de-duplicated: `<img src>` values and `background-image: url(...)` urls. Values
+/// are returned **verbatim** — exactly the resolver key turbo-html2pdf uses (the
+/// raw `src`, or the unquoted `url(...)` inner) — so the caller resolves each
+/// against the page URL, fetches the bytes, and stores them under the same key.
+/// `data:` URIs are skipped (self-contained, nothing to fetch).
+pub fn image_urls(html: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    img_srcs(html, &mut urls);
+    background_image_urls(html, &mut urls);
+    let mut seen = std::collections::HashSet::new();
+    urls.retain(|u| !u.starts_with("data:") && seen.insert(u.clone()));
+    urls
+}
+
+/// Push the `src` of every `<img>` tag onto `out`.
+fn img_srcs(html: &str, out: &mut Vec<String>) {
+    let lower = html.to_ascii_lowercase();
+    let bytes = html.as_bytes();
+    let mut cursor = 0;
+    while let Some(rel) = lower[cursor..].find("<img") {
+        let tag_start = cursor + rel;
+        // Whole tag name: char after `<img` must end it (ws / `>` / `/`).
+        let after = bytes.get(tag_start + 4).copied();
+        if !matches!(after, Some(b) if b == b'>' || b == b'/' || b.is_ascii_whitespace()) {
+            cursor = tag_start + 4;
+            continue;
+        }
+        let end = lower[tag_start..]
+            .find('>')
+            .map(|g| tag_start + g)
+            .unwrap_or(html.len());
+        if let Some(src) = attr_value(&html[tag_start..end], &lower[tag_start..end], "src") {
+            if !src.trim().is_empty() {
+                out.push(src.trim().to_string());
+            }
+        }
+        cursor = end + 1;
+    }
+}
+
+/// Push the url of every `background`/`background-image: url(...)` declaration
+/// onto `out` (inline `style=` attrs and `<style>` blocks alike — a raw source
+/// scan). Both the longhand and the `background:` shorthand carry image urls;
+/// real stylesheets use the shorthand pervasively.
+fn background_image_urls(html: &str, out: &mut Vec<String>) {
+    let lower = html.to_ascii_lowercase();
+    let mut cursor = 0;
+    // `background` also prefixes `background-image`, so this matches both.
+    while let Some(rel) = lower[cursor..].find("background") {
+        let decl = cursor + rel + "background".len();
+        cursor = decl;
+        // Only a `url(` inside THIS declaration (before its terminator) counts —
+        // a later declaration's url must not be attributed to a `background`
+        // property that had none (`background: #fff`).
+        // `;`/`}` end a CSS declaration; `<`/newline bound an inline `style=`
+        // attr's value. Quotes are NOT terminators — they may wrap the url itself
+        // (`url("x.png")`).
+        let end = lower[decl..]
+            .find([';', '}', '<', '\n'])
+            .map(|e| decl + e)
+            .unwrap_or(html.len());
+        let Some(urel) = lower[decl..end].find("url(") else {
+            continue;
+        };
+        let inner_start = decl + urel + "url(".len();
+        let Some(close) = html[inner_start..end].find(')') else {
+            continue;
+        };
+        let name = html[inner_start..inner_start + close]
+            .trim()
+            .trim_matches(['"', '\''])
+            .trim();
+        if !name.is_empty() {
+            out.push(name.to_string());
+        }
+        cursor = inner_start + close + 1;
+    }
+}
+
 /// Read `name="value"` (or `name='value'`) out of an opening-tag slice. `tag` is
 /// the original-case text; `tag_lower` its lowercase twin (for case-insensitive
 /// attribute-name matching while returning the original-case value).
@@ -214,6 +294,26 @@ mod tests {
         assert_eq!(
             hrefs,
             vec!["/a.css", "https://cdn.example/b.css", "bare.css"]
+        );
+    }
+
+    #[test]
+    fn image_urls_extracts_img_and_background_skipping_data() {
+        use super::image_urls;
+        let html = r#"<img src="/a.png">
+            <div style="background-image:url('b.jpg')"></div>
+            <style>.x{ background-image: url(c.png) }</style>
+            <div style="background:#fff url(d.webp) no-repeat"></div>
+            <style>.y{ background: url("e.svg") center }</style>
+            <div style="background:#000"></div>
+            <img src="data:image/png;base64,AAAA">
+            <img src="/a.png">"#;
+        // `<img>` srcs first (source order), then background/-image urls (longhand
+        // + shorthand, quoted or bare). A colour-only `background` and `data:` are
+        // skipped; duplicates removed.
+        assert_eq!(
+            image_urls(html),
+            vec!["/a.png", "b.jpg", "c.png", "d.webp", "e.svg"]
         );
     }
 

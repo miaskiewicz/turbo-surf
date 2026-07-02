@@ -471,6 +471,33 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
     }
 }
 
+/// Fetch a URL and return its **raw** response bytes (no charset decode), the
+/// final URL, and the status. For binary resources — images — where decoding to
+/// a `String` would corrupt the bytes. Auto-follows redirects (cap 20) over the
+/// shared client with the same headers/cookies as [`fetch_html`]; the byte cap
+/// applies and Set-Cookie is ingested. No content-type gate (the caller asks for
+/// an image on purpose).
+pub async fn fetch_bytes(
+    url: &str,
+    mut opts: FetchOptions<'_>,
+) -> Result<(String, Vec<u8>, u16), HttpError> {
+    let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
+    let cl = match opts.client {
+        Some(c) => c.clone(),
+        None => {
+            client(http::redirect::Policy::limited(20)).map_err(|e| err(e, ErrorCode::Network))?
+        }
+    };
+    let method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
+    let headers = build_headers(url, &opts);
+    let res = send(&cl, &method, url, &headers, &opts.body.clone()).await?;
+    let final_url = final_url(&res);
+    ingest_set_cookie(&mut opts, &res, &final_url);
+    let status = res.status().as_u16();
+    let bytes = read_capped(res, max_bytes).await?;
+    Ok((final_url, bytes, status))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

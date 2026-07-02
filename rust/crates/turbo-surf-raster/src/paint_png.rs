@@ -1,13 +1,14 @@
 //! Raster painter: walk a [`Fragment`] galley into a tiny-skia pixmap and encode
-//! PNG. Fragments paint in document order (no z-index/stacking model — the
-//! documented approximation). Content past the pixmap edge is clipped by
-//! tiny-skia, giving a viewport-clipped screenshot.
+//! PNG. Children paint back-to-front in CSS stacking order (§9.9); decoded images
+//! are scaled into their box, others fall back to a placeholder. Content past the
+//! pixmap edge is clipped by tiny-skia, giving a viewport-clipped screenshot.
 
-use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Transform};
+use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Transform};
 use turbo_html2pdf_core::layout::value::{BorderEdges, BorderSide};
 use turbo_html2pdf_core::{Fragment, FragmentContent, PositionedGlyph, Rgba};
 
 use crate::glyph::{self, Pen, Tracer};
+use crate::image_paint::DecodedAssets;
 
 /// Neutral fill for an `<img>` box whose pixels we don't have.
 const IMAGE_PLACEHOLDER: Rgba = Rgba {
@@ -20,15 +21,21 @@ const IMAGE_PLACEHOLDER: Rgba = Rgba {
 /// Paint `galley` into a `width × height` PNG over a `bg` canvas fill (the
 /// propagated root/body background). `Err` only on a zero/oversized canvas or a
 /// PNG-encode failure.
-pub fn paint(galley: &Fragment, width: u32, height: u32, bg: Rgba) -> Result<Vec<u8>, String> {
+pub fn paint(
+    galley: &Fragment,
+    width: u32,
+    height: u32,
+    bg: Rgba,
+    images: &DecodedAssets,
+) -> Result<Vec<u8>, String> {
     let mut pm =
         Pixmap::new(width, height).ok_or_else(|| format!("bad canvas {width}x{height}"))?;
     pm.fill(tiny_skia::Color::from_rgba8(bg.r, bg.g, bg.b, bg.a));
-    paint_fragment(&mut pm, galley);
+    paint_fragment(&mut pm, galley, images);
     pm.encode_png().map_err(|e| format!("png encode: {e}"))
 }
 
-fn paint_fragment(pm: &mut Pixmap, f: &Fragment) {
+fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
     match &f.content {
         FragmentContent::Box { background, border } => {
             if let Some(bg) = background {
@@ -50,13 +57,33 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment) {
             *font_size,
             *color,
         ),
-        FragmentContent::Image(_) => fill_rect(pm, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER),
+        FragmentContent::Image(placement) => paint_image(pm, f, &placement.name, images),
         FragmentContent::Directive(_) => {}
     }
     // Paint children back-to-front in CSS stacking order (§9.9), not raw DOM
     // order, so `position`/`z-index` boxes (menus, modals) layer correctly.
     for &i in &f.paint_order() {
-        paint_fragment(pm, &f.children[i]);
+        paint_fragment(pm, &f.children[i], images);
+    }
+}
+
+/// Draw an image into its layout box: scale the decoded pixels and blit them;
+/// fall back to a neutral placeholder when the image is absent or won't scale.
+fn paint_image(pm: &mut Pixmap, f: &Fragment, name: &str, images: &DecodedAssets) {
+    let (w, h) = (f.width.round() as u32, f.height.round() as u32);
+    let img = images.get(name).and_then(|d| d.scaled_pixmap(w, h));
+    match img {
+        Some(src) => {
+            pm.draw_pixmap(
+                f.x.round() as i32,
+                f.y.round() as i32,
+                src.as_ref(),
+                &PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
+        }
+        None => fill_rect(pm, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER),
     }
 }
 

@@ -201,3 +201,15 @@ fn default_viewport_is_1280x800() {
         }
     );
 }
+
+#[test]
+fn background_image_div_paints_supplied_bytes() {
+    let mut assets: ImageAssets = HashMap::new();
+    assets.insert("r.png".to_string(), solid_png(4, 4, 255, 0, 0));
+    let page = r#"<body style="margin:0"><div style="width:60px;height:60px;background-image:url(r.png)"></div></body>"#;
+    let svg = screenshot_svg_with_assets(page, "", Viewport::DEFAULT, &assets, false).expect("svg");
+    assert!(
+        svg.contains("<image "),
+        "background-image should paint an <image>, svg=\n{svg}"
+    );
+}

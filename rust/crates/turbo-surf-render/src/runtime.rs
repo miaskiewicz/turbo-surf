@@ -1329,6 +1329,45 @@ if (typeof globalThis.URL === "undefined") {
   }
 })();
 
+// DOM interface constructors — React / emotion / many bundles do
+// `x instanceof HTMLElement` (etc.) at load. If the constructor global is
+// undefined, `instanceof` throws ("Right-hand side of 'instanceof' is not an
+// object") and aborts the ENTIRE script bundle (Nike's whole React app failed this
+// way). Define them (only if absent) with a duck-typed `Symbol.hasInstance` so the
+// checks resolve correctly against our wrapped nodes by `nodeType`, rather than
+// throwing.
+(() => {
+  var def = function (k, pred) {
+    if (typeof globalThis[k] !== "undefined") return;
+    var C = function () {};
+    try { Object.defineProperty(C, Symbol.hasInstance, { value: pred, configurable: true }); } catch (_e) {}
+    try { globalThis[k] = C; } catch (_e) {}
+  };
+  var nodeAt = function (t) { return function (x) { return !!x && x.nodeType === t; }; };
+  var element = nodeAt(1);
+  def("EventTarget", function (x) { return !!x && typeof x.addEventListener === "function"; });
+  def("Node", function (x) { return !!x && typeof x.nodeType === "number"; });
+  def("Element", element);
+  def("CharacterData", function (x) { return !!x && (x.nodeType === 3 || x.nodeType === 8); });
+  def("Text", nodeAt(3));
+  def("Comment", nodeAt(8));
+  def("Document", nodeAt(9));
+  def("DocumentFragment", nodeAt(11));
+  def("Window", function (x) { return x === globalThis; });
+  def("Event", function (x) { return !!x && typeof x.type === "string" && ("target" in x || "bubbles" in x); });
+  // Every concrete HTML*Element frameworks branch on is just an Element here.
+  [
+    "HTMLElement", "HTMLUnknownElement", "HTMLDivElement", "HTMLSpanElement",
+    "HTMLAnchorElement", "HTMLInputElement", "HTMLButtonElement", "HTMLImageElement",
+    "HTMLIFrameElement", "HTMLCanvasElement", "HTMLFormElement", "HTMLScriptElement",
+    "HTMLStyleElement", "HTMLLinkElement", "HTMLTemplateElement", "HTMLTextAreaElement",
+    "HTMLSelectElement", "HTMLOptionElement", "HTMLUListElement", "HTMLOListElement",
+    "HTMLLIElement", "HTMLHeadingElement", "HTMLParagraphElement", "HTMLTableElement",
+    "HTMLTableRowElement", "HTMLTableCellElement", "HTMLLabelElement", "HTMLPreElement",
+    "SVGElement", "SVGSVGElement",
+  ].forEach(function (k) { def(k, element); });
+})();
+
 // Next.js's webpack runtime reads `document.currentScript` to resolve chunk paths
 // (getPathFromScript → `currentScript.getAttribute('src').replace(...)`). The tier
 // runs the page's scripts as one concatenated bundle, so there's no "current" script

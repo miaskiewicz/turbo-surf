@@ -25,7 +25,7 @@ mod paint_png;
 mod paint_svg;
 mod style_extract;
 
-pub use style_extract::{image_urls, stylesheet_hrefs};
+pub use style_extract::{delazy_images, image_urls, stylesheet_hrefs};
 
 use std::collections::HashMap;
 
@@ -283,7 +283,11 @@ fn lay_out(
     let mut author_css = String::from(external_css);
     author_css.push('\n');
     author_css.push_str(&style_extract::collect_style_blocks(html));
-    let visible_html = style_extract::strip_non_visual(html);
+    // Fill in `src`-less lazy images (data-src/srcset/data-*-url) so their boxes
+    // render, then strip non-visual elements. `image_urls` returns the same URLs,
+    // so the caller's fetched bytes resolve against these boxes.
+    let delazied = style_extract::delazy_images(html);
+    let visible_html = style_extract::strip_non_visual(&delazied);
     let mut diags = Diagnostics::default();
     let resolver = AssetResolver(images);
     // No page-height basis in a viewport render — only the 100%-width cap applies

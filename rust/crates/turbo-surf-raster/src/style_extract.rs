@@ -174,8 +174,60 @@ pub fn image_urls(html: &str) -> Vec<String> {
     urls
 }
 
-/// Push the `src` of every `<img>` tag onto `out`.
-fn img_srcs(html: &str, out: &mut Vec<String>) {
+/// Attributes carrying an image URL when `src` is absent/empty — lazy-loading and
+/// responsive patterns modern sites use (Nike puts the URL in `data-landscape-url`,
+/// no `src` at all). `srcset`/`data-srcset` hold a candidate *list*; the first URL
+/// is taken. Order = preference.
+const LAZY_IMG_ATTRS: &[&str] = &[
+    "data-src",
+    "data-original",
+    "data-lazy-src",
+    "data-lazy",
+    "data-image-src",
+    "data-landscape-url",
+    "data-portrait-url",
+    "srcset",
+    "data-srcset",
+];
+
+/// The first URL in a `srcset` value (`"a.png 1x, b.png 2x"` → `a.png`).
+fn first_srcset_url(v: &str) -> &str {
+    v.split(',')
+        .next()
+        .unwrap_or(v)
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+}
+
+/// The best image URL for an `<img>` tag: a non-empty `src`, else the first
+/// lazy/responsive attribute that carries one.
+fn best_img_url(tag: &str, tag_lower: &str) -> Option<String> {
+    if let Some(src) = attr_value(tag, tag_lower, "src") {
+        let src = html_unescape(src.trim());
+        if !src.is_empty() {
+            return Some(src);
+        }
+    }
+    for attr in LAZY_IMG_ATTRS {
+        if let Some(v) = attr_value(tag, tag_lower, attr) {
+            let v = v.trim();
+            let url = if attr.contains("srcset") {
+                first_srcset_url(v)
+            } else {
+                v
+            };
+            let url = html_unescape(url.trim());
+            if !url.is_empty() {
+                return Some(url);
+            }
+        }
+    }
+    None
+}
+
+/// Run `f` for each `<img>` tag with its (raw, lower) slice and its `[start,end)`.
+fn for_each_img(html: &str, mut f: impl FnMut(&str, &str, usize, usize)) {
     let lower = html.to_ascii_lowercase();
     let bytes = html.as_bytes();
     let mut cursor = 0;
@@ -191,14 +243,52 @@ fn img_srcs(html: &str, out: &mut Vec<String>) {
             .find('>')
             .map(|g| tag_start + g)
             .unwrap_or(html.len());
-        if let Some(src) = attr_value(&html[tag_start..end], &lower[tag_start..end], "src") {
-            let src = html_unescape(src.trim());
-            if !src.is_empty() {
-                out.push(src);
-            }
-        }
+        f(
+            &html[tag_start..end],
+            &lower[tag_start..end],
+            tag_start,
+            end,
+        );
         cursor = end + 1;
     }
+}
+
+/// Push the resolved image URL (`src`, or a lazy/responsive fallback) of every
+/// `<img>` onto `out`.
+fn img_srcs(html: &str, out: &mut Vec<String>) {
+    for_each_img(html, |tag, tag_lower, _, _| {
+        if let Some(url) = best_img_url(tag, tag_lower) {
+            out.push(url);
+        }
+    });
+}
+
+/// Fill in a missing `<img src>` from its lazy/responsive attribute, so the layout
+/// (which sizes/paints an image box from `src`) renders lazy-loaded images whose
+/// JS `src`-swap didn't run headless. `<img>`s that already have a `src` are left
+/// as-is. The injected URL matches what [`image_urls`] returns, so the caller's
+/// fetched bytes resolve.
+pub fn delazy_images(html: &str) -> String {
+    // Collect insertions (byte offset → text) then splice once, back-to-front.
+    let mut inserts: Vec<(usize, String)> = Vec::new();
+    for_each_img(html, |tag, tag_lower, start, _end| {
+        let has_src = attr_value(tag, tag_lower, "src").is_some_and(|s| !s.trim().is_empty());
+        if has_src {
+            return;
+        }
+        if let Some(url) = best_img_url(tag, tag_lower) {
+            // Insert right after `<img` (offset start+4).
+            inserts.push((start + 4, format!(r#" src="{url}""#)));
+        }
+    });
+    if inserts.is_empty() {
+        return html.to_string();
+    }
+    let mut out = html.to_string();
+    for (at, text) in inserts.into_iter().rev() {
+        out.insert_str(at, &text);
+    }
+    out
 }
 
 /// Push the url of every `background`/`background-image: url(...)` declaration

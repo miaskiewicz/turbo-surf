@@ -234,3 +234,33 @@ fn system_fonts_opt_in_renders() {
     .expect("png");
     assert_eq!(&png[..4], &[0x89, b'P', b'N', b'G']);
 }
+
+#[test]
+fn image_urls_extracts_lazy_and_responsive_attrs() {
+    // Modern sites omit `src` and put the real URL in a lazy/responsive attribute
+    // (Nike uses `data-landscape-url`). `image_urls` must recover all of them.
+    use turbo_surf_raster::image_urls;
+    let html = concat!(
+        r#"<img src="a.png">"#,
+        r#"<img data-src="b.png">"#,
+        r#"<img srcset="c.png 1x, c2.png 2x">"#,
+        r#"<img data-landscape-url="d.png">"#,
+        r#"<img src="" data-original="e.png">"#,
+    );
+    let urls = image_urls(html);
+    for want in ["a.png", "b.png", "c.png", "d.png", "e.png"] {
+        assert!(urls.iter().any(|u| u == want), "missing {want} in {urls:?}");
+    }
+}
+
+#[test]
+fn delazy_populates_missing_img_src_for_layout() {
+    // The layout reads `<img src>`; a `src`-less lazy image must get its `src`
+    // filled from the lazy attr so an image box (and its pixels) render.
+    use turbo_surf_raster::delazy_images;
+    let out = delazy_images(r#"<img data-landscape-url="hero.jpg" alt="x">"#);
+    assert!(
+        out.contains(r#"src="hero.jpg""#),
+        "src injected, got: {out}"
+    );
+}

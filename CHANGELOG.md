@@ -3,6 +3,22 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.3.2]
+Screenshot fidelity: CSS positioning + z-index stacking.
+
+### Added
+- **`position` + `z-index` in synthetic screenshots** — screenshots now honor
+  `position: relative | absolute | fixed | sticky` (out-of-flow boxes are removed
+  from flow and placed against their containing block; `relative` boxes shift
+  while keeping their space) and paint children back-to-front in CSS stacking
+  order (CSS 2.2 §9.9) instead of raw DOM order, so overlapping menus/modals layer
+  correctly. Powered by the layout work in turbo-html2pdf 0.2.5, consumed via the
+  new `Fragment::paint_order` in `turbo-surf-raster`'s PNG + SVG paint walks.
+
+### Changed
+- `turbo-surf-raster` now depends on `turbo-html2pdf-core` **0.2.5** (positioning
+  + `paint_order`).
+
 ## [0.3.1]
 Screenshot fidelity: external stylesheets + root-background propagation.
 

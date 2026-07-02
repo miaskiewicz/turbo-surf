@@ -14,10 +14,10 @@ name = "turbo_surf_py"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.3.1" }
-turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.3.1" }
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.3.1" }
-turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.3.1" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.3.2" }
+turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.3.2" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.3.2" }
+turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.3.2" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
 serde = "1"
 serde_json = "1"

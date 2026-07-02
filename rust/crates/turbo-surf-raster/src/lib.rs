@@ -5,13 +5,15 @@
 //! flex/table + real font shaping over bundled faces) to turn a raw HTML string
 //! into a positioned [`Fragment`] display list, then paints that list two ways:
 //! a raster [`paint_png`] (tiny-skia) and a vector [`paint_svg`]. Both walk the
-//! same fragments in document order, so they agree.
+//! same fragments in CSS stacking (paint) order via `Fragment::paint_order`, so
+//! they agree.
 //!
 //! This is a *reasonably representative* render, not a pixel-faithful browser:
-//! there is no stacking-context/z-index model (fragments paint in DOM order), no
-//! JS-driven visual state beyond whatever produced the snapshot, and `<img>`
-//! bytes are drawn as neutral placeholders (layout has their box, not their
-//! pixels). It runs only when asked — never on the fetch/extract hot path.
+//! `position`/`z-index` are honored for block flow (out-of-flow boxes are placed
+//! against their containing block and painted back-to-front per CSS 2.2 §9.9),
+//! but there is no JS-driven visual state beyond whatever produced the snapshot,
+//! and `<img>` bytes are drawn as neutral placeholders (layout has their box, not
+//! their pixels). It runs only when asked — never on the fetch/extract hot path.
 //!
 //! Because the input is just an HTML string, any snapshot works: the initial
 //! fetch, or any entry in a hydration trail.

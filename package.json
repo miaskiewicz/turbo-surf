@@ -1,6 +1,6 @@
 {
   "name": "turbo-surf",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Native-speed, browserless web crawler + MCP server for AI agents. A standalone Rust engine (turbo-dom + a V8 JS-render tier) — fetch + parse + extract + run page JS with no headless browser. This npm package is a thin launcher that spawns the native binary.",
   "license": "MIT",
   "main": "index.js",

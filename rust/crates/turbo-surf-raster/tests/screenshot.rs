@@ -35,6 +35,22 @@ fn renders_svg_with_boxes_and_glyph_paths() {
 }
 
 #[test]
+fn z_index_controls_stacking_paint_order() {
+    // Two overlapping absolutely-positioned boxes: the box that appears LATER in
+    // the DOM has the LOWER z-index, so it must paint UNDERNEATH. SVG paints in
+    // document order (later markup = on top), so in the output the low-z green
+    // rect must come before the high-z red rect.
+    let page = r#"<html><body style="margin:0">
+        <div style="position:absolute;top:0;left:0;width:80px;height:80px;background-color:#ff0000;z-index:2"></div>
+        <div style="position:absolute;top:0;left:0;width:80px;height:80px;background-color:#00aa00;z-index:1"></div>
+      </body></html>"#;
+    let svg = screenshot_svg(page, Viewport::DEFAULT).expect("svg");
+    let green = svg.find("#00aa00").expect("green rect present");
+    let red = svg.find("#ff0000").expect("red rect present");
+    assert!(green < red, "z:1 (green) must paint before z:2 (red)");
+}
+
+#[test]
 fn format_dispatch_matches_direct() {
     let vp = Viewport {
         width: 320,

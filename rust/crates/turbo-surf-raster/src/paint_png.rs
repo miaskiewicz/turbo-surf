@@ -53,8 +53,10 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment) {
         FragmentContent::Image(_) => fill_rect(pm, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER),
         FragmentContent::Directive(_) => {}
     }
-    for child in &f.children {
-        paint_fragment(pm, child);
+    // Paint children back-to-front in CSS stacking order (§9.9), not raw DOM
+    // order, so `position`/`z-index` boxes (menus, modals) layer correctly.
+    for &i in &f.paint_order() {
+        paint_fragment(pm, &f.children[i]);
     }
 }
 

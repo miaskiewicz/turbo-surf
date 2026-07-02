@@ -144,16 +144,7 @@ pub fn screenshot_png_with_assets(
     images: &ImageAssets,
     full_page: bool,
 ) -> Result<Vec<u8>, String> {
-    let decoded = image_paint::decode_all(images);
-    let galley = lay_out(
-        html,
-        external_css,
-        viewport.width,
-        &image_paint::png_map(&decoded),
-    )?;
-    let bg = canvas_background(&galley, viewport.width);
-    let height = paint_height(&galley, viewport, full_page);
-    paint_png::paint(&galley, viewport.width, height, bg, &decoded)
+    screenshot_png_with_opts(html, external_css, viewport, images, full_page, false)
 }
 
 /// Like [`screenshot_svg_with_css`] but with caller-fetched `images` (see
@@ -166,12 +157,51 @@ pub fn screenshot_svg_with_assets(
     images: &ImageAssets,
     full_page: bool,
 ) -> Result<String, String> {
+    screenshot_svg_with_opts(html, external_css, viewport, images, full_page, false)
+}
+
+/// [`screenshot_png_with_assets`] plus `system_fonts`: when true, the page's
+/// fonts resolve against the machine's installed system fonts (matching a browser
+/// on the same host) instead of only the bundled fallback faces. Opt-in — it
+/// loads the OS font set (cached across calls).
+pub fn screenshot_png_with_opts(
+    html: &str,
+    external_css: &str,
+    viewport: Viewport,
+    images: &ImageAssets,
+    full_page: bool,
+    system_fonts: bool,
+) -> Result<Vec<u8>, String> {
     let decoded = image_paint::decode_all(images);
     let galley = lay_out(
         html,
         external_css,
         viewport.width,
         &image_paint::png_map(&decoded),
+        system_fonts,
+    )?;
+    let bg = canvas_background(&galley, viewport.width);
+    let height = paint_height(&galley, viewport, full_page);
+    paint_png::paint(&galley, viewport.width, height, bg, &decoded)
+}
+
+/// [`screenshot_svg_with_assets`] plus `system_fonts` (see
+/// [`screenshot_png_with_opts`]).
+pub fn screenshot_svg_with_opts(
+    html: &str,
+    external_css: &str,
+    viewport: Viewport,
+    images: &ImageAssets,
+    full_page: bool,
+    system_fonts: bool,
+) -> Result<String, String> {
+    let decoded = image_paint::decode_all(images);
+    let galley = lay_out(
+        html,
+        external_css,
+        viewport.width,
+        &image_paint::png_map(&decoded),
+        system_fonts,
     )?;
     let bg = canvas_background(&galley, viewport.width);
     let height = paint_height(&galley, viewport, full_page);
@@ -182,6 +212,22 @@ pub fn screenshot_svg_with_assets(
         bg,
         &decoded,
     ))
+}
+
+/// The font registry for a render: the bundled fallback set, plus (opt-in) every
+/// installed system font. The system-font set is loaded once and cloned per call
+/// (loading the whole OS font directory is slow; the parsed faces are `Arc`-shared
+/// so the clone is cheap).
+fn font_registry(system_fonts: bool) -> FontRegistry {
+    if !system_fonts {
+        return FontRegistry::new();
+    }
+    static SYSTEM: std::sync::LazyLock<FontRegistry> = std::sync::LazyLock::new(|| {
+        let mut reg = FontRegistry::new();
+        reg.load_system_fonts();
+        reg
+    });
+    SYSTEM.clone()
 }
 
 /// The colour to fill the whole image with before painting. Browsers propagate
@@ -229,6 +275,7 @@ fn lay_out(
     external_css: &str,
     width: u32,
     images: &ImageAssets,
+    system_fonts: bool,
 ) -> Result<Fragment, String> {
     // Author CSS order (lowest→highest): external `<link>` sheets the caller
     // fetched, then the page's own `<style>` blocks. Then strip script/style/etc.
@@ -249,7 +296,7 @@ fn lay_out(
         &visible_html,
         &author_css,
         width as f32,
-        &FontRegistry::new(),
+        &font_registry(system_fonts),
         &image_ctx,
         &mut diags,
     )

@@ -122,8 +122,8 @@ export function imageUrls(html: string): string[];
 /** Like `*WithCss` but also paints `<img>`/`background-image` boxes from the
  * `images` map (each `imageUrls` ref → its fetched bytes). PNG/JPEG are drawn;
  * other formats fall back to a placeholder. */
-export function screenshotWithAssets(html: string, externalCss: string, images: Record<string, Buffer>, width?: number, height?: number, fullPage?: boolean): Buffer;
-export function screenshotSvgWithAssets(html: string, externalCss: string, images: Record<string, Buffer>, width?: number, height?: number, fullPage?: boolean): string;
+export function screenshotWithAssets(html: string, externalCss: string, images: Record<string, Buffer>, width?: number, height?: number, fullPage?: boolean, systemFonts?: boolean): Buffer;
+export function screenshotSvgWithAssets(html: string, externalCss: string, images: Record<string, Buffer>, width?: number, height?: number, fullPage?: boolean, systemFonts?: boolean): string;
 export function text(html: string): string;
 export function title(html: string): string;
 export function html(html: string): string;

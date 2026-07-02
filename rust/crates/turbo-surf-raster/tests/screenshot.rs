@@ -213,3 +213,24 @@ fn background_image_div_paints_supplied_bytes() {
         "background-image should paint an <image>, svg=\n{svg}"
     );
 }
+
+#[test]
+fn system_fonts_opt_in_renders() {
+    // The opt-in system-font path produces a valid PNG (fonts resolve against the
+    // machine's installed set; falls back to bundled when absent).
+    use turbo_surf_raster::screenshot_png_with_opts;
+    let vp = Viewport {
+        width: 200,
+        height: 100,
+    };
+    let png = screenshot_png_with_opts(
+        "<body style='font-family:Arial'>hi</body>",
+        "",
+        vp,
+        &ImageAssets::new(),
+        false,
+        true,
+    )
+    .expect("png");
+    assert_eq!(&png[..4], &[0x89, b'P', b'N', b'G']);
+}

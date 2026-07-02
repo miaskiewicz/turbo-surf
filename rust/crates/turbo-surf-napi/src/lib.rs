@@ -150,13 +150,15 @@ pub fn screenshot_with_assets(
     width: Option<u32>,
     height: Option<u32>,
     full_page: Option<bool>,
+    system_fonts: Option<bool>,
 ) -> Result<Buffer> {
-    raster::screenshot_png_with_assets(
+    raster::screenshot_png_with_opts(
         &html,
         &external_css,
         viewport(width, height),
         &to_assets(images),
         full_page.unwrap_or(false),
+        system_fonts.unwrap_or(false),
     )
     .map(Buffer::from)
     .map_err(Error::from_reason)
@@ -164,7 +166,8 @@ pub fn screenshot_with_assets(
 
 /// SVG screenshot of `html` with caller-fetched `external_css` and `images`;
 /// images embed as base64 `data:` URIs. `fullPage` grows the height to the full
-/// content height instead of clipping to the viewport. → document string.
+/// content height instead of clipping to the viewport. `systemFonts` resolves the
+/// page's fonts against the machine's installed fonts. → document string.
 #[napi]
 pub fn screenshot_svg_with_assets(
     html: String,
@@ -173,13 +176,15 @@ pub fn screenshot_svg_with_assets(
     width: Option<u32>,
     height: Option<u32>,
     full_page: Option<bool>,
+    system_fonts: Option<bool>,
 ) -> Result<String> {
-    raster::screenshot_svg_with_assets(
+    raster::screenshot_svg_with_opts(
         &html,
         &external_css,
         viewport(width, height),
         &to_assets(images),
         full_page.unwrap_or(false),
+        system_fonts.unwrap_or(false),
     )
     .map_err(Error::from_reason)
 }

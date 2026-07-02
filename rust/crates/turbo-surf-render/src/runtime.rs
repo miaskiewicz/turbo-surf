@@ -1299,6 +1299,34 @@ if (typeof globalThis.URL === "undefined") {
     width: 1280, height: 800, scale: 1, offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0,
     addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
   });
+  // PerformanceObserver — analytics / experiment code (e.g. Wikipedia's header
+  // enrollments) `new PerformanceObserver(...)` at load; an undefined ref throws
+  // inside a Promise and rejects the chain, killing the dependent script.
+  set("PerformanceObserver", class PerformanceObserver {
+    constructor(cb) { this._cb = cb; }
+    observe() {} disconnect() {} takeRecords() { return []; }
+  });
+  try { globalThis.PerformanceObserver.supportedEntryTypes = []; } catch (_e) {}
+})();
+
+// `Node.prototype.replaceChild(new, old)` — jQuery's `replaceWith`/`domManip` call
+// it; the DOM binding omits it. All wrapped elements share one template prototype,
+// so define `replaceChild` there (from the `insertBefore` + `removeChild` the
+// binding does provide). Guard against polluting `Object.prototype`.
+(() => {
+  var d = globalThis.document;
+  if (!d || typeof d.createElement !== "function") return;
+  var probe = d.createElement("div");
+  if (!probe || typeof probe.insertBefore !== "function") return;
+  var proto = Object.getPrototypeOf(probe);
+  if (!proto || proto === Object.prototype) return;
+  if (typeof proto.replaceChild !== "function") {
+    proto.replaceChild = function (newChild, oldChild) {
+      this.insertBefore(newChild, oldChild);
+      this.removeChild(oldChild);
+      return oldChild;
+    };
+  }
 })();
 
 // Next.js's webpack runtime reads `document.currentScript` to resolve chunk paths
@@ -2336,7 +2364,21 @@ fn best_effort_on_budget(
             rt.v8_isolate().cancel_terminate_execution();
             Ok(crate::browser_env::document_html())
         }
-        Err(e) => Err(budget_msg(&e, budget_ms)),
+        // A genuine JS error mid-hydration (a page script that throws, an unhandled
+        // rejection) used to discard everything. But by this point the DOM is
+        // installed and partially mutated by the scripts that DID run — partial
+        // hydration beats none (e.g. a jQuery site whose skin JS reparents the DOM
+        // before a later analytics script throws). Return the reached DOM if there
+        // is one; only propagate when nothing was rendered (install/parse failure).
+        Err(e) => {
+            rt.v8_isolate().cancel_terminate_execution();
+            let dom = crate::browser_env::document_html();
+            if dom.trim().is_empty() {
+                Err(budget_msg(&e, budget_ms))
+            } else {
+                Ok(dom)
+            }
+        }
     }
 }
 

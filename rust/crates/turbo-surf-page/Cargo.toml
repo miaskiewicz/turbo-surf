@@ -11,7 +11,7 @@ description = "turbo-surf tier 2: Page over the turbo-dom Rust parser + Navigato
 impersonate = ["turbo-surf-core/impersonate"]
 
 [dependencies]
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.3.2" }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.3.3" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
 async-trait = "0.1"
 futures-util = "0.3"

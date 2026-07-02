@@ -3,6 +3,36 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.3.3]
+
+Hydration reach + screenshot fidelity. Consumes turbo-html2pdf 0.2.6 (real-page
+layout/cascade: `var()`, sibling/structural selectors, inline-block-in-line,
+grid-template shorthand, sr-only hide, static-position absolutes, float text-wrap,
+`@media(...)` no-space). (0.3.2 was staged but never released; 0.3.3 supersedes it
+and carries everything below.)
+
+### Added
+- **Broader JS hydration** in the render tier so real page scripts reach a
+  browser-faithful DOM: `document.implementation.createHTMLDocument` (jQuery init),
+  `Node.prototype.replaceChild`, `PerformanceObserver`, and DOM interface
+  constructors (`HTMLElement`/`Node`/`Element`/… with duck-typed `instanceof`) so
+  React/emotion `instanceof` checks resolve instead of aborting the bundle.
+  Combined, MediaWiki's startup now runs (sets `client-js` + Vector layout
+  classes), so Wikipedia hydrates with its taxobox + images.
+- **Lazy / responsive image recovery** (`delazy_images` + `image_urls`): pulls the
+  URL from `data-src`/`srcset`/`data-srcset`/`data-original`/`data-*-url` when
+  `src` is absent, and fills a missing `src` before layout so the box + pixels
+  render. Nike-style `data-landscape-url` images now paint.
+- **Opt-in system-font screenshots** (`system_fonts` on the raster/napi assets
+  entries): resolve a page's fonts against the machine's installed fonts to match
+  a browser on the same host.
+
+### Fixed
+- **Resilient hydration**: a mid-hydration JS error now returns the partially
+  hydrated DOM instead of discarding everything — partial hydration beats none.
+- **HTML-entity-decode** extracted stylesheet/image URLs (`&amp;` in `load.php`
+  query strings), so Wikipedia's real skin CSS loads instead of a stub.
+
 ## [0.3.2]
 Screenshot fidelity: CSS positioning + z-index stacking, image rendering, full-page.
 

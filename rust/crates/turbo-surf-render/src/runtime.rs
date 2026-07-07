@@ -538,23 +538,44 @@ globalThis.fetch = async (url, init) => {
     body: new globalThis.ReadableStream({ start(c) { if (r.body) c.enqueue(new TextEncoder().encode(r.body)); c.close(); } }),
   };
 };
-// XMLHttpRequest over fetch (async; resolves in the event loop).
+// XMLHttpRequest over fetch (async; resolves in the event loop). Exposes the
+// EventTarget surface (`addEventListener`/`removeEventListener`/`dispatchEvent`) as well
+// as the `on*` props: real code wires the request via `req.addEventListener('load'/
+// 'readystatechange', …)` (Google's home-page bundle does), and a stub with only `on*`
+// crashed with "req.addEventListener is not a function", aborting the module.
 globalThis.XMLHttpRequest = class {
-  constructor() { this.readyState = 0; this.status = 0; this.responseText = ""; }
-  open(method, url) { this._m = method || "GET"; this._u = url; this.readyState = 1; }
-  setRequestHeader() {}
+  constructor() {
+    this.readyState = 0; this.status = 0; this.responseText = ""; this.response = "";
+    this._h = {}; // request headers
+    this._l = {}; // event listeners by type
+  }
+  open(method, url) { this._m = method || "GET"; this._u = url; this._setState(1); }
+  setRequestHeader(k, v) { this._h[String(k)] = String(v); }
+  addEventListener(type, fn) { if (typeof fn === "function") (this._l[type] = this._l[type] || []).push(fn); }
+  removeEventListener(type, fn) { const a = this._l[type]; if (a) { const i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } }
+  dispatchEvent(ev) { this._emit(ev && ev.type, ev); return true; }
+  // Fire an event to both the matching `on*` property and any addEventListener handlers.
+  _emit(type, ev) {
+    if (!type) return;
+    const e = ev || { type, target: this, currentTarget: this };
+    const on = this["on" + type];
+    if (typeof on === "function") { try { on.call(this, e); } catch (_e) {} }
+    for (const fn of (this._l[type] || []).slice()) { try { fn.call(this, e); } catch (_e) {} }
+  }
+  _setState(s) { this.readyState = s; this._emit("readystatechange"); }
   send(body) {
     const self = this;
     globalThis
-      .fetch(this._u, { method: this._m, body })
+      .fetch(this._u, { method: this._m, body, headers: self._h })
       .then(async (r) => {
         self.status = r.status;
         self.responseText = await r.text();
         self.response = self.responseText;
-        self.readyState = 4;
-        if (self.onreadystatechange) self.onreadystatechange();
-        if (self.onload) self.onload();
-      });
+        self._setState(4);
+        self._emit("load");
+        self._emit("loadend");
+      })
+      .catch(() => { self._setState(4); self._emit("error"); self._emit("loadend"); });
   }
 };
 // Observers: no live mutation notifications over the static tree → no-op stubs.
@@ -700,13 +721,61 @@ globalThis.MessageChannel = class MessageChannel {
   }
 };
 globalThis.MessagePort = function MessagePort() {};
-// performance — React/Next read performance.now() for timing/scheduling.
+// performance — React/Next read performance.now() for timing/scheduling. mark()/measure()
+// must RETURN the PerformanceEntry they create (real spec): RUM/timing code destructures
+// `const {startTime} = performance.mark(name)` (and reads `.duration`/`.entryType` off the
+// measure), so returning undefined crashed with "Cannot destructure property 'startTime' …"
+// (seen on nike.com's Boomerang beacon).
 globalThis.performance = globalThis.performance || {
   now: () => Date.now(),
   timeOrigin: 0,
-  mark() {}, measure() {}, clearMarks() {}, clearMeasures() {},
+  mark(name, opts) {
+    return { name: String(name == null ? "" : name), entryType: "mark",
+      startTime: (opts && +opts.startTime) || Date.now(), duration: 0, detail: (opts && opts.detail) || null };
+  },
+  measure(name) {
+    return { name: String(name == null ? "" : name), entryType: "measure", startTime: 0, duration: 0, detail: null };
+  },
+  clearMarks() {}, clearMeasures() {},
   getEntries: () => [], getEntriesByName: () => [], getEntriesByType: () => [],
 };
+// The CSS interface (window.CSS): CSS.supports (feature detection) + CSS.escape (identifier
+// escaping). Bundles reference it at load — Google's deferred `xjs` bundle aborted with
+// "CSS is not defined". No layout/CSS engine headless, so supports() validates the query
+// shape and reports supported (as modern Chrome would for a well-formed query), and escape()
+// implements the CSSOM ident serialization so a following `.replace`/selector build is safe.
+if (typeof globalThis.CSS === "undefined") {
+  const cssEscape = (value) => {
+    const s = String(value);
+    let out = "";
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c === 0) { out += "�"; continue; }
+      // control chars, or a leading digit (or a digit right after a leading '-') → hex escape
+      if ((c >= 0x1 && c <= 0x1f) || c === 0x7f ||
+          (i === 0 && c >= 0x30 && c <= 0x39) ||
+          (i === 1 && c >= 0x30 && c <= 0x39 && s.charCodeAt(0) === 0x2d)) {
+        out += "\\" + c.toString(16) + " "; continue;
+      }
+      // a lone leading '-'
+      if (i === 0 && c === 0x2d && s.length === 1) { out += "\\-"; continue; }
+      // ident-safe: alphanumerics, '-', '_', and non-ASCII pass through unescaped
+      if (c >= 0x80 || c === 0x2d || c === 0x5f ||
+          (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) {
+        out += s[i]; continue;
+      }
+      out += "\\" + s[i]; // everything else is backslash-escaped
+    }
+    return out;
+  };
+  globalThis.CSS = {
+    // `supports("prop", "value")` (two-arg) or `supports("(prop: value)")` (condition string).
+    supports: (a, b) => (b !== undefined
+      ? (typeof a === "string" && a.length > 0)
+      : (typeof a === "string" && a.indexOf(":") >= 0)),
+    escape: cssEscape,
+  };
+}
 // Encoding/crypto/base64 web globals deno_core doesn't ship but app bundles use.
 if (typeof globalThis.TextEncoder === "undefined") {
   globalThis.TextEncoder = class TextEncoder {
@@ -1190,6 +1259,15 @@ if (typeof globalThis.URL === "undefined") {
   def("baseURI", () => globalThis.location.href);
   // hasFocus(): auth/idle code refreshes only a focused document; default to focused.
   try { if (typeof d.hasFocus !== "function") d.hasFocus = () => true; } catch (_e) {}
+  // document.open()/close(): RUM beacons (nike.com's Boomerang/mPulse) do
+  // `iframe.contentWindow.document.open()` — our iframe contentWindow IS the realm — then
+  // `document.write(...)`. The binding had no `open`, so it threw "document.open is not a
+  // function" and aborted the beacon. open() must return the document (callers chain
+  // `d = document.open()`) and deliberately does NOT clear the already-parsed/hydrated tree
+  // (a real open() wipes the document, but wiping the hydrated DOM headless is worse than a
+  // no-op); close() is a no-op. write() is provided by the vendored binding.
+  try { if (typeof d.open !== "function") d.open = () => d; } catch (_e) {}
+  try { if (typeof d.close !== "function") d.close = () => {}; } catch (_e) {}
 })();
 
 // document.createTreeWalker + NodeFilter — focus-management code (MUI's DataGrid / focus

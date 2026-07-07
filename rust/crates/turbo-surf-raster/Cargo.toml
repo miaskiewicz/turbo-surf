@@ -10,7 +10,10 @@ description = "turbo-surf synthetic screenshot tier: HTML snapshot → layout �
 # The layout + style + font engine (from turbo-html2pdf, on crates.io). We
 # consume only its public HTML→Fragment drive (`layout_html`) + the `Fragment`
 # display list and paint it ourselves; no PDF code is pulled onto the hot path.
-turbo-html2pdf-core = "0.2.6"
+# border-radius rounded-rect painting needs the `border_radius` field added in
+# turbo-html2pdf-core 0.2.7 (unreleased at time of writing; lands in the publish
+# sequence — html2pdf first, then this bump).
+turbo-html2pdf-core = "0.2.7"
 # Raster canvas + PNG encode (Pixmap::encode_png, default `png-format` feature).
 tiny-skia = "0.11"
 # Glyph outlines: we parse `FontFace::data()` bytes independently to trace each

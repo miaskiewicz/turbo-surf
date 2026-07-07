@@ -3,7 +3,7 @@
 //! are scaled into their box, others fall back to a placeholder. Content past the
 //! pixmap edge is clipped by tiny-skia, giving a viewport-clipped screenshot.
 
-use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Transform};
+use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform};
 use turbo_html2pdf_core::layout::value::{BorderEdges, BorderSide};
 use turbo_html2pdf_core::{Fragment, FragmentContent, PositionedGlyph, Rgba};
 
@@ -37,11 +37,22 @@ pub fn paint(
 
 fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
     match &f.content {
-        FragmentContent::Box { background, border } => {
-            if let Some(bg) = background {
-                fill_rect(pm, f.x, f.y, f.width, f.height, *bg);
+        FragmentContent::Box {
+            background,
+            border,
+            border_radius,
+        } => {
+            if *border_radius > 0.5 {
+                if let Some(bg) = background {
+                    fill_round_rect(pm, f.x, f.y, f.width, f.height, *border_radius, *bg);
+                }
+                paint_round_border(pm, f, border, *border_radius);
+            } else {
+                if let Some(bg) = background {
+                    fill_rect(pm, f.x, f.y, f.width, f.height, *bg);
+                }
+                paint_border(pm, f, border);
             }
-            paint_border(pm, f, border);
         }
         FragmentContent::TextLine {
             glyphs,
@@ -119,6 +130,62 @@ fn paint_border(pm: &mut Pixmap, f: &Fragment, b: &BorderEdges) {
     if let Some((w, c)) = side(&b.right) {
         fill_rect(pm, f.x + f.width - w, f.y, w, f.height, c);
     }
+}
+
+/// A rounded-rectangle path (four cubic corner arcs, `kappa` control points).
+fn round_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
+    let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+    const K: f32 = 0.5522847; // circle-arc cubic-Bézier control ratio
+    let c = r * K;
+    let (r0, b0) = (x + w, y + h); // right, bottom edges
+    let mut p = PathBuilder::new();
+    p.move_to(x + r, y);
+    p.line_to(r0 - r, y);
+    p.cubic_to(r0 - r + c, y, r0, y + r - c, r0, y + r);
+    p.line_to(r0, b0 - r);
+    p.cubic_to(r0, b0 - r + c, r0 - r + c, b0, r0 - r, b0);
+    p.line_to(x + r, b0);
+    p.cubic_to(x + r - c, b0, x, b0 - r + c, x, b0 - r);
+    p.line_to(x, y + r);
+    p.cubic_to(x, y + r - c, x + r - c, y, x + r, y);
+    p.close();
+    p.finish()
+}
+
+/// Fill a rounded rectangle (e.g. a `border-radius:50%` radio/checkbox circle).
+fn fill_round_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32, c: Rgba) {
+    if w <= 0.0 || h <= 0.0 || c.a == 0 {
+        return;
+    }
+    if let Some(path) = round_rect_path(x, y, w, h, r) {
+        pm.fill_path(&path, &solid(c), FillRule::Winding, Transform::identity(), None);
+    }
+}
+
+/// Stroke a box's border as a single rounded outline (uniform width/color from the
+/// widest side — enough for the common uniform-radius controls). Inset by half the
+/// stroke so the outline stays inside the border box.
+fn paint_round_border(pm: &mut Pixmap, f: &Fragment, b: &BorderEdges, r: f32) {
+    let widest = [&b.top, &b.right, &b.bottom, &b.left]
+        .into_iter()
+        .filter(|s| s.width > 0)
+        .max_by_key(|s| s.width);
+    let Some((w, color)) = widest.and_then(|s| s.color.map(|c| (f32::from(s.width), c))) else {
+        return;
+    };
+    let hw = w / 2.0;
+    let Some(path) = round_rect_path(
+        f.x + hw,
+        f.y + hw,
+        f.width - w,
+        f.height - w,
+        (r - hw).max(0.0),
+    ) else {
+        return;
+    };
+    let mut stroke = Stroke::default();
+    stroke.width = w;
+    pm.stroke_path(&path, &solid(color), &stroke, Transform::identity(), None);
 }
 
 /// A tiny-skia path sink for [`glyph::trace_glyph`].

@@ -42,9 +42,13 @@ pub fn paint(
 
 fn paint_fragment(svg: &mut String, f: &Fragment, images: &DecodedAssets) {
     match &f.content {
-        FragmentContent::Box { background, border } => {
+        FragmentContent::Box {
+            background,
+            border,
+            border_radius,
+        } => {
             if let Some(bg) = background {
-                rect(svg, f.x, f.y, f.width, f.height, *bg);
+                rect_r(svg, f.x, f.y, f.width, f.height, *bg, *border_radius);
             }
             paint_border(svg, f, border);
         }
@@ -107,12 +111,22 @@ fn fill_attrs(c: Rgba) -> String {
 }
 
 fn rect(svg: &mut String, x: f32, y: f32, w: f32, h: f32, c: Rgba) {
+    rect_r(svg, x, y, w, h, c, 0.0);
+}
+
+/// A filled `<rect>`, rounded by `r` px (`rx`/`ry`) when `r > 0`.
+fn rect_r(svg: &mut String, x: f32, y: f32, w: f32, h: f32, c: Rgba, r: f32) {
     if w <= 0.0 || h <= 0.0 || c.a == 0 {
         return;
     }
+    let radius = if r > 0.5 {
+        format!(" rx=\"{r:.2}\" ry=\"{r:.2}\"")
+    } else {
+        String::new()
+    };
     let _ = writeln!(
         svg,
-        "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{w:.2}\" height=\"{h:.2}\" {}/>",
+        "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{w:.2}\" height=\"{h:.2}\"{radius} {}/>",
         fill_attrs(c)
     );
 }

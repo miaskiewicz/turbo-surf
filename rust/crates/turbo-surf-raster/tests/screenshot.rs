@@ -264,3 +264,19 @@ fn delazy_populates_missing_img_src_for_layout() {
         "src injected, got: {out}"
     );
 }
+
+#[test]
+fn border_radius_renders_rounded_rect() {
+    // A `border-radius:50%` box (the Codex radio/checkbox circle) must paint round,
+    // not square. In SVG that surfaces as an `rx`/`ry` on the background `<rect>`;
+    // the PNG path draws the same rounded corners via tiny-skia.
+    let page = r#"<html><body>
+        <div style="width:18px;height:18px;border-radius:50%;background-color:#3366cc"></div>
+      </body></html>"#;
+    let svg = screenshot_svg(page, Viewport::DEFAULT).expect("svg");
+    assert!(svg.contains("#3366cc"), "circle background present");
+    assert!(svg.contains("rx="), "border-radius emits a rounded rect (rx)");
+    // PNG still renders (rounded fill path is valid).
+    let png = screenshot_png(page, Viewport::DEFAULT).expect("png");
+    assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+}

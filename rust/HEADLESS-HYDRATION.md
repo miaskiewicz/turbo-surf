@@ -782,3 +782,72 @@ re-opened a live session, so the reloaded doc stayed the raw un-hydrated shell (
 Tickets this round: FLUX-1340 (leave CSV parse → flux-apis#260), FLUX-1341 (tax-reg predicate →
 payroll-app#212), FLUX-1342 (payroll-config login nav → payroll-app#213); FLUX-1338/1339 are
 unrelated product features filed the same day.
+
+## Public-site rendering triage (2026-07-08, Cycle 22) — wikipedia / google / nike
+
+Goal: render public homepages via the **raster** screenshot path (`hydrate()` → collect
+css/images → `screenshotWithAssets`), not the authenticated SPA path. Harness scripts are in
+the session scratchpad (`wikihydshot.cjs`, `hydshot.cjs`, `googconsent.cjs`) — fetch the DOM
+in Chromium, `native.hydrate(rawHtml, finalUrl, "", UA)`, then screenshot the hydrated HTML.
+
+`hydrate()` **works on all three** (Wikipedia 944ms, google ~1.9s, nike 7.5s — the JS ran,
+DOM grew). The gaps are NOT hydration failures; they are rendering/reveal issues:
+
+### Wikipedia — SOLVED, ships faithfully
+Static OR hydrated both render like Chromium after the 0.2.7 engine batch (mask-image icons,
+self-ref `var()`, pseudo-element non-leak, flex fixes, table min-content, `;`-in-url parser).
+The only JS-only bit: the TOC `>` **caret** (`mw-ui-icon-wikimedia-expand`) is defined 0× in
+the static page (`image=expand` absent) — it is a JS-injected icon. Hydrating DOES inject the
+`expand` rule (`expand icon defined: true`), but the `.vector-toc-toggle` spans still drop from
+the box tree (need to re-check why post-hydrate — likely still `display:none` or the icon rule
+lands but the toggle stays collapsed). Non-caret icons all render.
+
+### Google — content lays out, but google's OWN css hides it (JS-reveal wall)
+- With EXTERNAL css only → 44 text lines lay out. With external + INLINE (head) styles → **0**.
+  So a head `<style>` rule hides everything.
+- The raster uses `collect_style_blocks` (raw regex, grabs `<head>` styles too); a plain
+  `layout_html` probe uses `collect_style_css` (html5ever **drops `<head>`**) — that's why a
+  naive probe "renders" and the real raster is blank. **When diagnosing, always apply the head
+  styles.**
+- Traced the consent text ("continuar"/"continue"): its ancestors are
+  `<div class="o3j99 qarstb"> display:none` and another `<div> display:none`. Google ships the
+  modal in `display:none` containers and reveals it via JS (portal/clone/class-toggle). turbo's
+  hydration runs the JS but the serialized DOM still has `display:none` → blank, consent state
+  AND homepage state (both `turbo≈39KB` = empty). Obfuscated hide classes seen:
+  `.MDfoTd{opacity:0}`, `.VH47ed{visibility:hidden}`, `.KZMqi{left:-9999px}`, `.gb_*{display:none}`.
+- **Next agent:** find WHICH class/attr google's JS toggles to un-hide the modal (is it an
+  iframe? a body-appended portal? a class flip on `.o3j99`?), and either (a) make the render tier
+  reproduce that reveal, or (b) as a harness hack, force the reveal class before screenshot. This
+  is per-site reverse-engineering of a JS-reveal app, not an engine cascade bug (turbo applies
+  `display:none` correctly, same as Chromium pre-reveal).
+
+### Nike — Emotion CSS-in-JS WORKS; barren = consent overlay + weak overlay chrome + images-behind-modal
+- Nike's styling is **258 inline `<style>` blocks / 991 `.css-xxxxx` Emotion rules** (not
+  external). CSS-in-JS is **already supported** — proved by a committed harness
+  (`turbo-surf-raster/tests/screenshot.rs::css_in_js_inline_style_blocks_apply`: hashed classes +
+  `>` combinator + `@media` all cascade). So barrenness is NOT a cascade gap.
+- Nike serves a **cookie-consent wall** (Portuguese, geo/bot-triggered). Chromium shows it as a
+  styled white card over the nav+hero; turbo shows the consent TEXT unstyled → the overlay
+  **card chrome** (position:fixed backdrop, box-shadow, border-radius, transforms) paints weakly
+  and the modal doesn't read as a card. Product images render behind the modal.
+- Images: nike uses `<img loading=lazy data-landscape-url=… data-portrait-url=…>` (no `src`).
+  `delazy_images`/`LAZY_IMG_ATTRS` **already handles** `data-landscape-url`/`data-portrait-url`
+  → they DO get a `src` + are fetched (hydshot fetched 82). The "no images" was the consent
+  overlay covering them. A `layout_html`-only probe shows 0 images because it has no resolver —
+  not a real signal.
+- **Next agent:** to get nike's real homepage, dismiss the consent wall in the Chromium capture
+  (click Accept) BEFORE `hydrate()` (google's `#L2AGLb` pattern), OR pass consent cookies. Then
+  the gaps become: overlay/fixed-position card chrome fidelity + gradient/box-shadow painting.
+
+### Gotchas for the next agent
+- **macOS has no `timeout`** — `timeout <cmd>` errors "command not found" and looks like a hang.
+  Use `run_in_background` + poll, or `gtimeout`. Cost me multiple false "it hangs" diagnoses.
+- **Rebuild the addon with `--features impersonate`** (anti-bot) and verify the dylib timestamp
+  moved — `cargo build -p turbo-surf-napi` produces the dylib that index.js copies to
+  `turbo-surf.dev.node`; a stale `.dev.node` silently serves old code.
+- **Local turbo-html2pdf-core:** now released as **0.2.7** (crates.io). No `[patch.crates-io]`
+  needed anymore. If iterating on the engine again, add the patch back AND bump the local
+  workspace version to satisfy the raster's `^0.2.x` req, else cargo silently uses the registry.
+- Diagnostic probes live as throwaway `tests/zz_*.rs` (color-inject `background-color:#f00
+  !important`, walk `Fragment` boxes / `StyledNode` computed styles). Run in RELEASE
+  (`cargo test --release`) — debug full-page layout is too slow.

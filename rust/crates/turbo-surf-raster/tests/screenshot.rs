@@ -106,6 +106,57 @@ fn png_paints_supplied_image_bytes_not_a_placeholder() {
 }
 
 #[test]
+fn mask_image_icon_paints_tint_through_svg_alpha() {
+    // Real Wikipedia TOC-toggle caret markup: a `.vector-icon` glyph rendered with
+    // `-webkit-mask-image` (an SVG) tinted by `background-color`. The mask's alpha —
+    // the caret shape — selects where the tint paints. Before mask support turbo
+    // dropped the `::mask` and painted a solid coloured square (or nothing); this
+    // asserts (a) the caret's tint DOES paint inside the glyph, and (b) an in-box
+    // point OUTSIDE the glyph stays blank, i.e. it is a stencilled mask, not a rect.
+    let caret_svg =
+        br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><polygon points="2,3 18,3 10,14" fill="#000"/></svg>"##
+            .to_vec();
+    let mut assets: ImageAssets = HashMap::new();
+    assets.insert("caret.svg".to_string(), caret_svg);
+    // Real markup (cloned from en.wikipedia.org/wiki/Cat): the TOC-toggle button and
+    // its `mw-ui-icon-wikimedia-expand` icon span.
+    let page = r#"<html><body style="margin:0">
+        <button class="cdx-button cdx-button--icon-only vector-toc-toggle">
+          <span class="vector-icon mw-ui-icon-wikimedia-expand"></span>
+        </button>
+      </body></html>"#;
+    // The mask technique, mirroring Vector's `.vector-icon` rule (mask-image glyph +
+    // background-color tint). Distinct blue tint so we can find it in the output.
+    let css = ".vector-toc-toggle{display:block;padding:0;border:0;background:transparent}\
+               .vector-icon{-webkit-mask-image:url(caret.svg);background-color:#2244dd;display:block;width:20px;height:20px}";
+    let vp = Viewport {
+        width: 60,
+        height: 60,
+    };
+    let png = screenshot_png_with_assets(page, css, vp, &assets, false).expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    // Inside the caret (near its top-center, y<14): tinted blue.
+    let on = pm.pixel(10, 6).expect("pixel");
+    assert!(
+        on.blue() > 140 && on.red() < 130 && on.green() < 140,
+        "caret glyph must paint the blue tint, got ({},{},{})",
+        on.red(),
+        on.green(),
+        on.blue()
+    );
+    // Inside the 20×20 box but BELOW the caret apex (y=18 > polygon bottom 14): blank
+    // canvas — proves a masked glyph, not a solid filled rectangle.
+    let off = pm.pixel(3, 18).expect("pixel");
+    assert!(
+        off.blue() > 200 && off.red() > 200 && off.green() > 200,
+        "outside the caret shape must stay blank (mask, not a solid box), got ({},{},{})",
+        off.red(),
+        off.green(),
+        off.blue()
+    );
+}
+
+#[test]
 fn png_falls_back_to_placeholder_without_bytes() {
     // Same page, no supplied bytes: the `<img>` box lays out but paints nothing
     // (no Image fragment), so the middle stays the white canvas — definitely not
@@ -275,7 +326,10 @@ fn border_radius_renders_rounded_rect() {
       </body></html>"#;
     let svg = screenshot_svg(page, Viewport::DEFAULT).expect("svg");
     assert!(svg.contains("#3366cc"), "circle background present");
-    assert!(svg.contains("rx="), "border-radius emits a rounded rect (rx)");
+    assert!(
+        svg.contains("rx="),
+        "border-radius emits a rounded rect (rx)"
+    );
     // PNG still renders (rounded fill path is valid).
     let png = screenshot_png(page, Viewport::DEFAULT).expect("png");
     assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);

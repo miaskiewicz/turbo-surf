@@ -68,7 +68,7 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
             *font_size,
             *color,
         ),
-        FragmentContent::Image(placement) => paint_image(pm, f, &placement.name, images),
+        FragmentContent::Image(placement) => paint_image(pm, f, placement, images),
         FragmentContent::Directive(_) => {}
     }
     // Paint children back-to-front in CSS stacking order (§9.9), not raw DOM
@@ -80,11 +80,31 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
 
 /// Draw an image into its layout box: scale the decoded pixels and blit them;
 /// fall back to a neutral placeholder when the image is absent or won't scale.
-fn paint_image(pm: &mut Pixmap, f: &Fragment, name: &str, images: &DecodedAssets) {
+/// A `mask-image` placement (`tint` set) is stencilled: the source's alpha selects
+/// where the tint colour paints (Wikipedia's monochrome SVG UI glyphs).
+fn paint_image(
+    pm: &mut Pixmap,
+    f: &Fragment,
+    placement: &turbo_html2pdf_core::ImagePlacement,
+    images: &DecodedAssets,
+) {
     let (w, h) = (f.width.round() as u32, f.height.round() as u32);
-    let img = images.get(name).and_then(|d| d.scaled_pixmap(w, h));
-    match img {
-        Some(src) => {
+    let img = images
+        .get(&placement.name)
+        .and_then(|d| d.scaled_pixmap(w, h));
+    match (img, placement.tint) {
+        (Some(src), Some(tint)) => {
+            let stencilled = tint_pixmap(&src, tint);
+            pm.draw_pixmap(
+                f.x.round() as i32,
+                f.y.round() as i32,
+                stencilled.as_ref(),
+                &PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
+        }
+        (Some(src), None) => {
             pm.draw_pixmap(
                 f.x.round() as i32,
                 f.y.round() as i32,
@@ -94,8 +114,30 @@ fn paint_image(pm: &mut Pixmap, f: &Fragment, name: &str, images: &DecodedAssets
                 None,
             );
         }
-        None => fill_rect(pm, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER),
+        // A missing mask paints nothing (no placeholder box for a glyph); a missing
+        // real image shows the neutral placeholder.
+        (None, Some(_)) => {}
+        (None, None) => fill_rect(pm, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER),
     }
+}
+
+/// Stencil `tint` through a mask pixmap: each output pixel is `tint` with its alpha
+/// scaled by the source pixel's alpha, premultiplied. Where the mask is transparent
+/// nothing paints; where opaque the full tint shows.
+fn tint_pixmap(src: &Pixmap, tint: Rgba) -> Pixmap {
+    let mut out = Pixmap::new(src.width(), src.height()).expect("mask pixmap");
+    let scale = |c: u8, a: u8| ((c as u32 * a as u32) / 255) as u8;
+    for (o, s) in out.pixels_mut().iter_mut().zip(src.pixels()) {
+        let a = scale(s.alpha(), tint.a);
+        *o = tiny_skia::PremultipliedColorU8::from_rgba(
+            scale(tint.r, a),
+            scale(tint.g, a),
+            scale(tint.b, a),
+            a,
+        )
+        .expect("premultiplied");
+    }
+    out
 }
 
 fn solid(c: Rgba) -> Paint<'static> {
@@ -158,7 +200,13 @@ fn fill_round_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32, c: R
         return;
     }
     if let Some(path) = round_rect_path(x, y, w, h, r) {
-        pm.fill_path(&path, &solid(c), FillRule::Winding, Transform::identity(), None);
+        pm.fill_path(
+            &path,
+            &solid(c),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
     }
 }
 
@@ -183,8 +231,10 @@ fn paint_round_border(pm: &mut Pixmap, f: &Fragment, b: &BorderEdges, r: f32) {
     ) else {
         return;
     };
-    let mut stroke = Stroke::default();
-    stroke.width = w;
+    let stroke = Stroke {
+        width: w,
+        ..Default::default()
+    };
     pm.stroke_path(&path, &solid(color), &stroke, Transform::identity(), None);
 }
 

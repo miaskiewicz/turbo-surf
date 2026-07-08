@@ -3,6 +3,24 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.3.4]
+
+Consumes turbo-html2pdf-core 0.2.7 (mask-image icons, `white-space`, data-URI
+values, pseudo-element/self-ref-var/flex/table fixes, flex perf) so complex pages
+render like Chromium.
+
+### Added
+- **CSS `mask-image` icon painting.** The raster stencils a box's tint colour
+  through a mask SVG's alpha (`tint_pixmap`), so monochrome UI glyphs (Wikipedia's
+  language/menu/edit icons, Codex icon fonts) render as their shape instead of a
+  solid square. A missing mask paints nothing.
+- **`border-radius` rounded rects/borders** (rounded radio/checkbox circles, cards).
+
+### Fixed
+- Wikipedia renders faithfully end-to-end: title bar no longer overlaps the tabs,
+  taxobox montage contained + classification aligned, full-width header, page-action
+  tabs on one line, blue links, round radios.
+
 ## [0.3.3]
 
 Hydration reach + screenshot fidelity. Consumes turbo-html2pdf 0.2.6 (real-page

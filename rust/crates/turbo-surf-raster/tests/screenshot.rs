@@ -94,9 +94,17 @@ fn css_in_js_inline_style_blocks_apply() {
         <div class="css-b"><span>x</span></div>
         <div class="css-c"></div>
       </body></html>"#;
-    let png =
-        screenshot_png_with_assets(page, "", Viewport { width: 400, height: 400 }, &ImageAssets::new(), false)
-            .expect("png");
+    let png = screenshot_png_with_assets(
+        page,
+        "",
+        Viewport {
+            width: 400,
+            height: 400,
+        },
+        &ImageAssets::new(),
+        false,
+    )
+    .expect("png");
     let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
     let near = |x: u32, y: u32, c: (u8, u8, u8)| {
         let p = pm.pixel(x, y).unwrap();
@@ -105,7 +113,10 @@ fn css_in_js_inline_style_blocks_apply() {
             && (p.blue() as i32 - c.2 as i32).abs() < 30
     };
     assert!(near(50, 50, (20, 120, 220)), "hashed-class bg (.css-a)");
-    assert!(near(20, 118, (220, 40, 40)), "flex child via `>` (.css-b>span)");
+    assert!(
+        near(20, 118, (220, 40, 40)),
+        "flex child via `>` (.css-b>span)"
+    );
     assert!(near(30, 165, (30, 180, 60)), "@media hashed class (.css-c)");
 }
 

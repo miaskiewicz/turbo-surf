@@ -113,8 +113,18 @@ export function screenshotSvg(html: string, width?: number, height?: number): st
 export function stylesheetHrefs(html: string): string[];
 /** Like `screenshot`/`screenshotSvg` but with caller-fetched external `<link>`
  * stylesheet CSS cascaded on top of the page's inline styles. */
-export function screenshotWithCss(html: string, externalCss: string, width?: number, height?: number): Buffer;
-export function screenshotSvgWithCss(html: string, externalCss: string, width?: number, height?: number): string;
+export function screenshotWithCss(
+  html: string,
+  externalCss: string,
+  width?: number,
+  height?: number,
+): Buffer;
+export function screenshotSvgWithCss(
+  html: string,
+  externalCss: string,
+  width?: number,
+  height?: number,
+): string;
 /** Image refs in the page (`<img src>` + `background-image: url(...)`), verbatim
  * + de-duplicated (`data:` skipped). Resolve each against the page URL, fetch
  * the bytes, and pass them as the `images` map (ref → bytes) to `*WithAssets`. */
@@ -122,8 +132,24 @@ export function imageUrls(html: string): string[];
 /** Like `*WithCss` but also paints `<img>`/`background-image` boxes from the
  * `images` map (each `imageUrls` ref → its fetched bytes). PNG/JPEG are drawn;
  * other formats fall back to a placeholder. */
-export function screenshotWithAssets(html: string, externalCss: string, images: Record<string, Buffer>, width?: number, height?: number, fullPage?: boolean, systemFonts?: boolean): Buffer;
-export function screenshotSvgWithAssets(html: string, externalCss: string, images: Record<string, Buffer>, width?: number, height?: number, fullPage?: boolean, systemFonts?: boolean): string;
+export function screenshotWithAssets(
+  html: string,
+  externalCss: string,
+  images: Record<string, Buffer>,
+  width?: number,
+  height?: number,
+  fullPage?: boolean,
+  systemFonts?: boolean,
+): Buffer;
+export function screenshotSvgWithAssets(
+  html: string,
+  externalCss: string,
+  images: Record<string, Buffer>,
+  width?: number,
+  height?: number,
+  fullPage?: boolean,
+  systemFonts?: boolean,
+): string;
 export function text(html: string): string;
 export function title(html: string): string;
 export function html(html: string): string;

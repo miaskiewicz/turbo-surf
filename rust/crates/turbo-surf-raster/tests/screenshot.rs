@@ -80,6 +80,36 @@ fn image_urls_lists_img_and_background_refs() {
 }
 
 #[test]
+fn css_in_js_inline_style_blocks_apply() {
+    // CSS-in-JS (Emotion/styled-components, e.g. nike.com's 258 inline <style>
+    // blocks with `.css-xxxxx` hashed classes) must cascade: the page's own inline
+    // <style> sheets style the elements that reference them — including a `>`
+    // combinator and an `@media` query — not just an external stylesheet.
+    let page = r#"<html><head>
+        <style>.css-a{background-color:rgb(20,120,220);width:100px;height:100px}</style>
+        <style>.css-b{display:flex}.css-b>span{background-color:rgb(220,40,40);width:40px;height:40px}</style>
+        <style>@media (min-width:100px){.css-c{background-color:rgb(30,180,60);width:60px;height:60px}}</style>
+      </head><body style="margin:0">
+        <div class="css-a"></div>
+        <div class="css-b"><span>x</span></div>
+        <div class="css-c"></div>
+      </body></html>"#;
+    let png =
+        screenshot_png_with_assets(page, "", Viewport { width: 400, height: 400 }, &ImageAssets::new(), false)
+            .expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    let near = |x: u32, y: u32, c: (u8, u8, u8)| {
+        let p = pm.pixel(x, y).unwrap();
+        (p.red() as i32 - c.0 as i32).abs() < 30
+            && (p.green() as i32 - c.1 as i32).abs() < 30
+            && (p.blue() as i32 - c.2 as i32).abs() < 30
+    };
+    assert!(near(50, 50, (20, 120, 220)), "hashed-class bg (.css-a)");
+    assert!(near(20, 118, (220, 40, 40)), "flex child via `>` (.css-b>span)");
+    assert!(near(30, 165, (30, 180, 60)), "@media hashed class (.css-c)");
+}
+
+#[test]
 fn png_paints_supplied_image_bytes_not_a_placeholder() {
     // A 40×40 red `<img>` whose bytes the caller supplies must render as red
     // pixels (the fixture colour), not the grey placeholder or the white canvas.

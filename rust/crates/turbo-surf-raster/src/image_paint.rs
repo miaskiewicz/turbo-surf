@@ -48,6 +48,154 @@ pub fn png_map(decoded: &DecodedAssets) -> HashMap<String, Vec<u8>> {
         .collect()
 }
 
+/// Decode every `data:` image URI referenced by a `url(...)` (a CSS `mask-image`,
+/// `background-image`, …) in `css`/`html` and add it to `decoded`, keyed by the
+/// exact string turbo-html2pdf resolves against (the `url(...)` inner, surrounding
+/// quotes stripped, inner `\"` retained). Caller-fetched assets skip `data:` URIs
+/// (self-contained, nothing to fetch); this recovers them so an inline SVG mask or
+/// background paints — Wikipedia ships its TOC-toggle chevron as an inline
+/// `data:image/svg+xml` mask-image, invisible without this.
+pub fn add_data_uri_images(decoded: &mut DecodedAssets, css: &str, html: &str) {
+    for key in data_uri_url_tokens(css)
+        .into_iter()
+        .chain(data_uri_url_tokens(html))
+    {
+        if decoded.contains_key(&key) {
+            continue;
+        }
+        if let Some(img) = decode_data_uri(&key).as_deref().and_then(decode) {
+            decoded.insert(key, img);
+        }
+    }
+}
+
+/// Every `data:` URI inside a `url(...)` in `s`, extracted the way
+/// turbo-html2pdf's `url_token` does (strip `url(` … `)`, strip surrounding
+/// quotes, trim) so the key matches its resolver lookup. Quote-aware: a `;`/`,`/
+/// `)` inside the payload (an inline `<svg>` data URI has all three) doesn't end
+/// the token — only the matching unescaped closing quote does.
+fn data_uri_url_tokens(s: &str) -> Vec<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(rel) = s[i..].find("url(") {
+        let mut j = i + rel + "url(".len();
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        let inner = if j < b.len() && (b[j] == b'"' || b[j] == b'\'') {
+            let quote = b[j];
+            j += 1;
+            let start = j;
+            // Closing quote = the same quote NOT escaped by a preceding backslash.
+            while j < b.len() && !(b[j] == quote && b[j - 1] != b'\\') {
+                j += 1;
+            }
+            &s[start..j.min(b.len())]
+        } else {
+            let start = j;
+            while j < b.len() && b[j] != b')' {
+                j += 1;
+            }
+            &s[start..j]
+        };
+        let name = inner.trim();
+        if name.starts_with("data:") {
+            out.push(name.to_string());
+        }
+        i = (i + rel + "url(".len()).max(j);
+    }
+    out
+}
+
+/// The raw bytes of a `data:` URI: base64-decoded for `;base64,`, else the plain
+/// payload with the stylesheet's CSS string escaping undone (`\"` → `"`) and
+/// percent-encoding decoded (an inline SVG uses `%23` for `#`). `None` if `uri`
+/// isn't a data URI or its base64 is malformed.
+fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
+    let rest = uri.strip_prefix("data:")?;
+    let comma = rest.find(',')?;
+    let (meta, payload) = (&rest[..comma], &rest[comma + 1..]);
+    if meta.split(';').any(|t| t.eq_ignore_ascii_case("base64")) {
+        base64_decode(payload.trim())
+    } else {
+        Some(percent_decode(&css_unescape(payload)))
+    }
+}
+
+/// Undo CSS string escaping: a backslash quotes the next character verbatim
+/// (`\"` → `"`). Data-URI masks embed the SVG's `"` this way inside the `url()`
+/// string. (Hex escapes `\41` don't appear in these payloads.)
+fn css_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Percent-decode `%XX` byte escapes; any stray `%` not followed by two hex
+/// digits is passed through verbatim.
+fn percent_decode(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let (Some(h), Some(l)) = (hex_nibble(b[i + 1]), hex_nibble(b[i + 2])) {
+                out.push(h << 4 | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
+}
+
+fn hex_nibble(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Decode standard base64 (RFC 4648), ignoring `=` padding and whitespace. `None`
+/// on any non-alphabet byte. The inverse of [`base64`].
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    fn sextet(c: u8) -> Option<u32> {
+        match c {
+            b'A'..=b'Z' => Some((c - b'A') as u32),
+            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
+            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    let (mut buf, mut bits) = (0u32, 0u32);
+    for &c in s.as_bytes() {
+        if c == b'=' || c.is_ascii_whitespace() {
+            continue;
+        }
+        buf = buf << 6 | sextet(c)?;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
 /// Decode PNG/JPEG/GIF/WebP (via the `image` crate) or SVG (via resvg) into
 /// straight-alpha RGBA. `None` on an unrecognized or corrupt image.
 pub fn decode(bytes: &[u8]) -> Option<DecodedImage> {
@@ -168,7 +316,10 @@ fn base64(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{base64, decode};
+    use super::{
+        base64, base64_decode, css_unescape, data_uri_url_tokens, decode_data_uri, percent_decode,
+    };
+    use super::{decode, DecodedAssets};
 
     #[test]
     fn base64_matches_known_vectors() {
@@ -177,6 +328,70 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn base64_decode_is_the_inverse_of_encode() {
+        for v in [
+            &b""[..],
+            b"f",
+            b"fo",
+            b"foo",
+            b"foobar",
+            &[0u8, 255, 1, 254, 128],
+        ] {
+            assert_eq!(base64_decode(&base64(v)).unwrap(), v, "roundtrip {v:?}");
+        }
+        // Padding and embedded whitespace are ignored; a non-alphabet byte fails.
+        assert_eq!(base64_decode("Zm9v\nYmFy").unwrap(), b"foobar");
+        assert_eq!(base64_decode("*bad*"), None);
+    }
+
+    #[test]
+    fn percent_decode_and_css_unescape() {
+        assert_eq!(percent_decode("fill=%23fff"), b"fill=#fff");
+        assert_eq!(percent_decode("100%"), b"100%"); // stray % passed through
+        assert_eq!(css_unescape(r#"<svg a=\"b\">"#), r#"<svg a="b">"#);
+    }
+
+    #[test]
+    fn url_token_scan_takes_data_uris_whole_ignoring_inner_delimiters() {
+        // A `;`, `,` and `)` all appear inside the payload; only the closing quote
+        // ends the token. A non-`data:` url and a bare colour are skipped.
+        let css = r#"a{mask-image:url("data:image/svg+xml;utf8,<svg viewBox=\"0 0 1,1\"><path d=\"M0 0z)\"/></svg>")}
+                     b{background:#fff url(pic.png) no-repeat}
+                     c{mask:url('data:image/png;base64,iVBORw0=')}"#;
+        let toks = data_uri_url_tokens(css);
+        assert_eq!(toks.len(), 2, "two data: urls, the .png skipped: {toks:?}");
+        assert!(toks[0].starts_with("data:image/svg+xml;utf8,<svg"));
+        assert!(toks[0].ends_with("</svg>"), "kept whole: {}", toks[0]);
+        assert_eq!(toks[1], "data:image/png;base64,iVBORw0=");
+    }
+
+    #[test]
+    fn decode_data_uri_handles_base64_and_plain_svg() {
+        // base64 payload → raw bytes.
+        let uri = format!("data:image/png;base64,{}", base64(b"hello"));
+        assert_eq!(decode_data_uri(&uri).unwrap(), b"hello");
+        // Plain SVG payload: CSS-unescaped + percent-decoded into valid XML bytes.
+        let svg =
+            decode_data_uri(r#"data:image/svg+xml;utf8,<svg fill=\"%23f00\" width=\"2\">x</svg>"#)
+                .unwrap();
+        assert_eq!(svg, br##"<svg fill="#f00" width="2">x</svg>"##);
+    }
+
+    #[test]
+    fn add_data_uri_images_recovers_an_inline_svg_mask() {
+        // A minimal inline-SVG mask url() in the CSS is decoded and keyed by the
+        // exact resolver string (the unquoted url inner), ready for the paint pass.
+        let key = r#"data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><rect width=\"4\" height=\"4\" fill=\"%23000\"/></svg>"#;
+        let css = format!(".i{{mask-image:url(\"{key}\")}}");
+        let mut decoded: DecodedAssets = DecodedAssets::new();
+        super::add_data_uri_images(&mut decoded, &css, "");
+        let img = decoded
+            .get(key)
+            .expect("data-uri mask decoded under its key");
+        assert_eq!((img.width, img.height), (4, 4));
     }
 
     #[test]

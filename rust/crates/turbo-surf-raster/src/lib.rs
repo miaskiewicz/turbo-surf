@@ -172,7 +172,10 @@ pub fn screenshot_png_with_opts(
     full_page: bool,
     system_fonts: bool,
 ) -> Result<Vec<u8>, String> {
-    let decoded = image_paint::decode_all(images);
+    let mut decoded = image_paint::decode_all(images);
+    // Recover inline `data:` image masks/backgrounds the fetch step skips (nothing
+    // to fetch) — e.g. Wikipedia's TOC-toggle chevron mask-image.
+    image_paint::add_data_uri_images(&mut decoded, external_css, html);
     let galley = lay_out(
         html,
         external_css,
@@ -195,7 +198,8 @@ pub fn screenshot_svg_with_opts(
     full_page: bool,
     system_fonts: bool,
 ) -> Result<String, String> {
-    let decoded = image_paint::decode_all(images);
+    let mut decoded = image_paint::decode_all(images);
+    image_paint::add_data_uri_images(&mut decoded, external_css, html);
     let galley = lay_out(
         html,
         external_css,

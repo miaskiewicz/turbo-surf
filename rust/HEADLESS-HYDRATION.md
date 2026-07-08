@@ -796,11 +796,27 @@ DOM grew). The gaps are NOT hydration failures; they are rendering/reveal issues
 ### Wikipedia — SOLVED, ships faithfully
 Static OR hydrated both render like Chromium after the 0.2.7 engine batch (mask-image icons,
 self-ref `var()`, pseudo-element non-leak, flex fixes, table min-content, `;`-in-url parser).
-The only JS-only bit: the TOC `>` **caret** (`mw-ui-icon-wikimedia-expand`) is defined 0× in
-the static page (`image=expand` absent) — it is a JS-injected icon. Hydrating DOES inject the
-`expand` rule (`expand icon defined: true`), but the `.vector-toc-toggle` spans still drop from
-the box tree (need to re-check why post-hydrate — likely still `display:none` or the icon rule
-lands but the toggle stays collapsed). Non-caret icons all render.
+
+**TOC caret — root cause found + FIXED (Cycle 23, raster-side).** The caret
+(`.mw-ui-icon-wikimedia-expand`) is NOT dropped from the box tree — the empty icon span lays
+out as a 20×20 box. It vanished because its `mask-image` is an inline **`data:image/svg+xml`
+URI**, and the fetch step skips `data:` (nothing to fetch), so the mask resolved to nothing →
+`prepend_mask_image` in html2pdf bails at `probe_source` (resolver miss) → **no `Image`
+fragment emitted** → the box paints transparent. The committed mask test only ever covered an
+*external* `url(caret.svg)` asset, so this gap was invisible. Fix: the raster now decodes
+`data:` image URIs itself (`add_data_uri_images` in `image_paint.rs`) — quote-aware `url()`
+scan keyed EXACTLY as html2pdf's `url_token` (retains the CSS `\"` escaping), base64 + plain
+(`%23`/`\"`-decoded) payloads — and merges them into `decoded` so both the layout resolver
+(`png_map`) and the paint pass find them. General win: every inline-SVG mask/background now
+paints (nike/others too), not just Wikipedia. Covered by
+`datauri_mask_image_icon_paints_without_a_fetched_asset` + unit tests.
+
+**Remaining caret polish (layout-engine, html2pdf — deferred):** the caret now paints as the
+raw down-chevron `⌄` mid-row; Chromium shows `>` in a left gutter. Two html2pdf gaps: (a) the
+collapsed toggle's `transform: rotate(-90deg)` isn't applied to the mask (down-chevron not
+rotated to point right), and (b) the `.vector-toc-toggle` sits in the text flow instead of the
+row's left gutter. Both are `transform`/positioning work in the separate repo — overlaps the
+nike "overlay chrome + transforms paint weakly" item. Non-caret icons all render.
 
 ### Google — content lays out, but google's OWN css hides it (JS-reveal wall)
 - With EXTERNAL css only → 44 text lines lay out. With external + INLINE (head) styles → **0**.

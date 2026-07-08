@@ -198,6 +198,58 @@ fn mask_image_icon_paints_tint_through_svg_alpha() {
 }
 
 #[test]
+fn datauri_mask_image_icon_paints_without_a_fetched_asset() {
+    // The Wikipedia TOC-toggle caret exactly as it ships: an EMPTY icon span whose
+    // `mask-image` is an inline `data:image/svg+xml` URI (not a fetched asset), with
+    // the SVG's own `"` CSS-escaped (`\"`) and `#` percent-encoded (`%23`) inside the
+    // `url()` string. The fetch step skips `data:` URIs, so before the raster decoded
+    // them itself the mask resolved to nothing and the caret vanished from the box
+    // tree. This asserts the chevron tint paints straight from the data URI — no
+    // `ImageAssets` entry supplied.
+    let mask = "url(\"data:image/svg+xml;utf8,<svg xmlns=\\\"http://www.w3.org/2000/svg\\\" \
+        width=\\\"20\\\" height=\\\"20\\\" viewBox=\\\"0 0 20 20\\\" fill=\\\"%232244dd\\\">\
+        <path d=\\\"M2 3 H18 L10 14 Z\\\"/></svg>\")";
+    let page = r#"<html><body style="margin:0">
+        <button class="cdx-button cdx-button--icon-only vector-toc-toggle">
+          <span class="vector-icon mw-ui-icon-wikimedia-expand"></span>
+        </button>
+      </body></html>"#;
+    // Vector's real rule shape: mask-image glyph + background-color tint, on an
+    // inline-block empty span sized by the icon rule (not the caller).
+    let css = format!(
+        ".vector-toc-toggle{{display:block;padding:0;border:0;background:transparent}}\
+         .mw-ui-icon-wikimedia-expand{{-webkit-mask-image:{mask};mask-image:{mask};\
+         background-color:#2244dd;display:inline-block;width:20px;height:20px}}"
+    );
+    let vp = Viewport {
+        width: 60,
+        height: 60,
+    };
+    // No supplied assets — the mask must come from the inline data URI alone.
+    let assets: ImageAssets = HashMap::new();
+    let png = screenshot_png_with_assets(page, &css, vp, &assets, false).expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    // Inside the caret (top-center, y<12): the blue tint painted through the mask.
+    let on = pm.pixel(10, 5).expect("pixel");
+    assert!(
+        on.blue() > 140 && on.red() < 130 && on.green() < 140,
+        "data-URI caret must paint the tint, got ({},{},{})",
+        on.red(),
+        on.green(),
+        on.blue()
+    );
+    // Below the caret apex (y=18): blank — a stencilled mask, not a filled box.
+    let off = pm.pixel(3, 18).expect("pixel");
+    assert!(
+        off.blue() > 200 && off.red() > 200 && off.green() > 200,
+        "outside the caret shape must stay blank (mask, not a box), got ({},{},{})",
+        off.red(),
+        off.green(),
+        off.blue()
+    );
+}
+
+#[test]
 fn png_falls_back_to_placeholder_without_bytes() {
     // Same page, no supplied bytes: the `<img>` box lays out but paints nothing
     // (no Image fragment), so the middle stays the white canvas — definitely not

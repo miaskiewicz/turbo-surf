@@ -69,6 +69,148 @@ pub fn add_data_uri_images(decoded: &mut DecodedAssets, css: &str, html: &str) {
     }
 }
 
+/// Rewrite each inline `<svg>…</svg>` element to an `<img>` sized from the SVG's own
+/// `width`/`height` (carrying its `class`/`style` so CSS sizing still applies) with a
+/// synthetic `src` key, returning the rewritten HTML plus `(key, svg-source)` pairs
+/// for the caller to decode into the asset map (see [`add_inline_svg_assets`]). The
+/// layout engine has no inline-SVG painter, so a page's inline `<svg>` logos/icons
+/// (google.com ships ~21) render blank; routing them through the existing `<img>` +
+/// resvg path paints them. Nested `<svg>` are depth-matched; an unclosed/again-open
+/// `<svg` is left untouched.
+pub fn inline_svg_to_img(html: &str) -> (String, Vec<(String, String)>) {
+    let lower = html.to_ascii_lowercase();
+    let bytes = html.as_bytes();
+    let mut out = String::with_capacity(html.len());
+    let mut assets = Vec::new();
+    let mut cursor = 0;
+    while let Some(rel) = lower[cursor..].find("<svg") {
+        let start = cursor + rel;
+        // `<svg` must be a whole tag name (`<svg>`/`<svg `/`<svg/`), not `<svga…`.
+        let after = bytes.get(start + 4).copied();
+        if !matches!(after, Some(b) if b == b'>' || b == b'/' || b.is_ascii_whitespace()) {
+            out.push_str(&html[cursor..start + 4]);
+            cursor = start + 4;
+            continue;
+        }
+        let Some(otrel) = lower[start..].find('>') else {
+            break;
+        };
+        let open_end = start + otrel + 1;
+        let open_tag = &html[start..open_end];
+        // Locate the matching `</svg>` (depth-counted), or bail on this element.
+        let close_end = if open_tag.trim_end().ends_with("/>") {
+            Some(open_end) // self-closed: no content
+        } else {
+            svg_close_end(&lower, open_end)
+        };
+        let Some(close_end) = close_end else {
+            // Unbalanced — emit the open tag verbatim and move past it.
+            out.push_str(&html[cursor..open_end]);
+            cursor = open_end;
+            continue;
+        };
+        let key = format!("turbo-inline-svg-{}", assets.len());
+        out.push_str(&html[cursor..start]);
+        out.push_str("<img src=\"");
+        out.push_str(&key);
+        out.push('"');
+        for attr in ["class", "style", "width", "height"] {
+            if let Some(v) = svg_attr(open_tag, attr) {
+                if !v.contains('"') {
+                    out.push(' ');
+                    out.push_str(attr);
+                    out.push_str("=\"");
+                    out.push_str(&v);
+                    out.push('"');
+                }
+            }
+        }
+        out.push('>');
+        assets.push((key, html[start..close_end].to_string()));
+        cursor = close_end;
+    }
+    out.push_str(&html[cursor..]);
+    (out, assets)
+}
+
+/// The byte offset just past the `</svg>` that closes the `<svg>` whose content
+/// starts at `from` (depth-counted over lowercased `lower`), or `None` if unbalanced.
+fn svg_close_end(lower: &str, from: usize) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut scan = from;
+    while depth > 0 {
+        let next_open = lower[scan..].find("<svg");
+        let next_close = lower[scan..].find("</svg");
+        match (next_open, next_close) {
+            (Some(o), Some(c)) if o < c => {
+                depth += 1;
+                scan += o + 4;
+            }
+            (_, Some(c)) => {
+                depth -= 1;
+                let cabs = scan + c;
+                if depth == 0 {
+                    return lower[cabs..].find('>').map(|g| cabs + g + 1);
+                }
+                scan = cabs + 5;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// A single attribute value from an element's opening tag (`name="v"`/`name='v'`),
+/// or `None`. Minimal — used only for the inline-SVG rewrite.
+fn svg_attr(open_tag: &str, name: &str) -> Option<String> {
+    let lower = open_tag.to_ascii_lowercase();
+    let mut from = 0;
+    loop {
+        let rel = lower[from..].find(name)?;
+        let at = from + rel;
+        // Require a boundary before the name (space/`<`) and `=` (maybe spaced) after.
+        let before_ok = at == 0 || open_tag.as_bytes()[at - 1].is_ascii_whitespace();
+        let mut k = at + name.len();
+        while open_tag
+            .as_bytes()
+            .get(k)
+            .is_some_and(|b| b.is_ascii_whitespace())
+        {
+            k += 1;
+        }
+        if before_ok && open_tag.as_bytes().get(k) == Some(&b'=') {
+            k += 1;
+            while open_tag
+                .as_bytes()
+                .get(k)
+                .is_some_and(|b| b.is_ascii_whitespace())
+            {
+                k += 1;
+            }
+            let q = *open_tag.as_bytes().get(k)?;
+            if q == b'"' || q == b'\'' {
+                let vstart = k + 1;
+                let vend = open_tag[vstart..].find(q as char)? + vstart;
+                return Some(open_tag[vstart..vend].to_string());
+            }
+        }
+        from = at + name.len();
+    }
+}
+
+/// Decode the `(key, svg-source)` pairs from [`inline_svg_to_img`] into `decoded`
+/// (SVG → RGBA via resvg), so the synthetic `<img src=key>` boxes resolve + paint.
+pub fn add_inline_svg_assets(decoded: &mut DecodedAssets, assets: &[(String, String)]) {
+    for (key, src) in assets {
+        if decoded.contains_key(key) {
+            continue;
+        }
+        if let Some(img) = decode(src.as_bytes()) {
+            decoded.insert(key.clone(), img);
+        }
+    }
+}
+
 /// Every `data:` URI inside a `url(...)` in `s`, extracted the way
 /// turbo-html2pdf's `url_token` does (strip `url(` … `)`, strip surrounding
 /// quotes, trim) so the key matches its resolver lookup. Quote-aware: a `;`/`,`/
@@ -319,7 +461,36 @@ mod tests {
     use super::{
         base64, base64_decode, css_unescape, data_uri_url_tokens, decode_data_uri, percent_decode,
     };
-    use super::{decode, DecodedAssets};
+    use super::{decode, inline_svg_to_img, DecodedAssets};
+
+    #[test]
+    fn inline_svg_becomes_img_carrying_size_and_class() {
+        let html = r#"<div><svg class="ic" width="60" height="30" viewBox="0 0 60 30"><rect width="60" height="30"/></svg> after</div>"#;
+        let (out, assets) = inline_svg_to_img(html);
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].0, "turbo-inline-svg-0");
+        assert!(assets[0].1.starts_with("<svg") && assets[0].1.ends_with("</svg>"));
+        assert!(
+            out.contains(r#"<img src="turbo-inline-svg-0""#)
+                && out.contains(r#"class="ic""#)
+                && out.contains(r#"width="60""#)
+                && out.contains(r#"height="30""#),
+            "rewritten: {out}"
+        );
+        assert!(out.contains("> after</div>"), "text after preserved: {out}");
+    }
+
+    #[test]
+    fn inline_svg_nested_is_depth_matched_and_unbalanced_left_alone() {
+        // Nested <svg> — the OUTER close is the boundary, one asset.
+        let (_, nested) = inline_svg_to_img("<svg><svg></svg></svg>");
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0].1, "<svg><svg></svg></svg>");
+        // Unbalanced — left verbatim, nothing extracted.
+        let (out, none) = inline_svg_to_img("<svg width=\"1\"><rect/>");
+        assert!(none.is_empty());
+        assert_eq!(out, "<svg width=\"1\"><rect/>");
+    }
 
     #[test]
     fn base64_matches_known_vectors() {

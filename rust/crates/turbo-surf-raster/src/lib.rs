@@ -172,10 +172,16 @@ pub fn screenshot_png_with_opts(
     full_page: bool,
     system_fonts: bool,
 ) -> Result<Vec<u8>, String> {
+    // Rewrite inline `<svg>` to `<img>` (+ decode the SVGs) so the layout's `<img>`
+    // path paints them — the engine has no inline-SVG painter. Do this first so both
+    // the data-URI recovery and the layout see the rewritten markup.
+    let (html, inline_svgs) = image_paint::inline_svg_to_img(html);
+    let html = html.as_str();
     let mut decoded = image_paint::decode_all(images);
     // Recover inline `data:` image masks/backgrounds the fetch step skips (nothing
     // to fetch) — e.g. Wikipedia's TOC-toggle chevron mask-image.
     image_paint::add_data_uri_images(&mut decoded, external_css, html);
+    image_paint::add_inline_svg_assets(&mut decoded, &inline_svgs);
     let galley = lay_out(
         html,
         external_css,
@@ -199,8 +205,11 @@ pub fn screenshot_svg_with_opts(
     full_page: bool,
     system_fonts: bool,
 ) -> Result<String, String> {
+    let (html, inline_svgs) = image_paint::inline_svg_to_img(html);
+    let html = html.as_str();
     let mut decoded = image_paint::decode_all(images);
     image_paint::add_data_uri_images(&mut decoded, external_css, html);
+    image_paint::add_inline_svg_assets(&mut decoded, &inline_svgs);
     let galley = lay_out(
         html,
         external_css,

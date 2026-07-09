@@ -290,8 +290,18 @@ pub fn delazy_images(html: &str) -> String {
             return;
         }
         if let Some(url) = best_img_url(tag, tag_lower) {
+            // A lazy image is revealed by JS swapping an opacity/visibility class on
+            // load. We can't run that, but having assumed it loaded (by supplying
+            // `src`), force it visible too — else the engine drops it as `opacity:0`
+            // (nike's hero `<img>`s start opacity:0 and rendered as a blank band). Only
+            // when the tag has no inline `style` we would otherwise clobber.
+            let reveal = if attr_value(tag, tag_lower, "style").is_none() {
+                r#" style="opacity:1 !important;visibility:visible !important""#
+            } else {
+                ""
+            };
             // Insert right after `<img` (offset start+4).
-            inserts.push((start + 4, format!(r#" src="{url}""#)));
+            inserts.push((start + 4, format!(r#" src="{url}"{reveal}"#)));
         }
     });
     if inserts.is_empty() {
@@ -431,6 +441,39 @@ mod tests {
     #[test]
     fn empty_when_no_styles() {
         assert_eq!(collect_style_blocks("<div>plain</div>"), "");
+    }
+
+    #[test]
+    fn delazy_fills_src_and_reveals_lazy_image() {
+        use super::delazy_images;
+        // A `src`-less lazy `<img>` gets its `data-landscape-url` promoted to `src`
+        // plus a reveal style (it starts `opacity:0`, revealed by JS on load).
+        let out = delazy_images(r#"<img data-landscape-url="hero.jpg" alt="x">"#);
+        assert!(out.contains(r#"src="hero.jpg""#), "src filled: {out}");
+        assert!(out.contains("opacity:1 !important"), "revealed: {out}");
+        assert!(out.contains("visibility:visible !important"));
+    }
+
+    #[test]
+    fn delazy_takes_first_srcset_and_skips_when_src_present() {
+        use super::delazy_images;
+        // No `src`: first `srcset` candidate wins.
+        let out = delazy_images(r#"<img srcset="a.jpg 1x, b.jpg 2x">"#);
+        assert!(out.contains(r#"src="a.jpg""#), "{out}");
+        // An `<img>` that already has a non-empty `src` is left untouched.
+        let already = r#"<img src="real.jpg">"#;
+        assert_eq!(delazy_images(already), already);
+    }
+
+    #[test]
+    fn delazy_does_not_clobber_an_existing_inline_style() {
+        use super::delazy_images;
+        // A lazy `<img>` that carries an inline `style` keeps it — no reveal override
+        // is injected (it would need merging, not a second `style` attribute).
+        let out = delazy_images(r#"<img data-src="x.jpg" style="border:0">"#);
+        assert!(out.contains(r#"src="x.jpg""#), "{out}");
+        assert!(!out.contains("opacity:1"), "no style override: {out}");
+        assert!(out.contains(r#"style="border:0""#));
     }
 
     #[test]

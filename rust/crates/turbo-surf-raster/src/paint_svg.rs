@@ -7,7 +7,9 @@
 use std::fmt::Write;
 
 use turbo_html2pdf_core::layout::value::{BorderEdges, BorderSide};
-use turbo_html2pdf_core::{BoxShadow, Fragment, FragmentContent, PositionedGlyph, Rgba};
+use turbo_html2pdf_core::{
+    BoxShadow, Fragment, FragmentContent, LinearGradient as CssGradient, PositionedGlyph, Rgba,
+};
 
 use crate::glyph::{self, Pen, Tracer};
 use crate::image_paint::{self, DecodedAssets};
@@ -47,12 +49,16 @@ fn paint_fragment(svg: &mut String, f: &Fragment, images: &DecodedAssets) {
             border,
             border_radius,
             shadow,
+            gradient,
         } => {
             if let Some(sh) = shadow.filter(|s| !s.inset && s.color.a > 0) {
                 paint_box_shadow(svg, f, *border_radius, &sh);
             }
             if let Some(bg) = background {
                 rect_r(svg, f.x, f.y, f.width, f.height, *bg, *border_radius);
+            }
+            if let Some(g) = gradient {
+                paint_gradient(svg, f, *border_radius, g);
             }
             paint_border(svg, f, border);
         }
@@ -157,6 +163,51 @@ fn paint_box_shadow(svg: &mut String, f: &Fragment, border_radius: f32, sh: &Box
         svg,
         "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{w:.2}\" height=\"{h:.2}\"{rr} {} filter=\"url(#{id})\"/>",
         fill_attrs(sh.color)
+    );
+}
+
+/// Paint a `linear-gradient(...)` background as a native SVG `<linearGradient>`
+/// (userSpaceOnUse, start/end points across the box per the CSS angle) filling the
+/// box rect (rounded by `border_radius`). The gradient id is derived from the box
+/// geometry to stay unique within the document.
+fn paint_gradient(svg: &mut String, f: &Fragment, border_radius: f32, g: &CssGradient) {
+    if f.width < 0.5 || f.height < 0.5 || g.stops.len() < 2 {
+        return;
+    }
+    let (w, h) = (f.width, f.height);
+    let theta = g.angle_deg.to_radians();
+    let (dx, dy) = (theta.sin(), -theta.cos());
+    let half = (w * theta.sin().abs() + h * theta.cos().abs()) / 2.0;
+    let (cx, cy) = (f.x + w / 2.0, f.y + h / 2.0);
+    let (x1, y1) = (cx - dx * half, cy - dy * half);
+    let (x2, y2) = (cx + dx * half, cy + dy * half);
+    let id = format!("g{}_{}", (f.x as i64) + 1_000_000, (f.y as i64) + 1_000_000);
+    let _ = write!(
+        svg,
+        "<linearGradient id=\"{id}\" gradientUnits=\"userSpaceOnUse\" \
+         x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\">"
+    );
+    for s in &g.stops {
+        let _ = write!(
+            svg,
+            "<stop offset=\"{:.3}\" stop-color=\"#{:02x}{:02x}{:02x}\" stop-opacity=\"{:.3}\"/>",
+            s.pos.clamp(0.0, 1.0),
+            s.color.r,
+            s.color.g,
+            s.color.b,
+            s.color.a as f32 / 255.0
+        );
+    }
+    let rr = if border_radius > 0.5 {
+        format!(" rx=\"{border_radius:.2}\" ry=\"{border_radius:.2}\"")
+    } else {
+        String::new()
+    };
+    let _ = writeln!(
+        svg,
+        "</linearGradient>\n<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{w:.2}\" height=\"{h:.2}\"{rr} \
+         fill=\"url(#{id})\"/>",
+        f.x, f.y
     );
 }
 

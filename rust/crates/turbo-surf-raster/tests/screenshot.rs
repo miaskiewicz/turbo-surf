@@ -294,6 +294,47 @@ fn box_shadow_paints_a_soft_offset_shadow_behind_a_card() {
 }
 
 #[test]
+fn linear_gradient_background_paints_left_to_right() {
+    // `to right` (90°): the left edge is the first stop (red), the right edge the
+    // last (blue), and the middle a blend of both.
+    let page = r#"<html><body style="margin:0">
+        <div style="width:200px;height:60px;
+                    background:linear-gradient(to right, #ff0000, #0000ff)"></div>
+      </body></html>"#;
+    let vp = Viewport {
+        width: 200,
+        height: 60,
+    };
+    let png = screenshot_png_with_assets(page, "", vp, &ImageAssets::new(), false).expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    let left = pm.pixel(4, 30).expect("pixel");
+    let right = pm.pixel(196, 30).expect("pixel");
+    let mid = pm.pixel(100, 30).expect("pixel");
+    assert!(
+        left.red() > 200 && left.blue() < 60,
+        "left edge should be red, got ({},{},{})",
+        left.red(),
+        left.green(),
+        left.blue()
+    );
+    assert!(
+        right.blue() > 200 && right.red() < 60,
+        "right edge should be blue, got ({},{},{})",
+        right.red(),
+        right.green(),
+        right.blue()
+    );
+    // Middle blends: both channels present, neither saturated like the ends.
+    assert!(
+        mid.red() > 40 && mid.red() < 220 && mid.blue() > 40 && mid.blue() < 220,
+        "middle should blend red↔blue, got ({},{},{})",
+        mid.red(),
+        mid.green(),
+        mid.blue()
+    );
+}
+
+#[test]
 fn png_falls_back_to_placeholder_without_bytes() {
     // Same page, no supplied bytes: the `<img>` box lays out but paints nothing
     // (no Image fragment), so the middle stays the white canvas — definitely not

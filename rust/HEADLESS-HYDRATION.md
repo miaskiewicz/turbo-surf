@@ -834,6 +834,20 @@ drop the patch. Inset shadows, multiple layers, and `transform`ed shadows are v1
 Deferred: gradients + CSS `transform` (the Wikipedia caret rotate + nike hero) are the
 next engine features on the same fragment-attribute pattern.
 
+### Linear-gradient backgrounds — IMPLEMENTED (Cycle 24), release-pending
+`background`/`background-image: linear-gradient(...)` now paints (hero sections,
+buttons, cards). **turbo-html2pdf 0.2.9** parses it into a `LinearGradient` (angle +
+positioned stops) on `FragmentContent::Box` — angle (`<deg>`) or `to <side>/<corner>`
+(default `to bottom`), `rgb/rgba/#hex/named` stops with optional `%` positions
+(unpositioned spread evenly), nested-comma-safe, `radial-`/`conic-` skipped;
+**turbo-surf raster** paints it via tiny-skia `LinearGradient` (PNG, start/end points
+across the box per the CSS angle, clipped to the rounded rect) + native
+`<linearGradient>` (SVG). Proven on a demo (to-right, 135° diagonal, 3-stop
+red→green→blue with `%`, and a purple gradient card composited with box-shadow +
+border-radius + text). Covered by `linear_gradient_background_paints_left_to_right`
+(raster) + `gradient_tests` (html2pdf parser). Same release-coupling as box-shadow:
+needs html2pdf **0.2.9** published, then bump the dep. **CSS `transform` still deferred.**
+
 ### Google — NOT a JS-reveal bug (hypothesis disproven, Cycle 23)
 Consent dismissal now works generally (`consentshot.cjs` clicks `#L2AGLb` /
 `#onetrust-accept-btn-handler` / text-matched "Accept all" across main + child frames).

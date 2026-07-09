@@ -3,9 +3,14 @@
 //! are scaled into their box, others fall back to a placeholder. Content past the
 //! pixmap edge is clipped by tiny-skia, giving a viewport-clipped screenshot.
 
-use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform};
+use tiny_skia::{
+    FillRule, GradientStop, LinearGradient, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Point,
+    Rect, SpreadMode, Stroke, Transform,
+};
 use turbo_html2pdf_core::layout::value::{BorderEdges, BorderSide};
-use turbo_html2pdf_core::{BoxShadow, Fragment, FragmentContent, PositionedGlyph, Rgba};
+use turbo_html2pdf_core::{
+    BoxShadow, Fragment, FragmentContent, LinearGradient as CssGradient, PositionedGlyph, Rgba,
+};
 
 use crate::glyph::{self, Pen, Tracer};
 use crate::image_paint::DecodedAssets;
@@ -42,6 +47,7 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
             border,
             border_radius,
             shadow,
+            gradient,
         } => {
             // An outer shadow paints behind the box (before its fill/border) so the
             // card sits on it; inset shadows are v1-unsupported.
@@ -52,10 +58,16 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
                 if let Some(bg) = background {
                     fill_round_rect(pm, f.x, f.y, f.width, f.height, *border_radius, *bg);
                 }
+                if let Some(g) = gradient {
+                    paint_gradient(pm, f, *border_radius, g);
+                }
                 paint_round_border(pm, f, border, *border_radius);
             } else {
                 if let Some(bg) = background {
                     fill_rect(pm, f.x, f.y, f.width, f.height, *bg);
+                }
+                if let Some(g) = gradient {
+                    paint_gradient(pm, f, 0.0, g);
                 }
                 paint_border(pm, f, border);
             }
@@ -265,6 +277,57 @@ fn paint_box_shadow(pm: &mut Pixmap, f: &Fragment, border_radius: f32, sh: &BoxS
         Transform::identity(),
         None,
     );
+}
+
+/// Paint a `linear-gradient(...)` background into the box (clipped to its rounded
+/// rect when `border_radius > 0`). The CSS gradient-line angle (0 = to top, 90 = to
+/// right, clockwise) maps to start/end points across the box: the line runs through
+/// the centre, its half-length the CSS `|w·sinθ| + |h·cosθ|` projection so the 0%
+/// and 100% stops land at the box's extreme corners along the line.
+fn paint_gradient(pm: &mut Pixmap, f: &Fragment, border_radius: f32, g: &CssGradient) {
+    if f.width < 0.5 || f.height < 0.5 || g.stops.len() < 2 {
+        return;
+    }
+    let (w, h) = (f.width, f.height);
+    let theta = g.angle_deg.to_radians();
+    let (dx, dy) = (theta.sin(), -theta.cos()); // 0°→(0,-1) up; 90°→(1,0) right
+    let half = (w * theta.sin().abs() + h * theta.cos().abs()) / 2.0;
+    let (cx, cy) = (f.x + w / 2.0, f.y + h / 2.0);
+    let start = Point::from_xy(cx - dx * half, cy - dy * half);
+    let end = Point::from_xy(cx + dx * half, cy + dy * half);
+    let stops: Vec<GradientStop> = g
+        .stops
+        .iter()
+        .map(|s| {
+            GradientStop::new(
+                s.pos.clamp(0.0, 1.0),
+                tiny_skia::Color::from_rgba8(s.color.r, s.color.g, s.color.b, s.color.a),
+            )
+        })
+        .collect();
+    let Some(shader) =
+        LinearGradient::new(start, end, stops, SpreadMode::Pad, Transform::identity())
+    else {
+        return;
+    };
+    let paint = Paint {
+        shader,
+        anti_alias: true,
+        ..Paint::default()
+    };
+    if border_radius > 0.5 {
+        if let Some(path) = round_rect_path(f.x, f.y, w, h, border_radius) {
+            pm.fill_path(
+                &path,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+        }
+    } else if let Some(rect) = Rect::from_xywh(f.x, f.y, w, h) {
+        pm.fill_rect(rect, &paint, Transform::identity(), None);
+    }
 }
 
 /// Approximate a Gaussian blur with three passes of a separable box blur over the

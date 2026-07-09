@@ -7,7 +7,7 @@
 use std::fmt::Write;
 
 use turbo_html2pdf_core::layout::value::{BorderEdges, BorderSide};
-use turbo_html2pdf_core::{Fragment, FragmentContent, PositionedGlyph, Rgba};
+use turbo_html2pdf_core::{BoxShadow, Fragment, FragmentContent, PositionedGlyph, Rgba};
 
 use crate::glyph::{self, Pen, Tracer};
 use crate::image_paint::{self, DecodedAssets};
@@ -46,7 +46,11 @@ fn paint_fragment(svg: &mut String, f: &Fragment, images: &DecodedAssets) {
             background,
             border,
             border_radius,
+            shadow,
         } => {
+            if let Some(sh) = shadow.filter(|s| !s.inset && s.color.a > 0) {
+                paint_box_shadow(svg, f, *border_radius, &sh);
+            }
             if let Some(bg) = background {
                 rect_r(svg, f.x, f.y, f.width, f.height, *bg, *border_radius);
             }
@@ -112,6 +116,48 @@ fn fill_attrs(c: Rgba) -> String {
 
 fn rect(svg: &mut String, x: f32, y: f32, w: f32, h: f32, c: Rgba) {
     rect_r(svg, x, y, w, h, c, 0.0);
+}
+
+/// Paint an outer `box-shadow` as a blurred rounded rect behind the box, using an
+/// inline SVG `feGaussianBlur` filter (native, so any viewer renders the soft
+/// edge). `blur` 0 emits an unfiltered offset rect. The filter id is derived from
+/// the box geometry to stay unique within the document.
+fn paint_box_shadow(svg: &mut String, f: &Fragment, border_radius: f32, sh: &BoxShadow) {
+    let spread = sh.spread as f32;
+    let x = f.x + sh.offset_x as f32 - spread;
+    let y = f.y + sh.offset_y as f32 - spread;
+    let w = f.width + 2.0 * spread;
+    let h = f.height + 2.0 * spread;
+    if w < 0.5 || h < 0.5 {
+        return;
+    }
+    let radius = (border_radius + spread).max(0.0);
+    if sh.blur < 1 {
+        rect_r(svg, x, y, w, h, sh.color, radius);
+        return;
+    }
+    // Pad the filter region by the blur so the feathered edge isn't clipped.
+    let id = format!(
+        "sh{}_{}",
+        (f.x as i64) + 1_000_000,
+        (f.y as i64) + 1_000_000
+    );
+    let std = sh.blur as f32 / 2.0;
+    let _ = writeln!(
+        svg,
+        "<filter id=\"{id}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\">\
+         <feGaussianBlur stdDeviation=\"{std:.2}\"/></filter>",
+    );
+    let rr = if radius > 0.5 {
+        format!(" rx=\"{radius:.2}\" ry=\"{radius:.2}\"")
+    } else {
+        String::new()
+    };
+    let _ = writeln!(
+        svg,
+        "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{w:.2}\" height=\"{h:.2}\"{rr} {} filter=\"url(#{id})\"/>",
+        fill_attrs(sh.color)
+    );
 }
 
 /// A filled `<rect>`, rounded by `r` px (`rx`/`ry`) when `r > 0`.

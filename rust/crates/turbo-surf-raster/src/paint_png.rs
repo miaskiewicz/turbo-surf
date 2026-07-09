@@ -5,7 +5,7 @@
 
 use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform};
 use turbo_html2pdf_core::layout::value::{BorderEdges, BorderSide};
-use turbo_html2pdf_core::{Fragment, FragmentContent, PositionedGlyph, Rgba};
+use turbo_html2pdf_core::{BoxShadow, Fragment, FragmentContent, PositionedGlyph, Rgba};
 
 use crate::glyph::{self, Pen, Tracer};
 use crate::image_paint::DecodedAssets;
@@ -41,7 +41,13 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
             background,
             border,
             border_radius,
+            shadow,
         } => {
+            // An outer shadow paints behind the box (before its fill/border) so the
+            // card sits on it; inset shadows are v1-unsupported.
+            if let Some(sh) = shadow.filter(|s| !s.inset && s.color.a > 0) {
+                paint_box_shadow(pm, f, *border_radius, &sh);
+            }
             if *border_radius > 0.5 {
                 if let Some(bg) = background {
                     fill_round_rect(pm, f.x, f.y, f.width, f.height, *border_radius, *bg);
@@ -207,6 +213,117 @@ fn fill_round_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32, c: R
             Transform::identity(),
             None,
         );
+    }
+}
+
+/// Paint an outer `box-shadow` behind the box: stamp its rounded-rect silhouette
+/// (the border box, offset by `(offset_x, offset_y)` and grown by `spread`) in the
+/// shadow colour onto a scratch pixmap, box-blur it by `blur`, and composite it
+/// under the box. A `blur` of 0 fills the silhouette directly. This is what makes
+/// an overlay card/modal read as raised chrome rather than a flat rectangle.
+fn paint_box_shadow(pm: &mut Pixmap, f: &Fragment, border_radius: f32, sh: &BoxShadow) {
+    let spread = sh.spread as f32;
+    let sx = f.x + sh.offset_x as f32 - spread;
+    let sy = f.y + sh.offset_y as f32 - spread;
+    let sw = f.width + 2.0 * spread;
+    let sh_h = f.height + 2.0 * spread;
+    if sw < 0.5 || sh_h < 0.5 {
+        return;
+    }
+    let radius = (border_radius + spread).max(0.0);
+    let blur = sh.blur as f32;
+    if blur < 0.5 {
+        fill_round_rect(pm, sx, sy, sw, sh_h, radius, sh.color);
+        return;
+    }
+    // Scratch pixmap padded by the blur radius so the feathered edge isn't clipped.
+    let margin = blur.ceil() as i32;
+    let tw = sw.ceil() as i32 + 2 * margin;
+    let th = sh_h.ceil() as i32 + 2 * margin;
+    if !(1..=8192).contains(&tw) || !(1..=8192).contains(&th) {
+        return;
+    }
+    let Some(mut tmp) = Pixmap::new(tw as u32, th as u32) else {
+        return;
+    };
+    fill_round_rect(
+        &mut tmp,
+        margin as f32,
+        margin as f32,
+        sw,
+        sh_h,
+        radius,
+        sh.color,
+    );
+    // CSS blur radius ≈ 2σ; a 3-pass box blur of radius ≈ blur/2 approximates it.
+    box_blur(&mut tmp, (blur / 2.0).round().max(1.0) as usize);
+    pm.draw_pixmap(
+        sx as i32 - margin,
+        sy as i32 - margin,
+        tmp.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
+}
+
+/// Approximate a Gaussian blur with three passes of a separable box blur over the
+/// pixmap's premultiplied RGBA (edges clamp-extended). Only shadow scratch buffers
+/// pass through here, so the O(passes·w·h) cost is bounded by the shadow's size.
+fn box_blur(pm: &mut Pixmap, radius: usize) {
+    if radius == 0 {
+        return;
+    }
+    let (w, h) = (pm.width() as usize, pm.height() as usize);
+    let data = pm.data_mut();
+    for _ in 0..3 {
+        box_blur_horizontal(data, w, h, radius);
+        box_blur_vertical(data, w, h, radius);
+    }
+}
+
+/// One horizontal box-blur pass with a running window sum (clamp-extended edges).
+fn box_blur_horizontal(data: &mut [u8], w: usize, h: usize, r: usize) {
+    if w == 0 {
+        return;
+    }
+    let win = (2 * r + 1) as u32;
+    let mut src = vec![0u8; w * 4];
+    for y in 0..h {
+        let row = &mut data[y * w * 4..(y + 1) * w * 4];
+        src.copy_from_slice(row);
+        let get = |x: isize, c: usize| src[x.clamp(0, w as isize - 1) as usize * 4 + c] as u32;
+        for c in 0..4 {
+            let mut sum: u32 = (0..=r as isize).map(|x| get(x, c)).sum::<u32>()
+                + (1..=r as isize).map(|_| get(0, c)).sum::<u32>();
+            for x in 0..w {
+                row[x * 4 + c] = (sum / win) as u8;
+                sum = sum - get(x as isize - r as isize, c) + get(x as isize + r as isize + 1, c);
+            }
+        }
+    }
+}
+
+/// One vertical box-blur pass, mirror of [`box_blur_horizontal`] over columns.
+fn box_blur_vertical(data: &mut [u8], w: usize, h: usize, r: usize) {
+    if h == 0 {
+        return;
+    }
+    let win = (2 * r + 1) as u32;
+    let mut src = vec![0u8; h * 4];
+    for x in 0..w {
+        for (y, chunk) in src.chunks_exact_mut(4).enumerate() {
+            chunk.copy_from_slice(&data[(y * w + x) * 4..(y * w + x) * 4 + 4]);
+        }
+        let get = |y: isize, c: usize| src[y.clamp(0, h as isize - 1) as usize * 4 + c] as u32;
+        for c in 0..4 {
+            let mut sum: u32 = (0..=r as isize).map(|y| get(y, c)).sum::<u32>()
+                + (1..=r as isize).map(|_| get(0, c)).sum::<u32>();
+            for y in 0..h {
+                data[(y * w + x) * 4 + c] = (sum / win) as u8;
+                sum = sum - get(y as isize - r as isize, c) + get(y as isize + r as isize + 1, c);
+            }
+        }
     }
 }
 

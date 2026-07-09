@@ -818,7 +818,40 @@ rotated to point right), and (b) the `.vector-toc-toggle` sits in the text flow 
 row's left gutter. Both are `transform`/positioning work in the separate repo — overlaps the
 nike "overlay chrome + transforms paint weakly" item. Non-caret icons all render.
 
-### Google — content lays out, but google's OWN css hides it (JS-reveal wall)
+### Box-shadow / overlay card chrome — IMPLEMENTED (Cycle 23), release-pending
+Overlay cards/modals read as flat rectangles because turbo painted no `box-shadow`.
+Added end-to-end: **turbo-html2pdf** (`feat/css-positioning`) now parses `box-shadow`
+(`[inset]? <ox> <oy> <blur>? <spread>? <color>?`, comma layers → first kept,
+`currentColor` default) into a `BoxShadow` on `FragmentContent::Box`; **turbo-surf
+raster** paints it — an outer shadow stamped as a rounded-rect silhouette, 3-pass
+separable box-blur (≈ Gaussian, σ≈blur/2) in PNG, `feGaussianBlur` filter in SVG,
+composited behind the box. Proven on a synthetic consent-card (soft drop shadow +
+rounded corners + tinted button shadow, reads as a real modal). Covered by
+`box_shadow_paints_a_soft_offset_shadow_behind_a_card` (raster) + `box_shadow_tests`
+(html2pdf parser). **Blocked on landing in turbo-surf:** raster consumes it via a
+TEMP `[patch.crates-io]` → needs an html2pdf **0.2.8** release, then bump the dep +
+drop the patch. Inset shadows, multiple layers, and `transform`ed shadows are v1-out.
+Deferred: gradients + CSS `transform` (the Wikipedia caret rotate + nike hero) are the
+next engine features on the same fragment-attribute pattern.
+
+### Google — NOT a JS-reveal bug (hypothesis disproven, Cycle 23)
+Consent dismissal now works generally (`consentshot.cjs` clicks `#L2AGLb` /
+`#onetrust-accept-btn-handler` / text-matched "Accept all" across main + child frames).
+But google's homepage still renders **fully blank** in turbo — and crucially: rendering
+the Chromium-**revealed** DOM with NO hydrate is byte-identical to the hydrated render
+(`goog-raw.png` == `goog-hyd.png`, both 39842 B, 102 `display:none` each). So the earlier
+"turbo re-hides via JS-reveal" theory is **wrong** — turbo collapses the page independent
+of JS. Chromium trace of the search box `textarea.gLFyf` (visible at 344,377 446×50) shows
+its ENTIRE ancestor chain to `<body>` is visible — `gLFyf/a4bIc/SDkEP/RNNXgb`(flex) →
+`A8SBwf`(block,rel) → form → `o3j99 ikrT4e KEY6ib`(block) → `L3eUgb`(flex,the viewport
+centering column) → body — **no `display:none`/`opacity:0`/`visibility:hidden` anywhere**.
+So turbo either (a) mis-cascades a `display:none` onto this chain (`.o3j99` base is shared
+with the hidden `.o3j99.qarstb` consent div — a specificity/order bug would hide both), or
+(b) flex-collapses the full-viewport `L3eUgb` centering column. Next step is an html2pdf
+`zz_` probe with google's CSS to see which class computes `display:none` / which flex box
+sizes 0. Single-site, unbounded; lower ROI than the general engine features above.
+
+### Google — content lays out, but google's OWN css hides it (JS-reveal wall) [SUPERSEDED — see above]
 - With EXTERNAL css only → 44 text lines lay out. With external + INLINE (head) styles → **0**.
   So a head `<style>` rule hides everything.
 - The raster uses `collect_style_blocks` (raw regex, grabs `<head>` styles too); a plain
@@ -854,6 +887,15 @@ nike "overlay chrome + transforms paint weakly" item. Non-caret icons all render
 - **Next agent:** to get nike's real homepage, dismiss the consent wall in the Chromium capture
   (click Accept) BEFORE `hydrate()` (google's `#L2AGLb` pattern), OR pass consent cookies. Then
   the gaps become: overlay/fixed-position card chrome fidelity + gradient/box-shadow painting.
+
+**UPDATE (Cycle 23) — nike homepage now renders content.** `consentshot.cjs` dismisses the
+wall (`#onetrust-accept-btn-handler` / text "Accept all", main + child frames) before capture;
+turbo then lays out the real homepage (nav + hero copy "O TEU JOGO, AS TUAS REGRAS" + product
+sections "Nike Football / A LENDA CONTINUA VIVA" etc.). box-shadow (above) covers the card
+chrome. Remaining nike gaps are its own deep layout: hero/product IMAGES stay sparse (lazy
+`data-*-url` fetch fine, but the absolute/positioned hero grid doesn't place them where Chromium
+does) + gradient backgrounds. Those are general engine features (positioning + gradient), not
+nike-specific.
 
 ### Gotchas for the next agent
 - **macOS has no `timeout`** — `timeout <cmd>` errors "command not found" and looks like a hang.

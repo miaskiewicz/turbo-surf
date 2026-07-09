@@ -250,6 +250,50 @@ fn datauri_mask_image_icon_paints_without_a_fetched_asset() {
 }
 
 #[test]
+fn box_shadow_paints_a_soft_offset_shadow_behind_a_card() {
+    // A white card on a white canvas: only its `box-shadow` is visible, and only
+    // OUTSIDE the card footprint (the white fill paints over the shadow where they
+    // overlap). The shadow is offset down (`0 8px`) and blurred (`24px`), so a point
+    // just below the card is a soft grey, and a far corner stays white.
+    let page = r#"<html><body style="margin:0">
+        <div style="margin:40px 0 0 40px;width:80px;height:60px;background:#fff;
+                    box-shadow:0 8px 24px rgba(0,0,0,0.6)"></div>
+      </body></html>"#;
+    let vp = Viewport {
+        width: 200,
+        height: 200,
+    };
+    let png = screenshot_png_with_assets(page, "", vp, &ImageAssets::new(), false).expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    // Below the card bottom (card spans x40..120, y40..100): the shadow shows grey.
+    let shadow = pm.pixel(80, 112).expect("pixel");
+    assert!(
+        shadow.red() < 235 && shadow.red() > 20 && shadow.green() == shadow.red(),
+        "shadow below the card must be a neutral grey, got ({},{},{})",
+        shadow.red(),
+        shadow.green(),
+        shadow.blue()
+    );
+    // Blur = soft: the shadow fades with distance, so a point deeper below the card
+    // is lighter than one right under its edge (not a hard-edged filled rect).
+    let near = pm.pixel(80, 104).expect("pixel").red();
+    let far = pm.pixel(80, 150).expect("pixel").red();
+    assert!(
+        far > near,
+        "shadow must fade with distance (blur), near={near} far={far}"
+    );
+    // A corner far from the card is untouched white canvas.
+    let corner = pm.pixel(195, 5).expect("pixel");
+    assert!(
+        corner.red() > 250 && corner.green() > 250 && corner.blue() > 250,
+        "far corner must stay white, got ({},{},{})",
+        corner.red(),
+        corner.green(),
+        corner.blue()
+    );
+}
+
+#[test]
 fn png_falls_back_to_placeholder_without_bytes() {
     // Same page, no supplied bytes: the `<img>` box lays out but paints nothing
     // (no Image fragment), so the middle stays the white canvas — definitely not

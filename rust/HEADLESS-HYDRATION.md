@@ -848,7 +848,38 @@ border-radius + text). Covered by `linear_gradient_background_paints_left_to_rig
 (raster) + `gradient_tests` (html2pdf parser). Same release-coupling as box-shadow:
 needs html2pdf **0.2.9** published, then bump the dep. **CSS `transform` still deferred.**
 
-### Google — NOT a JS-reveal bug (hypothesis disproven, Cycle 23)
+### Nike — images FIXED (Cycle 25): AVIF `Accept` + image `%` sizing
+Nike's homepage rendered text-only, zero imagery. Two independent root causes, both
+now fixed:
+1. **AVIF.** Nike's `f_auto` CDN serves **AVIF** to a Chrome UA that accepts it (the
+   impersonate fingerprint's `Accept` advertises `image/avif`). turbo's `image` crate
+   has no AVIF decoder → every hero/product image silently dropped. Fix: `fetch_bytes`
+   (napi) now sends an image `Accept` **without** `image/avif`
+   (`image/webp,image/png,image/jpeg,…`), so the CDN falls back to WebP, which turbo
+   decodes. General: fixes every `f_auto`/Cloudinary site.
+2. **`width:100%` collapse.** Even fetched, the images were 0×0 — `size_replaced`
+   resolved `%` against a 0 basis (html2pdf 0.2.10 fix). Together the Ronaldo hero,
+   Mercurial boots, and tennis imagery now render (verified).
+
+**Remaining nike:** the cookie-modal (nike's own `cookie-modal-base`, `position:fixed`
+overlay, `display:block` in Chromium too) renders **in-flow** at the top instead of as a
+fixed overlay — turbo doesn't take `position:fixed` out of flow for the paint, so a wall
+of policy text pushes the page down. Fixed/overlay positioning is the next gap.
+
+### Google — box-tree DROP via cascade mis-computation (Cycle 25, NOT fixed)
+Still blank. Ruled out, in order: JS-reveal (raw==hydrated blank), overflow/clip
+(forcing `overflow:visible;height:auto` + bright bg on `.RNNXgb` still paints nothing),
+and flex-height collapse (added flex `min-height→taffy` in 0.2.10; `.RNNXgb` has
+`min-height:50px` but the search box STILL doesn't appear). Since forcing everything
+visible + a background on the search box yields nothing, the box is **not in the box
+tree** — an ancestor computes to `display:none`/`opacity:0`/`visibility:hidden` in
+turbo's cascade (which Chromium overrides). Google ships obfuscated hide classes
+(`.MDfoTd{opacity:0}`, `.VH47ed{visibility:hidden}`, `.gb_*{display:none}`); turbo is
+picking a wrong winning declaration (specificity/order) for one search-chain ancestor
+and dropping the subtree. Next: dump turbo's computed `display/opacity/visibility` per
+search-chain class to find the mis-cascaded rule. Single-site, deep — deprioritized.
+
+### Google — NOT a JS-reveal bug (hypothesis disproven, Cycle 23) [see Cycle 25 above]
 Consent dismissal now works generally (`consentshot.cjs` clicks `#L2AGLb` /
 `#onetrust-accept-btn-handler` / text-matched "Accept all" across main + child frames).
 But google's homepage still renders **fully blank** in turbo — and crucially: rendering

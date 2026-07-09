@@ -789,11 +789,23 @@ pub async fn fetch_html(url: String) -> Result<String> {
 /// Fetch a URL as raw bytes (no charset decode) → a `Buffer`. For binary
 /// resources — images for `screenshotWithAssets` — that a `fetchHtml` string
 /// would corrupt. Uses the shared pooled client; non-HTML content types allowed.
+///
+/// Advertises only the raster image formats turbo can decode (PNG/JPEG/WebP/GIF/
+/// SVG) — crucially **not** `image/avif`. Content-negotiating CDNs (`f_auto` on
+/// Nike/Cloudinary/etc.) serve AVIF to a Chrome UA that accepts it; turbo has no
+/// AVIF decoder, so those images would silently drop. Omitting AVIF makes the CDN
+/// fall back to WebP, which turbo does decode.
 #[napi]
 pub async fn fetch_bytes(url: String) -> Result<Buffer> {
+    let mut headers = std::collections::BTreeMap::new();
+    headers.insert(
+        "accept".to_string(),
+        "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8".to_string(),
+    );
     let opts = FetchOptions {
         allow_non_html: true,
         client: Some(shared_client()),
+        headers,
         ..Default::default()
     };
     let (_final_url, bytes, _status) = turbo_surf_core::net::fetch_bytes(&url, opts)

@@ -19,7 +19,7 @@ use turbo_dom_parser::rtdom::tree::{Handle, Namespace, Tree};
 use turbo_dom_parser::rtdom::NodeRef;
 
 /// The all-Rust DOM (rtdom) is now the ONLY DOM environment — the JS turbo-dom bootstrap
-/// (installGlobals + the `.node` parser) was removed in v0.3.1. Kept as a function (always true) so
+/// (installGlobals + the `.node` parser) was removed in v0.3.0. Kept as a function (always true) so
 /// the per-file install/reset call sites read intent; `TURBO_RUST_DOM` is no longer consulted.
 pub fn enabled() -> bool {
     true

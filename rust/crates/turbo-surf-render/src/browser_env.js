@@ -585,6 +585,26 @@
       if (g.HTMLElement) g.HTMLElement.prototype = baseProto;
       if (g.Element) g.Element.prototype = baseProto;
       if (g.Node) g.Node.prototype = baseProto;
+      // Lazy `<style>.sheet` for EVERY <style> — server-rendered ones (from the HTML
+      // parse / innerHTML) never pass through `createElement`, yet emotion /
+      // styled-components hydrate by calling `styleEl.sheet.insertRule(...)` on them.
+      // Without a `.sheet` that throws and aborts the chunk, blanking the styling.
+      // `mkSheet`'s insertRule reflects into `el.textContent`, so the serialized HTML
+      // then carries the injected CSS. Defined on the shared element prototype and
+      // WITHOUT a descriptor guard (the NON_MASKING interceptor makes every lookup
+      // report a descriptor, so a guard would wrongly skip). Caches per element.
+      Object.defineProperty(baseProto, 'sheet', {
+        configurable: true,
+        get: function(){
+          var tag = this.tagName;
+          if (!tag || String(tag).toUpperCase() !== 'STYLE') return null;
+          if (!this.__tcSheet) {
+            try { this.__tcSheet = mkSheet(this); sheets.push(this.__tcSheet); }
+            catch (e) { return mkSheet(this); }
+          }
+          return this.__tcSheet;
+        }
+      });
       var docProto = Object.getPrototypeOf(d) || baseProto;
       if (g.Document) g.Document.prototype = docProto;
       if (g.HTMLDocument) g.HTMLDocument.prototype = docProto;

@@ -43,6 +43,27 @@ pub fn paint(
 }
 
 fn paint_fragment(svg: &mut String, f: &Fragment, images: &DecodedAssets) {
+    // A CSS `transform` wraps this box + subtree in a `<g transform>` (applied about
+    // the box's absolute transform-origin), so the SVG viewer transforms them as a unit.
+    let transformed = matches!(
+        &f.content,
+        FragmentContent::Box {
+            transform: Some(_),
+            ..
+        }
+    );
+    if let FragmentContent::Box {
+        transform: Some(t), ..
+    } = &f.content
+    {
+        let (ox, oy) = (f.x + t.origin_x, f.y + t.origin_y);
+        let [a, b, c, d, e, g] = t.matrix;
+        let _ = write!(
+            svg,
+            "<g transform=\"translate({ox:.2} {oy:.2}) matrix({a} {b} {c} {d} {e} {g}) translate({:.2} {:.2})\">",
+            -ox, -oy
+        );
+    }
     match &f.content {
         FragmentContent::Box {
             background,
@@ -50,6 +71,7 @@ fn paint_fragment(svg: &mut String, f: &Fragment, images: &DecodedAssets) {
             border_radius,
             shadow,
             gradient,
+            ..
         } => {
             if let Some(sh) = shadow.filter(|s| !s.inset && s.color.a > 0) {
                 paint_box_shadow(svg, f, *border_radius, &sh);
@@ -83,6 +105,9 @@ fn paint_fragment(svg: &mut String, f: &Fragment, images: &DecodedAssets) {
     // order, so `position`/`z-index` boxes (menus, modals) layer correctly.
     for &i in &f.paint_order() {
         paint_fragment(svg, &f.children[i], images);
+    }
+    if transformed {
+        svg.push_str("</g>");
     }
 }
 

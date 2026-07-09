@@ -848,6 +848,36 @@ border-radius + text). Covered by `linear_gradient_background_paints_left_to_rig
 (raster) + `gradient_tests` (html2pdf parser). Same release-coupling as box-shadow:
 needs html2pdf **0.2.9** published, then bump the dep. **CSS `transform` still deferred.**
 
+### React-18 hydration — GENERAL fixes (Cycle 26): defer order + env globals + `<style>.sheet`
+Nike's app (like every React-18 SSR site) wasn't hydrating AT ALL — three general
+engine bugs, all fixed:
+1. **`defer` script order.** `__hydrate` ran `<script>`s in raw `querySelectorAll`
+   DOM order, ignoring `defer`. Sites put their app's `<script defer>` EARLY in
+   `<head>` but the framework vendor (`react.js`, non-defer) LATE near `</body>`
+   (Nike: `main.js` @byte 88k defer, `react.js` @608k non-defer). Raw order ran
+   `main` first → `React is not defined` → nothing hydrates. Fix (`runtime.rs`
+   `__hydrate`): non-defer scripts first (document order), then `defer` scripts.
+2. **Missing Web/DOM interface globals.** `x instanceof Response/Request/NodeList/
+   HTMLCollection/CSSStyleDeclaration/Attr/CDATASection/MutationRecord/...` threw
+   "Right-hand side is not an object" when the global was undefined — and one such
+   throw in a shared webpack helper cascades to kill React hydration for the whole
+   page. Fix: real `Response`/`Request` classes wired to `fetch` (`runtime.rs`);
+   the DOM/collection/CSS interface constructors + real `Audio(src)` + full-shape
+   `Worker`/`SharedWorker` in the versioned env (turbo-test browser_env → 0.3.10).
+   Result: **instanceof errors 38 → 0; hydration completes** (DOM grows +376KB).
+3. **`<style>.sheet` on SSR style tags** (turbo-test 0.3.9): emotion/styled-components
+   speedy-mode `styleEl.sheet.insertRule` on server-rendered `<style>` tags now works,
+   so client-injected CSS is captured (Nike styleChars 483K → 894K through the pure
+   hydrate path — no Chromium-CSSOM shortcut needed).
+
+**Nike still not a clean screenshot:** hydration now RUNS but hits a Next.js
+client-side exception → it navigates to `/_error` and the homepage re-renders blank
+(the SSR hero content survives in the page data, `"A LENDA CONTINUA VIVA"`, but the
+error boundary trips). Plus the OneTrust preference-center panel renders in-flow.
+Those are Next.js/consent-state specific, past the general engine gaps (now fixed).
+Also: CSS `transform` (0.2.11) now paints — carousel slides translate, the Wikipedia
+caret can rotate — so slides no longer pile at one spot.
+
 ### Nike — images FIXED (Cycle 25): AVIF `Accept` + image `%` sizing
 Nike's homepage rendered text-only, zero imagery. Two independent root causes, both
 now fixed:

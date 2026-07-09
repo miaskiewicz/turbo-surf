@@ -10,6 +10,7 @@ use tiny_skia::{
 use turbo_html2pdf_core::layout::value::{BorderEdges, BorderSide};
 use turbo_html2pdf_core::{
     BoxShadow, Fragment, FragmentContent, LinearGradient as CssGradient, PositionedGlyph, Rgba,
+    Transform2D as BoxTransform,
 };
 
 use crate::glyph::{self, Pen, Tracer};
@@ -36,11 +37,31 @@ pub fn paint(
     let mut pm =
         Pixmap::new(width, height).ok_or_else(|| format!("bad canvas {width}x{height}"))?;
     pm.fill(tiny_skia::Color::from_rgba8(bg.r, bg.g, bg.b, bg.a));
-    paint_fragment(&mut pm, galley, images);
+    paint_fragment(&mut pm, galley, images, Transform::identity());
     pm.encode_png().map_err(|e| format!("png encode: {e}"))
 }
 
-fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
+/// Compose a box's CSS `transform` about its absolute origin onto the inherited
+/// `xf`: a point in the box's local space maps through `matrix` (about the box's
+/// `transform-origin`) and then the ancestors' transform. Descendants inherit the
+/// result, so a translated carousel slide (and its content) all move together.
+fn compose_transform(xf: Transform, f: &Fragment, t: &BoxTransform) -> Transform {
+    let (ox, oy) = (f.x + t.origin_x, f.y + t.origin_y);
+    let [a, b, c, d, e, g] = t.matrix;
+    let m = Transform::from_translate(ox, oy)
+        .pre_concat(Transform::from_row(a, b, c, d, e, g))
+        .pre_concat(Transform::from_translate(-ox, -oy));
+    xf.pre_concat(m)
+}
+
+fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets, xf: Transform) {
+    // A CSS `transform` on this box applies to it AND its whole subtree.
+    let xf = match &f.content {
+        FragmentContent::Box {
+            transform: Some(t), ..
+        } => compose_transform(xf, f, t),
+        _ => xf,
+    };
     match &f.content {
         FragmentContent::Box {
             background,
@@ -48,28 +69,29 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
             border_radius,
             shadow,
             gradient,
+            ..
         } => {
             // An outer shadow paints behind the box (before its fill/border) so the
             // card sits on it; inset shadows are v1-unsupported.
             if let Some(sh) = shadow.filter(|s| !s.inset && s.color.a > 0) {
-                paint_box_shadow(pm, f, *border_radius, &sh);
+                paint_box_shadow(pm, f, *border_radius, &sh, xf);
             }
             if *border_radius > 0.5 {
                 if let Some(bg) = background {
-                    fill_round_rect(pm, f.x, f.y, f.width, f.height, *border_radius, *bg);
+                    fill_round_rect(pm, f.x, f.y, f.width, f.height, *border_radius, *bg, xf);
                 }
                 if let Some(g) = gradient {
-                    paint_gradient(pm, f, *border_radius, g);
+                    paint_gradient(pm, f, *border_radius, g, xf);
                 }
-                paint_round_border(pm, f, border, *border_radius);
+                paint_round_border(pm, f, border, *border_radius, xf);
             } else {
                 if let Some(bg) = background {
-                    fill_rect(pm, f.x, f.y, f.width, f.height, *bg);
+                    fill_rect(pm, f.x, f.y, f.width, f.height, *bg, xf);
                 }
                 if let Some(g) = gradient {
-                    paint_gradient(pm, f, 0.0, g);
+                    paint_gradient(pm, f, 0.0, g, xf);
                 }
-                paint_border(pm, f, border);
+                paint_border(pm, f, border, xf);
             }
         }
         FragmentContent::TextLine {
@@ -85,14 +107,15 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets) {
             face.units_per_em(),
             *font_size,
             *color,
+            xf,
         ),
-        FragmentContent::Image(placement) => paint_image(pm, f, placement, images),
+        FragmentContent::Image(placement) => paint_image(pm, f, placement, images, xf),
         FragmentContent::Directive(_) => {}
     }
     // Paint children back-to-front in CSS stacking order (§9.9), not raw DOM
     // order, so `position`/`z-index` boxes (menus, modals) layer correctly.
     for &i in &f.paint_order() {
-        paint_fragment(pm, &f.children[i], images);
+        paint_fragment(pm, &f.children[i], images, xf);
     }
 }
 
@@ -105,37 +128,34 @@ fn paint_image(
     f: &Fragment,
     placement: &turbo_html2pdf_core::ImagePlacement,
     images: &DecodedAssets,
+    xf: Transform,
 ) {
     let (w, h) = (f.width.round() as u32, f.height.round() as u32);
     let img = images
         .get(&placement.name)
         .and_then(|d| d.scaled_pixmap(w, h));
+    // Fold the box's top-left into the transform so a transformed image (a rotated
+    // thumbnail, a translated slide) maps correctly; draw the pixmap at (0,0).
+    let place = xf.pre_concat(Transform::from_translate(f.x.round(), f.y.round()));
     match (img, placement.tint) {
         (Some(src), Some(tint)) => {
             let stencilled = tint_pixmap(&src, tint);
             pm.draw_pixmap(
-                f.x.round() as i32,
-                f.y.round() as i32,
+                0,
+                0,
                 stencilled.as_ref(),
                 &PixmapPaint::default(),
-                Transform::identity(),
+                place,
                 None,
             );
         }
         (Some(src), None) => {
-            pm.draw_pixmap(
-                f.x.round() as i32,
-                f.y.round() as i32,
-                src.as_ref(),
-                &PixmapPaint::default(),
-                Transform::identity(),
-                None,
-            );
+            pm.draw_pixmap(0, 0, src.as_ref(), &PixmapPaint::default(), place, None);
         }
         // A missing mask paints nothing (no placeholder box for a glyph); a missing
         // real image shows the neutral placeholder.
         (None, Some(_)) => {}
-        (None, None) => fill_rect(pm, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER),
+        (None, None) => fill_rect(pm, f.x, f.y, f.width, f.height, IMAGE_PLACEHOLDER, xf),
     }
 }
 
@@ -165,30 +185,30 @@ fn solid(c: Rgba) -> Paint<'static> {
     paint
 }
 
-fn fill_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, c: Rgba) {
+fn fill_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, c: Rgba, xf: Transform) {
     if w <= 0.0 || h <= 0.0 || c.a == 0 {
         return;
     }
     if let Some(rect) = Rect::from_xywh(x, y, w, h) {
-        pm.fill_rect(rect, &solid(c), Transform::identity(), None);
+        pm.fill_rect(rect, &solid(c), xf, None);
     }
 }
 
 /// Paint each border side as a filled edge band (approximation: no corner
 /// mitring, no line styles — width + color only).
-fn paint_border(pm: &mut Pixmap, f: &Fragment, b: &BorderEdges) {
+fn paint_border(pm: &mut Pixmap, f: &Fragment, b: &BorderEdges, xf: Transform) {
     let side = |s: &BorderSide| s.color.filter(|_| s.width > 0).map(|c| (s.width as f32, c));
     if let Some((w, c)) = side(&b.top) {
-        fill_rect(pm, f.x, f.y, f.width, w, c);
+        fill_rect(pm, f.x, f.y, f.width, w, c, xf);
     }
     if let Some((w, c)) = side(&b.bottom) {
-        fill_rect(pm, f.x, f.y + f.height - w, f.width, w, c);
+        fill_rect(pm, f.x, f.y + f.height - w, f.width, w, c, xf);
     }
     if let Some((w, c)) = side(&b.left) {
-        fill_rect(pm, f.x, f.y, w, f.height, c);
+        fill_rect(pm, f.x, f.y, w, f.height, c, xf);
     }
     if let Some((w, c)) = side(&b.right) {
-        fill_rect(pm, f.x + f.width - w, f.y, w, f.height, c);
+        fill_rect(pm, f.x + f.width - w, f.y, w, f.height, c, xf);
     }
 }
 
@@ -213,18 +233,22 @@ fn round_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
 }
 
 /// Fill a rounded rectangle (e.g. a `border-radius:50%` radio/checkbox circle).
-fn fill_round_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32, c: Rgba) {
+#[allow(clippy::too_many_arguments)] // geometry + colour + the inherited transform
+fn fill_round_rect(
+    pm: &mut Pixmap,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    r: f32,
+    c: Rgba,
+    xf: Transform,
+) {
     if w <= 0.0 || h <= 0.0 || c.a == 0 {
         return;
     }
     if let Some(path) = round_rect_path(x, y, w, h, r) {
-        pm.fill_path(
-            &path,
-            &solid(c),
-            FillRule::Winding,
-            Transform::identity(),
-            None,
-        );
+        pm.fill_path(&path, &solid(c), FillRule::Winding, xf, None);
     }
 }
 
@@ -233,7 +257,13 @@ fn fill_round_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32, c: R
 /// shadow colour onto a scratch pixmap, box-blur it by `blur`, and composite it
 /// under the box. A `blur` of 0 fills the silhouette directly. This is what makes
 /// an overlay card/modal read as raised chrome rather than a flat rectangle.
-fn paint_box_shadow(pm: &mut Pixmap, f: &Fragment, border_radius: f32, sh: &BoxShadow) {
+fn paint_box_shadow(
+    pm: &mut Pixmap,
+    f: &Fragment,
+    border_radius: f32,
+    sh: &BoxShadow,
+    xf: Transform,
+) {
     let spread = sh.spread as f32;
     let sx = f.x + sh.offset_x as f32 - spread;
     let sy = f.y + sh.offset_y as f32 - spread;
@@ -245,7 +275,7 @@ fn paint_box_shadow(pm: &mut Pixmap, f: &Fragment, border_radius: f32, sh: &BoxS
     let radius = (border_radius + spread).max(0.0);
     let blur = sh.blur as f32;
     if blur < 0.5 {
-        fill_round_rect(pm, sx, sy, sw, sh_h, radius, sh.color);
+        fill_round_rect(pm, sx, sy, sw, sh_h, radius, sh.color, xf);
         return;
     }
     // Scratch pixmap padded by the blur radius so the feathered edge isn't clipped.
@@ -266,17 +296,15 @@ fn paint_box_shadow(pm: &mut Pixmap, f: &Fragment, border_radius: f32, sh: &BoxS
         sh_h,
         radius,
         sh.color,
+        Transform::identity(),
     );
     // CSS blur radius ≈ 2σ; a 3-pass box blur of radius ≈ blur/2 approximates it.
     box_blur(&mut tmp, (blur / 2.0).round().max(1.0) as usize);
-    pm.draw_pixmap(
-        sx as i32 - margin,
-        sy as i32 - margin,
-        tmp.as_ref(),
-        &PixmapPaint::default(),
-        Transform::identity(),
-        None,
-    );
+    let place = xf.pre_concat(Transform::from_translate(
+        (sx as i32 - margin) as f32,
+        (sy as i32 - margin) as f32,
+    ));
+    pm.draw_pixmap(0, 0, tmp.as_ref(), &PixmapPaint::default(), place, None);
 }
 
 /// Paint a `linear-gradient(...)` background into the box (clipped to its rounded
@@ -284,7 +312,13 @@ fn paint_box_shadow(pm: &mut Pixmap, f: &Fragment, border_radius: f32, sh: &BoxS
 /// right, clockwise) maps to start/end points across the box: the line runs through
 /// the centre, its half-length the CSS `|w·sinθ| + |h·cosθ|` projection so the 0%
 /// and 100% stops land at the box's extreme corners along the line.
-fn paint_gradient(pm: &mut Pixmap, f: &Fragment, border_radius: f32, g: &CssGradient) {
+fn paint_gradient(
+    pm: &mut Pixmap,
+    f: &Fragment,
+    border_radius: f32,
+    g: &CssGradient,
+    xf: Transform,
+) {
     if f.width < 0.5 || f.height < 0.5 || g.stops.len() < 2 {
         return;
     }
@@ -317,16 +351,10 @@ fn paint_gradient(pm: &mut Pixmap, f: &Fragment, border_radius: f32, g: &CssGrad
     };
     if border_radius > 0.5 {
         if let Some(path) = round_rect_path(f.x, f.y, w, h, border_radius) {
-            pm.fill_path(
-                &path,
-                &paint,
-                FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
+            pm.fill_path(&path, &paint, FillRule::Winding, xf, None);
         }
     } else if let Some(rect) = Rect::from_xywh(f.x, f.y, w, h) {
-        pm.fill_rect(rect, &paint, Transform::identity(), None);
+        pm.fill_rect(rect, &paint, xf, None);
     }
 }
 
@@ -393,7 +421,7 @@ fn box_blur_vertical(data: &mut [u8], w: usize, h: usize, r: usize) {
 /// Stroke a box's border as a single rounded outline (uniform width/color from the
 /// widest side — enough for the common uniform-radius controls). Inset by half the
 /// stroke so the outline stays inside the border box.
-fn paint_round_border(pm: &mut Pixmap, f: &Fragment, b: &BorderEdges, r: f32) {
+fn paint_round_border(pm: &mut Pixmap, f: &Fragment, b: &BorderEdges, r: f32, xf: Transform) {
     let widest = [&b.top, &b.right, &b.bottom, &b.left]
         .into_iter()
         .filter(|s| s.width > 0)
@@ -415,7 +443,7 @@ fn paint_round_border(pm: &mut Pixmap, f: &Fragment, b: &BorderEdges, r: f32) {
         width: w,
         ..Default::default()
     };
-    pm.stroke_path(&path, &solid(color), &stroke, Transform::identity(), None);
+    pm.stroke_path(&path, &solid(color), &stroke, xf, None);
 }
 
 /// A tiny-skia path sink for [`glyph::trace_glyph`].
@@ -439,6 +467,7 @@ impl Tracer for PathSink {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // glyph run + face metrics + colour + transform
 fn paint_text(
     pm: &mut Pixmap,
     f: &Fragment,
@@ -447,6 +476,7 @@ fn paint_text(
     units_per_em: u16,
     font_size: f32,
     color: Rgba,
+    xf: Transform,
 ) {
     if color.a == 0 || units_per_em == 0 {
         return;
@@ -465,13 +495,7 @@ fn paint_text(
         let mut sink = PathSink(PathBuilder::new());
         glyph::trace_glyph(&face, g.glyph_id, pen, &mut sink);
         if let Some(path) = sink.0.finish() {
-            pm.fill_path(
-                &path,
-                &paint,
-                FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
+            pm.fill_path(&path, &paint, FillRule::Winding, xf, None);
         }
     }
 }

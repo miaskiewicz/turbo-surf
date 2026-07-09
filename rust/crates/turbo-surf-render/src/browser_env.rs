@@ -1,7 +1,7 @@
 //! turbo-surf render-tier DOM = the turbo-test browser binding + a thin extension.
 //!
 //! `browser_env_upstream.rs` (in this dir) is a **VERBATIM** copy of
-//! `../turbo-test/src/browser_env.rs` (turbo-test @ f4da3c7) and `browser_env.js`
+//! `../turbo-test/src/browser_env.rs` (turbo-test @ e6a6aca) and `browser_env.js`
 //! likewise. ⚠️ DO NOT EDIT either of those — turbo-test owns the canonical,
 //! battle-tested rtdom↔V8 binding (it runs React + Testing Library on it). We reuse
 //! it for the render tier. There is intentionally **no cross-repo crate dependency**

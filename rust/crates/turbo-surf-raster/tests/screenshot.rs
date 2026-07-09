@@ -335,6 +335,50 @@ fn linear_gradient_background_paints_left_to_right() {
 }
 
 #[test]
+fn css_transform_rotates_a_box_about_its_centre() {
+    // A 40×40 box rotated 45° about its centre becomes a diamond: the axis-aligned
+    // corners rotate outside it (blank), the centre stays filled, and the diamond
+    // apex reaches ABOVE the box's original top edge — proving the rotation paints.
+    let page = r#"<html><body style="margin:0">
+        <div style="position:absolute;left:60px;top:60px;width:40px;height:40px;
+                    background:#ff0000;transform:rotate(45deg)"></div>
+      </body></html>"#;
+    let vp = Viewport {
+        width: 160,
+        height: 160,
+    };
+    let png = screenshot_png_with_assets(page, "", vp, &ImageAssets::new(), false).expect("png");
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    // Centre (80,80) stays red.
+    let c = pm.pixel(80, 80).expect("pixel");
+    assert!(
+        c.red() > 200 && c.green() < 80,
+        "centre should stay red, got ({},{},{})",
+        c.red(),
+        c.green(),
+        c.blue()
+    );
+    // The original top-left corner (60,60) is outside the rotated diamond → blank.
+    let corner = pm.pixel(62, 62).expect("pixel");
+    assert!(
+        corner.red() > 200 && corner.green() > 200 && corner.blue() > 200,
+        "rotated-away corner should be blank, got ({},{},{})",
+        corner.red(),
+        corner.green(),
+        corner.blue()
+    );
+    // The diamond apex reaches above the original top edge (y=60): (80,55) is red.
+    let apex = pm.pixel(80, 55).expect("pixel");
+    assert!(
+        apex.red() > 200 && apex.green() < 80,
+        "diamond apex above the original edge should be red, got ({},{},{})",
+        apex.red(),
+        apex.green(),
+        apex.blue()
+    );
+}
+
+#[test]
 fn png_falls_back_to_placeholder_without_bytes() {
     // Same page, no supplied bytes: the `<img>` box lays out but paints nothing
     // (no Image fragment), so the middle stays the white canvas — definitely not

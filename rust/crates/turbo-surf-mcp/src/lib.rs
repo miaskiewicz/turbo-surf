@@ -564,7 +564,7 @@ impl Session {
         // (impersonation + cookies apply), unless `{ images: false }`.
         let want_images = args.get("images").and_then(Value::as_bool).unwrap_or(true);
         let images = if want_images {
-            self.fetch_page_images(&html).await
+            self.fetch_page_images(&html, &css).await
         } else {
             raster::ImageAssets::new()
         };
@@ -618,11 +618,22 @@ impl Session {
     // reference (the resolver key the raster expects), resolving each against the
     // current page URL via the session client. Non-URL / `data:` refs and fetch
     // failures are skipped; the count is capped so a hostile page can't fan out.
-    async fn fetch_page_images(&mut self, html: &str) -> raster::ImageAssets {
+    async fn fetch_page_images(&mut self, html: &str, css: &str) -> raster::ImageAssets {
         const MAX_IMAGES: usize = 60;
         let base = self.url.clone();
         let mut assets = raster::ImageAssets::new();
-        for name in raster::image_urls(html).into_iter().take(MAX_IMAGES) {
+        // `<img>`/inline-style/`<style>`-block refs from the HTML, plus
+        // `background-image` refs from the external `<link>` stylesheets — the layout
+        // paints those backgrounds, but a HTML-only scan never fetches their bytes.
+        let names = raster::image_urls(html)
+            .into_iter()
+            .chain(raster::image_urls_in_css(css))
+            .take(MAX_IMAGES);
+        let mut seen = std::collections::HashSet::new();
+        for name in names {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
             let Some(url) = turbo_surf_core::url::resolve(&base, &name) else {
                 continue;
             };

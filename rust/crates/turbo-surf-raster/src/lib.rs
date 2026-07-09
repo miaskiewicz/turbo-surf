@@ -25,7 +25,7 @@ mod paint_png;
 mod paint_svg;
 mod style_extract;
 
-pub use style_extract::{delazy_images, image_urls, stylesheet_hrefs};
+pub use style_extract::{delazy_images, image_urls, image_urls_in_css, stylesheet_hrefs};
 
 use std::collections::HashMap;
 

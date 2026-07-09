@@ -134,6 +134,14 @@ pub fn image_urls(html: String) -> Vec<String> {
     raster::image_urls(&html)
 }
 
+/// `background-image: url(...)` references in a raw CSS string (external `<link>`
+/// stylesheets) — the backgrounds the layout paints but that `imageUrls(html)`
+/// alone misses. Fetch these too and add them to the `images` map.
+#[napi]
+pub fn image_urls_in_css(css: String) -> Vec<String> {
+    raster::image_urls_in_css(&css)
+}
+
 /// Convert a JS `{ ref: Buffer }` image map into the raster's asset map.
 fn to_assets(images: std::collections::HashMap<String, Buffer>) -> raster::ImageAssets {
     images.into_iter().map(|(k, v)| (k, v.to_vec())).collect()

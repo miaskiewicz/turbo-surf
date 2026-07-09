@@ -174,6 +174,19 @@ pub fn image_urls(html: &str) -> Vec<String> {
     urls
 }
 
+/// Like [`image_urls`] but over a raw CSS string — the `background-image: url(...)`
+/// references in external `<link>` stylesheets, which a scan of the HTML alone
+/// misses (the layout engine paints them, but the caller never fetches their bytes).
+/// Returned verbatim (the resolver key), `data:` URIs skipped. Callers should scan
+/// both `image_urls(html)` and `image_urls_in_css(external_css)`.
+pub fn image_urls_in_css(css: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    background_image_urls(css, &mut urls);
+    let mut seen = std::collections::HashSet::new();
+    urls.retain(|u| !u.starts_with("data:") && seen.insert(u.clone()));
+    urls
+}
+
 /// Attributes carrying an image URL when `src` is absent/empty — lazy-loading and
 /// responsive patterns modern sites use (Nike puts the URL in `data-landscape-url`,
 /// no `src` at all). `srcset`/`data-srcset` hold a candidate *list*; the first URL
@@ -492,6 +505,17 @@ mod tests {
             image_urls(html),
             vec!["/a.png", "b.jpg", "c.png", "d.webp", "e.svg"]
         );
+    }
+
+    #[test]
+    fn image_urls_in_css_extracts_external_backgrounds() {
+        use super::image_urls_in_css;
+        // External `<link>` stylesheets carry `background-image` refs that a scan of
+        // the HTML alone misses; longhand + shorthand, quoted or bare, `data:` skipped.
+        let css = ".a{background-image:url(https://x/bg1.png)}\
+                   .b{background:#fff url(\"bg2.jpg\") no-repeat}\
+                   .c{background-image:url(data:image/png;base64,AAA)}";
+        assert_eq!(image_urls_in_css(css), vec!["https://x/bg1.png", "bg2.jpg"]);
     }
 
     #[test]

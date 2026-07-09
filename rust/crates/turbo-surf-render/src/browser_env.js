@@ -160,6 +160,33 @@
     'DOMTokenList','NamedNodeMap','CSSStyleDeclaration','CSSRule','StyleSheet','MediaList',
     'DOMStringMap','MutationRecord','MediaQueryList','DOMRect','DOMRectReadOnly','DOMPoint'];
   ctors.forEach(function(n){ if (typeof g[n] === "undefined") { var f = function(){}; f.prototype = {}; try { Object.defineProperty(f, "name", { value: n, configurable: true }); } catch(e){} g[n] = f; } });
+  // EventTarget must be a REAL subclassable base. Apps + libraries write
+  // `class Foo extends EventTarget { … this.addEventListener(…) }` (event buses, modal
+  // managers, state stores — Nike's global-nav modal manager does exactly this); with an
+  // empty `EventTarget.prototype` the instance's `addEventListener` is undefined and the
+  // call throws. An uncaught throw mid-hydration makes React discard the SSR tree and
+  // client-render the whole root (#425), blanking server-rendered content. Give the
+  // prototype a working listener registry so subclass instances behave as event targets.
+  (function(){
+    var ET = g.EventTarget;
+    if (ET && ET.prototype && typeof ET.prototype.addEventListener !== "function") {
+      ET.prototype.addEventListener = function(type, cb){
+        if (!cb || (typeof cb !== "function" && typeof cb.handleEvent !== "function")) return;
+        var m = this.__etl || (this.__etl = {}); (m[type] = m[type] || []).push(cb);
+      };
+      ET.prototype.removeEventListener = function(type, cb){
+        var m = this.__etl; if (!m || !m[type]) return;
+        var i = m[type].indexOf(cb); if (i >= 0) m[type].splice(i, 1);
+      };
+      ET.prototype.dispatchEvent = function(ev){
+        var m = this.__etl, type = ev && ev.type, list = m && type && m[type];
+        if (list) { try { if (!ev.target) ev.target = this; ev.currentTarget = this; } catch(e){}
+          for (var i = 0; i < list.length; i++){ var cb = list[i];
+            try { typeof cb === "function" ? cb.call(this, ev) : cb.handleEvent(ev); } catch(e){} } }
+        return !(ev && ev.defaultPrevented);
+      };
+    }
+  })();
   // make `node instanceof HTMLElement/Element/Node/...` work for native DOM nodes (jest-dom's
   // checkHtmlElement + many libs rely on it) via Symbol.hasInstance keyed on nodeType.
   function iface(name, pred){ var f = g[name] || function(){}; try { Object.defineProperty(f, Symbol.hasInstance, { configurable: true, value: pred }); } catch(e){} g[name] = f; }

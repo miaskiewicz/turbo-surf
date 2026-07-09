@@ -681,10 +681,68 @@ if (typeof globalThis.structuredClone === "undefined") {
     return clone(v);
   };
 }
-// NOTE: getComputedStyle + matchMedia are provided by the vendored browser_env.js
-// (a jsdom-style getComputedStyle the Playwright shim's cssValue/visibility reads,
-// and a matchMedia stub). Do NOT redefine them here — ENV_BOOTSTRAP runs AFTER the
-// binding, so an override would clobber the real ones and break the shim.
+// NOTE: getComputedStyle is provided by the vendored browser_env.js (a jsdom-style
+// getComputedStyle the Playwright shim's cssValue/visibility reads). Do NOT redefine
+// IT here — ENV_BOOTSTRAP runs AFTER the binding, so an override would clobber the
+// real one and break the shim.
+//
+// matchMedia, though, ships as an always-`matches:false` stub. That makes every
+// responsive component render its MOBILE/collapsed variant (a `min-width:` desktop
+// query never matches) — e.g. Nike's header hydrates to a hamburger with its nav
+// links hidden, so the desktop nav "disappears" after hydration with NO error. We
+// override ONLY matchMedia (getComputedStyle untouched) with a real evaluator that
+// tests the query against the layout viewport (window.innerWidth/innerHeight), the
+// JS mirror of the CSS `@media` evaluation the layout tier already does.
+{
+  const __mqLen = (tok, basis) => {
+    // A CSS length in a media feature → px. Supports px and em/rem (16px root).
+    const m = String(tok).match(/([\d.]+)\s*(px|r?em)?/);
+    if (!m) return NaN;
+    const n = parseFloat(m[1]);
+    return m[2] === "em" || m[2] === "rem" ? n * 16 : n;
+  };
+  const __mqClause = (clause) => {
+    if (clause.indexOf("print") >= 0) return false;
+    const w = typeof globalThis.innerWidth === "number" ? globalThis.innerWidth : 1280;
+    const h = typeof globalThis.innerHeight === "number" ? globalThis.innerHeight : 800;
+    let ok = true;
+    for (const feat of clause.split(/\band\b/)) {
+      let m;
+      if ((m = feat.match(/min-width\s*:\s*([^)]+)/)) && w < __mqLen(m[1])) ok = false;
+      if ((m = feat.match(/max-width\s*:\s*([^)]+)/)) && w > __mqLen(m[1])) ok = false;
+      if ((m = feat.match(/min-height\s*:\s*([^)]+)/)) && h < __mqLen(m[1])) ok = false;
+      if ((m = feat.match(/max-height\s*:\s*([^)]+)/)) && h > __mqLen(m[1])) ok = false;
+      // Desktop defaults: light scheme, landscape, fine pointer + hover available.
+      if (/prefers-color-scheme\s*:\s*dark/.test(feat)) ok = false;
+      if (/orientation\s*:\s*portrait/.test(feat) && w >= h) ok = false;
+      if (/orientation\s*:\s*landscape/.test(feat) && w < h) ok = false;
+      if (/hover\s*:\s*none/.test(feat)) ok = false;
+      if (/pointer\s*:\s*coarse/.test(feat)) ok = false;
+      if (/any-pointer\s*:\s*coarse/.test(feat)) ok = false;
+    }
+    return ok;
+  };
+  const __evalMedia = (q) => {
+    const query = String(q || "").toLowerCase().trim();
+    if (!query || query === "all") return true;
+    return query.split(",").some((c) => __mqClause(c.trim()));
+  };
+  globalThis.matchMedia = function (q) {
+    const media = String(q == null ? "" : q);
+    const mql = {
+      media,
+      onchange: null,
+      _l: [],
+      addListener(fn) { if (typeof fn === "function") this._l.push(fn); },
+      removeListener(fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
+      addEventListener(_t, fn) { if (typeof fn === "function") this._l.push(fn); },
+      removeEventListener(_t, fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
+      dispatchEvent() { return false; },
+    };
+    Object.defineProperty(mql, "matches", { get: () => __evalMedia(media), enumerable: true });
+    return mql;
+  };
+}
 // FormData — auth/login SDKs (PropelAuth) build credential payloads with it; deno_core
 // ships none. A spec-shaped impl over an entry list (append keeps duplicates; set
 // replaces; field values stringified, File/Blob passed through).

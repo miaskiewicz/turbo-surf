@@ -180,6 +180,7 @@ pub fn screenshot_png_with_opts(
         html,
         external_css,
         viewport.width,
+        viewport.height,
         &image_paint::png_map(&decoded),
         system_fonts,
     )?;
@@ -204,6 +205,7 @@ pub fn screenshot_svg_with_opts(
         html,
         external_css,
         viewport.width,
+        viewport.height,
         &image_paint::png_map(&decoded),
         system_fonts,
     )?;
@@ -278,9 +280,15 @@ fn lay_out(
     html: &str,
     external_css: &str,
     width: u32,
+    height: u32,
     images: &ImageAssets,
     system_fonts: bool,
 ) -> Result<Fragment, String> {
+    // Tell the cascade the viewport HEIGHT so `@media (min-height/max-height:…)`
+    // conditions evaluate correctly (else every height feature is ignored and its
+    // rules always apply — Google's tall search box is `display:none` below
+    // `max-height:575px`, so it always vanished → blank render).
+    turbo_html2pdf_core::set_media_viewport_height(height as f32);
     // Author CSS order (lowest→highest): external `<link>` sheets the caller
     // fetched, then the page's own `<style>` blocks. Then strip script/style/etc.
     // so their text isn't flowed as visible content.

@@ -17,6 +17,7 @@ pub mod aws_waf;
 pub mod cache;
 pub mod challenge;
 pub mod cloudflare;
+pub mod consent;
 pub mod cookies;
 pub mod crawl;
 pub mod fingerprint;

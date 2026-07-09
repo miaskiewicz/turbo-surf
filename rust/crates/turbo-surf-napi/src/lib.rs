@@ -734,7 +734,7 @@ async fn do_fetch(
     body: Option<String>,
     cookies: Option<String>,
 ) -> Result<String> {
-    do_fetch_headers(url, method, body, cookies, None).await
+    do_fetch_headers(url, method, body, cookies, None, false).await
 }
 
 /// `do_fetch` plus extra request headers (JSON object) — backs the shim's
@@ -745,6 +745,7 @@ async fn do_fetch_headers(
     body: Option<String>,
     cookies: Option<String>,
     headers_json: Option<String>,
+    bypass_consent: bool,
 ) -> Result<String> {
     let mut jar = cookies
         .as_deref()
@@ -760,6 +761,7 @@ async fn do_fetch_headers(
         allow_non_html: true,
         jar: jar.as_mut(),
         client: Some(shared_client()),
+        bypass_consent,
         ..Default::default()
     };
     let res = net_fetch(url, opts)
@@ -829,8 +831,17 @@ pub async fn fetch_with_cookies(
     method: Option<String>,
     body: Option<String>,
     headers: Option<String>,
+    bypass_consent: Option<bool>,
 ) -> Result<String> {
-    do_fetch_headers(&url, method, body, Some(cookies), headers).await
+    do_fetch_headers(
+        &url,
+        method,
+        body,
+        Some(cookies),
+        headers,
+        bypass_consent.unwrap_or(false),
+    )
+    .await
 }
 
 fn record_json(r: &Record) -> Value {

@@ -75,6 +75,10 @@ pub struct FetchOptions<'a> {
     /// pass [`crate::fingerprint::select`]`(key)` to rotate per client. Ignored on
     /// the `impersonate` path, where wreq's emulation owns the headers.
     pub profile: Option<&'a crate::fingerprint::Profile>,
+    /// Seed well-known consent-wall cookies for the request host (see
+    /// [`crate::consent`]) so JS-gated "before you continue" interstitials are
+    /// dismissed and the real, server-rendered page is returned. Off by default.
+    pub bypass_consent: bool,
     pub now: f64,
 }
 
@@ -173,12 +177,45 @@ fn build_headers(url: &str, opts: &FetchOptions) -> BTreeMap<String, String> {
             h.insert("cookie".into(), cookie);
         }
     }
+    if opts.bypass_consent {
+        seed_consent_cookies(&mut h, url);
+    }
     if let Some(cache) = &opts.cache {
         for (k, v) in cache.validators(url) {
             h.insert(k, v);
         }
     }
     h
+}
+
+/// Merge the host's consent-bypass cookies (see [`crate::consent`]) into the
+/// `cookie` header, skipping any name a jar/caller cookie already set so an
+/// explicit cookie always wins.
+fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str) {
+    let host = crate::url::host_of(url).unwrap_or_default();
+    let extra = crate::consent::cookies_for_host(&host);
+    if extra.is_empty() {
+        return;
+    }
+    let mut cookie = h.get("cookie").cloned().unwrap_or_default();
+    for (name, value) in extra {
+        // Don't override a cookie the caller/jar already carries for this name.
+        let has = cookie
+            .split(';')
+            .any(|pair| pair.trim().split('=').next().map(str::trim) == Some(*name));
+        if has {
+            continue;
+        }
+        if !cookie.is_empty() {
+            cookie.push_str("; ");
+        }
+        cookie.push_str(name);
+        cookie.push('=');
+        cookie.push_str(value);
+    }
+    if !cookie.is_empty() {
+        h.insert("cookie".into(), cookie);
+    }
 }
 
 // Apply the Chrome TLS/JA3/JA4 + HTTP-2 emulation profile to a builder under the

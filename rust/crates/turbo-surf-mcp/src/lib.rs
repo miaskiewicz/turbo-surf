@@ -54,6 +54,10 @@ pub struct Session {
     /// Layout viewport for `screenshot` (and any future geometry). Defaults to a
     /// common desktop size; overridable via `set_viewport` or per-call args.
     viewport: raster::Viewport,
+    /// Seed consent-wall cookies (google/youtube "before you continue") so the
+    /// real page is served instead of a JS-gated interstitial. `None` = the
+    /// default (on); set `Some(false)` to send the raw consent-gated response.
+    bypass_consent: Option<bool>,
 }
 
 impl Session {
@@ -128,6 +132,7 @@ impl Session {
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
             profile: Some(&profile),
+            bypass_consent: self.bypass_consent.unwrap_or(true),
             ..Default::default()
         };
         let res = fetch_html_with(url, opts).await?;
@@ -1005,6 +1010,12 @@ pub fn tools() -> Value {
             "Set the default layout viewport (width/height px) used by screenshot",
         ),
         (
+            "set_bypass_consent",
+            "Toggle consent-wall bypass (google/youtube 'before you continue' \
+             interstitial). On by default: seeds the consent cookie so the real \
+             page is served. Arg: enabled? (default true)",
+        ),
+        (
             "run_playwright",
             "Execute a Playwright-style script (page/locator/getBy*/expect, test() blocks) with config (script, url?, testIdAttribute?) over the engine — no browser",
         ),
@@ -1095,6 +1106,13 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
         "set_mode" => {
             session.mode = arg_str(args, "mode").unwrap_or("no-js").to_string();
             Ok(json!({ "mode": session.mode }))
+        }
+        "set_bypass_consent" => {
+            // Toggle consent-wall cookie seeding (google/youtube interstitial).
+            // Default is on; pass `{ "enabled": false }` to fetch the raw response.
+            let on = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            session.bypass_consent = Some(on);
+            Ok(json!({ "bypassConsent": on }))
         }
         "eval_js" | "evaluate" => session.eval_js(script()?),
         "inject_js" => session.inject_js(script()?).await,

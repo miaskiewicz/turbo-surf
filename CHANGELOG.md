@@ -3,6 +3,103 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.3.5]
+
+Consumes turbo-html2pdf-core 0.2.13 — a batch of real-site rendering fixes
+(google.com / nike.com home pages): CSS Grid `justify-items` + `grid-column:span`
+placement, `box-sizing:inherit` reaching the page, border-box height, `.ttc` face
+index, `align-self`/min-width, lazy `<img>` data-urls, and text max-content
+rounding. See turbo-html2pdf's CHANGELOG for the full list.
+
+### Fixed
+- **Lazy images render.** The delazy pass (which promotes `data-*-url`/`srcset` to
+  `src`) now also injects `opacity:1;visibility:visible` so an assume-loaded image
+  isn't dropped as `opacity:0` — nike's hero `<img>`s start `opacity:0` and had
+  rendered as a blank band.
+- **Glyphs trace from the right `.ttc` sub-font.** The raster parses the font face at
+  its collection index (from `FontFace::index()`), so text in a system Arial/Helvetica
+  collection no longer renders shifted.
+
+## [0.3.4]
+
+Consumes turbo-html2pdf-core 0.2.7 (mask-image icons, `white-space`, data-URI
+values, pseudo-element/self-ref-var/flex/table fixes, flex perf) so complex pages
+render like Chromium.
+
+### Added
+- **CSS `mask-image` icon painting.** The raster stencils a box's tint colour
+  through a mask SVG's alpha (`tint_pixmap`), so monochrome UI glyphs (Wikipedia's
+  language/menu/edit icons, Codex icon fonts) render as their shape instead of a
+  solid square. A missing mask paints nothing.
+- **`border-radius` rounded rects/borders** (rounded radio/checkbox circles, cards).
+
+### Fixed
+- Wikipedia renders faithfully end-to-end: title bar no longer overlaps the tabs,
+  taxobox montage contained + classification aligned, full-width header, page-action
+  tabs on one line, blue links, round radios.
+
+## [0.3.3]
+
+Hydration reach + screenshot fidelity. Consumes turbo-html2pdf 0.2.6 (real-page
+layout/cascade: `var()`, sibling/structural selectors, inline-block-in-line,
+grid-template shorthand, sr-only hide, static-position absolutes, float text-wrap,
+`@media(...)` no-space). (0.3.2 was staged but never released; 0.3.3 supersedes it
+and carries everything below.)
+
+### Added
+- **Broader JS hydration** in the render tier so real page scripts reach a
+  browser-faithful DOM: `document.implementation.createHTMLDocument` (jQuery init),
+  `Node.prototype.replaceChild`, `PerformanceObserver`, and DOM interface
+  constructors (`HTMLElement`/`Node`/`Element`/… with duck-typed `instanceof`) so
+  React/emotion `instanceof` checks resolve instead of aborting the bundle.
+  Combined, MediaWiki's startup now runs (sets `client-js` + Vector layout
+  classes), so Wikipedia hydrates with its taxobox + images.
+- **Lazy / responsive image recovery** (`delazy_images` + `image_urls`): pulls the
+  URL from `data-src`/`srcset`/`data-srcset`/`data-original`/`data-*-url` when
+  `src` is absent, and fills a missing `src` before layout so the box + pixels
+  render. Nike-style `data-landscape-url` images now paint.
+- **Opt-in system-font screenshots** (`system_fonts` on the raster/napi assets
+  entries): resolve a page's fonts against the machine's installed fonts to match
+  a browser on the same host.
+
+### Fixed
+- **Resilient hydration**: a mid-hydration JS error now returns the partially
+  hydrated DOM instead of discarding everything — partial hydration beats none.
+- **HTML-entity-decode** extracted stylesheet/image URLs (`&amp;` in `load.php`
+  query strings), so Wikipedia's real skin CSS loads instead of a stub.
+
+## [0.3.2]
+Screenshot fidelity: CSS positioning + z-index stacking, image rendering, full-page.
+
+### Added
+- **`position` + `z-index` in synthetic screenshots** — screenshots now honor
+  `position: relative | absolute | fixed | sticky` (out-of-flow boxes are removed
+  from flow and placed against their containing block; `relative` boxes shift
+  while keeping their space) and paint children back-to-front in CSS stacking
+  order (CSS 2.2 §9.9) instead of raw DOM order, so overlapping menus/modals layer
+  correctly. Powered by the layout work in turbo-html2pdf 0.2.5, consumed via the
+  new `Fragment::paint_order` in `turbo-surf-raster`'s PNG + SVG paint walks.
+- **Image rendering** — `<img>` and `background-image` boxes now paint real
+  pixels: **PNG, JPEG, GIF, WebP, and SVG** (SVG rasterized via resvg). The raster
+  normalizes every decoded image to RGBA and hands turbo-html2pdf a re-encoded PNG
+  purely for sizing, so format support lives entirely in the raster. The
+  `screenshot` MCP tool and the Playwright shim fetch the page's image bytes over
+  the session client (impersonation + cookies apply), `{ images: false }` opts
+  out; the raster scales them into the layout box (PNG output) or embeds a base64
+  PNG `data:` URI (SVG output). New `image_urls` + `screenshot*_with_assets`
+  across raster/napi/Python for callers that fetch the bytes themselves; new
+  `net::fetch_bytes` (+ napi `fetchBytes`) returns raw bytes without charset
+  decode. Unknown formats fall back to a placeholder.
+- **Full-page screenshots** — `full_page` (MCP `full_page`, shim `fullPage`,
+  napi/Python `full_page`) grows the image height to the full laid-out content
+  height (viewport width still drives layout), clamped to 24k px. The `screenshot`
+  reply reports the true image `width`/`height`.
+
+### Changed
+- `turbo-surf-raster` now depends on `turbo-html2pdf-core` **0.2.5** (positioning,
+  `paint_order`, `layout_html_with_images`), the `image` crate (PNG/JPEG/GIF/WebP
+  decode), and `resvg` (SVG rasterization).
+
 ## [0.3.1]
 Screenshot fidelity: external stylesheets + root-background propagation.
 

@@ -66,10 +66,13 @@ impl<T: Tracer> OutlineBuilder for Adapter<'_, T> {
     }
 }
 
-/// Parse a font face from raw bytes. Returns `None` if the bytes don't parse (a
-/// malformed face paints nothing rather than panicking).
-pub fn parse_face(data: &[u8]) -> Option<Face<'_>> {
-    Face::parse(data, 0).ok()
+/// Parse face `index` of a font program. Returns `None` if the bytes don't parse (a
+/// malformed face paints nothing rather than panicking). `index` selects the face in
+/// a `.ttc` collection — it MUST match the index the glyph ids were shaped against
+/// (macOS Arial/Helvetica are collections; parsing index 0 for a non-0 face draws a
+/// different sub-font's glyphs, shifting the whole run).
+pub fn parse_face(data: &[u8], index: u32) -> Option<Face<'_>> {
+    Face::parse(data, index).ok()
 }
 
 /// Trace one glyph into `sink`. No-op for a glyph the face has no outline for

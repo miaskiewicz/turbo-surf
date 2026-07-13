@@ -10,9 +10,30 @@ description = "turbo-surf synthetic screenshot tier: HTML snapshot → layout �
 # The layout + style + font engine (from turbo-html2pdf, on crates.io). We
 # consume only its public HTML→Fragment drive (`layout_html`) + the `Fragment`
 # display list and paint it ourselves; no PDF code is pulled onto the hot path.
-turbo-html2pdf-core = "0.2.4"
+# CSS `transform` (0.2.11) for carousels/rotate; image `%`-sizing + flex
+# `min-height` (0.2.10); `linear-gradient` (0.2.9); box-shadow (0.2.8);
+# border-radius (0.2.7).
+turbo-html2pdf-core = "0.2.13"
 # Raster canvas + PNG encode (Pixmap::encode_png, default `png-format` feature).
 tiny-skia = "0.11"
 # Glyph outlines: we parse `FontFace::data()` bytes independently to trace each
 # glyph into a fill path (both the PNG and SVG painters share the trace).
 ttf-parser = "0.25"
+# Decode + scale fetched raster image bytes (PNG/JPEG/GIF/WebP) for painting. The
+# raster normalizes every decoded image to RGBA, so turbo-html2pdf only ever sizes
+# a re-encoded PNG — format support lives here, not in the layout engine.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+] }
+# Rasterize SVG `<img>`/`background-image` sources (logos/icons are ubiquitous).
+# Pinned to match turbo-html2pdf's svg tier (0.45.1; 0.46+ changes raster output).
+# resvg re-exports `usvg` + `tiny-skia`, used only inside the SVG decode path.
+resvg = { version = "=0.45.1", default-features = false }
+
+[dev-dependencies]
+# Screenshot tests build a fixture PNG and decode the rendered output to sample
+# pixels (verifying an image was painted, not a placeholder).
+tiny-skia = "0.11"

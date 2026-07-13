@@ -27,7 +27,7 @@ use view::{Field, FieldType, QueryType, TextMode};
 
 #[napi]
 pub fn version() -> String {
-    "0.3.1".to_string()
+    "0.3.5".to_string()
 }
 
 fn to_json_string<T: serde::Serialize>(v: &T) -> String {
@@ -123,6 +123,78 @@ pub fn screenshot_svg_with_css(
 ) -> Result<String> {
     raster::screenshot_svg_with_css(&html, &external_css, viewport(width, height))
         .map_err(Error::from_reason)
+}
+
+/// Every image reference in `html` (`<img src>` + `background-image: url(...)`),
+/// verbatim + de-duplicated (`data:` skipped). The caller resolves each against
+/// the page URL, fetches the bytes, and passes them as the `images` map to
+/// `*WithAssets`.
+#[napi]
+pub fn image_urls(html: String) -> Vec<String> {
+    raster::image_urls(&html)
+}
+
+/// `background-image: url(...)` references in a raw CSS string (external `<link>`
+/// stylesheets) — the backgrounds the layout paints but that `imageUrls(html)`
+/// alone misses. Fetch these too and add them to the `images` map.
+#[napi]
+pub fn image_urls_in_css(css: String) -> Vec<String> {
+    raster::image_urls_in_css(&css)
+}
+
+/// Convert a JS `{ ref: Buffer }` image map into the raster's asset map.
+fn to_assets(images: std::collections::HashMap<String, Buffer>) -> raster::ImageAssets {
+    images.into_iter().map(|(k, v)| (k, v.to_vec())).collect()
+}
+
+/// PNG screenshot of `html` with caller-fetched `external_css` and `images` (a
+/// map from each `imageUrls` ref to its fetched bytes). PNG/JPEG images are
+/// painted into their layout box; others fall back to a placeholder.
+#[napi]
+pub fn screenshot_with_assets(
+    html: String,
+    external_css: String,
+    images: std::collections::HashMap<String, Buffer>,
+    width: Option<u32>,
+    height: Option<u32>,
+    full_page: Option<bool>,
+    system_fonts: Option<bool>,
+) -> Result<Buffer> {
+    raster::screenshot_png_with_opts(
+        &html,
+        &external_css,
+        viewport(width, height),
+        &to_assets(images),
+        full_page.unwrap_or(false),
+        system_fonts.unwrap_or(false),
+    )
+    .map(Buffer::from)
+    .map_err(Error::from_reason)
+}
+
+/// SVG screenshot of `html` with caller-fetched `external_css` and `images`;
+/// images embed as base64 `data:` URIs. `fullPage` grows the height to the full
+/// content height instead of clipping to the viewport. `systemFonts` resolves the
+/// page's fonts against the machine's installed fonts. → document string.
+#[napi]
+pub fn screenshot_svg_with_assets(
+    html: String,
+    external_css: String,
+    images: std::collections::HashMap<String, Buffer>,
+    width: Option<u32>,
+    height: Option<u32>,
+    full_page: Option<bool>,
+    system_fonts: Option<bool>,
+) -> Result<String> {
+    raster::screenshot_svg_with_opts(
+        &html,
+        &external_css,
+        viewport(width, height),
+        &to_assets(images),
+        full_page.unwrap_or(false),
+        system_fonts.unwrap_or(false),
+    )
+    .map_err(Error::from_reason)
 }
 
 #[napi]
@@ -670,7 +742,7 @@ async fn do_fetch(
     body: Option<String>,
     cookies: Option<String>,
 ) -> Result<String> {
-    do_fetch_headers(url, method, body, cookies, None).await
+    do_fetch_headers(url, method, body, cookies, None, false).await
 }
 
 /// `do_fetch` plus extra request headers (JSON object) — backs the shim's
@@ -681,6 +753,7 @@ async fn do_fetch_headers(
     body: Option<String>,
     cookies: Option<String>,
     headers_json: Option<String>,
+    bypass_consent: bool,
 ) -> Result<String> {
     let mut jar = cookies
         .as_deref()
@@ -696,6 +769,7 @@ async fn do_fetch_headers(
         allow_non_html: true,
         jar: jar.as_mut(),
         client: Some(shared_client()),
+        bypass_consent,
         ..Default::default()
     };
     let res = net_fetch(url, opts)
@@ -722,6 +796,34 @@ pub async fn fetch_html(url: String) -> Result<String> {
     do_fetch(&url, None, None, None).await
 }
 
+/// Fetch a URL as raw bytes (no charset decode) → a `Buffer`. For binary
+/// resources — images for `screenshotWithAssets` — that a `fetchHtml` string
+/// would corrupt. Uses the shared pooled client; non-HTML content types allowed.
+///
+/// Advertises only the raster image formats turbo can decode (PNG/JPEG/WebP/GIF/
+/// SVG) — crucially **not** `image/avif`. Content-negotiating CDNs (`f_auto` on
+/// Nike/Cloudinary/etc.) serve AVIF to a Chrome UA that accepts it; turbo has no
+/// AVIF decoder, so those images would silently drop. Omitting AVIF makes the CDN
+/// fall back to WebP, which turbo does decode.
+#[napi]
+pub async fn fetch_bytes(url: String) -> Result<Buffer> {
+    let mut headers = std::collections::BTreeMap::new();
+    headers.insert(
+        "accept".to_string(),
+        "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8".to_string(),
+    );
+    let opts = FetchOptions {
+        allow_non_html: true,
+        client: Some(shared_client()),
+        headers,
+        ..Default::default()
+    };
+    let (_final_url, bytes, _status) = turbo_surf_core::net::fetch_bytes(&url, opts)
+        .await
+        .map_err(|e| Error::from_reason(e.to_string()))?;
+    Ok(Buffer::from(bytes))
+}
+
 /// Fetch with an explicit method/body (e.g. a POST form submission).
 #[napi]
 pub async fn request(url: String, method: String, body: Option<String>) -> Result<String> {
@@ -737,8 +839,17 @@ pub async fn fetch_with_cookies(
     method: Option<String>,
     body: Option<String>,
     headers: Option<String>,
+    bypass_consent: Option<bool>,
 ) -> Result<String> {
-    do_fetch_headers(&url, method, body, Some(cookies), headers).await
+    do_fetch_headers(
+        &url,
+        method,
+        body,
+        Some(cookies),
+        headers,
+        bypass_consent.unwrap_or(false),
+    )
+    .await
 }
 
 fn record_json(r: &Record) -> Value {

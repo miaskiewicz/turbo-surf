@@ -19,7 +19,7 @@ use turbo_dom_parser::rtdom::tree::{Handle, Namespace, Tree};
 use turbo_dom_parser::rtdom::NodeRef;
 
 /// The all-Rust DOM (rtdom) is now the ONLY DOM environment — the JS turbo-dom bootstrap
-/// (installGlobals + the `.node` parser) was removed in v0.3.1. Kept as a function (always true) so
+/// (installGlobals + the `.node` parser) was removed in v0.3.0. Kept as a function (always true) so
 /// the per-file install/reset call sites read intent; `TURBO_RUST_DOM` is no longer consulted.
 pub fn enabled() -> bool {
     true
@@ -494,6 +494,7 @@ fn get_children(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::
         arr.set_index(scope, i as u32, node.into());
     }
     bind_method(scope, arr.into(), "item", nodelist_item);
+    bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
 }
 
@@ -583,6 +584,19 @@ fn el_click(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     dispatch_synthetic(scope, h, "click", true, true);
 }
 fn el_scroll_into_view(_scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {}
+
+// Form-control methods with no headless effect (no constraint-validation UI, no text
+// selection). They must EXIST though: React's hydration/commit calls `setCustomValidity`
+// / `setSelectionRange` on inputs, and without the method the NON_MASKING interceptor
+// returns `undefined` → "x is not a function" throws mid-hydration → React discards the
+// SSR tree and client-renders the whole root (#425), losing server-rendered content.
+fn el_noop(_scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {}
+
+/// Constraint-validation predicates (`checkValidity`/`reportValidity`) → always valid
+/// (there is no interactive validation UI to fail against).
+fn el_valid_true(scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+    rv.set(v8::Boolean::new(scope, true).into());
+}
 fn el_get_bounding_client_rect(scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
     let o = v8::Object::new(scope);
     for k in ["x", "y", "top", "left", "right", "bottom", "width", "height"] {
@@ -746,6 +760,9 @@ fn get_attributes(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8
         }
         arr.set_index(scope, i as u32, o.into());
     }
+    // NamedNodeMap accessors (`attributes.item(i)` / `attributes.namedItem(name)`).
+    bind_method(scope, arr.into(), "item", nodelist_item);
+    bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
 }
 
@@ -815,6 +832,43 @@ fn el_contains(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mu
     rv.set(v8::Boolean::new(scope, contains).into());
 }
 
+/// `node.hasChildNodes()` — true when the node has at least one child. Without this
+/// native method the NON_MASKING interceptor returns `undefined`, so React's
+/// hydration/commit path (which calls `hasChildNodes()` while diffing) throws
+/// "hasChildNodes is not a function" and aborts the client-render fallback.
+fn el_has_child_nodes(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+    let Some(h) = handle_of(scope, args.this()) else { return };
+    let has = with_tree(|t| NodeRef::new(t, h).first_child().is_some()).unwrap_or(false);
+    rv.set(v8::Boolean::new(scope, has).into());
+}
+
+/// `collection.namedItem(name)` for the array-like NodeList/HTMLCollection we hand
+/// back — returns the first element whose `id` (or `name`) matches, else null. Bound
+/// alongside `.item` so libs that call `namedItem` (React-DOM, form-collection code)
+/// don't hit "namedItem is not a function".
+fn nodelist_named_item(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+    let name = arg_str(scope, &args, 0);
+    let this = args.this();
+    let len = this
+        .get(scope, v8::String::new(scope, "length").unwrap().into())
+        .and_then(|v| v.uint32_value(scope))
+        .unwrap_or(0);
+    for i in 0..len {
+        let Some(item) = this.get_index(scope, i) else { continue };
+        let Ok(obj) = v8::Local::<v8::Object>::try_from(item) else { continue };
+        for attr in ["id", "name"] {
+            let key = v8::String::new(scope, attr).unwrap();
+            if let Some(val) = obj.get(scope, key.into()) {
+                if val.is_string() && val.to_rust_string_lossy(scope) == name {
+                    rv.set(item);
+                    return;
+                }
+            }
+        }
+    }
+    rv.set_null();
+}
+
 fn el_query_selector_all(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
     let Some(h) = handle_of(scope, args.this()) else { return };
     let sel = arg_str(scope, &args, 0);
@@ -828,6 +882,7 @@ fn el_query_selector_all(scope: &mut v8::PinScope, args: v8::FunctionCallbackArg
         arr.set_index(scope, i as u32, node.into());
     }
     bind_method(scope, arr.into(), "item", nodelist_item);
+    bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
 }
 
@@ -1318,6 +1373,7 @@ fn get_child_nodes(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v
         arr.set_index(scope, i as u32, node.into());
     }
     bind_method(scope, arr.into(), "item", nodelist_item);
+    bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
 }
 
@@ -1549,6 +1605,7 @@ fn doc_query_selector_all(scope: &mut v8::PinScope, args: v8::FunctionCallbackAr
         arr.set_index(scope, i as u32, node.into());
     }
     bind_method(scope, arr.into(), "item", nodelist_item);
+    bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
 }
 
@@ -1601,6 +1658,7 @@ fn build_el_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::
     tmpl_method(scope, tmpl, "matches", el_matches);
     tmpl_method(scope, tmpl, "closest", el_closest);
     tmpl_method(scope, tmpl, "contains", el_contains);
+    tmpl_method(scope, tmpl, "hasChildNodes", el_has_child_nodes);
     tmpl_method(scope, tmpl, "cloneNode", el_clone_node);
     tmpl_method(scope, tmpl, "getRootNode", el_get_root_node);
     tmpl_method(scope, tmpl, "containsNode", el_contains_node);
@@ -1611,6 +1669,16 @@ fn build_el_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::
     tmpl_method(scope, tmpl, "blur", el_blur);
     tmpl_method(scope, tmpl, "click", el_click);
     tmpl_method(scope, tmpl, "scrollIntoView", el_scroll_into_view);
+    // Form-control methods (no headless effect, but must exist so React's commit path
+    // doesn't throw "not a function" and discard the SSR tree — see el_noop).
+    tmpl_method(scope, tmpl, "setCustomValidity", el_noop);
+    tmpl_method(scope, tmpl, "setSelectionRange", el_noop);
+    tmpl_method(scope, tmpl, "setRangeText", el_noop);
+    tmpl_method(scope, tmpl, "select", el_noop);
+    tmpl_method(scope, tmpl, "scrollTo", el_noop);
+    tmpl_method(scope, tmpl, "scrollBy", el_noop);
+    tmpl_method(scope, tmpl, "checkValidity", el_valid_true);
+    tmpl_method(scope, tmpl, "reportValidity", el_valid_true);
     tmpl_method(scope, tmpl, "getBoundingClientRect", el_get_bounding_client_rect);
     // CharacterData (text/comment node) mutation — native over rtdom's text storage.
     tmpl_method(scope, tmpl, "insertData", el_insert_data);

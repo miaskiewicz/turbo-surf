@@ -152,8 +152,41 @@
     g.__ttEvent = true;
   }
   var ctors = ['Node','Element','HTMLElement','HTMLDivElement','HTMLInputElement','HTMLButtonElement','HTMLAnchorElement','HTMLSelectElement','HTMLTextAreaElement','HTMLFormElement','HTMLImageElement','HTMLLabelElement','HTMLOptionElement','HTMLUListElement','HTMLLIElement','HTMLSpanElement','HTMLParagraphElement','HTMLHeadingElement','HTMLTableElement','HTMLIFrameElement','HTMLCanvasElement','HTMLStyleElement','HTMLScriptElement','HTMLDocument','Document','DocumentFragment','ShadowRoot','Text','Comment','SVGElement','SVGSVGElement','DOMParser','EventTarget','AbortController','AbortSignal','DOMException',
-    'UIEvent','MouseEvent','KeyboardEvent','FocusEvent','InputEvent','TouchEvent','PointerEvent','WheelEvent','DragEvent','ClipboardEvent','AnimationEvent','TransitionEvent','MessageEvent','ProgressEvent','CompositionEvent','PopStateEvent','HashChangeEvent','StorageEvent','ErrorEvent','CloseEvent'];
+    'UIEvent','MouseEvent','KeyboardEvent','FocusEvent','InputEvent','TouchEvent','PointerEvent','WheelEvent','DragEvent','ClipboardEvent','AnimationEvent','TransitionEvent','MessageEvent','ProgressEvent','CompositionEvent','PopStateEvent','HashChangeEvent','StorageEvent','ErrorEvent','CloseEvent',
+    // DOM node/collection/CSS interfaces app bundles do `instanceof` against (an
+    // undefined RHS throws "not an object" and aborts the chunk — a single missing
+    // `Response`/`NodeList` cascades through webpack init and kills React hydration).
+    'CharacterData','Attr','CDATASection','ProcessingInstruction','NodeList','HTMLCollection',
+    'DOMTokenList','NamedNodeMap','CSSStyleDeclaration','CSSRule','StyleSheet','MediaList',
+    'DOMStringMap','MutationRecord','MediaQueryList','DOMRect','DOMRectReadOnly','DOMPoint'];
   ctors.forEach(function(n){ if (typeof g[n] === "undefined") { var f = function(){}; f.prototype = {}; try { Object.defineProperty(f, "name", { value: n, configurable: true }); } catch(e){} g[n] = f; } });
+  // EventTarget must be a REAL subclassable base. Apps + libraries write
+  // `class Foo extends EventTarget { … this.addEventListener(…) }` (event buses, modal
+  // managers, state stores — Nike's global-nav modal manager does exactly this); with an
+  // empty `EventTarget.prototype` the instance's `addEventListener` is undefined and the
+  // call throws. An uncaught throw mid-hydration makes React discard the SSR tree and
+  // client-render the whole root (#425), blanking server-rendered content. Give the
+  // prototype a working listener registry so subclass instances behave as event targets.
+  (function(){
+    var ET = g.EventTarget;
+    if (ET && ET.prototype && typeof ET.prototype.addEventListener !== "function") {
+      ET.prototype.addEventListener = function(type, cb){
+        if (!cb || (typeof cb !== "function" && typeof cb.handleEvent !== "function")) return;
+        var m = this.__etl || (this.__etl = {}); (m[type] = m[type] || []).push(cb);
+      };
+      ET.prototype.removeEventListener = function(type, cb){
+        var m = this.__etl; if (!m || !m[type]) return;
+        var i = m[type].indexOf(cb); if (i >= 0) m[type].splice(i, 1);
+      };
+      ET.prototype.dispatchEvent = function(ev){
+        var m = this.__etl, type = ev && ev.type, list = m && type && m[type];
+        if (list) { try { if (!ev.target) ev.target = this; ev.currentTarget = this; } catch(e){}
+          for (var i = 0; i < list.length; i++){ var cb = list[i];
+            try { typeof cb === "function" ? cb.call(this, ev) : cb.handleEvent(ev); } catch(e){} } }
+        return !(ev && ev.defaultPrevented);
+      };
+    }
+  })();
   // make `node instanceof HTMLElement/Element/Node/...` work for native DOM nodes (jest-dom's
   // checkHtmlElement + many libs rely on it) via Symbol.hasInstance keyed on nodeType.
   function iface(name, pred){ var f = g[name] || function(){}; try { Object.defineProperty(f, Symbol.hasInstance, { configurable: true, value: pred }); } catch(e){} g[name] = f; }
@@ -168,6 +201,50 @@
   iface('HTMLInputElement', function(o){ return isNode(o) && o.nodeType === 1 && String(o.tagName).toUpperCase() === 'INPUT'; });
   iface('HTMLTextAreaElement', function(o){ return isNode(o) && o.nodeType === 1 && String(o.tagName).toUpperCase() === 'TEXTAREA'; });
   iface('HTMLSelectElement', function(o){ return isNode(o) && o.nodeType === 1 && String(o.tagName).toUpperCase() === 'SELECT'; });
+  // Node subtypes keyed on nodeType (CharacterData is the Text/Comment/CDATA base).
+  iface('CharacterData', function(o){ return isNode(o) && (o.nodeType === 3 || o.nodeType === 4 || o.nodeType === 8); });
+  iface('Attr', function(o){ return isNode(o) && o.nodeType === 2; });
+  iface('CDATASection', function(o){ return isNode(o) && o.nodeType === 4; });
+  iface('ProcessingInstruction', function(o){ return isNode(o) && o.nodeType === 7; });
+  // CSSStyleDeclaration: what el.style / getComputedStyle() return (has getPropertyValue).
+  iface('CSSStyleDeclaration', function(o){ return o != null && typeof o === 'object' && typeof o.getPropertyValue === 'function'; });
+  // Live-ish collections: array-like with length + item(). NodeList also allows forEach.
+  iface('HTMLCollection', function(o){ return o != null && typeof o === 'object' && typeof o.length === 'number' && typeof o.item === 'function'; });
+  iface('NodeList', function(o){ return o != null && typeof o === 'object' && typeof o.length === 'number' && (typeof o.item === 'function' || typeof o.forEach === 'function'); });
+  iface('DOMTokenList', function(o){ return o != null && typeof o === 'object' && typeof o.length === 'number' && typeof o.toggle === 'function'; });
+  // Audio(src) — a real HTMLAudioElement built through the DOM (so it participates in
+  // the tree + carries the media API stubs below), matching `new Audio(url)`.
+  if (typeof g.Audio === 'undefined') {
+    g.Audio = function Audio(src){
+      var el = d.createElement('audio');
+      if (src != null) { try { el.src = String(src); } catch(e){} }
+      return el;
+    };
+    try { g.Audio.prototype = (g.HTMLAudioElement && g.HTMLAudioElement.prototype) || {}; } catch(e){}
+  }
+  // Media-element methods on the shared element prototype (headless has no audio/video
+  // pipeline; these no-op so `el.play()`/`.load()` don't throw and `.play()` still
+  // returns a promise as the spec requires). `canPlayType` reports no support.
+  (function(){
+    var mp = (g.HTMLElement && g.HTMLElement.prototype) || {};
+    if (typeof mp.play !== 'function') mp.play = function(){ return Promise.resolve(); };
+    if (typeof mp.pause !== 'function') mp.pause = function(){};
+    if (typeof mp.load !== 'function') mp.load = function(){};
+    if (typeof mp.canPlayType !== 'function') mp.canPlayType = function(){ return ''; };
+  })();
+  // Worker — a real class with the full interface. A single deno_core isolate has no
+  // second thread, so it doesn't spawn one (the worker body doesn't run); it queues
+  // postMessage + exposes onmessage/onerror + terminate so apps that construct a
+  // Worker (analytics, off-main-thread hashing) don't throw and degrade gracefully.
+  if (typeof g.Worker === 'undefined') {
+    g.Worker = function Worker(url){ this.url = String(url || ''); this.onmessage = null; this.onmessageerror = null; this.onerror = null; this._l = {}; };
+    g.Worker.prototype.postMessage = function(){};
+    g.Worker.prototype.terminate = function(){};
+    g.Worker.prototype.addEventListener = function(t, f){ (this._l[t] = this._l[t] || []).push(f); };
+    g.Worker.prototype.removeEventListener = function(t, f){ var a = this._l[t]; if (a){ var i = a.indexOf(f); if (i >= 0) a.splice(i, 1); } };
+    g.Worker.prototype.dispatchEvent = function(){ return true; };
+    if (typeof g.SharedWorker === 'undefined') { g.SharedWorker = function SharedWorker(url){ this.url = String(url || ''); this.port = { postMessage: function(){}, start: function(){}, close: function(){}, addEventListener: function(){}, removeEventListener: function(){}, onmessage: null }; }; }
+  }
   // Extra HTML*Element constructors the base ctor list omits. App bundles reference these for
   // feature-detect / instanceof / subclassing (MUI's Dialog touches HTMLDialogElement); an
   // undefined reference aborts the chunk mid-hydration, blanking the tree. Single-tag elements get
@@ -340,13 +417,44 @@
     // Element.getClientRects() — no layout engine, so mirror getBoundingClientRect's zero rect as a
     // single-entry DOMRectList-ish (with .item). Libs do getClientRects()[0] / .length; [] would NPE.
     if (!baseProto.getClientRects) baseProto.getClientRects = function(){ var r = this.getBoundingClientRect ? this.getBoundingClientRect() : { x:0,y:0,top:0,left:0,right:0,bottom:0,width:0,height:0 }; var list = [r]; list.item = function(i){ return list[i] || null; }; return list; };
+    // isEqualNode — React 18 hydration calls it on EVERY node to reconcile the server
+    // markup with the client render; without it every comparison throws
+    // "e.isEqualNode is not a function", React reports a hydration mismatch (#418) and
+    // discards the SSR tree → the whole app falls back to a blank client render. Real
+    // spec-shaped deep structural equality (same type/name, same attributes, same
+    // character data, recursively-equal children). Recurses via a helper (not
+    // child.isEqualNode) so it works even on node types that miss the method.
+    if (!baseProto.isEqualNode) {
+      var __nodeEq = function(a, b){
+        if (a === b) return true;
+        if (!a || !b) return false;
+        if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) return false;
+        if (a.nodeType === 1) {
+          var aa = a.attributes || [], ba = b.attributes || [];
+          if ((aa.length || 0) !== (ba.length || 0)) return false;
+          for (var i = 0; i < aa.length; i++) {
+            var at = aa[i], nm = at && (at.name != null ? at.name : at.nodeName);
+            if (nm == null) continue;
+            if (!b.getAttribute || b.getAttribute(nm) !== (at.value != null ? at.value : at.nodeValue)) return false;
+          }
+        } else if ((a.nodeValue || '') !== (b.nodeValue || '')) {
+          return false;
+        }
+        var ac = a.childNodes || [], bc = b.childNodes || [];
+        if ((ac.length || 0) !== (bc.length || 0)) return false;
+        for (var j = 0; j < ac.length; j++) { if (!__nodeEq(ac[j], bc[j])) return false; }
+        return true;
+      };
+      baseProto.isEqualNode = function(other){ return __nodeEq(this, other); };
+      if (!baseProto.isSameNode) baseProto.isSameNode = function(other){ return this === other; };
+    }
     // getElementsByTagName / getElementsByClassName / getElementsByName over querySelectorAll. The
     // native binding ships querySelector(All) only; libs (jQuery's load-time support probe does
     // el.getElementsByTagName('input')[0].checked) need these. Add to the shared element prototype
     // (guarded so a native impl wins if ever added).
     // Walk descendants via `children` (works on a DETACHED subtree, unlike querySelectorAll which
     // matches only connected nodes — same reason select.options walks children).
-    var geWalk = function(node, match){ var out = []; (function visit(n){ var kids = n.children || []; for (var i=0;i<kids.length;i++){ if (match(kids[i])) out.push(kids[i]); visit(kids[i]); } })(node); out.item = function(i){ return out[i] || null; }; return out; };
+    var geWalk = function(node, match){ var out = []; (function visit(n){ var kids = n.children || []; for (var i=0;i<kids.length;i++){ if (match(kids[i])) out.push(kids[i]); visit(kids[i]); } })(node); out.item = function(i){ return out[i] || null; }; out.namedItem = function(nm){ for (var i=0;i<out.length;i++){ var e=out[i]; if (e && (e.id === nm || (e.getAttribute && e.getAttribute('name') === nm))) return e; } return null; }; return out; };
     var geByTag = function(t){ var want = String(t).toUpperCase(); return geWalk(this, function(e){ return want === '*' || String(e.tagName).toUpperCase() === want; }); };
     var geByClass = function(c){ var want = String(c).trim().split(/\s+/).filter(Boolean); return geWalk(this, function(e){ var cls = String(e.className || '').split(/\s+/); return want.every(function(w){ return cls.indexOf(w) >= 0; }); }); };
     var geByName = function(nm){ var want = String(nm); return geWalk(this, function(e){ return e.getAttribute && e.getAttribute('name') === want; }); };
@@ -585,6 +693,26 @@
       if (g.HTMLElement) g.HTMLElement.prototype = baseProto;
       if (g.Element) g.Element.prototype = baseProto;
       if (g.Node) g.Node.prototype = baseProto;
+      // Lazy `<style>.sheet` for EVERY <style> — server-rendered ones (from the HTML
+      // parse / innerHTML) never pass through `createElement`, yet emotion /
+      // styled-components hydrate by calling `styleEl.sheet.insertRule(...)` on them.
+      // Without a `.sheet` that throws and aborts the chunk, blanking the styling.
+      // `mkSheet`'s insertRule reflects into `el.textContent`, so the serialized HTML
+      // then carries the injected CSS. Defined on the shared element prototype and
+      // WITHOUT a descriptor guard (the NON_MASKING interceptor makes every lookup
+      // report a descriptor, so a guard would wrongly skip). Caches per element.
+      Object.defineProperty(baseProto, 'sheet', {
+        configurable: true,
+        get: function(){
+          var tag = this.tagName;
+          if (!tag || String(tag).toUpperCase() !== 'STYLE') return null;
+          if (!this.__tcSheet) {
+            try { this.__tcSheet = mkSheet(this); sheets.push(this.__tcSheet); }
+            catch (e) { return mkSheet(this); }
+          }
+          return this.__tcSheet;
+        }
+      });
       var docProto = Object.getPrototypeOf(d) || baseProto;
       if (g.Document) g.Document.prototype = docProto;
       if (g.HTMLDocument) g.HTMLDocument.prototype = docProto;

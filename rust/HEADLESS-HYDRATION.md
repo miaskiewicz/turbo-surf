@@ -782,3 +782,205 @@ re-opened a live session, so the reloaded doc stayed the raw un-hydrated shell (
 Tickets this round: FLUX-1340 (leave CSV parse → flux-apis#260), FLUX-1341 (tax-reg predicate →
 payroll-app#212), FLUX-1342 (payroll-config login nav → payroll-app#213); FLUX-1338/1339 are
 unrelated product features filed the same day.
+
+## Public-site rendering triage (2026-07-08, Cycle 22) — wikipedia / google / nike
+
+Goal: render public homepages via the **raster** screenshot path (`hydrate()` → collect
+css/images → `screenshotWithAssets`), not the authenticated SPA path. Harness scripts are in
+the session scratchpad (`wikihydshot.cjs`, `hydshot.cjs`, `googconsent.cjs`) — fetch the DOM
+in Chromium, `native.hydrate(rawHtml, finalUrl, "", UA)`, then screenshot the hydrated HTML.
+
+`hydrate()` **works on all three** (Wikipedia 944ms, google ~1.9s, nike 7.5s — the JS ran,
+DOM grew). The gaps are NOT hydration failures; they are rendering/reveal issues:
+
+### Wikipedia — SOLVED, ships faithfully
+Static OR hydrated both render like Chromium after the 0.2.7 engine batch (mask-image icons,
+self-ref `var()`, pseudo-element non-leak, flex fixes, table min-content, `;`-in-url parser).
+
+**TOC caret — root cause found + FIXED (Cycle 23, raster-side).** The caret
+(`.mw-ui-icon-wikimedia-expand`) is NOT dropped from the box tree — the empty icon span lays
+out as a 20×20 box. It vanished because its `mask-image` is an inline **`data:image/svg+xml`
+URI**, and the fetch step skips `data:` (nothing to fetch), so the mask resolved to nothing →
+`prepend_mask_image` in html2pdf bails at `probe_source` (resolver miss) → **no `Image`
+fragment emitted** → the box paints transparent. The committed mask test only ever covered an
+*external* `url(caret.svg)` asset, so this gap was invisible. Fix: the raster now decodes
+`data:` image URIs itself (`add_data_uri_images` in `image_paint.rs`) — quote-aware `url()`
+scan keyed EXACTLY as html2pdf's `url_token` (retains the CSS `\"` escaping), base64 + plain
+(`%23`/`\"`-decoded) payloads — and merges them into `decoded` so both the layout resolver
+(`png_map`) and the paint pass find them. General win: every inline-SVG mask/background now
+paints (nike/others too), not just Wikipedia. Covered by
+`datauri_mask_image_icon_paints_without_a_fetched_asset` + unit tests.
+
+**Remaining caret polish (layout-engine, html2pdf — deferred):** the caret now paints as the
+raw down-chevron `⌄` mid-row; Chromium shows `>` in a left gutter. Two html2pdf gaps: (a) the
+collapsed toggle's `transform: rotate(-90deg)` isn't applied to the mask (down-chevron not
+rotated to point right), and (b) the `.vector-toc-toggle` sits in the text flow instead of the
+row's left gutter. Both are `transform`/positioning work in the separate repo — overlaps the
+nike "overlay chrome + transforms paint weakly" item. Non-caret icons all render.
+
+### Box-shadow / overlay card chrome — IMPLEMENTED (Cycle 23), release-pending
+Overlay cards/modals read as flat rectangles because turbo painted no `box-shadow`.
+Added end-to-end: **turbo-html2pdf** (`feat/css-positioning`) now parses `box-shadow`
+(`[inset]? <ox> <oy> <blur>? <spread>? <color>?`, comma layers → first kept,
+`currentColor` default) into a `BoxShadow` on `FragmentContent::Box`; **turbo-surf
+raster** paints it — an outer shadow stamped as a rounded-rect silhouette, 3-pass
+separable box-blur (≈ Gaussian, σ≈blur/2) in PNG, `feGaussianBlur` filter in SVG,
+composited behind the box. Proven on a synthetic consent-card (soft drop shadow +
+rounded corners + tinted button shadow, reads as a real modal). Covered by
+`box_shadow_paints_a_soft_offset_shadow_behind_a_card` (raster) + `box_shadow_tests`
+(html2pdf parser). **Blocked on landing in turbo-surf:** raster consumes it via a
+TEMP `[patch.crates-io]` → needs an html2pdf **0.2.8** release, then bump the dep +
+drop the patch. Inset shadows, multiple layers, and `transform`ed shadows are v1-out.
+Deferred: gradients + CSS `transform` (the Wikipedia caret rotate + nike hero) are the
+next engine features on the same fragment-attribute pattern.
+
+### Linear-gradient backgrounds — IMPLEMENTED (Cycle 24), release-pending
+`background`/`background-image: linear-gradient(...)` now paints (hero sections,
+buttons, cards). **turbo-html2pdf 0.2.9** parses it into a `LinearGradient` (angle +
+positioned stops) on `FragmentContent::Box` — angle (`<deg>`) or `to <side>/<corner>`
+(default `to bottom`), `rgb/rgba/#hex/named` stops with optional `%` positions
+(unpositioned spread evenly), nested-comma-safe, `radial-`/`conic-` skipped;
+**turbo-surf raster** paints it via tiny-skia `LinearGradient` (PNG, start/end points
+across the box per the CSS angle, clipped to the rounded rect) + native
+`<linearGradient>` (SVG). Proven on a demo (to-right, 135° diagonal, 3-stop
+red→green→blue with `%`, and a purple gradient card composited with box-shadow +
+border-radius + text). Covered by `linear_gradient_background_paints_left_to_right`
+(raster) + `gradient_tests` (html2pdf parser). Same release-coupling as box-shadow:
+needs html2pdf **0.2.9** published, then bump the dep. **CSS `transform` still deferred.**
+
+### React-18 hydration — GENERAL fixes (Cycle 26): defer order + env globals + `<style>.sheet`
+Nike's app (like every React-18 SSR site) wasn't hydrating AT ALL — three general
+engine bugs, all fixed:
+1. **`defer` script order.** `__hydrate` ran `<script>`s in raw `querySelectorAll`
+   DOM order, ignoring `defer`. Sites put their app's `<script defer>` EARLY in
+   `<head>` but the framework vendor (`react.js`, non-defer) LATE near `</body>`
+   (Nike: `main.js` @byte 88k defer, `react.js` @608k non-defer). Raw order ran
+   `main` first → `React is not defined` → nothing hydrates. Fix (`runtime.rs`
+   `__hydrate`): non-defer scripts first (document order), then `defer` scripts.
+2. **Missing Web/DOM interface globals.** `x instanceof Response/Request/NodeList/
+   HTMLCollection/CSSStyleDeclaration/Attr/CDATASection/MutationRecord/...` threw
+   "Right-hand side is not an object" when the global was undefined — and one such
+   throw in a shared webpack helper cascades to kill React hydration for the whole
+   page. Fix: real `Response`/`Request` classes wired to `fetch` (`runtime.rs`);
+   the DOM/collection/CSS interface constructors + real `Audio(src)` + full-shape
+   `Worker`/`SharedWorker` in the versioned env (turbo-test browser_env → 0.3.10).
+   Result: **instanceof errors 38 → 0; hydration completes** (DOM grows +376KB).
+3. **`<style>.sheet` on SSR style tags** (turbo-test 0.3.9): emotion/styled-components
+   speedy-mode `styleEl.sheet.insertRule` on server-rendered `<style>` tags now works,
+   so client-injected CSS is captured (Nike styleChars 483K → 894K through the pure
+   hydrate path — no Chromium-CSSOM shortcut needed).
+
+**Nike still not a clean screenshot:** hydration now RUNS but hits a Next.js
+client-side exception → it navigates to `/_error` and the homepage re-renders blank
+(the SSR hero content survives in the page data, `"A LENDA CONTINUA VIVA"`, but the
+error boundary trips). Plus the OneTrust preference-center panel renders in-flow.
+Those are Next.js/consent-state specific, past the general engine gaps (now fixed).
+Also: CSS `transform` (0.2.11) now paints — carousel slides translate, the Wikipedia
+caret can rotate — so slides no longer pile at one spot.
+
+### Nike — images FIXED (Cycle 25): AVIF `Accept` + image `%` sizing
+Nike's homepage rendered text-only, zero imagery. Two independent root causes, both
+now fixed:
+1. **AVIF.** Nike's `f_auto` CDN serves **AVIF** to a Chrome UA that accepts it (the
+   impersonate fingerprint's `Accept` advertises `image/avif`). turbo's `image` crate
+   has no AVIF decoder → every hero/product image silently dropped. Fix: `fetch_bytes`
+   (napi) now sends an image `Accept` **without** `image/avif`
+   (`image/webp,image/png,image/jpeg,…`), so the CDN falls back to WebP, which turbo
+   decodes. General: fixes every `f_auto`/Cloudinary site.
+2. **`width:100%` collapse.** Even fetched, the images were 0×0 — `size_replaced`
+   resolved `%` against a 0 basis (html2pdf 0.2.10 fix). Together the Ronaldo hero,
+   Mercurial boots, and tennis imagery now render (verified).
+
+**Remaining nike:** the cookie-modal (nike's own `cookie-modal-base`, `position:fixed`
+overlay, `display:block` in Chromium too) renders **in-flow** at the top instead of as a
+fixed overlay — turbo doesn't take `position:fixed` out of flow for the paint, so a wall
+of policy text pushes the page down. Fixed/overlay positioning is the next gap.
+
+### Google — box-tree DROP via cascade mis-computation (Cycle 25, NOT fixed)
+Still blank. Ruled out, in order: JS-reveal (raw==hydrated blank), overflow/clip
+(forcing `overflow:visible;height:auto` + bright bg on `.RNNXgb` still paints nothing),
+and flex-height collapse (added flex `min-height→taffy` in 0.2.10; `.RNNXgb` has
+`min-height:50px` but the search box STILL doesn't appear). Since forcing everything
+visible + a background on the search box yields nothing, the box is **not in the box
+tree** — an ancestor computes to `display:none`/`opacity:0`/`visibility:hidden` in
+turbo's cascade (which Chromium overrides). Google ships obfuscated hide classes
+(`.MDfoTd{opacity:0}`, `.VH47ed{visibility:hidden}`, `.gb_*{display:none}`); turbo is
+picking a wrong winning declaration (specificity/order) for one search-chain ancestor
+and dropping the subtree. Next: dump turbo's computed `display/opacity/visibility` per
+search-chain class to find the mis-cascaded rule. Single-site, deep — deprioritized.
+
+### Google — NOT a JS-reveal bug (hypothesis disproven, Cycle 23) [see Cycle 25 above]
+Consent dismissal now works generally (`consentshot.cjs` clicks `#L2AGLb` /
+`#onetrust-accept-btn-handler` / text-matched "Accept all" across main + child frames).
+But google's homepage still renders **fully blank** in turbo — and crucially: rendering
+the Chromium-**revealed** DOM with NO hydrate is byte-identical to the hydrated render
+(`goog-raw.png` == `goog-hyd.png`, both 39842 B, 102 `display:none` each). So the earlier
+"turbo re-hides via JS-reveal" theory is **wrong** — turbo collapses the page independent
+of JS. Chromium trace of the search box `textarea.gLFyf` (visible at 344,377 446×50) shows
+its ENTIRE ancestor chain to `<body>` is visible — `gLFyf/a4bIc/SDkEP/RNNXgb`(flex) →
+`A8SBwf`(block,rel) → form → `o3j99 ikrT4e KEY6ib`(block) → `L3eUgb`(flex,the viewport
+centering column) → body — **no `display:none`/`opacity:0`/`visibility:hidden` anywhere**.
+So turbo either (a) mis-cascades a `display:none` onto this chain (`.o3j99` base is shared
+with the hidden `.o3j99.qarstb` consent div — a specificity/order bug would hide both), or
+(b) flex-collapses the full-viewport `L3eUgb` centering column. Next step is an html2pdf
+`zz_` probe with google's CSS to see which class computes `display:none` / which flex box
+sizes 0. Single-site, unbounded; lower ROI than the general engine features above.
+
+### Google — content lays out, but google's OWN css hides it (JS-reveal wall) [SUPERSEDED — see above]
+- With EXTERNAL css only → 44 text lines lay out. With external + INLINE (head) styles → **0**.
+  So a head `<style>` rule hides everything.
+- The raster uses `collect_style_blocks` (raw regex, grabs `<head>` styles too); a plain
+  `layout_html` probe uses `collect_style_css` (html5ever **drops `<head>`**) — that's why a
+  naive probe "renders" and the real raster is blank. **When diagnosing, always apply the head
+  styles.**
+- Traced the consent text ("continuar"/"continue"): its ancestors are
+  `<div class="o3j99 qarstb"> display:none` and another `<div> display:none`. Google ships the
+  modal in `display:none` containers and reveals it via JS (portal/clone/class-toggle). turbo's
+  hydration runs the JS but the serialized DOM still has `display:none` → blank, consent state
+  AND homepage state (both `turbo≈39KB` = empty). Obfuscated hide classes seen:
+  `.MDfoTd{opacity:0}`, `.VH47ed{visibility:hidden}`, `.KZMqi{left:-9999px}`, `.gb_*{display:none}`.
+- **Next agent:** find WHICH class/attr google's JS toggles to un-hide the modal (is it an
+  iframe? a body-appended portal? a class flip on `.o3j99`?), and either (a) make the render tier
+  reproduce that reveal, or (b) as a harness hack, force the reveal class before screenshot. This
+  is per-site reverse-engineering of a JS-reveal app, not an engine cascade bug (turbo applies
+  `display:none` correctly, same as Chromium pre-reveal).
+
+### Nike — Emotion CSS-in-JS WORKS; barren = consent overlay + weak overlay chrome + images-behind-modal
+- Nike's styling is **258 inline `<style>` blocks / 991 `.css-xxxxx` Emotion rules** (not
+  external). CSS-in-JS is **already supported** — proved by a committed harness
+  (`turbo-surf-raster/tests/screenshot.rs::css_in_js_inline_style_blocks_apply`: hashed classes +
+  `>` combinator + `@media` all cascade). So barrenness is NOT a cascade gap.
+- Nike serves a **cookie-consent wall** (Portuguese, geo/bot-triggered). Chromium shows it as a
+  styled white card over the nav+hero; turbo shows the consent TEXT unstyled → the overlay
+  **card chrome** (position:fixed backdrop, box-shadow, border-radius, transforms) paints weakly
+  and the modal doesn't read as a card. Product images render behind the modal.
+- Images: nike uses `<img loading=lazy data-landscape-url=… data-portrait-url=…>` (no `src`).
+  `delazy_images`/`LAZY_IMG_ATTRS` **already handles** `data-landscape-url`/`data-portrait-url`
+  → they DO get a `src` + are fetched (hydshot fetched 82). The "no images" was the consent
+  overlay covering them. A `layout_html`-only probe shows 0 images because it has no resolver —
+  not a real signal.
+- **Next agent:** to get nike's real homepage, dismiss the consent wall in the Chromium capture
+  (click Accept) BEFORE `hydrate()` (google's `#L2AGLb` pattern), OR pass consent cookies. Then
+  the gaps become: overlay/fixed-position card chrome fidelity + gradient/box-shadow painting.
+
+**UPDATE (Cycle 23) — nike homepage now renders content.** `consentshot.cjs` dismisses the
+wall (`#onetrust-accept-btn-handler` / text "Accept all", main + child frames) before capture;
+turbo then lays out the real homepage (nav + hero copy "O TEU JOGO, AS TUAS REGRAS" + product
+sections "Nike Football / A LENDA CONTINUA VIVA" etc.). box-shadow (above) covers the card
+chrome. Remaining nike gaps are its own deep layout: hero/product IMAGES stay sparse (lazy
+`data-*-url` fetch fine, but the absolute/positioned hero grid doesn't place them where Chromium
+does) + gradient backgrounds. Those are general engine features (positioning + gradient), not
+nike-specific.
+
+### Gotchas for the next agent
+- **macOS has no `timeout`** — `timeout <cmd>` errors "command not found" and looks like a hang.
+  Use `run_in_background` + poll, or `gtimeout`. Cost me multiple false "it hangs" diagnoses.
+- **Rebuild the addon with `--features impersonate`** (anti-bot) and verify the dylib timestamp
+  moved — `cargo build -p turbo-surf-napi` produces the dylib that index.js copies to
+  `turbo-surf.dev.node`; a stale `.dev.node` silently serves old code.
+- **Local turbo-html2pdf-core:** now released as **0.2.7** (crates.io). No `[patch.crates-io]`
+  needed anymore. If iterating on the engine again, add the patch back AND bump the local
+  workspace version to satisfy the raster's `^0.2.x` req, else cargo silently uses the registry.
+- Diagnostic probes live as throwaway `tests/zz_*.rs` (color-inject `background-color:#f00
+  !important`, walk `Fragment` boxes / `StyledNode` computed styles). Run in RELEASE
+  (`cargo test --release`) — debug full-page layout is too slow.

@@ -18,14 +18,14 @@ use turbo_surf_core::challenge::{self, ChallengeSolver, SolveContext};
 use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::crawl::{crawl as run_crawl, CrawlOptions};
 use turbo_surf_core::fingerprint;
-use turbo_surf_core::net::{fetch_html, FetchOptions};
+use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
 use turbo_surf_core::robots::{RobotsCache, RobotsFetcher};
 use turbo_surf_page::{batch as batch_urls, TurboNavigator};
 use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
-pub const VERSION: &str = "0.3.1";
+pub const VERSION: &str = "0.3.5";
 
 /// One agent session: the current page URL + parsed tree + nav history, plus the
 /// browser-ish state agents expect (UA / extra headers / cookie jar / JS mode) and
@@ -54,6 +54,10 @@ pub struct Session {
     /// Layout viewport for `screenshot` (and any future geometry). Defaults to a
     /// common desktop size; overridable via `set_viewport` or per-call args.
     viewport: raster::Viewport,
+    /// Seed consent-wall cookies (google/youtube "before you continue") so the
+    /// real page is served instead of a JS-gated interstitial. `None` = the
+    /// default (on); set `Some(false)` to send the raw consent-gated response.
+    bypass_consent: Option<bool>,
 }
 
 impl Session {
@@ -128,6 +132,7 @@ impl Session {
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
             profile: Some(&profile),
+            bypass_consent: self.bypass_consent.unwrap_or(true),
             ..Default::default()
         };
         let res = fetch_html_with(url, opts).await?;
@@ -555,19 +560,34 @@ impl Session {
         } else {
             String::new()
         };
+        // `<img>` + `background-image` bytes, fetched over the session client
+        // (impersonation + cookies apply), unless `{ images: false }`.
+        let want_images = args.get("images").and_then(Value::as_bool).unwrap_or(true);
+        let images = if want_images {
+            self.fetch_page_images(&html, &css).await
+        } else {
+            raster::ImageAssets::new()
+        };
+        // `full_page: true` grows the image to the full content height instead of
+        // clipping to the viewport height (width still drives layout).
+        let full_page = args
+            .get("full_page")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         match arg_str(args, "format").unwrap_or("png") {
             "svg" => {
-                let svg = raster::screenshot_svg_with_css(&html, &css, vp)?;
+                let svg = raster::screenshot_svg_with_assets(&html, &css, vp, &images, full_page)?;
                 Ok(json!({
                     "format": "svg", "mimeType": "image/svg+xml",
-                    "width": vp.width, "height": vp.height, "svg": svg,
+                    "width": vp.width, "height": svg_height(&svg).unwrap_or(vp.height), "svg": svg,
                 }))
             }
             "png" => {
-                let png = raster::screenshot_png_with_css(&html, &css, vp)?;
+                let png = raster::screenshot_png_with_assets(&html, &css, vp, &images, full_page)?;
+                let (w, h) = png_dims(&png).unwrap_or((vp.width, vp.height));
                 Ok(json!({
                     "format": "png", "mimeType": "image/png",
-                    "width": vp.width, "height": vp.height, "base64": BASE64.encode(&png),
+                    "width": w, "height": h, "base64": BASE64.encode(&png),
                 }))
             }
             other => Err(format!("screenshot: unknown format '{other}' (png|svg)")),
@@ -592,6 +612,51 @@ impl Session {
             }
         }
         css
+    }
+
+    // Fetch the page's `<img>` + `background-image` bytes, keyed by their raw
+    // reference (the resolver key the raster expects), resolving each against the
+    // current page URL via the session client. Non-URL / `data:` refs and fetch
+    // failures are skipped; the count is capped so a hostile page can't fan out.
+    async fn fetch_page_images(&mut self, html: &str, css: &str) -> raster::ImageAssets {
+        const MAX_IMAGES: usize = 60;
+        let base = self.url.clone();
+        let mut assets = raster::ImageAssets::new();
+        // `<img>`/inline-style/`<style>`-block refs from the HTML, plus
+        // `background-image` refs from the external `<link>` stylesheets — the layout
+        // paints those backgrounds, but a HTML-only scan never fetches their bytes.
+        let names = raster::image_urls(html)
+            .into_iter()
+            .chain(raster::image_urls_in_css(css))
+            .take(MAX_IMAGES);
+        let mut seen = std::collections::HashSet::new();
+        for name in names {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            let Some(url) = turbo_surf_core::url::resolve(&base, &name) else {
+                continue;
+            };
+            if let Ok(bytes) = self.fetch_image_bytes(&url).await {
+                assets.insert(name, bytes);
+            }
+        }
+        assets
+    }
+
+    // Fetch a single resource as raw bytes (no charset decode — image data must
+    // survive verbatim) over the session client/jar/profile.
+    async fn fetch_image_bytes(&mut self, url: &str) -> Result<Vec<u8>, String> {
+        self.requests.push(url.to_string());
+        let profile = self.profile_for(url);
+        let opts = FetchOptions {
+            allow_non_html: true,
+            headers: self.request_headers(),
+            jar: Some(&mut self.jar),
+            profile: Some(&profile),
+            ..Default::default()
+        };
+        Ok(fetch_bytes(url, opts).await.map_err(|e| e.to_string())?.1)
     }
 
     // Report the active stealth posture: the per-host fingerprint profile this
@@ -641,6 +706,25 @@ async fn fetch_html_with(
 ) -> Result<(String, String, u16), String> {
     let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
     Ok((res.final_url, res.html, res.status))
+}
+
+// The (width, height) in a PNG's IHDR (big-endian at bytes 16..24), so the
+// screenshot reply reports the real image size — important for `full_page`,
+// where the height is the content height, not the viewport.
+fn png_dims(png: &[u8]) -> Option<(u32, u32)> {
+    let b = png.get(16..24)?;
+    let w = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+    let h = u32::from_be_bytes([b[4], b[5], b[6], b[7]]);
+    Some((w, h))
+}
+
+// The `height="N"` of the raster's SVG `<svg>` header (the raster emits an
+// integer px height), for the same `full_page`-aware size reporting as PNG.
+fn svg_height(svg: &str) -> Option<u32> {
+    let at = svg.find("height=\"")? + "height=\"".len();
+    let rest = &svg[at..];
+    let end = rest.find('"')?;
+    rest[..end].trim().parse().ok()
 }
 
 // FNV-1a (64-bit) over a string — the Akamai script-hash seed for analyze_akamai.
@@ -922,16 +1006,25 @@ pub fn tools() -> Value {
         (
             "screenshot",
             "Synthetic screenshot of the current page or a hydration-trail \
-             snapshot — native layout+paint, no browser. Fetches the page's \
-             external <link> stylesheets (via the session client, so \
-             impersonation + cookies apply) and cascades them unless \
-             external_css:false. Args: format (png|svg), snapshot? (dom_history \
-             index), width?/height? (override viewport), external_css?. \
+             snapshot — native layout+paint, no browser. Honors CSS \
+             position/z-index stacking. Fetches the page's external <link> \
+             stylesheets and its <img>/background-image bytes (via the session \
+             client, so impersonation + cookies apply); PNG/JPEG/GIF/WebP/SVG \
+             images are painted, others fall back to a placeholder. Args: format (png|svg), \
+             snapshot? (dom_history index), width?/height? (override viewport), \
+             external_css? (default true), images? (default true), \
+             full_page? (default false — true grows height to full content). \
              PNG returns base64; SVG returns the document string.",
         ),
         (
             "set_viewport",
             "Set the default layout viewport (width/height px) used by screenshot",
+        ),
+        (
+            "set_bypass_consent",
+            "Toggle consent-wall bypass (google/youtube 'before you continue' \
+             interstitial). On by default: seeds the consent cookie so the real \
+             page is served. Arg: enabled? (default true)",
         ),
         (
             "run_playwright",
@@ -1024,6 +1117,13 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
         "set_mode" => {
             session.mode = arg_str(args, "mode").unwrap_or("no-js").to_string();
             Ok(json!({ "mode": session.mode }))
+        }
+        "set_bypass_consent" => {
+            // Toggle consent-wall cookie seeding (google/youtube interstitial).
+            // Default is on; pass `{ "enabled": false }` to fetch the raw response.
+            let on = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            session.bypass_consent = Some(on);
+            Ok(json!({ "bypassConsent": on }))
         }
         "eval_js" | "evaluate" => session.eval_js(script()?),
         "inject_js" => session.inject_js(script()?).await,

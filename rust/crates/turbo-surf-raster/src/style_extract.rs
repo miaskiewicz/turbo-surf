@@ -84,14 +84,273 @@ pub fn stylesheet_hrefs(html: &str) -> Vec<String> {
             && !rel_val.split_whitespace().any(|t| t == "alternate");
         if is_sheet {
             if let Some(href) = attr_value(tag, tag_lower, "href") {
-                if !href.trim().is_empty() {
-                    hrefs.push(href.trim().to_string());
+                let href = html_unescape(href.trim());
+                if !href.is_empty() {
+                    hrefs.push(href);
                 }
             }
         }
         cursor = end + 1;
     }
     hrefs
+}
+
+/// Decode the HTML entities that appear in URL attributes — chiefly `&amp;`,
+/// which HTML *requires* in an `href`/`src` query string (`?a=1&amp;b=2`). Left
+/// undecoded, the fetched URL carries a literal `&amp;` and the server sees a
+/// bogus `amp;b` parameter (this is why Wikipedia's `load.php?...&amp;only=styles`
+/// stylesheet returned a stub instead of the skin CSS). Covers the named entities
+/// URLs use plus numeric (`&#38;` / `&#x26;`) forms; unknown entities pass through.
+fn html_unescape(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'&' {
+            out.push(bytes[i] as char);
+            i += 1;
+            continue;
+        }
+        match s[i..].find(';').map(|semi| &s[i + 1..i + semi]) {
+            Some(entity) => {
+                push_entity(entity, &mut out);
+                i += entity.len() + 2; // '&' + entity + ';'
+            }
+            None => {
+                out.push('&');
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Append the character for one entity body (between `&` and `;`) to `out`, or the
+/// verbatim `&entity;` if it isn't one we decode.
+fn push_entity(entity: &str, out: &mut String) {
+    let decoded = match entity {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" | "#39" => Some('\''),
+        _ => numeric_entity(entity),
+    };
+    match decoded {
+        Some(c) => out.push(c),
+        None => {
+            out.push('&');
+            out.push_str(entity);
+            out.push(';');
+        }
+    }
+}
+
+/// A numeric character reference: `#38` (decimal) or `#x26` (hex).
+fn numeric_entity(entity: &str) -> Option<char> {
+    let digits = entity.strip_prefix('#')?;
+    let code = match digits.strip_prefix(['x', 'X']) {
+        Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+        None => digits.parse::<u32>().ok()?,
+    };
+    char::from_u32(code)
+}
+
+/// Every image reference the layout engine can paint, in source order and
+/// de-duplicated: `<img src>` values and `background-image: url(...)` urls. Values
+/// are returned **verbatim** — exactly the resolver key turbo-html2pdf uses (the
+/// raw `src`, or the unquoted `url(...)` inner) — so the caller resolves each
+/// against the page URL, fetches the bytes, and stores them under the same key.
+/// `data:` URIs are skipped (self-contained, nothing to fetch).
+pub fn image_urls(html: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    img_srcs(html, &mut urls);
+    background_image_urls(html, &mut urls);
+    let mut seen = std::collections::HashSet::new();
+    urls.retain(|u| !u.starts_with("data:") && seen.insert(u.clone()));
+    urls
+}
+
+/// Like [`image_urls`] but over a raw CSS string — the `background-image: url(...)`
+/// references in external `<link>` stylesheets, which a scan of the HTML alone
+/// misses (the layout engine paints them, but the caller never fetches their bytes).
+/// Returned verbatim (the resolver key), `data:` URIs skipped. Callers should scan
+/// both `image_urls(html)` and `image_urls_in_css(external_css)`.
+pub fn image_urls_in_css(css: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    background_image_urls(css, &mut urls);
+    let mut seen = std::collections::HashSet::new();
+    urls.retain(|u| !u.starts_with("data:") && seen.insert(u.clone()));
+    urls
+}
+
+/// Attributes carrying an image URL when `src` is absent/empty — lazy-loading and
+/// responsive patterns modern sites use (Nike puts the URL in `data-landscape-url`,
+/// no `src` at all). `srcset`/`data-srcset` hold a candidate *list*; the first URL
+/// is taken. Order = preference.
+const LAZY_IMG_ATTRS: &[&str] = &[
+    "data-src",
+    "data-original",
+    "data-lazy-src",
+    "data-lazy",
+    "data-image-src",
+    "data-landscape-url",
+    "data-portrait-url",
+    "srcset",
+    "data-srcset",
+];
+
+/// The first URL in a `srcset` value (`"a.png 1x, b.png 2x"` → `a.png`).
+fn first_srcset_url(v: &str) -> &str {
+    v.split(',')
+        .next()
+        .unwrap_or(v)
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+}
+
+/// The best image URL for an `<img>` tag: a non-empty `src`, else the first
+/// lazy/responsive attribute that carries one.
+fn best_img_url(tag: &str, tag_lower: &str) -> Option<String> {
+    if let Some(src) = attr_value(tag, tag_lower, "src") {
+        let src = html_unescape(src.trim());
+        if !src.is_empty() {
+            return Some(src);
+        }
+    }
+    for attr in LAZY_IMG_ATTRS {
+        if let Some(v) = attr_value(tag, tag_lower, attr) {
+            let v = v.trim();
+            let url = if attr.contains("srcset") {
+                first_srcset_url(v)
+            } else {
+                v
+            };
+            let url = html_unescape(url.trim());
+            if !url.is_empty() {
+                return Some(url);
+            }
+        }
+    }
+    None
+}
+
+/// Run `f` for each `<img>` tag with its (raw, lower) slice and its `[start,end)`.
+fn for_each_img(html: &str, mut f: impl FnMut(&str, &str, usize, usize)) {
+    let lower = html.to_ascii_lowercase();
+    let bytes = html.as_bytes();
+    let mut cursor = 0;
+    while let Some(rel) = lower[cursor..].find("<img") {
+        let tag_start = cursor + rel;
+        // Whole tag name: char after `<img` must end it (ws / `>` / `/`).
+        let after = bytes.get(tag_start + 4).copied();
+        if !matches!(after, Some(b) if b == b'>' || b == b'/' || b.is_ascii_whitespace()) {
+            cursor = tag_start + 4;
+            continue;
+        }
+        let end = lower[tag_start..]
+            .find('>')
+            .map(|g| tag_start + g)
+            .unwrap_or(html.len());
+        f(
+            &html[tag_start..end],
+            &lower[tag_start..end],
+            tag_start,
+            end,
+        );
+        cursor = end + 1;
+    }
+}
+
+/// Push the resolved image URL (`src`, or a lazy/responsive fallback) of every
+/// `<img>` onto `out`.
+fn img_srcs(html: &str, out: &mut Vec<String>) {
+    for_each_img(html, |tag, tag_lower, _, _| {
+        if let Some(url) = best_img_url(tag, tag_lower) {
+            out.push(url);
+        }
+    });
+}
+
+/// Fill in a missing `<img src>` from its lazy/responsive attribute, so the layout
+/// (which sizes/paints an image box from `src`) renders lazy-loaded images whose
+/// JS `src`-swap didn't run headless. `<img>`s that already have a `src` are left
+/// as-is. The injected URL matches what [`image_urls`] returns, so the caller's
+/// fetched bytes resolve.
+pub fn delazy_images(html: &str) -> String {
+    // Collect insertions (byte offset → text) then splice once, back-to-front.
+    let mut inserts: Vec<(usize, String)> = Vec::new();
+    for_each_img(html, |tag, tag_lower, start, _end| {
+        let has_src = attr_value(tag, tag_lower, "src").is_some_and(|s| !s.trim().is_empty());
+        if has_src {
+            return;
+        }
+        if let Some(url) = best_img_url(tag, tag_lower) {
+            // A lazy image is revealed by JS swapping an opacity/visibility class on
+            // load. We can't run that, but having assumed it loaded (by supplying
+            // `src`), force it visible too — else the engine drops it as `opacity:0`
+            // (nike's hero `<img>`s start opacity:0 and rendered as a blank band). Only
+            // when the tag has no inline `style` we would otherwise clobber.
+            let reveal = if attr_value(tag, tag_lower, "style").is_none() {
+                r#" style="opacity:1 !important;visibility:visible !important""#
+            } else {
+                ""
+            };
+            // Insert right after `<img` (offset start+4).
+            inserts.push((start + 4, format!(r#" src="{url}"{reveal}"#)));
+        }
+    });
+    if inserts.is_empty() {
+        return html.to_string();
+    }
+    let mut out = html.to_string();
+    for (at, text) in inserts.into_iter().rev() {
+        out.insert_str(at, &text);
+    }
+    out
+}
+
+/// Push the url of every `background`/`background-image: url(...)` declaration
+/// onto `out` (inline `style=` attrs and `<style>` blocks alike — a raw source
+/// scan). Both the longhand and the `background:` shorthand carry image urls;
+/// real stylesheets use the shorthand pervasively.
+fn background_image_urls(html: &str, out: &mut Vec<String>) {
+    let lower = html.to_ascii_lowercase();
+    let mut cursor = 0;
+    // `background` also prefixes `background-image`, so this matches both.
+    while let Some(rel) = lower[cursor..].find("background") {
+        let decl = cursor + rel + "background".len();
+        cursor = decl;
+        // Only a `url(` inside THIS declaration (before its terminator) counts —
+        // a later declaration's url must not be attributed to a `background`
+        // property that had none (`background: #fff`).
+        // `;`/`}` end a CSS declaration; `<`/newline bound an inline `style=`
+        // attr's value. Quotes are NOT terminators — they may wrap the url itself
+        // (`url("x.png")`).
+        let end = lower[decl..]
+            .find([';', '}', '<', '\n'])
+            .map(|e| decl + e)
+            .unwrap_or(html.len());
+        let Some(urel) = lower[decl..end].find("url(") else {
+            continue;
+        };
+        let inner_start = decl + urel + "url(".len();
+        let Some(close) = html[inner_start..end].find(')') else {
+            continue;
+        };
+        let name = html[inner_start..inner_start + close]
+            .trim()
+            .trim_matches(['"', '\''])
+            .trim();
+        if !name.is_empty() {
+            out.push(html_unescape(name));
+        }
+        cursor = inner_start + close + 1;
+    }
 }
 
 /// Read `name="value"` (or `name='value'`) out of an opening-tag slice. `tag` is
@@ -185,6 +444,39 @@ mod tests {
     }
 
     #[test]
+    fn delazy_fills_src_and_reveals_lazy_image() {
+        use super::delazy_images;
+        // A `src`-less lazy `<img>` gets its `data-landscape-url` promoted to `src`
+        // plus a reveal style (it starts `opacity:0`, revealed by JS on load).
+        let out = delazy_images(r#"<img data-landscape-url="hero.jpg" alt="x">"#);
+        assert!(out.contains(r#"src="hero.jpg""#), "src filled: {out}");
+        assert!(out.contains("opacity:1 !important"), "revealed: {out}");
+        assert!(out.contains("visibility:visible !important"));
+    }
+
+    #[test]
+    fn delazy_takes_first_srcset_and_skips_when_src_present() {
+        use super::delazy_images;
+        // No `src`: first `srcset` candidate wins.
+        let out = delazy_images(r#"<img srcset="a.jpg 1x, b.jpg 2x">"#);
+        assert!(out.contains(r#"src="a.jpg""#), "{out}");
+        // An `<img>` that already has a non-empty `src` is left untouched.
+        let already = r#"<img src="real.jpg">"#;
+        assert_eq!(delazy_images(already), already);
+    }
+
+    #[test]
+    fn delazy_does_not_clobber_an_existing_inline_style() {
+        use super::delazy_images;
+        // A lazy `<img>` that carries an inline `style` keeps it — no reveal override
+        // is injected (it would need merging, not a second `style` attribute).
+        let out = delazy_images(r#"<img data-src="x.jpg" style="border:0">"#);
+        assert!(out.contains(r#"src="x.jpg""#), "{out}");
+        assert!(!out.contains("opacity:1"), "no style override: {out}");
+        assert!(out.contains(r#"style="border:0""#));
+    }
+
+    #[test]
     fn strip_non_visual_removes_script_and_style_source() {
         use super::strip_non_visual;
         let html = r#"<div>hi</div>
@@ -215,6 +507,58 @@ mod tests {
             hrefs,
             vec!["/a.css", "https://cdn.example/b.css", "bare.css"]
         );
+    }
+
+    #[test]
+    fn stylesheet_hrefs_decode_html_entities() {
+        use super::stylesheet_hrefs;
+        // HTML requires `&` in an href to be written `&amp;`; the returned href
+        // must be the real URL (`&`), not the escaped source, or the fetch 404s /
+        // drops query params (Wikipedia's load.php skin CSS bug).
+        let html =
+            r#"<link rel="stylesheet" href="/w/load.php?lang=en&amp;only=styles&amp;skin=vector">"#;
+        assert_eq!(
+            stylesheet_hrefs(html),
+            vec!["/w/load.php?lang=en&only=styles&skin=vector"]
+        );
+    }
+
+    #[test]
+    fn image_urls_decode_html_entities() {
+        use super::image_urls;
+        let html = r#"<img src="/img?w=100&amp;h=50&amp;fmt=webp">"#;
+        assert_eq!(image_urls(html), vec!["/img?w=100&h=50&fmt=webp"]);
+    }
+
+    #[test]
+    fn image_urls_extracts_img_and_background_skipping_data() {
+        use super::image_urls;
+        let html = r#"<img src="/a.png">
+            <div style="background-image:url('b.jpg')"></div>
+            <style>.x{ background-image: url(c.png) }</style>
+            <div style="background:#fff url(d.webp) no-repeat"></div>
+            <style>.y{ background: url("e.svg") center }</style>
+            <div style="background:#000"></div>
+            <img src="data:image/png;base64,AAAA">
+            <img src="/a.png">"#;
+        // `<img>` srcs first (source order), then background/-image urls (longhand
+        // + shorthand, quoted or bare). A colour-only `background` and `data:` are
+        // skipped; duplicates removed.
+        assert_eq!(
+            image_urls(html),
+            vec!["/a.png", "b.jpg", "c.png", "d.webp", "e.svg"]
+        );
+    }
+
+    #[test]
+    fn image_urls_in_css_extracts_external_backgrounds() {
+        use super::image_urls_in_css;
+        // External `<link>` stylesheets carry `background-image` refs that a scan of
+        // the HTML alone misses; longhand + shorthand, quoted or bare, `data:` skipped.
+        let css = ".a{background-image:url(https://x/bg1.png)}\
+                   .b{background:#fff url(\"bg2.jpg\") no-repeat}\
+                   .c{background-image:url(data:image/png;base64,AAA)}";
+        assert_eq!(image_urls_in_css(css), vec!["https://x/bg1.png", "bg2.jpg"]);
     }
 
     #[test]

@@ -341,8 +341,33 @@ globalThis.navigator = {
   globalThis.screen = {
     width: __w, height: __h, availWidth: __w, availHeight: __h,
     colorDepth: 24, pixelDepth: 24,
+    // ScreenOrientation is an EventTarget — apps listen for orientation changes;
+    // a missing `addEventListener` throws and can trip a component during hydration.
+    orientation: {
+      type: "landscape-primary", angle: 0,
+      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+      onchange: null,
+    },
   };
   globalThis.devicePixelRatio = __pick("devicePixelRatio", 2);
+}
+// document.fonts (FontFaceSet) — an EventTarget with a `ready` promise; web-font
+// loaders (`document.fonts.ready`, `.addEventListener('loadingdone')`) touch it, and
+// a missing one throws mid-hydration. No real font pipeline here, so `ready` resolves
+// immediately and load/check report success/emptiness.
+if (globalThis.document && !globalThis.document.fonts) {
+  try {
+    const __fonts = {
+      ready: Promise.resolve(), status: "loaded", size: 0,
+      add() {}, delete() { return false; }, clear() {}, has() { return false; },
+      check() { return true; }, load() { return Promise.resolve([]); },
+      forEach() {}, values() { return [][Symbol.iterator](); }, keys() { return [][Symbol.iterator](); },
+      [Symbol.iterator]() { return [][Symbol.iterator](); },
+      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+      onloading: null, onloadingdone: null, onloadingerror: null,
+    };
+    Object.defineProperty(globalThis.document, "fonts", { configurable: true, get() { return __fonts; } });
+  } catch (e) {}
 }
 // `window.chrome` presence (with loadTimes/csi/app, but no extension `runtime`) is
 // what a plain Chrome page exposes; its absence flags a non-Chrome/headless client.
@@ -458,7 +483,65 @@ if (typeof globalThis.Headers === "undefined") {
     [Symbol.iterator]() { return this._m.entries(); }
   };
 }
-// fetch over the tier-1 net stack → a minimal Response (with real headers, so RSC
+// Fetch `Response`/`Request` — real classes (not object literals) so libraries that
+// do `x instanceof Response` / `x instanceof Request` work instead of throwing
+// ("Right-hand side of 'instanceof' is not an object" — a single undefined `Response`
+// aborts a shared bundle and, cascading through webpack's module init, kills React
+// hydration entirely). Bodies are text-backed (the render tier marshals strings).
+if (typeof globalThis.Response === "undefined") {
+  globalThis.Response = class Response {
+    constructor(body, init) {
+      init = init || {};
+      this._body = body == null ? "" : (typeof body === "string" ? body : String(body));
+      this.status = init.status == null ? 200 : init.status | 0;
+      this.statusText = init.statusText || "";
+      this.ok = this.status >= 200 && this.status < 300;
+      this.redirected = !!init.redirected;
+      this.type = init.type || "basic";
+      this.url = init.url || "";
+      this.bodyUsed = false;
+      const h = new globalThis.Headers(init.headers || undefined);
+      this.headers = h;
+    }
+    static json(data, init) {
+      const r = new globalThis.Response(JSON.stringify(data), init);
+      r.headers.set("content-type", "application/json");
+      return r;
+    }
+    static error() { const r = new globalThis.Response("", { status: 0 }); r.type = "error"; return r; }
+    static redirect(url, status) { return new globalThis.Response("", { status: status || 302, headers: { location: url } }); }
+    clone() { const r = new globalThis.Response(this._body, { status: this.status, statusText: this.statusText, url: this.url }); this.headers.forEach((v, k) => r.headers.set(k, v)); return r; }
+    async text() { this.bodyUsed = true; return this._body; }
+    async json() { this.bodyUsed = true; return JSON.parse(this._body || "null"); }
+    async arrayBuffer() { this.bodyUsed = true; return new TextEncoder().encode(this._body).buffer; }
+    async blob() { this.bodyUsed = true; return new globalThis.Blob([this._body], { type: this.headers.get("content-type") || "" }); }
+    async formData() { this.bodyUsed = true; const fd = new globalThis.FormData(); return fd; }
+    get body() { const b = this._body; return new globalThis.ReadableStream({ start(c) { if (b) c.enqueue(new TextEncoder().encode(b)); c.close(); } }); }
+  };
+}
+if (typeof globalThis.Request === "undefined") {
+  globalThis.Request = class Request {
+    constructor(input, init) {
+      init = init || {};
+      this.url = (input && typeof input === "object") ? input.url : String(input);
+      this.method = (init.method || (input && input.method) || "GET").toUpperCase();
+      this.headers = new globalThis.Headers(init.headers || (input && input.headers) || undefined);
+      this._body = init.body != null ? init.body : (input && input._body) || null;
+      this.bodyUsed = false;
+      this.credentials = init.credentials || "same-origin";
+      this.mode = init.mode || "cors";
+      this.cache = init.cache || "default";
+      this.redirect = init.redirect || "follow";
+      this.referrer = init.referrer || "about:client";
+      this.signal = init.signal || (globalThis.AbortController ? new globalThis.AbortController().signal : null);
+    }
+    clone() { return new globalThis.Request(this.url, { method: this.method, headers: this.headers, body: this._body }); }
+    async text() { this.bodyUsed = true; return this._body == null ? "" : String(this._body); }
+    async json() { this.bodyUsed = true; return JSON.parse(this._body || "null"); }
+    async arrayBuffer() { this.bodyUsed = true; return new TextEncoder().encode(this._body == null ? "" : String(this._body)).buffer; }
+  };
+}
+// fetch over the tier-1 net stack → a real Response (with real headers, so RSC
 // client navigation that reads `res.headers.get('content-type')` works).
 globalThis.fetch = async (url, init) => {
   // Marshal the request (method/headers/body) to the op — a Request object carries them
@@ -520,41 +603,52 @@ globalThis.fetch = async (url, init) => {
     });
     if (globalThis.__netLog.length > 1000) globalThis.__netLog.splice(0, globalThis.__netLog.length - 1000);
   } catch (_e) {}
-  const headers = new globalThis.Headers();
-  if (r.content_type) headers.set("content-type", r.content_type);
-  return {
+  const headers = {};
+  if (r.content_type) headers["content-type"] = r.content_type;
+  return new globalThis.Response(r.body, {
     status: r.status,
-    statusText: "",
-    ok: r.ok,
-    redirected: false,
-    type: "basic",
-    url: String((url && url.url) || url),
     headers,
-    clone() { return this; },
-    text: async () => r.body,
-    json: async () => JSON.parse(r.body),
-    arrayBuffer: async () => new TextEncoder().encode(r.body).buffer,
-    blob: async () => new globalThis.Blob([r.body], { type: r.content_type || "" }),
-    body: new globalThis.ReadableStream({ start(c) { if (r.body) c.enqueue(new TextEncoder().encode(r.body)); c.close(); } }),
-  };
+    url: String((url && url.url) || url),
+  });
 };
-// XMLHttpRequest over fetch (async; resolves in the event loop).
+// XMLHttpRequest over fetch (async; resolves in the event loop). Exposes the
+// EventTarget surface (`addEventListener`/`removeEventListener`/`dispatchEvent`) as well
+// as the `on*` props: real code wires the request via `req.addEventListener('load'/
+// 'readystatechange', …)` (Google's home-page bundle does), and a stub with only `on*`
+// crashed with "req.addEventListener is not a function", aborting the module.
 globalThis.XMLHttpRequest = class {
-  constructor() { this.readyState = 0; this.status = 0; this.responseText = ""; }
-  open(method, url) { this._m = method || "GET"; this._u = url; this.readyState = 1; }
-  setRequestHeader() {}
+  constructor() {
+    this.readyState = 0; this.status = 0; this.responseText = ""; this.response = "";
+    this._h = {}; // request headers
+    this._l = {}; // event listeners by type
+  }
+  open(method, url) { this._m = method || "GET"; this._u = url; this._setState(1); }
+  setRequestHeader(k, v) { this._h[String(k)] = String(v); }
+  addEventListener(type, fn) { if (typeof fn === "function") (this._l[type] = this._l[type] || []).push(fn); }
+  removeEventListener(type, fn) { const a = this._l[type]; if (a) { const i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } }
+  dispatchEvent(ev) { this._emit(ev && ev.type, ev); return true; }
+  // Fire an event to both the matching `on*` property and any addEventListener handlers.
+  _emit(type, ev) {
+    if (!type) return;
+    const e = ev || { type, target: this, currentTarget: this };
+    const on = this["on" + type];
+    if (typeof on === "function") { try { on.call(this, e); } catch (_e) {} }
+    for (const fn of (this._l[type] || []).slice()) { try { fn.call(this, e); } catch (_e) {} }
+  }
+  _setState(s) { this.readyState = s; this._emit("readystatechange"); }
   send(body) {
     const self = this;
     globalThis
-      .fetch(this._u, { method: this._m, body })
+      .fetch(this._u, { method: this._m, body, headers: self._h })
       .then(async (r) => {
         self.status = r.status;
         self.responseText = await r.text();
         self.response = self.responseText;
-        self.readyState = 4;
-        if (self.onreadystatechange) self.onreadystatechange();
-        if (self.onload) self.onload();
-      });
+        self._setState(4);
+        self._emit("load");
+        self._emit("loadend");
+      })
+      .catch(() => { self._setState(4); self._emit("error"); self._emit("loadend"); });
   }
 };
 // Observers: no live mutation notifications over the static tree → no-op stubs.
@@ -587,10 +681,68 @@ if (typeof globalThis.structuredClone === "undefined") {
     return clone(v);
   };
 }
-// NOTE: getComputedStyle + matchMedia are provided by the vendored browser_env.js
-// (a jsdom-style getComputedStyle the Playwright shim's cssValue/visibility reads,
-// and a matchMedia stub). Do NOT redefine them here — ENV_BOOTSTRAP runs AFTER the
-// binding, so an override would clobber the real ones and break the shim.
+// NOTE: getComputedStyle is provided by the vendored browser_env.js (a jsdom-style
+// getComputedStyle the Playwright shim's cssValue/visibility reads). Do NOT redefine
+// IT here — ENV_BOOTSTRAP runs AFTER the binding, so an override would clobber the
+// real one and break the shim.
+//
+// matchMedia, though, ships as an always-`matches:false` stub. That makes every
+// responsive component render its MOBILE/collapsed variant (a `min-width:` desktop
+// query never matches) — e.g. Nike's header hydrates to a hamburger with its nav
+// links hidden, so the desktop nav "disappears" after hydration with NO error. We
+// override ONLY matchMedia (getComputedStyle untouched) with a real evaluator that
+// tests the query against the layout viewport (window.innerWidth/innerHeight), the
+// JS mirror of the CSS `@media` evaluation the layout tier already does.
+{
+  const __mqLen = (tok, basis) => {
+    // A CSS length in a media feature → px. Supports px and em/rem (16px root).
+    const m = String(tok).match(/([\d.]+)\s*(px|r?em)?/);
+    if (!m) return NaN;
+    const n = parseFloat(m[1]);
+    return m[2] === "em" || m[2] === "rem" ? n * 16 : n;
+  };
+  const __mqClause = (clause) => {
+    if (clause.indexOf("print") >= 0) return false;
+    const w = typeof globalThis.innerWidth === "number" ? globalThis.innerWidth : 1280;
+    const h = typeof globalThis.innerHeight === "number" ? globalThis.innerHeight : 800;
+    let ok = true;
+    for (const feat of clause.split(/\band\b/)) {
+      let m;
+      if ((m = feat.match(/min-width\s*:\s*([^)]+)/)) && w < __mqLen(m[1])) ok = false;
+      if ((m = feat.match(/max-width\s*:\s*([^)]+)/)) && w > __mqLen(m[1])) ok = false;
+      if ((m = feat.match(/min-height\s*:\s*([^)]+)/)) && h < __mqLen(m[1])) ok = false;
+      if ((m = feat.match(/max-height\s*:\s*([^)]+)/)) && h > __mqLen(m[1])) ok = false;
+      // Desktop defaults: light scheme, landscape, fine pointer + hover available.
+      if (/prefers-color-scheme\s*:\s*dark/.test(feat)) ok = false;
+      if (/orientation\s*:\s*portrait/.test(feat) && w >= h) ok = false;
+      if (/orientation\s*:\s*landscape/.test(feat) && w < h) ok = false;
+      if (/hover\s*:\s*none/.test(feat)) ok = false;
+      if (/pointer\s*:\s*coarse/.test(feat)) ok = false;
+      if (/any-pointer\s*:\s*coarse/.test(feat)) ok = false;
+    }
+    return ok;
+  };
+  const __evalMedia = (q) => {
+    const query = String(q || "").toLowerCase().trim();
+    if (!query || query === "all") return true;
+    return query.split(",").some((c) => __mqClause(c.trim()));
+  };
+  globalThis.matchMedia = function (q) {
+    const media = String(q == null ? "" : q);
+    const mql = {
+      media,
+      onchange: null,
+      _l: [],
+      addListener(fn) { if (typeof fn === "function") this._l.push(fn); },
+      removeListener(fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
+      addEventListener(_t, fn) { if (typeof fn === "function") this._l.push(fn); },
+      removeEventListener(_t, fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
+      dispatchEvent() { return false; },
+    };
+    Object.defineProperty(mql, "matches", { get: () => __evalMedia(media), enumerable: true });
+    return mql;
+  };
+}
 // FormData — auth/login SDKs (PropelAuth) build credential payloads with it; deno_core
 // ships none. A spec-shaped impl over an entry list (append keeps duplicates; set
 // replaces; field values stringified, File/Blob passed through).
@@ -700,13 +852,61 @@ globalThis.MessageChannel = class MessageChannel {
   }
 };
 globalThis.MessagePort = function MessagePort() {};
-// performance — React/Next read performance.now() for timing/scheduling.
+// performance — React/Next read performance.now() for timing/scheduling. mark()/measure()
+// must RETURN the PerformanceEntry they create (real spec): RUM/timing code destructures
+// `const {startTime} = performance.mark(name)` (and reads `.duration`/`.entryType` off the
+// measure), so returning undefined crashed with "Cannot destructure property 'startTime' …"
+// (seen on nike.com's Boomerang beacon).
 globalThis.performance = globalThis.performance || {
   now: () => Date.now(),
   timeOrigin: 0,
-  mark() {}, measure() {}, clearMarks() {}, clearMeasures() {},
+  mark(name, opts) {
+    return { name: String(name == null ? "" : name), entryType: "mark",
+      startTime: (opts && +opts.startTime) || Date.now(), duration: 0, detail: (opts && opts.detail) || null };
+  },
+  measure(name) {
+    return { name: String(name == null ? "" : name), entryType: "measure", startTime: 0, duration: 0, detail: null };
+  },
+  clearMarks() {}, clearMeasures() {},
   getEntries: () => [], getEntriesByName: () => [], getEntriesByType: () => [],
 };
+// The CSS interface (window.CSS): CSS.supports (feature detection) + CSS.escape (identifier
+// escaping). Bundles reference it at load — Google's deferred `xjs` bundle aborted with
+// "CSS is not defined". No layout/CSS engine headless, so supports() validates the query
+// shape and reports supported (as modern Chrome would for a well-formed query), and escape()
+// implements the CSSOM ident serialization so a following `.replace`/selector build is safe.
+if (typeof globalThis.CSS === "undefined") {
+  const cssEscape = (value) => {
+    const s = String(value);
+    let out = "";
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c === 0) { out += "�"; continue; }
+      // control chars, or a leading digit (or a digit right after a leading '-') → hex escape
+      if ((c >= 0x1 && c <= 0x1f) || c === 0x7f ||
+          (i === 0 && c >= 0x30 && c <= 0x39) ||
+          (i === 1 && c >= 0x30 && c <= 0x39 && s.charCodeAt(0) === 0x2d)) {
+        out += "\\" + c.toString(16) + " "; continue;
+      }
+      // a lone leading '-'
+      if (i === 0 && c === 0x2d && s.length === 1) { out += "\\-"; continue; }
+      // ident-safe: alphanumerics, '-', '_', and non-ASCII pass through unescaped
+      if (c >= 0x80 || c === 0x2d || c === 0x5f ||
+          (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) {
+        out += s[i]; continue;
+      }
+      out += "\\" + s[i]; // everything else is backslash-escaped
+    }
+    return out;
+  };
+  globalThis.CSS = {
+    // `supports("prop", "value")` (two-arg) or `supports("(prop: value)")` (condition string).
+    supports: (a, b) => (b !== undefined
+      ? (typeof a === "string" && a.length > 0)
+      : (typeof a === "string" && a.indexOf(":") >= 0)),
+    escape: cssEscape,
+  };
+}
 // Encoding/crypto/base64 web globals deno_core doesn't ship but app bundles use.
 if (typeof globalThis.TextEncoder === "undefined") {
   globalThis.TextEncoder = class TextEncoder {
@@ -1190,6 +1390,15 @@ if (typeof globalThis.URL === "undefined") {
   def("baseURI", () => globalThis.location.href);
   // hasFocus(): auth/idle code refreshes only a focused document; default to focused.
   try { if (typeof d.hasFocus !== "function") d.hasFocus = () => true; } catch (_e) {}
+  // document.open()/close(): RUM beacons (nike.com's Boomerang/mPulse) do
+  // `iframe.contentWindow.document.open()` — our iframe contentWindow IS the realm — then
+  // `document.write(...)`. The binding had no `open`, so it threw "document.open is not a
+  // function" and aborted the beacon. open() must return the document (callers chain
+  // `d = document.open()`) and deliberately does NOT clear the already-parsed/hydrated tree
+  // (a real open() wipes the document, but wiping the hydrated DOM headless is worse than a
+  // no-op); close() is a no-op. write() is provided by the vendored binding.
+  try { if (typeof d.open !== "function") d.open = () => d; } catch (_e) {}
+  try { if (typeof d.close !== "function") d.close = () => {}; } catch (_e) {}
 })();
 
 // document.createTreeWalker + NodeFilter — focus-management code (MUI's DataGrid / focus
@@ -1299,6 +1508,73 @@ if (typeof globalThis.URL === "undefined") {
     width: 1280, height: 800, scale: 1, offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0,
     addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
   });
+  // PerformanceObserver — analytics / experiment code (e.g. Wikipedia's header
+  // enrollments) `new PerformanceObserver(...)` at load; an undefined ref throws
+  // inside a Promise and rejects the chain, killing the dependent script.
+  set("PerformanceObserver", class PerformanceObserver {
+    constructor(cb) { this._cb = cb; }
+    observe() {} disconnect() {} takeRecords() { return []; }
+  });
+  try { globalThis.PerformanceObserver.supportedEntryTypes = []; } catch (_e) {}
+})();
+
+// `Node.prototype.replaceChild(new, old)` — jQuery's `replaceWith`/`domManip` call
+// it; the DOM binding omits it. All wrapped elements share one template prototype,
+// so define `replaceChild` there (from the `insertBefore` + `removeChild` the
+// binding does provide). Guard against polluting `Object.prototype`.
+(() => {
+  var d = globalThis.document;
+  if (!d || typeof d.createElement !== "function") return;
+  var probe = d.createElement("div");
+  if (!probe || typeof probe.insertBefore !== "function") return;
+  var proto = Object.getPrototypeOf(probe);
+  if (!proto || proto === Object.prototype) return;
+  if (typeof proto.replaceChild !== "function") {
+    proto.replaceChild = function (newChild, oldChild) {
+      this.insertBefore(newChild, oldChild);
+      this.removeChild(oldChild);
+      return oldChild;
+    };
+  }
+})();
+
+// DOM interface constructors — React / emotion / many bundles do
+// `x instanceof HTMLElement` (etc.) at load. If the constructor global is
+// undefined, `instanceof` throws ("Right-hand side of 'instanceof' is not an
+// object") and aborts the ENTIRE script bundle (Nike's whole React app failed this
+// way). Define them (only if absent) with a duck-typed `Symbol.hasInstance` so the
+// checks resolve correctly against our wrapped nodes by `nodeType`, rather than
+// throwing.
+(() => {
+  var def = function (k, pred) {
+    if (typeof globalThis[k] !== "undefined") return;
+    var C = function () {};
+    try { Object.defineProperty(C, Symbol.hasInstance, { value: pred, configurable: true }); } catch (_e) {}
+    try { globalThis[k] = C; } catch (_e) {}
+  };
+  var nodeAt = function (t) { return function (x) { return !!x && x.nodeType === t; }; };
+  var element = nodeAt(1);
+  def("EventTarget", function (x) { return !!x && typeof x.addEventListener === "function"; });
+  def("Node", function (x) { return !!x && typeof x.nodeType === "number"; });
+  def("Element", element);
+  def("CharacterData", function (x) { return !!x && (x.nodeType === 3 || x.nodeType === 8); });
+  def("Text", nodeAt(3));
+  def("Comment", nodeAt(8));
+  def("Document", nodeAt(9));
+  def("DocumentFragment", nodeAt(11));
+  def("Window", function (x) { return x === globalThis; });
+  def("Event", function (x) { return !!x && typeof x.type === "string" && ("target" in x || "bubbles" in x); });
+  // Every concrete HTML*Element frameworks branch on is just an Element here.
+  [
+    "HTMLElement", "HTMLUnknownElement", "HTMLDivElement", "HTMLSpanElement",
+    "HTMLAnchorElement", "HTMLInputElement", "HTMLButtonElement", "HTMLImageElement",
+    "HTMLIFrameElement", "HTMLCanvasElement", "HTMLFormElement", "HTMLScriptElement",
+    "HTMLStyleElement", "HTMLLinkElement", "HTMLTemplateElement", "HTMLTextAreaElement",
+    "HTMLSelectElement", "HTMLOptionElement", "HTMLUListElement", "HTMLOListElement",
+    "HTMLLIElement", "HTMLHeadingElement", "HTMLParagraphElement", "HTMLTableElement",
+    "HTMLTableRowElement", "HTMLTableCellElement", "HTMLLabelElement", "HTMLPreElement",
+    "SVGElement", "SVGSVGElement",
+  ].forEach(function (k) { def(k, element); });
 })();
 
 // Next.js's webpack runtime reads `document.currentScript` to resolve chunk paths
@@ -1448,7 +1724,22 @@ globalThis.__hydrate = async function (maxRounds = 300, timerBudget = 200000) {
   // best-effort DOM rendered so far.
   for (let round = 0; round < maxRounds && timersLeft > 0; round++) {
     let ranScript = false;
-    for (const el of Array.prototype.slice.call(document.querySelectorAll("script"))) {
+    // Honor `defer`: a browser runs parser-blocking scripts as it reaches them and
+    // holds `defer` scripts until after parsing, THEN runs them in document order.
+    // Running in raw DOM order instead breaks the common pattern where an app's
+    // `<script defer>` bundle sits EARLY in <head> but its (non-defer) framework
+    // vendor script sits later — e.g. Nike defers `main.js` (byte ~88k) while
+    // `react.js` is non-defer near </body> (~608k). Raw order runs `main` first →
+    // `React is not defined` → the whole app never hydrates. So: non-defer scripts
+    // first (document order), then `defer` scripts (document order). `async` isn't
+    // deferred. New scripts injected mid-round re-partition on the next pass.
+    const isDeferred = (el) =>
+      el.getAttribute &&
+      el.getAttribute("defer") !== null &&
+      el.getAttribute("async") === null;
+    const all = Array.prototype.slice.call(document.querySelectorAll("script"));
+    const ordered = all.filter((el) => !isDeferred(el)).concat(all.filter(isDeferred));
+    for (const el of ordered) {
       if (!el.__tcDone) { ranScript = true; await globalThis.__execScriptEl(el); }
     }
     const fired = globalThis.__runTimers(Math.min(timersLeft, 5000));
@@ -2336,7 +2627,21 @@ fn best_effort_on_budget(
             rt.v8_isolate().cancel_terminate_execution();
             Ok(crate::browser_env::document_html())
         }
-        Err(e) => Err(budget_msg(&e, budget_ms)),
+        // A genuine JS error mid-hydration (a page script that throws, an unhandled
+        // rejection) used to discard everything. But by this point the DOM is
+        // installed and partially mutated by the scripts that DID run — partial
+        // hydration beats none (e.g. a jQuery site whose skin JS reparents the DOM
+        // before a later analytics script throws). Return the reached DOM if there
+        // is one; only propagate when nothing was rendered (install/parse failure).
+        Err(e) => {
+            rt.v8_isolate().cancel_terminate_execution();
+            let dom = crate::browser_env::document_html();
+            if dom.trim().is_empty() {
+                Err(budget_msg(&e, budget_ms))
+            } else {
+                Ok(dom)
+            }
+        }
     }
 }
 

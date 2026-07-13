@@ -1490,11 +1490,12 @@ class Page {
   }
 
   // A synthetic screenshot: native layout + paint over the current HTML, no
-  // browser. Real pixels, but a *representative* render (no z-index/stacking
-  // model, `<img>` drawn as placeholders). `type: "svg"` (or a `.svg` path)
-  // returns a vector document; otherwise PNG. `fullPage`/`clip` are ignored —
-  // the image is the viewport (override via `width`/`height` or the context
-  // viewport). Returns a Buffer; writes `path` if given.
+  // browser. Real pixels, but a *representative* render (honors CSS
+  // position/z-index stacking; paints PNG/JPEG `<img>`/background images it can
+  // fetch, others fall back to a placeholder). `type: "svg"` (or a `.svg` path)
+  // returns a vector document; otherwise PNG. `fullPage: true` grows the image to
+  // the full content height; `clip` is ignored (width/height or the context
+  // viewport drive layout). Returns a Buffer; writes `path` if given.
   async screenshot(opts = {}) {
     const vp = this._context._viewport ?? { width: 1280, height: 800 };
     const width = opts.width ?? vp.width;
@@ -1504,11 +1505,38 @@ class Page {
     // Fetch the page's external <link> stylesheets so the render is styled, not
     // just inline-CSS. `{ externalCss: false }` skips it (offline/inline-only).
     const css = opts.externalCss === false ? "" : await this._fetchLinkedCss();
+    // Fetch the page's <img>/background-image bytes so images paint (PNG/JPEG);
+    // `{ images: false }` skips it.
+    const images = opts.images === false ? {} : await this._fetchImages();
+    // Playwright's `fullPage` grows the image to the full content height.
+    const fullPage = opts.fullPage === true;
     const out = asSvg
-      ? Buffer.from(native.screenshotSvgWithCss(this._html, css, width, height), "utf8")
-      : native.screenshotWithCss(this._html, css, width, height);
+      ? Buffer.from(
+          native.screenshotSvgWithAssets(this._html, css, images, width, height, fullPage),
+          "utf8",
+        )
+      : native.screenshotWithAssets(this._html, css, images, width, height, fullPage);
     if (opts.path) await writeFile(opts.path, out);
     return out;
+  }
+
+  // Fetch the page's `<img>` + `background-image` bytes, keyed by their raw ref
+  // (the resolver key the raster expects), resolved against the page URL and
+  // fetched as raw bytes over the engine's client. Best-effort: non-http pages
+  // and failed/unresolvable refs are skipped; count capped to match the engine.
+  async _fetchImages() {
+    if (!/^https?:/.test(this._url ?? "")) return {};
+    const images = {};
+    for (const ref of native.imageUrls(this._html).slice(0, 60)) {
+      try {
+        const abs = new URL(ref, this._url).href;
+        const buf = await native.fetchBytes(abs);
+        if (buf && buf.length) images[ref] = buf;
+      } catch {
+        /* skip an image that won't resolve/fetch */
+      }
+    }
+    return images;
   }
 
   // Concatenate the page's `<link rel="stylesheet">` bodies, resolved against the

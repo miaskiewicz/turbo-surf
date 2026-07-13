@@ -75,6 +75,10 @@ pub struct FetchOptions<'a> {
     /// pass [`crate::fingerprint::select`]`(key)` to rotate per client. Ignored on
     /// the `impersonate` path, where wreq's emulation owns the headers.
     pub profile: Option<&'a crate::fingerprint::Profile>,
+    /// Seed well-known consent-wall cookies for the request host (see
+    /// [`crate::consent`]) so JS-gated "before you continue" interstitials are
+    /// dismissed and the real, server-rendered page is returned. Off by default.
+    pub bypass_consent: bool,
     pub now: f64,
 }
 
@@ -173,12 +177,45 @@ fn build_headers(url: &str, opts: &FetchOptions) -> BTreeMap<String, String> {
             h.insert("cookie".into(), cookie);
         }
     }
+    if opts.bypass_consent {
+        seed_consent_cookies(&mut h, url);
+    }
     if let Some(cache) = &opts.cache {
         for (k, v) in cache.validators(url) {
             h.insert(k, v);
         }
     }
     h
+}
+
+/// Merge the host's consent-bypass cookies (see [`crate::consent`]) into the
+/// `cookie` header, skipping any name a jar/caller cookie already set so an
+/// explicit cookie always wins.
+fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str) {
+    let host = crate::url::host_of(url).unwrap_or_default();
+    let extra = crate::consent::cookies_for_host(&host);
+    if extra.is_empty() {
+        return;
+    }
+    let mut cookie = h.get("cookie").cloned().unwrap_or_default();
+    for (name, value) in extra {
+        // Don't override a cookie the caller/jar already carries for this name.
+        let has = cookie
+            .split(';')
+            .any(|pair| pair.trim().split('=').next().map(str::trim) == Some(*name));
+        if has {
+            continue;
+        }
+        if !cookie.is_empty() {
+            cookie.push_str("; ");
+        }
+        cookie.push_str(name);
+        cookie.push('=');
+        cookie.push_str(value);
+    }
+    if !cookie.is_empty() {
+        h.insert("cookie".into(), cookie);
+    }
 }
 
 // Apply the Chrome TLS/JA3/JA4 + HTTP-2 emulation profile to a builder under the
@@ -469,6 +506,33 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
         Some(n) => follow_manually(&mut opts, url, n, max_bytes).await,
         None => follow_auto(&mut opts, url, max_bytes).await,
     }
+}
+
+/// Fetch a URL and return its **raw** response bytes (no charset decode), the
+/// final URL, and the status. For binary resources — images — where decoding to
+/// a `String` would corrupt the bytes. Auto-follows redirects (cap 20) over the
+/// shared client with the same headers/cookies as [`fetch_html`]; the byte cap
+/// applies and Set-Cookie is ingested. No content-type gate (the caller asks for
+/// an image on purpose).
+pub async fn fetch_bytes(
+    url: &str,
+    mut opts: FetchOptions<'_>,
+) -> Result<(String, Vec<u8>, u16), HttpError> {
+    let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
+    let cl = match opts.client {
+        Some(c) => c.clone(),
+        None => {
+            client(http::redirect::Policy::limited(20)).map_err(|e| err(e, ErrorCode::Network))?
+        }
+    };
+    let method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
+    let headers = build_headers(url, &opts);
+    let res = send(&cl, &method, url, &headers, &opts.body.clone()).await?;
+    let final_url = final_url(&res);
+    ingest_set_cookie(&mut opts, &res, &final_url);
+    let status = res.status().as_u16();
+    let bytes = read_capped(res, max_bytes).await?;
+    Ok((final_url, bytes, status))
 }
 
 #[cfg(test)]

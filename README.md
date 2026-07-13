@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.3.1 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.3.5 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (7-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -381,10 +381,12 @@ an `expect(locator)` chain is batched into one crossing).
 
 `page.screenshot()` renders a **synthetic** image (PNG or SVG) from a native
 layout+paint of the current HTML — no browser, no Chromium. It's *reasonably
-representative*, not pixel-faithful (fragments paint in DOM order with no
-z-index/stacking model; `<img>` draws as a placeholder). Runs only when asked,
-over any HTML snapshot; the viewport is configurable. See the `screenshot` MCP
-tool + `screenshot`/`screenshotSvg` napi functions.
+representative*, not pixel-faithful (`position`/`z-index` are honored via CSS
+stacking order; `<img>` + `background-image` are fetched and painted —
+PNG/JPEG/GIF/WebP + SVG, unknown formats fall back to a placeholder). `full_page`
+grows to the content height. Runs only when asked, over any HTML snapshot; the
+viewport is configurable. See the `screenshot` MCP tool + `screenshot`/`screenshotSvg`
+napi functions.
 
 What a no-browser engine **physically can't do fails honestly** (it throws or
 no-ops — never a silent pass):

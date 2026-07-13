@@ -745,6 +745,130 @@ fn encoding_crypto_base64_globals_present() {
     assert_eq!(v["un"], "hi", "{out}");
 }
 
+// The `CSS` interface (CSS.supports / CSS.escape). Google's deferred `xjs` bundle — and
+// feature-detecting UI/CSS-in-JS libraries generally — reference the `CSS` global at
+// load; deno_core ships none, so the bundle aborted mid-hydration with
+// "CSS is not defined" (seen on google.com). A minimal namespace with a working
+// `supports` (parses the value shape, always "supported" headless) + spec `escape`.
+#[test]
+fn css_interface_global_present() {
+    let out = run_with_dom(
+        "<body></body>",
+        r#"
+        JSON.stringify({
+          t: typeof CSS,
+          fn: typeof CSS.supports,
+          sup2: CSS.supports("display", "flex"),
+          sup1: CSS.supports("(display: grid)"),
+          esc: CSS.escape("a.b#c"),
+          escLead: CSS.escape("1x"),
+        });
+        "#,
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["t"], "object", "window.CSS is a namespace object: {out}");
+    assert_eq!(v["fn"], "function", "{out}");
+    assert_eq!(v["sup2"], true, "{out}");
+    assert_eq!(v["sup1"], true, "{out}");
+    // CSS.escape escapes CSS-syntax chars; a leading digit is escaped as a hex code point.
+    assert_eq!(v["esc"], "a\\.b\\#c", "{out}");
+    assert_eq!(v["escLead"], "\\31 x", "{out}");
+}
+
+// XMLHttpRequest must expose the EventTarget surface (`addEventListener` / `removeEventListener`)
+// like a real XHR — Google's home-page bundle wires its request via
+// `req.addEventListener('load'/'readystatechange', …)` rather than the `onload` property, and
+// our stub only had the `on*` props, so it crashed with
+// "b.i.req.addEventListener is not a function" and aborted the module.
+#[tokio::test]
+async fn xhr_add_event_listener_fires_load() {
+    let port = spawn_json_server(r#"{"ok":1}"#).await;
+    let html = render_page(
+        "<body><div id='root'>loading</div></body>",
+        &base(port),
+        r#"
+        const xhr = new XMLHttpRequest();
+        let states = 0;
+        xhr.addEventListener('readystatechange', () => { states++; });
+        xhr.addEventListener('load', () => {
+          document.getElementById('root').textContent = 'loaded:' + xhr.status + ':' + (states > 0);
+        });
+        xhr.open('GET', '/data.json');
+        xhr.send();
+        "#,
+    )
+    .await
+    .unwrap()
+    .replace("&nbsp;", " ");
+    assert!(
+        html.contains("loaded:200:true"),
+        "xhr.addEventListener('load') must fire + readystatechange listeners run: {html}"
+    );
+}
+
+// document.open() / document.close() — RUM beacons (Nike's Boomerang/mPulse) do
+// `O.document.open()` (writing a loader into an iframe's document, and our iframe
+// contentWindow IS the realm) then `document.write(...)`. The binding had no `open`,
+// so it threw "document.open is not a function" and aborted the beacon script. open()
+// must return the document (so `d = document.open()` chains) and must NOT wipe the
+// already-parsed DOM (a real open() clears, but wiping the hydrated tree is worse than
+// a no-op here); close() is a no-op.
+#[test]
+fn document_open_close_do_not_throw_and_keep_dom() {
+    let html = render_html(
+        "<body><div id='keep'>x</div></body>",
+        r#"
+        const d = document.open();
+        d.write("<p class='wrote'>hi</p>");
+        document.close();
+        document.getElementById('keep').setAttribute('data-open-ok', String(d === document));
+        "#,
+    )
+    .unwrap();
+    assert!(
+        html.contains(r#"data-open-ok="true""#),
+        "document.open() must return the document: {html}"
+    );
+    assert!(
+        html.contains(r#"class="wrote""#),
+        "document.write after open() must land: {html}"
+    );
+    assert!(
+        html.contains(r#"id="keep""#),
+        "document.open() must NOT wipe the already-parsed DOM: {html}"
+    );
+}
+
+// performance.mark()/measure() must return the PerformanceEntry they create — Nike's
+// Boomerang timing code destructures `const {startTime} = window.performance.mark(name)`
+// (and reads `.duration`/`.entryType` off the measure), so a `mark()` returning undefined
+// crashed with "Cannot destructure property 'startTime' of … as it is undefined".
+#[test]
+fn performance_mark_measure_return_entries() {
+    let out = run_with_dom(
+        "<body></body>",
+        r#"
+        const m = performance.mark("boot");
+        const ms = performance.measure("span", "boot");
+        JSON.stringify({
+          sType: typeof m.startTime, dur: m.duration, et: m.entryType, nm: m.name,
+          msStart: typeof ms.startTime, msDur: typeof ms.duration, msEt: ms.entryType, msNm: ms.name,
+        });
+        "#,
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["sType"], "number", "mark().startTime is a number: {out}");
+    assert_eq!(v["dur"], 0, "a mark has zero duration: {out}");
+    assert_eq!(v["et"], "mark", "{out}");
+    assert_eq!(v["nm"], "boot", "{out}");
+    assert_eq!(v["msStart"], "number", "{out}");
+    assert_eq!(v["msDur"], "number", "{out}");
+    assert_eq!(v["msEt"], "measure", "{out}");
+    assert_eq!(v["msNm"], "span", "{out}");
+}
+
 // React 18's scheduler drains its work queue via a MessageChannel (port2.postMessage
 // → port1.onmessage). Without it, scheduled work (the hydration/mount the entry
 // queues) never runs and nothing paints. MessageChannel must route a message to the

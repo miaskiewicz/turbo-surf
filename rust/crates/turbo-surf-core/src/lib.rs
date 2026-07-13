@@ -17,6 +17,7 @@ pub mod aws_waf;
 pub mod cache;
 pub mod challenge;
 pub mod cloudflare;
+pub mod consent;
 pub mod cookies;
 pub mod crawl;
 pub mod fingerprint;
@@ -39,4 +40,4 @@ pub use reqwest as http_backend;
 pub use wreq as http_backend;
 
 /// Library version — kept in lockstep with `package.json` per the release rules.
-pub const VERSION: &str = "0.3.1";
+pub const VERSION: &str = "0.3.5";

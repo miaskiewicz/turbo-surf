@@ -3,6 +3,23 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.3.5]
+
+Consumes turbo-html2pdf-core 0.2.13 — a batch of real-site rendering fixes
+(google.com / nike.com home pages): CSS Grid `justify-items` + `grid-column:span`
+placement, `box-sizing:inherit` reaching the page, border-box height, `.ttc` face
+index, `align-self`/min-width, lazy `<img>` data-urls, and text max-content
+rounding. See turbo-html2pdf's CHANGELOG for the full list.
+
+### Fixed
+- **Lazy images render.** The delazy pass (which promotes `data-*-url`/`srcset` to
+  `src`) now also injects `opacity:1;visibility:visible` so an assume-loaded image
+  isn't dropped as `opacity:0` — nike's hero `<img>`s start `opacity:0` and had
+  rendered as a blank band.
+- **Glyphs trace from the right `.ttc` sub-font.** The raster parses the font face at
+  its collection index (from `FontFace::index()`), so text in a system Arial/Helvetica
+  collection no longer renders shifted.
+
 ## [0.3.4]
 
 Consumes turbo-html2pdf-core 0.2.7 (mask-image icons, `white-space`, data-URI

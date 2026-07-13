@@ -104,6 +104,7 @@ fn paint_fragment(pm: &mut Pixmap, f: &Fragment, images: &DecodedAssets, xf: Tra
             f,
             glyphs,
             face.data(),
+            face.index(),
             face.units_per_em(),
             *font_size,
             *color,
@@ -473,6 +474,7 @@ fn paint_text(
     f: &Fragment,
     glyphs: &[PositionedGlyph],
     font_bytes: &[u8],
+    font_index: u32,
     units_per_em: u16,
     font_size: f32,
     color: Rgba,
@@ -481,7 +483,7 @@ fn paint_text(
     if color.a == 0 || units_per_em == 0 {
         return;
     }
-    let Some(face) = glyph::parse_face(font_bytes) else {
+    let Some(face) = glyph::parse_face(font_bytes, font_index) else {
         return;
     };
     let scale = font_size / units_per_em as f32;

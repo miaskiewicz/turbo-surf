@@ -13,7 +13,7 @@ description = "turbo-surf synthetic screenshot tier: HTML snapshot â†’ layout â†
 # CSS `transform` (0.2.11) for carousels/rotate; image `%`-sizing + flex
 # `min-height` (0.2.10); `linear-gradient` (0.2.9); box-shadow (0.2.8);
 # border-radius (0.2.7).
-turbo-html2pdf-core = "0.2.12"
+turbo-html2pdf-core = "0.2.13"
 # Raster canvas + PNG encode (Pixmap::encode_png, default `png-format` feature).
 tiny-skia = "0.11"
 # Glyph outlines: we parse `FontFace::data()` bytes independently to trace each

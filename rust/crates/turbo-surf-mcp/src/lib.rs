@@ -25,7 +25,7 @@ use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
-pub const VERSION: &str = "0.3.4";
+pub const VERSION: &str = "0.3.5";
 
 /// One agent session: the current page URL + parsed tree + nav history, plus the
 /// browser-ish state agents expect (UA / extra headers / cookie jar / JS mode) and

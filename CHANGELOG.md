@@ -3,6 +3,15 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.3.6]
+
+Consumes turbo-html2pdf-core 0.2.14 — real-site rendering round 2 (nike.com
+editorial cards / google.com search bar): `calc(% ± px)` lengths, `aspect-ratio`,
+flow-relative margins/padding (`*-inline-start`), absolute overlay `%`-height/`bottom`
+deferral against an auto-height card, height-based vertical insets, and static-start
+placement of auto-inset absolute flex children (Google's "AI Mode" icon). See
+turbo-html2pdf's CHANGELOG for the full list.
+
 ## [0.3.5]
 
 Consumes turbo-html2pdf-core 0.2.13 — a batch of real-site rendering fixes

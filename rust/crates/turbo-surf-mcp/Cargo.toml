@@ -21,16 +21,21 @@ path = "src/main.rs"
 impersonate = ["turbo-surf-core/impersonate"]
 
 [dependencies]
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.3.6" }
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.3.6" }
-turbo-surf-page = { path = "../turbo-surf-page", version = "0.3.6" }
-turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.3.6" }
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.3.6" }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.0" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.4.0" }
+turbo-surf-page = { path = "../turbo-surf-page", version = "0.4.0" }
+turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.4.0" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.4.0" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
 async-trait = "0.1"
 base64 = "0.22"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "io-std", "io-util", "net", "time"] }
+# SERP `search` tool: URL-encode the query + decode engine redirect wrappers
+# (DuckDuckGo `uddg`, Google `/url?q=`) via the same `url` crate core already uses.
+url = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }

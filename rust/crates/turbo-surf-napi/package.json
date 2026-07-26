@@ -1,6 +1,6 @@
 {
   "name": "turbo-surf-native",
-  "version": "0.3.6",
+  "version": "0.4.0",
   "description": "Native (Rust) engine for turbo-surf — napi-rs addon",
   "main": "index.js",
   "types": "index.d.ts",

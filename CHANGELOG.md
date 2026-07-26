@@ -3,6 +3,36 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.4.0]
+
+Adds four additive MCP tools + a data-driven search-strategy system for programmatic
+fetch/search consumers (the `fetch` knowledge terminal). Purely additive — no change to
+any existing tool's behaviour or the no-JS default tier.
+
+### Added
+- **`fetch_markdown`** — one-shot `{ url, mode?, links? }` → `{ url, title, status,
+  markdown, links? }`. Composes the existing `goto`+`markdown` internals so a caller
+  needn't drive a stateful session for the common "URL → clean markdown" case.
+- **`fetch_markdown_batch`** — concurrent, order-preserving multi-URL markdown:
+  `{ urls, concurrency?(4), links? }` → per-url `{ url, status, title, markdown, links? }`
+  or `{ url, error }` (a per-url failure never aborts the batch). Self-contained no-JS
+  loop; does not touch `batch`/`crawl::Nav` (which discard the parse tree).
+- **`search`** — web search via SERP scrape: `{ query, engine?(duckduckgo), base?,
+  limit?(10) }` → `[{ title, url, snippet? }]`. Stateless — a direct fetch that never
+  mutates the session's current page or cookie jar.
+- **Data-driven, versioned search strategies.** Engine parse rules are **JSON data**
+  (dated `Strategy` documents), not compiled selectors — so a markup change is a data
+  edit, not a recompile. Layered registry: `search_load_strategy` (session override) →
+  user strategies dir (`TURBO_SURF_SEARCH_STRATEGIES`) → bundled defaults
+  (`search-strategies.json`). New tools **`search_strategies`** (list active),
+  **`search_load_strategy`** (register/override — add a new engine or hotfix a stale one
+  live), **`search_reset_strategy`** (drop overrides). Bundled engines: duckduckgo, bing,
+  google, searxng, baidu.
+  - **Note:** google/bing/baidu SERP selectors are best-effort — SERP markup is volatile
+    and some engines gate datacenter IPs (google served a JS wall in CI, so its selectors
+    are not live-verified). duckduckgo (`html.duckduckgo.com`) is the reliable default; any
+    engine is fixable at runtime via `search_load_strategy` without a release.
+
 ## [0.3.6]
 
 Consumes turbo-html2pdf-core 0.2.14 — real-site rendering round 2 (nike.com

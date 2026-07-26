@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "turbo-surf"
-version = "0.3.6"
+version = "0.4.0"
 description = "Browserless, native-speed web crawler + extractor with a V8 JS-render tier (PyO3 binding over the turbo-surf Rust engine)."
 readme = "README.md"
 requires-python = ">=3.8"

@@ -219,7 +219,14 @@ fn first_srcset_url(v: &str) -> &str {
 /// placeholder `src` + the real URL in `data-*`, so a non-empty `src` alone must
 /// not win over the lazy attr.
 const PLACEHOLDER_SRC_TOKENS: &[&str] = &[
-    "spacer", "blank.", "pixel", "1x1", "transparent", "placeholder", "dot.gif", "grey.gif",
+    "spacer",
+    "blank.",
+    "pixel",
+    "1x1",
+    "transparent",
+    "placeholder",
+    "dot.gif",
+    "grey.gif",
     "gray.gif",
 ];
 
@@ -340,7 +347,9 @@ pub fn delazy_images(html: &str) -> String {
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
     for_each_img(html, |tag, tag_lower, start, _end| {
         let src = attr_value(tag, tag_lower, "src").map(|s| s.trim().to_string());
-        let real_src = src.as_deref().is_some_and(|s| !s.is_empty() && !is_placeholder_src(s));
+        let real_src = src
+            .as_deref()
+            .is_some_and(|s| !s.is_empty() && !is_placeholder_src(s));
         if real_src {
             return; // already points at a real image
         }
@@ -542,7 +551,10 @@ mod tests {
         let out = delazy_images(
             r#"<img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" data-src="real.jpg">"#,
         );
-        assert!(out.contains(r#"src="real.jpg""#), "placeholder replaced: {out}");
+        assert!(
+            out.contains(r#"src="real.jpg""#),
+            "placeholder replaced: {out}"
+        );
         assert!(!out.contains("data:image/gif"), "placeholder gone: {out}");
     }
 
@@ -569,8 +581,14 @@ mod tests {
         // The fetch side agrees with delazy: a placeholder `src` yields the lazy URL,
         // so the caller fetches the real image (not the 1×1 spacer).
         let urls = image_urls(r#"<img src="data:image/gif;base64,R0lGOD" data-src="real.jpg">"#);
-        assert!(urls.iter().any(|u| u == "real.jpg"), "fetches real: {urls:?}");
-        assert!(!urls.iter().any(|u| u.starts_with("data:")), "not the placeholder: {urls:?}");
+        assert!(
+            urls.iter().any(|u| u == "real.jpg"),
+            "fetches real: {urls:?}"
+        );
+        assert!(
+            !urls.iter().any(|u| u.starts_with("data:")),
+            "not the placeholder: {urls:?}"
+        );
     }
 
     #[test]

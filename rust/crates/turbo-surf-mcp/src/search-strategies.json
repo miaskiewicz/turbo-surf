@@ -24,15 +24,10 @@
   },
   {
     "engine": "google",
-    "version": "2026-07-26",
-    "query_url": "https://www.google.com/search?q={query}&num={limit}",
-    "format": "html",
-    "mode": "no-js",
-    "result_container": "div.g",
-    "title": "h3",
-    "link": "a[href]",
-    "link_redirect_param": "q",
-    "snippet": ".VwiC3b"
+    "version": "2026-07-27",
+    "query_url": "https://www.google.com/search?q={query}",
+    "format": "structural",
+    "mode": "browser"
   },
   {
     "engine": "searxng",

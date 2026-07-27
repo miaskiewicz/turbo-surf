@@ -1059,9 +1059,11 @@ impl Strategy {
                         .into());
                 }
             }
+            // Classname-free structural extraction (google): no selectors to validate.
+            "structural" => {}
             other => {
                 return Err(format!(
-                    "web_search_load_strategy: unknown format '{other}' (html|json)"
+                    "web_search_load_strategy: unknown format '{other}' (html|json|structural)"
                 ))
             }
         }
@@ -1071,6 +1073,7 @@ impl Strategy {
 
 // One organic search hit. `snippet` is omitted from the JSON when the markup
 // carried none, so the reply stays `[{title,url,snippet?}]`.
+#[derive(Debug)]
 struct SearchResult {
     title: String,
     url: String,
@@ -1125,8 +1128,57 @@ fn build_query_url(
 fn parse_serp(strategy: &Strategy, body: &str, limit: usize) -> Vec<SearchResult> {
     match strategy.format.as_str() {
         "json" => parse_json_serp(strategy, body, limit),
+        "structural" => parse_structural_serp(body, limit),
         _ => parse_html_serp(strategy, body, limit),
     }
+}
+
+/// True when `url`'s host is a search-engine-internal / asset host (google's own
+/// nav, gstatic, googleusercontent, google account/policy links) — never an organic
+/// result, so it's filtered out of the structural pass.
+fn is_serp_internal_host(url: &str) -> bool {
+    let host = turbo_surf_core::url::host_of(url).unwrap_or_default();
+    host.ends_with("google.com")
+        || host.ends_with("gstatic.com")
+        || host.ends_with("googleusercontent.com")
+        || host.ends_with("google.co")
+        || host.contains(".google.")
+}
+
+/// Classname-free organic-result extraction — for engines (google) whose result
+/// container/title classes are obfuscated and rotate frequently, making a selector
+/// strategy brittle. The stable STRUCTURE doesn't change: an organic result is an
+/// `<a href="http…">` that CONTAINS an `<h3>` (its title) and points off-site. We
+/// walk those anchors, take the h3 text as the title and the anchor href as the URL,
+/// skip engine-internal hosts, and dedup by URL.
+fn parse_structural_serp(html: &str, limit: usize) -> Vec<SearchResult> {
+    let tree = Tree::parse(html);
+    let mut out: Vec<SearchResult> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for &a in tree.query_selector_all("a[href]").iter() {
+        if out.len() >= limit {
+            break;
+        }
+        let href = tree.get_attribute(a, "href").unwrap_or_default();
+        let url = href.trim();
+        if !url.starts_with("http") || is_serp_internal_host(url) {
+            continue;
+        }
+        // The title-carrying <h3> must be INSIDE this anchor (the organic-result shape).
+        let Some(h3) = find_desc(&tree, a, "h3") else {
+            continue;
+        };
+        let title = norm_ws(&tree.text_content(h3));
+        if title.is_empty() || !seen.insert(url.to_string()) {
+            continue;
+        }
+        out.push(SearchResult {
+            title,
+            url: url.to_string(),
+            snippet: None,
+        });
+    }
+    out
 }
 
 // First descendant of `container` matching `selector` (scoped: we only walk the
@@ -2962,13 +3014,38 @@ mod tests {
     }
 
     #[test]
-    fn search_parses_google_title_and_link_separately() {
+    fn search_parses_google_structural() {
+        // Google uses the classname-free structural parser (its result classes are
+        // obfuscated + rotate): an <a href="http…"> containing an <h3> is a result.
         let r = parse_serp(built_in().get("google").unwrap(), GOOGLE_HTML, 10);
         assert_eq!(r.len(), 2);
-        // Title comes from the <h3>, the URL from the wrapping <a href>.
         assert_eq!(r[0].title, "Google One");
         assert_eq!(r[0].url, "https://example.com/g1");
-        assert_eq!(r[0].snippet.as_deref(), Some("Google snippet one."));
+        assert_eq!(r[1].url, "https://example.com/g2");
+        // structural extraction carries no snippet.
+        assert!(r[0].snippet.is_none());
+    }
+
+    #[test]
+    fn structural_skips_internal_hosts_and_dedups() {
+        // Only off-site anchors that WRAP an <h3> count; google-internal nav (google.com
+        // /gstatic), an <h3>-less link, and a duplicate URL are all filtered.
+        let html = r#"<html><body>
+          <a href="https://www.google.com/search?q=x"><h3>internal nav</h3></a>
+          <a href="https://maps.gstatic.com/a"><h3>asset</h3></a>
+          <a href="https://ex.com/1"><h3>Real One</h3></a>
+          <a href="https://ex.com/nav">no h3 here</a>
+          <a href="https://ex.com/1"><h3>Dup URL</h3></a>
+          <a href="https://ex.com/2"><h3>Real Two</h3></a>
+        </body></html>"#;
+        let google = strat(
+            r#"{"engine":"google","query_url":"https://g/?q={query}","format":"structural"}"#,
+        );
+        let r = parse_serp(&google, html, 10);
+        assert_eq!(r.len(), 2, "internal/no-h3/dup filtered: {r:?}");
+        assert_eq!(r[0].title, "Real One");
+        assert_eq!(r[0].url, "https://ex.com/1");
+        assert_eq!(r[1].url, "https://ex.com/2");
     }
 
     #[test]
@@ -3000,7 +3077,7 @@ mod tests {
         );
         assert_eq!(
             build_query_url(reg.get("google").unwrap(), "rust", 5, None).unwrap(),
-            "https://www.google.com/search?q=rust&num=5"
+            "https://www.google.com/search?q=rust"
         );
         assert_eq!(
             build_query_url(

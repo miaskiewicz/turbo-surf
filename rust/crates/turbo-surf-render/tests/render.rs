@@ -6,8 +6,34 @@
 use turbo_surf_render::{
     render_html, render_html_async, render_hydrate, render_hydrate_with_budget, render_page,
     render_page_pooled, render_page_with_budget, run_with_dom, PageSession,
-    DEFAULT_RENDER_BUDGET_MS,
+    DEFAULT_RENDER_BUDGET_MS, SCRIPT_BOUNDARY,
 };
+
+// --- per-script isolation: a throw in one <script> doesn't abort the rest -----
+// A browser runs each <script> as a separate top-level program: an uncaught error in
+// one does NOT stop later scripts, and top-level let/const/function/var still populate
+// the shared realm scope so a later script sees them. The render tier splits a
+// page-script bundle on SCRIPT_BOUNDARY and runs each part on its own.
+#[tokio::test]
+async fn a_throwing_script_does_not_abort_later_scripts() {
+    let base = "http://localhost/";
+    let html = "<body><div id='o'></div></body>";
+    // Part 1 throws (simulates google's `_._DumpException` cascade); part 2 declares a
+    // top-level `let` + `function`; part 3 reads them and writes the DOM — so passing
+    // proves both isolation (part 3 ran) AND shared realm scope (it saw part 2's decls).
+    let bundle = [
+        r#"throw new Error("boom from script 1");"#,
+        r#"let PART2 = "ran"; function greet(){ return "hi:" + PART2; }"#,
+        r#"document.getElementById('o').textContent = greet();"#,
+    ]
+    .join(SCRIPT_BOUNDARY);
+
+    let out = render_page(html, base, &bundle).await.unwrap();
+    assert!(
+        out.contains("hi:ran"),
+        "later scripts run past a throw and share realm scope: {out}"
+    );
+}
 
 // set_fingerprint is a PROCESS-global override; serialize the tests that read or
 // mutate it so a parallel override can't leak into a default-assuming test.

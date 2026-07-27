@@ -255,7 +255,10 @@ impl Session {
                 parts.push(r.html);
             }
         }
-        parts.join("\n;\n")
+        // Join with the render tier's script boundary (not a bare `;`) so each
+        // `<script>` body runs as its own top-level program — a throw in one is
+        // isolated from the rest, like a browser (see `render` `SCRIPT_BOUNDARY`).
+        parts.join(turbo_surf_render::SCRIPT_BOUNDARY)
     }
 
     // Run the page's own scripts over its DOM (the render tier) and reload the

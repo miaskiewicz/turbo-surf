@@ -312,6 +312,10 @@ globalThis.navigator = {
   deviceMemory: __pick("deviceMemory", 8),
   maxTouchPoints: __pick("maxTouchPoints", 0),
   cookieEnabled: true, doNotTrack: null,
+  // Fire-and-forget telemetry beacon: real Chrome exposes it, and its absence is a
+  // headless tell (google's homepage reads `navigator.sendBeacon` before hydrating).
+  // No network here — accept + report success, matching the spec's boolean return.
+  sendBeacon: (_url, _data) => true,
   plugins: __plugins, mimeTypes: [],
   // NetworkInformation — real Chrome exposes it; anti-bot scripts (found via the
   // `probe` example on a real Akamai sensor) read it, and its absence is a tell.

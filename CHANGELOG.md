@@ -17,21 +17,27 @@ any existing tool's behaviour or the no-JS default tier.
   `{ urls, concurrency?(4), links? }` → per-url `{ url, status, title, markdown, links? }`
   or `{ url, error }` (a per-url failure never aborts the batch). Self-contained no-JS
   loop; does not touch `batch`/`crawl::Nav` (which discard the parse tree).
-- **`search`** — web search via SERP scrape: `{ query, engine?(duckduckgo), base?,
+- **`web_search`** — web search via SERP scrape: `{ query, engine?, base?,
   limit?(10) }` → `[{ title, url, snippet? }]`. Stateless — a direct fetch that never
-  mutates the session's current page or cookie jar.
+  mutates the session's current page or cookie jar. Engine precedence: explicit `engine`
+  arg → session default (`web_search_set_engine`) → `duckduckgo`.
+- **`web_search_set_engine`** — set the session default engine used by `web_search` when
+  a call omits `engine`: `{ engine }` → `{ engine, ok }`. Validates the id resolves in the
+  strategy registry (unknown engine → error).
 - **Data-driven, versioned search strategies.** Engine parse rules are **JSON data**
   (dated `Strategy` documents), not compiled selectors — so a markup change is a data
-  edit, not a recompile. Layered registry: `search_load_strategy` (session override) →
+  edit, not a recompile. Layered registry: `web_search_load_strategy` (session override) →
   user strategies dir (`TURBO_SURF_SEARCH_STRATEGIES`) → bundled defaults
-  (`search-strategies.json`). New tools **`search_strategies`** (list active),
-  **`search_load_strategy`** (register/override — add a new engine or hotfix a stale one
-  live), **`search_reset_strategy`** (drop overrides). Bundled engines: duckduckgo, bing,
+  (`search-strategies.json`). New tools **`web_search_strategies`** (list active),
+  **`web_search_load_strategy`** (register/override — add a new engine or hotfix a stale one
+  live), **`web_search_reset_strategy`** (drop overrides). Bundled engines: duckduckgo, bing,
   google, searxng, baidu.
   - **Note:** google/bing/baidu SERP selectors are best-effort — SERP markup is volatile
     and some engines gate datacenter IPs (google served a JS wall in CI, so its selectors
     are not live-verified). duckduckgo (`html.duckduckgo.com`) is the reliable default; any
-    engine is fixable at runtime via `search_load_strategy` without a release.
+    engine is fixable at runtime via `web_search_load_strategy` without a release.
+- Consumes turbo-html2pdf-core 0.2.15 (temp local path-dep pending its publish; swap to
+  crates.io version on release).
 
 ## [0.3.6]
 

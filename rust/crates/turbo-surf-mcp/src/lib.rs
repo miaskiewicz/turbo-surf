@@ -59,10 +59,13 @@ pub struct Session {
     /// real page is served instead of a JS-gated interstitial. `None` = the
     /// default (on); set `Some(false)` to send the raw consent-gated response.
     bypass_consent: Option<bool>,
-    /// Session-scoped `search` parse-strategy overrides, keyed by engine id — the
+    /// Session-scoped `web_search` parse-strategy overrides, keyed by engine id — the
     /// highest-precedence registry layer (see `resolve_strategy`). Populated by
-    /// `search_load_strategy`; empty by default (falls through to user-dir/built-in).
+    /// `web_search_load_strategy`; empty by default (falls through to user-dir/built-in).
     search_overrides: HashMap<String, Strategy>,
+    /// Session default engine for `web_search` when a call omits `engine` — set via
+    /// `web_search_set_engine`. `None` (the default) falls through to `"duckduckgo"`.
+    default_search_engine: Option<String>,
 }
 
 impl Session {
@@ -973,7 +976,7 @@ async fn fetch_markdown_entry(url: &str, want_links: bool) -> Result<Value, Stri
 // A declarative parse strategy: everything the interpreter needs to build a SERP
 // query URL and pull organic results out of the response — all DATA, no engine
 // selector lives in compiled code. Loaded from the bundled `search-strategies.json`,
-// a user strategies dir, or `search_load_strategy` at runtime (see the registry).
+// a user strategies dir, or `web_search_load_strategy` at runtime (see the registry).
 #[derive(Clone, Debug, serde::Deserialize)]
 struct Strategy {
     /// The id callers pass as `engine`.
@@ -1024,36 +1027,38 @@ fn default_html_format() -> String {
 }
 
 impl Strategy {
-    // Load-time validation for `search_load_strategy`: engine id + a `{query}` slot
+    // Load-time validation for `web_search_load_strategy`: engine id + a `{query}` slot
     // are always required; the rest depends on `format`.
     fn validate(&self) -> Result<(), String> {
         if self.engine.trim().is_empty() {
-            return Err("search_load_strategy: 'engine' must be non-empty".into());
+            return Err("web_search_load_strategy: 'engine' must be non-empty".into());
         }
         if !self.query_url.contains("{query}") {
-            return Err("search_load_strategy: 'query_url' must contain '{query}'".into());
+            return Err("web_search_load_strategy: 'query_url' must contain '{query}'".into());
         }
         match self.format.as_str() {
             "json" => {
                 let jp = self
                     .json_path
                     .as_ref()
-                    .ok_or("search_load_strategy: format 'json' requires 'json_path'")?;
+                    .ok_or("web_search_load_strategy: format 'json' requires 'json_path'")?;
                 if jp.results.is_empty() || jp.title.is_empty() || jp.url.is_empty() {
-                    return Err("search_load_strategy: 'json_path' needs results/title/url".into());
+                    return Err(
+                        "web_search_load_strategy: 'json_path' needs results/title/url".into(),
+                    );
                 }
             }
             "html" => {
                 if self.result_container.is_empty() || self.title.is_empty() || self.link.is_empty()
                 {
-                    return Err("search_load_strategy: format 'html' requires \
+                    return Err("web_search_load_strategy: format 'html' requires \
                                 result_container/title/link"
                         .into());
                 }
             }
             other => {
                 return Err(format!(
-                    "search_load_strategy: unknown format '{other}' (html|json)"
+                    "web_search_load_strategy: unknown format '{other}' (html|json)"
                 ))
             }
         }
@@ -1103,8 +1108,8 @@ fn build_query_url(
 ) -> Result<String, String> {
     let mut url = strategy.query_url.clone();
     if url.contains("{base}") {
-        let base =
-            base.ok_or_else(|| format!("search: engine '{}' requires 'base'", strategy.engine))?;
+        let base = base
+            .ok_or_else(|| format!("web_search: engine '{}' requires 'base'", strategy.engine))?;
         url = url.replace("{base}", base.trim_end_matches('/'));
     }
     url = url.replace("{query}", &encode_query(query));
@@ -1318,7 +1323,7 @@ fn resolve_strategy(session: &Session, engine: &str) -> Result<(Strategy, &'stat
         return Ok((s.clone(), "built-in"));
     }
     Err(format!(
-        "unknown engine '{engine}' (load one with search_load_strategy)"
+        "unknown engine '{engine}' (load one with web_search_load_strategy)"
     ))
 }
 
@@ -1373,14 +1378,15 @@ async fn fetch_serp(strategy: &Strategy, url: &str) -> Result<String, String> {
     Ok(res.html)
 }
 
-// `search`: a web search via a one-shot SERP scrape, driven entirely by the active
+// `web_search`: a web search via a one-shot SERP scrape, driven entirely by the active
 // parse Strategy (bundled / user-dir / session override — see `resolve_strategy`).
 // STATELESS: it reads the session's override map but never touches the current page,
 // cookie jar, or history — a caller's page survives a search. Returns organic
-// results as `[{title,url,snippet?}]`.
+// results as `[{title,url,snippet?}]`. Engine precedence: explicit `engine` arg →
+// session default (`web_search_set_engine`) → `"duckduckgo"`.
 async fn tool_search(session: &Session, args: &Value) -> Result<Value, String> {
-    let query = arg_str(args, "query").ok_or("search: missing 'query'")?;
-    let engine = arg_str(args, "engine").unwrap_or("duckduckgo");
+    let query = arg_str(args, "query").ok_or("web_search: missing 'query'")?;
+    let engine = pick_search_engine(session, args);
     let (strategy, _source) = resolve_strategy(session, engine)?;
     let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
     let url = build_query_url(&strategy, query, limit, arg_str(args, "base"))?;
@@ -1392,20 +1398,38 @@ async fn tool_search(session: &Session, args: &Value) -> Result<Value, String> {
         .collect::<Vec<_>>()))
 }
 
-// `search_strategies`: list every active strategy → `[{engine,version,source,format}]`.
+// Engine precedence for `web_search`: explicit `engine` arg → session default (set via
+// `web_search_set_engine`) → the `"duckduckgo"` fallback.
+fn pick_search_engine<'a>(session: &'a Session, args: &'a Value) -> &'a str {
+    arg_str(args, "engine")
+        .or(session.default_search_engine.as_deref())
+        .unwrap_or("duckduckgo")
+}
+
+// `web_search_strategies`: list every active strategy → `[{engine,version,source,format}]`.
 fn tool_search_strategies(session: &Session) -> Value {
     json!(list_active_strategies(session))
 }
 
-// `search_load_strategy`: validate a strategy JSON object and register it as a
+// `web_search_set_engine`: set the session default engine used by `web_search` when a
+// call omits `engine`. Validates the id resolves in the strategy registry (unknown →
+// the registry's "unknown engine" error) before storing it. Returns `{engine,ok:true}`.
+fn tool_search_set_engine(session: &mut Session, args: &Value) -> Result<Value, String> {
+    let engine = arg_str(args, "engine").ok_or("web_search_set_engine: missing 'engine'")?;
+    resolve_strategy(session, engine)?;
+    session.default_search_engine = Some(engine.to_string());
+    Ok(json!({ "engine": engine, "ok": true }))
+}
+
+// `web_search_load_strategy`: validate a strategy JSON object and register it as a
 // session-scoped override for its engine id (enables new engines / hotfixes a stale
 // built-in with no release). Returns `{engine,version,ok:true}`.
 fn tool_search_load_strategy(session: &mut Session, args: &Value) -> Result<Value, String> {
     let raw = args
         .get("strategy")
-        .ok_or("search_load_strategy: missing 'strategy' object")?;
+        .ok_or("web_search_load_strategy: missing 'strategy' object")?;
     let strategy: Strategy = serde_json::from_value(raw.clone())
-        .map_err(|e| format!("search_load_strategy: invalid strategy ({e})"))?;
+        .map_err(|e| format!("web_search_load_strategy: invalid strategy ({e})"))?;
     strategy.validate()?;
     let engine = strategy.engine.clone();
     let version = strategy.version.clone();
@@ -1413,7 +1437,7 @@ fn tool_search_load_strategy(session: &mut Session, args: &Value) -> Result<Valu
     Ok(json!({ "engine": engine, "version": version, "ok": true }))
 }
 
-// `search_reset_strategy`: drop one session override (`engine`) or clear all →
+// `web_search_reset_strategy`: drop one session override (`engine`) or clear all →
 // back to the user-dir/built-in layers. Returns what was dropped.
 fn tool_search_reset_strategy(session: &mut Session, args: &Value) -> Result<Value, String> {
     match arg_str(args, "engine") {
@@ -1456,24 +1480,31 @@ pub fn tools() -> Value {
              single-page via fetch_markdown { mode }",
         ),
         (
-            "search",
+            "web_search",
             "Web search via a one-shot SERP scrape → organic results \
              [{title,url,snippet?}] in rank order, driven by a data-defined parse \
-             strategy (see search_strategies). engine? (default duckduckgo — the \
+             strategy (see web_search_strategies). engine? (default duckduckgo — the \
              most reliable no-JS endpoint; google/bing are best-effort scrapes that \
-             may drift or captcha; searxng/baidu also bundled). base? is the \
-             instance URL for engine:searxng. limit? (default 10). Stateless: does \
-             not touch the session page/jar",
+             may drift or captcha; searxng/baidu also bundled; or set a session \
+             default via web_search_set_engine). base? is the instance URL for \
+             engine:searxng. limit? (default 10). Stateless: does not touch the \
+             session page/jar",
         ),
         (
-            "search_strategies",
+            "web_search_set_engine",
+            "Set the session default search engine used by web_search when a call \
+             omits engine. Arg: engine (must resolve in the strategy registry — see \
+             web_search_strategies). Unknown engine → error → {engine,ok}",
+        ),
+        (
+            "web_search_strategies",
             "List the active search parse-strategies → \
              [{engine,version,source,format}] (source: custom|user-dir|built-in, \
              highest precedence first). Strategies are DATA, not code — dated + \
              overridable",
         ),
         (
-            "search_load_strategy",
+            "web_search_load_strategy",
             "Register/override a search parse-strategy (session-scoped) for its \
              engine id. Arg: strategy (the JSON object: engine, version, query_url \
              with {query}/{limit}/{base}, format html|json, selectors or json_path). \
@@ -1481,7 +1512,7 @@ pub fn tools() -> Value {
              {engine,version,ok}",
         ),
         (
-            "search_reset_strategy",
+            "web_search_reset_strategy",
             "Drop a session strategy override (engine?) or clear all → back to the \
              user-dir/built-in layers. Returns what was dropped",
         ),
@@ -1670,10 +1701,11 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
         }
         "fetch_markdown" => tool_fetch_markdown(session, args).await,
         "fetch_markdown_batch" => tool_fetch_markdown_batch(args).await,
-        "search" => tool_search(session, args).await,
-        "search_strategies" => Ok(tool_search_strategies(session)),
-        "search_load_strategy" => tool_search_load_strategy(session, args),
-        "search_reset_strategy" => tool_search_reset_strategy(session, args),
+        "web_search" => tool_search(session, args).await,
+        "web_search_set_engine" => tool_search_set_engine(session, args),
+        "web_search_strategies" => Ok(tool_search_strategies(session)),
+        "web_search_load_strategy" => tool_search_load_strategy(session, args),
+        "web_search_reset_strategy" => tool_search_reset_strategy(session, args),
         "reload" => session.reload().await,
         "go_back" => session.go_back().await,
         "go_forward" => session.go_forward().await,
@@ -2789,7 +2821,7 @@ mod tests {
       {"title":"No URL","url":"","content":"dropped"}
     ]}"#;
 
-    // Parse a strategy from a JSON literal — the same path `search_load_strategy`
+    // Parse a strategy from a JSON literal — the same path `web_search_load_strategy`
     // and the bundled defaults take, so tests exercise the real interpreter.
     fn strat(json: &str) -> Strategy {
         serde_json::from_str(json).expect("test strategy should parse")
@@ -2903,10 +2935,10 @@ mod tests {
         let s = Session::new();
         let e = resolve_strategy(&s, "bogus").unwrap_err();
         assert!(e.contains("unknown engine 'bogus'"), "{e}");
-        assert!(e.contains("search_load_strategy"), "{e}");
+        assert!(e.contains("web_search_load_strategy"), "{e}");
     }
 
-    // `search_load_strategy` override wins over the built-in; `search_reset_strategy`
+    // `web_search_load_strategy` override wins over the built-in; `web_search_reset_strategy`
     // restores it.
     #[tokio::test]
     async fn load_strategy_overrides_builtin_then_reset_restores() {
@@ -2916,7 +2948,7 @@ mod tests {
         // Load a session override for the same engine id.
         let r = call_tool(
             &mut s,
-            "search_load_strategy",
+            "web_search_load_strategy",
             &json!({ "strategy": {
                 "engine": "duckduckgo",
                 "version": "2099-01-01",
@@ -2938,7 +2970,7 @@ mod tests {
         // Reset drops it → back to built-in.
         let dropped = call_tool(
             &mut s,
-            "search_reset_strategy",
+            "web_search_reset_strategy",
             &json!({ "engine": "duckduckgo" }),
         )
         .await
@@ -2953,7 +2985,7 @@ mod tests {
         let mut s = Session::new();
         let bad = call_tool(
             &mut s,
-            "search_load_strategy",
+            "web_search_load_strategy",
             &json!({ "strategy": {
                 "engine": "x",
                 "query_url": "https://x/?q={query}",
@@ -2965,7 +2997,7 @@ mod tests {
         // A query_url without {query} is rejected too.
         let bad2 = call_tool(
             &mut s,
-            "search_load_strategy",
+            "web_search_load_strategy",
             &json!({ "strategy": {
                 "engine": "x",
                 "query_url": "https://x/search",
@@ -2980,12 +3012,12 @@ mod tests {
         );
     }
 
-    // `search_strategies` lists all active strategies with their source; a session
+    // `web_search_strategies` lists all active strategies with their source; a session
     // override flips that engine's source to "custom".
     #[tokio::test]
     async fn search_strategies_lists_sources() {
         let mut s = Session::new();
-        let list = call_tool(&mut s, "search_strategies", &json!({}))
+        let list = call_tool(&mut s, "web_search_strategies", &json!({}))
             .await
             .unwrap();
         let arr = list.as_array().unwrap();
@@ -2998,7 +3030,7 @@ mod tests {
         // After an override, that engine reports "custom".
         call_tool(
             &mut s,
-            "search_load_strategy",
+            "web_search_load_strategy",
             &json!({ "strategy": {
                 "engine": "google",
                 "version": "2099-01-01",
@@ -3009,7 +3041,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let list = call_tool(&mut s, "search_strategies", &json!({}))
+        let list = call_tool(&mut s, "web_search_strategies", &json!({}))
             .await
             .unwrap();
         let google = list
@@ -3020,6 +3052,41 @@ mod tests {
             .unwrap();
         assert_eq!(google["source"], "custom");
         assert_eq!(google["version"], "2099-01-01");
+    }
+
+    // `web_search_set_engine` stores a session default that `web_search` uses when a
+    // call omits `engine`; an explicit `engine` arg still overrides it. Unknown → error.
+    #[tokio::test]
+    async fn set_engine_sets_session_default_and_arg_overrides() {
+        let mut s = Session::new();
+        // No default yet → falls through to duckduckgo.
+        assert_eq!(pick_search_engine(&s, &json!({})), "duckduckgo");
+        // Set a session default.
+        let r = call_tool(
+            &mut s,
+            "web_search_set_engine",
+            &json!({ "engine": "bing" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["ok"], true);
+        assert_eq!(r["engine"], "bing");
+        // A no-engine call now uses the stored default.
+        assert_eq!(pick_search_engine(&s, &json!({})), "bing");
+        // An explicit engine arg still wins.
+        assert_eq!(
+            pick_search_engine(&s, &json!({ "engine": "google" })),
+            "google"
+        );
+        // Unknown engine → the registry's "unknown engine" error; default unchanged.
+        let bad = call_tool(
+            &mut s,
+            "web_search_set_engine",
+            &json!({ "engine": "bogus" }),
+        )
+        .await;
+        assert!(bad.unwrap_err().contains("unknown engine 'bogus'"));
+        assert_eq!(pick_search_engine(&s, &json!({})), "bing");
     }
 
     // The interpreter honors a runtime-loaded strategy end to end (parse only).

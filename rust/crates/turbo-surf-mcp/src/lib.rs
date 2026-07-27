@@ -1448,7 +1448,7 @@ async fn fetch_serp(strategy: &Strategy, url: &str, force_browser: bool) -> Resu
 async fn browser_fetch_serp(url: &str) -> Result<String, String> {
     let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
         "web_search browser mode needs the TURBO_SURF_BROWSER_FETCH_CMD env var (a \
-         real-browser sidecar; e.g. `node .sidecar/fetch-serp.mjs`)"
+         real-browser sidecar; run web_search_setup_browser, or `node scripts/browser-sidecar/fetch-serp.mjs`)"
             .to_string()
     })?;
     browser_fetch_serp_cmd(url, &cmd).await
@@ -1586,6 +1586,36 @@ fn tool_search_reset_strategy(session: &mut Session, args: &Value) -> Result<Val
     }
 }
 
+// `web_search_setup_browser`: build the hardened-Chrome sidecar (installs patchright +
+// verifies Chrome) so `web_search {browser:true}` / google works. Runs the committed
+// setup script; `dir` overrides its location (default `scripts/browser-sidecar`,
+// relative to the process cwd). Returns the script output + the env var to export.
+async fn tool_setup_browser(args: &Value) -> Result<Value, String> {
+    let dir = arg_str(args, "dir").unwrap_or("scripts/browser-sidecar");
+    let script = format!("{dir}/setup.sh");
+    if !std::path::Path::new(&script).exists() {
+        return Err(format!(
+            "setup script not found at {script} — pass `dir` pointing at the committed \
+             scripts/browser-sidecar (or run `bash <dir>/setup.sh` manually)"
+        ));
+    }
+    let out = tokio::process::Command::new("bash")
+        .arg(&script)
+        .output()
+        .await
+        .map_err(|e| format!("run {script}: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    let fetch_cmd = format!("node {dir}/fetch-serp.mjs");
+    Ok(json!({
+        "ok": out.status.success(),
+        "output": stdout,
+        "stderr": stderr,
+        "set_env": { "TURBO_SURF_BROWSER_FETCH_CMD": fetch_cmd },
+        "hint": "export TURBO_SURF_BROWSER_FETCH_CMD then web_search {engine:'google'} or browser:true",
+    }))
+}
+
 pub fn tools() -> Value {
     let specs: &[(&str, &str)] = &[
         // navigation
@@ -1650,6 +1680,13 @@ pub fn tools() -> Value {
             "web_search_reset_strategy",
             "Drop a session strategy override (engine?) or clear all → back to the \
              user-dir/built-in layers. Returns what was dropped",
+        ),
+        (
+            "web_search_setup_browser",
+            "Build the hardened-Chrome sidecar (installs patchright + verifies Chrome) \
+             so web_search {browser:true} / google works. Runs scripts/browser-sidecar/\
+             setup.sh (override with dir?). Returns the output + the \
+             TURBO_SURF_BROWSER_FETCH_CMD to export",
         ),
         (
             "markdown",
@@ -1841,6 +1878,7 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
         "web_search_strategies" => Ok(tool_search_strategies(session)),
         "web_search_load_strategy" => tool_search_load_strategy(session, args),
         "web_search_reset_strategy" => tool_search_reset_strategy(session, args),
+        "web_search_setup_browser" => tool_setup_browser(args).await,
         "reload" => session.reload().await,
         "go_back" => session.go_back().await,
         "go_forward" => session.go_forward().await,

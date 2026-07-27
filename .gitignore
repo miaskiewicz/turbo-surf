@@ -54,3 +54,8 @@ harness/crawlers/storage/
 
 # Local stealth browser sidecar (chromium + node_modules) — never committed
 .sidecar/
+
+# Browser-sidecar runtime (committed: fetch-serp.mjs, setup.sh, package.json)
+scripts/browser-sidecar/node_modules/
+scripts/browser-sidecar/.chrome-profile/
+scripts/browser-sidecar/package-lock.json

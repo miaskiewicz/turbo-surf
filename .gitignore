@@ -51,3 +51,6 @@ harness/crawlers/__pycache__/
 storage/
 harness/crawlers/storage/
 .serena/
+
+# Local stealth browser sidecar (chromium + node_modules) — never committed
+.sidecar/

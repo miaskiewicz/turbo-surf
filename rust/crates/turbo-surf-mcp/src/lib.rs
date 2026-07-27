@@ -1363,7 +1363,14 @@ fn list_active_strategies(session: &Session) -> Vec<Value> {
 // per-host Chrome identity + consent-cookie seeding, and for a render-tier strategy
 // (mode fast/secure) runs the page's own JS on a THROWAWAY session, so the caller's
 // current page/jar are never touched.
-async fn fetch_serp(strategy: &Strategy, url: &str) -> Result<String, String> {
+async fn fetch_serp(strategy: &Strategy, url: &str, force_browser: bool) -> Result<String, String> {
+    // Browser mode: hand the SERP URL to a real-browser sidecar (opt-in, chromium
+    // stays OUT of the engine) and parse the rendered results HTML it returns. This
+    // is the path for engines gated behind a browser-integrity wall (google's
+    // BotGuard/enablejs), which no headless fetch/JS-tier clears — a real browser does.
+    if force_browser || strategy.mode == "browser" {
+        return browser_fetch_serp(url).await;
+    }
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
     let opts = FetchOptions {
         allow_non_html: true, // json engines return non-HTML bodies
@@ -1381,6 +1388,71 @@ async fn fetch_serp(strategy: &Strategy, url: &str) -> Result<String, String> {
     Ok(res.html)
 }
 
+/// Fetch a SERP through the opt-in browser sidecar named by the
+/// `TURBO_SURF_BROWSER_FETCH_CMD` env var (e.g. `node harness/browser-solver/fetch-serp.mjs`).
+/// Contract: we write `{"url":"…"}\n` to its stdin; it navigates a real browser and
+/// writes `{"html":"…","finalUrl":"…","status":200}` to stdout. Chromium is never
+/// linked into the engine — this shells out to a dev/deploy-provided browser.
+async fn browser_fetch_serp(url: &str) -> Result<String, String> {
+    let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
+        "web_search browser mode needs the TURBO_SURF_BROWSER_FETCH_CMD env var (a \
+         real-browser sidecar; e.g. `node .sidecar/fetch-serp.mjs`)"
+            .to_string()
+    })?;
+    browser_fetch_serp_cmd(url, &cmd).await
+}
+
+/// Run a specific browser-sidecar command for `url` (the env-independent core, so the
+/// contract is unit-testable with a stub command). See [`browser_fetch_serp`].
+async fn browser_fetch_serp_cmd(url: &str, cmd: &str) -> Result<String, String> {
+    use tokio::io::AsyncWriteExt;
+    let mut parts = cmd.split_whitespace();
+    let prog = parts
+        .next()
+        .ok_or("TURBO_SURF_BROWSER_FETCH_CMD is empty")?;
+    let mut child = tokio::process::Command::new(prog)
+        .args(parts)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("spawn browser sidecar ({prog}): {e}"))?;
+    let req = json!({ "url": url }).to_string();
+    child
+        .stdin
+        .take()
+        .ok_or("no sidecar stdin")?
+        .write_all(req.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().await.map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!(
+            "browser sidecar failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout)
+                .chars()
+                .take(200)
+                .collect::<String>()
+        ));
+    }
+    let v: Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| format!("browser sidecar returned non-JSON: {e}"))?;
+    // The sidecar flags an abuse wall (google /sorry captcha) — surface it as a clear
+    // error instead of parsing a captcha page into zero silent results.
+    if v.get("blocked").and_then(Value::as_bool).unwrap_or(false) {
+        return Err(format!(
+            "search engine served an anti-abuse captcha (blocked); the exit IP is likely \
+             rate-limited — {}",
+            v.get("finalUrl").and_then(Value::as_str).unwrap_or("")
+        ));
+    }
+    v.get("html")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "browser sidecar response has no 'html'".to_string())
+}
+
 // `web_search`: a web search via a one-shot SERP scrape, driven entirely by the active
 // parse Strategy (bundled / user-dir / session override — see `resolve_strategy`).
 // STATELESS: it reads the session's override map but never touches the current page,
@@ -1393,7 +1465,13 @@ async fn tool_search(session: &Session, args: &Value) -> Result<Value, String> {
     let (strategy, _source) = resolve_strategy(session, engine)?;
     let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
     let url = build_query_url(&strategy, query, limit, arg_str(args, "base"))?;
-    let body = fetch_serp(&strategy, &url).await?;
+    // `browser:true` forces the real-browser sidecar for this call (for engines gated
+    // behind a browser-integrity wall like google); else the strategy's own mode drives.
+    let force_browser = args
+        .get("browser")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let body = fetch_serp(&strategy, &url, force_browser).await?;
     let results = parse_serp(&strategy, &body, limit);
     Ok(json!(results
         .iter()
@@ -1490,8 +1568,10 @@ pub fn tools() -> Value {
              most reliable no-JS endpoint; google/bing are best-effort scrapes that \
              may drift or captcha; searxng/baidu also bundled; or set a session \
              default via web_search_set_engine). base? is the instance URL for \
-             engine:searxng. limit? (default 10). Stateless: does not touch the \
-             session page/jar",
+             engine:searxng. limit? (default 10). browser? routes the SERP fetch \
+             through a real-browser sidecar (TURBO_SURF_BROWSER_FETCH_CMD) — needed \
+             for engines behind a browser-integrity wall (google BotGuard). Stateless: \
+             does not touch the session page/jar",
         ),
         (
             "web_search_set_engine",
@@ -2146,6 +2226,31 @@ mod tests {
 
     async fn call(s: &mut Session, name: &str, args: Value) -> Value {
         call_tool(s, name, &args).await.unwrap()
+    }
+
+    // The browser-sidecar contract (env-independent core): a stub `node -e` command
+    // stands in for the real chromium sidecar — it drains stdin and prints a JSON
+    // {html} line. Verifies we drive the sidecar and read its html back. (The JS has
+    // no spaces so it survives the command's whitespace split into program + args.)
+    #[tokio::test]
+    async fn browser_serp_reads_sidecar_html() {
+        let html = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write(JSON.stringify({html:'<h3>ok</h3>'}))",
+        )
+        .await;
+        assert_eq!(html.unwrap(), "<h3>ok</h3>");
+    }
+
+    #[tokio::test]
+    async fn browser_serp_surfaces_captcha_block() {
+        let err = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write(JSON.stringify({blocked:true,finalUrl:'https://g/sorry'}))",
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("captcha"), "block surfaced: {err}");
     }
 
     #[tokio::test]

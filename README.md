@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.3.6 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.4.0 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (7-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl

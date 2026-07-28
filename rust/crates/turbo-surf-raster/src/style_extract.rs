@@ -213,15 +213,34 @@ fn first_srcset_url(v: &str) -> &str {
         .unwrap_or("")
 }
 
-/// The best image URL for an `<img>` tag: a non-empty `src`, else the first
-/// lazy/responsive attribute that carries one.
-fn best_img_url(tag: &str, tag_lower: &str) -> Option<String> {
-    if let Some(src) = attr_value(tag, tag_lower, "src") {
-        let src = html_unescape(src.trim());
-        if !src.is_empty() {
-            return Some(src);
-        }
-    }
+/// Tokens that mark a `src` as a lazy-load *placeholder* rather than the real
+/// image (a 1×1 spacer / blank pixel a site shows until JS swaps in the real URL
+/// held in a `data-*` attribute). Nike (and most lazy-loaders) ship a non-empty
+/// placeholder `src` + the real URL in `data-*`, so a non-empty `src` alone must
+/// not win over the lazy attr.
+const PLACEHOLDER_SRC_TOKENS: &[&str] = &[
+    "spacer",
+    "blank.",
+    "pixel",
+    "1x1",
+    "transparent",
+    "placeholder",
+    "dot.gif",
+    "grey.gif",
+    "gray.gif",
+];
+
+/// Whether an `<img src>` is a lazy-load placeholder we should look past when a
+/// real lazy/responsive URL is also present. Any inline `data:` URI counts (real
+/// content images are served by URL; an inline `src` alongside a `data-*` lazy
+/// attr is the placeholder), as does a spacer/blank/1×1 filename.
+fn is_placeholder_src(src: &str) -> bool {
+    let s = src.trim().to_ascii_lowercase();
+    s.starts_with("data:") || PLACEHOLDER_SRC_TOKENS.iter().any(|t| s.contains(t))
+}
+
+/// The first lazy/responsive attribute URL on the tag (order = preference).
+fn lazy_img_url(tag: &str, tag_lower: &str) -> Option<String> {
     for attr in LAZY_IMG_ATTRS {
         if let Some(v) = attr_value(tag, tag_lower, attr) {
             let v = v.trim();
@@ -237,6 +256,24 @@ fn best_img_url(tag: &str, tag_lower: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// The best image URL for an `<img>` tag: a real (non-empty, non-placeholder)
+/// `src`, else the first lazy/responsive attribute that carries one. A placeholder
+/// `src` (1×1 spacer / inline `data:` pixel) yields to the lazy URL so the real
+/// image is fetched + painted instead of the spacer.
+fn best_img_url(tag: &str, tag_lower: &str) -> Option<String> {
+    let src = attr_value(tag, tag_lower, "src")
+        .map(|s| html_unescape(s.trim()))
+        .filter(|s| !s.is_empty());
+    match src {
+        // A real src wins outright.
+        Some(s) if !is_placeholder_src(&s) => Some(s),
+        // A placeholder src yields to a lazy URL when one exists, else stands.
+        Some(s) => lazy_img_url(tag, tag_lower).or(Some(s)),
+        // No src at all → the lazy/responsive fallback.
+        None => lazy_img_url(tag, tag_lower),
+    }
 }
 
 /// Run `f` for each `<img>` tag with its (raw, lower) slice and its `[start,end)`.
@@ -276,40 +313,80 @@ fn img_srcs(html: &str, out: &mut Vec<String>) {
     });
 }
 
-/// Fill in a missing `<img src>` from its lazy/responsive attribute, so the layout
-/// (which sizes/paints an image box from `src`) renders lazy-loaded images whose
-/// JS `src`-swap didn't run headless. `<img>`s that already have a `src` are left
-/// as-is. The injected URL matches what [`image_urls`] returns, so the caller's
-/// fetched bytes resolve.
-pub fn delazy_images(html: &str) -> String {
-    // Collect insertions (byte offset → text) then splice once, back-to-front.
-    let mut inserts: Vec<(usize, String)> = Vec::new();
-    for_each_img(html, |tag, tag_lower, start, _end| {
-        let has_src = attr_value(tag, tag_lower, "src").is_some_and(|s| !s.trim().is_empty());
-        if has_src {
-            return;
+/// The byte span `[start, end)` of attribute `name`'s (quoted) value within `tag`,
+/// or `None` if absent/unquoted. Mirrors [`attr_value`]'s scan but returns the span
+/// so a value can be rewritten in place.
+fn attr_value_span(tag: &str, tag_lower: &str, name: &str) -> Option<(usize, usize)> {
+    let mut from = 0;
+    loop {
+        let rel = tag_lower[from..].find(name)?;
+        let at = from + rel;
+        let before_ok = at == 0 || tag.as_bytes()[at - 1].is_ascii_whitespace();
+        let after_name = at + name.len();
+        if before_ok && tag_lower[after_name..].trim_start().starts_with('=') {
+            // Advance past `=` and any whitespace to the opening quote.
+            let eq = after_name + tag[after_name..].find('=')?;
+            let vstart_rel = tag[eq + 1..].find(['"', '\''])?;
+            let quote = tag.as_bytes()[eq + 1 + vstart_rel];
+            let val_start = eq + 1 + vstart_rel + 1;
+            let val_end = val_start + tag[val_start..].find(quote as char)?;
+            return Some((val_start, val_end));
         }
-        if let Some(url) = best_img_url(tag, tag_lower) {
-            // A lazy image is revealed by JS swapping an opacity/visibility class on
-            // load. We can't run that, but having assumed it loaded (by supplying
-            // `src`), force it visible too — else the engine drops it as `opacity:0`
-            // (nike's hero `<img>`s start opacity:0 and rendered as a blank band). Only
-            // when the tag has no inline `style` we would otherwise clobber.
-            let reveal = if attr_value(tag, tag_lower, "style").is_none() {
-                r#" style="opacity:1 !important;visibility:visible !important""#
-            } else {
-                ""
-            };
-            // Insert right after `<img` (offset start+4).
-            inserts.push((start + 4, format!(r#" src="{url}"{reveal}"#)));
+        from = after_name;
+    }
+}
+
+/// Fill in a missing `<img src>` (or replace a lazy-load *placeholder* `src`) from
+/// its lazy/responsive attribute, so the layout (which sizes/paints an image box
+/// from `src`) renders lazy-loaded images whose JS `src`-swap didn't run headless.
+/// `<img>`s with a real `src` are left as-is. The resulting URL matches what
+/// [`image_urls`] returns, so the caller's fetched bytes resolve.
+pub fn delazy_images(html: &str) -> String {
+    // Collect edits `[start, end) -> text` (an insert is a zero-width span), then
+    // splice once, back-to-front so earlier offsets stay valid.
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    for_each_img(html, |tag, tag_lower, start, _end| {
+        let src = attr_value(tag, tag_lower, "src").map(|s| s.trim().to_string());
+        let real_src = src
+            .as_deref()
+            .is_some_and(|s| !s.is_empty() && !is_placeholder_src(s));
+        if real_src {
+            return; // already points at a real image
+        }
+        let Some(url) = best_img_url(tag, tag_lower) else {
+            return;
+        };
+        match src {
+            // A placeholder `src` is present: rewrite its value to the real URL in
+            // place (a second `src` attr would be ignored — first wins in the parser).
+            Some(s) if !s.is_empty() => {
+                if let Some((vs, ve)) = attr_value_span(tag, tag_lower, "src") {
+                    edits.push((start + vs, start + ve, url));
+                }
+            }
+            // No `src` at all: insert one right after `<img` (offset start+4). A lazy
+            // image is revealed by JS swapping an opacity/visibility class on load;
+            // we can't run that, so force it visible too (else the engine drops it as
+            // `opacity:0` — nike's hero `<img>`s start opacity:0 as a blank band).
+            // Only when the tag has no inline `style` we would otherwise clobber.
+            _ => {
+                let reveal = if attr_value(tag, tag_lower, "style").is_none() {
+                    r#" style="opacity:1 !important;visibility:visible !important""#
+                } else {
+                    ""
+                };
+                let at = start + 4;
+                edits.push((at, at, format!(r#" src="{url}"{reveal}"#)));
+            }
         }
     });
-    if inserts.is_empty() {
+    if edits.is_empty() {
         return html.to_string();
     }
+    edits.sort_by_key(|(s, _, _)| *s);
     let mut out = html.to_string();
-    for (at, text) in inserts.into_iter().rev() {
-        out.insert_str(at, &text);
+    for (s, e, text) in edits.into_iter().rev() {
+        out.replace_range(s..e, &text);
     }
     out
 }
@@ -463,6 +540,55 @@ mod tests {
         // An `<img>` that already has a non-empty `src` is left untouched.
         let already = r#"<img src="real.jpg">"#;
         assert_eq!(delazy_images(already), already);
+    }
+
+    #[test]
+    fn delazy_replaces_a_placeholder_data_uri_src_with_the_lazy_url() {
+        use super::delazy_images;
+        // Nike-style: a non-empty 1×1 `data:` placeholder `src` + the real URL in a
+        // lazy attr. The placeholder must be REPLACED (not left, not duplicated) so
+        // the real image is sized/painted.
+        let out = delazy_images(
+            r#"<img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" data-src="real.jpg">"#,
+        );
+        assert!(
+            out.contains(r#"src="real.jpg""#),
+            "placeholder replaced: {out}"
+        );
+        assert!(!out.contains("data:image/gif"), "placeholder gone: {out}");
+    }
+
+    #[test]
+    fn delazy_replaces_a_spacer_src_with_the_lazy_url() {
+        use super::delazy_images;
+        let out = delazy_images(r#"<img src="/img/spacer.gif" data-landscape-url="hero.jpg">"#);
+        assert!(out.contains(r#"src="hero.jpg""#), "spacer replaced: {out}");
+        assert!(!out.contains("spacer.gif"), "spacer gone: {out}");
+    }
+
+    #[test]
+    fn delazy_keeps_a_real_data_uri_when_no_lazy_url() {
+        use super::delazy_images;
+        // A genuine inline `data:` image with NO lazy attr must be left as-is (we only
+        // look past a placeholder when a real lazy URL exists to use instead).
+        let real = r#"<img src="data:image/png;base64,iVBORw0KGgoAAAANSU">"#;
+        assert_eq!(delazy_images(real), real);
+    }
+
+    #[test]
+    fn image_urls_prefers_lazy_over_a_placeholder_src() {
+        use super::image_urls;
+        // The fetch side agrees with delazy: a placeholder `src` yields the lazy URL,
+        // so the caller fetches the real image (not the 1×1 spacer).
+        let urls = image_urls(r#"<img src="data:image/gif;base64,R0lGOD" data-src="real.jpg">"#);
+        assert!(
+            urls.iter().any(|u| u == "real.jpg"),
+            "fetches real: {urls:?}"
+        );
+        assert!(
+            !urls.iter().any(|u| u.starts_with("data:")),
+            "not the placeholder: {urls:?}"
+        );
     }
 
     #[test]

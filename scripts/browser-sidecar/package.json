@@ -1,0 +1,7 @@
+{
+  "name": "turbo-surf-browser-sidecar",
+  "private": true,
+  "type": "module",
+  "description": "Hardened-Chrome SERP sidecar for turbo-surf web_search {browser:true}. CDP-hardened via patchright.",
+  "dependencies": { "patchright": "^1" }
+}

@@ -1,0 +1,56 @@
+[
+  {
+    "engine": "duckduckgo",
+    "version": "2026-07-26",
+    "query_url": "https://html.duckduckgo.com/html/?q={query}",
+    "format": "html",
+    "mode": "no-js",
+    "result_container": ".web-result",
+    "title": "a.result__a",
+    "link": "a.result__a",
+    "link_redirect_param": "uddg",
+    "snippet": ".result__snippet"
+  },
+  {
+    "engine": "bing",
+    "version": "2026-07-26",
+    "query_url": "https://www.bing.com/search?q={query}",
+    "format": "html",
+    "mode": "no-js",
+    "result_container": "li.b_algo",
+    "title": "h2 a",
+    "link": "h2 a",
+    "snippet": ".b_caption p"
+  },
+  {
+    "engine": "google",
+    "version": "2026-07-27",
+    "query_url": "https://www.google.com/search?q={query}",
+    "format": "structural",
+    "mode": "browser"
+  },
+  {
+    "engine": "searxng",
+    "version": "2026-07-26",
+    "query_url": "{base}/search?q={query}&format=json",
+    "format": "json",
+    "mode": "no-js",
+    "json_path": {
+      "results": "results",
+      "title": "title",
+      "url": "url",
+      "snippet": "content"
+    }
+  },
+  {
+    "engine": "baidu",
+    "version": "2026-07-26",
+    "query_url": "https://www.baidu.com/s?wd={query}",
+    "format": "html",
+    "mode": "no-js",
+    "result_container": ".result",
+    "title": "h3 a",
+    "link": "h3 a",
+    "snippet": ".c-abstract"
+  }
+]

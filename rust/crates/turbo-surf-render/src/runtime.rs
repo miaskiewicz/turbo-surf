@@ -312,6 +312,10 @@ globalThis.navigator = {
   deviceMemory: __pick("deviceMemory", 8),
   maxTouchPoints: __pick("maxTouchPoints", 0),
   cookieEnabled: true, doNotTrack: null,
+  // Fire-and-forget telemetry beacon: real Chrome exposes it, and its absence is a
+  // headless tell (google's homepage reads `navigator.sendBeacon` before hydrating).
+  // No network here — accept + report success, matching the spec's boolean return.
+  sendBeacon: (_url, _data) => true,
   plugins: __plugins, mimeTypes: [],
   // NetworkInformation — real Chrome exposes it; anti-bot scripts (found via the
   // `probe` example on a real Akamai sensor) read it, and its absence is a tell.
@@ -2505,6 +2509,35 @@ pub async fn render_page_pooled(
     }
 }
 
+/// The boundary a page-script bundle places between successive `<script>` bodies so
+/// the render tier can run each as a SEPARATE top-level program. A browser isolates
+/// scripts: an uncaught error in one `<script>` does not abort the rest, while every
+/// script's top-level `var`/`function`/`let`/`const` still populate the shared realm
+/// scope (successive `execute_script`s reuse the same V8 context). A bundle with no
+/// boundary is a single script (arbitrary callers) and runs whole, as before.
+pub const SCRIPT_BOUNDARY: &str = "\n/*__ts_script_boundary_9f3a__*/\n";
+
+/// Run a page-script bundle the browser way: each boundary-delimited part as its own
+/// top-level `execute_script`, so a throwing script is isolated from the others
+/// (logged + skipped) instead of aborting every later script. Only a real isolate
+/// termination (the render-budget watchdog / cancellation) stops the loop and
+/// propagates — a plain JS throw leaves the isolate healthy to run the next part.
+fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str) -> Result<(), String> {
+    for part in bundle.split(SCRIPT_BOUNDARY) {
+        if part.trim().is_empty() {
+            continue;
+        }
+        if let Err(e) = rt.execute_script("<page>", part.to_string()) {
+            if rt.v8_isolate().is_execution_terminating() {
+                return Err(e.to_string()); // budget / termination — stop the page
+            }
+            // Browser semantics: a later `<script>` still runs after one throws.
+            eprintln!("script error: {e}");
+        }
+    }
+    Ok(())
+}
+
 async fn run_async(
     rt: &mut JsRuntime,
     html: &str,
@@ -2512,8 +2545,7 @@ async fn run_async(
     script: &str,
 ) -> Result<String, String> {
     install_dom(rt, html, base)?;
-    rt.execute_script("<page>", script.to_string())
-        .map_err(|e| e.to_string())?;
+    exec_page_scripts(rt, script)?;
     drain_event_loop(rt).await?; // promises/microtasks + fetch from the page
     rt.execute_script("<timers>", "__runTimers()")
         .map_err(|e| e.to_string())?;
@@ -2554,8 +2586,7 @@ async fn run_async_pooled(
     install_dom(rt, html, base)?;
     rt.execute_script("<scrub>", SCRUB_GLOBALS)
         .map_err(|e| e.to_string())?;
-    rt.execute_script("<page>", script.to_string())
-        .map_err(|e| e.to_string())?;
+    exec_page_scripts(rt, script)?;
     drain_event_loop(rt).await?;
     rt.execute_script("<timers>", "__runTimers()")
         .map_err(|e| e.to_string())?;

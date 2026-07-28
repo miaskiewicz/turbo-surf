@@ -31,6 +31,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
+      - name: Install BoringSSL toolchain (nasm/cmake)
+        run: sudo apt-get update && sudo apt-get install -y nasm cmake
+
       - name: Install
         run: npm ci
 

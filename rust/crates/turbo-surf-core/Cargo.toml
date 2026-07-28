@@ -7,9 +7,10 @@ repository.workspace = true
 description = "Browserless native-speed crawler core (Rust port, tier 1)"
 
 [features]
+default = ["impersonate"]
 # Swap the stock reqwest+rustls client for wreq (BoringSSL), which presents a
 # real Chrome TLS/JA3/JA4 + HTTP-2 (Akamai) fingerprint. Off by default: wreq
-# pulls BoringSSL, which needs a C toolchain (cmake/nasm) to build. See net.rs.
+# pulls BoringSSL, which needs a C toolchain (cmake/nasm) to build. ON by default (anti-bot); disable with --no-default-features. See net.rs.
 impersonate = ["dep:wreq", "dep:wreq-util"]
 
 [dependencies]

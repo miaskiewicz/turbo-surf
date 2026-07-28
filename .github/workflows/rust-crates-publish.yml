@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
+      - name: Install BoringSSL toolchain (nasm/cmake)
+        run: sudo apt-get update && sudo apt-get install -y nasm cmake
       # cargo reads CARGO_REGISTRY_TOKEN from the env natively; `cargo publish`
       # waits for each crate to index before the next dependent publishes.
       - run: cargo publish -p turbo-surf-core

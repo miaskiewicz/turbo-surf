@@ -10,7 +10,8 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::OnceLock;
 use turbo_dom_parser::rtdom::serialize::serialize_inner;
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
@@ -25,7 +26,7 @@ use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
-pub const VERSION: &str = "0.3.6";
+pub const VERSION: &str = "0.4.0";
 
 /// One agent session: the current page URL + parsed tree + nav history, plus the
 /// browser-ish state agents expect (UA / extra headers / cookie jar / JS mode) and
@@ -58,6 +59,13 @@ pub struct Session {
     /// real page is served instead of a JS-gated interstitial. `None` = the
     /// default (on); set `Some(false)` to send the raw consent-gated response.
     bypass_consent: Option<bool>,
+    /// Session-scoped `web_search` parse-strategy overrides, keyed by engine id — the
+    /// highest-precedence registry layer (see `resolve_strategy`). Populated by
+    /// `web_search_load_strategy`; empty by default (falls through to user-dir/built-in).
+    search_overrides: HashMap<String, Strategy>,
+    /// Session default engine for `web_search` when a call omits `engine` — set via
+    /// `web_search_set_engine`. `None` (the default) falls through to `"duckduckgo"`.
+    default_search_engine: Option<String>,
 }
 
 impl Session {
@@ -247,7 +255,10 @@ impl Session {
                 parts.push(r.html);
             }
         }
-        parts.join("\n;\n")
+        // Join with the render tier's script boundary (not a bare `;`) so each
+        // `<script>` body runs as its own top-level program — a throw in one is
+        // isolated from the rest, like a browser (see `render` `SCRIPT_BOUNDARY`).
+        parts.join(turbo_surf_render::SCRIPT_BOUNDARY)
     }
 
     // Run the page's own scripts over its DOM (the render tier) and reload the
@@ -889,6 +900,722 @@ async fn tool_run_playwright(session: &mut Session, args: &Value) -> Result<Valu
     serde_json::from_str(&out).map_err(|e| format!("run_playwright: bad result ({e}); raw={out}"))
 }
 
+// One-shot `goto` + `markdown`: fetch a URL and return its rendered markdown in a
+// single call, so a caller can treat surf as stateless instead of driving a
+// `goto` then `markdown` pair over a long-lived session. It composes the same
+// internals those two tools use — no new behaviour. `mode` (opt-in) selects the JS
+// render tier for this fetch; `links:true` also returns the page's absolute links.
+async fn tool_fetch_markdown(session: &mut Session, args: &Value) -> Result<Value, String> {
+    let url = arg_str(args, "url").ok_or("fetch_markdown: missing 'url'")?;
+    // Opt-in only: leave the session's current tier untouched when unset.
+    if let Some(mode) = arg_str(args, "mode") {
+        session.mode = mode.to_string();
+    }
+    // `goto` already yields { url, status, title }; extend it with the content.
+    let mut out = session.goto(url).await?;
+    let tree = session.tree()?;
+    let base = session.url.clone();
+    out["markdown"] = json!(view::markdown(tree, tree.root(), &base));
+    if args.get("links").and_then(Value::as_bool).unwrap_or(false) {
+        out["links"] = json!(view::links(tree, &base));
+    }
+    Ok(out)
+}
+
+// Concurrent, order-preserving, no-JS sibling of `fetch_markdown`: fetch + parse
+// + render markdown for each URL. A per-URL failure lands as `{url,error}` and
+// never aborts the batch (mirroring `turbo_surf_page::batch`'s per-URL `Err`).
+// It runs its own bounded loop rather than routing through `page::batch` — that
+// path returns `crawl::Nav`, which discards the parse tree we render markdown off.
+async fn tool_fetch_markdown_batch(args: &Value) -> Result<Value, String> {
+    use futures_util::stream::{self, StreamExt};
+    let urls: Vec<String> = args
+        .get("urls")
+        .and_then(Value::as_array)
+        .ok_or("fetch_markdown_batch: missing 'urls' array")?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let concurrency = args.get("concurrency").and_then(Value::as_u64).unwrap_or(4) as usize;
+    let want_links = args.get("links").and_then(Value::as_bool).unwrap_or(false);
+    let out: Vec<Value> = stream::iter(urls)
+        .map(|url| async move {
+            match fetch_markdown_entry(&url, want_links).await {
+                Ok(entry) => entry,
+                Err(e) => json!({ "url": url, "error": e }),
+            }
+        })
+        .buffered(concurrency.max(1))
+        .collect()
+        .await;
+    Ok(json!(out))
+}
+
+// Fetch + parse + render markdown for one URL (the batch's per-URL unit). The
+// tree is kept locally so markdown/links render off the same parse — hence the
+// self-contained fetch instead of `page::batch`, whose `Nav` drops the tree.
+async fn fetch_markdown_entry(url: &str, want_links: bool) -> Result<Value, String> {
+    let opts = FetchOptions {
+        allow_non_html: true,
+        ..Default::default()
+    };
+    let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
+    let tree = Tree::parse(&res.html);
+    let base = res.final_url;
+    let mut entry = json!({
+        "url": base,
+        "status": res.status,
+        "title": title_of(&tree),
+        "markdown": view::markdown(&tree, tree.root(), &base),
+    });
+    if want_links {
+        entry["links"] = json!(view::links(&tree, &base));
+    }
+    Ok(entry)
+}
+
+// --- web search (SERP scrape) -----------------------------------------------
+
+// A declarative parse strategy: everything the interpreter needs to build a SERP
+// query URL and pull organic results out of the response — all DATA, no engine
+// selector lives in compiled code. Loaded from the bundled `search-strategies.json`,
+// a user strategies dir, or `web_search_load_strategy` at runtime (see the registry).
+#[derive(Clone, Debug, serde::Deserialize)]
+struct Strategy {
+    /// The id callers pass as `engine`.
+    engine: String,
+    /// The dated markup snapshot this strategy targets (informational).
+    #[serde(default)]
+    version: String,
+    /// `{query}` (%-encoded), `{limit}`, `{base}` are interpolated into this.
+    query_url: String,
+    /// "html" (selectors) | "json" (`json_path`). Defaults to html.
+    #[serde(default = "default_html_format")]
+    format: String,
+    /// Fetch tier: "no-js" | "fast" | "secure". Empty == no-js. fast/secure render
+    /// the SERP's own JS on a throwaway session before parsing.
+    #[serde(default)]
+    mode: String,
+    // --- html strategies: selectors, `title`/`link`/`snippet` scoped to `result_container` ---
+    #[serde(default)]
+    result_container: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    link: String,
+    /// Optional: unwrap `/url?<param>=<real>` or `//host/l/?<param>=<real>` redirect
+    /// wrappers (Google `q`, DuckDuckGo `uddg`).
+    #[serde(default)]
+    link_redirect_param: Option<String>,
+    #[serde(default)]
+    snippet: Option<String>,
+    // --- json strategies (searxng, …): dotted paths into the response ---
+    #[serde(default)]
+    json_path: Option<JsonPath>,
+}
+
+// The response shape for a `format:"json"` engine: `results` is the (dot-pathed)
+// array of hits; `title`/`url`/`snippet` are dot-paths within each hit.
+#[derive(Clone, Debug, serde::Deserialize)]
+struct JsonPath {
+    results: String,
+    title: String,
+    url: String,
+    #[serde(default)]
+    snippet: Option<String>,
+}
+
+fn default_html_format() -> String {
+    "html".to_string()
+}
+
+impl Strategy {
+    // Load-time validation for `web_search_load_strategy`: engine id + a `{query}` slot
+    // are always required; the rest depends on `format`.
+    fn validate(&self) -> Result<(), String> {
+        if self.engine.trim().is_empty() {
+            return Err("web_search_load_strategy: 'engine' must be non-empty".into());
+        }
+        if !self.query_url.contains("{query}") {
+            return Err("web_search_load_strategy: 'query_url' must contain '{query}'".into());
+        }
+        match self.format.as_str() {
+            "json" => {
+                let jp = self
+                    .json_path
+                    .as_ref()
+                    .ok_or("web_search_load_strategy: format 'json' requires 'json_path'")?;
+                if jp.results.is_empty() || jp.title.is_empty() || jp.url.is_empty() {
+                    return Err(
+                        "web_search_load_strategy: 'json_path' needs results/title/url".into(),
+                    );
+                }
+            }
+            "html" => {
+                if self.result_container.is_empty() || self.title.is_empty() || self.link.is_empty()
+                {
+                    return Err("web_search_load_strategy: format 'html' requires \
+                                result_container/title/link"
+                        .into());
+                }
+            }
+            // Classname-free structural extraction (google): no selectors to validate.
+            "structural" => {}
+            other => {
+                return Err(format!(
+                    "web_search_load_strategy: unknown format '{other}' (html|json|structural)"
+                ))
+            }
+        }
+        Ok(())
+    }
+}
+
+// One organic search hit. `snippet` is omitted from the JSON when the markup
+// carried none, so the reply stays `[{title,url,snippet?}]`.
+#[derive(Debug)]
+struct SearchResult {
+    title: String,
+    url: String,
+    snippet: Option<String>,
+}
+
+impl SearchResult {
+    fn to_json(&self) -> Value {
+        let mut o = json!({ "title": self.title, "url": self.url });
+        if let Some(s) = &self.snippet {
+            o["snippet"] = json!(s);
+        }
+        o
+    }
+}
+
+// --- the interpreter (pure; no network) -------------------------------------
+
+// Percent-encode a query string for a URL query value (spaces → `+`).
+fn encode_query(s: &str) -> String {
+    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+}
+
+// Collapse runs of whitespace to single spaces + trim — SERP markup is padded
+// with newlines/indentation we don't want in titles/snippets.
+fn norm_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+// Build the fetch URL from a strategy's `query_url` template. `{query}` is
+// %-encoded, `{limit}` is the count, `{base}` is the (trailing-slash-trimmed)
+// instance root — an error if the template needs `{base}` but none was given.
+fn build_query_url(
+    strategy: &Strategy,
+    query: &str,
+    limit: usize,
+    base: Option<&str>,
+) -> Result<String, String> {
+    let mut url = strategy.query_url.clone();
+    if url.contains("{base}") {
+        let base = base
+            .ok_or_else(|| format!("web_search: engine '{}' requires 'base'", strategy.engine))?;
+        url = url.replace("{base}", base.trim_end_matches('/'));
+    }
+    url = url.replace("{query}", &encode_query(query));
+    url = url.replace("{limit}", &limit.to_string());
+    Ok(url)
+}
+
+// PURE result parser: a fetched SERP body → organic results, rank order, capped at
+// `limit`. Kept free of the network so it's unit-testable off saved fixtures.
+fn parse_serp(strategy: &Strategy, body: &str, limit: usize) -> Vec<SearchResult> {
+    match strategy.format.as_str() {
+        "json" => parse_json_serp(strategy, body, limit),
+        "structural" => parse_structural_serp(body, limit),
+        _ => parse_html_serp(strategy, body, limit),
+    }
+}
+
+/// True when `url`'s host is a search-engine-internal / asset host (google's own
+/// nav, gstatic, googleusercontent, google account/policy links) — never an organic
+/// result, so it's filtered out of the structural pass.
+fn is_serp_internal_host(url: &str) -> bool {
+    let host = turbo_surf_core::url::host_of(url).unwrap_or_default();
+    host.ends_with("google.com")
+        || host.ends_with("gstatic.com")
+        || host.ends_with("googleusercontent.com")
+        || host.ends_with("google.co")
+        || host.contains(".google.")
+}
+
+/// Classname-free organic-result extraction — for engines (google) whose result
+/// container/title classes are obfuscated and rotate frequently, making a selector
+/// strategy brittle. The stable STRUCTURE doesn't change: an organic result is an
+/// `<a href="http…">` that CONTAINS an `<h3>` (its title) and points off-site. We
+/// walk those anchors, take the h3 text as the title and the anchor href as the URL,
+/// skip engine-internal hosts, and dedup by URL.
+fn parse_structural_serp(html: &str, limit: usize) -> Vec<SearchResult> {
+    let tree = Tree::parse(html);
+    let mut out: Vec<SearchResult> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for &a in tree.query_selector_all("a[href]").iter() {
+        if out.len() >= limit {
+            break;
+        }
+        let href = tree.get_attribute(a, "href").unwrap_or_default();
+        let url = href.trim();
+        if !url.starts_with("http") || is_serp_internal_host(url) {
+            continue;
+        }
+        // The title-carrying <h3> must be INSIDE this anchor (the organic-result shape).
+        let Some(h3) = find_desc(&tree, a, "h3") else {
+            continue;
+        };
+        let title = norm_ws(&tree.text_content(h3));
+        if title.is_empty() || !seen.insert(url.to_string()) {
+            continue;
+        }
+        out.push(SearchResult {
+            title,
+            url: url.to_string(),
+            snippet: None,
+        });
+    }
+    out
+}
+
+// First descendant of `container` matching `selector` (scoped: we only walk the
+// container's subtree, so `matches`' ancestor-aware combinators stay in-container).
+fn find_desc(tree: &Tree, container: Handle, selector: &str) -> Option<Handle> {
+    tree.descendants(container)
+        .into_iter()
+        .find(|&h| tree.matches(h, selector))
+}
+
+// Unwrap an engine redirect href to the real destination when the strategy names a
+// wrapper param: DuckDuckGo's `//duckduckgo.com/l/?uddg=<enc-url>` and Google's
+// `/url?q=<enc-url>` carry the target in that query param. No param (or the param
+// absent from the href) → the href is already the real URL.
+fn decode_redirect(param: Option<&str>, href: &str) -> Option<String> {
+    let Some(key) = param else {
+        return Some(href.to_string());
+    };
+    // Re-absolutize so `url::Url` will parse it: protocol-relative (`//host/..`)
+    // and path-only (`/url?..`) wrappers both need a scheme+host to parse.
+    let abs = if href.starts_with("//") {
+        format!("https:{href}")
+    } else if href.starts_with('/') {
+        format!("https://redirect.invalid{href}")
+    } else {
+        href.to_string()
+    };
+    let parsed = url::Url::parse(&abs).ok()?;
+    let unwrapped = parsed
+        .query_pairs()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.into_owned());
+    Some(unwrapped.unwrap_or_else(|| href.to_string()))
+}
+
+// Scoped selector extraction: one hit per `result_container`, with `title`/`link`/
+// `snippet` matched inside it and `link_redirect_param` decoded. `title` falls back
+// to the link anchor when its selector misses (DDG/Bing: the anchor *is* the title).
+fn parse_html_serp(strategy: &Strategy, html: &str, limit: usize) -> Vec<SearchResult> {
+    let tree = Tree::parse(html);
+    let mut out = Vec::new();
+    for &container in tree.query_selector_all(&strategy.result_container).iter() {
+        if out.len() >= limit {
+            break;
+        }
+        let Some(link_h) = find_desc(&tree, container, &strategy.link) else {
+            continue;
+        };
+        let href = tree.get_attribute(link_h, "href").unwrap_or_default();
+        // Skip entries whose url is empty / unparseable / not http(s).
+        let url = match decode_redirect(strategy.link_redirect_param.as_deref(), href.trim())
+            .filter(|u| u.starts_with("http"))
+        {
+            Some(u) => u,
+            None => continue,
+        };
+        let title_h = find_desc(&tree, container, &strategy.title).unwrap_or(link_h);
+        let title = norm_ws(&tree.text_content(title_h));
+        let snippet = strategy
+            .snippet
+            .as_deref()
+            .and_then(|s| find_desc(&tree, container, s))
+            .map(|h| norm_ws(&tree.text_content(h)))
+            .filter(|s| !s.is_empty());
+        out.push(SearchResult {
+            title,
+            url,
+            snippet,
+        });
+    }
+    out
+}
+
+// Walk a dot-separated path (`a.b.c`) into a JSON value.
+fn json_lookup<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut cur = v;
+    for seg in path.split('.') {
+        cur = cur.get(seg)?;
+    }
+    Some(cur)
+}
+
+// JSON-API engines (searxng, …): walk `json_path` — `results[]` of
+// `{title,url,snippet}` by dotted path. Entries missing a url are skipped.
+fn parse_json_serp(strategy: &Strategy, body: &str, limit: usize) -> Vec<SearchResult> {
+    let Some(jp) = &strategy.json_path else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<Value>(body) else {
+        return Vec::new();
+    };
+    let Some(arr) = json_lookup(&v, &jp.results).and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|r| {
+            let url = json_lookup(r, &jp.url)
+                .and_then(Value::as_str)
+                .filter(|u| !u.is_empty())?;
+            let title = json_lookup(r, &jp.title)
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let snippet = jp
+                .snippet
+                .as_deref()
+                .and_then(|s| json_lookup(r, s))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .filter(|s| !s.is_empty());
+            Some(SearchResult {
+                title: title.to_string(),
+                url: url.to_string(),
+                snippet,
+            })
+        })
+        .take(limit)
+        .collect()
+}
+
+// --- the layered registry ----------------------------------------------------
+
+// The bundled default strategies (duckduckgo/bing/google/searxng/baidu), embedded
+// at compile time. Still DATA — parsed at load into the registry, never a Rust
+// table — so a release that only edits this JSON updates every engine.
+const BUNDLED_STRATEGIES_JSON: &str = include_str!("search-strategies.json");
+
+// The two process-wide registry layers, loaded once: the bundled defaults and any
+// user-dir strategies (from `TURBO_SURF_SEARCH_STRATEGIES`). The session override
+// map is the third, highest-precedence layer and lives on `Session`.
+struct StaticRegistry {
+    built_in: HashMap<String, Strategy>,
+    user_dir: HashMap<String, Strategy>,
+}
+
+// Parse a JSON array of strategy objects into an engine-keyed map (a malformed
+// document yields an empty map; a gate test asserts the bundled default parses).
+fn strategies_from_json_array(json: &str) -> HashMap<String, Strategy> {
+    serde_json::from_str::<Vec<Strategy>>(json)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| (s.engine.clone(), s))
+        .collect()
+}
+
+// Load user-supplied strategies from `TURBO_SURF_SEARCH_STRATEGIES` (a dir of
+// `*.json`, one strategy per file). Non-fatal: an unset/absent dir yields an empty
+// map, and a bad file is logged and skipped (it never blocks startup).
+fn load_user_dir() -> HashMap<String, Strategy> {
+    let mut map = HashMap::new();
+    let Ok(dir) = std::env::var("TURBO_SURF_SEARCH_STRATEGIES") else {
+        return map;
+    };
+    if dir.is_empty() {
+        return map;
+    }
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return map;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match serde_json::from_str::<Strategy>(&text) {
+                Ok(s) if !s.engine.trim().is_empty() => {
+                    map.insert(s.engine.clone(), s);
+                }
+                Ok(_) => eprintln!("search: skipping {} (empty engine id)", path.display()),
+                Err(e) => eprintln!("search: skipping {} ({e})", path.display()),
+            },
+            Err(e) => eprintln!("search: cannot read {} ({e})", path.display()),
+        }
+    }
+    map
+}
+
+fn static_registry() -> &'static StaticRegistry {
+    static REG: OnceLock<StaticRegistry> = OnceLock::new();
+    REG.get_or_init(|| StaticRegistry {
+        built_in: strategies_from_json_array(BUNDLED_STRATEGIES_JSON),
+        user_dir: load_user_dir(),
+    })
+}
+
+// Resolve an engine id to its active strategy + source, precedence high→low:
+// session override → user dir → bundled default.
+fn resolve_strategy(session: &Session, engine: &str) -> Result<(Strategy, &'static str), String> {
+    if let Some(s) = session.search_overrides.get(engine) {
+        return Ok((s.clone(), "custom"));
+    }
+    let reg = static_registry();
+    if let Some(s) = reg.user_dir.get(engine) {
+        return Ok((s.clone(), "user-dir"));
+    }
+    if let Some(s) = reg.built_in.get(engine) {
+        return Ok((s.clone(), "built-in"));
+    }
+    Err(format!(
+        "unknown engine '{engine}' (load one with web_search_load_strategy)"
+    ))
+}
+
+// List every active strategy with its winning source, sorted by engine id. Layers
+// are inserted low→high precedence so the higher layer overwrites the entry.
+fn list_active_strategies(session: &Session) -> Vec<Value> {
+    let reg = static_registry();
+    let mut seen: BTreeMap<String, (String, &'static str, String)> = BTreeMap::new();
+    let mut add = |engine: &str, s: &Strategy, source: &'static str| {
+        seen.insert(
+            engine.to_string(),
+            (s.version.clone(), source, s.format.clone()),
+        );
+    };
+    for (e, s) in &reg.built_in {
+        add(e, s, "built-in");
+    }
+    for (e, s) in &reg.user_dir {
+        add(e, s, "user-dir");
+    }
+    for (e, s) in &session.search_overrides {
+        add(e, s, "custom");
+    }
+    seen.into_iter()
+        .map(|(engine, (version, source, format))| {
+            json!({ "engine": engine, "version": version, "source": source, "format": format })
+        })
+        .collect()
+}
+
+// --- the search tools --------------------------------------------------------
+
+// Fetch a SERP for a strategy. STATELESS re: the caller's session — it uses a fresh
+// per-host Chrome identity + consent-cookie seeding, and for a render-tier strategy
+// (mode fast/secure) runs the page's own JS on a THROWAWAY session, so the caller's
+// current page/jar are never touched.
+async fn fetch_serp(strategy: &Strategy, url: &str, force_browser: bool) -> Result<String, String> {
+    // Browser mode: hand the SERP URL to a real-browser sidecar (opt-in, chromium
+    // stays OUT of the engine) and parse the rendered results HTML it returns. This
+    // is the path for engines gated behind a browser-integrity wall (google's
+    // BotGuard/enablejs), which no headless fetch/JS-tier clears — a real browser does.
+    if force_browser || strategy.mode == "browser" {
+        return browser_fetch_serp(url).await;
+    }
+    let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
+    let opts = FetchOptions {
+        allow_non_html: true, // json engines return non-HTML bodies
+        profile: Some(&profile),
+        bypass_consent: true,
+        ..Default::default()
+    };
+    let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
+    if matches!(strategy.mode.as_str(), "fast" | "secure" | "js") {
+        let mut tmp = Session::new();
+        tmp.load(&res.final_url, &res.html);
+        tmp.render_current().await?;
+        return Ok(serialize_doc(tmp.tree()?));
+    }
+    Ok(res.html)
+}
+
+/// Fetch a SERP through the opt-in browser sidecar named by the
+/// `TURBO_SURF_BROWSER_FETCH_CMD` env var (e.g. `node harness/browser-solver/fetch-serp.mjs`).
+/// Contract: we write `{"url":"…"}\n` to its stdin; it navigates a real browser and
+/// writes `{"html":"…","finalUrl":"…","status":200}` to stdout. Chromium is never
+/// linked into the engine — this shells out to a dev/deploy-provided browser.
+async fn browser_fetch_serp(url: &str) -> Result<String, String> {
+    let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
+        "web_search browser mode needs the TURBO_SURF_BROWSER_FETCH_CMD env var (a \
+         real-browser sidecar; run web_search_setup_browser, or `node scripts/browser-sidecar/fetch-serp.mjs`)"
+            .to_string()
+    })?;
+    browser_fetch_serp_cmd(url, &cmd).await
+}
+
+/// Run a specific browser-sidecar command for `url` (the env-independent core, so the
+/// contract is unit-testable with a stub command). See [`browser_fetch_serp`].
+async fn browser_fetch_serp_cmd(url: &str, cmd: &str) -> Result<String, String> {
+    use tokio::io::AsyncWriteExt;
+    let mut parts = cmd.split_whitespace();
+    let prog = parts
+        .next()
+        .ok_or("TURBO_SURF_BROWSER_FETCH_CMD is empty")?;
+    let mut child = tokio::process::Command::new(prog)
+        .args(parts)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("spawn browser sidecar ({prog}): {e}"))?;
+    let req = json!({ "url": url }).to_string();
+    child
+        .stdin
+        .take()
+        .ok_or("no sidecar stdin")?
+        .write_all(req.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().await.map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!(
+            "browser sidecar failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout)
+                .chars()
+                .take(200)
+                .collect::<String>()
+        ));
+    }
+    let v: Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| format!("browser sidecar returned non-JSON: {e}"))?;
+    // The sidecar flags an abuse wall (google /sorry captcha) — surface it as a clear
+    // error instead of parsing a captcha page into zero silent results.
+    if v.get("blocked").and_then(Value::as_bool).unwrap_or(false) {
+        return Err(format!(
+            "search engine served an anti-abuse captcha (blocked); the exit IP is likely \
+             rate-limited — {}",
+            v.get("finalUrl").and_then(Value::as_str).unwrap_or("")
+        ));
+    }
+    v.get("html")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "browser sidecar response has no 'html'".to_string())
+}
+
+// `web_search`: a web search via a one-shot SERP scrape, driven entirely by the active
+// parse Strategy (bundled / user-dir / session override — see `resolve_strategy`).
+// STATELESS: it reads the session's override map but never touches the current page,
+// cookie jar, or history — a caller's page survives a search. Returns organic
+// results as `[{title,url,snippet?}]`. Engine precedence: explicit `engine` arg →
+// session default (`web_search_set_engine`) → `"duckduckgo"`.
+async fn tool_search(session: &Session, args: &Value) -> Result<Value, String> {
+    let query = arg_str(args, "query").ok_or("web_search: missing 'query'")?;
+    let engine = pick_search_engine(session, args);
+    let (strategy, _source) = resolve_strategy(session, engine)?;
+    let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
+    let url = build_query_url(&strategy, query, limit, arg_str(args, "base"))?;
+    // `browser:true` forces the real-browser sidecar for this call (for engines gated
+    // behind a browser-integrity wall like google); else the strategy's own mode drives.
+    let force_browser = args
+        .get("browser")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let body = fetch_serp(&strategy, &url, force_browser).await?;
+    let results = parse_serp(&strategy, &body, limit);
+    Ok(json!(results
+        .iter()
+        .map(SearchResult::to_json)
+        .collect::<Vec<_>>()))
+}
+
+// Engine precedence for `web_search`: explicit `engine` arg → session default (set via
+// `web_search_set_engine`) → the `"duckduckgo"` fallback.
+fn pick_search_engine<'a>(session: &'a Session, args: &'a Value) -> &'a str {
+    arg_str(args, "engine")
+        .or(session.default_search_engine.as_deref())
+        .unwrap_or("duckduckgo")
+}
+
+// `web_search_strategies`: list every active strategy → `[{engine,version,source,format}]`.
+fn tool_search_strategies(session: &Session) -> Value {
+    json!(list_active_strategies(session))
+}
+
+// `web_search_set_engine`: set the session default engine used by `web_search` when a
+// call omits `engine`. Validates the id resolves in the strategy registry (unknown →
+// the registry's "unknown engine" error) before storing it. Returns `{engine,ok:true}`.
+fn tool_search_set_engine(session: &mut Session, args: &Value) -> Result<Value, String> {
+    let engine = arg_str(args, "engine").ok_or("web_search_set_engine: missing 'engine'")?;
+    resolve_strategy(session, engine)?;
+    session.default_search_engine = Some(engine.to_string());
+    Ok(json!({ "engine": engine, "ok": true }))
+}
+
+// `web_search_load_strategy`: validate a strategy JSON object and register it as a
+// session-scoped override for its engine id (enables new engines / hotfixes a stale
+// built-in with no release). Returns `{engine,version,ok:true}`.
+fn tool_search_load_strategy(session: &mut Session, args: &Value) -> Result<Value, String> {
+    let raw = args
+        .get("strategy")
+        .ok_or("web_search_load_strategy: missing 'strategy' object")?;
+    let strategy: Strategy = serde_json::from_value(raw.clone())
+        .map_err(|e| format!("web_search_load_strategy: invalid strategy ({e})"))?;
+    strategy.validate()?;
+    let engine = strategy.engine.clone();
+    let version = strategy.version.clone();
+    session.search_overrides.insert(engine.clone(), strategy);
+    Ok(json!({ "engine": engine, "version": version, "ok": true }))
+}
+
+// `web_search_reset_strategy`: drop one session override (`engine`) or clear all →
+// back to the user-dir/built-in layers. Returns what was dropped.
+fn tool_search_reset_strategy(session: &mut Session, args: &Value) -> Result<Value, String> {
+    match arg_str(args, "engine") {
+        Some(engine) => {
+            let dropped = session.search_overrides.remove(engine).is_some();
+            Ok(json!({ "engine": engine, "dropped": dropped }))
+        }
+        None => {
+            let dropped: Vec<String> = session.search_overrides.keys().cloned().collect();
+            session.search_overrides.clear();
+            Ok(json!({ "dropped": dropped }))
+        }
+    }
+}
+
+// `web_search_setup_browser`: build the hardened-Chrome sidecar (installs patchright +
+// verifies Chrome) so `web_search {browser:true}` / google works. Runs the committed
+// setup script; `dir` overrides its location (default `scripts/browser-sidecar`,
+// relative to the process cwd). Returns the script output + the env var to export.
+async fn tool_setup_browser(args: &Value) -> Result<Value, String> {
+    let dir = arg_str(args, "dir").unwrap_or("scripts/browser-sidecar");
+    let script = format!("{dir}/setup.sh");
+    if !std::path::Path::new(&script).exists() {
+        return Err(format!(
+            "setup script not found at {script} — pass `dir` pointing at the committed \
+             scripts/browser-sidecar (or run `bash <dir>/setup.sh` manually)"
+        ));
+    }
+    let out = tokio::process::Command::new("bash")
+        .arg(&script)
+        .output()
+        .await
+        .map_err(|e| format!("run {script}: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    let fetch_cmd = format!("node {dir}/fetch-serp.mjs");
+    Ok(json!({
+        "ok": out.status.success(),
+        "output": stdout,
+        "stderr": stderr,
+        "set_env": { "TURBO_SURF_BROWSER_FETCH_CMD": fetch_cmd },
+        "hint": "export TURBO_SURF_BROWSER_FETCH_CMD then web_search {engine:'google'} or browser:true",
+    }))
+}
+
 pub fn tools() -> Value {
     let specs: &[(&str, &str)] = &[
         // navigation
@@ -901,6 +1628,66 @@ pub fn tools() -> Value {
             "Set the User-Agent for subsequent fetches",
         ),
         // content / reads
+        (
+            "fetch_markdown",
+            "One-shot goto+markdown: fetch a URL → {url,title,status,markdown}. \
+             mode? (no-js|fast|secure) sets the JS tier; links? also returns \
+             absolute links",
+        ),
+        (
+            "fetch_markdown_batch",
+            "Concurrent, order-preserving no-js batch of fetch_markdown: fetch \
+             urls[] → [{url,title,status,markdown}] (one entry per input, a \
+             failure as {url,error}). concurrency? (default 4); links? also \
+             returns absolute links per page. No-js only — the render/JS tier is \
+             single-page via fetch_markdown { mode }",
+        ),
+        (
+            "web_search",
+            "Web search via a one-shot SERP scrape → organic results \
+             [{title,url,snippet?}] in rank order, driven by a data-defined parse \
+             strategy (see web_search_strategies). engine? (default duckduckgo — the \
+             most reliable no-JS endpoint; google/bing are best-effort scrapes that \
+             may drift or captcha; searxng/baidu also bundled; or set a session \
+             default via web_search_set_engine). base? is the instance URL for \
+             engine:searxng. limit? (default 10). browser? routes the SERP fetch \
+             through a real-browser sidecar (TURBO_SURF_BROWSER_FETCH_CMD) — needed \
+             for engines behind a browser-integrity wall (google BotGuard). Stateless: \
+             does not touch the session page/jar",
+        ),
+        (
+            "web_search_set_engine",
+            "Set the session default search engine used by web_search when a call \
+             omits engine. Arg: engine (must resolve in the strategy registry — see \
+             web_search_strategies). Unknown engine → error → {engine,ok}",
+        ),
+        (
+            "web_search_strategies",
+            "List the active search parse-strategies → \
+             [{engine,version,source,format}] (source: custom|user-dir|built-in, \
+             highest precedence first). Strategies are DATA, not code — dated + \
+             overridable",
+        ),
+        (
+            "web_search_load_strategy",
+            "Register/override a search parse-strategy (session-scoped) for its \
+             engine id. Arg: strategy (the JSON object: engine, version, query_url \
+             with {query}/{limit}/{base}, format html|json, selectors or json_path). \
+             Enables new engines or hotfixes a stale built-in with no release → \
+             {engine,version,ok}",
+        ),
+        (
+            "web_search_reset_strategy",
+            "Drop a session strategy override (engine?) or clear all → back to the \
+             user-dir/built-in layers. Returns what was dropped",
+        ),
+        (
+            "web_search_setup_browser",
+            "Build the hardened-Chrome sidecar (installs patchright + verifies Chrome) \
+             so web_search {browser:true} / google works. Runs scripts/browser-sidecar/\
+             setup.sh (override with dir?). Returns the output + the \
+             TURBO_SURF_BROWSER_FETCH_CMD to export",
+        ),
         (
             "markdown",
             "Markdown view of the current page's main content",
@@ -1084,6 +1871,14 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
                 .goto(arg_str(args, "url").ok_or("goto: missing 'url'")?)
                 .await
         }
+        "fetch_markdown" => tool_fetch_markdown(session, args).await,
+        "fetch_markdown_batch" => tool_fetch_markdown_batch(args).await,
+        "web_search" => tool_search(session, args).await,
+        "web_search_set_engine" => tool_search_set_engine(session, args),
+        "web_search_strategies" => Ok(tool_search_strategies(session)),
+        "web_search_load_strategy" => tool_search_load_strategy(session, args),
+        "web_search_reset_strategy" => tool_search_reset_strategy(session, args),
+        "web_search_setup_browser" => tool_setup_browser(args).await,
         "reload" => session.reload().await,
         "go_back" => session.go_back().await,
         "go_forward" => session.go_forward().await,
@@ -1523,6 +2318,31 @@ mod tests {
         call_tool(s, name, &args).await.unwrap()
     }
 
+    // The browser-sidecar contract (env-independent core): a stub `node -e` command
+    // stands in for the real chromium sidecar — it drains stdin and prints a JSON
+    // {html} line. Verifies we drive the sidecar and read its html back. (The JS has
+    // no spaces so it survives the command's whitespace split into program + args.)
+    #[tokio::test]
+    async fn browser_serp_reads_sidecar_html() {
+        let html = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write(JSON.stringify({html:'<h3>ok</h3>'}))",
+        )
+        .await;
+        assert_eq!(html.unwrap(), "<h3>ok</h3>");
+    }
+
+    #[tokio::test]
+    async fn browser_serp_surfaces_captcha_block() {
+        let err = browser_fetch_serp_cmd(
+            "https://e/",
+            "node -e process.stdin.resume();process.stdout.write(JSON.stringify({blocked:true,finalUrl:'https://g/sorry'}))",
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("captcha"), "block surfaced: {err}");
+    }
+
     #[tokio::test]
     async fn read_tools_over_loaded_page() {
         let mut s = loaded();
@@ -1688,6 +2508,105 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn fetch_markdown_one_shot_over_localhost() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut b = [0u8; 2048];
+                let _ = sock.read(&mut b).await;
+                let body = "<html><head><title>Doc</title></head><body>\
+                    <main><h1>Hi</h1><p>para</p></main>\
+                    <a href='/x'>L</a></body></html>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{body}"
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.flush().await;
+            }
+        });
+        let url = format!("http://127.0.0.1:{port}/");
+        // Bare call: fetch + markdown in one, no `links` field.
+        let mut s = Session::new();
+        let r = call(&mut s, "fetch_markdown", json!({ "url": url })).await;
+        assert_eq!(r["url"], url);
+        assert_eq!(r["status"], 200);
+        assert_eq!(r["title"], "Doc");
+        assert!(r["markdown"].as_str().unwrap().contains("# Hi"));
+        assert!(r.get("links").is_none());
+        // links:true adds the absolute-links array.
+        let r = call(
+            &mut s,
+            "fetch_markdown",
+            json!({ "url": url, "links": true }),
+        )
+        .await;
+        assert_eq!(r["links"], json!([format!("{url}x")]));
+    }
+
+    #[tokio::test]
+    async fn fetch_markdown_batch_over_localhost() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut b = [0u8; 2048];
+                    let n = sock.read(&mut b).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&b[..n]);
+                    // Serve a distinct titled page per path so we can assert the
+                    // result array is order-preserving across concurrent fetches.
+                    let title = if req.contains("/two") { "Two" } else { "One" };
+                    let body = format!(
+                        "<html><head><title>{title}</title></head><body>\
+                         <main><h1>{title}</h1><p>para</p></main>\
+                         <a href='/x'>L</a></body></html>"
+                    );
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{body}"
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.flush().await;
+                });
+            }
+        });
+        let one = format!("http://127.0.0.1:{port}/one");
+        let two = format!("http://127.0.0.1:{port}/two");
+        // Port 1 refuses the connection → the per-URL fetch errors out.
+        let dead = "http://127.0.0.1:1/gone".to_string();
+        let out = call(
+            &mut Session::new(),
+            "fetch_markdown_batch",
+            json!({ "urls": [one, two, dead], "links": true }),
+        )
+        .await;
+        let arr = out.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        // Order-preserving: one, two, then the failed entry — regardless of which
+        // concurrent fetch finished first.
+        assert_eq!(arr[0]["url"], one);
+        assert_eq!(arr[0]["status"], 200);
+        assert_eq!(arr[0]["title"], "One");
+        assert!(arr[0]["markdown"].as_str().unwrap().contains("# One"));
+        // `/x` resolves against the host root, not the `/one` path.
+        assert_eq!(
+            arr[0]["links"],
+            json!([format!("http://127.0.0.1:{port}/x")])
+        );
+        assert_eq!(arr[1]["url"], two);
+        assert_eq!(arr[1]["title"], "Two");
+        assert!(arr[1]["markdown"].as_str().unwrap().contains("# Two"));
+        // A per-URL failure is captured, not fatal: `{url,error}`, no markdown.
+        assert_eq!(arr[2]["url"], dead);
+        assert!(arr[2].get("error").is_some());
+        assert!(arr[2].get("markdown").is_none());
     }
 
     // E2E of the whole challenge pipeline (detect → solve → inject cookie →
@@ -2054,6 +2973,363 @@ mod tests {
         assert!(call_tool(&mut empty, "text", &json!({})).await.is_err());
         // goto missing url
         assert!(call_tool(&mut s, "goto", &json!({})).await.is_err());
+    }
+
+    // --- web search (SERP parser) -------------------------------------------
+    // Saved SERP snippets mimicking each engine's real structure (2-3 organic
+    // results). The parser is a PURE fn so these need no network.
+
+    // DDG html endpoint: `.web-result` containers, `a.result__a` title/link whose
+    // href is the `//duckduckgo.com/l/?uddg=<enc>` redirect wrapper, and
+    // `.result__snippet`. Second result is a bare (already-direct) href.
+    const DDG_HTML: &str = r#"<html><body>
+      <div class="result results_links web-result">
+        <h2 class="result__title">
+          <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fone&amp;rut=abc">First Result</a>
+        </h2>
+        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fone">Snippet one text.</a>
+      </div>
+      <div class="result results_links web-result">
+        <h2 class="result__title">
+          <a class="result__a" href="https://direct.example.org/two">Second Result</a>
+        </h2>
+        <a class="result__snippet">Snippet two text.</a>
+      </div>
+    </body></html>"#;
+
+    const BING_HTML: &str = r#"<html><body>
+      <ol id="b_results">
+        <li class="b_algo"><h2><a href="https://example.com/b1">Bing One</a></h2>
+          <div class="b_caption"><p>Bing snippet one.</p></div></li>
+        <li class="b_algo"><h2><a href="https://example.com/b2">Bing Two</a></h2>
+          <div class="b_caption"><p>Bing snippet two.</p></div></li>
+      </ol>
+    </body></html>"#;
+
+    const GOOGLE_HTML: &str = r#"<html><body>
+      <div class="g"><div class="yuRUbf"><a href="https://example.com/g1"><h3>Google One</h3></a></div>
+        <div class="VwiC3b">Google snippet one.</div></div>
+      <div class="g"><div class="yuRUbf"><a href="https://example.com/g2"><h3>Google Two</h3></a></div>
+        <div class="VwiC3b">Google snippet two.</div></div>
+    </body></html>"#;
+
+    const SEARXNG_JSON: &str = r#"{"query":"rust","results":[
+      {"title":"Sx One","url":"https://example.com/s1","content":"Sx snippet one."},
+      {"title":"Sx Two","url":"https://example.com/s2","content":"Sx snippet two."},
+      {"title":"No URL","url":"","content":"dropped"}
+    ]}"#;
+
+    // Parse a strategy from a JSON literal — the same path `web_search_load_strategy`
+    // and the bundled defaults take, so tests exercise the real interpreter.
+    fn strat(json: &str) -> Strategy {
+        serde_json::from_str(json).expect("test strategy should parse")
+    }
+
+    // The bundled built-in strategies, by engine id.
+    fn built_in() -> HashMap<String, Strategy> {
+        strategies_from_json_array(BUNDLED_STRATEGIES_JSON)
+    }
+
+    #[test]
+    fn search_parses_duckduckgo_and_decodes_uddg() {
+        let r = parse_serp(built_in().get("duckduckgo").unwrap(), DDG_HTML, 10);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].title, "First Result");
+        // The `uddg` redirect wrapper is decoded to the real absolute URL.
+        assert_eq!(r[0].url, "https://example.com/one");
+        assert_eq!(r[0].snippet.as_deref(), Some("Snippet one text."));
+        // A bare (non-wrapped) href is used as-is.
+        assert_eq!(r[1].url, "https://direct.example.org/two");
+    }
+
+    #[test]
+    fn search_parses_bing() {
+        let r = parse_serp(built_in().get("bing").unwrap(), BING_HTML, 10);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].title, "Bing One");
+        assert_eq!(r[0].url, "https://example.com/b1");
+        assert_eq!(r[1].snippet.as_deref(), Some("Bing snippet two."));
+    }
+
+    #[test]
+    fn search_parses_google_structural() {
+        // Google uses the classname-free structural parser (its result classes are
+        // obfuscated + rotate): an <a href="http…"> containing an <h3> is a result.
+        let r = parse_serp(built_in().get("google").unwrap(), GOOGLE_HTML, 10);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].title, "Google One");
+        assert_eq!(r[0].url, "https://example.com/g1");
+        assert_eq!(r[1].url, "https://example.com/g2");
+        // structural extraction carries no snippet.
+        assert!(r[0].snippet.is_none());
+    }
+
+    #[test]
+    fn structural_skips_internal_hosts_and_dedups() {
+        // Only off-site anchors that WRAP an <h3> count; google-internal nav (google.com
+        // /gstatic), an <h3>-less link, and a duplicate URL are all filtered.
+        let html = r#"<html><body>
+          <a href="https://www.google.com/search?q=x"><h3>internal nav</h3></a>
+          <a href="https://maps.gstatic.com/a"><h3>asset</h3></a>
+          <a href="https://ex.com/1"><h3>Real One</h3></a>
+          <a href="https://ex.com/nav">no h3 here</a>
+          <a href="https://ex.com/1"><h3>Dup URL</h3></a>
+          <a href="https://ex.com/2"><h3>Real Two</h3></a>
+        </body></html>"#;
+        let google = strat(
+            r#"{"engine":"google","query_url":"https://g/?q={query}","format":"structural"}"#,
+        );
+        let r = parse_serp(&google, html, 10);
+        assert_eq!(r.len(), 2, "internal/no-h3/dup filtered: {r:?}");
+        assert_eq!(r[0].title, "Real One");
+        assert_eq!(r[0].url, "https://ex.com/1");
+        assert_eq!(r[1].url, "https://ex.com/2");
+    }
+
+    #[test]
+    fn search_parses_searxng_json_and_skips_empty_url() {
+        let r = parse_serp(built_in().get("searxng").unwrap(), SEARXNG_JSON, 10);
+        // The url-less third entry is dropped.
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].title, "Sx One");
+        assert_eq!(r[0].url, "https://example.com/s1");
+        assert_eq!(r[0].snippet.as_deref(), Some("Sx snippet one."));
+    }
+
+    #[test]
+    fn search_respects_limit() {
+        let reg = built_in();
+        assert_eq!(parse_serp(reg.get("bing").unwrap(), BING_HTML, 1).len(), 1);
+        assert_eq!(
+            parse_serp(reg.get("searxng").unwrap(), SEARXNG_JSON, 1).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn build_query_url_interpolates_and_searxng_requires_base() {
+        let reg = built_in();
+        assert_eq!(
+            build_query_url(reg.get("duckduckgo").unwrap(), "rust lang", 10, None).unwrap(),
+            "https://html.duckduckgo.com/html/?q=rust+lang"
+        );
+        assert_eq!(
+            build_query_url(reg.get("google").unwrap(), "rust", 5, None).unwrap(),
+            "https://www.google.com/search?q=rust"
+        );
+        assert_eq!(
+            build_query_url(
+                reg.get("searxng").unwrap(),
+                "rust",
+                10,
+                Some("http://localhost:8888/")
+            )
+            .unwrap(),
+            "http://localhost:8888/search?q=rust&format=json"
+        );
+        // `{base}` present but no base supplied → error.
+        assert!(build_query_url(reg.get("searxng").unwrap(), "rust", 10, None).is_err());
+    }
+
+    // The bundled default JSON must deserialize + carry all five engines, each
+    // valid + dated — a malformed default fails the gate here.
+    #[test]
+    fn bundled_strategies_parse_validate_and_cover_five_engines() {
+        // Deserializes as a whole (a syntax/shape error would fail here).
+        let all: Vec<Strategy> =
+            serde_json::from_str(BUNDLED_STRATEGIES_JSON).expect("bundled JSON should deserialize");
+        assert_eq!(all.len(), 5, "expected 5 bundled engines");
+        let reg = built_in();
+        for engine in ["duckduckgo", "bing", "google", "searxng", "baidu"] {
+            let s = reg
+                .get(engine)
+                .unwrap_or_else(|| panic!("bundled default missing '{engine}'"));
+            s.validate()
+                .unwrap_or_else(|e| panic!("bundled '{engine}' invalid: {e}"));
+            assert!(!s.version.is_empty(), "'{engine}' needs a version date");
+            assert!(s.query_url.contains("{query}"));
+        }
+    }
+
+    // An unknown engine (no override, not in user-dir/built-in) resolves to a
+    // helpful error naming the load tool.
+    #[test]
+    fn resolve_unknown_engine_errors() {
+        let s = Session::new();
+        let e = resolve_strategy(&s, "bogus").unwrap_err();
+        assert!(e.contains("unknown engine 'bogus'"), "{e}");
+        assert!(e.contains("web_search_load_strategy"), "{e}");
+    }
+
+    // `web_search_load_strategy` override wins over the built-in; `web_search_reset_strategy`
+    // restores it.
+    #[tokio::test]
+    async fn load_strategy_overrides_builtin_then_reset_restores() {
+        let mut s = Session::new();
+        // Default: duckduckgo resolves to the built-in.
+        assert_eq!(resolve_strategy(&s, "duckduckgo").unwrap().1, "built-in");
+        // Load a session override for the same engine id.
+        let r = call_tool(
+            &mut s,
+            "web_search_load_strategy",
+            &json!({ "strategy": {
+                "engine": "duckduckgo",
+                "version": "2099-01-01",
+                "query_url": "https://override.test/?q={query}",
+                "format": "html",
+                "result_container": ".r",
+                "title": "a",
+                "link": "a"
+            }}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["ok"], true);
+        assert_eq!(r["version"], "2099-01-01");
+        // Now the override wins.
+        let (strat, source) = resolve_strategy(&s, "duckduckgo").unwrap();
+        assert_eq!(source, "custom");
+        assert_eq!(strat.version, "2099-01-01");
+        // Reset drops it → back to built-in.
+        let dropped = call_tool(
+            &mut s,
+            "web_search_reset_strategy",
+            &json!({ "engine": "duckduckgo" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(dropped["dropped"], true);
+        assert_eq!(resolve_strategy(&s, "duckduckgo").unwrap().1, "built-in");
+    }
+
+    // Loading an invalid strategy (missing the required html selectors) is rejected.
+    #[tokio::test]
+    async fn load_strategy_validates_required_keys() {
+        let mut s = Session::new();
+        let bad = call_tool(
+            &mut s,
+            "web_search_load_strategy",
+            &json!({ "strategy": {
+                "engine": "x",
+                "query_url": "https://x/?q={query}",
+                "format": "html"
+            }}),
+        )
+        .await;
+        assert!(bad.is_err(), "missing selectors should be rejected");
+        // A query_url without {query} is rejected too.
+        let bad2 = call_tool(
+            &mut s,
+            "web_search_load_strategy",
+            &json!({ "strategy": {
+                "engine": "x",
+                "query_url": "https://x/search",
+                "format": "json",
+                "json_path": { "results": "r", "title": "t", "url": "u" }
+            }}),
+        )
+        .await;
+        assert!(
+            bad2.is_err(),
+            "query_url missing {{query}} should be rejected"
+        );
+    }
+
+    // `web_search_strategies` lists all active strategies with their source; a session
+    // override flips that engine's source to "custom".
+    #[tokio::test]
+    async fn search_strategies_lists_sources() {
+        let mut s = Session::new();
+        let list = call_tool(&mut s, "web_search_strategies", &json!({}))
+            .await
+            .unwrap();
+        let arr = list.as_array().unwrap();
+        let engines: Vec<&str> = arr.iter().map(|e| e["engine"].as_str().unwrap()).collect();
+        for e in ["duckduckgo", "bing", "google", "searxng", "baidu"] {
+            assert!(engines.contains(&e), "missing '{e}' in listing");
+        }
+        // All built-in by default.
+        assert!(arr.iter().all(|e| e["source"] == "built-in"));
+        // After an override, that engine reports "custom".
+        call_tool(
+            &mut s,
+            "web_search_load_strategy",
+            &json!({ "strategy": {
+                "engine": "google",
+                "version": "2099-01-01",
+                "query_url": "https://x/?q={query}",
+                "format": "html",
+                "result_container": ".r", "title": "a", "link": "a"
+            }}),
+        )
+        .await
+        .unwrap();
+        let list = call_tool(&mut s, "web_search_strategies", &json!({}))
+            .await
+            .unwrap();
+        let google = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["engine"] == "google")
+            .unwrap();
+        assert_eq!(google["source"], "custom");
+        assert_eq!(google["version"], "2099-01-01");
+    }
+
+    // `web_search_set_engine` stores a session default that `web_search` uses when a
+    // call omits `engine`; an explicit `engine` arg still overrides it. Unknown → error.
+    #[tokio::test]
+    async fn set_engine_sets_session_default_and_arg_overrides() {
+        let mut s = Session::new();
+        // No default yet → falls through to duckduckgo.
+        assert_eq!(pick_search_engine(&s, &json!({})), "duckduckgo");
+        // Set a session default.
+        let r = call_tool(
+            &mut s,
+            "web_search_set_engine",
+            &json!({ "engine": "bing" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["ok"], true);
+        assert_eq!(r["engine"], "bing");
+        // A no-engine call now uses the stored default.
+        assert_eq!(pick_search_engine(&s, &json!({})), "bing");
+        // An explicit engine arg still wins.
+        assert_eq!(
+            pick_search_engine(&s, &json!({ "engine": "google" })),
+            "google"
+        );
+        // Unknown engine → the registry's "unknown engine" error; default unchanged.
+        let bad = call_tool(
+            &mut s,
+            "web_search_set_engine",
+            &json!({ "engine": "bogus" }),
+        )
+        .await;
+        assert!(bad.unwrap_err().contains("unknown engine 'bogus'"));
+        assert_eq!(pick_search_engine(&s, &json!({})), "bing");
+    }
+
+    // The interpreter honors a runtime-loaded strategy end to end (parse only).
+    #[test]
+    fn interpreter_drives_a_loaded_strategy() {
+        let g = strat(
+            r#"{
+              "engine":"g","version":"t",
+              "query_url":"https://g/search?q={query}&num={limit}",
+              "format":"html","result_container":"div.g",
+              "title":"h3","link":"a[href]","link_redirect_param":"q","snippet":".VwiC3b"
+            }"#,
+        );
+        assert_eq!(
+            build_query_url(&g, "a b", 3, None).unwrap(),
+            "https://g/search?q=a+b&num=3"
+        );
+        let r = parse_serp(&g, GOOGLE_HTML, 10);
+        assert_eq!(r[0].title, "Google One");
+        assert_eq!(r[0].url, "https://example.com/g1");
     }
 
     #[tokio::test]

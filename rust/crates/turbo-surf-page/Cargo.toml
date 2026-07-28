@@ -7,6 +7,7 @@ repository.workspace = true
 description = "turbo-surf tier 2: Page over the turbo-dom Rust parser + Navigator impl"
 
 [features]
+default = ["impersonate"]
 # Forward turbo-surf-core's BoringSSL Chrome-fingerprint client. See its net.rs.
 impersonate = ["turbo-surf-core/impersonate"]
 

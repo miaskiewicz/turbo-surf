@@ -15,9 +15,10 @@ name = "turbo-surf-mcp"
 path = "src/main.rs"
 
 [features]
+default = ["impersonate"]
 # Build the MCP binary with a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint
 # (BoringSSL, via turbo-surf-core's `impersonate`). Off by default — it needs a C
-# toolchain (cmake/nasm) at build time. See turbo-surf-core/src/net.rs.
+# toolchain (cmake/nasm) at build time. ON by default (anti-bot). See turbo-surf-core/src/net.rs.
 impersonate = ["turbo-surf-core/impersonate"]
 
 [dependencies]

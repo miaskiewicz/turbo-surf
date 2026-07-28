@@ -10,6 +10,7 @@ description = "turbo-surf napi-rs addon — in-process bridge from the Rust core
 crate-type = ["cdylib"]
 
 [features]
+default = ["impersonate"]
 # Forward turbo-surf-core's BoringSSL Chrome-fingerprint client (dev/harness use
 # of the impersonation path). See turbo-surf-core/src/net.rs.
 impersonate = ["turbo-surf-core/impersonate", "turbo-surf-page/impersonate"]

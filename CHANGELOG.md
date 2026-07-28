@@ -5,39 +5,67 @@ All notable changes to turbo-surf are documented here. Format follows
 
 ## [0.4.0]
 
-Adds four additive MCP tools + a data-driven search-strategy system for programmatic
-fetch/search consumers (the `fetch` knowledge terminal). Purely additive — no change to
-any existing tool's behaviour or the no-JS default tier.
+Programmatic fetch + web-search tooling for agent consumers (the `fetch` knowledge
+terminal), a hardened-browser search sidecar that clears google's BotGuard, render-tier
+fidelity fixes, and the turbo-html2pdf-core **0.3.1** layout engine. Additive — no change
+to existing tools' behaviour or the no-JS default tier.
 
-### Added
+### Added — fetch/markdown
 - **`fetch_markdown`** — one-shot `{ url, mode?, links? }` → `{ url, title, status,
-  markdown, links? }`. Composes the existing `goto`+`markdown` internals so a caller
-  needn't drive a stateful session for the common "URL → clean markdown" case.
-- **`fetch_markdown_batch`** — concurrent, order-preserving multi-URL markdown:
-  `{ urls, concurrency?(4), links? }` → per-url `{ url, status, title, markdown, links? }`
-  or `{ url, error }` (a per-url failure never aborts the batch). Self-contained no-JS
-  loop; does not touch `batch`/`crawl::Nav` (which discard the parse tree).
-- **`web_search`** — web search via SERP scrape: `{ query, engine?, base?,
-  limit?(10) }` → `[{ title, url, snippet? }]`. Stateless — a direct fetch that never
-  mutates the session's current page or cookie jar. Engine precedence: explicit `engine`
-  arg → session default (`web_search_set_engine`) → `duckduckgo`.
-- **`web_search_set_engine`** — set the session default engine used by `web_search` when
-  a call omits `engine`: `{ engine }` → `{ engine, ok }`. Validates the id resolves in the
-  strategy registry (unknown engine → error).
-- **Data-driven, versioned search strategies.** Engine parse rules are **JSON data**
-  (dated `Strategy` documents), not compiled selectors — so a markup change is a data
-  edit, not a recompile. Layered registry: `web_search_load_strategy` (session override) →
-  user strategies dir (`TURBO_SURF_SEARCH_STRATEGIES`) → bundled defaults
-  (`search-strategies.json`). New tools **`web_search_strategies`** (list active),
-  **`web_search_load_strategy`** (register/override — add a new engine or hotfix a stale one
-  live), **`web_search_reset_strategy`** (drop overrides). Bundled engines: duckduckgo, bing,
-  google, searxng, baidu.
-  - **Note:** google/bing/baidu SERP selectors are best-effort — SERP markup is volatile
-    and some engines gate datacenter IPs (google served a JS wall in CI, so its selectors
-    are not live-verified). duckduckgo (`html.duckduckgo.com`) is the reliable default; any
-    engine is fixable at runtime via `web_search_load_strategy` without a release.
-- Consumes turbo-html2pdf-core 0.2.15 (temp local path-dep pending its publish; swap to
-  crates.io version on release).
+  markdown, links? }`. Composes `goto`+`markdown` so a caller needn't drive a stateful
+  session for the common "URL → clean markdown" case.
+- **`fetch_markdown_batch`** — concurrent, order-preserving multi-URL markdown;
+  per-url failures captured, never abort the batch. Self-contained no-JS loop; does not
+  touch `batch`/`crawl::Nav`.
+
+### Added — web search
+- **`web_search`** `{ query, engine?, base?, limit?(10), browser? }` → `[{ title, url,
+  snippet? }]`. Stateless (never mutates the session page/jar). Engine precedence:
+  explicit `engine` → session default (`web_search_set_engine`) → `duckduckgo`.
+- **`web_search_set_engine`** — session-default engine switcher.
+- **Data-driven, versioned search strategies** — engine parse rules are JSON data (not
+  compiled selectors), a layered registry: `web_search_load_strategy` override → user dir
+  (`TURBO_SURF_SEARCH_STRATEGIES`) → bundled `search-strategies.json`. Plus
+  `web_search_strategies` (list) / `web_search_reset_strategy` (drop). Bundled: duckduckgo
+  (reliable default), bing, google, searxng, baidu.
+- **Real-browser SERP sidecar** (`web_search { browser:true }`; google is `mode:"browser"`)
+  — engines behind a browser-integrity wall (google BotGuard/`enablejs`) serve no results
+  to any headless fetch. The sidecar shells to a real browser (chromium stays OUT of the
+  engine, over `TURBO_SURF_BROWSER_FETCH_CMD`, JSON contract) and parses its rendered
+  results. Informed by our own `botto` detector: the tell is the CDP `Runtime.enable`
+  leak, so the committed sidecar uses **patchright** (CDP-hardened) + a persistent context
+  on real Chrome (works headless), and does zero surface tampering. A `/sorry` captcha
+  surfaces as a clear error, not empty results.
+- **`web_search_setup_browser`** MCP action + committed `scripts/browser-sidecar/`
+  (`fetch-serp.mjs`, `setup.sh`, README) — one-command setup; runtime (node_modules /
+  Chrome profile) gitignored.
+- **Classname-free structural google parser** (`format:"structural"`) — google's result
+  classes are obfuscated + rotate, so results are extracted by the stable STRUCTURE
+  (`<a href="http…">` containing an `<h3>`, off-site, deduped). Verified: real organic
+  results end-to-end.
+
+### Added / Fixed — render tier
+- **Per-script isolation** — the classic render path ran the whole page-script bundle as
+  one `execute_script`, so one throw aborted every later script (google's `_._DumpException`
+  killed hydration). Now each `<script>` runs as its own top-level program (errors isolate;
+  cross-script `var`/`let`/`function` still shared) — a browser-faithful hydration fix for
+  all JS sites.
+- **`navigator.sendBeacon` shim** — a real-Chrome API whose absence is a headless tell.
+- **Raster delazy fix** — a lazy-load placeholder/spacer `<img src>` (1×1/`data:`) now
+  yields to the real `data-*` URL, so lazy images (nike) are fetched + painted instead of
+  a grey placeholder.
+
+### Changed
+- **`impersonate` (real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint) is now ON by default.**
+  The shipped MCP binary + npm prebuilds present a genuine Chrome network fingerprint out
+  of the box (anti-bot for Cloudflare/Akamai/TLS-gated sites). It's the BoringSSL (`wreq`)
+  backend — building from source now needs a C toolchain (cmake/nasm); the CI/release
+  workflows install it, and prebuilt binaries need nothing. Disable with
+  `--no-default-features`. (Note: impersonate is *not* the google answer — BotGuard needs
+  the browser sidecar above; impersonate covers TLS/HTTP-fingerprint gates.)
+- Consumes **turbo-html2pdf-core 0.3.1** — the layout conformance engine (68→73
+  Chromium-verified fixtures, border-collapse, `<br>` inline forced-break, sub/sup),
+  replacing the 0.3.6 line's 0.2.14.
 
 ## [0.3.6]
 

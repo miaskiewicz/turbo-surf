@@ -33,6 +33,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: "${{ matrix.target }}" }
+      # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
+      - name: Install BoringSSL toolchain (nasm/cmake)
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   sudo apt-get update && sudo apt-get install -y nasm cmake ;;
+            macOS)   brew install nasm cmake || true ;;
+            Windows) choco install nasm --no-progress -y && echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH" ;;
+          esac
       - name: Build the MCP binary
         run: cargo build --release -p turbo-surf-mcp --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
       - name: Stage platform binary

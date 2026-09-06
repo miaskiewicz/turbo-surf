@@ -109,6 +109,32 @@
     }
     if (decl.visibility == null) decl.visibility = '';
     if (decl.opacity == null) decl.opacity = '';
+    // Used-value resolution for percentage width/height. A no-layout env returns a raw "50%"
+    // verbatim, but a containing-block percentage has a well-defined used value in normal flow
+    // (pct * the containing block's content width/height), which a real browser reports in px.
+    // Resolve against the nearest ancestor with a px (or, for width, auto=fill) measure so
+    // getComputedStyle(child).width matches a browser without a full layout engine.
+    var usedPx = function(node, axis, depth){
+      if (!node || depth > 32) return null;
+      var cs; try { cs = (node === el) ? decl : g.getComputedStyle(node); } catch(e){ return null; }
+      var raw = cs && (axis === 'width' ? cs.width : cs.height); raw = raw == null ? '' : String(raw);
+      var mpx = /^(-?\d+(?:\.\d+)?)px$/.exec(raw); if (mpx) return parseFloat(mpx[1]);
+      var parent = node.parentElement || (node.parentNode && node.parentNode.nodeType === 1 ? node.parentNode : null);
+      var mpc = /^(-?\d+(?:\.\d+)?)%$/.exec(raw);
+      if (mpc) { var base = usedPx(parent, axis, depth + 1); return base == null ? null : (parseFloat(mpc[1]) / 100) * base; }
+      // width:auto in normal flow fills the containing block (block box); height:auto is content-driven (unknown here).
+      if ((raw === '' || raw === 'auto') && axis === 'width') return usedPx(parent, axis, depth + 1);
+      return null;
+    };
+    try {
+      ['width', 'height'].forEach(function(axis){
+        var raw = decl[axis];
+        if (typeof raw === 'string' && /^-?\d+(?:\.\d+)?%$/.test(raw.trim())) {
+          var px = usedPx(el, axis, 0);
+          if (px != null && isFinite(px)) setProp(axis, (Math.round(px * 1000) / 1000) + 'px');
+        }
+      });
+    } catch(e){}
     return decl;
   };
   if (typeof g.requestAnimationFrame === 'undefined') g.requestAnimationFrame = function(cb){ return setTimeout(function(){ cb(Date.now()); }, 0); };

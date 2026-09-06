@@ -245,6 +245,25 @@ fn font_registry(system_fonts: bool) -> FontRegistry {
     SYSTEM.clone()
 }
 
+/// Measure the advance width (and an approximate line height) of `text` under a CSS
+/// `font-family` list at `size_px`, using real font metrics. With `system_fonts`, the OS
+/// fonts are loaded so distinct named families (Arial vs Georgia vs Courier) resolve to
+/// distinct faces and yield distinct widths — what a font-detection probe reads. Returns
+/// `(width_px, height_px)`; `(0.0, 0.0)` if no face resolves.
+pub fn measure_text(text: &str, family_css: &str, size_px: f32, system_fonts: bool) -> (f32, f32) {
+    let families: Vec<String> = family_css
+        .split(',')
+        .map(|s| s.trim().trim_matches(|c| c == '\'' || c == '"').trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let refs: Vec<&str> = families.iter().map(|s| s.as_str()).collect();
+    let reg = font_registry(system_fonts);
+    match reg.select(&refs, 400, false) {
+        Some(face) => (face.measure(text, size_px, 0.0), size_px * 1.2),
+        None => (0.0, 0.0),
+    }
+}
+
 /// The colour to fill the whole image with before painting. Browsers propagate
 /// the root element's (or `<body>`'s) background to the viewport canvas, so a
 /// page with a dark `body` background paints dark everywhere — not just under

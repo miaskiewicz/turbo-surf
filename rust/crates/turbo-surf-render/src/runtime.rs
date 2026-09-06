@@ -150,6 +150,33 @@ fn op_fingerprint() -> String {
         .unwrap_or_else(|| "{}".to_string())
 }
 
+// Process-global text-measurement hook. The render crate has no font/layout stack, so the host
+// (napi/mcp, which own turbo-surf-raster) injects a real advance-width measurer. ENV_BOOTSTRAP's
+// offsetWidth/offsetHeight read it so a font-detection probe sees per-family metric differences a
+// no-layout DOM otherwise can't produce. Same host-injection pattern as `set_fingerprint`.
+type MeasureFn = Box<dyn Fn(&str, &str, f64) -> (f64, f64) + Send + Sync>;
+static MEASURE_TEXT: std::sync::RwLock<Option<MeasureFn>> = std::sync::RwLock::new(None);
+
+/// Install the host's text measurer: `(text, css_font_family, font_size_px) -> (width_px, height_px)`.
+/// Injected once at startup by the crate that owns the font/layout engine (raster). Until set,
+/// `offsetWidth`/`offsetHeight` report 0 (a standalone render isolate has no fonts).
+pub fn set_measure_fn(f: MeasureFn) {
+    if let Ok(mut g) = MEASURE_TEXT.write() {
+        *g = Some(f);
+    }
+}
+
+// Measure text advance for offsetWidth/offsetHeight. Returns JSON `[width,height]`, or `null` when
+// no host measurer is installed. Never throws across the boundary.
+#[op2]
+#[string]
+fn op_measure_text(#[string] text: &str, #[string] family: &str, size: f64) -> String {
+    match MEASURE_TEXT.read().ok().and_then(|g| g.as_ref().map(|f| f(text, family, size))) {
+        Some((w, h)) => format!("[{w},{h}]"),
+        None => "null".to_string(),
+    }
+}
+
 // `document.cookie` setter: ingest a `name=value; attrs` line against the base.
 #[op2(fast)]
 fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
@@ -256,7 +283,8 @@ deno_core::extension!(
         op_cookie_set,
         op_fetch,
         op_user_agent,
-        op_fingerprint
+        op_fingerprint,
+        op_measure_text
     ],
 );
 
@@ -2376,6 +2404,34 @@ globalThis.__domSig = () => {
       });
     }
     G.OfflineAudioContext = OfflineAudioContext; mark(G.OfflineAudioContext, "OfflineAudioContext");
+  });
+
+  // offsetWidth / offsetHeight via the host's real font measurer (op_measure_text, system fonts).
+  // A no-layout DOM reports neither, so a font-detection probe (span metrics per font-family) sees
+  // fontCount 0 (no-system-fonts). Defined on the base element/node prototype so all elements inherit;
+  // measures the node's own text under its computed font. No host measurer installed => 0 (honest).
+  guard(() => {
+    const measure = (elm) => {
+      try {
+        const t = elm && elm.textContent; if (!t) return null;
+        const op = Deno.core.ops.op_measure_text; if (!op) return null;
+        const cs = G.getComputedStyle(elm);
+        const fam = (cs && cs.fontFamily) || "sans-serif";
+        const size = parseFloat((cs && cs.fontSize) || "16") || 16;
+        const r = JSON.parse(op(String(t), String(fam), size));
+        return r && r.length === 2 ? r : null;
+      } catch (e) { return null; }
+    };
+    let p = Object.getPrototypeOf(document.createElement("span"));
+    while (p && Object.getPrototypeOf(p) && Object.getPrototypeOf(p) !== Object.prototype) p = Object.getPrototypeOf(p);
+    if (p) {
+      if (!Object.getOwnPropertyDescriptor(p, "offsetWidth")) {
+        Object.defineProperty(p, "offsetWidth", { configurable: true, get() { const m = measure(this); return m ? Math.round(m[0]) : 0; } });
+      }
+      if (!Object.getOwnPropertyDescriptor(p, "offsetHeight")) {
+        Object.defineProperty(p, "offsetHeight", { configurable: true, get() { const m = measure(this); return m ? Math.round(m[1]) : 0; } });
+      }
+    }
   });
 
   // Chrome-desktop feature markers (ua-version-spoof): each must be PRESENT for a claimed major of

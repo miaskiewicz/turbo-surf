@@ -171,7 +171,11 @@ pub fn set_measure_fn(f: MeasureFn) {
 #[op2]
 #[string]
 fn op_measure_text(#[string] text: &str, #[string] family: &str, size: f64) -> String {
-    match MEASURE_TEXT.read().ok().and_then(|g| g.as_ref().map(|f| f(text, family, size))) {
+    match MEASURE_TEXT
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().map(|f| f(text, family, size)))
+    {
         Some((w, h)) => format!("[{w},{h}]"),
         None => "null".to_string(),
     }

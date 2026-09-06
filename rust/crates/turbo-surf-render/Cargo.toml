@@ -20,7 +20,7 @@ turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
 # fetch backend, so downstream non-binary consumers (the PyO3 wheel) don't drag it in
 # and need a C toolchain. The shipped mcp binary still gets impersonate — it requests
 # `turbo-surf-core/impersonate` explicitly (its own default).
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.0", default-features = false }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

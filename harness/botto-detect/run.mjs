@@ -141,7 +141,9 @@ async function main() {
   const tells = verdict.tells || [];
   const strong = tells.filter((t) => t.severity === "strong");
   console.log("=== botto verdict on turbo-surf render isolate ===");
-  console.log(`fake=${verdict.fake}  suspicion=${verdict.suspicion.toFixed(3)}  tells=${tells.length}`);
+  console.log(
+    `fake=${verdict.fake}  suspicion=${verdict.suspicion.toFixed(3)}  tells=${tells.length}`,
+  );
   console.log("");
   console.log("STRONG tells (any one sets fake=true):");
   for (const t of strong) console.log(`  ✖ ${t.id}  (w${t.weight ?? "?"})`);

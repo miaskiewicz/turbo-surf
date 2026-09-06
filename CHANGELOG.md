@@ -3,6 +3,42 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.4.1] — render-isolate stealth surface
+
+Make the browserless V8+rtdom render isolate present a native-fidelity, passive
+browser surface so a deep fingerprinter (Botguard / reCAPTCHA-class) reads it as
+real Chrome. Battle-tested against the botto detector: **21 tells → 0**
+(`fake=false`, suspicion 0.296 → 0.000). Additive — no change to existing tools or
+the no-JS default tier.
+
+### Added
+- **`harness/botto-detect/`** — an oracle harness that runs botto's real in-page
+  collector (probe + feature-probe + Botguard integrity VM) inside the live isolate
+  and reports its fake/suspicion/tell verdict. Skips cleanly without `../botto` or
+  the napi addon.
+- **`op_measure_text` + `set_measure_fn`** (render) — a host-injected text measurer
+  (napi/mcp back it with `turbo-surf-raster`'s real font engine, system fonts on),
+  so the isolate's new `offsetWidth`/`offsetHeight` report per-font-family advance
+  widths a no-layout DOM lacks.
+- **`turbo_surf_raster::measure_text`** — advance width + line height for a CSS
+  `font-family` list at a size, over real font metrics.
+
+### Fixed — anti-detect surface
+- Host-interface prototypes (Navigator/Screen/HTMLDocument) with native accessor
+  getters; WebIDL brands via `Symbol.toStringTag` (incl. a computed brand on the
+  shared rtdom node prototype); per-tag element brands + native-marked methods;
+  missing host constructors; a non-silent `OfflineAudioContext`; `CSS.supports`
+  rejecting vendor-prefixed Gecko/WebKit props; Chrome-desktop feature markers; and
+  a real-global property-count pad.
+- **`getComputedStyle`** now resolves percentage `width`/`height` to used px against
+  the containing block (via turbo-test `browser_env` @ 52de5c4, re-vendored), so a
+  layout-sensitive read returns real px instead of `"50%"`.
+
+### Notes
+- Passive/consistency surface only — the active render tier (real canvas/WebGL
+  pixels) stays honest. botto is FP-safe-by-design, so this defeats it and the
+  commodity tier; a hardened detector may still catch individual shims.
+
 ## [0.4.0]
 
 Programmatic fetch + web-search tooling for agent consumers (the `fetch` knowledge

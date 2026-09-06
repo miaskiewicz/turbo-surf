@@ -253,7 +253,12 @@ fn font_registry(system_fonts: bool) -> FontRegistry {
 pub fn measure_text(text: &str, family_css: &str, size_px: f32, system_fonts: bool) -> (f32, f32) {
     let families: Vec<String> = family_css
         .split(',')
-        .map(|s| s.trim().trim_matches(|c| c == '\'' || c == '"').trim().to_string())
+        .map(|s| {
+            s.trim()
+                .trim_matches(|c| c == '\'' || c == '"')
+                .trim()
+                .to_string()
+        })
         .filter(|s| !s.is_empty())
         .collect();
     let refs: Vec<&str> = families.iter().map(|s| s.as_str()).collect();

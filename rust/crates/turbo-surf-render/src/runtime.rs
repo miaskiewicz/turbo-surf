@@ -150,6 +150,37 @@ fn op_fingerprint() -> String {
         .unwrap_or_else(|| "{}".to_string())
 }
 
+// Process-global text-measurement hook. The render crate has no font/layout stack, so the host
+// (napi/mcp, which own turbo-surf-raster) injects a real advance-width measurer. ENV_BOOTSTRAP's
+// offsetWidth/offsetHeight read it so a font-detection probe sees per-family metric differences a
+// no-layout DOM otherwise can't produce. Same host-injection pattern as `set_fingerprint`.
+type MeasureFn = Box<dyn Fn(&str, &str, f64) -> (f64, f64) + Send + Sync>;
+static MEASURE_TEXT: std::sync::RwLock<Option<MeasureFn>> = std::sync::RwLock::new(None);
+
+/// Install the host's text measurer: `(text, css_font_family, font_size_px) -> (width_px, height_px)`.
+/// Injected once at startup by the crate that owns the font/layout engine (raster). Until set,
+/// `offsetWidth`/`offsetHeight` report 0 (a standalone render isolate has no fonts).
+pub fn set_measure_fn(f: MeasureFn) {
+    if let Ok(mut g) = MEASURE_TEXT.write() {
+        *g = Some(f);
+    }
+}
+
+// Measure text advance for offsetWidth/offsetHeight. Returns JSON `[width,height]`, or `null` when
+// no host measurer is installed. Never throws across the boundary.
+#[op2]
+#[string]
+fn op_measure_text(#[string] text: &str, #[string] family: &str, size: f64) -> String {
+    match MEASURE_TEXT
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().map(|f| f(text, family, size)))
+    {
+        Some((w, h)) => format!("[{w},{h}]"),
+        None => "null".to_string(),
+    }
+}
+
 // `document.cookie` setter: ingest a `name=value; attrs` line against the base.
 #[op2(fast)]
 fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
@@ -256,7 +287,8 @@ deno_core::extension!(
         op_cookie_set,
         op_fetch,
         op_user_agent,
-        op_fingerprint
+        op_fingerprint,
+        op_measure_text
     ],
 );
 
@@ -2184,6 +2216,301 @@ globalThis.__domSig = () => {
   if (globalThis.Headers) mark(globalThis.Headers, "Headers");
   const nav = globalThis.navigator;
   if (nav && nav.clipboard) { mark(nav.clipboard.writeText, "writeText"); mark(nav.clipboard.readText, "readText"); }
+
+  // ── Structural browser-surface fidelity ──────────────────────────────────────
+  // A no-Chromium engine exposes navigator/screen/document as plain object literals
+  // (brand "[object Object]", data props, no host prototypes). A deep fingerprinter
+  // (Botguard/reCAPTCHA-class) reads WebIDL brands (Object.prototype.toString), native
+  // accessor getters up the prototype chain, and native method sources — all of which a
+  // synthetic DOM fails. This block re-homes our synthetic globals behind correctly-named
+  // host prototypes carrying NATIVE-marked accessor getters (via the same toString WeakSet
+  // above), so the passive/consistency surface reads like real Chrome. It cannot forge the
+  // active render tier (canvas/WebGL pixels, real layout cascade, font metrics) — those stay
+  // honest gaps. Every section is independently guarded so a failure can't break hydration.
+  const G = globalThis;
+  const guard = (fn) => { try { fn(); } catch (e) {} };
+  const tag = (obj, name) => { if (obj) Object.defineProperty(obj, Symbol.toStringTag, { value: name, configurable: true }); };
+  // A native-reporting getter (its source reads "[native code]" via the trap above).
+  const nativeGetter = (val) => { const g = function () { return val; }; mark(g); return g; };
+  // Insert a correctly-named host prototype between `obj` and its current prototype, carrying
+  // native accessor getters for `keys` (values snapshotted from the instance). Own data props
+  // are LEFT in place — reads still hit them; the deep-probe's chain walk (which skips own
+  // props) finds the native getter. `dropOwn` removes named own props (needed for `webdriver`,
+  // whose tamper check fires on ANY own descriptor).
+  const hostInterface = (obj, ctorName, keys, dropOwn) => {
+    if (!obj) return;
+    const ctor = ({ [ctorName]: function () {} })[ctorName]; // .name === ctorName
+    const proto = Object.create(Object.getPrototypeOf(obj) || Object.prototype);
+    Object.defineProperty(proto, "constructor", { value: ctor, configurable: true });
+    try { ctor.prototype = proto; } catch (e) {} // a function's own `prototype` is writable but non-configurable
+    mark(ctor, ctorName);
+    tag(proto, ctorName);
+    G[ctorName] = G[ctorName] || ctor; // expose the constructor (real browsers do)
+    for (const k of keys) {
+      let val; try { val = obj[k]; } catch (e) { val = undefined; }
+      Object.defineProperty(proto, k, { get: nativeGetter(val), enumerable: true, configurable: true });
+    }
+    for (const k of (dropOwn || [])) { try { delete obj[k]; } catch (e) {} }
+    Object.setPrototypeOf(obj, proto);
+  };
+
+  // navigator → Navigator.prototype (13 native getters). webdriver moves to a native getter
+  // returning false with NO own property (defeats webdriver-getter-tampered + the alt/contradiction
+  // cross-reads, which call the prototype getter).
+  guard(() => hostInterface(nav, "Navigator",
+    ["userAgent", "platform", "language", "languages", "hardwareConcurrency", "vendor",
+     "onLine", "appVersion", "appName", "product", "cookieEnabled", "appCodeName",
+     "maxTouchPoints", "webdriver"], ["webdriver"]));
+  guard(() => { Object.defineProperty(Object.getPrototypeOf(nav), "webdriver", { get: nativeGetter(false), enumerable: true, configurable: true }); });
+  guard(() => { if (nav && typeof nav.javaEnabled !== "function") { nav.javaEnabled = function javaEnabled() { return false; }; mark(nav.javaEnabled, "javaEnabled"); } });
+
+  // screen → Screen.prototype (6 native getters); reserve OS chrome so avail<full (screen-no-os-chrome).
+  guard(() => {
+    const scr = G.screen;
+    if (scr) {
+      if (scr.availHeight === scr.height) { try { scr.availHeight = scr.height - 25; } catch (e) {} }
+      hostInterface(scr, "Screen", ["width", "height", "availWidth", "availHeight", "colorDepth", "pixelDepth"]);
+    }
+  });
+
+  // document → HTMLDocument brand + 5 native getters (best-effort: the native DOM object may
+  // reject a prototype swap; the brand tag still lands on the instance).
+  guard(() => { if (G.document) tag(G.document, "HTMLDocument"); });
+  guard(() => hostInterface(G.document, "HTMLDocument", ["cookie", "title", "referrer", "readyState", "URL"]));
+
+  // window / history / console brands (WINDOW_BRANDS: note console's brand is lowercase).
+  guard(() => tag(G, "Window"));
+  guard(() => {
+    G.history = G.history || { length: 1, state: null, scrollRestoration: "auto",
+      back() {}, forward() {}, go() {}, pushState() {}, replaceState() {} };
+    tag(G.history, "History");
+  });
+  guard(() => { if (G.console) { tag(G.console, "console"); ["log", "info", "warn", "error", "debug"].forEach((m) => mark(G.console[m], m)); } });
+  guard(() => { if (G.performance && G.performance.now) mark(G.performance.now, "now"); });
+
+  // createElement was re-wrapped as a JS closure above; re-mark it native (create-element-not-native).
+  guard(() => { if (G.document && G.document.createElement) mark(G.document.createElement, "createElement"); });
+
+  // Kill the Gecko/WebKit engine false-positives: CSS.supports must reject vendor-prefixed
+  // Gecko props (a permissive syntax-only stub answered true → engineGecko → ua-chrome-wrong-engine).
+  guard(() => {
+    if (G.CSS && typeof G.CSS.supports === "function") {
+      const origSupports = G.CSS.supports.bind(G.CSS);
+      G.CSS.supports = function supports(prop, val) {
+        const p = String(prop == null ? "" : prop).toLowerCase();
+        if (p.indexOf("-moz-") === 0 || p.indexOf("-webkit-") === 0 || p.indexOf("-ms-") === 0) return false;
+        try { return origSupports(prop, val); } catch (e) { return false; }
+      };
+      mark(G.CSS.supports, "supports");
+    }
+  });
+
+  // Constructed-object host interfaces we own in JS (brand + native method). The 9 rtdom-native
+  // element/Range/Text brands need vendored-binding work and stay as residual struct fails.
+  const defClass = (name, method, ctorArgsOk) => guard(() => {
+    let C = G[name];
+    if (typeof C !== "function") { C = function () {}; Object.defineProperty(C, "name", { value: name, configurable: true }); G[name] = C; }
+    mark(C, name);
+    C.prototype = C.prototype || {};
+    tag(C.prototype, name);
+    if (method && typeof C.prototype[method] !== "function") { C.prototype[method] = function () {}; }
+    if (method) { try { Object.defineProperty(C.prototype[method], "name", { value: method, configurable: true }); } catch (e) {} mark(C.prototype[method]); }
+  });
+  defClass("Blob", "slice");
+  defClass("Headers", null);
+  defClass("XMLHttpRequest", "open");
+  defClass("URL", null);
+  defClass("Event", null);
+  defClass("DOMParser", "parseFromString");
+  guard(() => { if (G.crypto) tag(G.crypto, "Crypto"); });
+
+  // rtdom nodes/elements expose DISTINCT per-tag prototypes reachable from JS, so brand each
+  // (Symbol.toStringTag on the tag's own prototype) and native-mark its checked method IN PLACE
+  // (mark the existing function, never shadow it) — clears struct-brand-table + struct-method-not-native
+  // without touching the vendored DOM binding.
+  guard(() => {
+    const brandNode = (obj, name, method) => {
+      if (!obj) return;
+      const proto = Object.getPrototypeOf(obj);
+      if (proto) {
+        tag(proto, name);
+        const ctor = ({ [name]: function () {} })[name];
+        try { Object.defineProperty(proto, "constructor", { value: ctor, configurable: true }); mark(ctor, name); } catch (e) {}
+      }
+      if (method) {
+        let fn; try { fn = obj[method]; } catch (e) {}
+        if (typeof fn !== "function" && proto) { proto[method] = function () {}; fn = proto[method]; try { Object.defineProperty(fn, "name", { value: method, configurable: true }); } catch (e) {} }
+        if (typeof fn === "function") mark(fn);
+      }
+    };
+    const d = G.document;
+    if (d) {
+      brandNode(d.createElement("a"), "HTMLAnchorElement", "click");
+      brandNode(d.createElement("canvas"), "HTMLCanvasElement", "getContext");
+      brandNode(d.createElement("video"), "HTMLVideoElement", "canPlayType");
+      brandNode(d.createElement("input"), "HTMLInputElement", null);
+      brandNode(d.implementation, "DOMImplementation", null);
+      brandNode(d.createRange && d.createRange(), "Range", "cloneRange");
+      brandNode(d.createTextNode && d.createTextNode("x"), "Text", null);
+      brandNode(d.createComment && d.createComment("x"), "Comment", null);
+      brandNode(d.createDocumentFragment && d.createDocumentFragment(), "DocumentFragment", null);
+    }
+  });
+  // video / text / comment / documentFragment share ONE generic rtdom prototype, so a static brand
+  // collides (last write wins). Install a COMPUTED Symbol.toStringTag accessor deriving the WebIDL
+  // brand from the node's own type — one proto, per-instance-correct brands. Distinct-proto nodes
+  // (a/canvas/input/range) keep their closer static brand.
+  guard(() => {
+    const d = G.document;
+    if (!d) return;
+    const EL = { A: "HTMLAnchorElement", CANVAS: "HTMLCanvasElement", VIDEO: "HTMLVideoElement",
+      INPUT: "HTMLInputElement", AUDIO: "HTMLAudioElement", IMG: "HTMLImageElement", DIV: "HTMLDivElement",
+      SPAN: "HTMLSpanElement", P: "HTMLParagraphElement", BUTTON: "HTMLButtonElement" };
+    const brandOf = function () {
+      try {
+        const nt = this.nodeType;
+        const nn = String(this.nodeName == null ? "" : this.nodeName);
+        if (nt === 3 || nn === "#text") return "Text";
+        if (nt === 8 || nn === "#comment") return "Comment";
+        if (nt === 11 || nn.toUpperCase() === "#DOCUMENT-FRAGMENT") return "DocumentFragment";
+        if (nt === 1) return EL[nn] || "HTMLElement";
+      } catch (e) {}
+      return "Object";
+    };
+    for (const o of [d.createTextNode("x"), d.createComment("x"), d.createDocumentFragment(), d.createElement("video")]) {
+      const p = o && Object.getPrototypeOf(o);
+      if (p) { try { Object.defineProperty(p, Symbol.toStringTag, { configurable: true, get: brandOf }); } catch (e) {} }
+    }
+  });
+
+  // Presence of universal host constructors (no-webgl-context / no-audio-context / surface-missing).
+  const ensureCtor = (name) => guard(() => { if (typeof G[name] !== "function") { const c = function () {}; Object.defineProperty(c, "name", { value: name, configurable: true }); G[name] = c; } mark(G[name], name); });
+  ["WebGLRenderingContext", "WebGL2RenderingContext", "AudioContext", "webkitAudioContext",
+   "IntersectionObserver", "ResizeObserver", "AbortController", "URL", "PerformanceObserver",
+   "MutationObserver", "Worker"].forEach(ensureCtor);
+  guard(() => { ["fetch", "requestAnimationFrame", "queueMicrotask", "matchMedia"].forEach((n) => { if (typeof G[n] === "function") mark(G[n], n); }); });
+
+  // OfflineAudioContext with a non-silent DSP buffer (audio-silent needs energy > 0). A deterministic
+  // synthetic waveform — device-invariant, indistinguishable from a real offline render to a hash+energy
+  // probe, and honest (we ARE computing an audio buffer on CPU, not faking a specific device's DSP).
+  guard(() => {
+    const AudioParam = () => ({ value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, setTargetAtTime() {} });
+    const node = () => ({ connect() { return node(); }, disconnect() {}, start() {}, stop() {},
+      frequency: AudioParam(), threshold: AudioParam(), knee: AudioParam(), ratio: AudioParam(),
+      attack: AudioParam(), release: AudioParam(), gain: AudioParam(), type: "triangle" });
+    function OfflineAudioContext(_ch, length, _rate) {
+      this.length = length || 44100; this.sampleRate = _rate || 44100; this.destination = node();
+      this.createOscillator = node; this.createDynamicsCompressor = node; this.createGain = node;
+      this.createBiquadFilter = node; this.currentTime = 0;
+      this.startRendering = () => Promise.resolve({
+        length: this.length, numberOfChannels: 1, sampleRate: this.sampleRate,
+        getChannelData: () => { const a = new Float32Array(this.length); for (let i = 0; i < a.length; i++) a[i] = Math.sin(i * 0.017) * 0.25 + 0.05; return a; },
+      });
+    }
+    G.OfflineAudioContext = OfflineAudioContext; mark(G.OfflineAudioContext, "OfflineAudioContext");
+  });
+
+  // offsetWidth / offsetHeight via the host's real font measurer (op_measure_text, system fonts).
+  // A no-layout DOM reports neither, so a font-detection probe (span metrics per font-family) sees
+  // fontCount 0 (no-system-fonts). Defined on the base element/node prototype so all elements inherit;
+  // measures the node's own text under its computed font. No host measurer installed => 0 (honest).
+  guard(() => {
+    const measure = (elm) => {
+      try {
+        const t = elm && elm.textContent; if (!t) return null;
+        const op = Deno.core.ops.op_measure_text; if (!op) return null;
+        const cs = G.getComputedStyle(elm);
+        const fam = (cs && cs.fontFamily) || "sans-serif";
+        const size = parseFloat((cs && cs.fontSize) || "16") || 16;
+        const r = JSON.parse(op(String(t), String(fam), size));
+        return r && r.length === 2 ? r : null;
+      } catch (e) { return null; }
+    };
+    let p = Object.getPrototypeOf(document.createElement("span"));
+    while (p && Object.getPrototypeOf(p) && Object.getPrototypeOf(p) !== Object.prototype) p = Object.getPrototypeOf(p);
+    if (p) {
+      if (!Object.getOwnPropertyDescriptor(p, "offsetWidth")) {
+        Object.defineProperty(p, "offsetWidth", { configurable: true, get() { const m = measure(this); return m ? Math.round(m[0]) : 0; } });
+      }
+      if (!Object.getOwnPropertyDescriptor(p, "offsetHeight")) {
+        Object.defineProperty(p, "offsetHeight", { configurable: true, get() { const m = measure(this); return m ? Math.round(m[1]) : 0; } });
+      }
+    }
+  });
+
+  // Chrome-desktop feature markers (ua-version-spoof): each must be PRESENT for a claimed major of
+  // 139..148; existence-only stubs (probed via `in`), never invoked. NB: deliberately NOT adding any
+  // Gecko/WebKit marker (e.g. GestureEvent) that would re-trip the engine check.
+  guard(() => {
+    const ns = (path) => { const segs = path.split("."); let o = G;
+      for (let i = 0; i < segs.length - 1; i++) { const s = segs[i]; if (o[s] == null) o[s] = (s === "prototype") ? {} : function () {}; o = o[s]; }
+      const last = segs[segs.length - 1]; if (!(last in o)) o[last] = function () {}; };
+    ["Object.groupBy", "Promise.withResolvers", "Array.fromAsync", "Uint8Array.fromBase64",
+     "IDBObjectStore.prototype.getAllRecords", "Document.prototype.activeViewTransition",
+     "PerformanceResourceTiming.prototype.contentEncoding", "Map.prototype.getOrInsert",
+     "HTMLMediaElement.prototype.loading"].forEach(ns);
+    if (!("Temporal" in G)) G.Temporal = {};
+    if (!("Sanitizer" in G)) G.Sanitizer = function Sanitizer() {};
+    if (typeof Math.sumPrecise !== "function") Math.sumPrecise = function sumPrecise() { return 0; };
+  });
+
+  // Pad window's own-property count above the fake-DOM floor (window-prop-count-low, <600). These are
+  // genuine Chrome global interface names; define any absent as a stub constructor (also improves the
+  // window-surface realism). Not load-bearing — a weak, corroborating tell.
+  guard(() => {
+    const NAMES = ("HTMLElement HTMLDivElement HTMLSpanElement HTMLBodyElement HTMLHeadElement HTMLHtmlElement " +
+      "HTMLParagraphElement HTMLImageElement HTMLButtonElement HTMLSelectElement HTMLOptionElement HTMLTextAreaElement " +
+      "HTMLLabelElement HTMLFormElement HTMLTableElement HTMLTableRowElement HTMLTableCellElement HTMLUListElement " +
+      "HTMLOListElement HTMLLIElement HTMLHeadingElement HTMLScriptElement HTMLStyleElement HTMLLinkElement HTMLMetaElement " +
+      "HTMLIFrameElement HTMLCanvasElement HTMLVideoElement HTMLAudioElement HTMLMediaElement HTMLSourceElement " +
+      "HTMLTrackElement HTMLPictureElement HTMLTemplateElement HTMLSlotElement HTMLDetailsElement HTMLDialogElement " +
+      "SVGElement SVGSVGElement SVGRectElement SVGCircleElement SVGPathElement SVGGElement SVGTextElement SVGUseElement " +
+      "CSSStyleSheet CSSStyleRule CSSMediaRule CSSKeyframesRule CSSKeyframeRule CSSSupportsRule CSSFontFaceRule " +
+      "CSSStyleDeclaration StyleSheet MediaQueryList DOMRect DOMRectReadOnly DOMPoint DOMMatrix DOMTokenList NamedNodeMap " +
+      "NodeList HTMLCollection Attr CharacterData ProcessingInstruction CDATASection ShadowRoot CustomEvent MouseEvent " +
+      "KeyboardEvent PointerEvent TouchEvent WheelEvent FocusEvent InputEvent UIEvent DragEvent ClipboardEvent " +
+      "AnimationEvent TransitionEvent ProgressEvent MessageEvent CloseEvent ErrorEvent PopStateEvent HashChangeEvent " +
+      "StorageEvent PageTransitionEvent BeforeUnloadEvent GamepadEvent SubmitEvent FormDataEvent " +
+      "AbortSignal EventTarget FileReader FileList File FormData ReadableStream WritableStream TransformStream " +
+      "TextEncoder TextDecoder TextEncoderStream TextDecoderStream CompressionStream DecompressionStream " +
+      "BroadcastChannel MessageChannel MessagePort WebSocket XMLHttpRequestUpload XMLSerializer XPathEvaluator " +
+      "XPathResult NodeIterator TreeWalker MutationRecord PerformanceEntry PerformanceMark PerformanceMeasure " +
+      "PerformanceNavigationTiming PerformanceResourceTiming PerformanceObserverEntryList PerformancePaintTiming " +
+      "IntersectionObserverEntry ResizeObserverEntry ReportingObserver Crypto CryptoKey SubtleCrypto CacheStorage Cache " +
+      "ServiceWorker ServiceWorkerContainer ServiceWorkerRegistration Notification PushManager Permissions PermissionStatus " +
+      "Geolocation MediaStream MediaStreamTrack RTCPeerConnection RTCDataChannel AudioBuffer AudioNode GainNode OscillatorNode " +
+      "AnalyserNode BiquadFilterNode DynamicsCompressorNode Image Audio Option Path2D ImageData ImageBitmap OffscreenCanvas " +
+      "IDBDatabase IDBTransaction IDBObjectStore IDBIndex IDBCursor IDBKeyRange IDBRequest IDBFactory " +
+      "VisualViewport Screen History Location Navigator BarProp CSSFontFeatureValuesRule " +
+      "SVGLineElement SVGPolygonElement SVGPolylineElement SVGEllipseElement SVGImageElement SVGDefsElement " +
+      "SVGClipPathElement SVGLinearGradientElement SVGRadialGradientElement SVGStopElement SVGSymbolElement " +
+      "SVGMarkerElement SVGPatternElement SVGMaskElement SVGFilterElement SVGTitleElement SVGDescElement " +
+      "SVGAnimateElement SVGForeignObjectElement SVGTextPathElement SVGTSpanElement SVGViewElement SVGSwitchElement " +
+      "HTMLAreaElement HTMLBaseElement HTMLBRElement HTMLDataElement HTMLDataListElement HTMLDListElement " +
+      "HTMLEmbedElement HTMLFieldSetElement HTMLHRElement HTMLLegendElement HTMLMapElement HTMLMenuElement " +
+      "HTMLMeterElement HTMLModElement HTMLObjectElement HTMLOptGroupElement HTMLOutputElement HTMLParamElement " +
+      "HTMLPreElement HTMLProgressElement HTMLQuoteElement HTMLTableCaptionElement HTMLTableColElement " +
+      "HTMLTableSectionElement HTMLTimeElement HTMLTitleElement HTMLUnknownElement HTMLMarqueeElement HTMLFontElement " +
+      "CSSConditionRule CSSGroupingRule CSSImportRule CSSNamespaceRule CSSPageRule CSSCounterStyleRule CSSLayerBlockRule " +
+      "CSSLayerStatementRule CSSPropertyRule CSSNestedDeclarations CSSPositionTryRule CSSTransition CSSAnimation " +
+      "CSSNumericValue CSSUnitValue CSSKeywordValue CSSMathSum CSSTransformValue CSSUnparsedValue CSSVariableReferenceValue " +
+      "DOMRectList DOMQuad DOMStringList DOMStringMap DOMException DOMImplementation DOMParser Range StaticRange " +
+      "AbstractRange Selection Comment Text CDATASection DocumentType DocumentFragment ShadowRoot Element " +
+      "AnimationEffect KeyframeEffect Animation AnimationTimeline DocumentTimeline AnimationPlaybackEvent " +
+      "IntersectionObserver ResizeObserver ReportingObserver PerformanceObserver MutationObserver " +
+      "Worklet PaintWorkletGlobalScope AudioWorklet AudioWorkletNode Blob FileSystemHandle FileSystemFileHandle " +
+      "FileSystemDirectoryHandle FileSystemWritableFileStream StorageManager NavigatorUAData Sanitizer TrustedHTML " +
+      "TrustedScript TrustedScriptURL TrustedTypePolicy TrustedTypePolicyFactory Highlight HighlightRegistry " +
+      "EyeDropper FragmentDirective NavigateEvent Navigation NavigationHistoryEntry NavigationTransition " +
+      "CookieStore CookieChangeEvent PressureObserver ScreenDetails ScreenDetailed WakeLock WakeLockSentinel " +
+      "MediaQueryListEvent PictureInPictureEvent PictureInPictureWindow RemotePlayback TextTrack TextTrackCue " +
+      "VTTCue TextTrackList TimeRanges MediaError MediaEncryptedEvent SourceBuffer MediaSource " +
+      "AudioData VideoFrame EncodedAudioChunk EncodedVideoChunk ImageTrack ImageDecoder GPUDevice GPUAdapter " +
+      "GPUBuffer GPUTexture GPUCanvasContext WebGLBuffer WebGLProgram WebGLShader WebGLTexture WebGLFramebuffer " +
+      "WebGLRenderbuffer WebGLUniformLocation WebGLActiveInfo WebGLContextEvent WebGLVertexArrayObject " +
+      "CanvasGradient CanvasPattern CanvasRenderingContext2D OffscreenCanvasRenderingContext2D Path2D TextMetrics").split(/\s+/);
+    for (const n of NAMES) { if (n && typeof G[n] === "undefined") { const c = function () {}; try { Object.defineProperty(c, "name", { value: n, configurable: true }); } catch (e) {} G[n] = c; mark(c, n); } }
+  });
 })();
 })();"##;
 

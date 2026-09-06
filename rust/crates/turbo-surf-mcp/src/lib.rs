@@ -26,7 +26,7 @@ use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
-pub const VERSION: &str = "0.4.0";
+pub const VERSION: &str = "0.4.1";
 
 /// One agent session: the current page URL + parsed tree + nav history, plus the
 /// browser-ish state agents expect (UA / extra headers / cookie jar / JS mode) and
@@ -68,8 +68,22 @@ pub struct Session {
     default_search_engine: Option<String>,
 }
 
+/// Install process-global render hooks once: a raster-backed text measurer (system fonts on) that
+/// backs the render isolate's offsetWidth/offsetHeight, so a font-detection probe sees per-family
+/// metrics. The render crate has no font stack, so the host (this crate, which owns raster) injects it.
+fn ensure_render_hooks() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        turbo_surf_render::set_measure_fn(Box::new(|text, family, size| {
+            let (w, h) = raster::measure_text(text, family, size as f32, true);
+            (w as f64, h as f64)
+        }));
+    });
+}
+
 impl Session {
     pub fn new() -> Self {
+        ensure_render_hooks();
         Self {
             // Pick up a solver from env/`.env` if one is configured (else inert).
             // Supply the V8 engine so the Cloudflare solver runs the challenge's own

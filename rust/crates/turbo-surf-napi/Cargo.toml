@@ -18,12 +18,12 @@ impersonate = ["turbo-surf-core/impersonate", "turbo-surf-page/impersonate"]
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi6", "tokio_rt"] }
 napi-derive = "2"
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.0" }
-turbo-surf-page = { path = "../turbo-surf-page", version = "0.4.0" }
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.4.0" }
-turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.4.0" }
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.4.0" }
-turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.4.0" }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.1" }
+turbo-surf-page = { path = "../turbo-surf-page", version = "0.4.1" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.4.1" }
+turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.4.1" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.4.1" }
+turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.4.1" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
 serde = "1"
 serde_json = "1"

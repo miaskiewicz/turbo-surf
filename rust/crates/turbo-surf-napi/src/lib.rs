@@ -23,11 +23,25 @@ use turbo_surf_core::net::{build_client, fetch_html as net_fetch, FetchOptions};
 use turbo_surf_page::TurboNavigator;
 use turbo_surf_raster as raster;
 use turbo_surf_view as view;
+
+/// Install process-global render hooks once, then ensure the V8 platform. The render crate has no
+/// font stack, so we inject a raster-backed text measurer (system fonts on) that backs the isolate's
+/// offsetWidth/offsetHeight. Every render/live entry point funnels through here.
+pub(crate) fn ensure_render_init() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        turbo_surf_render::set_measure_fn(Box::new(|text, family, size| {
+            let (w, h) = raster::measure_text(text, family, size as f32, true);
+            (w as f64, h as f64)
+        }));
+    });
+    turbo_surf_render::ensure_platform();
+}
 use view::{Field, FieldType, QueryType, TextMode};
 
 #[napi]
 pub fn version() -> String {
-    "0.4.0".to_string()
+    "0.4.1".to_string()
 }
 
 fn to_json_string<T: serde::Serialize>(v: &T) -> String {
@@ -362,7 +376,7 @@ fn parse_field(spec: &Value) -> Field {
 /// (Playwright `page.evaluate`-ish; synchronous, no event loop).
 #[napi]
 pub fn evaluate(html: String, script: String) -> Result<String> {
-    turbo_surf_render::ensure_platform();
+    ensure_render_init();
     turbo_surf_render::run_with_dom(&html, &script).map_err(Error::from_reason)
 }
 
@@ -374,7 +388,7 @@ pub fn evaluate(html: String, script: String) -> Result<String> {
 pub fn render(html: String, base_url: String, script: String) -> Result<String> {
     // Init the V8 platform on THIS (Node main) thread before the per-call worker spawns,
     // so the platform parent is the long-lived main thread, not a transient one.
-    turbo_surf_render::ensure_platform();
+    ensure_render_init();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -439,7 +453,7 @@ fn render_worker() -> &'static std::sync::Mutex<std::sync::mpsc::Sender<RenderJo
 #[napi]
 pub fn render_pooled(html: String, base_url: String, script: String) -> Result<String> {
     // Parent the V8 platform on the main thread before the persistent worker spins up.
-    turbo_surf_render::ensure_platform();
+    ensure_render_init();
     let (reply_tx, reply_rx) = std::sync::mpsc::channel();
     render_worker()
         .lock()
@@ -500,7 +514,7 @@ pub fn hydrate(
     user_agent: Option<String>,
 ) -> AsyncTask<HydrateTask> {
     // Parent the V8 platform on the main thread before the libuv worker runs compute().
-    turbo_surf_render::ensure_platform();
+    ensure_render_init();
     AsyncTask::new(HydrateTask {
         html,
         base_url,

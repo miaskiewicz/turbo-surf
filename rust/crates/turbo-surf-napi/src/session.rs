@@ -324,7 +324,7 @@ pub fn live_open(
 ) -> AsyncTask<LiveOpenTask> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
-    turbo_surf_render::ensure_platform();
+    crate::ensure_render_init();
     AsyncTask::new(LiveOpenTask {
         html,
         base_url,

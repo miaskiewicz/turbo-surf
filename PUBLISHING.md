@@ -1,16 +1,20 @@
 # Publishing turbo-surf
 
-turbo-surf ships from **one `v*` git tag**, which fires two GitHub Actions
-workflows. The engine is a standalone Rust binary; the npm package is a thin
-launcher that spawns it (no napi, no Node hosting Rust — same model as turbo-test).
+turbo-surf ships from two git-tag families across **three registries**. The engine
+is a standalone Rust binary; the npm package is a thin launcher that spawns it (no
+napi, no Node hosting Rust — same model as turbo-test).
 
-| Workflow | Publishes | Where | Auth secret |
-|---|---|---|---|
-| `release.yml` | `turbo-surf` — builds the `turbo-surf-mcp` binary for every platform, drops them in `bin/`, publishes the launcher (`cli.js`/`index.js` + `bin/`) | npm | `NPM_TOKEN` |
-| `rust-crates-publish.yml` | the Rust crates, in dep order: `core → view → page → render → mcp` | crates.io | `CARGO_REGISTRY_TOKEN` |
+| Workflow | Publishes | Where | Trigger tag | Auth secret |
+|---|---|---|---|---|
+| `release.yml` | `turbo-surf` — builds the `turbo-surf-mcp` binary for every platform, drops them in `bin/`, publishes the launcher (`cli.js`/`index.js` + `bin/`) | npm | `v*` | `NPM_TOKEN` |
+| `rust-crates-publish.yml` | the Rust crates, in dep order: `core → view → page → render → raster → mcp` | crates.io | `v*` | `CARGO_REGISTRY_TOKEN` |
+| `release-py.yml` | `turbo-surf` — maturin abi3 wheels (CPython 3.8+) per platform + sdist, built from `rust/crates/turbo-surf-py/` | PyPI | `pyv*` | `PYPI_TOKEN` |
 
-Both trigger on `push: tags: ['v*']`. (The `turbo-surf-napi` cdylib + `turbo-surf-transform`
-crate are not published — napi is dev/harness-only now.)
+The `v*` tag fires npm + crates; the **PyPI wheel ships on a SEPARATE `pyv*` tag**
+(e.g. `pyv0.4.1`) so it never fires on the npm/crates release, and it skips cleanly
+until `PYPI_TOKEN` is set. Cut BOTH tags at the same version for a full release.
+(The `turbo-surf-napi` cdylib + `turbo-surf-transform` crate are not published — napi
+is dev/harness-only now.)
 
 ## The one rule: every version string must match the tag
 
@@ -25,6 +29,8 @@ or a workflow ships a mismatched version. Bump to the SAME `X.Y.Z`:
 - `rust/crates/turbo-surf-py/pyproject.toml` → `version` (**maturin builds the PyPI
   wheel from THIS, not the workspace version** — if it lags, the publish job
   `--skip-existing`s the old wheel and goes green without publishing anything)
+- `rust/crates/turbo-surf-py/src/lib.rs` → the `version()` pyfunction's returned
+  string (the Python module's self-reported version)
 - `README.md` status line
 
 Sanity check (should print nothing): `grep -rn "<old-version>" package.json rust/
@@ -37,15 +43,19 @@ README.md | grep -v /target/`.
    --all-targets && cargo fmt --check`; from the root `npm run lint && npm run
    format:check` (the launcher JS).
 3. Add the new version's entry to `CHANGELOG.md`.
-4. Commit (`chore(release): vX.Y.Z`), tag (`git tag -a vX.Y.Z -m vX.Y.Z`), push the
-   commit **and** the tag (`git push origin <branch> && git push origin vX.Y.Z`).
+4. Commit (`chore(release): vX.Y.Z`), then cut BOTH tags at the same commit:
+   - `git tag -a vX.Y.Z -m vX.Y.Z` — npm + crates.
+   - `git tag -a pyvX.Y.Z -m pyvX.Y.Z` — PyPI wheels.
+   Push the commit **and** both tags: `git push origin <branch> && git push origin
+   vX.Y.Z pyvX.Y.Z`. (Skip `pyvX.Y.Z` only if you deliberately aren't shipping Python.)
 5. The workflows build + publish. Verify after CI:
    - `npm view turbo-surf version` (and that `bin/` shipped:
      `npm pack turbo-surf --dry-run`)
    - the crate pages on crates.io (`turbo-surf-core`, …)
+   - `pip index versions turbo-surf` (or the PyPI project page)
 
-Publishing is **outward-facing + irreversible** (npm + crates.io versions can't be
-reused) — only cut a tag when a release is intended.
+Publishing is **outward-facing + irreversible** (npm + crates.io + PyPI versions
+can't be reused) — only cut a tag when a release is intended.
 
 ## Notes
 

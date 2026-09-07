@@ -14,14 +14,16 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
 
 ## Stack & layout
 
-- **Engine: Rust** (`rust/` — a 7-crate workspace on the `turbo-dom` crate, edition
+- **Engine: Rust** (`rust/` — a 9-crate workspace on the `turbo-dom` crate, edition
   2021). Source is `.mjs`-free except a thin JS launcher + the dev harness.
 - **Crates:** `turbo-surf-core` (net/cookies/robots/url/frontier/crawl/cache),
   `turbo-surf-page` (navigator), `turbo-surf-view` (extract/visible/aria/locator/
   markdown/query/xpath/hydration/actions/…), `turbo-surf-render` (deno_core V8 +
-  the vendored `browser_env` rtdom↔V8 DOM binding), `turbo-surf-transform` (swc),
-  `turbo-surf-napi` (dev/harness in-process addon), `turbo-surf-mcp` (the stdio
-  MCP **binary** the launcher spawns).
+  the vendored `browser_env` rtdom↔V8 DOM binding), `turbo-surf-raster` (synthetic
+  screenshot tier — native layout+paint over `turbo-html2pdf-core`, + `measure_text`),
+  `turbo-surf-transform` (swc), `turbo-surf-napi` (dev/harness in-process addon),
+  `turbo-surf-py` (PyO3 binding → PyPI wheels), `turbo-surf-mcp` (the stdio MCP
+  **binary** the launcher spawns).
 - **JS surface:** `cli.js` + `index.js` (the launcher), `harness/` (benchmarks),
   `rust/playwright-shim/` (a drop-in `@playwright/test` façade over the
   `turbo-surf-napi` addon — Page/Locator/expect/context/fixtures, no browser;

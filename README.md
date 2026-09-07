@@ -12,7 +12,7 @@ demand — see below):
   elements, a link/form graph, an accessibility tree, markdown and plain-text views,
   rendered-HTML capture, CSS/XPath node queries, and schema-driven structured
   extraction.
-- **An agent tool** — a 62-tool **MCP** server agents drive directly over stdio
+- **An agent tool** — a 76-tool **MCP** server agents drive directly over stdio
   (`crawl`, `batch`, navigate, click/fill/submit, query, extract, accessibility
   tree, markdown, `render`/`eval_js`/`inject_js`, `screenshot`, cookies/headers,
   `snapshot`).
@@ -29,7 +29,7 @@ library, and they get their DOM from a real browser (Playwright/Puppeteer/
 Selenium) or an in-process fake DOM with no security isolation (jsdom,
 happy-dom). turbo-surf is unusual on four axes at once:
 
-1. **AI-agent-ready out of the box.** It ships a full **MCP server** (62 tools:
+1. **AI-agent-ready out of the box.** It ships a full **MCP server** (76 tools:
    navigate, click/fill/submit, query, extract, accessibility tree, markdown,
    `crawl` a whole site, `batch` a URL list, `render`/`set_mode` to run page JS,
    `eval_js`/`inject_js` against the live render heap with a DOM-history trail,
@@ -58,7 +58,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
 Status: **v0.4.1 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
-A native Rust engine (7-crate workspace on the `turbo-dom` crate): hardened
+A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
 orchestration (global + per-host concurrency, token-bucket politeness, backoff/retry,
@@ -66,7 +66,7 @@ canonical dedupe, depth/page caps), structured extraction, CSS+XPath query, a
 no-Chromium JS render tier (a true V8 isolate over the native DOM) with re-enterable
 live-heap `eval_js`/`inject_js` + a DOM-history trail, **synthetic screenshots**
 (PNG/SVG from a native layout+paint of any HTML snapshot — still no browser), and a
-62-tool MCP server (native binary). Benchmarked against real browsers + other
+76-tool MCP server (native binary). Benchmarked against real browsers + other
 crawlers (below).
 
 ## Install
@@ -84,8 +84,9 @@ runtime hosts it).
 
 ### What ships where
 
-turbo-surf publishes from **one `v*` git tag** to two registries (see
-[PUBLISHING.md](./PUBLISHING.md)):
+turbo-surf publishes to **three registries** (see [PUBLISHING.md](./PUBLISHING.md)):
+a **`v*`** git tag ships the npm launcher + the Rust crates; a separate **`pyv*`**
+tag ships the PyPI wheels.
 
 | Artifact | Registry | What it is | For |
 |---|---|---|---|
@@ -100,7 +101,7 @@ shim (`rust/playwright-shim/`) is a dev/in-repo tool, not an npm artifact.
 ## MCP server (agents)
 
 ```sh
-npx turbo-surf-mcp          # stdio MCP server (62 tools), e.g.:
+npx turbo-surf-mcp          # stdio MCP server (76 tools), e.g.:
 # navigation:  goto, go_back, go_forward, reload, set_user_agent
 # content:     interactive_elements, accessibility_tree, aria_snapshot, markdown,
 #              text, html, links, requests, snapshot, query, get_by,
@@ -108,16 +109,18 @@ npx turbo-surf-mcp          # stdio MCP server (62 tools), e.g.:
 # screenshot:  screenshot (PNG/SVG of the page or a dom_history snapshot),
 #              set_viewport
 # interaction: click, fill, submit, click_selector, fill_selector, select_option,
-#              check, uncheck, fill_many, find_text, forms, extract_links
+#              check, uncheck, fill_many, find_text, extract_links, set_bypass_consent
 # accessors:   get_attribute, text_content, inner_html, input_value, count,
 #              is_visible, is_checked, is_enabled, is_editable, is_focused,
 #              is_empty, aria_role, accessible_name, accessible_description
 # bulk:        crawl, batch
+# search:      web_search, web_search_set_engine, web_search_setup_browser,
+#              web_search_strategies, web_search_load_strategy, web_search_reset_strategy
+# fetch:       fetch_markdown, fetch_markdown_batch, fetch_json, fetch_raw
 # render/JS:   render, set_mode, eval_js, inject_js, latest_dom, dom_history,
-#              evaluate, detect_js, run_playwright, probe
+#              evaluate, detect, detect_js, run_playwright, probe
 # stealth:     stealth_status, set_fingerprint, analyze_akamai
 # session:     get_cookies, set_cookie, set_extra_headers, robots_check
-# direct:      fetch_json, fetch_raw
 ```
 
 `render`/`set_mode` switch the Page into the JS render tier (a true V8 isolate over
@@ -166,7 +169,7 @@ claude mcp list
 ```
 
 Now start (or restart) Claude Code and ask it to, e.g., *"use turbo-surf to fetch
-the markdown of example.com"* — the 62 tools above are available. Remove it later
+the markdown of example.com"* — the 76 tools above are available. Remove it later
 with `claude mcp remove turbo-surf`.
 
 **Scope (where the server is registered).** By default it's registered for your

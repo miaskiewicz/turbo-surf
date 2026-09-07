@@ -66,7 +66,11 @@ async function launchContext(proxy) {
 async function main() {
   const raw = await readStdin();
   let req = {};
-  try { req = JSON.parse(raw || "{}"); } catch { /* empty → error below */ }
+  try {
+    req = JSON.parse(raw || "{}");
+  } catch {
+    /* empty → error below */
+  }
   if (!req.url) {
     process.stderr.write("fetch-serp: missing 'url' on stdin\n");
     process.exit(2);
@@ -87,7 +91,10 @@ async function main() {
     const isGoogle = /(^|\.)google\./i.test(new URL(req.url).hostname);
     if (isGoogle) {
       try {
-        await page.goto("https://www.google.com/", { waitUntil: "domcontentloaded", timeout: 20000 });
+        await page.goto("https://www.google.com/", {
+          waitUntil: "domcontentloaded",
+          timeout: 20000,
+        });
         await page.waitForTimeout(800);
       } catch (e) {}
     }
@@ -97,7 +104,9 @@ async function main() {
     const html = await page.content();
     const finalUrl = page.url();
     const blocked = /\/sorry\//.test(finalUrl) || /unusual traffic/i.test(html);
-    process.stdout.write(JSON.stringify({ html, finalUrl, status: resp ? resp.status() : 0, blocked }));
+    process.stdout.write(
+      JSON.stringify({ html, finalUrl, status: resp ? resp.status() : 0, blocked }),
+    );
   } finally {
     await context.close();
   }

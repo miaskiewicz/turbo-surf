@@ -404,8 +404,9 @@ fn box_blur_vertical(data: &mut [u8], w: usize, h: usize, r: usize) {
     let win = (2 * r + 1) as u32;
     let mut src = vec![0u8; h * 4];
     for x in 0..w {
-        for (y, chunk) in src.chunks_exact_mut(4).enumerate() {
-            chunk.copy_from_slice(&data[(y * w + x) * 4..(y * w + x) * 4 + 4]);
+        for y in 0..h {
+            let s = (y * w + x) * 4;
+            src[y * 4..y * 4 + 4].copy_from_slice(&data[s..s + 4]);
         }
         let get = |y: isize, c: usize| src[y.clamp(0, h as isize - 1) as usize * 4 + c] as u32;
         for c in 0..4 {

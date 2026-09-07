@@ -3,6 +3,32 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.4.2] — screenshot render fidelity
+
+Raster-tier fixes so synthetic screenshots of real, JS-heavy sites match a browser
+(validated against a Chromium oracle on google.com / nike.com / en.wikipedia.org).
+All via the no-Chromium hydrate + paint path.
+
+### Fixed
+- **`<noscript>` CSS was being applied** — Google ships `<noscript><style>…div{display:none}…`,
+  which a JS-enabled browser ignores. `lay_out()` now strips `<noscript>` before the
+  cascade, so a hydrated page's real content isn't hidden (Google's search UI was
+  dropped to a near-blank body).
+- **`>` inside a quoted attribute truncated `<img>` extraction** — a naive `.find('>')`
+  matched the `>` inside `alt="PLAY MIND<br>GAMES"`, so responsive heroes whose real
+  URL lives in later attributes (`data-landscape-url`, `srcset`) were never fetched or
+  painted (Nike hero = gray box). Image-tag scanning is now quote-aware.
+- **Wikipedia/`:is()` infoboxes restored** via **turbo-html2pdf-core 0.3.2**: the layout
+  engine dropped every `<table>` because a selector like `:is(p,table,thead + tbody)`
+  in a collapse sheet was comma-split into a bare `table{display:none}`. Bumped the
+  raster dep to consume the fix.
+
+### Added
+- Responsive images pick the **largest** `srcset`/`<picture>` candidate for a sharper
+  paint.
+- **`delazyImages`** exposed over napi — de-lazy `data-src`/lazy `<img>`s before
+  screenshotting.
+
 ## [0.4.1] — render-isolate stealth surface
 
 Make the browserless V8+rtdom render isolate present a native-fidelity, passive

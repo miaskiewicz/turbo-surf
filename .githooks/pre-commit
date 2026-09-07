@@ -14,7 +14,10 @@ fail() { echo "  ✖ $1"; status=1; }
 # Vendored files are byte-for-byte upstream copies (the turbo-test DOM binding
 # `browser_env.js`) — never lint/reformat them (re-vendoring overwrites them, and
 # oxlint/biome ignore configs don't apply to explicitly-passed paths, so filter here).
-VENDORED='(^|/)browser_env\.js$'
+# biome/oxlint ignore configs don't apply to explicitly-passed paths, and biome
+# refuses lockfiles (default-ignored → "no files processed" → exit 1), so filter
+# both the vendored binding and package-lock.json out of the staged set here.
+VENDORED='((^|/)browser_env\.js|(^|/)package-lock\.json)$'
 staged="$(git diff --cached --name-only --diff-filter=ACM | grep -vE "$VENDORED" || true)"
 js_files="$(echo "$staged"  | grep -E '\.(mjs|js|cjs)$'             || true)"
 fmt_files="$(echo "$staged" | grep -E '\.(mjs|js|cjs|json|jsonc)$' || true)"

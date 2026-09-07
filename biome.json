@@ -25,6 +25,7 @@
       "**/target/**",
       "test/fixtures/**",
       "**/storage/**",
+      "**/package-lock.json",
       "**/browser_env.js",
       ".sidecar/**",
       "**/.chrome-profile/**"

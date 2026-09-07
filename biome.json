@@ -25,7 +25,9 @@
       "**/target/**",
       "test/fixtures/**",
       "**/storage/**",
-      "**/browser_env.js"
+      "**/browser_env.js",
+      ".sidecar/**",
+      "**/.chrome-profile/**"
     ]
   }
 }

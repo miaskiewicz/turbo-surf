@@ -66,19 +66,26 @@ test("drives a Google search from the homepage (fill + submit -> SERP url)", { s
     await c.call("initialize", {});
     await c.tool("set_mode", { mode: "secure" }); // run page JS in the V8 isolate
 
-    const goto = JSON.parse(c.text(await c.tool("goto", { url: "https://www.google.com" })) || "{}");
+    const goto = JSON.parse(
+      c.text(await c.tool("goto", { url: "https://www.google.com" })) || "{}",
+    );
     assert.match(goto.url ?? "", /google\.com/, "landed on google.com");
 
     // The homepage query box is a <textarea name=q> inside <form role=search>.
     const q = c.text(await c.tool("query", { selector: "textarea[name=q], input[name=q]" }));
     assert.ok(q.includes('name=\\"q\\"') || q.includes('name="q"'), "found the query input");
 
-    const fill = JSON.parse(c.text(await c.tool("fill", { selector: "textarea[name=q]", value: "turbo dom rust" })) || "{}");
+    const fill = JSON.parse(
+      c.text(await c.tool("fill", { selector: "textarea[name=q]", value: "turbo dom rust" })) ||
+        "{}",
+    );
     assert.equal(fill.ok, true, "filled the query box");
 
     // Submitting the GET form navigates to /search?q=... — the drive works even
     // though the results are BotGuard-gated.
-    const submit = JSON.parse(c.text(await c.tool("submit", { selector: "form[role=search]" })) || "{}");
+    const submit = JSON.parse(
+      c.text(await c.tool("submit", { selector: "form[role=search]" })) || "{}",
+    );
     assert.match(submit.url ?? "", /\/search\?/, "submit navigated to the search endpoint");
     assert.match(submit.url ?? "", /q=turbo\+dom\+rust/, "query is carried into the SERP url");
 

@@ -322,6 +322,12 @@ fn lay_out(
     // rules always apply — Google's tall search box is `display:none` below
     // `max-height:575px`, so it always vanished → blank render).
     turbo_html2pdf_core::set_media_viewport_height(height as f32);
+    // Drop `<noscript>` first: turbo-surf rasters the hydrated (JS-enabled) DOM, so
+    // noscript content is inert — its `<style>` must not cascade (Google hides every
+    // display-less div via a noscript `table,div,span,p{display:none}`) and its `<img>`
+    // fallbacks must not be de-lazied.
+    let html = style_extract::strip_noscript(html);
+    let html = html.as_str();
     // Author CSS order (lowest→highest): external `<link>` sheets the caller
     // fetched, then the page's own `<style>` blocks. Then strip script/style/etc.
     // so their text isn't flowed as visible content.

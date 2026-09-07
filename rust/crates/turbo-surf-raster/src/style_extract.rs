@@ -22,6 +22,19 @@ pub fn strip_non_visual(html: &str) -> String {
     out
 }
 
+/// Strip every `<noscript>…</noscript>` element (tag + body) from raw HTML.
+///
+/// turbo-surf rasters the *hydrated* DOM — the page after its own JS ran — so
+/// scripting is enabled and `<noscript>` content is inert (a browser never
+/// applies it). Its inner `<style>`/`<img>` fallbacks must be dropped BEFORE
+/// [`collect_style_blocks`] and [`delazy_images`], or a noscript rule like
+/// Google's `<noscript><style>table,div,span,p{display:none}</style></noscript>`
+/// cascades and hides every element lacking an explicit `display` (blanking the
+/// centred search UI).
+pub fn strip_noscript(html: &str) -> String {
+    strip_tag_blocks(html, "noscript")
+}
+
 fn strip_tag_blocks(html: &str, tag: &str) -> String {
     let open = format!("<{tag}");
     let close = format!("</{tag}");
@@ -203,14 +216,28 @@ const LAZY_IMG_ATTRS: &[&str] = &[
     "data-srcset",
 ];
 
-/// The first URL in a `srcset` value (`"a.png 1x, b.png 2x"` → `a.png`).
-fn first_srcset_url(v: &str) -> &str {
-    v.split(',')
-        .next()
-        .unwrap_or(v)
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
+/// The *largest* candidate URL in a `srcset` value — the sharpest image, matching
+/// what a browser picks for a full-width hero. Each candidate is `url [descriptor]`
+/// where the descriptor is a width (`1024w`) or pixel-density (`2x`); a bare URL
+/// scores 1. `"a.png 480w, b.png 1024w"` → `b.png`. Falls back to the first URL when
+/// no descriptors are present.
+fn largest_srcset_url(v: &str) -> &str {
+    let mut best = "";
+    let mut best_score = -1.0f32;
+    for cand in v.split(',') {
+        let mut it = cand.split_whitespace();
+        let Some(url) = it.next() else { continue };
+        let score = match it.next() {
+            Some(d) if d.ends_with('w') => d[..d.len() - 1].parse::<f32>().unwrap_or(1.0),
+            Some(d) if d.ends_with('x') => d[..d.len() - 1].parse::<f32>().unwrap_or(1.0),
+            _ => 1.0,
+        };
+        if score > best_score {
+            best_score = score;
+            best = url;
+        }
+    }
+    best
 }
 
 /// Tokens that mark a `src` as a lazy-load *placeholder* rather than the real
@@ -245,7 +272,7 @@ fn lazy_img_url(tag: &str, tag_lower: &str) -> Option<String> {
         if let Some(v) = attr_value(tag, tag_lower, attr) {
             let v = v.trim();
             let url = if attr.contains("srcset") {
-                first_srcset_url(v)
+                largest_srcset_url(v)
             } else {
                 v
             };
@@ -289,10 +316,7 @@ fn for_each_img(html: &str, mut f: impl FnMut(&str, &str, usize, usize)) {
             cursor = tag_start + 4;
             continue;
         }
-        let end = lower[tag_start..]
-            .find('>')
-            .map(|g| tag_start + g)
-            .unwrap_or(html.len());
+        let end = tag_end(bytes, tag_start).unwrap_or(html.len());
         f(
             &html[tag_start..end],
             &lower[tag_start..end],
@@ -301,6 +325,23 @@ fn for_each_img(html: &str, mut f: impl FnMut(&str, &str, usize, usize)) {
         );
         cursor = end + 1;
     }
+}
+
+/// Byte offset of the `>` that closes the tag opening at `start`, skipping any `>`
+/// inside a quoted attribute value (`alt="PLAY MIND<br>GAMES"` — a stray `>` in the
+/// value must not end the tag). Returns `None` if unterminated.
+fn tag_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut quote: Option<u8> = None;
+    for (i, &b) in bytes.iter().enumerate().skip(start) {
+        match quote {
+            Some(q) if b == q => quote = None,
+            Some(_) => {}
+            None if b == b'"' || b == b'\'' => quote = Some(b),
+            None if b == b'>' => return Some(i),
+            None => {}
+        }
+    }
+    None
 }
 
 /// Push the resolved image URL (`src`, or a lazy/responsive fallback) of every
@@ -521,6 +562,19 @@ mod tests {
     }
 
     #[test]
+    fn strip_noscript_removes_tag_and_body() {
+        use super::strip_noscript;
+        // The inert noscript block (styles + fallback markup) is dropped whole; the
+        // surrounding real content survives.
+        let html = r#"<body><noscript><style>div{display:none}</style><img src="fallback.png"></noscript><div>real</div></body>"#;
+        let out = strip_noscript(html);
+        assert!(!out.contains("noscript"));
+        assert!(!out.contains("display:none"));
+        assert!(!out.contains("fallback.png"));
+        assert!(out.contains("<div>real</div>"));
+    }
+
+    #[test]
     fn delazy_fills_src_and_reveals_lazy_image() {
         use super::delazy_images;
         // A `src`-less lazy `<img>` gets its `data-landscape-url` promoted to `src`
@@ -532,14 +586,40 @@ mod tests {
     }
 
     #[test]
-    fn delazy_takes_first_srcset_and_skips_when_src_present() {
+    fn delazy_takes_largest_srcset_and_skips_when_src_present() {
         use super::delazy_images;
-        // No `src`: first `srcset` candidate wins.
+        // No `src`: the LARGEST `srcset` candidate wins (sharpest hero) — `2x` over `1x`.
         let out = delazy_images(r#"<img srcset="a.jpg 1x, b.jpg 2x">"#);
-        assert!(out.contains(r#"src="a.jpg""#), "{out}");
+        assert!(out.contains(r#"src="b.jpg""#), "{out}");
+        // Width descriptors: the widest candidate wins.
+        let w = delazy_images(r#"<img srcset="s.jpg 480w, l.jpg 1920w, m.jpg 1024w">"#);
+        assert!(w.contains(r#"src="l.jpg""#), "{w}");
         // An `<img>` that already has a non-empty `src` is left untouched.
         let already = r#"<img src="real.jpg">"#;
         assert_eq!(delazy_images(already), already);
+    }
+
+    #[test]
+    fn image_urls_survive_gt_inside_attribute_value() {
+        use super::image_urls;
+        // Nike's hero: `alt="PLAY MIND<br>GAMES"` puts a `>` inside a quoted attribute.
+        // A naive tag-end scan truncates the tag at that `>` and never reaches
+        // `data-landscape-url`, so the hero image is never fetched. The tag-end must
+        // be quote-aware.
+        let html =
+            r#"<img loading="lazy" alt="PLAY MIND<br>GAMES" data-landscape-url="hero-1920.jpg">"#;
+        let urls = image_urls(html);
+        assert!(urls.contains(&"hero-1920.jpg".to_string()), "{urls:?}");
+    }
+
+    #[test]
+    fn delazy_survives_gt_inside_attribute_value() {
+        use super::delazy_images;
+        // Same tag, through the delazy rewrite: the real hero URL must land in `src`.
+        let html =
+            r#"<img loading="lazy" alt="PLAY MIND<br>GAMES" data-landscape-url="hero-1920.jpg">"#;
+        let out = delazy_images(html);
+        assert!(out.contains(r#"src="hero-1920.jpg""#), "{out}");
     }
 
     #[test]

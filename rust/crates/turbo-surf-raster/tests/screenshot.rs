@@ -516,12 +516,13 @@ fn image_urls_extracts_lazy_and_responsive_attrs() {
     let html = concat!(
         r#"<img src="a.png">"#,
         r#"<img data-src="b.png">"#,
+        // `srcset` picks the LARGEST candidate (the `2x` here) — the sharpest hero.
         r#"<img srcset="c.png 1x, c2.png 2x">"#,
         r#"<img data-landscape-url="d.png">"#,
         r#"<img src="" data-original="e.png">"#,
     );
     let urls = image_urls(html);
-    for want in ["a.png", "b.png", "c.png", "d.png", "e.png"] {
+    for want in ["a.png", "b.png", "c2.png", "d.png", "e.png"] {
         assert!(urls.iter().any(|u| u == want), "missing {want} in {urls:?}");
     }
 }
@@ -555,4 +556,22 @@ fn border_radius_renders_rounded_rect() {
     // PNG still renders (rounded fill path is valid).
     let png = screenshot_png(page, Viewport::DEFAULT).expect("png");
     assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+}
+
+#[test]
+fn noscript_styles_are_inert() {
+    // With JS enabled (turbo-surf hydrates before rastering), `<noscript>` content
+    // is inert — a browser never applies it. Google ships
+    // `<noscript><style>table,div,span,p{display:none}</style></noscript>`; if that
+    // style cascades it hides every div lacking an explicit `display` rule, blanking
+    // the centred search UI. The noscript `<style>` must NOT be collected as author CSS.
+    let page = r#"<html><head></head><body style="margin:0">
+        <noscript><style>div{display:none}</style></noscript>
+        <div style="background-color:#abcdef;height:40px">visible</div>
+      </body></html>"#;
+    let svg = screenshot_svg(page, Viewport::DEFAULT).expect("svg");
+    assert!(
+        svg.contains("#abcdef"),
+        "noscript <style> must not cascade and hide the div"
+    );
 }

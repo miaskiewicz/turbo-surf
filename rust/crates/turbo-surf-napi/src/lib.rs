@@ -41,7 +41,7 @@ use view::{Field, FieldType, QueryType, TextMode};
 
 #[napi]
 pub fn version() -> String {
-    "0.4.1".to_string()
+    "0.4.2".to_string()
 }
 
 fn to_json_string<T: serde::Serialize>(v: &T) -> String {
@@ -154,6 +154,16 @@ pub fn image_urls(html: String) -> Vec<String> {
 #[napi]
 pub fn image_urls_in_css(css: String) -> Vec<String> {
     raster::image_urls_in_css(&css)
+}
+
+/// Rewrite `src`-less / placeholder lazy `<img>`s so their real URL (from
+/// `data-src`/`data-srcset`/`srcset`/`data-*-url`) lands in `src` — the eager
+/// markup a browser would have after its lazy-loader ran. The URLs match
+/// `imageUrls`, so the caller fetches those bytes and passes them to `*WithAssets`.
+/// Returns the rewritten HTML.
+#[napi]
+pub fn delazy_images(html: String) -> String {
+    raster::delazy_images(&html)
 }
 
 /// Convert a JS `{ ref: Buffer }` image map into the raster's asset map.

@@ -71,9 +71,11 @@ pub struct FetchOptions<'a> {
     /// when `None`.
     pub client: Option<&'a http::Client>,
     /// Fingerprint identity for the default (rustls) header set. `None` uses
-    /// [`crate::fingerprint::default_profile`] (the fixed Chrome 149 / macOS set);
-    /// pass [`crate::fingerprint::select`]`(key)` to rotate per client. Ignored on
-    /// the `impersonate` path, where wreq's emulation owns the headers.
+    /// [`crate::fingerprint::default_profile`] (the fixed Chrome 153 / macOS set);
+    /// pass [`crate::fingerprint::select`]`(key)` to rotate per client. This per-call
+    /// arg is ignored on the `impersonate` path, where wreq's emulation owns the
+    /// header set/order and `default_profile`'s UA + `sec-ch-ua` are pinned on top
+    /// (see [`emulate`]).
     pub profile: Option<&'a crate::fingerprint::Profile>,
     /// Seed well-known consent-wall cookies for the request host (see
     /// [`crate::consent`]) so JS-gated "before you continue" interstitials are
@@ -221,18 +223,36 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str) {
 // Apply the Chrome TLS/JA3/JA4 + HTTP-2 emulation profile to a builder under the
 // `impersonate` feature; a pass-through on the default (rustls) backend, which
 // can't forge a fingerprint. One seam so both client constructors stay in sync.
+//
+// wreq-util's newest bundled emulation is Chrome 149, so the TLS ClientHello +
+// HTTP-2 (Akamai) fingerprint are Chrome 149's — and Chrome's TLS hello is stable
+// across minor versions, so that hello is byte-for-byte what current Chrome still
+// sends. The *reported* version (UA + `sec-ch-ua`), however, is what anti-bot walls
+// read as "stale", so we override just those two header VALUES to the same
+// Chrome 153 identity that `fingerprint::default_profile` (the rustls path) and the
+// render-tier navigator report — keeping wreq's header ORDER/casing intact (order is
+// itself a fingerprint). Single source of truth: both backends now present the exact
+// same HTTP identity, only the (version-stable) TLS hello lags at 149.
 fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     #[cfg(feature = "impersonate")]
-    let builder = builder.emulation(
-        // Chrome 149 on macOS — matched to fingerprint::default_profile and the
-        // render-tier navigator so the TLS/HTTP-2 fingerprint, the request headers,
-        // and `navigator.*` all report the same browser+OS (a cross-layer mismatch
-        // is itself a bot signal).
-        wreq_util::Emulation::builder()
-            .profile(wreq_util::Profile::Chrome149)
-            .platform(wreq_util::Platform::MacOS)
-            .build(),
-    );
+    let builder = {
+        let profile = crate::fingerprint::default_profile();
+        let mut hints = http::header::HeaderMap::new();
+        if let Ok(v) = profile.sec_ch_ua.parse() {
+            hints.insert("sec-ch-ua", v);
+        }
+        builder
+            .emulation(
+                wreq_util::Emulation::builder()
+                    .profile(wreq_util::Profile::Chrome149)
+                    .platform(wreq_util::Platform::MacOS)
+                    .build(),
+            )
+            // Override AFTER emulation (wreq applies the profile immediately, so
+            // later fine-tuning wins) to freshen the reported version 149 -> 153.
+            .user_agent(profile.user_agent.as_str())
+            .default_headers(hints)
+    };
     builder
 }
 

@@ -50,7 +50,7 @@ pub struct Session {
     /// `None` (the default) leaves the solve path inert.
     solver: Option<Box<dyn ChallengeSolver>>,
     /// Render-tier navigator fingerprint overrides (JSON object), applied via
-    /// `set_fingerprint`. Empty = Chrome 149 defaults.
+    /// `set_fingerprint`. Empty = Chrome 153 defaults.
     fingerprint: String,
     /// Layout viewport for `screenshot` (and any future geometry). Defaults to a
     /// common desktop size; overridable via `set_viewport` or per-call args.
@@ -529,7 +529,7 @@ impl Session {
     }
 
     // Override render-tier navigator fingerprint fields (JSON object merged over
-    // the Chrome 149 defaults; every field is individually overridable). Persisted
+    // the Chrome 153 defaults; every field is individually overridable). Persisted
     // on the session and pushed to the render isolate. `{}` resets to defaults.
     fn set_fingerprint(&mut self, overrides: &Value) -> Result<Value, String> {
         let json = if overrides.is_null() {

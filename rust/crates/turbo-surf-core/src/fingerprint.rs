@@ -99,7 +99,7 @@ const OSES: &[Os] = &[
 
 // Recent Chrome majors. Kept within wreq-util's emulated range so the same pool
 // can later drive a per-profile TLS client without an unmatched version.
-const MAJORS: &[u16] = &[149, 148, 147, 146, 145, 144];
+const MAJORS: &[u16] = &[153, 152, 151, 150, 149, 148];
 
 // Plausible logical-core counts for desktops.
 const CORES: &[u8] = &[4, 8, 12, 16];
@@ -189,17 +189,17 @@ pub fn profile_at(index: usize) -> Profile {
     }
 }
 
-/// The fixed identity used when no profile is selected: Chrome 149 on macOS,
+/// The fixed identity used when no profile is selected: Chrome 153 on macOS,
 /// matching the tier-1 default headers and the render-tier navigator. Keeping
 /// this stable means turning the pool *off* (passing no key) reproduces the
 /// pre-pool wire behaviour exactly.
 pub fn default_profile() -> Profile {
     Profile {
-        chrome_major: 149,
+        chrome_major: 153,
         user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
-                     (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+                     (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
             .to_string(),
-        sec_ch_ua: "\"Google Chrome\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\""
+        sec_ch_ua: "\"Google Chrome\";v=\"153\", \"Chromium\";v=\"153\", \"Not)A;Brand\";v=\"24\""
             .to_string(),
         sec_ch_ua_platform: "\"macOS\"",
         nav_platform: "MacIntel",
@@ -262,10 +262,10 @@ mod tests {
     }
 
     #[test]
-    fn default_profile_matches_chrome_149_macos() {
+    fn default_profile_matches_chrome_153_macos() {
         let p = default_profile();
-        assert_eq!(p.chrome_major, 149);
-        assert!(p.user_agent.contains("Chrome/149") && p.user_agent.contains("Macintosh"));
+        assert_eq!(p.chrome_major, 153);
+        assert!(p.user_agent.contains("Chrome/153") && p.user_agent.contains("Macintosh"));
         assert_eq!(p.sec_ch_ua_platform, "\"macOS\"");
         // The default's headers are exactly the tier-1 set.
         let h = p.nav_headers();

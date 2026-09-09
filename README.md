@@ -203,7 +203,7 @@ platform there's no prebuilt binary (build from a checkout as above).
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
-By default every request carries a real **Chrome 149** identity — full UA + client
+By default every request carries a real **Chrome 153** identity — full UA + client
 hints (`sec-ch-ua`, `sec-fetch-*`, …) on the wire, and a matching Chrome
 `navigator` (`platform`, `vendor`, `webdriver: false`, plugins, `window.chrome`,
 native-`toString`) inside the JS render tier. **Nothing to configure for the
@@ -336,7 +336,7 @@ Set `TURBO_SURF_PROXY` so the token's IP/JA3 matches your egress (and build with
 `--features impersonate` so the replay JA3 matches the Chrome that minted it).
 
 **Controllable render fingerprint.** Every render-tier `navigator` field has a
-Chrome 149 default and is overridable at runtime via the MCP `set_fingerprint`
+Chrome 153 default and is overridable at runtime via the MCP `set_fingerprint`
 tool (or `turbo_surf_render::set_fingerprint(json)`):
 
 ```jsonc
@@ -348,7 +348,7 @@ tool (or `turbo_surf_render::set_fingerprint(json)`):
     "devicePixelRatio": 2,
     "connection": { "effectiveType": "4g", "rtt": 50, "downlink": 10 },
     "userAgentData": { "platform": "Windows", "brands": [ /* … */ ] }
-} }   // {} resets to Chrome 149 macOS defaults
+} }   // {} resets to Chrome 153 macOS defaults
 ```
 
 `stealth_status` reports the active profile, the wired solver, the pool size, and

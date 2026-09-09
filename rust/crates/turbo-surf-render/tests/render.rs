@@ -203,11 +203,11 @@ fn fingerprint_override_applies_and_resets() {
         "override not applied: {out}"
     );
 
-    // Reset → Chrome 149 macOS defaults return.
+    // Reset → Chrome 153 macOS defaults return.
     turbo_surf_render::set_fingerprint("{}");
     let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
     assert!(
-        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|149\""),
+        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|153\""),
         "reset to defaults failed: {out}"
     );
 }

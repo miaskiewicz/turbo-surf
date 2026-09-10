@@ -1542,8 +1542,15 @@ async fn maybe_clear_sorry(
         Err(e @ (SolveError::VisualChallenge | SolveError::NotConfigured)) => {
             match challenge::solver_from_env() {
                 Some(external) => {
-                    match sorry::clear_if_sorry(external.as_ref(), jar, &final_url, &html, &ctx, 0.0)
-                        .await
+                    match sorry::clear_if_sorry(
+                        external.as_ref(),
+                        jar,
+                        &final_url,
+                        &html,
+                        &ctx,
+                        0.0,
+                    )
+                    .await
                     {
                         Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
                         Ok(None) => Ok((final_url, html)),

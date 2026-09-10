@@ -3,6 +3,32 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.4.4] — client-hint parity + in-isolate reCAPTCHA execution
+
+Fingerprint-parity + browserless reCAPTCHA/BotGuard execution work. Note: this does
+**not** unblock google search — google `/search` is served an enablejs shell at
+request #1 and `/sorry` is IP-reputation-gated (hits real Chrome too), and a
+reCAPTCHA token is Google-server-verified. These land the client-side capability +
+fingerprint fidelity; the residual walls are IP reputation and server-side scoring.
+
+### Added
+- **Full Chrome-153 client-hint parity on the impersonate wire** — the complete
+  `sec-ch-ua-*` family (`arch`/`bitness`/`wow64`/`model`/`form-factors`/
+  `platform-version`/`full-version`/`full-version-list`), Apple-Silicon-coherent, plus
+  the corrected greased brand token (`"Not_A Brand";v="8"`). wreq's Chrome149
+  emulation only sent the low-entropy trio.
+- **In-isolate reCAPTCHA/BotGuard execution** in the V8 render tier: the reCAPTCHA
+  main-frame VM now runs to completion (`window.postMessage` + host-protocol shims:
+  `___grecaptcha_cfg`, on* slots, `contentType`, `trustedTypes`); a **bridged
+  bframe cross-origin iframe** (second window realm, `contentWindow`/`contentDocument`)
+  with two-way cross-realm `postMessage`; a **network handshake** that fetches
+  `api2/anchor`+`bframe` over `op_fetch` and runs the bframe VM in the child realm
+  (`grecaptcha.execute()` resolves with a client token); a coherent **SwiftShader
+  WebGL** context (identity strings + limits + extensions + deterministic readback,
+  was null); content-dependent **canvas2d** readback; and a much-extended `probe`
+  recon surface (window/WebGL/performance/Date/Intl/MessageChannel/`toString`).
+- Requires turbo-test browser_env ≥ 0.3.16 (vendored) for the iframe + WebGL + canvas.
+
 ## [0.4.3] — Chrome 153 fingerprint
 
 Freshened the emulated browser identity from Chrome 149 to **Chrome 153** (current

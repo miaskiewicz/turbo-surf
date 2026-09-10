@@ -973,6 +973,62 @@ globalThis.MessageChannel = class MessageChannel {
   }
 };
 globalThis.MessagePort = function MessagePort() {};
+// window.postMessage — deliver a `message` event to THIS realm's window listeners
+// (async, via the timer queue so the hydration/interaction drain processes it). Real
+// same-window `postMessage(msg)` fires `message` handlers with `{data, origin, source}`
+// where `origin` is the sender's (i.e. our) origin. This is load-bearing for the
+// reCAPTCHA/BotGuard host protocol: after the VM installs the grecaptcha API it drives
+// its own scheduler by posting to the window and running work in the `message` handler —
+// a bare `postMessage(...)` call (window.postMessage) with no shim throws
+// "postMessage is not a function" and aborts the VM before any token path runs. The
+// vendored binding supplies window `addEventListener`/`dispatchEvent`; we only add the
+// poster. MessageEvent is a bare stub here, so build a plain event carrying the fields
+// collectors read (data/origin/source/ports).
+globalThis.postMessage = function postMessage(message, targetOrigin, transfer) {
+  const origin = (globalThis.location && globalThis.location.origin) || "";
+  const ports = Array.isArray(transfer) ? transfer : (transfer && transfer.length ? Array.prototype.slice.call(transfer) : []);
+  globalThis.setTimeout(() => {
+    const ev = {
+      type: "message", data: message, origin, lastEventId: "", source: globalThis, ports,
+      bubbles: false, cancelable: false, composed: false, defaultPrevented: false,
+      target: globalThis, currentTarget: globalThis, eventPhase: 0, isTrusted: false, timeStamp: Date.now(),
+      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
+    };
+    try { if (typeof globalThis.onmessage === "function") globalThis.onmessage(ev); } catch (_e) {}
+    try { if (typeof globalThis.dispatchEvent === "function") globalThis.dispatchEvent(ev); } catch (_e) {}
+  }, 0);
+};
+// window `on*` event-handler slots default to `null` in a real browser (never
+// undefined). The reCAPTCHA VM reads `window.onmessage` while wiring its postMessage
+// handshake; an undefined read (vs null) is both a functional gap and a headless tell.
+for (const __on of ["onmessage", "onerror", "onmessageerror", "ononline", "onoffline", "onpopstate", "onhashchange", "onbeforeunload", "onunload", "onload"]) {
+  try { if (globalThis[__on] === undefined) globalThis[__on] = null; } catch (_e) {}
+}
+// document.contentType — real Chrome reports "text/html" for an HTML document; the
+// reCAPTCHA VM reads it. The vendored binding doesn't expose it, so add an own accessor.
+try {
+  if (globalThis.document && globalThis.document.contentType === undefined) {
+    Object.defineProperty(globalThis.document, "contentType", { configurable: true, get() { return "text/html"; } });
+  }
+} catch (_e) {}
+// TrustedTypes — real Chrome exposes `window.trustedTypes`; the reCAPTCHA VM (and many
+// CSP-aware bundles) probe it and wrap script/HTML sinks through a policy. Absence is a
+// (weak) tell and a `trustedTypes.createPolicy(...)` call on undefined throws. Pass-through
+// policies (identity transforms) keep the sinks working with no real sanitization.
+if (typeof globalThis.trustedTypes === "undefined") {
+  const __mkPolicy = (name, rules) => ({
+    name: String(name == null ? "" : name),
+    createHTML: (s) => (rules && rules.createHTML ? rules.createHTML(s) : String(s)),
+    createScript: (s) => (rules && rules.createScript ? rules.createScript(s) : String(s)),
+    createScriptURL: (s) => (rules && rules.createScriptURL ? rules.createScriptURL(s) : String(s)),
+  });
+  globalThis.trustedTypes = {
+    createPolicy: (name, rules) => __mkPolicy(name, rules),
+    defaultPolicy: null, emptyHTML: "", emptyScript: "",
+    getPropertyType: () => null, getAttributeType: () => null,
+    isHTML: () => false, isScript: () => false, isScriptURL: () => false,
+  };
+}
 // performance — React/Next read performance.now() for timing/scheduling. mark()/measure()
 // must RETURN the PerformanceEntry they create (real spec): RUM/timing code destructures
 // `const {startTime} = performance.mark(name)` (and reads `.duration`/`.entryType` off the
@@ -2305,6 +2361,10 @@ globalThis.__domSig = () => {
   // collector that reads its `.toString()` would see source and flag a tampered/polyfilled
   // beacon. Report native, like every other shim.
   if (nav && typeof nav.sendBeacon === "function") mark(nav.sendBeacon, "sendBeacon");
+  // window.postMessage + trustedTypes are JS shims (see their defs); a collector reading
+  // their `.toString()` must see native source, like every other shim.
+  if (typeof globalThis.postMessage === "function") mark(globalThis.postMessage, "postMessage");
+  if (globalThis.trustedTypes && typeof globalThis.trustedTypes.createPolicy === "function") mark(globalThis.trustedTypes.createPolicy, "createPolicy");
 
   // ── Structural browser-surface fidelity ──────────────────────────────────────
   // A no-Chromium engine exposes navigator/screen/document as plain object literals

@@ -38,45 +38,164 @@ pub struct ProbeReport {
 // Wraps the fingerprint surfaces in logging Proxies. Runs in the page-script slot
 // AFTER ENV_BOOTSTRAP, so it re-wraps the real (already-installed) globals — no
 // ENV_BOOTSTRAP edit or op plumbing needed. Records into `globalThis.__probe`.
+//
+// Coverage is deliberately broad enough to inventory a heavy VM fingerprinter
+// (BotGuard/reCAPTCHA-class), not just a passive consistency probe: the whole
+// `window` surface via recording accessors (so undefined reads surface as shim
+// gaps), `document` beyond `createElement`, canvas 2D + WebGL contexts down to
+// `getParameter`/`getExtension`/`getSupportedExtensions` with their args,
+// `performance`, `Date`, `Intl`, `MessageChannel`, and `Function.prototype.toString`
+// anti-tamper reads. Each section is guarded so a failure can't abort recon.
 const PROBE_INSTALL: &str = r#"(() => {
   const log = (globalThis.__probe = []);
   const rec = (target, prop, kind, defined) => {
     try { log.push({ target, prop: String(prop), kind, defined }); } catch (e) {}
   };
+  // Shallow logging proxy: records own-prop get/call; wraps returned functions so
+  // their invocation is recorded too. Object results are left raw unless a caller
+  // re-wraps them (canvas/context/navigator sub-objects do).
   const wrap = (name, obj) => {
     if (!obj || (typeof obj !== "object" && typeof obj !== "function")) return obj;
     return new Proxy(obj, {
       get(o, p) {
-        const v = Reflect.get(o, p);
+        let v; try { v = Reflect.get(o, p); } catch (e) { v = undefined; }
         rec(name, p, "get", v !== undefined);
         if (typeof v === "function") {
-          return function (...a) {
-            rec(name, p, "call", true);
-            return v.apply(this === undefined ? o : this, a);
-          };
+          return function (...a) { rec(name, p, "call", true); return v.apply(this === undefined ? o : this, a); };
         }
         return v;
       },
     });
   };
-  if (globalThis.navigator) globalThis.navigator = wrap("navigator", globalThis.navigator);
-  globalThis.screen = wrap("screen", globalThis.screen || {});
-  if (globalThis.chrome) globalThis.chrome = wrap("chrome", globalThis.chrome);
-  // Canvas / WebGL fingerprint surface: tag context creation + pixel readback.
+  // Preserve constructor-ness for function-valued globals (XMLHttpRequest, Worker,
+  // RTCPeerConnection, the observers…): a plain closure would break `new`.
+  const wrapFn = (name, fn) => new Proxy(fn, {
+    apply(t, thiz, a) { rec(name, "()", "call", true); return Reflect.apply(t, thiz === undefined ? globalThis : thiz, a); },
+    construct(t, a, nt) { rec(name, "new", "construct", true); return Reflect.construct(t, a, nt); },
+  });
+  // WebGL / 2D context: record getParameter/getExtension/getSupportedExtensions/readPixels
+  // (the GPU-fingerprint surface) with their arguments, and whether the context existed.
+  const ctxWrap = (kind, ctx) => new Proxy(ctx, {
+    get(o, p) {
+      let v; try { v = Reflect.get(o, p); } catch (e) { v = undefined; }
+      rec("ctx:" + kind, p, "get", v !== undefined);
+      if (typeof v === "function") {
+        return function (...a) {
+          rec("ctx:" + kind, String(p) + (a.length ? "(" + a.map(String).join(",") + ")" : ""), "call", true);
+          return v.apply(o, a);
+        };
+      }
+      return v;
+    },
+  });
+  const canvasWrap = (el) => new Proxy(el, {
+    get(o, p) {
+      let v; try { v = Reflect.get(o, p); } catch (e) { v = undefined; }
+      rec("canvas", p, "get", v !== undefined);
+      if (p === "getContext") {
+        return function (kind, ...rest) {
+          rec("canvas", "getContext(" + String(kind) + ")", "call", true);
+          let ctx = null; try { ctx = v.call(o, kind, ...rest); } catch (e) { ctx = null; }
+          // A null context (e.g. WebGL) is the shim gap; record its presence explicitly.
+          rec("canvas", "getContext(" + String(kind) + ")=>" + (ctx ? "ctx" : "null"), "get", ctx != null);
+          return ctx ? ctxWrap(String(kind), ctx) : ctx;
+        };
+      }
+      if (typeof v === "function") {
+        return function (...a) { rec("canvas", p, "call", true); return v.apply(o, a); };
+      }
+      return v;
+    },
+  });
+  const wrapDoc = (doc) => new Proxy(doc, {
+    get(o, p) {
+      let v; try { v = Reflect.get(o, p); } catch (e) { v = undefined; }
+      rec("document", p, "get", v !== undefined);
+      if (p === "createElement") {
+        return function (tag) {
+          const el = v.call(o, tag);
+          if (String(tag).toLowerCase() === "canvas") { rec("document", "createElement(canvas)", "call", true); return canvasWrap(el); }
+          return el;
+        };
+      }
+      if (typeof v === "function") {
+        return function (...a) { rec("document", p, "call", true); return v.apply(o, a); };
+      }
+      return v;
+    },
+  });
+
+  // Dedicated wraps for the compound fingerprint objects (substituted into the
+  // curated window loop below so bare `navigator`/`document`/… resolve to them).
+  const dedicated = Object.create(null);
+  if (globalThis.navigator) dedicated.navigator = wrap("navigator", globalThis.navigator);
+  dedicated.screen = wrap("screen", globalThis.screen || {});
+  if (globalThis.chrome) dedicated.chrome = wrap("chrome", globalThis.chrome);
+  if (globalThis.document) dedicated.document = wrapDoc(globalThis.document);
+  if (globalThis.performance) dedicated.performance = wrap("performance", globalThis.performance);
   try {
-    const doc = globalThis.document;
-    if (doc && doc.createElement) {
-      const orig = doc.createElement.bind(doc);
-      doc.createElement = (tag) => {
-        const el = orig(tag);
-        if (String(tag).toLowerCase() === "canvas") {
-          rec("document", "createElement(canvas)", "call", true);
-          return wrap("canvas", el);
-        }
-        return el;
-      };
+    const D = globalThis.Date;
+    dedicated.Date = new Proxy(D, {
+      construct(T, a) { rec("Date", "new", "construct", true); return Reflect.construct(T, a); },
+      apply(T, thiz, a) { rec("Date", "()", "call", true); return Reflect.apply(T, thiz, a); },
+      get(o, p) { let v = Reflect.get(o, p); rec("Date", p, "get", v !== undefined); if (typeof v === "function") return function (...a) { rec("Date", p, "call", true); return v.apply(o, a); }; return v; },
+    });
+  } catch (e) {}
+  if (globalThis.Intl) dedicated.Intl = wrap("Intl", globalThis.Intl);
+  try {
+    if (globalThis.MessageChannel) {
+      dedicated.MessageChannel = new Proxy(globalThis.MessageChannel, {
+        construct(T, a) { rec("MessageChannel", "new", "construct", true); return Reflect.construct(T, a); },
+      });
     }
   } catch (e) {}
+
+  // Function.prototype.toString anti-tamper reads — BotGuard calls this heavily to
+  // detect polyfilled/non-native functions. Count them, preserving the underlying
+  // native-branding trap ENV_BOOTSTRAP installed.
+  try {
+    const ft = Function.prototype.toString;
+    const rts = function toString() { rec("Function.prototype", "toString", "call", true); return ft.call(this); };
+    try { Object.defineProperty(rts, "name", { value: "toString", configurable: true }); } catch (e) {}
+    Function.prototype.toString = rts;
+  } catch (e) {}
+
+  // Curated window-surface: a recording accessor per name so window-level reads register
+  // AND undefined reads surface as shim gaps (the backfill to-do list). Object values get
+  // a logging proxy; function values keep constructor-ness via wrapFn; the compound
+  // objects above are substituted from `dedicated`. `window`/`self` are pinned to the
+  // realm so recon never nulls out the global the VM needs to even start.
+  const WRAP_OBJ = new Set(["history", "location", "crypto", "localStorage", "sessionStorage", "visualViewport", "external", "speechSynthesis"]);
+  const WIN_NAMES = ("top parent frames self window name length opener closed origin isSecureContext crossOriginIsolated " +
+    "document navigator screen chrome performance Date Intl MessageChannel MessagePort postMessage " +
+    "Notification RTCPeerConnection webkitRTCPeerConnection indexedDB caches " +
+    "WebGLRenderingContext WebGL2RenderingContext OffscreenCanvas createImageBitmap requestIdleCallback cancelIdleCallback " +
+    "matchMedia getComputedStyle IntersectionObserver ResizeObserver PerformanceObserver MutationObserver " +
+    "Worker SharedWorker WebAssembly Reflect Proxy BigInt queueMicrotask structuredClone reportError scheduler trustedTypes " +
+    "devicePixelRatio innerWidth innerHeight outerWidth outerHeight screenX screenY scrollX scrollY pageXOffset pageYOffset " +
+    "history location crypto localStorage sessionStorage visualViewport external speechSynthesis " +
+    "XMLHttpRequest fetch addEventListener removeEventListener dispatchEvent requestAnimationFrame cancelAnimationFrame " +
+    "onerror onmessage ononline onoffline Permissions").split(/\s+/);
+  const seen = new Set();
+  for (const name of WIN_NAMES) {
+    if (!name || seen.has(name)) continue; seen.add(name);
+    try {
+      let cur = globalThis[name];
+      let exposed;
+      if (name === "window" || name === "self") { cur = globalThis; exposed = globalThis; }
+      else if (dedicated[name] !== undefined) exposed = dedicated[name];
+      else if (cur === null || cur === undefined) exposed = cur;
+      else if (typeof cur === "function") exposed = wrapFn(name, cur);
+      else if (typeof cur === "object" && WRAP_OBJ.has(name)) exposed = wrap(name, cur);
+      else exposed = cur;
+      const defined = cur !== undefined;
+      Object.defineProperty(globalThis, name, {
+        configurable: true,
+        get() { rec("window", name, "get", defined); return exposed; },
+        set(v) { rec("window", name, "set", true); exposed = v; },
+      });
+    } catch (e) {}
+  }
 })();"#;
 
 #[derive(serde::Deserialize)]

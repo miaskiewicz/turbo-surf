@@ -35,6 +35,12 @@ fingerprint fidelity; the residual walls are IP reputation and server-side scori
   score flows and google `/sorry` **only with a clean `TURBO_SURF_PROXY` IP** (token is
   server-scored); v2 visual image-grid is refused (`SolveError::VisualChallenge`) to
   route to an external solver.
+- **Google `/sorry` → SERP clearance loop**: parses the `/sorry` reCAPTCHA form,
+  submits a solved token (`g-recaptcha-response`) to `/sorry/index`, captures the
+  `GOOGLE_ABUSE_EXEMPTION` cookie, and re-fetches the original SERP with it — wired
+  into the `web_search` native path. Token-source-agnostic (in-isolate v3/invisible,
+  or an external solver for v2 image-grid). Loop is offline-tested; live `/sorry` is
+  usually a v2 image challenge needing an external solver for the token.
 - **Browser sidecar: `headless` is a per-call choice** (stdin `headless` >
   `TURBO_SURF_SIDECAR_HEADLESS` env > **headed default**) and a `headless?` arg on
   `web_search`. Measured: headless Chrome trips google's `/sorry` (an automation tell,

@@ -2280,6 +2280,90 @@ globalThis.__domSig = () => {
       try { if (typeof el.dispatchEvent === "function") el.dispatchEvent(ev); } catch (_e) {}
     }, 0);
   };
+  // ── reCAPTCHA bframe handshake (network + second realm) ─────────────────────────
+  // reCAPTCHA's main VM (recaptcha__en.js) FULLY executes here; execute() then loads the
+  // cross-origin **bframe** iframe and drives the challenge over postMessage to its
+  // contentWindow, awaiting a token reply. Offline/in-isolate that iframe never loads, so
+  // execute() hangs. This upgrades a bframe (or anchor) iframe from the lightweight stub to
+  // a REAL bridged second realm (browser_env's __makeFrameRealm), FETCHES the frame + its
+  // own VM over op_fetch (shared cookie jar), runs that VM INSIDE the child realm, and lets
+  // the realm's directional postMessage carry the parent↔bframe handshake — so execute()
+  // can progress past "awaiting bframe" toward a client-side token.
+  const BFRAME_RE = /\/recaptcha\/.*(bframe|anchor)/i;
+  // Run a sub-VM's source inside the child realm: shadow the realm-scoped identifiers
+  // (window/self/globalThis/document/parent/top/location/postMessage/…) as function params so
+  // the VM's `window`/`parent`/bare `postMessage` resolve to the child window + parent view,
+  // not the host globals. Builtins (fetch, JSON, crypto, Math, typed arrays) intentionally
+  // fall through to the real globals. This is the same-isolate realm trick — the documented
+  // fidelity tradeoff (no separate V8 context; shared prototypes).
+  const runVmInRealm = (cw, code) => {
+    const cd = cw.document;
+    const fn = new Function(
+      "window", "self", "globalThis", "document", "parent", "top", "frames", "frameElement",
+      "location", "navigator", "screen", "postMessage", "addEventListener", "removeEventListener",
+      "dispatchEvent",
+      code
+    );
+    return fn.call(cw, cw, cw, cw, cd, cw.parent, cw.top, cw.frames, cw.frameElement,
+      cw.location, cw.navigator, cw.screen,
+      cw.postMessage.bind(cw), cw.addEventListener.bind(cw), cw.removeEventListener.bind(cw),
+      cw.dispatchEvent.bind(cw));
+  };
+  // Extract + run the frame document's scripts in the realm, in document order: inline
+  // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL).
+  const loadFrameScripts = async (cw, html, frameUrl) => {
+    const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      const attrs = m[1] || "";
+      const srcM = /\ssrc\s*=\s*["']([^"']+)["']/i.exec(attrs);
+      if (srcM) {
+        let u = srcM[1];
+        try { u = new URL(u, frameUrl).href; } catch (_e) {}
+        const r = await ops.op_fetch(u, "{}");
+        if (r && r.body) { try { runVmInRealm(cw, r.body); } catch (_e) {} }
+      } else if (m[2] && m[2].trim()) {
+        try { runVmInRealm(cw, m[2]); } catch (_e) {}
+      }
+    }
+  };
+  // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
+  const fireRealmLoad = (cw) => {
+    const cd = cw.document;
+    globalThis.setTimeout(() => {
+      try { cd.readyState = "complete"; } catch (_e) {}
+      const dcl = { type: "DOMContentLoaded", target: cd, currentTarget: cd };
+      try { cd.dispatchEvent(dcl); } catch (_e) {}
+      const load = { type: "load", target: cw, currentTarget: cw };
+      try { if (typeof cw.onload === "function") cw.onload(load); } catch (_e) {}
+      try { cw.dispatchEvent(load); } catch (_e) {}
+    }, 0);
+  };
+  // The full handshake: build the realm, fetch the frame + its VM, run it, fire load.
+  // Counted in __pendingFetches so the hydration/interaction drain stays awake until it
+  // settles. Idempotent per element.
+  globalThis.__recaptchaBframeHandshake = async (el, url) => {
+    if (typeof globalThis.__makeFrameRealm !== "function") return;
+    if (el.__bframeStarted) return; el.__bframeStarted = true;
+    globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+    try {
+      const cw = globalThis.__makeFrameRealm(el, globalThis);
+      const r = await ops.op_fetch(url, "{}");
+      const html = (r && r.body) || "";
+      await loadFrameScripts(cw, html, url);
+      fireRealmLoad(cw);
+    } catch (_e) {
+    } finally {
+      globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
+    }
+  };
+  // Route a bframe/anchor src to the handshake; every other iframe keeps the lightweight
+  // load-once stub (the PostHog/PropelAuth churn fix). Returns true when it routed.
+  const routeIframeSrc = (el, v) => {
+    const url = String(v);
+    if (BFRAME_RE.test(url)) { try { globalThis.__recaptchaBframeHandshake(el, url); } catch (_e) {} return true; }
+    return false;
+  };
   // Analytics SDKs (PostHog) churn HUNDREDS of hidden <iframe>s during hydration. With
   // no real navigation each one never loads, so the SDK keeps recreating them — and the
   // tree append/remove + serialize cost of that churn starves the render budget so the
@@ -2299,7 +2383,9 @@ globalThis.__domSig = () => {
       nodeType: 1, nodeName: "IFRAME", tagName: "IFRAME", __iframeStub: true,
       style: {}, dataset: {}, contentWindow: win, contentDocument: globalThis.document,
       onload: null, onerror: null,
-      setAttribute(n, v) { if (n === "src" && v) fireIframeLoad(this); this[n] = v; },
+      // Route 'src' through the accessor below (single source of truth: bframe → handshake,
+      // else load-once); other attributes are plain data props.
+      setAttribute(n, v) { if (n === "src") { this.src = v; return; } this[n] = v; },
       getAttribute(n) { return this[n] != null ? String(this[n]) : null; },
       removeAttribute(n) { delete this[n]; },
       appendChild(c) { return c; }, removeChild(c) { return c; },
@@ -2312,7 +2398,7 @@ globalThis.__domSig = () => {
     Object.defineProperty(stub, "src", {
       configurable: true,
       get() { return stub.__src || ""; },
-      set(v) { stub.__src = String(v); if (stub.__src) fireIframeLoad(stub); },
+      set(v) { stub.__src = String(v); if (stub.__src && !routeIframeSrc(stub, stub.__src)) fireIframeLoad(stub); },
     });
     return stub;
   };

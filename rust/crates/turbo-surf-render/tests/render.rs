@@ -2024,7 +2024,170 @@ async fn esm_src_chunk_with_module_body_loads_and_resolves_imports() {
     );
 }
 
+// The render tier exposes a coherent SwiftShader WebGL context (vendored from turbo-test):
+// the GPU identity a fingerprinter reads (UNMASKED_VENDOR/RENDERER via WEBGL_debug_renderer_info,
+// VENDOR/RENDERER/VERSION, MAX_TEXTURE_SIZE) plus deterministic, content-dependent readback.
+// A null WebGL context is itself a strong headless tell; SwiftShader is the real GPU-less
+// Chrome signature. This raises the score fidelity of any client-collected token.
+#[test]
+fn webgl_swiftshader_signature_in_render_isolate() {
+    let out = run_with_dom(
+        "<body></body>",
+        r#"(() => {
+          const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+          const gl = c.getContext('webgl');
+          if (!gl) return 'NULL';
+          const d = gl.getExtension('WEBGL_debug_renderer_info');
+          const px1 = new Uint8Array(16); gl.readPixels(0,0,2,2,0x1908,0x1401,px1);
+          gl.clearColor(0.2,0.4,0.6,1); gl.clear(0x4000); gl.drawArrays(0x0004,0,3);
+          const px2 = new Uint8Array(16); gl.readPixels(0,0,2,2,0x1908,0x1401,px2);
+          return [
+            gl.getParameter(gl.VENDOR),
+            gl.getParameter(gl.RENDERER),
+            gl.getParameter(d.UNMASKED_VENDOR_WEBGL),
+            gl.getParameter(d.UNMASKED_RENDERER_WEBGL),
+            gl.getParameter(gl.MAX_TEXTURE_SIZE),
+            gl.getSupportedExtensions().indexOf('WEBGL_debug_renderer_info') >= 0,
+            Array.from(px1).join(',') !== Array.from(px2).join(','),
+          ].join('||');
+        })()"#,
+    )
+    .unwrap();
+    assert!(
+        out.contains("WebKit||WebKit WebGL||Google Inc. (Google)"),
+        "SwiftShader identity: {out}"
+    );
+    assert!(
+        out.contains("ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"),
+        "SwiftShader unmasked renderer: {out}"
+    );
+    assert!(
+        out.contains("||8192||true||true"),
+        "max-texture + debug ext + content-dependent readback: {out}"
+    );
+}
+
+// reCAPTCHA-shaped bframe handshake, end to end and offline. A page bundle stands in for
+// the main reCAPTCHA VM (whose execute() creates the cross-origin bframe iframe and drives
+// the challenge over postMessage); a localhost server serves the bframe DOCUMENT + its own
+// VM. The render tier must: upgrade the bframe iframe to a real second realm, fetch the
+// frame + its VM over the net stack, run that VM inside the realm, and bridge the parent↔
+// bframe postMessage so the token reply reaches the parent and execute() resolves.
+#[tokio::test]
+async fn recaptcha_bframe_handshake_resolves_with_a_client_token() {
+    // The bframe document loads its own VM by <script src>; the VM greets the parent on
+    // load, and on the challenge posts a client-computed token back through e.source.
+    let port = spawn_recaptcha_bframe_server().await;
+    let base = base(port);
+    // Stand-in for reCAPTCHA's main VM: execute() creates the bframe, posts the challenge
+    // once the frame signals ready, and resolves the token onto #token.
+    let bundle = format!(
+        r#"
+        const out = document.getElementById('token');
+        let resolved = '';
+        function execute() {{
+          const iframe = document.createElement('iframe');
+          window.addEventListener('message', (e) => {{
+            const m = e.data || {{}};
+            if (m.type === 'bframe-ready' && e.source === iframe.contentWindow) {{
+              // Post the challenge INTO the bframe realm.
+              iframe.contentWindow.postMessage({{ type: 'challenge', c: 'SITEKEY-XYZ' }}, '*');
+            }} else if (m.type === 'token' && e.source === iframe.contentWindow) {{
+              resolved = m.token;
+              out.setAttribute('data-token', resolved);
+              out.textContent = 'RESOLVED:' + resolved;
+            }}
+          }});
+          iframe.src = '{base}recaptcha/api2/bframe?k=SITEKEY-XYZ';
+          document.body.appendChild(iframe);
+        }}
+        execute();
+        "#
+    );
+    let html = render_page(
+        "<html><body><div id='token'>pending</div></body></html>",
+        &base,
+        &bundle,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains("RESOLVED:bframe-token-"),
+        "execute() must resolve with the client token the bframe VM posted back: {html}"
+    );
+    assert!(
+        html.contains(r#"data-token="bframe-token-SITEKEY-XYZ""#),
+        "the token must echo the challenge the parent posted into the bframe realm: {html}"
+    );
+    // The bframe realm's own (detached) document must NOT leak into the parent's serialized
+    // tree: exactly one <body>, and no bframe/recaptcha frame content injected into the page.
+    // (The trailing empty <head> is a pre-existing render_page serialization artifact present
+    // on every render, unrelated to the child realm — not asserted on here.)
+    assert!(
+        html.matches("<body").count() == 1
+            && !html.contains("frame-vm")
+            && !html.contains("<script"),
+        "the child realm DOM must stay out of the parent's serialized tree: {html}"
+    );
+}
+
 // --- helpers ----------------------------------------------------------------
+// Serves the reCAPTCHA bframe document (text/html) + its VM (application/javascript). The
+// bframe VM runs in the iframe's second realm: on load it posts `bframe-ready` to the parent,
+// and on the `challenge` it posts a `token` back through e.source (→ the parent).
+async fn spawn_recaptcha_bframe_server() -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut b = [0u8; 4096];
+            let n = s.read(&mut b).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&b[..n]).to_string();
+            let path = req
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("/")
+                .split('?')
+                .next()
+                .unwrap_or("/")
+                .to_string();
+            let (ctype, body): (&str, String) = if !path.ends_with(".js") {
+                (
+                    "text/html",
+                    r#"<!DOCTYPE html><html><head><script src="/recaptcha/api2/frame-vm.js"></script></head><body></body></html>"#.to_string(),
+                )
+            } else {
+                (
+                    "application/javascript",
+                    // Runs inside the child realm: `window`/`parent`/`addEventListener`/
+                    // `postMessage` are the realm's. Greet the parent on load; answer the
+                    // challenge with a token derived from it, posted back through e.source.
+                    r#"
+                    addEventListener('message', function (e) {
+                      var m = e.data || {};
+                      if (m.type === 'challenge') {
+                        e.source.postMessage({ type: 'token', token: 'bframe-token-' + m.c }, '*');
+                      }
+                    });
+                    addEventListener('load', function () {
+                      parent.postMessage({ type: 'bframe-ready' }, '*');
+                    });
+                    "#
+                    .to_string(),
+                )
+            };
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nConnection: close\r\n\r\n{body}"
+            );
+            let _ = s.write_all(resp.as_bytes()).await;
+            let _ = s.flush().await;
+        }
+    });
+    port
+}
+
 // Serves distinct JS bodies per request path (matched against the request line) —
 // for ESM import graphs where the chunk and its dependency differ.
 async fn spawn_paths_js_server(routes: &[(&'static str, &'static str)]) -> u16 {

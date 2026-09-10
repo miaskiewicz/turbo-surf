@@ -32,35 +32,110 @@ pub fn enabled() -> bool {
 pub fn log_enabled() -> bool {
     use std::sync::OnceLock;
     static LOG: OnceLock<bool> = OnceLock::new();
-    *LOG.get_or_init(|| std::env::var("TURBO_RUST_DOM_LOG").map(|v| !v.is_empty() && v != "0").unwrap_or(false))
+    *LOG.get_or_init(|| {
+        std::env::var("TURBO_RUST_DOM_LOG")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false)
+    })
 }
 
 /// Names the native DOM binds (template methods/accessors + document own methods) + JS internals —
 /// the interceptor falls through for these and only records the REST as "missing".
 const KNOWN: &[&str] = &[
     // element methods + accessors
-    "appendChild", "removeChild", "insertBefore", "setAttribute", "getAttribute", "hasAttribute",
-    "removeAttribute", "querySelector", "querySelectorAll", "tagName", "parentNode", "firstChild",
-    "nextSibling", "textContent", "id", "className",
-    "style", "oninput", "onchange", "onclick",
-    "nodeType", "nodeName", "childNodes", "ownerDocument",
-    "addEventListener", "removeEventListener", "dispatchEvent",
-    "matches", "contains",
-    "innerHTML", "outerHTML", "children", "parentElement", "firstElementChild", "namespaceURI",
-    "value", "append", "prepend", "remove", "focus", "blur", "click", "scrollIntoView",
-    "getBoundingClientRect", "createElementNS", "createDocumentFragment", "createComment",
-    "cloneNode", "isConnected", "attributes", "dataset", "createRange",
-    "getRootNode", "getSelection",
+    "appendChild",
+    "removeChild",
+    "insertBefore",
+    "setAttribute",
+    "getAttribute",
+    "hasAttribute",
+    "removeAttribute",
+    "querySelector",
+    "querySelectorAll",
+    "tagName",
+    "parentNode",
+    "firstChild",
+    "nextSibling",
+    "textContent",
+    "id",
+    "className",
+    "style",
+    "oninput",
+    "onchange",
+    "onclick",
+    "nodeType",
+    "nodeName",
+    "childNodes",
+    "ownerDocument",
+    "addEventListener",
+    "removeEventListener",
+    "dispatchEvent",
+    "matches",
+    "contains",
+    "innerHTML",
+    "outerHTML",
+    "children",
+    "parentElement",
+    "firstElementChild",
+    "namespaceURI",
+    "value",
+    "append",
+    "prepend",
+    "remove",
+    "focus",
+    "blur",
+    "click",
+    "scrollIntoView",
+    "getBoundingClientRect",
+    "createElementNS",
+    "createDocumentFragment",
+    "createComment",
+    "cloneNode",
+    "isConnected",
+    "attributes",
+    "dataset",
+    "createRange",
+    "getRootNode",
+    "getSelection",
     "closest",
-    "data", "nodeValue", "constructor",
+    "data",
+    "nodeValue",
+    "constructor",
     "documentMode",
-    "activeElement", "focus", "blur", "selectionStart", "selectionEnd", "setSelectionRange",
-    "getAttributeNode", "TEXT_NODE", "ELEMENT_NODE", "COMMENT_NODE", "DOCUMENT_NODE", "DOCUMENT_FRAGMENT_NODE",
+    "activeElement",
+    "focus",
+    "blur",
+    "selectionStart",
+    "selectionEnd",
+    "setSelectionRange",
+    "getAttributeNode",
+    "TEXT_NODE",
+    "ELEMENT_NODE",
+    "COMMENT_NODE",
+    "DOCUMENT_NODE",
+    "DOCUMENT_FRAGMENT_NODE",
     // document own methods/props
-    "createElement", "createTextNode", "getElementById", "body", "documentElement",
+    "createElement",
+    "createTextNode",
+    "getElementById",
+    "body",
+    "documentElement",
     // JS internals V8 / libs probe constantly — never DOM
-    "then", "catch", "finally", "constructor", "prototype", "toString", "valueOf", "toJSON",
-    "length", "name", "call", "apply", "bind", "hasOwnProperty", "nodeName",
+    "then",
+    "catch",
+    "finally",
+    "constructor",
+    "prototype",
+    "toString",
+    "valueOf",
+    "toJSON",
+    "length",
+    "name",
+    "call",
+    "apply",
+    "bind",
+    "hasOwnProperty",
+    "nodeName",
 ];
 
 thread_local! {
@@ -70,7 +145,12 @@ thread_local! {
 
 /// Interceptor getter (debug only): fall through for known/symbol names; record + return undefined
 /// for anything unimplemented.
-fn missing_getter(scope: &mut v8::PinScope, name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) -> v8::Intercepted {
+fn missing_getter(
+    scope: &mut v8::PinScope,
+    name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) -> v8::Intercepted {
     // V8 inline-cache hazard with NON_MASKING interceptors: once a load site reads a property while
     // it is ABSENT (we intercept → undefined), V8 may cache "this site goes to the interceptor" and
     // keep routing there EVEN AFTER the property is later added as a real own property — masking it
@@ -102,7 +182,13 @@ fn missing_getter(scope: &mut v8::PinScope, name: v8::Local<v8::Name>, args: v8:
 /// properties. Required so `document.x = …` shims AND React's expando writes on DOM nodes
 /// (`node.__reactProps$…`, `_reactListening…`) persist instead of being swallowed by the
 /// getter-only interceptor.
-fn passthrough_setter(_scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, _value: v8::Local<v8::Value>, _args: v8::PropertyCallbackArguments, _rv: v8::ReturnValue<()>) -> v8::Intercepted {
+fn passthrough_setter(
+    _scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    _value: v8::Local<v8::Value>,
+    _args: v8::PropertyCallbackArguments,
+    _rv: v8::ReturnValue<()>,
+) -> v8::Intercepted {
     v8::Intercepted::kNo
 }
 
@@ -113,7 +199,10 @@ pub fn dump_missing() {
         return;
     }
     items.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    eprintln!("[rust-dom] {} missing DOM members (name×accesses):", items.len());
+    eprintln!(
+        "[rust-dom] {} missing DOM members (name×accesses):",
+        items.len()
+    );
     for (name, n) in &items {
         eprintln!("[rust-dom]   {name} ×{n}");
     }
@@ -140,7 +229,11 @@ fn handle_of(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>) -> Option<Han
 
 /// Wrap a handle as a JS node object (cached for identity).
 fn wrap<'s>(scope: &mut v8::PinScope<'s, '_>, handle: Handle) -> v8::Local<'s, v8::Object> {
-    if let Some(g) = DOM.with(|d| d.borrow().as_ref().and_then(|s| s.cache.get(&handle).cloned())) {
+    if let Some(g) = DOM.with(|d| {
+        d.borrow()
+            .as_ref()
+            .and_then(|s| s.cache.get(&handle).cloned())
+    }) {
         return v8::Local::new(scope, &g);
     }
     let tmpl_g = DOM.with(|d| d.borrow().as_ref().unwrap().el_template.clone());
@@ -172,7 +265,11 @@ fn arg_str(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments, i: i3
 /// Resolve argument `i` to a node handle, or `None` for null/undefined/non-node. CRITICAL: guards
 /// `to_object()`, which THROWS "Cannot convert undefined or null to object" on null/undefined — and
 /// `insertBefore(node, null)` / `removeChild`-style calls pass that constantly (emotion/react-dom).
-fn arg_handle(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments, i: i32) -> Option<Handle> {
+fn arg_handle(
+    scope: &mut v8::PinScope,
+    args: &v8::FunctionCallbackArguments,
+    i: i32,
+) -> Option<Handle> {
     let v = args.get(i);
     if v.is_null_or_undefined() {
         return None;
@@ -191,16 +288,32 @@ fn with_tree_mut<R>(f: impl FnOnce(&mut Tree) -> R) -> Option<R> {
 
 // ---- element methods -------------------------------------------------------------------------
 
-fn el_append_child(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(parent) = handle_of(scope, args.this()) else { return };
-    let Some(child) = arg_handle(scope, &args, 0) else { return };
+fn el_append_child(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(parent) = handle_of(scope, args.this()) else {
+        return;
+    };
+    let Some(child) = arg_handle(scope, &args, 0) else {
+        return;
+    };
     with_tree_mut(|t| t.append_child(parent, child));
     rv.set(args.get(0));
 }
 
-fn el_remove_child(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(parent) = handle_of(scope, args.this()) else { return };
-    let Some(child) = arg_handle(scope, &args, 0) else { return };
+fn el_remove_child(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(parent) = handle_of(scope, args.this()) else {
+        return;
+    };
+    let Some(child) = arg_handle(scope, &args, 0) else {
+        return;
+    };
     with_tree_mut(|t| t.remove_child(parent, child));
     rv.set(args.get(0));
 }
@@ -208,43 +321,85 @@ fn el_remove_child(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments
 // ---- CharacterData methods (text/comment nodes) ----------------------------------------------
 fn arg_usize(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments, i: i32) -> usize {
     let n = args.get(i).integer_value(scope).unwrap_or(0);
-    if n < 0 { 0 } else { n as usize }
+    if n < 0 {
+        0
+    } else {
+        n as usize
+    }
 }
-fn el_insert_data(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_insert_data(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let off = arg_usize(scope, &args, 0);
     let data = arg_str(scope, &args, 1);
     with_tree_mut(|t| t.insert_data(h, off, &data));
 }
-fn el_delete_data(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_delete_data(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let off = arg_usize(scope, &args, 0);
     let count = arg_usize(scope, &args, 1);
     with_tree_mut(|t| t.delete_data(h, off, count));
 }
-fn el_append_data(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_append_data(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let data = arg_str(scope, &args, 0);
     with_tree_mut(|t| t.append_data(h, &data));
 }
-fn el_replace_data(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_replace_data(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let off = arg_usize(scope, &args, 0);
     let count = arg_usize(scope, &args, 1);
     let data = arg_str(scope, &args, 2);
     with_tree_mut(|t| t.replace_data(h, off, count, &data));
 }
-fn el_substring_data(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_substring_data(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let off = arg_usize(scope, &args, 0);
     let count = arg_usize(scope, &args, 1);
     let s = with_tree(|t| t.substring_data(h, off, count)).unwrap_or_default();
     rv.set(v8::String::new(scope, &s).unwrap().into());
 }
-fn el_split_text(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_split_text(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let off = arg_usize(scope, &args, 0);
-    let Some(new_h) = with_tree_mut(|t| t.split_text(h, off)) else { return };
+    let Some(new_h) = with_tree_mut(|t| t.split_text(h, off)) else {
+        return;
+    };
     let node = wrap(scope, new_h);
     rv.set(node.into());
 }
@@ -255,18 +410,32 @@ fn el_split_text(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, 
 // `visibility: hidden` set on an ancestor never reached descendants — testing-library then treated a
 // hidden subtree as query-visible. JS getComputedStyle calls this for those inherited properties.
 // (The result is version-cached on the Tree, so repeated calls within a render are cheap.)
-fn el_cascade_prop(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_cascade_prop(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let name = arg_str(scope, &args, 0);
-    let val = with_tree(|t| turbo_dom_parser::rtdom::cascade::computed_style(t, h).get(&name).cloned())
-        .flatten()
-        .unwrap_or_default();
+    let val = with_tree(|t| {
+        turbo_dom_parser::rtdom::cascade::computed_style(t, h)
+            .get(&name)
+            .cloned()
+    })
+    .flatten()
+    .unwrap_or_default();
     rv.set(v8::String::new(scope, &val).unwrap().into());
 }
 
 // Resolve a run of variadic (Node | string) arguments [start..] into handles, turning bare strings
 // into text nodes (per the ChildNode/ParentNode spec). Used by before/after/replaceWith/etc.
-fn resolve_nodes(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments, start: i32) -> Vec<Handle> {
+fn resolve_nodes(
+    scope: &mut v8::PinScope,
+    args: &v8::FunctionCallbackArguments,
+    start: i32,
+) -> Vec<Handle> {
     let mut out = Vec::new();
     for i in start..args.length() {
         let v = args.get(i);
@@ -282,49 +451,97 @@ fn resolve_nodes(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments,
     out
 }
 fn el_before(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let nodes = resolve_nodes(scope, &args, 0);
     with_tree_mut(|t| t.before(h, &nodes));
 }
 fn el_after(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let nodes = resolve_nodes(scope, &args, 0);
     with_tree_mut(|t| t.after(h, &nodes));
 }
-fn el_replace_with(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_replace_with(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let nodes = resolve_nodes(scope, &args, 0);
     with_tree_mut(|t| t.replace_with(h, &nodes));
 }
-fn el_replace_children(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_replace_children(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let nodes = resolve_nodes(scope, &args, 0);
     with_tree_mut(|t| t.replace_children(h, &nodes));
 }
-fn el_insert_adjacent_element(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_insert_adjacent_element(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let pos = arg_str(scope, &args, 0);
-    let Some(el) = arg_handle(scope, &args, 1) else { return };
+    let Some(el) = arg_handle(scope, &args, 1) else {
+        return;
+    };
     let ok = with_tree_mut(|t| t.insert_adjacent_element(h, &pos, el)).unwrap_or(false);
-    if ok { rv.set(args.get(1)); } else { rv.set(v8::null(scope).into()); }
+    if ok {
+        rv.set(args.get(1));
+    } else {
+        rv.set(v8::null(scope).into());
+    }
 }
-fn el_insert_adjacent_html(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_insert_adjacent_html(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let pos = arg_str(scope, &args, 0);
     let html = arg_str(scope, &args, 1);
     with_tree_mut(|t| t.insert_adjacent_html(h, &pos, &html));
 }
-fn el_toggle_attribute(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_toggle_attribute(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let name = arg_str(scope, &args, 0).to_ascii_lowercase();
     let force = if args.length() > 1 && !args.get(1).is_undefined() {
         Some(args.get(1).boolean_value(scope))
-    } else { None };
+    } else {
+        None
+    };
     let present = with_tree_mut(|t| t.toggle_attribute(h, &name, force)).unwrap_or(false);
     rv.set(v8::Boolean::new(scope, present).into());
 }
-fn el_get_attribute_ns(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_get_attribute_ns(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let local = arg_str(scope, &args, 1);
     match with_tree(|t| t.get_attribute_ns(h, None, &local)).flatten() {
         Some(s) => rv.set(v8::String::new(scope, &s).unwrap().into()),
@@ -332,23 +549,41 @@ fn el_get_attribute_ns(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgum
     }
 }
 
-fn el_insert_before(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(parent) = handle_of(scope, args.this()) else { return };
-    let Some(child) = arg_handle(scope, &args, 0) else { return };
+fn el_insert_before(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(parent) = handle_of(scope, args.this()) else {
+        return;
+    };
+    let Some(child) = arg_handle(scope, &args, 0) else {
+        return;
+    };
     let reference = arg_handle(scope, &args, 1);
     with_tree_mut(|t| t.insert_before(parent, child, reference));
     rv.set(args.get(0));
 }
 
-fn el_set_attribute(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_set_attribute(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let name = arg_str(scope, &args, 0);
     let value = arg_str(scope, &args, 1);
     // HTML setAttribute lowercases the qualified name (React calls setAttribute('colSpan', …); jsdom
     // stores 'colspan'). Lowercase for HTML-namespace elements only (ns 0); SVG (ns 1) keeps camelCase
     // attrs like viewBox.
     let is_html = with_tree(|t| t.namespace_id(h) == 0).unwrap_or(true);
-    let key = if is_html { name.to_ascii_lowercase() } else { name.clone() };
+    let key = if is_html {
+        name.to_ascii_lowercase()
+    } else {
+        name.clone()
+    };
     with_tree_mut(|t| t.set_attribute(h, &key, &value));
 
     // When an <input> becomes a checkbox/radio (React sets `type` via setAttribute after createElement),
@@ -374,14 +609,26 @@ fn el_set_attribute(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgument
 /// form (React writes `tabindex`/`maxlength` lowercased; tests read `tabIndex`/`maxLength`). Exact-
 /// first preserves SVG camelCase attributes (`viewBox`).
 fn attr_get(t: &Tree, h: Handle, name: &str) -> Option<String> {
-    if let Some(v) = t.get_attribute(h, name) { return Some(v.to_string()); }
+    if let Some(v) = t.get_attribute(h, name) {
+        return Some(v.to_string());
+    }
     let lower = name.to_ascii_lowercase();
-    if lower != name { if let Some(v) = t.get_attribute(h, &lower) { return Some(v.to_string()); } }
+    if lower != name {
+        if let Some(v) = t.get_attribute(h, &lower) {
+            return Some(v.to_string());
+        }
+    }
     None
 }
 
-fn el_get_attribute(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_get_attribute(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let name = arg_str(scope, &args, 0);
     let val = with_tree(|t| attr_get(t, h, &name)).flatten();
     match val {
@@ -390,14 +637,26 @@ fn el_get_attribute(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgument
     }
 }
 
-fn el_get_attribute_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_get_attribute_node(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let name = arg_str(scope, &args, 0);
     let val = with_tree(|t| attr_get(t, h, &name)).flatten();
     match val {
         Some(v) => {
             let o = v8::Object::new(scope);
-            for (pk, pv) in [("name", name.as_str()), ("nodeName", name.as_str()), ("localName", name.as_str()), ("value", v.as_str()), ("nodeValue", v.as_str())] {
+            for (pk, pv) in [
+                ("name", name.as_str()),
+                ("nodeName", name.as_str()),
+                ("localName", name.as_str()),
+                ("value", v.as_str()),
+                ("nodeValue", v.as_str()),
+            ] {
                 let key = v8::String::new(scope, pk).unwrap();
                 let s = v8::String::new(scope, pv).unwrap();
                 o.set(scope, key.into(), s.into());
@@ -418,76 +677,161 @@ fn el_get_attribute_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArg
 fn attr_name_value(scope: &mut v8::PinScope, v: v8::Local<v8::Value>) -> Option<(String, String)> {
     let o = v.to_object(scope)?;
     let name = get_str_prop(scope, o, "name").or_else(|| get_str_prop(scope, o, "nodeName"))?;
-    let value = get_str_prop(scope, o, "value").or_else(|| get_str_prop(scope, o, "nodeValue")).unwrap_or_default();
-    if name.is_empty() { None } else { Some((name, value)) }
+    let value = get_str_prop(scope, o, "value")
+        .or_else(|| get_str_prop(scope, o, "nodeValue"))
+        .unwrap_or_default();
+    if name.is_empty() {
+        None
+    } else {
+        Some((name, value))
+    }
 }
-fn el_set_attribute_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_set_attribute_node(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     if let Some((name, value)) = attr_name_value(scope, args.get(0)) {
         let is_html = with_tree(|t| t.namespace_id(h) == 0).unwrap_or(true);
-        let key = if is_html { name.to_ascii_lowercase() } else { name };
+        let key = if is_html {
+            name.to_ascii_lowercase()
+        } else {
+            name
+        };
         with_tree_mut(|t| t.set_attribute(h, &key, &value));
     }
     rv.set(v8::null(scope).into()); // replaced Attr (none modeled) → null
 }
-fn el_remove_attribute_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_remove_attribute_node(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     if let Some((name, _)) = attr_name_value(scope, args.get(0)) {
         with_tree_mut(|t| t.remove_attribute(h, &name));
         let lower = name.to_ascii_lowercase();
-        if lower != name { with_tree_mut(|t| t.remove_attribute(h, &lower)); }
+        if lower != name {
+            with_tree_mut(|t| t.remove_attribute(h, &lower));
+        }
     }
     rv.set(args.get(0)); // spec returns the removed Attr
 }
 
-fn el_has_attribute(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_has_attribute(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let name = arg_str(scope, &args, 0);
     let lower = name.to_ascii_lowercase();
-    let has = with_tree(|t| t.has_attribute(h, &name) || (lower != name && t.has_attribute(h, &lower))).unwrap_or(false);
+    let has =
+        with_tree(|t| t.has_attribute(h, &name) || (lower != name && t.has_attribute(h, &lower)))
+            .unwrap_or(false);
     rv.set(v8::Boolean::new(scope, has).into());
 }
 
-fn el_remove_attribute(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_remove_attribute(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let name = arg_str(scope, &args, 0);
     let lower = name.to_ascii_lowercase();
-    with_tree_mut(|t| { t.remove_attribute(h, &name); if lower != name { t.remove_attribute(h, &lower); } });
+    with_tree_mut(|t| {
+        t.remove_attribute(h, &name);
+        if lower != name {
+            t.remove_attribute(h, &lower);
+        }
+    });
 }
 
 /// element-scoped querySelector via NodeRef.
-fn el_query_selector(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_query_selector(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let sel = arg_str(scope, &args, 0);
-    let found = with_tree(|t| NodeRef::new(t, h).query_selector(&sel).map(|n| n.handle())).flatten();
+    let found =
+        with_tree(|t| NodeRef::new(t, h).query_selector(&sel).map(|n| n.handle())).flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
 
 // ---- innerHTML / outerHTML / children / form props / classList (P3.3 batch) -----------------
 
-fn get_inner_html(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
-    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_inner(t, h)).unwrap_or_default();
+fn get_inner_html(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
+    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_inner(t, h))
+        .unwrap_or_default();
     rv.set(v8::String::new(scope, &html).unwrap().into());
 }
-fn set_inner_html(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, value: v8::Local<v8::Value>, args: v8::PropertyCallbackArguments, _rv: v8::ReturnValue<()>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn set_inner_html(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    value: v8::Local<v8::Value>,
+    args: v8::PropertyCallbackArguments,
+    _rv: v8::ReturnValue<()>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let html = value.to_rust_string_lossy(scope);
     with_tree_mut(|t| t.set_inner_html(h, &html));
 }
-fn get_outer_html(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
-    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_outer(t, h)).unwrap_or_default();
+fn get_outer_html(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
+    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_outer(t, h))
+        .unwrap_or_default();
     rv.set(v8::String::new(scope, &html).unwrap().into());
 }
 
 /// `children` = element-only child nodes (HTMLCollection-ish array).
-fn get_children(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_children(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let kids: Vec<Handle> = with_tree(|t| {
-        t.children(h).into_iter().filter(|&c| t.node_type_id(c) == 1).collect()
-    }).unwrap_or_default();
+        t.children(h)
+            .into_iter()
+            .filter(|&c| t.node_type_id(c) == 1)
+            .collect()
+    })
+    .unwrap_or_default();
     let arr = v8::Array::new(scope, kids.len() as i32);
     for (i, k) in kids.into_iter().enumerate() {
         let node = wrap(scope, k);
@@ -498,33 +842,79 @@ fn get_children(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::
     rv.set(arr.into());
 }
 
-fn get_parent_element(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
-    let p = with_tree(|t| NodeRef::new(t, h).parent().map(|x| x.handle()).filter(|&ph| t.node_type_id(ph) == 1)).flatten();
+fn get_parent_element(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
+    let p = with_tree(|t| {
+        NodeRef::new(t, h)
+            .parent()
+            .map(|x| x.handle())
+            .filter(|&ph| t.node_type_id(ph) == 1)
+    })
+    .flatten();
     let v = wrap_opt(scope, p);
     rv.set(v);
 }
 
-fn get_first_element_child(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_first_element_child(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let c = with_tree(|t| NodeRef::new(t, h).first_element_child().map(|x| x.handle())).flatten();
     let v = wrap_opt(scope, c);
     rv.set(v);
 }
 
-fn get_namespace_uri(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, _args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    rv.set(v8::String::new(scope, "http://www.w3.org/1999/xhtml").unwrap().into());
+fn get_namespace_uri(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    _args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    rv.set(
+        v8::String::new(scope, "http://www.w3.org/1999/xhtml")
+            .unwrap()
+            .into(),
+    );
 }
 
 /// `value`/`checked`/`disabled` etc — stored on the element as expandos by default (React's
 /// controlled inputs set them directly); fall back to the attribute for `value`.
-fn get_value(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
-    let v = with_tree(|t| t.get_attribute(h, "value").map(|s| s.to_string())).flatten().unwrap_or_default();
+fn get_value(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
+    let v = with_tree(|t| t.get_attribute(h, "value").map(|s| s.to_string()))
+        .flatten()
+        .unwrap_or_default();
     rv.set(v8::String::new(scope, &v).unwrap().into());
 }
-fn set_value(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, value: v8::Local<v8::Value>, args: v8::PropertyCallbackArguments, _rv: v8::ReturnValue<()>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn set_value(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    value: v8::Local<v8::Value>,
+    args: v8::PropertyCallbackArguments,
+    _rv: v8::ReturnValue<()>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let v = value.to_rust_string_lossy(scope);
     with_tree_mut(|t| t.set_attribute(h, "value", &v));
 }
@@ -539,9 +929,13 @@ thread_local! {
 /// bubbling focusout/focusin reach React's delegated onBlur/onFocus at the root container. userEvent
 /// drives blur-on-tab purely through native focus(), so this must dispatch the events itself.
 fn el_focus(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let prev = ACTIVE.with(|a| *a.borrow());
-    if prev == Some(h) { return; }
+    if prev == Some(h) {
+        return;
+    }
     ACTIVE.with(|a| *a.borrow_mut() = Some(h));
     // Only blur a previously-focused element that is still attached. A detached `prev` is a stale
     // pointer left by a prior, now-unmounted tree (testing-library cleanup); dispatching blur/focusout
@@ -554,14 +948,23 @@ fn el_focus(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     dispatch_synthetic(scope, h, "focusin", true, false);
 }
 fn el_blur(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
-    if ACTIVE.with(|a| *a.borrow()) != Some(h) { return; }
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
+    if ACTIVE.with(|a| *a.borrow()) != Some(h) {
+        return;
+    }
     ACTIVE.with(|a| *a.borrow_mut() = None);
     dispatch_synthetic(scope, h, "blur", false, false);
     dispatch_synthetic(scope, h, "focusout", true, false);
 }
 /// `document.activeElement` → the focused element, or `<body>`.
-fn get_active_element(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, _args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
+fn get_active_element(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    _args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
     // Real DOM resets focus to <body> when the active element is removed from the tree. If our
     // tracked handle is detached (e.g. the focused input of a prior, now-unmounted React tree —
     // testing-library cleanup leaves the JS ACTIVE pointer dangling), drop it so the stale node
@@ -580,10 +983,17 @@ fn get_active_element(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, _arg
 /// Native `HTMLElement.click()` — dispatch a bubbling, cancelable click event so React's delegated
 /// onClick at the root container fires. Tests call `el.click()` directly (no userEvent).
 fn el_click(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     dispatch_synthetic(scope, h, "click", true, true);
 }
-fn el_scroll_into_view(_scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {}
+fn el_scroll_into_view(
+    _scope: &mut v8::PinScope,
+    _args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+}
 
 // Form-control methods with no headless effect (no constraint-validation UI, no text
 // selection). They must EXIST though: React's hydration/commit calls `setCustomValidity`
@@ -594,12 +1004,22 @@ fn el_noop(_scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, _rv:
 
 /// Constraint-validation predicates (`checkValidity`/`reportValidity`) → always valid
 /// (there is no interactive validation UI to fail against).
-fn el_valid_true(scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn el_valid_true(
+    scope: &mut v8::PinScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     rv.set(v8::Boolean::new(scope, true).into());
 }
-fn el_get_bounding_client_rect(scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn el_get_bounding_client_rect(
+    scope: &mut v8::PinScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let o = v8::Object::new(scope);
-    for k in ["x", "y", "top", "left", "right", "bottom", "width", "height"] {
+    for k in [
+        "x", "y", "top", "left", "right", "bottom", "width", "height",
+    ] {
         let key = v8::String::new(scope, k).unwrap();
         let zero = v8::Number::new(scope, 0.0);
         o.set(scope, key.into(), zero.into());
@@ -609,15 +1029,23 @@ fn el_get_bounding_client_rect(scope: &mut v8::PinScope, _args: v8::FunctionCall
 
 /// `append(...nodes)` / `prepend(...)` / `remove()` (DOM ChildNode/ParentNode mixins).
 fn el_append(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(parent) = handle_of(scope, args.this()) else { return };
+    let Some(parent) = handle_of(scope, args.this()) else {
+        return;
+    };
     for i in 0..args.length() {
         if let Some(child) = arg_handle(scope, &args, i) {
             with_tree_mut(|t| t.append_child(parent, child));
         }
     }
 }
-fn el_remove_self(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_remove_self(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let parent = with_tree(|t| NodeRef::new(t, h).parent().map(|p| p.handle())).flatten();
     if let Some(p) = parent {
         with_tree_mut(|t| t.remove_child(p, h));
@@ -625,25 +1053,49 @@ fn el_remove_self(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments,
 }
 
 // document native methods (reliable — no JS-bootstrap dependency).
-fn doc_create_element_ns(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn doc_create_element_ns(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let ns = arg_str(scope, &args, 0).to_ascii_lowercase();
     let tag = arg_str(scope, &args, 1);
     // Map the namespace URI to rtdom's ns id (svg=1, math=2, html=0) so SVG/MathML elements keep
     // their namespace + case-preserved attributes (e.g. `viewBox`), unlike HTML which lowercases.
-    let ns_id: u8 = if ns.contains("svg") { 1 } else if ns.contains("mathml") || ns.contains("math") { 2 } else { 0 };
-    let made = with_tree_mut(|t| if ns_id == 0 { t.create_element(&tag) } else { t.create_element_ns(&tag, Namespace::from_id(ns_id)) });
+    let ns_id: u8 = if ns.contains("svg") {
+        1
+    } else if ns.contains("mathml") || ns.contains("math") {
+        2
+    } else {
+        0
+    };
+    let made = with_tree_mut(|t| {
+        if ns_id == 0 {
+            t.create_element(&tag)
+        } else {
+            t.create_element_ns(&tag, Namespace::from_id(ns_id))
+        }
+    });
     if let Some(h) = made {
         let node = wrap(scope, h);
         rv.set(node.into());
     }
 }
-fn doc_create_fragment(scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn doc_create_fragment(
+    scope: &mut v8::PinScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     if let Some(h) = with_tree_mut(|t| t.create_element("#document-fragment")) {
         let node = wrap(scope, h);
         rv.set(node.into());
     }
 }
-fn doc_create_comment(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn doc_create_comment(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let data = arg_str(scope, &args, 0);
     if let Some(h) = with_tree_mut(|t| t.create_comment(&data)) {
         let node = wrap(scope, h);
@@ -677,8 +1129,14 @@ fn clone_subtree(t: &mut Tree, h: Handle, deep: bool) -> Handle {
 
 /// `getRootNode()` → the topmost ancestor (the document root if connected). jest-dom's
 /// `toBeInTheDocument` compares `ownerDocument === getRootNode()`.
-fn el_get_root_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_get_root_node(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let root = with_tree(|t| {
         let mut cur = h;
         while let Some(p) = NodeRef::new(t, cur).parent() {
@@ -692,8 +1150,14 @@ fn el_get_root_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgument
     }
 }
 
-fn el_clone_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_clone_node(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let deep = args.get(0).boolean_value(scope);
     if let Some(new_h) = with_tree_mut(|t| clone_subtree(t, h, deep)) {
         let node = wrap(scope, new_h);
@@ -722,38 +1186,66 @@ fn is_connected(t: &Tree, h: Handle) -> bool {
     false
 }
 
-fn get_is_connected(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_is_connected(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let c = with_tree(|t| is_connected(t, h)).unwrap_or(false);
     rv.set(v8::Boolean::new(scope, c).into());
 }
 
 /// `parent.contains(node)` — true if node === parent or a descendant.
-fn el_contains_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(p) = handle_of(scope, args.this()) else { return };
+fn el_contains_node(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(p) = handle_of(scope, args.this()) else {
+        return;
+    };
     let other = arg_handle(scope, &args, 0);
     let yes = match other {
         Some(o) => with_tree(|t| {
             let mut cur = Some(o);
             while let Some(c) = cur {
-                if c == p { return true; }
+                if c == p {
+                    return true;
+                }
                 cur = NodeRef::new(t, c).parent().map(|x| x.handle());
             }
             false
-        }).unwrap_or(false),
+        })
+        .unwrap_or(false),
         None => false,
     };
     rv.set(v8::Boolean::new(scope, yes).into());
 }
 
 /// `attributes` → array of `{ name, value, nodeName, nodeValue }` (NamedNodeMap-lite, indexable).
-fn get_attributes(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_attributes(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let attrs = with_tree(|t| t.attributes(h)).unwrap_or_default();
     let arr = v8::Array::new(scope, attrs.len() as i32);
     for (i, (k, v)) in attrs.into_iter().enumerate() {
         let o = v8::Object::new(scope);
-        for (pk, pv) in [("name", k.as_str()), ("nodeName", k.as_str()), ("value", v.as_str()), ("nodeValue", v.as_str())] {
+        for (pk, pv) in [
+            ("name", k.as_str()),
+            ("nodeName", k.as_str()),
+            ("value", v.as_str()),
+            ("nodeValue", v.as_str()),
+        ] {
             let key = v8::String::new(scope, pk).unwrap();
             let val = v8::String::new(scope, pv).unwrap();
             o.set(scope, key.into(), val.into());
@@ -767,8 +1259,15 @@ fn get_attributes(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8
 }
 
 /// `dataset` → `{ camelCaseKey: value }` for each `data-*` attribute.
-fn get_dataset(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_dataset(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let attrs = with_tree(|t| t.attributes(h)).unwrap_or_default();
     let o = v8::Object::new(scope);
     for (k, v) in attrs {
@@ -777,9 +1276,14 @@ fn get_dataset(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::P
             let mut camel = String::new();
             let mut up = false;
             for ch in rest.chars() {
-                if ch == '-' { up = true; }
-                else if up { camel.extend(ch.to_uppercase()); up = false; }
-                else { camel.push(ch); }
+                if ch == '-' {
+                    up = true;
+                } else if up {
+                    camel.extend(ch.to_uppercase());
+                    up = false;
+                } else {
+                    camel.push(ch);
+                }
             }
             let key = v8::String::new(scope, &camel).unwrap();
             let val = v8::String::new(scope, &v).unwrap();
@@ -790,8 +1294,14 @@ fn get_dataset(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::P
 }
 
 /// `closest(selector)` → nearest ancestor (incl. self) that matches, or null.
-fn el_closest(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_closest(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let sel = arg_str(scope, &args, 0);
     let found = with_tree(|t| {
         let mut cur = Some(h);
@@ -802,31 +1312,47 @@ fn el_closest(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut
             cur = NodeRef::new(t, c).parent().map(|p| p.handle());
         }
         None
-    }).flatten();
+    })
+    .flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
 
-fn el_matches(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_matches(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let sel = arg_str(scope, &args, 0);
     let m = with_tree(|t| t.matches(h, &sel)).unwrap_or(false);
     rv.set(v8::Boolean::new(scope, m).into());
 }
 
-fn el_contains(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_contains(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let other = arg_handle(scope, &args, 0);
     let contains = match other {
         Some(o) => with_tree(|t| {
             // walk up from `o` to see if `h` is an ancestor (or equal).
             let mut cur = Some(o);
             while let Some(c) = cur {
-                if c == h { return true; }
+                if c == h {
+                    return true;
+                }
                 cur = NodeRef::new(t, c).parent().map(|p| p.handle());
             }
             false
-        }).unwrap_or(false),
+        })
+        .unwrap_or(false),
         None => false,
     };
     rv.set(v8::Boolean::new(scope, contains).into());
@@ -836,8 +1362,14 @@ fn el_contains(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mu
 /// native method the NON_MASKING interceptor returns `undefined`, so React's
 /// hydration/commit path (which calls `hasChildNodes()` while diffing) throws
 /// "hasChildNodes is not a function" and aborts the client-render fallback.
-fn el_has_child_nodes(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_has_child_nodes(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let has = with_tree(|t| NodeRef::new(t, h).first_child().is_some()).unwrap_or(false);
     rv.set(v8::Boolean::new(scope, has).into());
 }
@@ -846,7 +1378,11 @@ fn el_has_child_nodes(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgume
 /// back — returns the first element whose `id` (or `name`) matches, else null. Bound
 /// alongside `.item` so libs that call `namedItem` (React-DOM, form-collection code)
 /// don't hit "namedItem is not a function".
-fn nodelist_named_item(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn nodelist_named_item(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let name = arg_str(scope, &args, 0);
     let this = args.this();
     let len = this
@@ -854,8 +1390,12 @@ fn nodelist_named_item(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgum
         .and_then(|v| v.uint32_value(scope))
         .unwrap_or(0);
     for i in 0..len {
-        let Some(item) = this.get_index(scope, i) else { continue };
-        let Ok(obj) = v8::Local::<v8::Object>::try_from(item) else { continue };
+        let Some(item) = this.get_index(scope, i) else {
+            continue;
+        };
+        let Ok(obj) = v8::Local::<v8::Object>::try_from(item) else {
+            continue;
+        };
         for attr in ["id", "name"] {
             let key = v8::String::new(scope, attr).unwrap();
             if let Some(val) = obj.get(scope, key.into()) {
@@ -869,11 +1409,21 @@ fn nodelist_named_item(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgum
     rv.set_null();
 }
 
-fn el_query_selector_all(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_query_selector_all(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let sel = arg_str(scope, &args, 0);
     let handles = with_tree(|t| {
-        NodeRef::new(t, h).query_selector_all(&sel).into_iter().map(|n| n.handle()).collect::<Vec<_>>()
+        NodeRef::new(t, h)
+            .query_selector_all(&sel)
+            .into_iter()
+            .map(|n| n.handle())
+            .collect::<Vec<_>>()
     })
     .unwrap_or_default();
     let arr = v8::Array::new(scope, handles.len() as i32);
@@ -890,44 +1440,103 @@ fn el_query_selector_all(scope: &mut v8::PinScope, args: v8::FunctionCallbackArg
 // Getter sig: (scope, name, PropertyCallbackArguments, ReturnValue<Value>).
 // Setter sig: (scope, name, Local<Value>, PropertyCallbackArguments, ReturnValue<()>).
 
-fn get_tag_name(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
-    let tag = with_tree(|t| t.tag_name(h)).flatten().unwrap_or_default().to_uppercase();
+fn get_tag_name(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
+    let tag = with_tree(|t| t.tag_name(h))
+        .flatten()
+        .unwrap_or_default()
+        .to_uppercase();
     rv.set(v8::String::new(scope, &tag).unwrap().into());
 }
 
-fn get_text_content(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_text_content(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let txt = with_tree(|t| t.text_content(h)).unwrap_or_default();
     rv.set(v8::String::new(scope, &txt).unwrap().into());
 }
 
-fn set_text_content(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, value: v8::Local<v8::Value>, args: v8::PropertyCallbackArguments, _rv: v8::ReturnValue<()>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn set_text_content(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    value: v8::Local<v8::Value>,
+    args: v8::PropertyCallbackArguments,
+    _rv: v8::ReturnValue<()>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let txt = value.to_rust_string_lossy(scope);
     with_tree_mut(|t| t.set_text_content(h, &txt));
 }
 
-fn get_id(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
-    let id = with_tree(|t| t.get_attribute(h, "id").map(|s| s.to_string())).flatten().unwrap_or_default();
+fn get_id(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
+    let id = with_tree(|t| t.get_attribute(h, "id").map(|s| s.to_string()))
+        .flatten()
+        .unwrap_or_default();
     rv.set(v8::String::new(scope, &id).unwrap().into());
 }
 
-fn set_id(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, value: v8::Local<v8::Value>, args: v8::PropertyCallbackArguments, _rv: v8::ReturnValue<()>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn set_id(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    value: v8::Local<v8::Value>,
+    args: v8::PropertyCallbackArguments,
+    _rv: v8::ReturnValue<()>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let v = value.to_rust_string_lossy(scope);
     with_tree_mut(|t| t.set_attribute(h, "id", &v));
 }
 
-fn get_class_name(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
-    let c = with_tree(|t| t.get_attribute(h, "class").map(|s| s.to_string())).flatten().unwrap_or_default();
+fn get_class_name(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
+    let c = with_tree(|t| t.get_attribute(h, "class").map(|s| s.to_string()))
+        .flatten()
+        .unwrap_or_default();
     rv.set(v8::String::new(scope, &c).unwrap().into());
 }
 
-fn set_class_name(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, value: v8::Local<v8::Value>, args: v8::PropertyCallbackArguments, _rv: v8::ReturnValue<()>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn set_class_name(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    value: v8::Local<v8::Value>,
+    args: v8::PropertyCallbackArguments,
+    _rv: v8::ReturnValue<()>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let v = value.to_rust_string_lossy(scope);
     with_tree_mut(|t| t.set_attribute(h, "class", &v));
 }
@@ -936,8 +1545,15 @@ fn set_class_name(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, value: v
 // enumerated string 'true' | 'false' | 'plaintext-only' | 'inherit'. Lexical reads this property
 // (NOT the attribute) to decide the root is editable and to wire up its beforeinput pipeline; with
 // it missing (undefined) Lexical treats the editor as non-editable and never emits onChange.
-fn get_content_editable(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_content_editable(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let attr = with_tree(|t| attr_get(t, h, "contenteditable")).flatten();
     let out = match attr.as_deref() {
         Some("") | Some("true") => "true",
@@ -948,24 +1564,55 @@ fn get_content_editable(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, ar
     rv.set(v8::String::new(scope, out).unwrap().into());
 }
 
-fn set_content_editable(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, value: v8::Local<v8::Value>, args: v8::PropertyCallbackArguments, _rv: v8::ReturnValue<()>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn set_content_editable(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    value: v8::Local<v8::Value>,
+    args: v8::PropertyCallbackArguments,
+    _rv: v8::ReturnValue<()>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let v = value.to_rust_string_lossy(scope);
     with_tree_mut(|t| t.set_attribute(h, "contenteditable", &v));
 }
 
 // `element.isContentEditable` — true when the element itself is editable (contenteditable=""|"true")
 // or it inherits editability from an ancestor.
-fn get_is_content_editable(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(mut h) = handle_of(scope, args.holder()) else { return };
+fn get_is_content_editable(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(mut h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let mut editable = false;
     loop {
-        match with_tree(|t| attr_get(t, h, "contenteditable")).flatten().as_deref() {
-            Some("") | Some("true") | Some("plaintext-only") => { editable = true; break; }
-            Some("false") => { editable = false; break; }
+        match with_tree(|t| attr_get(t, h, "contenteditable"))
+            .flatten()
+            .as_deref()
+        {
+            Some("") | Some("true") | Some("plaintext-only") => {
+                editable = true;
+                break;
+            }
+            Some("false") => {
+                editable = false;
+                break;
+            }
             _ => {}
         }
-        match with_tree(|t| NodeRef::new(t, h).parent().map(|p| p.handle()).filter(|&ph| t.node_type_id(ph) == 1)).flatten() {
+        match with_tree(|t| {
+            NodeRef::new(t, h)
+                .parent()
+                .map(|p| p.handle())
+                .filter(|&ph| t.node_type_id(ph) == 1)
+        })
+        .flatten()
+        {
             Some(p) => h = p,
             None => break,
         }
@@ -973,22 +1620,43 @@ fn get_is_content_editable(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>,
     rv.set(v8::Boolean::new(scope, editable).into());
 }
 
-fn get_parent_node(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_parent_node(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let found = with_tree(|t| NodeRef::new(t, h).parent().map(|x| x.handle())).flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
 
-fn get_first_child(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_first_child(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let found = with_tree(|t| NodeRef::new(t, h).first_child().map(|x| x.handle())).flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
 
-fn get_next_sibling(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_next_sibling(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let found = with_tree(|t| NodeRef::new(t, h).next_sibling().map(|x| x.handle())).flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
@@ -1026,19 +1694,40 @@ fn arg_capture(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments) -
     false
 }
 
-fn el_add_event_listener(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_add_event_listener(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let ty = arg_str(scope, &args, 0);
-    let Some(f) = v8::Local::<v8::Function>::try_from(args.get(1)).ok() else { return };
+    let Some(f) = v8::Local::<v8::Function>::try_from(args.get(1)).ok() else {
+        return;
+    };
     let capture = arg_capture(scope, &args);
     let g = v8::Global::new(scope, f);
-    LISTENERS.with(|m| m.borrow_mut().entry((h, ty)).or_default().push((g, capture)));
+    LISTENERS.with(|m| {
+        m.borrow_mut()
+            .entry((h, ty))
+            .or_default()
+            .push((g, capture))
+    });
 }
 
-fn el_remove_event_listener(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let Some(h) = handle_of(scope, args.this()) else { return };
+fn el_remove_event_listener(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let Some(h) = handle_of(scope, args.this()) else {
+        return;
+    };
     let ty = arg_str(scope, &args, 0);
-    let Some(f) = v8::Local::<v8::Function>::try_from(args.get(1)).ok() else { return };
+    let Some(f) = v8::Local::<v8::Function>::try_from(args.get(1)).ok() else {
+        return;
+    };
     LISTENERS.with(|m| {
         if let Some(v) = m.borrow_mut().get_mut(&(h, ty)) {
             v.retain(|(g, _)| !v8::Local::new(scope, g).eq(&f));
@@ -1046,14 +1735,22 @@ fn el_remove_event_listener(scope: &mut v8::PinScope, args: v8::FunctionCallback
     });
 }
 
-fn el_dispatch_event(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn el_dispatch_event(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let Some(target) = handle_of(scope, args.this()) else {
         rv.set(v8::Boolean::new(scope, true).into());
         return;
     };
     let event = args.get(0);
-    if event.is_null_or_undefined() { return; }
-    let Some(event_obj) = event.to_object(scope) else { return };
+    if event.is_null_or_undefined() {
+        return;
+    }
+    let Some(event_obj) = event.to_object(scope) else {
+        return;
+    };
     let ty = get_str_prop(scope, event_obj, "type").unwrap_or_default();
     let bubbles = get_bool_prop(scope, event_obj, "bubbles");
 
@@ -1065,7 +1762,11 @@ fn el_dispatch_event(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgumen
     // the activation-behavior spec), so React's ChangeEventPlugin — which detects checkbox change on
     // the `click` event by reading node.checked — sees the new value. Reverted below if the click is
     // canceled. `change`/`input` DOM events fire afterward (also below).
-    let click_check = if ty == "click" { checkable_kind(target) } else { None };
+    let click_check = if ty == "click" {
+        checkable_kind(target)
+    } else {
+        None
+    };
     let check_was = click_check.map(|_| get_bool_prop(scope, target_node, "checked"));
     if let (Some(kind), Some(was)) = (click_check, check_was) {
         let next = if kind == CheckKind::Radio { true } else { !was };
@@ -1085,44 +1786,60 @@ fn el_dispatch_event(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgumen
     // target's parent → root (non-capture listeners). React 18 registers some delegated root
     // listeners in capture phase, so a bubble-only dispatch would miss them.
     let mut capture_path: Vec<Handle> = ancestors.iter().rev().copied().collect();
-    let bubble_path: Vec<Handle> = if bubbles { ancestors.clone() } else { Vec::new() };
+    let bubble_path: Vec<Handle> = if bubbles {
+        ancestors.clone()
+    } else {
+        Vec::new()
+    };
     capture_path.push(target); // target fires in both phases (handled by the at_target flag below)
 
-    let fire = |scope: &mut v8::PinScope, node_h: Handle, want_capture: bool, at_target: bool| -> bool {
-        if get_bool_prop(scope, event_obj, "__stop") {
-            return false;
-        }
-        let listeners: Vec<(v8::Global<v8::Function>, bool)> =
-            LISTENERS.with(|m| m.borrow().get(&(node_h, ty.clone())).cloned().unwrap_or_default());
-        if listeners.is_empty() {
-            return true;
-        }
-        let cur_node = wrap(scope, node_h);
-        set_prop(scope, event_obj, "currentTarget", cur_node.into());
-        for (g, capture) in listeners {
-            // at the target, both capture and bubble listeners fire; elsewhere only the phase's.
-            if !at_target && capture != want_capture {
-                continue;
+    let fire =
+        |scope: &mut v8::PinScope, node_h: Handle, want_capture: bool, at_target: bool| -> bool {
+            if get_bool_prop(scope, event_obj, "__stop") {
+                return false;
             }
-            if get_bool_prop(scope, event_obj, "__stopImmediate") {
-                break;
+            let listeners: Vec<(v8::Global<v8::Function>, bool)> = LISTENERS.with(|m| {
+                m.borrow()
+                    .get(&(node_h, ty.clone()))
+                    .cloned()
+                    .unwrap_or_default()
+            });
+            if listeners.is_empty() {
+                return true;
             }
-            let f = v8::Local::new(scope, &g);
-            let recv: v8::Local<v8::Value> = cur_node.into();
-            f.call(scope, recv, &[event]);
-        }
-        true
-    };
+            let cur_node = wrap(scope, node_h);
+            set_prop(scope, event_obj, "currentTarget", cur_node.into());
+            for (g, capture) in listeners {
+                // at the target, both capture and bubble listeners fire; elsewhere only the phase's.
+                if !at_target && capture != want_capture {
+                    continue;
+                }
+                if get_bool_prop(scope, event_obj, "__stopImmediate") {
+                    break;
+                }
+                let f = v8::Local::new(scope, &g);
+                let recv: v8::Local<v8::Value> = cur_node.into();
+                f.call(scope, recv, &[event]);
+            }
+            true
+        };
 
     // capture: root → parent
-    for &node_h in capture_path.iter().take(capture_path.len().saturating_sub(1)) {
-        if !fire(scope, node_h, true, false) { break; }
+    for &node_h in capture_path
+        .iter()
+        .take(capture_path.len().saturating_sub(1))
+    {
+        if !fire(scope, node_h, true, false) {
+            break;
+        }
     }
     // at target (both phases)
     fire(scope, target, false, true);
     // bubble: parent → root
     for node_h in bubble_path {
-        if !fire(scope, node_h, false, false) { break; }
+        if !fire(scope, node_h, false, false) {
+            break;
+        }
     }
     let not_prevented = !get_bool_prop(scope, event_obj, "defaultPrevented");
 
@@ -1151,15 +1868,24 @@ fn el_dispatch_event(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgumen
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum CheckKind { Checkbox, Radio }
+enum CheckKind {
+    Checkbox,
+    Radio,
+}
 
 /// `<input type=checkbox|radio>` → its kind, else None (drives the click toggle default action).
 fn checkable_kind(h: Handle) -> Option<CheckKind> {
     with_tree(|t| {
-        if t.node_type_id(h) != 1 || t.tag_name(h).unwrap_or_default().to_ascii_uppercase() != "INPUT" {
+        if t.node_type_id(h) != 1
+            || t.tag_name(h).unwrap_or_default().to_ascii_uppercase() != "INPUT"
+        {
             return None;
         }
-        match t.get_attribute(h, "type").map(|s| s.to_ascii_lowercase()).as_deref() {
+        match t
+            .get_attribute(h, "type")
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref()
+        {
             Some("checkbox") => Some(CheckKind::Checkbox),
             Some("radio") => Some(CheckKind::Radio),
             _ => None,
@@ -1190,7 +1916,10 @@ fn closest_form(h: Handle) -> Option<Handle> {
     with_tree(|t| {
         let mut cur = Some(h);
         while let Some(c) = cur {
-            if t.tag_name(c).map(|s| s.eq_ignore_ascii_case("form")).unwrap_or(false) {
+            if t.tag_name(c)
+                .map(|s| s.eq_ignore_ascii_case("form"))
+                .unwrap_or(false)
+            {
                 return Some(c);
             }
             cur = NodeRef::new(t, c).parent().map(|p| p.handle());
@@ -1202,12 +1931,20 @@ fn closest_form(h: Handle) -> Option<Handle> {
 
 /// Construct `new Event(type, {bubbles, cancelable})` and dispatch it on `target` via its native
 /// dispatchEvent (re-enters the event system → fires listeners).
-fn dispatch_synthetic(scope: &mut v8::PinScope, target: Handle, ty: &str, bubbles: bool, cancelable: bool) {
+fn dispatch_synthetic(
+    scope: &mut v8::PinScope,
+    target: Handle,
+    ty: &str,
+    bubbles: bool,
+    cancelable: bool,
+) {
     let global = scope.get_current_context().global(scope);
     let Some(ctor) = v8::String::new(scope, "Event")
         .and_then(|k| global.get(scope, k.into()))
         .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
-    else { return };
+    else {
+        return;
+    };
     let init = v8::Object::new(scope);
     for (k, val) in [("bubbles", bubbles), ("cancelable", cancelable)] {
         if let Some(key) = v8::String::new(scope, k) {
@@ -1216,7 +1953,9 @@ fn dispatch_synthetic(scope: &mut v8::PinScope, target: Handle, ty: &str, bubble
         }
     }
     let ty_str = v8::String::new(scope, ty).unwrap();
-    let Some(ev) = ctor.new_instance(scope, &[ty_str.into(), init.into()]) else { return };
+    let Some(ev) = ctor.new_instance(scope, &[ty_str.into(), init.into()]) else {
+        return;
+    };
     let node = wrap(scope, target);
     if let Some(de) = v8::String::new(scope, "dispatchEvent")
         .and_then(|k| node.get(scope, k.into()))
@@ -1228,10 +1967,18 @@ fn dispatch_synthetic(scope: &mut v8::PinScope, target: Handle, ty: &str, bubble
 }
 
 // small prop helpers
-fn get_str_prop(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>, name: &str) -> Option<String> {
+fn get_str_prop(
+    scope: &mut v8::PinScope,
+    obj: v8::Local<v8::Object>,
+    name: &str,
+) -> Option<String> {
     let key = v8::String::new(scope, name)?;
     let v = obj.get(scope, key.into())?;
-    if v.is_string() { Some(v.to_rust_string_lossy(scope)) } else { None }
+    if v.is_string() {
+        Some(v.to_rust_string_lossy(scope))
+    } else {
+        None
+    }
 }
 fn get_bool_prop(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>, name: &str) -> bool {
     v8::String::new(scope, name)
@@ -1239,7 +1986,12 @@ fn get_bool_prop(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>, name: &st
         .map(|v| v.boolean_value(scope))
         .unwrap_or(false)
 }
-fn set_prop(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>, name: &str, val: v8::Local<v8::Value>) {
+fn set_prop(
+    scope: &mut v8::PinScope,
+    obj: v8::Local<v8::Object>,
+    name: &str,
+    val: v8::Local<v8::Value>,
+) {
     if let Some(k) = v8::String::new(scope, name) {
         obj.set(scope, k.into(), val);
     }
@@ -1248,8 +2000,15 @@ fn set_prop(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>, name: &str, va
 /// `constructor` → the named global DOM constructor for this node's type, so libraries keying on
 /// `node.constructor.name` (pretty-format's DOMElementFilter regex `/^((HTML|SVG)\w*)?Element$/`)
 /// treat it as a DOM node, not a plain Object they'd recurse into and crash on.
-fn get_constructor(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_constructor(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let (nt, tag) = with_tree(|t| (t.node_type_id(h), t.tag_name(h))).unwrap_or((1, None));
     let cname = match nt {
         3 => "Text",
@@ -1317,16 +2076,30 @@ fn get_constructor(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v
     }
 }
 
-fn get_node_type(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_node_type(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let nt = with_tree(|t| t.node_type_id(h)).unwrap_or(1);
     rv.set(v8::Integer::new(scope, nt as i32).into());
 }
 
 /// `data` / `nodeValue` → text of a text/comment node (null for elements). Serializers call
 /// `.replace` on these, so they must be strings (not undefined) for text nodes.
-fn get_node_data(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_node_data(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let nt = with_tree(|t| t.node_type_id(h)).unwrap_or(1);
     if nt == 3 || nt == 8 {
         let data = with_tree(|t| t.node_value(h)).flatten().unwrap_or_default();
@@ -1335,24 +2108,46 @@ fn get_node_data(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8:
         rv.set(v8::null(scope).into());
     }
 }
-fn set_node_data(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, value: v8::Local<v8::Value>, args: v8::PropertyCallbackArguments, _rv: v8::ReturnValue<()>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn set_node_data(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    value: v8::Local<v8::Value>,
+    args: v8::PropertyCallbackArguments,
+    _rv: v8::ReturnValue<()>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let data = value.to_rust_string_lossy(scope);
     with_tree_mut(|t| t.set_text_content(h, &data));
 }
 
 // `Element.localName` — the lowercase local name (rtdom stores tags lowercased). Non-elements have
 // no local name (null). React/Next devtools read node.localName in places.
-fn get_local_name(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_local_name(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     match with_tree(|t| t.local_name(h).map(|s| s.to_string())).flatten() {
         Some(ln) => rv.set(v8::String::new(scope, &ln).unwrap().into()),
         None => rv.set(v8::null(scope).into()),
     }
 }
 
-fn get_node_name(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_node_name(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let (nt, tag) = with_tree(|t| (t.node_type_id(h), t.tag_name(h))).unwrap_or((1, None));
     let name = match nt {
         3 => "#text".to_string(),
@@ -1364,8 +2159,15 @@ fn get_node_name(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8:
     rv.set(v8::String::new(scope, &name).unwrap().into());
 }
 
-fn get_child_nodes(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_child_nodes(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     let kids = with_tree(|t| t.children(h)).unwrap_or_default();
     let arr = v8::Array::new(scope, kids.len() as i32);
     for (i, k) in kids.into_iter().enumerate() {
@@ -1380,16 +2182,28 @@ fn get_child_nodes(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v
 /// `NodeList.item(i)` → the i-th node, or null when out of range. Bound on every node-collection
 /// array we hand back (childNodes / querySelectorAll / getElementsBy*), so libs calling `.item(i)`
 /// instead of `[i]` (e.g. React-DOM's child reconciliation) don't crash.
-fn nodelist_item(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn nodelist_item(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let i = args.get(0).number_value(scope).unwrap_or(f64::NAN);
-    if i.is_nan() || i < 0.0 { rv.set_null(); return; }
+    if i.is_nan() || i < 0.0 {
+        rv.set_null();
+        return;
+    }
     match args.this().get_index(scope, i as u32) {
         Some(v) if !v.is_undefined() => rv.set(v),
         _ => rv.set_null(),
     }
 }
 
-fn get_owner_document(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, _args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
+fn get_owner_document(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    _args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
     // every node's ownerDocument is the single document (root).
     if let Some(root) = with_tree(|t| t.root()) {
         let doc = wrap(scope, root);
@@ -1404,8 +2218,15 @@ thread_local! {
 
 /// `element.style` → a cached plain JS object (CSSStyleDeclaration-lite). React sets `style.color`
 /// etc. as own props; `el.style.x === x` works. (Full CSSOM / attribute sync is a later refinement.)
-fn get_style(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::PropertyCallbackArguments, mut rv: v8::ReturnValue<v8::Value>) {
-    let Some(h) = handle_of(scope, args.holder()) else { return };
+fn get_style(
+    scope: &mut v8::PinScope,
+    _name: v8::Local<v8::Name>,
+    args: v8::PropertyCallbackArguments,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let Some(h) = handle_of(scope, args.holder()) else {
+        return;
+    };
     if let Some(g) = STYLE.with(|s| s.borrow().get(&h).cloned()) {
         let o = v8::Local::new(scope, &g);
         rv.set(o.into());
@@ -1415,7 +2236,12 @@ fn get_style(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::Pro
     // setProperty/getPropertyValue/removeProperty so libs using the CSSOM methods don't crash.
     bind_method(scope, obj, "setProperty", style_set_property);
     bind_method(scope, obj, "getPropertyValue", style_get_property);
-    bind_method(scope, obj, "getPropertyPriority", style_get_property_priority);
+    bind_method(
+        scope,
+        obj,
+        "getPropertyPriority",
+        style_get_property_priority,
+    );
     bind_method(scope, obj, "removeProperty", style_remove_property);
     // stash the element handle so the proxy set-trap can reflect to the `style` content attribute.
     if let Some(hk) = v8::String::new(scope, "__h") {
@@ -1427,27 +2253,45 @@ fn get_style(scope: &mut v8::PinScope, _name: v8::Local<v8::Name>, args: v8::Pro
     // getAttribute('style') see it. Reads/methods pass through to the target.
     let handler = v8::Object::new(scope);
     bind_method(scope, handler, "set", style_proxy_set);
-    let proxy = v8::Proxy::new(scope, obj, handler).map(|p| p.into()).unwrap_or(obj);
+    let proxy = v8::Proxy::new(scope, obj, handler)
+        .map(|p| p.into())
+        .unwrap_or(obj);
     let g = v8::Global::new(scope, proxy);
-    STYLE.with(|s| { s.borrow_mut().insert(h, g); });
+    STYLE.with(|s| {
+        s.borrow_mut().insert(h, g);
+    });
     rv.set(proxy.into());
 }
 
 /// Proxy `set` trap for `element.style`: set on the target, then serialize the declaration to the
 /// element's `style` content attribute so it's observable via attribute selectors / getAttribute.
-fn style_proxy_set(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
-    let target = match v8::Local::<v8::Object>::try_from(args.get(0)) { Ok(o) => o, Err(_) => { rv.set_bool(false); return; } };
+fn style_proxy_set(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let target = match v8::Local::<v8::Object>::try_from(args.get(0)) {
+        Ok(o) => o,
+        Err(_) => {
+            rv.set_bool(false);
+            return;
+        }
+    };
     let key = args.get(1);
     let mut value = args.get(2);
     // CSSOM values are always strings (jest-dom assigns numbers like `style.fontWeight = 600`; a
     // browser stores "600"). Coerce to string, then normalize hex colors to rgb()/rgba() so
     // el.style.X reads match getComputedStyle's normalized cascade values for jest-dom toHaveStyle.
     if value.is_number() || value.is_boolean() {
-        if let Some(s) = value.to_string(scope) { value = s.into(); }
+        if let Some(s) = value.to_string(scope) {
+            value = s.into();
+        }
     }
     if value.is_string() {
         if let Some(n) = normalize_css_color(&value.to_rust_string_lossy(scope)) {
-            if let Some(s) = v8::String::new(scope, &n) { value = s.into(); }
+            if let Some(s) = v8::String::new(scope, &n) {
+                value = s.into();
+            }
         }
     }
     target.set(scope, key, value);
@@ -1458,7 +2302,13 @@ fn style_proxy_set(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments
         .map(|n| Handle::from_raw(n as u32));
     if let Some(h) = h {
         let css = serialize_style(scope, target);
-        with_tree_mut(|t| { if css.is_empty() { t.remove_attribute(h, "style"); } else { t.set_attribute(h, "style", &css); } });
+        with_tree_mut(|t| {
+            if css.is_empty() {
+                t.remove_attribute(h, "style");
+            } else {
+                t.set_attribute(h, "style", &css);
+            }
+        });
     }
     rv.set_bool(true);
 }
@@ -1469,14 +2319,32 @@ fn style_proxy_set(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments
 fn normalize_css_color(v: &str) -> Option<String> {
     let s = v.trim();
     let hex = s.strip_prefix('#')?;
-    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) { return None; }
-    let h = |a: u8, b: u8| -> Option<u8> { u8::from_str_radix(&format!("{}{}", a as char, b as char), 16).ok() };
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let h = |a: u8, b: u8| -> Option<u8> {
+        u8::from_str_radix(&format!("{}{}", a as char, b as char), 16).ok()
+    };
     let b = hex.as_bytes();
     match hex.len() {
-        3 => { let (r, g, bl) = (h(b[0], b[0])?, h(b[1], b[1])?, h(b[2], b[2])?); Some(format!("rgb({}, {}, {})", r, g, bl)) }
-        6 => { let (r, g, bl) = (h(b[0], b[1])?, h(b[2], b[3])?, h(b[4], b[5])?); Some(format!("rgb({}, {}, {})", r, g, bl)) }
-        8 => { let (r, g, bl, a) = (h(b[0], b[1])?, h(b[2], b[3])?, h(b[4], b[5])?, h(b[6], b[7])?);
-               let af = (a as f64 / 255.0 * 100.0).round() / 100.0; Some(format!("rgba({}, {}, {}, {})", r, g, bl, af)) }
+        3 => {
+            let (r, g, bl) = (h(b[0], b[0])?, h(b[1], b[1])?, h(b[2], b[2])?);
+            Some(format!("rgb({}, {}, {})", r, g, bl))
+        }
+        6 => {
+            let (r, g, bl) = (h(b[0], b[1])?, h(b[2], b[3])?, h(b[4], b[5])?);
+            Some(format!("rgb({}, {}, {})", r, g, bl))
+        }
+        8 => {
+            let (r, g, bl, a) = (
+                h(b[0], b[1])?,
+                h(b[2], b[3])?,
+                h(b[4], b[5])?,
+                h(b[6], b[7])?,
+            );
+            let af = (a as f64 / 255.0 * 100.0).round() / 100.0;
+            Some(format!("rgba({}, {}, {}, {})", r, g, bl, af))
+        }
         _ => None,
     }
 }
@@ -1485,28 +2353,51 @@ fn normalize_css_color(v: &str) -> Option<String> {
 /// names → kebab-case), skipping internals (`__*`) and methods.
 fn serialize_style(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>) -> String {
     let mut out = String::new();
-    let Some(names) = obj.get_own_property_names(scope, Default::default()) else { return out };
+    let Some(names) = obj.get_own_property_names(scope, Default::default()) else {
+        return out;
+    };
     for i in 0..names.length() {
-        let Some(k) = names.get_index(scope, i) else { continue };
+        let Some(k) = names.get_index(scope, i) else {
+            continue;
+        };
         let kn = k.to_rust_string_lossy(scope);
-        if kn.starts_with("__") { continue; }
+        if kn.starts_with("__") {
+            continue;
+        }
         let Some(v) = obj.get(scope, k) else { continue };
-        if v.is_function() || v.is_undefined() || v.is_null() { continue; }
+        if v.is_function() || v.is_undefined() || v.is_null() {
+            continue;
+        }
         let vs = v.to_rust_string_lossy(scope);
-        if vs.is_empty() { continue; }
+        if vs.is_empty() {
+            continue;
+        }
         // camelCase -> kebab-case
         let mut prop = String::with_capacity(kn.len() + 4);
         for ch in kn.chars() {
-            if ch.is_ascii_uppercase() { prop.push('-'); prop.push(ch.to_ascii_lowercase()); }
-            else { prop.push(ch); }
+            if ch.is_ascii_uppercase() {
+                prop.push('-');
+                prop.push(ch.to_ascii_lowercase());
+            } else {
+                prop.push(ch);
+            }
         }
-        if !out.is_empty() { out.push(' '); }
-        out.push_str(&prop); out.push_str(": "); out.push_str(&vs); out.push(';');
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&prop);
+        out.push_str(": ");
+        out.push_str(&vs);
+        out.push(';');
     }
     out
 }
 
-fn style_set_property(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
+fn style_set_property(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
     let name = arg_str(scope, &args, 0);
     let value = args.get(1);
     if let Some(key) = v8::String::new(scope, &name) {
@@ -1528,7 +2419,10 @@ fn style_set_property(scope: &mut v8::PinScope, args: v8::FunctionCallbackArgume
 }
 
 /// the `__prio` object on a style declaration (created on first use) holding per-property priorities.
-fn style_prio_map<'s>(scope: &mut v8::PinScope<'s, '_>, style: v8::Local<v8::Object>) -> Option<v8::Local<'s, v8::Object>> {
+fn style_prio_map<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    style: v8::Local<v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
     let key = v8::String::new(scope, "__prio")?;
     let existing = style.get(scope, key.into())?;
     if let Ok(o) = v8::Local::<v8::Object>::try_from(existing) {
@@ -1539,7 +2433,11 @@ fn style_prio_map<'s>(scope: &mut v8::PinScope<'s, '_>, style: v8::Local<v8::Obj
     Some(o)
 }
 
-fn style_get_property_priority(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn style_get_property_priority(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let name = arg_str(scope, &args, 0);
     let prio = style_prio_map(scope, args.this())
         .and_then(|m| v8::String::new(scope, &name).and_then(|k| m.get(scope, k.into())))
@@ -1549,17 +2447,28 @@ fn style_get_property_priority(scope: &mut v8::PinScope, args: v8::FunctionCallb
     rv.set(v8::String::new(scope, &prio).unwrap().into());
 }
 
-fn style_get_property(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn style_get_property(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let name = arg_str(scope, &args, 0);
     if let Some(key) = v8::String::new(scope, &name) {
         if let Some(v) = args.this().get(scope, key.into()) {
-            if !v.is_undefined() { rv.set(v); return; }
+            if !v.is_undefined() {
+                rv.set(v);
+                return;
+            }
         }
     }
     rv.set(v8::String::new(scope, "").unwrap().into());
 }
 
-fn style_remove_property(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
+fn style_remove_property(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
     let name = arg_str(scope, &args, 0);
     if let Some(key) = v8::String::new(scope, &name) {
         args.this().delete(scope, key.into());
@@ -1568,37 +2477,62 @@ fn style_remove_property(scope: &mut v8::PinScope, args: v8::FunctionCallbackArg
 
 // ---- document methods ------------------------------------------------------------------------
 
-fn doc_create_element(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn doc_create_element(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let tag = arg_str(scope, &args, 0);
-    let Some(h) = with_tree_mut(|t| t.create_element(&tag)) else { return };
+    let Some(h) = with_tree_mut(|t| t.create_element(&tag)) else {
+        return;
+    };
     let node = wrap(scope, h);
     rv.set(node.into());
 }
 
-fn doc_create_text_node(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn doc_create_text_node(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let data = arg_str(scope, &args, 0);
-    let Some(h) = with_tree_mut(|t| t.create_text_node(&data)) else { return };
+    let Some(h) = with_tree_mut(|t| t.create_text_node(&data)) else {
+        return;
+    };
     let node = wrap(scope, h);
     rv.set(node.into());
 }
 
-fn doc_get_element_by_id(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn doc_get_element_by_id(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let id = arg_str(scope, &args, 0);
     let found = with_tree(|t| t.get_element_by_id(&id)).flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
 
-fn doc_query_selector(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn doc_query_selector(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let sel = arg_str(scope, &args, 0);
     let found = with_tree(|t| t.query_selector(&sel)).flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
 
-fn doc_query_selector_all(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
+fn doc_query_selector_all(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
     let sel = arg_str(scope, &args, 0);
-    let handles: Vec<Handle> = with_tree(|t| t.query_selector_all(&sel).to_vec()).unwrap_or_default();
+    let handles: Vec<Handle> =
+        with_tree(|t| t.query_selector_all(&sel).to_vec()).unwrap_or_default();
     let arr = v8::Array::new(scope, handles.len() as i32);
     for (i, hh) in handles.into_iter().enumerate() {
         let node = wrap(scope, hh);
@@ -1611,7 +2545,12 @@ fn doc_query_selector_all(scope: &mut v8::PinScope, args: v8::FunctionCallbackAr
 
 // ---- install ---------------------------------------------------------------------------------
 
-fn bind_method(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>, name: &str, f: impl v8::MapFnTo<v8::FunctionCallback>) {
+fn bind_method(
+    scope: &mut v8::PinScope,
+    obj: v8::Local<v8::Object>,
+    name: &str,
+    f: impl v8::MapFnTo<v8::FunctionCallback>,
+) {
     let tmpl = v8::FunctionTemplate::new(scope, f);
     let func = tmpl.get_function(scope).unwrap();
     let key = v8::String::new(scope, name).unwrap();
@@ -1619,18 +2558,34 @@ fn bind_method(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>, name: &str,
 }
 
 /// Set a method (FunctionTemplate) on an object template.
-fn tmpl_method(scope: &mut v8::PinScope, tmpl: v8::Local<v8::ObjectTemplate>, name: &str, f: impl v8::MapFnTo<v8::FunctionCallback>) {
+fn tmpl_method(
+    scope: &mut v8::PinScope,
+    tmpl: v8::Local<v8::ObjectTemplate>,
+    name: &str,
+    f: impl v8::MapFnTo<v8::FunctionCallback>,
+) {
     let ft = v8::FunctionTemplate::new(scope, f);
     let key = v8::String::new(scope, name).unwrap();
     tmpl.set(key.into(), ft.into());
 }
 
-fn tmpl_getter(scope: &mut v8::PinScope, tmpl: v8::Local<v8::ObjectTemplate>, name: &str, g: impl v8::MapFnTo<v8::AccessorNameGetterCallback>) {
+fn tmpl_getter(
+    scope: &mut v8::PinScope,
+    tmpl: v8::Local<v8::ObjectTemplate>,
+    name: &str,
+    g: impl v8::MapFnTo<v8::AccessorNameGetterCallback>,
+) {
     let key = v8::String::new(scope, name).unwrap();
     tmpl.set_accessor(key.into(), g);
 }
 
-fn tmpl_accessor(scope: &mut v8::PinScope, tmpl: v8::Local<v8::ObjectTemplate>, name: &str, g: impl v8::MapFnTo<v8::AccessorNameGetterCallback>, s: impl v8::MapFnTo<v8::AccessorNameSetterCallback>) {
+fn tmpl_accessor(
+    scope: &mut v8::PinScope,
+    tmpl: v8::Local<v8::ObjectTemplate>,
+    name: &str,
+    g: impl v8::MapFnTo<v8::AccessorNameGetterCallback>,
+    s: impl v8::MapFnTo<v8::AccessorNameSetterCallback>,
+) {
     let key = v8::String::new(scope, name).unwrap();
     tmpl.set_accessor_with_setter(key.into(), g, s);
 }
@@ -1679,7 +2634,12 @@ fn build_el_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::
     tmpl_method(scope, tmpl, "scrollBy", el_noop);
     tmpl_method(scope, tmpl, "checkValidity", el_valid_true);
     tmpl_method(scope, tmpl, "reportValidity", el_valid_true);
-    tmpl_method(scope, tmpl, "getBoundingClientRect", el_get_bounding_client_rect);
+    tmpl_method(
+        scope,
+        tmpl,
+        "getBoundingClientRect",
+        el_get_bounding_client_rect,
+    );
     // CharacterData (text/comment node) mutation — native over rtdom's text storage.
     tmpl_method(scope, tmpl, "insertData", el_insert_data);
     tmpl_method(scope, tmpl, "deleteData", el_delete_data);
@@ -1694,7 +2654,12 @@ fn build_el_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::
     tmpl_method(scope, tmpl, "after", el_after);
     tmpl_method(scope, tmpl, "replaceWith", el_replace_with);
     tmpl_method(scope, tmpl, "replaceChildren", el_replace_children);
-    tmpl_method(scope, tmpl, "insertAdjacentElement", el_insert_adjacent_element);
+    tmpl_method(
+        scope,
+        tmpl,
+        "insertAdjacentElement",
+        el_insert_adjacent_element,
+    );
     tmpl_method(scope, tmpl, "insertAdjacentHTML", el_insert_adjacent_html);
     tmpl_method(scope, tmpl, "toggleAttribute", el_toggle_attribute);
     tmpl_method(scope, tmpl, "getAttributeNS", el_get_attribute_ns);
@@ -1723,19 +2688,37 @@ fn build_el_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::
     tmpl_getter(scope, tmpl, "dataset", get_dataset);
     tmpl_accessor(scope, tmpl, "innerHTML", get_inner_html, set_inner_html);
 
-    tmpl_accessor(scope, tmpl, "textContent", get_text_content, set_text_content);
+    tmpl_accessor(
+        scope,
+        tmpl,
+        "textContent",
+        get_text_content,
+        set_text_content,
+    );
     tmpl_accessor(scope, tmpl, "id", get_id, set_id);
     tmpl_accessor(scope, tmpl, "className", get_class_name, set_class_name);
-    tmpl_accessor(scope, tmpl, "contentEditable", get_content_editable, set_content_editable);
+    tmpl_accessor(
+        scope,
+        tmpl,
+        "contentEditable",
+        get_content_editable,
+        set_content_editable,
+    );
     tmpl_getter(scope, tmpl, "isContentEditable", get_is_content_editable);
 
     // Node-type constants on every node (`node.TEXT_NODE === 3`, …). dom-accessibility-api compares
     // `node.nodeType === node.TEXT_NODE`, so without these the accessible-name walk skips all text
     // nodes → empty names → getByRole({name}) finds nothing.
     for (name, val) in [
-        ("ELEMENT_NODE", 1), ("ATTRIBUTE_NODE", 2), ("TEXT_NODE", 3), ("CDATA_SECTION_NODE", 4),
-        ("PROCESSING_INSTRUCTION_NODE", 7), ("COMMENT_NODE", 8), ("DOCUMENT_NODE", 9),
-        ("DOCUMENT_TYPE_NODE", 10), ("DOCUMENT_FRAGMENT_NODE", 11),
+        ("ELEMENT_NODE", 1),
+        ("ATTRIBUTE_NODE", 2),
+        ("TEXT_NODE", 3),
+        ("CDATA_SECTION_NODE", 4),
+        ("PROCESSING_INSTRUCTION_NODE", 7),
+        ("COMMENT_NODE", 8),
+        ("DOCUMENT_NODE", 9),
+        ("DOCUMENT_TYPE_NODE", 10),
+        ("DOCUMENT_FRAGMENT_NODE", 11),
     ] {
         let key = v8::String::new(scope, name).unwrap();
         let v = v8::Integer::new(scope, val);
@@ -1747,7 +2730,10 @@ fn build_el_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::
     let handler = v8::NamedPropertyHandlerConfiguration::new()
         .getter(missing_getter)
         .setter(passthrough_setter)
-        .flags(v8::PropertyHandlerFlags::NON_MASKING | v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS);
+        .flags(
+            v8::PropertyHandlerFlags::NON_MASKING
+                | v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS,
+        );
     tmpl.set_named_property_handler(handler);
 
     tmpl
@@ -1761,7 +2747,11 @@ pub fn install(scope: &mut v8::PinScope) {
         v8::Global::new(scope, t)
     };
     DOM.with(|d| {
-        *d.borrow_mut() = Some(DomState { tree, cache: HashMap::new(), el_template });
+        *d.borrow_mut() = Some(DomState {
+            tree,
+            cache: HashMap::new(),
+            el_template,
+        });
     });
 
     let root = with_tree(|t| t.root()).unwrap();
@@ -1776,7 +2766,12 @@ pub fn install(scope: &mut v8::PinScope) {
     bind_method(scope, document, "querySelector", doc_query_selector);
     bind_method(scope, document, "querySelectorAll", doc_query_selector_all);
     bind_method(scope, document, "createElementNS", doc_create_element_ns);
-    bind_method(scope, document, "createDocumentFragment", doc_create_fragment);
+    bind_method(
+        scope,
+        document,
+        "createDocumentFragment",
+        doc_create_fragment,
+    );
     bind_method(scope, document, "createComment", doc_create_comment);
     if let Some(b) = body_h {
         let body = wrap(scope, b);
@@ -1813,7 +2808,10 @@ fn run_js(scope: &mut v8::PinScope, src: &str) {
         }
     }
     if tc.has_caught() && log_enabled() {
-        let msg = tc.exception().map(|e| e.to_rust_string_lossy(tc)).unwrap_or_default();
+        let msg = tc
+            .exception()
+            .map(|e| e.to_rust_string_lossy(tc))
+            .unwrap_or_default();
         eprintln!("[rust-dom] bootstrap threw: {msg}");
     }
 }
@@ -1867,7 +2865,9 @@ mod tests {
         };
 
         // create + append + attribute + textContent + querySelector + identity
-        let out = run(scope, r#"
+        let out = run(
+            scope,
+            r#"
             const d = document.createElement('div');
             d.setAttribute('id', 'x');
             d.className = 'card';
@@ -1883,15 +2883,199 @@ mod tests {
                 getAttr: d.getAttribute('id'),
                 inBody: document.body.firstChild === d,
             });
-        "#);
+        "#,
+        );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["tag"], "DIV", "{out}");
         assert_eq!(v["id"], "x", "{out}");
         assert_eq!(v["cls"], "card", "{out}");
         assert_eq!(v["text"], "hello", "{out}");
-        assert_eq!(v["identity"], true, "querySelector must return the SAME object: {out}");
+        assert_eq!(
+            v["identity"], true,
+            "querySelector must return the SAME object: {out}"
+        );
         assert_eq!(v["getAttr"], "x", "{out}");
         assert_eq!(v["inBody"], true, "{out}");
+        reset();
+    }
+
+    // A cross-origin <iframe> hosts a bridged second window realm: contentWindow is a
+    // distinct object with its own document, and postMessage crosses the realm boundary
+    // in BOTH directions carrying the correct source/origin (the reCAPTCHA anchor↔bframe
+    // handshake shape). Delivery is async (setTimeout), so a queue shim + drain stands in
+    // for the real message loop.
+    #[test]
+    fn iframe_second_realm_bridges_post_message_both_ways() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install(scope);
+
+        let run = |scope: &mut v8::PinScope, code: &str| -> String {
+            let src = v8::String::new(scope, code).unwrap();
+            let script = v8::Script::compile(scope, src, None).unwrap();
+            let r = script.run(scope).unwrap();
+            r.to_rust_string_lossy(scope)
+        };
+
+        let out = run(
+            scope,
+            r#"
+            // Virtual timer queue so postMessage delivery is drainable (no wall clock).
+            const __q = [];
+            globalThis.setTimeout = (fn) => { __q.push(fn); return __q.length; };
+            const drain = () => { let n = 0; while (__q.length && n++ < 1000) { (__q.shift())(); } };
+            globalThis.location = { origin: 'https://page.test', href: 'https://page.test/' };
+
+            const iframe = document.createElement('iframe');
+            iframe.setAttribute('src', 'https://recaptcha.test/frame');
+            const cw = iframe.contentWindow;
+            const cd = iframe.contentDocument;
+
+            const distinct = cw !== globalThis && cw.document === cd && cw.self === cw;
+            const ownDoc = cd.body != null && cd.body !== document.body;
+
+            // Child builds its own DOM into its own document and queries it back through
+            // the child document facade. (The underlying binding has a single native tree,
+            // so the child subtree is not tree-level isolated from the parent — the shared
+            // object graph noted in browser_env.js; the realm boundary is the window +
+            // message channel, which is what a cross-frame protocol relies on.)
+            const el = cd.createElement('div'); el.setAttribute('id', 'inchild');
+            cd.body.appendChild(el);
+            const childFindsOwn = cd.getElementById('inchild') != null &&
+                                  cd.querySelector('#inchild') === el;
+
+            // Child listens for a challenge and replies through e.source (→ parent).
+            let childSaw = '';
+            cw.addEventListener('message', (e) => {
+                childSaw = e.data + '|' + e.origin + '|' + (e.source === cw.parent);
+                e.source.postMessage('token:CHILD-REPLY', e.origin);
+            });
+            // Parent listens for the reply and checks source identity + child origin.
+            let parentSaw = '';
+            addEventListener('message', (e) => {
+                parentSaw = e.data + '|' + e.origin + '|' + (e.source === iframe.contentWindow);
+            });
+
+            // Parent → child.
+            cw.postMessage('challenge:GO', 'https://recaptcha.test');
+            drain(); drain();
+
+            JSON.stringify({ distinct, ownDoc, childFindsOwn, childSaw, parentSaw, childOrigin: cw.origin });
+        "#,
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["distinct"], true,
+            "contentWindow is a distinct realm: {out}"
+        );
+        assert_eq!(v["ownDoc"], true, "child has its own document body: {out}");
+        assert_eq!(
+            v["childFindsOwn"], true,
+            "child finds its own element via its own document: {out}"
+        );
+        assert_eq!(v["childOrigin"], "https://recaptcha.test", "{out}");
+        // Child received the parent's challenge with the parent origin + a source it can reply to.
+        assert_eq!(
+            v["childSaw"], "challenge:GO|https://page.test|true",
+            "{out}"
+        );
+        // Parent received the child's reply with source === the iframe + the child origin.
+        assert_eq!(
+            v["parentSaw"], "token:CHILD-REPLY|https://recaptcha.test|true",
+            "cross-realm reply must carry the child origin + iframe source: {out}"
+        );
+        reset();
+    }
+
+    // WebGL emulates a coherent headless-Chrome SwiftShader context: the identity strings
+    // (VENDOR/RENDERER + UNMASKED_* via WEBGL_debug_renderer_info), the numeric limits, the
+    // extension list, shader precision, and deterministic content-dependent readPixels — the
+    // surface a GPU fingerprinter reads. No longer null (a null WebGL is a stronger bot tell).
+    #[test]
+    fn webgl_reports_a_coherent_swiftshader_signature() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install(scope);
+
+        let run = |scope: &mut v8::PinScope, code: &str| -> String {
+            let src = v8::String::new(scope, code).unwrap();
+            let script = v8::Script::compile(scope, src, None).unwrap();
+            let r = script.run(scope).unwrap();
+            r.to_rust_string_lossy(scope)
+        };
+
+        let out = run(
+            scope,
+            r#"
+            const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+            const gl = c.getContext('webgl');
+            const notNull = gl != null;
+            const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+            const unmaskedVendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
+            const unmaskedRenderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+            const vendor = gl.getParameter(gl.VENDOR);
+            const renderer = gl.getParameter(gl.RENDERER);
+            const version = gl.getParameter(gl.VERSION);
+            const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+            const exts = gl.getSupportedExtensions();
+            const hasDbg = exts.indexOf('WEBGL_debug_renderer_info') >= 0;
+            const prec = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER || 0x8B30, gl.HIGH_FLOAT);
+
+            // readPixels: deterministic + content-dependent (draw ops change the hash).
+            const rp = () => { const px = new Uint8Array(4*16); gl.readPixels(0,0,4,4,0x1908,0x1401,px); return Array.from(px.slice(0,8)).join(','); };
+            const a1 = rp();
+            gl.clearColor(0.1,0.2,0.3,1.0); gl.clear(0x4000); gl.drawArrays(0x0004,0,3);
+            const a2 = rp();
+            const a3 = rp(); // same op-state, read again → must be identical (deterministic)
+
+            const gl2 = document.createElement('canvas').getContext('webgl2');
+            const version2 = gl2.getParameter(gl2.VERSION);
+
+            JSON.stringify({ notNull, unmaskedVendor, unmaskedRenderer, vendor, renderer, version,
+              version2, maxTex, hasDbg, extCount: exts.length,
+              precOk: prec.rangeMin === 127 && prec.rangeMax === 127 && prec.precision === 23,
+              detStable: a2 === a3, contentDep: a1 !== a2 });
+        "#,
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["notNull"], true, "webgl context must not be null: {out}");
+        assert_eq!(v["unmaskedVendor"], "Google Inc. (Google)", "{out}");
+        assert_eq!(
+            v["unmaskedRenderer"],
+            "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+            "{out}"
+        );
+        assert_eq!(v["vendor"], "WebKit", "{out}");
+        assert_eq!(v["renderer"], "WebKit WebGL", "{out}");
+        assert_eq!(v["version"], "WebGL 1.0 (OpenGL ES 2.0 Chromium)", "{out}");
+        assert_eq!(v["version2"], "WebGL 2.0 (OpenGL ES 3.0 Chromium)", "{out}");
+        assert_eq!(v["maxTex"], 8192, "{out}");
+        assert_eq!(
+            v["hasDbg"], true,
+            "WEBGL_debug_renderer_info must be advertised: {out}"
+        );
+        assert!(
+            v["extCount"].as_u64().unwrap() > 20,
+            "full extension list: {out}"
+        );
+        assert_eq!(
+            v["precOk"], true,
+            "highp float precision is SwiftShader's 127/127/23: {out}"
+        );
+        assert_eq!(
+            v["detStable"], true,
+            "identical GL draws hash identically: {out}"
+        );
+        assert_eq!(
+            v["contentDep"], true,
+            "different GL draws change readback: {out}"
+        );
         reset();
     }
 }

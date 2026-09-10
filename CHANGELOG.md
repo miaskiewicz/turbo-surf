@@ -9,6 +9,23 @@ Freshened the emulated browser identity from Chrome 149 to **Chrome 153** (curre
 stable) across every layer an anti-bot wall reads, and fixed a latent cross-layer
 version mismatch on the default impersonate path.
 
+### Added
+- **`trust-anchors` cargo feature** (off by default; implies `impersonate`) — emits
+  Chrome 152+'s `trust_anchors` TLS extension (codepoint `0xCA34`), taking the
+  ClientHello JA4 from `t13d1516h2` to `t13d1517h2` to match current Chrome. Built on
+  a small **vendored fork of `wreq`** under `rust/vendor/wreq` (adds a `trust_anchors`
+  field to `TlsOptions`, wired to BoringSSL's `SSL_CTX_set1_requested_trust_anchors`),
+  applied via `[patch.crates-io]`. An empty list still emits the extension. See the
+  caveat in `PUBLISHING.md` — the `[patch]` is workspace-local, so the feature works
+  in the shipped binary but not for crates.io library consumers who enable it.
+- **Render tier: real `navigator.sendBeacon` delivery + a complete `XMLHttpRequest`
+  surface** (responseType, response headers, readyState transitions/constants, abort/
+  timeout/withCredentials) over the isolate's `op_fetch` + shared cookie jar, in the
+  non-vendored `ENV_BOOTSTRAP` injection layer (native-branded via the `toString`
+  WeakSet). Any page whose anti-bot/analytics flow ships a token via `sendBeacon` or a
+  fuller XHR now completes the round-trip. (Note: this does **not** unblock google
+  search — its SERP is BotGuard/JS-gated and stays on the real-Chrome sidecar.)
+
 ### Changed
 - **Emulated Chrome 149 → 153**: `fingerprint::default_profile` (UA + `sec-ch-ua`),
   the profile major pool, and the render-tier `navigator.userAgent` / `chromeMajor`

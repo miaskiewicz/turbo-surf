@@ -236,18 +236,33 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str) {
 fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     #[cfg(feature = "impersonate")]
     let builder = {
+        use wreq::IntoEmulation;
         let profile = crate::fingerprint::default_profile();
         let mut hints = http::header::HeaderMap::new();
         if let Ok(v) = profile.sec_ch_ua.parse() {
             hints.insert("sec-ch-ua", v);
         }
+        // Resolve the wreq-util Chrome 149 profile to a concrete `Emulation` so its
+        // TlsOptions can be tweaked before it's applied.
+        #[allow(unused_mut)]
+        let mut emulation = wreq_util::Emulation::builder()
+            .profile(wreq_util::Profile::Chrome149)
+            .platform(wreq_util::Platform::MacOS)
+            .build()
+            .into_emulation();
+        // With the `trust-anchors` feature, additionally emit Chrome 152+'s
+        // `trust_anchors` extension (codepoint 0xCA34). wreq-util's Chrome149
+        // profile omits it, leaving JA4 at `t13d1516h2` vs real Chrome's
+        // `t13d1517h2`. An *empty* trust-anchors list still sends the extension
+        // (BoringSSL), so JA4 gains the extension without carrying real IDs; the
+        // ext lands at the ClientHello tail but JA4's ext hash is order-independent.
+        // Needs the vendored wreq fork (see workspace Cargo.toml `[patch.crates-io]`).
+        #[cfg(feature = "trust-anchors")]
+        if let Some(tls) = emulation.tls_options.as_mut() {
+            tls.trust_anchors = Some(bytes::Bytes::new());
+        }
         builder
-            .emulation(
-                wreq_util::Emulation::builder()
-                    .profile(wreq_util::Profile::Chrome149)
-                    .platform(wreq_util::Platform::MacOS)
-                    .build(),
-            )
+            .emulation(emulation)
             // Override AFTER emulation (wreq applies the profile immediately, so
             // later fine-tuning wins) to freshen the reported version 149 -> 153.
             .user_agent(profile.user_agent.as_str())

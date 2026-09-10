@@ -83,6 +83,13 @@ version mismatch on the default impersonate path.
   search — its SERP is BotGuard/JS-gated and stays on the real-Chrome sidecar.)
 
 ### Changed
+- **Request-#1 network-fingerprint parity with real Chrome** (the layer served
+  before any JS): the impersonate HEADERS frame is now byte-for-byte Chrome —
+  H2 priority weight 256 (was 220), `upgrade-insecure-requests` + `sec-fetch-user`
+  added, exact Chrome navigation header ORDER (via `orig_headers`), `accept-encoding`
+  = `gzip, deflate, br, zstd`, and the high-entropy `sec-ch-ua-*` hints are **no longer
+  sent on a cold request** (real Chrome sends only the low-entropy trio until the
+  server sends `Accept-CH`). The impersonate e2e asserts these against a live echo.
 - **Emulated Chrome 149 → 153**: `fingerprint::default_profile` (UA + `sec-ch-ua`),
   the profile major pool, and the render-tier `navigator.userAgent` / `chromeMajor`
   now report Chrome 153.

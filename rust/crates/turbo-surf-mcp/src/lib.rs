@@ -1429,13 +1429,20 @@ fn list_active_strategies(session: &Session) -> Vec<Value> {
 // per-host Chrome identity + consent-cookie seeding, and for a render-tier strategy
 // (mode fast/secure) runs the page's own JS on a THROWAWAY session, so the caller's
 // current page/jar are never touched.
-async fn fetch_serp(strategy: &Strategy, url: &str, force_browser: bool) -> Result<String, String> {
+async fn fetch_serp(
+    strategy: &Strategy,
+    url: &str,
+    force_browser: bool,
+    headless: Option<bool>,
+) -> Result<String, String> {
     // Browser mode: hand the SERP URL to a real-browser sidecar (opt-in, chromium
     // stays OUT of the engine) and parse the rendered results HTML it returns. This
     // is the path for engines gated behind a browser-integrity wall (google's
     // BotGuard/enablejs), which no headless fetch/JS-tier clears — a real browser does.
+    // `headless` (from the caller) picks the sidecar's mode; None lets the sidecar
+    // default (headed — headless trips google's /sorry).
     if force_browser || strategy.mode == "browser" {
-        return browser_fetch_serp(url).await;
+        return browser_fetch_serp(url, headless).await;
     }
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
     let opts = FetchOptions {
@@ -1456,21 +1463,26 @@ async fn fetch_serp(strategy: &Strategy, url: &str, force_browser: bool) -> Resu
 
 /// Fetch a SERP through the opt-in browser sidecar named by the
 /// `TURBO_SURF_BROWSER_FETCH_CMD` env var (e.g. `node harness/browser-solver/fetch-serp.mjs`).
-/// Contract: we write `{"url":"…"}\n` to its stdin; it navigates a real browser and
-/// writes `{"html":"…","finalUrl":"…","status":200}` to stdout. Chromium is never
-/// linked into the engine — this shells out to a dev/deploy-provided browser.
-async fn browser_fetch_serp(url: &str) -> Result<String, String> {
+/// Contract: we write `{"url":"…","headless"?:bool}\n` to its stdin; it navigates a
+/// real browser and writes `{"html":"…","finalUrl":"…","status":200}` to stdout.
+/// Chromium is never linked into the engine — this shells out to a dev/deploy-provided
+/// browser. `headless` (None = sidecar default, headed) is forwarded on stdin.
+async fn browser_fetch_serp(url: &str, headless: Option<bool>) -> Result<String, String> {
     let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
         "web_search browser mode needs the TURBO_SURF_BROWSER_FETCH_CMD env var (a \
          real-browser sidecar; run web_search_setup_browser, or `node scripts/browser-sidecar/fetch-serp.mjs`)"
             .to_string()
     })?;
-    browser_fetch_serp_cmd(url, &cmd).await
+    browser_fetch_serp_cmd(url, &cmd, headless).await
 }
 
 /// Run a specific browser-sidecar command for `url` (the env-independent core, so the
 /// contract is unit-testable with a stub command). See [`browser_fetch_serp`].
-async fn browser_fetch_serp_cmd(url: &str, cmd: &str) -> Result<String, String> {
+async fn browser_fetch_serp_cmd(
+    url: &str,
+    cmd: &str,
+    headless: Option<bool>,
+) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
     let mut parts = cmd.split_whitespace();
     let prog = parts
@@ -1483,7 +1495,11 @@ async fn browser_fetch_serp_cmd(url: &str, cmd: &str) -> Result<String, String> 
         .stderr(std::process::Stdio::inherit())
         .spawn()
         .map_err(|e| format!("spawn browser sidecar ({prog}): {e}"))?;
-    let req = json!({ "url": url }).to_string();
+    let req = match headless {
+        Some(h) => json!({ "url": url, "headless": h }),
+        None => json!({ "url": url }),
+    }
+    .to_string();
     child
         .stdin
         .take()
@@ -1537,7 +1553,10 @@ async fn tool_search(session: &Session, args: &Value) -> Result<Value, String> {
         .get("browser")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let body = fetch_serp(&strategy, &url, force_browser).await?;
+    // `headless:true|false` picks the sidecar's Chrome mode for this call (browser mode
+    // only); omit to let the sidecar default (headed — headless trips google's /sorry).
+    let headless = args.get("headless").and_then(Value::as_bool);
+    let body = fetch_serp(&strategy, &url, force_browser, headless).await?;
     let results = parse_serp(&strategy, &body, limit);
     Ok(json!(results
         .iter()
@@ -1666,8 +1685,10 @@ pub fn tools() -> Value {
              default via web_search_set_engine). base? is the instance URL for \
              engine:searxng. limit? (default 10). browser? routes the SERP fetch \
              through a real-browser sidecar (TURBO_SURF_BROWSER_FETCH_CMD) — needed \
-             for engines behind a browser-integrity wall (google BotGuard). Stateless: \
-             does not touch the session page/jar",
+             for engines behind a browser-integrity wall (google BotGuard). headless? \
+             (browser mode) picks the sidecar's Chrome mode — omit for the reliable \
+             headed default (headless trips google's /sorry); true only where there's \
+             no display. Stateless: does not touch the session page/jar",
         ),
         (
             "web_search_set_engine",
@@ -2341,6 +2362,7 @@ mod tests {
         let html = browser_fetch_serp_cmd(
             "https://e/",
             "node -e process.stdin.resume();process.stdout.write(JSON.stringify({html:'<h3>ok</h3>'}))",
+            None,
         )
         .await;
         assert_eq!(html.unwrap(), "<h3>ok</h3>");
@@ -2351,10 +2373,30 @@ mod tests {
         let err = browser_fetch_serp_cmd(
             "https://e/",
             "node -e process.stdin.resume();process.stdout.write(JSON.stringify({blocked:true,finalUrl:'https://g/sorry'}))",
+            None,
         )
         .await
         .unwrap_err();
         assert!(err.contains("captcha"), "block surfaced: {err}");
+    }
+
+    #[tokio::test]
+    async fn browser_serp_forwards_headless_flag() {
+        // Stub echoes back the `headless` it received on stdin. Command must be
+        // whitespace-free per the split_whitespace contract (single `-e` token).
+        let cmd = "node -e d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{h=JSON.parse(d).headless;process.stdout.write(JSON.stringify({html:'<h3>headless='+h+'</h3>'}))})";
+        let on = browser_fetch_serp_cmd("https://e/", cmd, Some(true))
+            .await
+            .unwrap();
+        assert!(on.contains("headless=true"), "headless not forwarded: {on}");
+        // None omits the key (sidecar applies its own headed default).
+        let off = browser_fetch_serp_cmd("https://e/", cmd, None)
+            .await
+            .unwrap();
+        assert!(
+            off.contains("headless=undefined"),
+            "headless should be absent when None: {off}"
+        );
     }
 
     #[tokio::test]

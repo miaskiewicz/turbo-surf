@@ -2,7 +2,8 @@
 // Stealth browser SERP sidecar for turbo-surf's `web_search { browser:true }`.
 // Chromium stays OUT of the engine binary; the mcp server shells out over a tiny
 // JSON contract:
-//   stdin  : {"url":"…","userAgent"?:"…","proxy"?:"…"}
+//   stdin  : {"url":"…","headless"?:bool,"userAgent"?:"…","proxy"?:"…"}
+//            headless defaults to false (headed) — see launchContext.
 //   stdout : {"html":"…","finalUrl":"…","status":200,"blocked":bool}
 //   nonzero exit + stderr on failure.
 //
@@ -50,14 +51,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // hardening so extra `--disable-*` flags fight it. The persistent profile also warms
 // across runs (NID/consent cookies accumulate). Returns a BrowserContext (not a
 // Browser) — the caller uses it directly.
-async function launchContext(proxy) {
+async function launchContext(proxy, headless) {
   const userDataDir = join(HERE, ".chrome-profile"); // gitignored, persists between runs
-  // HEADED by default. Measured: headless real Chrome trips google's /sorry
-  // "unusual traffic" wall (headless zeroes plugins + breaks Notification↔Permissions
-  // coherence — an automation tell) while HEADED Chrome on the same IP returns the
-  // real SERP. So the default is headed; set TURBO_SURF_SIDECAR_HEADLESS=1 for
-  // display-less environments (CI/servers — wrap in xvfb, or accept the /sorry risk).
-  const headless = process.env.TURBO_SURF_SIDECAR_HEADLESS === "1";
+  // HEADED by default. Measured: headless real Chrome trips google's /sorry "unusual
+  // traffic" wall (headless zeroes plugins + breaks Notification↔Permissions coherence
+  // — an automation tell) while HEADED Chrome on the same IP returns the real SERP.
+  // `headless` is caller-controlled (see main): per-call `headless` on stdin, else the
+  // TURBO_SURF_SIDECAR_HEADLESS env, else headed. Run headless only where there's no
+  // display (CI/servers — wrap in xvfb) and accept the /sorry risk.
   const opts = {
     channel: "chrome",
     headless,
@@ -82,7 +83,13 @@ async function main() {
     process.exit(2);
   }
 
-  const context = await launchContext(req.proxy);
+  // Headless precedence: per-call `headless` on stdin > TURBO_SURF_SIDECAR_HEADLESS env
+  // > headed (false). Headed is the reliable default (see launchContext).
+  const headless =
+    typeof req.headless === "boolean"
+      ? req.headless
+      : process.env.TURBO_SURF_SIDECAR_HEADLESS === "1";
+  const context = await launchContext(req.proxy, headless);
   try {
     // Google consent so the SERP isn't gated by the "before you continue" wall.
     await context.addCookies([
@@ -102,7 +109,7 @@ async function main() {
           timeout: 20000,
         });
         await page.waitForTimeout(800);
-      } catch (e) {}
+      } catch {}
     }
 
     const resp = await page.goto(req.url, { waitUntil: "domcontentloaded", timeout: 30000 });

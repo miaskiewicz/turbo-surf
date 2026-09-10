@@ -59,4 +59,20 @@ async fn presents_a_chrome_tls_and_http2_fingerprint() {
         ua, expected_ua,
         "wire UA is wreq's bundled UA, not the pinned default_profile override"
     );
+
+    // Client-hint parity: the full Chrome sec-ch-ua-* family must reach the wire, not
+    // just the low-entropy trio — a wall that parses client hints (google) flags a
+    // client that sends `sec-ch-ua` but omits the high-entropy hints. The echo reflects
+    // sent request headers, so their names appear in the response body.
+    for hint in [
+        "sec-ch-ua-full-version-list",
+        "sec-ch-ua-arch",
+        "sec-ch-ua-platform-version",
+        "sec-ch-ua-bitness",
+    ] {
+        assert!(
+            body.contains(hint),
+            "client hint missing on the wire: {hint}"
+        );
+    }
 }

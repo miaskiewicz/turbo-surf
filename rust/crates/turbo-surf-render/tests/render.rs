@@ -2444,3 +2444,94 @@ async fn tcresolvescoped_walks_nth_chain() {
     assert_eq!(a, "1:A", "selector leaf scoped to the 1st step");
     session.close();
 }
+
+// --- render-tier cookie-jar plumbing ---------------------------------------
+// The session jar must capture cookies established DURING a page's life from BOTH
+// sources a browser has: `document.cookie` writes AND `Set-Cookie` on the page's own
+// fetch/XHR responses. This is what lets a later navigation carry a session the page's
+// JS earned (e.g. Google's homepage-JS consent handshake minting `NID`).
+
+// `document.cookie = "NID=…"` in page JS must land in the session jar (op_cookie_set
+// bridges the in-isolate document.cookie to the shared CookieJar).
+#[tokio::test]
+async fn render_tier_document_cookie_write_reaches_jar() {
+    let mut session = PageSession::open(
+        "<html><body></body></html>",
+        "https://example.test/",
+        "",
+        "",
+        DEFAULT_RENDER_BUDGET_MS,
+    )
+    .await
+    .expect("session opens");
+    session
+        .eval(
+            r#"document.cookie = "NID=js_written_session; path=/";
+               globalThis.__RESULT = document.cookie;"#,
+        )
+        .await
+        .unwrap();
+    let jar = session.cookies();
+    assert!(
+        jar.contains("NID") && jar.contains("js_written_session"),
+        "document.cookie write must reach the session jar, got: {jar}"
+    );
+    session.close();
+}
+
+// A render-tier `fetch()` whose response mints a cookie via `Set-Cookie` — INCLUDING on
+// a redirect hop — must land that cookie in the session jar. This proves op_fetch's
+// per-hop Set-Cookie ingestion (the browser-equivalent path that earns Google's `NID`,
+// which is set on the consent `/save` 302).
+#[tokio::test]
+async fn render_tier_fetch_set_cookie_on_redirect_reaches_jar() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let base = format!("http://127.0.0.1:{port}/");
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut b = [0u8; 4096];
+            let n = s.read(&mut b).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&b[..n]).to_string();
+            let line = req.lines().next().unwrap_or("").to_string();
+            // GET /mint → 302 to /done, minting NID on the redirect hop (as Google's
+            // consent /save does). Anything else → 200.
+            let resp = if line.starts_with("GET /mint") {
+                "HTTP/1.1 302 Found\r\nSet-Cookie: NID=fetch_earned_session; Path=/\r\nLocation: /done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+            } else {
+                let body = "<html><body>done</body></html>";
+                format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body)
+            };
+            let _ = s.write_all(resp.as_bytes()).await;
+            let _ = s.flush().await;
+        }
+    });
+
+    let mut session = PageSession::open(
+        "<html><body></body></html>",
+        &base,
+        "",
+        "",
+        DEFAULT_RENDER_BUDGET_MS,
+    )
+    .await
+    .expect("session opens");
+    // Fire the fetch from page JS and await it (eval drains to quiescence, and op_fetch
+    // is counted in __pendingFetches so the drain waits for it).
+    session
+        .eval(&format!(
+            r#"globalThis.__RESULT = 'pending';
+               (async () => {{ try {{ await fetch("{base}mint"); }} catch (e) {{}}
+                              globalThis.__RESULT = 'done'; }})();"#
+        ))
+        .await
+        .unwrap();
+    let jar = session.cookies();
+    assert!(
+        jar.contains("NID") && jar.contains("fetch_earned_session"),
+        "Set-Cookie on the fetch's 302 hop must reach the session jar, got: {jar}"
+    );
+    session.close();
+}

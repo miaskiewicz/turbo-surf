@@ -249,6 +249,11 @@ async fn op_fetch(
         body,
         headers,
         allow_non_html: true, // fetch pulls JSON/text too
+        // Follow redirects MANUALLY so `Set-Cookie` on an intermediate 3xx hop is
+        // ingested (the browser-equivalent per-hop cookie round-trip). Auto-follow
+        // only ingests the final response's cookies — a login/consent endpoint that
+        // mints its session cookie on a 302 (Google's `/save` → `NID`) would be lost.
+        max_redirects: Some(20),
         jar: Some(&mut local),
         ..Default::default()
     };

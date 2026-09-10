@@ -45,6 +45,18 @@ fingerprint fidelity; the residual walls are IP reputation and server-side scori
   `TURBO_SURF_SIDECAR_HEADLESS` env > **headed default**) and a `headless?` arg on
   `web_search`. Measured: headless Chrome trips google's `/sorry` (an automation tell,
   not the IP — headed on the same IP returns the real SERP), so headed is the default.
+- **Real EU consent-save handshake → earns google `NID`** (the native `/search`
+  unlock). The "Before you continue" interstitial's **Accept all** POSTs to
+  `consent.google.com/save?…escs=<token>` and *that* 302 `Set-Cookie`s `NID` (+ SOCS/
+  STRP) — the trusted-session cookie `/search` requires. `consent::handshake_if_consent`
+  now parses the interstitial, replays the accept form, and ingests NID (previously we
+  only hard-coded a synthetic `SOCS` that *visually* dismissed the wall but never earned
+  the session — which is why the homepage rendered but `/search` stayed on enablejs).
+  Proven offline: enablejs shell → real SERP once NID is in the jar.
+- **Fix: `Set-Cookie` dropped on redirect hops.** `fetch_html` auto-follow ingested
+  cookies only on the final response, silently dropping the `NID` set on the consent
+  302; the consent handshake + render-tier `op_fetch` now follow redirects manually so
+  session cookies earned mid-redirect land in the jar (browser-equivalent).
 - Requires turbo-test browser_env ≥ 0.3.16 (vendored) for the iframe + WebGL + canvas.
 
 ## [0.4.3] — Chrome 153 fingerprint

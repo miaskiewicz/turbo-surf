@@ -25,3 +25,14 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# Vendored fork of wreq (6.0.0-rc.29): adds a `trust_anchors` field to `TlsOptions`
+# + a builder method, and applies it via BoringSSL's
+# `SSL_CTX_set1_requested_trust_anchors` in `tls/conn.rs`, so we can emit Chrome
+# 152+'s `trust_anchors` ClientHello extension (codepoint 0xCA34). Gated in
+# turbo-surf-core behind the (off-by-default) `trust-anchors` feature; the field is
+# inert (`None`) otherwise, so the default build behaves exactly as stock wreq. The
+# diff lives under vendor/wreq — see the "turbo-surf patch" comments in tls.rs and
+# tls/conn.rs.
+[patch.crates-io]
+wreq = { path = "vendor/wreq" }

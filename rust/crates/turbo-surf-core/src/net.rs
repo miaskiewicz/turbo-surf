@@ -223,16 +223,37 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str) {
 // can't forge a fingerprint. One seam so both client constructors stay in sync.
 fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     #[cfg(feature = "impersonate")]
-    let builder = builder.emulation(
-        // Chrome 149 on macOS — matched to fingerprint::default_profile and the
-        // render-tier navigator so the TLS/HTTP-2 fingerprint, the request headers,
-        // and `navigator.*` all report the same browser+OS (a cross-layer mismatch
-        // is itself a bot signal).
-        wreq_util::Emulation::builder()
-            .profile(wreq_util::Profile::Chrome149)
-            .platform(wreq_util::Platform::MacOS)
-            .build(),
-    );
+    // Chrome 149 on macOS — matched to fingerprint::default_profile and the
+    // render-tier navigator so the TLS/HTTP-2 fingerprint, the request headers,
+    // and `navigator.*` all report the same browser+OS (a cross-layer mismatch
+    // is itself a bot signal).
+    let emulation = wreq_util::Emulation::builder()
+        .profile(wreq_util::Profile::Chrome149)
+        .platform(wreq_util::Platform::MacOS)
+        .build();
+
+    // With the `trust-anchors` feature, additionally emit Chrome 152+'s
+    // `trust_anchors` extension (codepoint 0xCA34). wreq-util's Chrome149 profile
+    // omits it, leaving our JA4 at `t13d1516h2` vs real Chrome's `t13d1517h2`. We
+    // resolve the profile to a concrete `wreq::Emulation`, then set an *empty*
+    // trust-anchors list on its TlsOptions: per BoringSSL, an empty list still
+    // sends the extension (so JA4 gains one extension → `t13d1517h2`) without our
+    // having to carry real trust-anchor IDs. The extension lands at the tail of
+    // the ClientHello, but JA4's extension hash is order-independent, so the
+    // fingerprint matches. Requires the vendored wreq fork (see workspace
+    // Cargo.toml `[patch.crates-io]`).
+    #[cfg(all(feature = "impersonate", feature = "trust-anchors"))]
+    let builder = {
+        use wreq::IntoEmulation;
+        let mut emulation = emulation.into_emulation();
+        if let Some(tls) = emulation.tls_options.as_mut() {
+            tls.trust_anchors = Some(bytes::Bytes::new());
+        }
+        builder.emulation(emulation)
+    };
+    #[cfg(all(feature = "impersonate", not(feature = "trust-anchors")))]
+    let builder = builder.emulation(emulation);
+
     builder
 }
 

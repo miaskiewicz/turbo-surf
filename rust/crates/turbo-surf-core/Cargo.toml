@@ -12,6 +12,13 @@ default = ["impersonate"]
 # real Chrome TLS/JA3/JA4 + HTTP-2 (Akamai) fingerprint. Off by default: wreq
 # pulls BoringSSL, which needs a C toolchain (cmake/nasm) to build. ON by default (anti-bot); disable with --no-default-features. See net.rs.
 impersonate = ["dep:wreq", "dep:wreq-util"]
+# Emit Chrome 152+'s `trust_anchors` TLS extension (codepoint 0xCA34 / 51764) in
+# the ClientHello, so our JA4 matches real Chrome's `t13d1517h2` (wreq-util's
+# Chrome149 profile alone yields `t13d1516h2`). Off by default — it's a new,
+# non-standard extension. Implies `impersonate` (the emitter lives on the wreq
+# path). Uses the vendored wreq fork's `TlsOptions::trust_anchors`; see net.rs
+# `emulate()` and the [patch.crates-io] note in the workspace Cargo.toml.
+trust-anchors = ["impersonate"]
 
 [dependencies]
 url = "2"

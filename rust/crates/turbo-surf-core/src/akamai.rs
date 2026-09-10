@@ -380,10 +380,10 @@ mod tests {
 
         let solver =
             AkamaiSolver::new().with_sensor_url(format!("http://127.0.0.1:{port}/akam/sensor"));
-        let ch = Challenge {
-            vendor: crate::challenge::Vendor::Akamai,
-            page_url: format!("http://127.0.0.1:{port}/"),
-        };
+        let ch = Challenge::new(
+            crate::challenge::Vendor::Akamai,
+            format!("http://127.0.0.1:{port}/"),
+        );
         let ctx = SolveContext {
             user_agent: input().user_agent,
             proxy: None,

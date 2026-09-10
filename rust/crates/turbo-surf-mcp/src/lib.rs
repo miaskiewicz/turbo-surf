@@ -86,9 +86,13 @@ impl Session {
         ensure_render_hooks();
         Self {
             // Pick up a solver from env/`.env` if one is configured (else inert).
-            // Supply the V8 engine so the Cloudflare solver runs the challenge's own
-            // JS to compute the answer (the proper path) instead of the placeholder.
-            solver: challenge::solver_from_env_pow(Some(Box::new(turbo_surf_render::V8PowEngine))),
+            // Supply the V8 engines: the PoW engine runs a Cloudflare/AWS challenge's
+            // own JS (the proper path), and the reCAPTCHA engine drives the in-isolate
+            // token flow when `TURBO_SURF_SOLVER=recaptcha`.
+            solver: challenge::solver_from_env_pow(
+                Some(Box::new(turbo_surf_render::V8PowEngine)),
+                Some(Box::new(turbo_surf_render::V8RecaptchaEngine)),
+            ),
             ..Self::default()
         }
     }
@@ -229,6 +233,41 @@ impl Session {
         let res = fetch_html_with(url, opts).await?;
         self.load(&res.0, &res.1);
         Ok(Some(res.2))
+    }
+
+    // Mint a reCAPTCHA token in-isolate for `url` (optionally with an explicit
+    // sitekey/action) via the V8 render tier, independent of the env-selected solver.
+    // Honest boundary: works for v3/invisible/score flows (and the google `/sorry`
+    // wall paired with a clean IP); a v2 image-grid challenge returns a clear error.
+    async fn solve_recaptcha(
+        &self,
+        url: &str,
+        sitekey: Option<String>,
+        action: Option<String>,
+    ) -> Result<Value, String> {
+        use turbo_surf_core::recaptcha::RecaptchaSolver;
+        let solver =
+            RecaptchaSolver::new().with_engine(Box::new(turbo_surf_render::V8RecaptchaEngine));
+        let ch = challenge::Challenge {
+            vendor: challenge::Vendor::Recaptcha,
+            page_url: url.to_string(),
+            sitekey,
+            action,
+        };
+        let ctx = SolveContext {
+            user_agent: self.ua.clone().unwrap_or_default(),
+            proxy: std::env::var("TURBO_SURF_PROXY")
+                .ok()
+                .filter(|s| !s.is_empty()),
+        };
+        let token = solver.solve(&ch, &ctx).await.map_err(|e| e.to_string())?;
+        let response = token
+            .headers
+            .iter()
+            .find(|(k, _)| k == "g-recaptcha-response")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default();
+        Ok(json!({ "url": url, "token": response, "sitekey": ch.sitekey }))
     }
 
     fn render_mode(&self) -> bool {
@@ -1783,6 +1822,15 @@ pub fn tools() -> Value {
              candidate, tests live acceptance, and saves a working one locally.",
         ),
         (
+            "solve_recaptcha",
+            "Mint a reCAPTCHA token in-isolate (V8 render tier, no browser) → \
+             {url,token,sitekey}. Args: url (required); sitekey?/action? (else \
+             auto-detected from the page). Works for v3/invisible/score flows (and the \
+             google `/sorry` wall paired with a clean TURBO_SURF_PROXY IP — acceptance \
+             is Google-scored server-side). A v2 image-grid challenge is NOT solvable \
+             in-isolate → clear error (route to an external solver).",
+        ),
+        (
             "set_fingerprint",
             "Override render-tier navigator fields (JSON: userAgent, platform, \
              vendor, languages, hardwareConcurrency, deviceMemory, chromeMajor, \
@@ -1947,6 +1995,16 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
         "analyze_akamai" => {
             session
                 .analyze_akamai(args.get("retry").and_then(|v| v.as_bool()).unwrap_or(false))
+                .await
+        }
+        "solve_recaptcha" => {
+            let url = arg_str(args, "url").ok_or("solve_recaptcha: missing 'url'")?;
+            session
+                .solve_recaptcha(
+                    url,
+                    arg_str(args, "sitekey").map(str::to_string),
+                    arg_str(args, "action").map(str::to_string),
+                )
                 .await
         }
         "stealth_status" => Ok(session.stealth_status()),
@@ -2330,6 +2388,104 @@ mod tests {
 
     async fn call(s: &mut Session, name: &str, args: Value) -> Value {
         call_tool(s, name, &args).await.unwrap()
+    }
+
+    // The `solve_recaptcha` MCP tool, end to end and offline: a localhost fixture stands
+    // in for google (page + api.js main VM + bframe doc + bframe VM), the tool drives the
+    // in-isolate flow and returns the client token. A v2 image-grid checkbox fixture is
+    // refused with the documented error — the honest boundary surfaced through the tool.
+    #[tokio::test]
+    async fn solve_recaptcha_tool_mints_token_and_refuses_v2_image() {
+        let ok_port = spawn_recaptcha_fixture(true).await;
+        let mut s = Session::new();
+        let res = call(
+            &mut s,
+            "solve_recaptcha",
+            json!({ "url": format!("http://127.0.0.1:{ok_port}/") }),
+        )
+        .await;
+        assert_eq!(
+            res["token"], "bframe-token-SITEKEY-XYZ",
+            "the tool must return the in-isolate client token: {res}"
+        );
+
+        // v2 image checkbox → error through the tool (call_tool returns Err).
+        let v2_port = spawn_recaptcha_fixture(false).await;
+        let err = call_tool(
+            &mut s,
+            "solve_recaptcha",
+            &json!({ "url": format!("http://127.0.0.1:{v2_port}/") }),
+        )
+        .await;
+        assert!(
+            err.is_err(),
+            "a v2 image-grid challenge must be refused, got {err:?}"
+        );
+    }
+
+    // reCAPTCHA fixture server; `v3` true → a solvable score flow (page + api.js VM +
+    // bframe), false → a plain v2 checkbox widget (the unsolvable image case).
+    async fn spawn_recaptcha_fixture(v3: bool) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = req
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("/")
+                    .to_string();
+                let (ctype, body): (&str, &str) = if !v3 {
+                    (
+                        "text/html",
+                        r#"<!DOCTYPE html><html><head><script src="/recaptcha/api.js"></script></head>
+                        <body><form><div class="g-recaptcha" data-sitekey="SITEKEY-CB"></div></form></body></html>"#,
+                    )
+                } else if path.contains("frame-vm.js") {
+                    (
+                        "application/javascript",
+                        "addEventListener('message',function(e){var m=e.data||{};if(m.type==='challenge'){e.source.postMessage({type:'token',token:'bframe-token-'+m.c},'*');}});\
+                         addEventListener('load',function(){parent.postMessage({type:'bframe-ready'},'*');});",
+                    )
+                } else if path.contains("api.js") {
+                    (
+                        "application/javascript",
+                        "(function(){window.grecaptcha={ready:function(cb){cb();},render:function(){return 0;},\
+                         execute:function(sk,o){return new Promise(function(res){var f=document.createElement('iframe');\
+                         window.addEventListener('message',function(e){var m=e.data||{};\
+                         if(m.type==='bframe-ready'&&e.source===f.contentWindow){f.contentWindow.postMessage({type:'challenge',c:sk},'*');}\
+                         else if(m.type==='token'&&e.source===f.contentWindow){res(m.token);}});\
+                         f.src=location.origin+'/recaptcha/api2/bframe?k='+sk;document.body.appendChild(f);});}};})();",
+                    )
+                } else if path.contains("bframe") {
+                    (
+                        "text/html",
+                        r#"<!DOCTYPE html><html><head><script src="/recaptcha/api2/frame-vm.js"></script></head><body></body></html>"#,
+                    )
+                } else {
+                    (
+                        "text/html",
+                        r#"<!DOCTYPE html><html><head><script src="/recaptcha/api.js?render=SITEKEY-XYZ"></script></head>
+                        <body><div class="g-recaptcha" data-sitekey="SITEKEY-XYZ" data-size="invisible"></div></body></html>"#,
+                    )
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.flush().await;
+            }
+        });
+        port
     }
 
     // The browser-sidecar contract (env-independent core): a stub `node -e` command

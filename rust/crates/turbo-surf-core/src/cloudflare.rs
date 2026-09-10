@@ -391,10 +391,7 @@ mod tests {
         let base = format!("http://127.0.0.1:{port}");
         let solver =
             CloudflareSolver::new().with_submit_url(format!("{base}/cdn-cgi/challenge-platform/"));
-        let ch = Challenge {
-            vendor: Vendor::Cloudflare,
-            page_url: format!("{base}/"),
-        };
+        let ch = Challenge::new(Vendor::Cloudflare, format!("{base}/"));
         let token = solver.solve(&ch, &SolveContext::default()).await.unwrap();
         let cf = token.cookies.iter().find(|(k, _)| k == "cf_clearance");
         assert!(cf.is_some(), "must return cf_clearance");

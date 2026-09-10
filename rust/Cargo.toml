@@ -14,7 +14,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.4.3"
+version = "0.4.4"
 license = "MIT"
 repository = "https://github.com/miaskiewicz/turbo-surf"
 
@@ -34,5 +34,13 @@ lto = "thin"
 # inert (`None`) otherwise, so the default build behaves exactly as stock wreq. The
 # diff lives under vendor/wreq — see the "turbo-surf patch" comments in tls.rs and
 # tls/conn.rs.
+#
+# NOTE: the Chrome request-#1 network-fingerprint fixes (HEADERS priority weight
+# 220 -> 256, `upgrade-insecure-requests`, the Chrome header ORDER, and dropping
+# high-entropy client hints from a cold request) are NOT patched into wreq-util —
+# they all live in turbo-surf-core's net.rs `emulate()`, which tunes the resolved
+# `Emulation` (its public `headers`/`orig_headers`/`http2_options` fields). Keeping
+# them there (rather than a vendored wreq-util) means they survive a stock wreq-util
+# and reach crates.io consumers of turbo-surf-core.
 [patch.crates-io]
 wreq = { path = "vendor/wreq" }

@@ -16,6 +16,7 @@ use turbo_dom_parser::rtdom::serialize::serialize_inner;
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
 use turbo_surf_core::challenge::{self, ChallengeSolver, SolveContext};
+use turbo_surf_core::consent;
 use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::crawl::{crawl as run_crawl, CrawlOptions};
 use turbo_surf_core::fingerprint;
@@ -26,7 +27,10 @@ use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
-pub const VERSION: &str = "0.4.3";
+mod enid;
+use enid::{EnidCache, EnidCookie};
+
+pub const VERSION: &str = "0.4.4";
 
 /// One agent session: the current page URL + parsed tree + nav history, plus the
 /// browser-ish state agents expect (UA / extra headers / cookie jar / JS mode) and
@@ -86,9 +90,13 @@ impl Session {
         ensure_render_hooks();
         Self {
             // Pick up a solver from env/`.env` if one is configured (else inert).
-            // Supply the V8 engine so the Cloudflare solver runs the challenge's own
-            // JS to compute the answer (the proper path) instead of the placeholder.
-            solver: challenge::solver_from_env_pow(Some(Box::new(turbo_surf_render::V8PowEngine))),
+            // Supply the V8 engines: the PoW engine runs a Cloudflare/AWS challenge's
+            // own JS (the proper path), and the reCAPTCHA engine drives the in-isolate
+            // token flow when `TURBO_SURF_SOLVER=recaptcha`.
+            solver: challenge::solver_from_env_pow(
+                Some(Box::new(turbo_surf_render::V8PowEngine)),
+                Some(Box::new(turbo_surf_render::V8RecaptchaEngine)),
+            ),
             ..Self::default()
         }
     }
@@ -158,19 +166,74 @@ impl Session {
             ..Default::default()
         };
         let res = fetch_html_with(url, opts).await?;
-        self.load(&res.0, &res.1);
-        let mut status = res.2;
+        let (mut cur_url, mut cur_html, mut status) = res;
+        self.load(&cur_url, &cur_html);
+        // If the response is a Google "Before you continue" consent interstitial,
+        // replay its Accept-all form to earn the real trusted session (`NID`) into the
+        // jar, then re-fetch — the synthetic `SOCS` un-hides the page, but only this
+        // handshake mints the cookie a JS-free `/search` needs. Runs before challenge
+        // solving so the re-fetched (consented) page is what a `/sorry` check sees.
+        if let Some((u, h, s)) = self.try_consent_handshake(&cur_url, &cur_html).await? {
+            cur_url = u;
+            cur_html = h;
+            status = s;
+        }
         // If the response is a JS-challenge / PoW wall and a solver is configured,
         // solve it, inject the cleared cookies, and re-fetch on the fast path.
-        if let Some(new_status) = self.try_solve_challenge(&res.0, status, &res.1).await? {
+        if let Some(new_status) = self
+            .try_solve_challenge(&cur_url, status, &cur_html)
+            .await?
+        {
             status = new_status;
         }
         if self.render_mode() {
             self.render_current().await?;
         }
         Ok(
-            json!({ "url": res.0, "status": status, "title": title_of(self.tree.as_ref().unwrap()) }),
+            json!({ "url": cur_url, "status": status, "title": title_of(self.tree.as_ref().unwrap()) }),
         )
+    }
+
+    // Detect a Google consent interstitial on a just-fetched response and, if
+    // `bypass_consent` is on, replay its Accept-all form (the real
+    // `consent.google.com/save` handshake) to earn the trusted session (`NID`) into
+    // the session jar, then re-fetch the same URL with the earned cookies. Returns the
+    // re-fetched `(url, html, status)` when it ran, else `None` (not a consent wall /
+    // bypass off / handshake earned nothing). A parse/handshake failure leaves the
+    // interstitial in place rather than aborting the navigation.
+    async fn try_consent_handshake(
+        &mut self,
+        url: &str,
+        body: &str,
+    ) -> Result<Option<(String, String, u16)>, String> {
+        if !self.bypass_consent.unwrap_or(true) {
+            return Ok(None);
+        }
+        if !consent::is_consent_interstitial(url, body) {
+            return Ok(None);
+        }
+        let ua = self.ua.clone().unwrap_or_default();
+        let earned = match consent::handshake_if_consent(&mut self.jar, url, body, &ua, 0.0).await {
+            Ok(Some(e)) if e.earned_nid => e,
+            // No accept form, handshake error, or no NID minted: leave the page as-is.
+            _ => return Ok(None),
+        };
+        // Re-fetch (prefer the consent `continue` URL; fall back to the current URL).
+        // The jar now replays NID, and the synthetic SOCS still un-hides the page, so
+        // this returns the real post-consent content.
+        let target = earned.continue_url.as_deref().unwrap_or(url).to_string();
+        let profile = self.profile_for(&target);
+        let opts = FetchOptions {
+            allow_non_html: true,
+            headers: self.request_headers(),
+            jar: Some(&mut self.jar),
+            profile: Some(&profile),
+            bypass_consent: true,
+            ..Default::default()
+        };
+        let res = fetch_html_with(&target, opts).await?;
+        self.load(&res.0, &res.1);
+        Ok(Some(res))
     }
 
     // Detect an anti-bot wall on a just-fetched response and, if a solver is set,
@@ -229,6 +292,41 @@ impl Session {
         let res = fetch_html_with(url, opts).await?;
         self.load(&res.0, &res.1);
         Ok(Some(res.2))
+    }
+
+    // Mint a reCAPTCHA token in-isolate for `url` (optionally with an explicit
+    // sitekey/action) via the V8 render tier, independent of the env-selected solver.
+    // Honest boundary: works for v3/invisible/score flows (and the google `/sorry`
+    // wall paired with a clean IP); a v2 image-grid challenge returns a clear error.
+    async fn solve_recaptcha(
+        &self,
+        url: &str,
+        sitekey: Option<String>,
+        action: Option<String>,
+    ) -> Result<Value, String> {
+        use turbo_surf_core::recaptcha::RecaptchaSolver;
+        let solver =
+            RecaptchaSolver::new().with_engine(Box::new(turbo_surf_render::V8RecaptchaEngine));
+        let ch = challenge::Challenge {
+            vendor: challenge::Vendor::Recaptcha,
+            page_url: url.to_string(),
+            sitekey,
+            action,
+        };
+        let ctx = SolveContext {
+            user_agent: self.ua.clone().unwrap_or_default(),
+            proxy: std::env::var("TURBO_SURF_PROXY")
+                .ok()
+                .filter(|s| !s.is_empty()),
+        };
+        let token = solver.solve(&ch, &ctx).await.map_err(|e| e.to_string())?;
+        let response = token
+            .headers
+            .iter()
+            .find(|(k, _)| k == "g-recaptcha-response")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default();
+        Ok(json!({ "url": url, "token": response, "sitekey": ch.sitekey }))
     }
 
     fn render_mode(&self) -> bool {
@@ -1429,48 +1527,251 @@ fn list_active_strategies(session: &Session) -> Vec<Value> {
 // per-host Chrome identity + consent-cookie seeding, and for a render-tier strategy
 // (mode fast/secure) runs the page's own JS on a THROWAWAY session, so the caller's
 // current page/jar are never touched.
-async fn fetch_serp(strategy: &Strategy, url: &str, force_browser: bool) -> Result<String, String> {
+async fn fetch_serp(
+    strategy: &Strategy,
+    url: &str,
+    force_browser: bool,
+    headless: Option<bool>,
+    remint: bool,
+) -> Result<String, String> {
     // Browser mode: hand the SERP URL to a real-browser sidecar (opt-in, chromium
-    // stays OUT of the engine) and parse the rendered results HTML it returns. This
-    // is the path for engines gated behind a browser-integrity wall (google's
-    // BotGuard/enablejs), which no headless fetch/JS-tier clears — a real browser does.
+    // stays OUT of the engine) and parse the rendered results HTML it returns. An
+    // explicit `browser:true` escape hatch still routes the WHOLE SERP through the
+    // real browser (for a walled engine that even ENID reuse can't clear).
+    // `headless` (from the caller) picks the sidecar's mode; None lets the sidecar
+    // default (headed — headless trips google's /sorry). A custom `mode:"browser"`
+    // strategy still routes the whole SERP through the browser as before.
     if force_browser || strategy.mode == "browser" {
-        return browser_fetch_serp(url).await;
+        return browser_fetch_serp(url, headless).await;
+    }
+    // ENID mode (google): fetch `/search` NATIVELY (wreq, the impersonate stack)
+    // reusing a trusted `__Secure-ENID` minted rarely by the headed sidecar — NOT
+    // routing every SERP through the browser. A stale/missing token (the response
+    // is the `enablejs` shell) triggers exactly one re-mint + native retry.
+    if strategy.mode == "enid" {
+        return google_enid_fetch(url, headless, remint).await;
     }
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
+    // A throwaway jar so a google /sorry clearance's exemption cookie can be captured
+    // and replayed on the re-fetch — the caller's session jar is never touched (this
+    // function is stateless re: the session).
+    let mut jar = CookieJar::new();
     let opts = FetchOptions {
         allow_non_html: true, // json engines return non-HTML bodies
         profile: Some(&profile),
         bypass_consent: true,
+        jar: Some(&mut jar),
         ..Default::default()
     };
     let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
+    // If the SERP fetch was bounced to google's /sorry unusual-traffic wall, run the
+    // reCAPTCHA → GOOGLE_ABUSE_EXEMPTION → SERP clearance loop and continue with the
+    // cleared SERP HTML (a no-op for any other engine / a non-walled response).
+    let (final_url, html) = maybe_clear_sorry(&mut jar, res.final_url, res.html).await?;
     if matches!(strategy.mode.as_str(), "fast" | "secure" | "js") {
         let mut tmp = Session::new();
-        tmp.load(&res.final_url, &res.html);
+        tmp.load(&final_url, &html);
         tmp.render_current().await?;
         return Ok(serialize_doc(tmp.tree()?));
     }
-    Ok(res.html)
+    Ok(html)
+}
+
+// --- native google SERP via a reused, sidecar-minted `__Secure-ENID` -----------
+
+/// The sidecar dir (holds `fetch-serp.mjs` + the gitignored ENID cache). Override
+/// with `TURBO_SURF_SIDECAR_DIR`; defaults to the committed `scripts/browser-sidecar`.
+fn sidecar_dir() -> String {
+    std::env::var("TURBO_SURF_SIDECAR_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "scripts/browser-sidecar".to_string())
+}
+
+/// Fetch a google SERP NATIVELY (no browser) reusing a trusted `__Secure-ENID`,
+/// reading the sidecar command from `TURBO_SURF_BROWSER_FETCH_CMD` and the cache
+/// from the default location. See [`google_enid_flow`] for the mechanism.
+async fn google_enid_fetch(
+    url: &str,
+    headless: Option<bool>,
+    remint: bool,
+) -> Result<String, String> {
+    let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
+        "google web_search needs the TURBO_SURF_BROWSER_FETCH_CMD env var (the headed \
+         sidecar that mints a trusted __Secure-ENID; run web_search_setup_browser, or \
+         `node scripts/browser-sidecar/fetch-serp.mjs`)"
+            .to_string()
+    })?;
+    let cache = EnidCache::default_for(&sidecar_dir());
+    google_enid_flow(url, &cache, &cmd, headless, remint).await
+}
+
+/// The testable core of the native-google path (no env reads):
+///  1. Reuse the cached trusted `__Secure-ENID` (unless `remint` forces a fresh one
+///     or the cache misses/expired) — minting via the headed sidecar only when
+///     needed. Minting is rare; the token is long-lived + client-agnostic.
+///  2. Fetch `/search` NATIVELY (wreq, the impersonate stack) with the token in the
+///     jar. Google's `/sorry` IP-reputation wall (orthogonal) is still cleared.
+///  3. If the response is the `enablejs` shell (a stale/untrusted token — no
+///     `id="rso"`/`<h3>`), re-mint via the sidecar EXACTLY once, cache it, and retry
+///     the native fetch. A second shell is surfaced as an error (don't loop).
+async fn google_enid_flow(
+    url: &str,
+    cache: &EnidCache,
+    mint_cmd: &str,
+    headless: Option<bool>,
+    remint: bool,
+) -> Result<String, String> {
+    let cookies = match (remint, cache.get_valid(enid::now_secs())) {
+        (false, Some(c)) => c,
+        _ => mint_and_cache(cache, mint_cmd, headless).await?,
+    };
+    let html = native_google_fetch(url, &cookies).await?;
+    if !is_enablejs_shell(&html) {
+        return Ok(html);
+    }
+    // Stale/untrusted token → re-mint once and retry natively.
+    let fresh = mint_and_cache(cache, mint_cmd, headless).await?;
+    let retry = native_google_fetch(url, &fresh).await?;
+    if is_enablejs_shell(&retry) {
+        return Err(
+            "google served the enablejs shell even after a fresh __Secure-ENID mint — the \
+             exit IP is likely flagged (a /sorry'd IP won't serve the SERP to any token) or \
+             google has changed the gate; try a clean exit IP or the browser:true sidecar"
+                .to_string(),
+        );
+    }
+    Ok(retry)
+}
+
+/// Mint a fresh trusted ENID via the sidecar and persist it. A cache-write failure
+/// is non-fatal (log-and-continue): the freshly minted cookies still drive this
+/// call; only cross-restart reuse is lost.
+async fn mint_and_cache(
+    cache: &EnidCache,
+    mint_cmd: &str,
+    headless: Option<bool>,
+) -> Result<Vec<EnidCookie>, String> {
+    let cookies = enid::mint_enid_cmd(mint_cmd, headless).await?;
+    if let Err(e) = cache.set(&cookies) {
+        eprintln!("web_search: ENID minted but cache write failed ({e}); reuse won't persist");
+    }
+    Ok(cookies)
+}
+
+/// One native `/search` fetch with the minted cookies injected into a throwaway jar
+/// (the caller's session jar is never touched). Google's `/sorry` clearance loop
+/// still applies (IP-reputation is orthogonal to the ENID token).
+async fn native_google_fetch(url: &str, cookies: &[EnidCookie]) -> Result<String, String> {
+    let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
+    let mut jar = CookieJar::new();
+    for c in cookies {
+        jar.add(&c.name, &c.value, &c.domain, &c.path, c.expires);
+    }
+    let opts = FetchOptions {
+        allow_non_html: true,
+        profile: Some(&profile),
+        bypass_consent: true,
+        jar: Some(&mut jar),
+        ..Default::default()
+    };
+    let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
+    let (_final_url, html) = maybe_clear_sorry(&mut jar, res.final_url, res.html).await?;
+    Ok(html)
+}
+
+/// True when `html` is google's `enablejs` JS shell rather than the real SERP. The
+/// real SERP carries the results container (`id="rso"`) and organic `<h3>` titles;
+/// the shell has neither (it's the "enable JavaScript" bootstrap). Cheap substring
+/// checks — the SERP is large and we only need presence.
+fn is_enablejs_shell(html: &str) -> bool {
+    !(html.contains("id=\"rso\"") || html.contains("<h3"))
+}
+
+/// If `html` (fetched from `final_url`) is google's `/sorry` unusual-traffic wall, run
+/// the [`turbo_surf_core::sorry`] clearance loop and return the cleared `(url, SERP)`;
+/// otherwise pass the page through unchanged. The token is minted in-isolate by the V8
+/// [`turbo_surf_render::V8RecaptchaEngine`] (v3/invisible/score flows); a v2 image grid
+/// surfaces [`SolveError::VisualChallenge`], which defers to the env-configured external
+/// solver ([`challenge::solver_from_env`]) if one is present, else a clear error.
+async fn maybe_clear_sorry(
+    jar: &mut CookieJar,
+    final_url: String,
+    html: String,
+) -> Result<(String, String), String> {
+    use turbo_surf_core::challenge::SolveError;
+    use turbo_surf_core::recaptcha::RecaptchaSolver;
+    use turbo_surf_core::sorry;
+    if !sorry::is_sorry_wall(&final_url, &html) {
+        return Ok((final_url, html));
+    }
+    let ctx = SolveContext {
+        user_agent: fingerprint::default_profile().user_agent,
+        proxy: std::env::var("TURBO_SURF_PROXY")
+            .ok()
+            .filter(|s| !s.is_empty()),
+    };
+    // In-isolate first (no external cost); it produces a token for score/invisible flows.
+    let in_isolate =
+        RecaptchaSolver::new().with_engine(Box::new(turbo_surf_render::V8RecaptchaEngine));
+    match sorry::clear_if_sorry(&in_isolate, jar, &final_url, &html, &ctx, 0.0).await {
+        Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
+        Ok(None) => Ok((final_url, html)),
+        // v2 image grid / no engine: defer to a configured external solver if present.
+        Err(e @ (SolveError::VisualChallenge | SolveError::NotConfigured)) => {
+            match challenge::solver_from_env() {
+                Some(external) => {
+                    match sorry::clear_if_sorry(
+                        external.as_ref(),
+                        jar,
+                        &final_url,
+                        &html,
+                        &ctx,
+                        0.0,
+                    )
+                    .await
+                    {
+                        Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
+                        Ok(None) => Ok((final_url, html)),
+                        Err(ext) => Err(format!(
+                            "google /sorry clearance failed (in-isolate: {e}; external {}: {ext})",
+                            external.name()
+                        )),
+                    }
+                }
+                None => Err(format!(
+                    "google /sorry is a v2 image / score-gated challenge the in-isolate flow \
+                     can't clear ({e}); configure an external solver (TURBO_SURF_SOLVER + key) \
+                     or use the headed browser sidecar"
+                )),
+            }
+        }
+        Err(e) => Err(format!("google /sorry clearance failed: {e}")),
+    }
 }
 
 /// Fetch a SERP through the opt-in browser sidecar named by the
 /// `TURBO_SURF_BROWSER_FETCH_CMD` env var (e.g. `node harness/browser-solver/fetch-serp.mjs`).
-/// Contract: we write `{"url":"…"}\n` to its stdin; it navigates a real browser and
-/// writes `{"html":"…","finalUrl":"…","status":200}` to stdout. Chromium is never
-/// linked into the engine — this shells out to a dev/deploy-provided browser.
-async fn browser_fetch_serp(url: &str) -> Result<String, String> {
+/// Contract: we write `{"url":"…","headless"?:bool}\n` to its stdin; it navigates a
+/// real browser and writes `{"html":"…","finalUrl":"…","status":200}` to stdout.
+/// Chromium is never linked into the engine — this shells out to a dev/deploy-provided
+/// browser. `headless` (None = sidecar default, headed) is forwarded on stdin.
+async fn browser_fetch_serp(url: &str, headless: Option<bool>) -> Result<String, String> {
     let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
         "web_search browser mode needs the TURBO_SURF_BROWSER_FETCH_CMD env var (a \
          real-browser sidecar; run web_search_setup_browser, or `node scripts/browser-sidecar/fetch-serp.mjs`)"
             .to_string()
     })?;
-    browser_fetch_serp_cmd(url, &cmd).await
+    browser_fetch_serp_cmd(url, &cmd, headless).await
 }
 
 /// Run a specific browser-sidecar command for `url` (the env-independent core, so the
 /// contract is unit-testable with a stub command). See [`browser_fetch_serp`].
-async fn browser_fetch_serp_cmd(url: &str, cmd: &str) -> Result<String, String> {
+async fn browser_fetch_serp_cmd(
+    url: &str,
+    cmd: &str,
+    headless: Option<bool>,
+) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
     let mut parts = cmd.split_whitespace();
     let prog = parts
@@ -1483,7 +1784,11 @@ async fn browser_fetch_serp_cmd(url: &str, cmd: &str) -> Result<String, String> 
         .stderr(std::process::Stdio::inherit())
         .spawn()
         .map_err(|e| format!("spawn browser sidecar ({prog}): {e}"))?;
-    let req = json!({ "url": url }).to_string();
+    let req = match headless {
+        Some(h) => json!({ "url": url, "headless": h }),
+        None => json!({ "url": url }),
+    }
+    .to_string();
     child
         .stdin
         .take()
@@ -1537,7 +1842,14 @@ async fn tool_search(session: &Session, args: &Value) -> Result<Value, String> {
         .get("browser")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let body = fetch_serp(&strategy, &url, force_browser).await?;
+    // `headless:true|false` picks the sidecar's Chrome mode for this call (browser mode
+    // only); omit to let the sidecar default (headed — headless trips google's /sorry).
+    let headless = args.get("headless").and_then(Value::as_bool);
+    // `remint:true` (or TURBO_SURF_ENID_REMINT=1) forces a fresh sidecar mint on the
+    // native-google (ENID) path, ignoring any cached token for this call.
+    let remint = args.get("remint").and_then(Value::as_bool).unwrap_or(false)
+        || std::env::var("TURBO_SURF_ENID_REMINT").is_ok_and(|v| v == "1");
+    let body = fetch_serp(&strategy, &url, force_browser, headless, remint).await?;
     let results = parse_serp(&strategy, &body, limit);
     Ok(json!(results
         .iter()
@@ -1664,10 +1976,19 @@ pub fn tools() -> Value {
              most reliable no-JS endpoint; google/bing are best-effort scrapes that \
              may drift or captcha; searxng/baidu also bundled; or set a session \
              default via web_search_set_engine). base? is the instance URL for \
-             engine:searxng. limit? (default 10). browser? routes the SERP fetch \
-             through a real-browser sidecar (TURBO_SURF_BROWSER_FETCH_CMD) — needed \
-             for engines behind a browser-integrity wall (google BotGuard). Stateless: \
-             does not touch the session page/jar",
+             engine:searxng. limit? (default 10). engine:google fetches /search \
+             NATIVELY (no browser) reusing a trusted __Secure-ENID minted rarely by \
+             the headed sidecar (TURBO_SURF_BROWSER_FETCH_CMD); a stale/missing token \
+             (google's enablejs shell) auto re-mints once + retries. remint? (or \
+             TURBO_SURF_ENID_REMINT=1) forces a fresh mint. browser? instead routes \
+             the WHOLE SERP through the real-browser sidecar (escape hatch for an \
+             engine behind a browser-integrity wall). headless? picks the sidecar's \
+             Chrome mode for a mint/browser fetch — omit for the reliable headed \
+             default (headless trips google's /sorry); true only where there's no \
+             display (xvfb). On the native path, a google /sorry unusual-traffic wall \
+             is auto-cleared in-isolate (reCAPTCHA → GOOGLE_ABUSE_EXEMPTION → SERP) \
+             for v3/invisible/score flows; a v2 image grid defers to an external \
+             solver or errors. Stateless: does not touch the session page/jar",
         ),
         (
             "web_search_set_engine",
@@ -1781,6 +2102,15 @@ pub fn tools() -> Value {
             "EXPERIMENTAL: probe the live Akamai script on the current page, hash it, \
              and build candidate sensor_data per version. `{retry:true}` POSTs each \
              candidate, tests live acceptance, and saves a working one locally.",
+        ),
+        (
+            "solve_recaptcha",
+            "Mint a reCAPTCHA token in-isolate (V8 render tier, no browser) → \
+             {url,token,sitekey}. Args: url (required); sitekey?/action? (else \
+             auto-detected from the page). Works for v3/invisible/score flows (and the \
+             google `/sorry` wall paired with a clean TURBO_SURF_PROXY IP — acceptance \
+             is Google-scored server-side). A v2 image-grid challenge is NOT solvable \
+             in-isolate → clear error (route to an external solver).",
         ),
         (
             "set_fingerprint",
@@ -1947,6 +2277,16 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
         "analyze_akamai" => {
             session
                 .analyze_akamai(args.get("retry").and_then(|v| v.as_bool()).unwrap_or(false))
+                .await
+        }
+        "solve_recaptcha" => {
+            let url = arg_str(args, "url").ok_or("solve_recaptcha: missing 'url'")?;
+            session
+                .solve_recaptcha(
+                    url,
+                    arg_str(args, "sitekey").map(str::to_string),
+                    arg_str(args, "action").map(str::to_string),
+                )
                 .await
         }
         "stealth_status" => Ok(session.stealth_status()),
@@ -2332,6 +2672,104 @@ mod tests {
         call_tool(s, name, &args).await.unwrap()
     }
 
+    // The `solve_recaptcha` MCP tool, end to end and offline: a localhost fixture stands
+    // in for google (page + api.js main VM + bframe doc + bframe VM), the tool drives the
+    // in-isolate flow and returns the client token. A v2 image-grid checkbox fixture is
+    // refused with the documented error — the honest boundary surfaced through the tool.
+    #[tokio::test]
+    async fn solve_recaptcha_tool_mints_token_and_refuses_v2_image() {
+        let ok_port = spawn_recaptcha_fixture(true).await;
+        let mut s = Session::new();
+        let res = call(
+            &mut s,
+            "solve_recaptcha",
+            json!({ "url": format!("http://127.0.0.1:{ok_port}/") }),
+        )
+        .await;
+        assert_eq!(
+            res["token"], "bframe-token-SITEKEY-XYZ",
+            "the tool must return the in-isolate client token: {res}"
+        );
+
+        // v2 image checkbox → error through the tool (call_tool returns Err).
+        let v2_port = spawn_recaptcha_fixture(false).await;
+        let err = call_tool(
+            &mut s,
+            "solve_recaptcha",
+            &json!({ "url": format!("http://127.0.0.1:{v2_port}/") }),
+        )
+        .await;
+        assert!(
+            err.is_err(),
+            "a v2 image-grid challenge must be refused, got {err:?}"
+        );
+    }
+
+    // reCAPTCHA fixture server; `v3` true → a solvable score flow (page + api.js VM +
+    // bframe), false → a plain v2 checkbox widget (the unsolvable image case).
+    async fn spawn_recaptcha_fixture(v3: bool) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = req
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("/")
+                    .to_string();
+                let (ctype, body): (&str, &str) = if !v3 {
+                    (
+                        "text/html",
+                        r#"<!DOCTYPE html><html><head><script src="/recaptcha/api.js"></script></head>
+                        <body><form><div class="g-recaptcha" data-sitekey="SITEKEY-CB"></div></form></body></html>"#,
+                    )
+                } else if path.contains("frame-vm.js") {
+                    (
+                        "application/javascript",
+                        "addEventListener('message',function(e){var m=e.data||{};if(m.type==='challenge'){e.source.postMessage({type:'token',token:'bframe-token-'+m.c},'*');}});\
+                         addEventListener('load',function(){parent.postMessage({type:'bframe-ready'},'*');});",
+                    )
+                } else if path.contains("api.js") {
+                    (
+                        "application/javascript",
+                        "(function(){window.grecaptcha={ready:function(cb){cb();},render:function(){return 0;},\
+                         execute:function(sk,o){return new Promise(function(res){var f=document.createElement('iframe');\
+                         window.addEventListener('message',function(e){var m=e.data||{};\
+                         if(m.type==='bframe-ready'&&e.source===f.contentWindow){f.contentWindow.postMessage({type:'challenge',c:sk},'*');}\
+                         else if(m.type==='token'&&e.source===f.contentWindow){res(m.token);}});\
+                         f.src=location.origin+'/recaptcha/api2/bframe?k='+sk;document.body.appendChild(f);});}};})();",
+                    )
+                } else if path.contains("bframe") {
+                    (
+                        "text/html",
+                        r#"<!DOCTYPE html><html><head><script src="/recaptcha/api2/frame-vm.js"></script></head><body></body></html>"#,
+                    )
+                } else {
+                    (
+                        "text/html",
+                        r#"<!DOCTYPE html><html><head><script src="/recaptcha/api.js?render=SITEKEY-XYZ"></script></head>
+                        <body><div class="g-recaptcha" data-sitekey="SITEKEY-XYZ" data-size="invisible"></div></body></html>"#,
+                    )
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.flush().await;
+            }
+        });
+        port
+    }
+
     // The browser-sidecar contract (env-independent core): a stub `node -e` command
     // stands in for the real chromium sidecar — it drains stdin and prints a JSON
     // {html} line. Verifies we drive the sidecar and read its html back. (The JS has
@@ -2341,6 +2779,7 @@ mod tests {
         let html = browser_fetch_serp_cmd(
             "https://e/",
             "node -e process.stdin.resume();process.stdout.write(JSON.stringify({html:'<h3>ok</h3>'}))",
+            None,
         )
         .await;
         assert_eq!(html.unwrap(), "<h3>ok</h3>");
@@ -2351,10 +2790,211 @@ mod tests {
         let err = browser_fetch_serp_cmd(
             "https://e/",
             "node -e process.stdin.resume();process.stdout.write(JSON.stringify({blocked:true,finalUrl:'https://g/sorry'}))",
+            None,
         )
         .await
         .unwrap_err();
         assert!(err.contains("captcha"), "block surfaced: {err}");
+    }
+
+    #[tokio::test]
+    async fn browser_serp_forwards_headless_flag() {
+        // Stub echoes back the `headless` it received on stdin. Command must be
+        // whitespace-free per the split_whitespace contract (single `-e` token).
+        let cmd = "node -e d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{h=JSON.parse(d).headless;process.stdout.write(JSON.stringify({html:'<h3>headless='+h+'</h3>'}))})";
+        let on = browser_fetch_serp_cmd("https://e/", cmd, Some(true))
+            .await
+            .unwrap();
+        assert!(on.contains("headless=true"), "headless not forwarded: {on}");
+        // None omits the key (sidecar applies its own headed default).
+        let off = browser_fetch_serp_cmd("https://e/", cmd, None)
+            .await
+            .unwrap();
+        assert!(
+            off.contains("headless=undefined"),
+            "headless should be absent when None: {off}"
+        );
+    }
+
+    // --- native-google ENID reuse (offline: localhost /search + a stub mint) -----
+
+    #[test]
+    fn enablejs_shell_detected_by_missing_rso_h3() {
+        // The real SERP carries #rso + <h3>; the enablejs bootstrap has neither.
+        assert!(is_enablejs_shell(
+            "<html><body>Please enable JavaScript</body></html>"
+        ));
+        assert!(!is_enablejs_shell(
+            "<html><body><div id=\"rso\"><h3>hit</h3></div></body></html>"
+        ));
+        assert!(!is_enablejs_shell("<h3>only a title</h3>"));
+    }
+
+    // A localhost stand-in for google `/search`: returns the real SERP only when the
+    // request carries `__Secure-ENID=TRUSTED`, else the enablejs JS shell — the exact
+    // gate the trusted-ENID reuse targets. Returns the bound port.
+    async fn spawn_enid_search_server() -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut b = [0u8; 4096];
+                    let n = sock.read(&mut b).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&b[..n]);
+                    let trusted = req.lines().any(|l| {
+                        l.to_ascii_lowercase().starts_with("cookie:")
+                            && l.contains("__Secure-ENID=TRUSTED")
+                    });
+                    let body = if trusted {
+                        "<html><body><div id=\"rso\"><h3>Real Result</h3></div></body></html>"
+                    } else {
+                        "<html><body>enablejs: please enable javascript</body></html>"
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.flush().await;
+                });
+            }
+        });
+        port
+    }
+
+    // A whitespace-free path to a bash mint stub that (a) bumps a counter file so a
+    // test can assert the mint count and (b) prints a cookie set with a TRUSTED ENID.
+    // Returns `(mint_cmd, counter_path)`.
+    fn write_mint_stub(tag: &str) -> (String, std::path::PathBuf) {
+        use std::io::Write as _;
+        let base = std::env::temp_dir();
+        let counter = base.join(format!("enid-mint-count-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_file(&counter);
+        let script = base.join(format!("enid-mint-{}-{}.sh", std::process::id(), tag));
+        let src = format!(
+            "cat >/dev/null\nprintf x >> '{}'\nprintf '{{\"cookies\":[{{\"name\":\"__Secure-ENID\",\"value\":\"TRUSTED\",\"domain\":\"127.0.0.1\",\"path\":\"/\"}}]}}'\n",
+            counter.display()
+        );
+        let mut f = std::fs::File::create(&script).unwrap();
+        f.write_all(src.as_bytes()).unwrap();
+        (format!("bash {}", script.display()), counter)
+    }
+
+    fn mint_count(counter: &std::path::Path) -> usize {
+        std::fs::read(counter).map(|b| b.len()).unwrap_or(0)
+    }
+
+    fn tmp_enid_cache(tag: &str) -> EnidCache {
+        let p = std::env::temp_dir().join(format!(
+            "enid-flow-cache-{}-{}.json",
+            std::process::id(),
+            tag
+        ));
+        let _ = std::fs::remove_file(&p);
+        EnidCache::new(p)
+    }
+
+    #[tokio::test]
+    async fn enid_flow_cache_miss_mints_then_native_fetch_gets_serp() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let (cmd, counter) = write_mint_stub("miss");
+        let cache = tmp_enid_cache("miss"); // no file → cache miss
+
+        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+            .await
+            .unwrap();
+        assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
+        assert_eq!(
+            mint_count(&counter),
+            1,
+            "cache miss should mint exactly once"
+        );
+        // The mint was persisted → a follow-up is a cache hit.
+        assert!(cache.get_valid(enid::now_secs()).is_some());
+    }
+
+    #[tokio::test]
+    async fn enid_flow_cache_hit_skips_mint() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let (cmd, counter) = write_mint_stub("hit");
+        let cache = tmp_enid_cache("hit");
+        // Pre-seed a live, trusted token → no mint should happen.
+        cache
+            .set(&[EnidCookie {
+                name: enid::ENID_NAME.into(),
+                value: "TRUSTED".into(),
+                domain: "127.0.0.1".into(),
+                path: "/".into(),
+                expires: Some(enid::now_secs() + 86_400.0),
+            }])
+            .unwrap();
+
+        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+            .await
+            .unwrap();
+        assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
+        assert_eq!(mint_count(&counter), 0, "cached token → no mint");
+    }
+
+    #[tokio::test]
+    async fn enid_flow_stale_token_triggers_one_remint_and_retry() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let (cmd, counter) = write_mint_stub("stale");
+        let cache = tmp_enid_cache("stale");
+        // A cached token the cache considers live but the server rejects (untrusted)
+        // → first native fetch returns the enablejs shell.
+        cache
+            .set(&[EnidCookie {
+                name: enid::ENID_NAME.into(),
+                value: "STALE".into(),
+                domain: "127.0.0.1".into(),
+                path: "/".into(),
+                expires: Some(enid::now_secs() + 86_400.0),
+            }])
+            .unwrap();
+
+        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+            .await
+            .unwrap();
+        assert!(
+            html.contains("id=\"rso\""),
+            "want SERP after re-mint, got: {html}"
+        );
+        assert_eq!(
+            mint_count(&counter),
+            1,
+            "enablejs shell should trigger EXACTLY one re-mint"
+        );
+    }
+
+    #[tokio::test]
+    async fn enid_flow_remint_flag_forces_fresh_mint_over_cache() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let (cmd, counter) = write_mint_stub("force");
+        let cache = tmp_enid_cache("force");
+        cache
+            .set(&[EnidCookie {
+                name: enid::ENID_NAME.into(),
+                value: "TRUSTED".into(),
+                domain: "127.0.0.1".into(),
+                path: "/".into(),
+                expires: Some(enid::now_secs() + 86_400.0),
+            }])
+            .unwrap();
+
+        // remint:true → mint despite a valid cache.
+        let html = google_enid_flow(&url, &cache, &cmd, None, true)
+            .await
+            .unwrap();
+        assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
+        assert_eq!(mint_count(&counter), 1, "remint flag forces a mint");
     }
 
     #[tokio::test]

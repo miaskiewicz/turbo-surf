@@ -249,6 +249,11 @@ async fn op_fetch(
         body,
         headers,
         allow_non_html: true, // fetch pulls JSON/text too
+        // Follow redirects MANUALLY so `Set-Cookie` on an intermediate 3xx hop is
+        // ingested (the browser-equivalent per-hop cookie round-trip). Auto-follow
+        // only ingests the final response's cookies — a login/consent endpoint that
+        // mints its session cookie on a 302 (Google's `/save` → `NID`) would be lost.
+        max_redirects: Some(20),
         jar: Some(&mut local),
         ..Default::default()
     };
@@ -973,6 +978,62 @@ globalThis.MessageChannel = class MessageChannel {
   }
 };
 globalThis.MessagePort = function MessagePort() {};
+// window.postMessage — deliver a `message` event to THIS realm's window listeners
+// (async, via the timer queue so the hydration/interaction drain processes it). Real
+// same-window `postMessage(msg)` fires `message` handlers with `{data, origin, source}`
+// where `origin` is the sender's (i.e. our) origin. This is load-bearing for the
+// reCAPTCHA/BotGuard host protocol: after the VM installs the grecaptcha API it drives
+// its own scheduler by posting to the window and running work in the `message` handler —
+// a bare `postMessage(...)` call (window.postMessage) with no shim throws
+// "postMessage is not a function" and aborts the VM before any token path runs. The
+// vendored binding supplies window `addEventListener`/`dispatchEvent`; we only add the
+// poster. MessageEvent is a bare stub here, so build a plain event carrying the fields
+// collectors read (data/origin/source/ports).
+globalThis.postMessage = function postMessage(message, targetOrigin, transfer) {
+  const origin = (globalThis.location && globalThis.location.origin) || "";
+  const ports = Array.isArray(transfer) ? transfer : (transfer && transfer.length ? Array.prototype.slice.call(transfer) : []);
+  globalThis.setTimeout(() => {
+    const ev = {
+      type: "message", data: message, origin, lastEventId: "", source: globalThis, ports,
+      bubbles: false, cancelable: false, composed: false, defaultPrevented: false,
+      target: globalThis, currentTarget: globalThis, eventPhase: 0, isTrusted: false, timeStamp: Date.now(),
+      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
+    };
+    try { if (typeof globalThis.onmessage === "function") globalThis.onmessage(ev); } catch (_e) {}
+    try { if (typeof globalThis.dispatchEvent === "function") globalThis.dispatchEvent(ev); } catch (_e) {}
+  }, 0);
+};
+// window `on*` event-handler slots default to `null` in a real browser (never
+// undefined). The reCAPTCHA VM reads `window.onmessage` while wiring its postMessage
+// handshake; an undefined read (vs null) is both a functional gap and a headless tell.
+for (const __on of ["onmessage", "onerror", "onmessageerror", "ononline", "onoffline", "onpopstate", "onhashchange", "onbeforeunload", "onunload", "onload"]) {
+  try { if (globalThis[__on] === undefined) globalThis[__on] = null; } catch (_e) {}
+}
+// document.contentType — real Chrome reports "text/html" for an HTML document; the
+// reCAPTCHA VM reads it. The vendored binding doesn't expose it, so add an own accessor.
+try {
+  if (globalThis.document && globalThis.document.contentType === undefined) {
+    Object.defineProperty(globalThis.document, "contentType", { configurable: true, get() { return "text/html"; } });
+  }
+} catch (_e) {}
+// TrustedTypes — real Chrome exposes `window.trustedTypes`; the reCAPTCHA VM (and many
+// CSP-aware bundles) probe it and wrap script/HTML sinks through a policy. Absence is a
+// (weak) tell and a `trustedTypes.createPolicy(...)` call on undefined throws. Pass-through
+// policies (identity transforms) keep the sinks working with no real sanitization.
+if (typeof globalThis.trustedTypes === "undefined") {
+  const __mkPolicy = (name, rules) => ({
+    name: String(name == null ? "" : name),
+    createHTML: (s) => (rules && rules.createHTML ? rules.createHTML(s) : String(s)),
+    createScript: (s) => (rules && rules.createScript ? rules.createScript(s) : String(s)),
+    createScriptURL: (s) => (rules && rules.createScriptURL ? rules.createScriptURL(s) : String(s)),
+  });
+  globalThis.trustedTypes = {
+    createPolicy: (name, rules) => __mkPolicy(name, rules),
+    defaultPolicy: null, emptyHTML: "", emptyScript: "",
+    getPropertyType: () => null, getAttributeType: () => null,
+    isHTML: () => false, isScript: () => false, isScriptURL: () => false,
+  };
+}
 // performance — React/Next read performance.now() for timing/scheduling. mark()/measure()
 // must RETURN the PerformanceEntry they create (real spec): RUM/timing code destructures
 // `const {startTime} = performance.mark(name)` (and reads `.duration`/`.entryType` off the
@@ -2224,6 +2285,90 @@ globalThis.__domSig = () => {
       try { if (typeof el.dispatchEvent === "function") el.dispatchEvent(ev); } catch (_e) {}
     }, 0);
   };
+  // ── reCAPTCHA bframe handshake (network + second realm) ─────────────────────────
+  // reCAPTCHA's main VM (recaptcha__en.js) FULLY executes here; execute() then loads the
+  // cross-origin **bframe** iframe and drives the challenge over postMessage to its
+  // contentWindow, awaiting a token reply. Offline/in-isolate that iframe never loads, so
+  // execute() hangs. This upgrades a bframe (or anchor) iframe from the lightweight stub to
+  // a REAL bridged second realm (browser_env's __makeFrameRealm), FETCHES the frame + its
+  // own VM over op_fetch (shared cookie jar), runs that VM INSIDE the child realm, and lets
+  // the realm's directional postMessage carry the parent↔bframe handshake — so execute()
+  // can progress past "awaiting bframe" toward a client-side token.
+  const BFRAME_RE = /\/recaptcha\/.*(bframe|anchor)/i;
+  // Run a sub-VM's source inside the child realm: shadow the realm-scoped identifiers
+  // (window/self/globalThis/document/parent/top/location/postMessage/…) as function params so
+  // the VM's `window`/`parent`/bare `postMessage` resolve to the child window + parent view,
+  // not the host globals. Builtins (fetch, JSON, crypto, Math, typed arrays) intentionally
+  // fall through to the real globals. This is the same-isolate realm trick — the documented
+  // fidelity tradeoff (no separate V8 context; shared prototypes).
+  const runVmInRealm = (cw, code) => {
+    const cd = cw.document;
+    const fn = new Function(
+      "window", "self", "globalThis", "document", "parent", "top", "frames", "frameElement",
+      "location", "navigator", "screen", "postMessage", "addEventListener", "removeEventListener",
+      "dispatchEvent",
+      code
+    );
+    return fn.call(cw, cw, cw, cw, cd, cw.parent, cw.top, cw.frames, cw.frameElement,
+      cw.location, cw.navigator, cw.screen,
+      cw.postMessage.bind(cw), cw.addEventListener.bind(cw), cw.removeEventListener.bind(cw),
+      cw.dispatchEvent.bind(cw));
+  };
+  // Extract + run the frame document's scripts in the realm, in document order: inline
+  // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL).
+  const loadFrameScripts = async (cw, html, frameUrl) => {
+    const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      const attrs = m[1] || "";
+      const srcM = /\ssrc\s*=\s*["']([^"']+)["']/i.exec(attrs);
+      if (srcM) {
+        let u = srcM[1];
+        try { u = new URL(u, frameUrl).href; } catch (_e) {}
+        const r = await ops.op_fetch(u, "{}");
+        if (r && r.body) { try { runVmInRealm(cw, r.body); } catch (_e) {} }
+      } else if (m[2] && m[2].trim()) {
+        try { runVmInRealm(cw, m[2]); } catch (_e) {}
+      }
+    }
+  };
+  // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
+  const fireRealmLoad = (cw) => {
+    const cd = cw.document;
+    globalThis.setTimeout(() => {
+      try { cd.readyState = "complete"; } catch (_e) {}
+      const dcl = { type: "DOMContentLoaded", target: cd, currentTarget: cd };
+      try { cd.dispatchEvent(dcl); } catch (_e) {}
+      const load = { type: "load", target: cw, currentTarget: cw };
+      try { if (typeof cw.onload === "function") cw.onload(load); } catch (_e) {}
+      try { cw.dispatchEvent(load); } catch (_e) {}
+    }, 0);
+  };
+  // The full handshake: build the realm, fetch the frame + its VM, run it, fire load.
+  // Counted in __pendingFetches so the hydration/interaction drain stays awake until it
+  // settles. Idempotent per element.
+  globalThis.__recaptchaBframeHandshake = async (el, url) => {
+    if (typeof globalThis.__makeFrameRealm !== "function") return;
+    if (el.__bframeStarted) return; el.__bframeStarted = true;
+    globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+    try {
+      const cw = globalThis.__makeFrameRealm(el, globalThis);
+      const r = await ops.op_fetch(url, "{}");
+      const html = (r && r.body) || "";
+      await loadFrameScripts(cw, html, url);
+      fireRealmLoad(cw);
+    } catch (_e) {
+    } finally {
+      globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
+    }
+  };
+  // Route a bframe/anchor src to the handshake; every other iframe keeps the lightweight
+  // load-once stub (the PostHog/PropelAuth churn fix). Returns true when it routed.
+  const routeIframeSrc = (el, v) => {
+    const url = String(v);
+    if (BFRAME_RE.test(url)) { try { globalThis.__recaptchaBframeHandshake(el, url); } catch (_e) {} return true; }
+    return false;
+  };
   // Analytics SDKs (PostHog) churn HUNDREDS of hidden <iframe>s during hydration. With
   // no real navigation each one never loads, so the SDK keeps recreating them — and the
   // tree append/remove + serialize cost of that churn starves the render budget so the
@@ -2243,7 +2388,9 @@ globalThis.__domSig = () => {
       nodeType: 1, nodeName: "IFRAME", tagName: "IFRAME", __iframeStub: true,
       style: {}, dataset: {}, contentWindow: win, contentDocument: globalThis.document,
       onload: null, onerror: null,
-      setAttribute(n, v) { if (n === "src" && v) fireIframeLoad(this); this[n] = v; },
+      // Route 'src' through the accessor below (single source of truth: bframe → handshake,
+      // else load-once); other attributes are plain data props.
+      setAttribute(n, v) { if (n === "src") { this.src = v; return; } this[n] = v; },
       getAttribute(n) { return this[n] != null ? String(this[n]) : null; },
       removeAttribute(n) { delete this[n]; },
       appendChild(c) { return c; }, removeChild(c) { return c; },
@@ -2256,7 +2403,7 @@ globalThis.__domSig = () => {
     Object.defineProperty(stub, "src", {
       configurable: true,
       get() { return stub.__src || ""; },
-      set(v) { stub.__src = String(v); if (stub.__src) fireIframeLoad(stub); },
+      set(v) { stub.__src = String(v); if (stub.__src && !routeIframeSrc(stub, stub.__src)) fireIframeLoad(stub); },
     });
     return stub;
   };
@@ -2305,6 +2452,10 @@ globalThis.__domSig = () => {
   // collector that reads its `.toString()` would see source and flag a tampered/polyfilled
   // beacon. Report native, like every other shim.
   if (nav && typeof nav.sendBeacon === "function") mark(nav.sendBeacon, "sendBeacon");
+  // window.postMessage + trustedTypes are JS shims (see their defs); a collector reading
+  // their `.toString()` must see native source, like every other shim.
+  if (typeof globalThis.postMessage === "function") mark(globalThis.postMessage, "postMessage");
+  if (globalThis.trustedTypes && typeof globalThis.trustedTypes.createPolicy === "function") mark(globalThis.trustedTypes.createPolicy, "createPolicy");
 
   // ── Structural browser-surface fidelity ──────────────────────────────────────
   // A no-Chromium engine exposes navigator/screen/document as plain object literals

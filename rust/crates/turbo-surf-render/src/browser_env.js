@@ -1,6 +1,15 @@
 (function(){
   var g = globalThis;
   if (typeof g.navigator === 'undefined') g.navigator = { userAgent: 'turbo-test', platform: 'rust', language: 'en-US', languages: ['en-US'], clipboard: {}, maxTouchPoints: 0 };
+  // Top-level window self-references (browsers + jsdom + vitest): a non-framed window is its own
+  // parent/top, and `self`/`frames` alias the window. `window === globalThis` here, so point them at
+  // g. Configurable so a test can stub framing (Object.defineProperty(window,'parent',{value:...})).
+  // Without these, `window.parent !== window` reads as "always inside an iframe" and silently breaks
+  // top-level/iframe detection that works under vitest.
+  ['self', 'parent', 'top', 'frames'].forEach(function(k){
+    if (g[k] !== g) { try { Object.defineProperty(g, k, { value: g, writable: true, configurable: true, enumerable: false }); } catch(e){ try { g[k] = g; } catch(e2){} } }
+  });
+  if (typeof g.frameElement === 'undefined') { try { Object.defineProperty(g, 'frameElement', { value: null, writable: true, configurable: true, enumerable: false }); } catch(e){ try { g.frameElement = null; } catch(e2){} } }
   // ---- CSS shorthand expansion ----------------------------------------------------------------
   // getComputedStyle in jsdom derives longhands from shorthands; tests read e.g. marginTop,
   // borderWidth, backgroundColor, rowGap, flexBasis. Expand the common shorthands into longhands so
@@ -661,36 +670,232 @@
         }
       } catch(e){}
     };
-    // <canvas>.getContext('2d') — a no-op 2D context stub (no rasterization). Covers components that
-    // probe a context (signature pads, charts) without a real GPU/layout backend.
+    // <canvas>.getContext('2d') — a 2D context that does NOT rasterize but RECORDS the draw
+    // operations (with the paint state at each) so readback (toDataURL/getImageData/toBlob)
+    // is DETERMINISTIC and CONTENT-DEPENDENT: identical draws always hash to identical bytes,
+    // different draws to different bytes. An empty `data:image/png;base64,` or an all-zero
+    // getImageData is a canvas-fingerprint dead tell (real canvases vary with content); a
+    // stable content-derived hash reads like a real — if device-invariant — canvas. There is
+    // no GPU/font rasterizer here, so the output is synthetic: honest about being computed
+    // from the op log, not a specific device's pixels. Covers signature pads/charts too.
+    var __cvHash = function(str){
+      // FNV-1a (32-bit), avalanched at the end.
+      var h = 0x811c9dc5;
+      for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+      h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0; h ^= h >>> 13; return h >>> 0;
+    };
+    var __CV_B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var __cvB64 = function(bytes){
+      var out = '';
+      for (var i = 0; i < bytes.length; i += 3) {
+        var a = bytes[i], b = (i+1 < bytes.length) ? bytes[i+1] : 0, c = (i+2 < bytes.length) ? bytes[i+2] : 0;
+        var n = (a << 16) | (b << 8) | c;
+        out += __CV_B64[(n>>18)&63] + __CV_B64[(n>>12)&63] + ((i+1 < bytes.length) ? __CV_B64[(n>>6)&63] : '=') + ((i+2 < bytes.length) ? __CV_B64[n&63] : '=');
+      }
+      return out;
+    };
+    // Deterministic byte stream of length n from a 32-bit seed (an LCG).
+    var __cvBytes = function(seed, n){
+      var b = new Array(n), x = (seed ^ 0x9e3779b9) >>> 0;
+      for (var i = 0; i < n; i++) { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; b[i] = (x >>> 16) & 0xff; }
+      return b;
+    };
+    var __cvSeed = function(canvas, ctx, extra){
+      var w = (canvas && canvas.width) || 300, h = (canvas && canvas.height) || 150;
+      var ops = (ctx && ctx._ops) ? ctx._ops : [];
+      return __cvHash(w + 'x' + h + '|' + (extra || '') + '|' + JSON.stringify(ops));
+    };
     var mkCanvasCtx = function(canvas){
       var noop = function(){};
-      return {
+      var ctx = {
         canvas: canvas,
-        fillRect: noop, clearRect: noop, strokeRect: noop, beginPath: noop, closePath: noop,
-        moveTo: noop, lineTo: noop, bezierCurveTo: noop, quadraticCurveTo: noop, arc: noop, arcTo: noop,
-        rect: noop, ellipse: noop, fill: noop, stroke: noop, clip: noop, save: noop, restore: noop,
-        scale: noop, rotate: noop, translate: noop, transform: noop, setTransform: noop, resetTransform: noop,
-        drawImage: noop, putImageData: noop, setLineDash: noop, getLineDash: function(){ return []; },
+        _ops: [],
+        setLineDash: noop, getLineDash: function(){ return []; },
         createLinearGradient: function(){ return { addColorStop: noop }; },
         createRadialGradient: function(){ return { addColorStop: noop }; },
+        createConicGradient: function(){ return { addColorStop: noop }; },
         createPattern: function(){ return {}; },
-        getImageData: function(x,y,w,h){ return { data: new Uint8ClampedArray(Math.max(0,(w||0)*(h||0)*4)), width: w||0, height: h||0 }; },
-        createImageData: function(w,h){ return { data: new Uint8ClampedArray(Math.max(0,(w||0)*(h||0)*4)), width: w||0, height: h||0 }; },
-        measureText: function(s){ return { width: (String(s||'').length)*6, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2 }; },
-        fillText: noop, strokeText: noop, isPointInPath: function(){ return false; },
-        fillStyle: '#000', strokeStyle: '#000', lineWidth: 1, lineCap: 'butt', lineJoin: 'miter',
-        font: '10px sans-serif', textAlign: 'start', textBaseline: 'alphabetic', globalAlpha: 1, globalCompositeOperation: 'source-over'
+        getImageData: function(x,y,w,h){
+          w = w||0; h = h||0;
+          var data = new Uint8ClampedArray(Math.max(0, w*h*4));
+          // Content-dependent, deterministic pixels derived from the op log — not all-zero.
+          if (data.length) {
+            var src = __cvBytes(__cvSeed(canvas, ctx, 'getImageData:'+x+','+y+','+w+','+h), Math.min(data.length, 4096));
+            for (var i = 0; i < data.length; i++) data[i] = src[i % src.length];
+          }
+          return { data: data, width: w, height: h, colorSpace: 'srgb' };
+        },
+        createImageData: function(w,h){ if (w && w.width != null) { h = w.height; w = w.width; } return { data: new Uint8ClampedArray(Math.max(0,(w||0)*(h||0)*4)), width: w||0, height: h||0, colorSpace: 'srgb' }; },
+        measureText: function(s){ this._ops.push(['measureText', String(s||''), this.font]); var wdt = (String(s||'').length)*6; return { width: wdt, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2, actualBoundingBoxLeft: 0, actualBoundingBoxRight: wdt, fontBoundingBoxAscent: 8, fontBoundingBoxDescent: 2 }; },
+        isPointInPath: function(){ return false; }, isPointInStroke: function(){ return false; },
+        fillStyle: '#000000', strokeStyle: '#000000', lineWidth: 1, lineCap: 'butt', lineJoin: 'miter',
+        miterLimit: 10, lineDashOffset: 0, shadowBlur: 0, shadowColor: 'rgba(0, 0, 0, 0)', shadowOffsetX: 0, shadowOffsetY: 0,
+        font: '10px sans-serif', textAlign: 'start', textBaseline: 'alphabetic', direction: 'ltr',
+        globalAlpha: 1, globalCompositeOperation: 'source-over', imageSmoothingEnabled: true, imageSmoothingQuality: 'low'
       };
+      // Record-only paint/path methods: log the call (args + relevant paint state) so the
+      // readback hash reflects what was drawn, but perform no rasterization.
+      var recorded = ['fillRect','clearRect','strokeRect','beginPath','closePath','moveTo','lineTo',
+        'bezierCurveTo','quadraticCurveTo','arc','arcTo','rect','roundRect','ellipse','fill','stroke',
+        'clip','save','restore','scale','rotate','translate','transform','setTransform','resetTransform',
+        'drawImage','putImageData','fillText','strokeText','drawFocusIfNeeded'];
+      recorded.forEach(function(name){
+        ctx[name] = function(){
+          var a = Array.prototype.slice.call(arguments).map(function(v){ return (v && typeof v === 'object') ? (v.tagName || v.nodeName || 'obj') : v; });
+          this._ops.push([name, a, this.fillStyle, this.strokeStyle, this.font, this.textBaseline, this.textAlign, this.globalAlpha, this.globalCompositeOperation]);
+        };
+      });
+      return ctx;
+    };
+    // WebGL: a COHERENT headless-Chrome SwiftShader context (ANGLE over Vulkan). Headless
+    // Chrome has NO GPU and renders WebGL through SwiftShader — a legitimate, ubiquitous real
+    // fingerprint (every GPU-less Chrome reports exactly this), so emulating it is far less of
+    // a tell than a null context (which reads as WebGL blocked/disabled). Values below are
+    // SwiftShader's real ones: VENDOR/RENDERER + UNMASKED_* (via WEBGL_debug_renderer_info),
+    // VERSION/GLSL strings as Chrome reports, the numeric limits, the extension list, and
+    // shader precision. Readback (readPixels/toDataURL/toBlob) is DETERMINISTIC + content-
+    // dependent (hashes the GL op log, like the 2D path) — synthetic, not a real rasterizer
+    // (a real GL raster is a bigger Tier-2 job); honest about being computed from the op log.
+    var GLC = {
+      VENDOR:0x1F00, RENDERER:0x1F01, VERSION:0x1F02, SHADING_LANGUAGE_VERSION:0x8B8C,
+      MAX_TEXTURE_SIZE:0x0D33, MAX_CUBE_MAP_TEXTURE_SIZE:0x851C, MAX_RENDERBUFFER_SIZE:0x84E8,
+      MAX_VIEWPORT_DIMS:0x0D3A, MAX_TEXTURE_IMAGE_UNITS:0x8872, MAX_COMBINED_TEXTURE_IMAGE_UNITS:0x8B4D,
+      MAX_VERTEX_TEXTURE_IMAGE_UNITS:0x8B4C, MAX_VERTEX_ATTRIBS:0x8869, MAX_VERTEX_UNIFORM_VECTORS:0x8DFB,
+      MAX_FRAGMENT_UNIFORM_VECTORS:0x8DFD, MAX_VARYING_VECTORS:0x8DFC,
+      ALIASED_LINE_WIDTH_RANGE:0x846E, ALIASED_POINT_SIZE_RANGE:0x846D,
+      RED_BITS:0x0D52, GREEN_BITS:0x0D53, BLUE_BITS:0x0D54, ALPHA_BITS:0x0D55, DEPTH_BITS:0x0D56,
+      STENCIL_BITS:0x0D57, SUBPIXEL_BITS:0x0D50, SAMPLES:0x80A9, SAMPLE_BUFFERS:0x80A8,
+      MAX_TEXTURE_MAX_ANISOTROPY_EXT:0x84FF, TEXTURE_MAX_ANISOTROPY_EXT:0x84FE,
+      UNMASKED_VENDOR_WEBGL:0x9245, UNMASKED_RENDERER_WEBGL:0x9246,
+      HIGH_FLOAT:0x8DF2, MEDIUM_FLOAT:0x8DF1, LOW_FLOAT:0x8DF0, HIGH_INT:0x8DF5, MEDIUM_INT:0x8DF4, LOW_INT:0x8DF3,
+      MAX_3D_TEXTURE_SIZE:0x8073, MAX_ARRAY_TEXTURE_LAYERS:0x88FF, MAX_DRAW_BUFFERS:0x8824,
+      MAX_COLOR_ATTACHMENTS:0x8CDF, MAX_SAMPLES:0x8D57, MAX_UNIFORM_BUFFER_BINDINGS:0x8A2F,
+      MAX_VERTEX_UNIFORM_BLOCKS:0x8A2B, MAX_FRAGMENT_UNIFORM_BLOCKS:0x8A2D,
+      MAX_ELEMENTS_INDICES:0x80E9, MAX_ELEMENTS_VERTICES:0x80E8, VERTEX_ARRAY_BINDING_OES:0x85B5,
+    };
+    var GL_EXT1 = ['ANGLE_instanced_arrays','EXT_blend_minmax','EXT_color_buffer_half_float',
+      'EXT_disjoint_timer_query','EXT_float_blend','EXT_frag_depth','EXT_shader_texture_lod','EXT_sRGB',
+      'EXT_texture_compression_bptc','EXT_texture_compression_rgtc','EXT_texture_filter_anisotropic',
+      'OES_element_index_uint','OES_fbo_render_mipmap','OES_standard_derivatives','OES_texture_float',
+      'OES_texture_float_linear','OES_texture_half_float','OES_texture_half_float_linear',
+      'OES_vertex_array_object','WEBGL_color_buffer_float','WEBGL_compressed_texture_s3tc',
+      'WEBGL_compressed_texture_s3tc_srgb','WEBGL_debug_renderer_info','WEBGL_debug_shaders',
+      'WEBGL_depth_texture','WEBGL_draw_buffers','WEBGL_lose_context','WEBGL_multi_draw'];
+    var GL_EXT2 = ['EXT_color_buffer_float','EXT_color_buffer_half_float','EXT_disjoint_timer_query_webgl2',
+      'EXT_float_blend','EXT_texture_compression_bptc','EXT_texture_compression_rgtc',
+      'EXT_texture_filter_anisotropic','EXT_texture_norm16','KHR_parallel_shader_compile',
+      'OES_draw_buffers_indexed','OES_texture_float_linear','WEBGL_compressed_texture_s3tc',
+      'WEBGL_compressed_texture_s3tc_srgb','WEBGL_debug_renderer_info','WEBGL_debug_shaders',
+      'WEBGL_lose_context','WEBGL_multi_draw','WEBGL_provoking_vertex'];
+    var mkWebGLCtx = function(canvas, isGL2){
+      var C = GLC, noop = function(){};
+      var params = {};
+      params[C.VENDOR] = 'WebKit'; params[C.RENDERER] = 'WebKit WebGL';
+      params[C.VERSION] = isGL2 ? 'WebGL 2.0 (OpenGL ES 3.0 Chromium)' : 'WebGL 1.0 (OpenGL ES 2.0 Chromium)';
+      params[C.SHADING_LANGUAGE_VERSION] = isGL2 ? 'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)' : 'WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)';
+      params[C.UNMASKED_VENDOR_WEBGL] = 'Google Inc. (Google)';
+      params[C.UNMASKED_RENDERER_WEBGL] = 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)';
+      params[C.MAX_TEXTURE_SIZE] = 8192; params[C.MAX_CUBE_MAP_TEXTURE_SIZE] = 8192;
+      params[C.MAX_RENDERBUFFER_SIZE] = 8192; params[C.MAX_VIEWPORT_DIMS] = new Int32Array([8192, 8192]);
+      params[C.MAX_TEXTURE_IMAGE_UNITS] = 16; params[C.MAX_COMBINED_TEXTURE_IMAGE_UNITS] = 32;
+      params[C.MAX_VERTEX_TEXTURE_IMAGE_UNITS] = 16; params[C.MAX_VERTEX_ATTRIBS] = 16;
+      params[C.MAX_VERTEX_UNIFORM_VECTORS] = 4096; params[C.MAX_FRAGMENT_UNIFORM_VECTORS] = 4096;
+      params[C.MAX_VARYING_VECTORS] = 30;
+      params[C.ALIASED_LINE_WIDTH_RANGE] = new Float32Array([1, 1]);
+      params[C.ALIASED_POINT_SIZE_RANGE] = new Float32Array([1, 1023]);
+      params[C.MAX_TEXTURE_MAX_ANISOTROPY_EXT] = 16;
+      params[C.RED_BITS] = 8; params[C.GREEN_BITS] = 8; params[C.BLUE_BITS] = 8; params[C.ALPHA_BITS] = 8;
+      params[C.DEPTH_BITS] = 24; params[C.STENCIL_BITS] = 0; params[C.SUBPIXEL_BITS] = 4;
+      params[C.SAMPLES] = 0; params[C.SAMPLE_BUFFERS] = 0;
+      if (isGL2) {
+        params[C.MAX_3D_TEXTURE_SIZE] = 2048; params[C.MAX_ARRAY_TEXTURE_LAYERS] = 2048;
+        params[C.MAX_DRAW_BUFFERS] = 8; params[C.MAX_COLOR_ATTACHMENTS] = 8; params[C.MAX_SAMPLES] = 4;
+        params[C.MAX_UNIFORM_BUFFER_BINDINGS] = 72; params[C.MAX_VERTEX_UNIFORM_BLOCKS] = 12;
+        params[C.MAX_FRAGMENT_UNIFORM_BLOCKS] = 12; params[C.MAX_ELEMENTS_INDICES] = 0x7FFFFFFF;
+        params[C.MAX_ELEMENTS_VERTICES] = 0x7FFFFFFF;
+      }
+      var EXT = isGL2 ? GL_EXT2 : GL_EXT1;
+      var gl = { canvas: canvas, _ops: [],
+        drawingBufferWidth: (canvas && canvas.width) || 300, drawingBufferHeight: (canvas && canvas.height) || 150,
+        drawingBufferColorSpace: 'srgb', unpackColorSpace: 'srgb' };
+      for (var k in C) gl[k] = C[k]; // enum constants readable off the context (gl.VERSION, …)
+      gl.getParameter = function(p){ return (p in params) ? params[p] : null; };
+      gl.getContextAttributes = function(){ return { alpha:true, antialias:true, depth:true, desynchronized:false,
+        failIfMajorPerformanceCaveat:false, powerPreference:'default', premultipliedAlpha:true,
+        preserveDrawingBuffer:false, stencil:false, xrCompatible:false }; };
+      gl.getSupportedExtensions = function(){ return EXT.slice(); };
+      gl.getExtension = function(name){
+        if (EXT.indexOf(name) < 0) return null;
+        if (name === 'WEBGL_debug_renderer_info') return { UNMASKED_VENDOR_WEBGL: C.UNMASKED_VENDOR_WEBGL, UNMASKED_RENDERER_WEBGL: C.UNMASKED_RENDERER_WEBGL };
+        if (name === 'EXT_texture_filter_anisotropic') return { MAX_TEXTURE_MAX_ANISOTROPY_EXT: C.MAX_TEXTURE_MAX_ANISOTROPY_EXT, TEXTURE_MAX_ANISOTROPY_EXT: C.TEXTURE_MAX_ANISOTROPY_EXT };
+        if (name === 'OES_vertex_array_object') return { createVertexArrayOES:function(){return{};}, deleteVertexArrayOES:noop, bindVertexArrayOES:noop, isVertexArrayOES:function(){return false;}, VERTEX_ARRAY_BINDING_OES:C.VERTEX_ARRAY_BINDING_OES };
+        if (name === 'WEBGL_lose_context') return { loseContext:noop, restoreContext:noop };
+        if (name === 'ANGLE_instanced_arrays') return { drawArraysInstancedANGLE:noop, drawElementsInstancedANGLE:noop, vertexAttribDivisorANGLE:noop, VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE:0x88FE };
+        return {}; // non-null stub so `if (gl.getExtension(x))` feature-detects pass
+      };
+      gl.getShaderPrecisionFormat = function(shaderType, precisionType){
+        var isFloat = (precisionType === C.HIGH_FLOAT || precisionType === C.MEDIUM_FLOAT || precisionType === C.LOW_FLOAT);
+        // SwiftShader maps all float precisions to IEEE highp (127/127/23); ints 31/30/0.
+        return isFloat ? { rangeMin:127, rangeMax:127, precision:23 } : { rangeMin:31, rangeMax:30, precision:0 };
+      };
+      // Record-only GL commands so readback reflects what was drawn (no rasterization).
+      ['clear','clearColor','drawArrays','drawElements','drawArraysInstanced','drawElementsInstanced',
+       'viewport','scissor','useProgram','bindBuffer','bufferData','bufferSubData','vertexAttribPointer',
+       'enableVertexAttribArray','uniform1f','uniform2f','uniform3f','uniform4f','uniform1i','uniformMatrix4fv',
+       'activeTexture','bindTexture','texImage2D','texSubImage2D','texParameteri','enable','disable',
+       'blendFunc','depthFunc','flush','finish','readBuffer'].forEach(function(n){
+        gl[n] = function(){ var a = Array.prototype.slice.call(arguments).map(function(v){ return (v && typeof v === 'object') ? (v.byteLength != null ? ('buf' + v.byteLength) : (v.length != null ? ('arr' + v.length) : 'obj')) : v; }); this._ops.push([n, a]); };
+      });
+      ['createBuffer','createProgram','createShader','createTexture','createFramebuffer','createRenderbuffer','createVertexArray','createSampler'].forEach(function(n){ gl[n] = function(){ return { __glObj:n }; }; });
+      ['deleteBuffer','deleteProgram','deleteShader','deleteTexture','deleteFramebuffer','deleteRenderbuffer','deleteVertexArray','shaderSource','compileShader','attachShader','linkProgram','validateProgram','detachShader','generateMipmap','pixelStorei','framebufferTexture2D','bindFramebuffer','bindRenderbuffer','bindVertexArray','renderbufferStorage','colorMask','depthMask','frontFace','cullFace','lineWidth','hint','stencilFunc','stencilOp','blendEquation','blendFuncSeparate','texParameterf','clearDepth','clearStencil','depthRange','sampleCoverage','stencilMask'].forEach(function(n){ gl[n] = noop; });
+      gl.getShaderParameter = function(){ return true; };
+      gl.getProgramParameter = function(){ return true; };
+      gl.getShaderInfoLog = function(){ return ''; };
+      gl.getProgramInfoLog = function(){ return ''; };
+      gl.getError = function(){ return 0; };
+      gl.getAttribLocation = function(){ return 0; };
+      gl.getUniformLocation = function(){ return { __loc:true }; };
+      gl.isContextLost = function(){ return false; };
+      gl.checkFramebufferStatus = function(){ return 0x8CD5; }; // FRAMEBUFFER_COMPLETE
+      gl.readPixels = function(x,y,w,h,fmt,type,pixels){
+        if (pixels && pixels.length){
+          var src = __cvBytes(__cvSeed(canvas, gl, 'readPixels:'+x+','+y+','+w+','+h+','+fmt+','+type), Math.min(pixels.length, 4096));
+          for (var i = 0; i < pixels.length; i++) pixels[i] = src[i % src.length];
+        }
+      };
+      try { var P = isGL2 ? g.WebGL2RenderingContext : g.WebGLRenderingContext; if (P && P.prototype) Object.setPrototypeOf(gl, P.prototype); } catch(e){}
+      return gl;
     };
     // <canvas> methods live on HTMLCanvasElement.prototype (not own) so tests can mock
     // HTMLCanvasElement.prototype.getContext / getBoundingClientRect (signature pads) and the mock
     // isn't shadowed by an own method.
     (function(){
       var cp = protoFor.HTMLCanvasElement;
-      cp.getContext = function(kind){ if (kind === '2d') { if (!this.__ctx2d) this.__ctx2d = mkCanvasCtx(this); return this.__ctx2d; } return null; };
-      cp.toDataURL = function(){ return 'data:image/png;base64,'; };
-      cp.toBlob = function(cb){ if (cb) cb(null); };
+      // The readback seed uses whichever context recorded ops (2D or WebGL).
+      var activeCtx = function(cv){ return cv.__ctx2d || cv.__ctxgl2 || cv.__ctxgl || null; };
+      cp.getContext = function(kind){
+        var k = String(kind);
+        if (k === '2d') { if (!this.__ctx2d) this.__ctx2d = mkCanvasCtx(this); return this.__ctx2d; }
+        if (k === 'webgl' || k === 'experimental-webgl') { if (!this.__ctxgl) this.__ctxgl = mkWebGLCtx(this, false); return this.__ctxgl; }
+        if (k === 'webgl2' || k === 'experimental-webgl2') { if (!this.__ctxgl2) this.__ctxgl2 = mkWebGLCtx(this, true); return this.__ctxgl2; }
+        return null;
+      };
+      cp.toDataURL = function(type){
+        var mime = (typeof type === 'string' && type) ? type : 'image/png';
+        var seed = __cvSeed(this, activeCtx(this), 'toDataURL:'+mime);
+        return 'data:' + mime + ';base64,' + __cvB64(__cvBytes(seed, 54));
+      };
+      cp.toBlob = function(cb, type){
+        if (!cb) return;
+        var mime = (typeof type === 'string' && type) ? type : 'image/png';
+        var bytes = __cvBytes(__cvSeed(this, activeCtx(this), 'toBlob:'+mime), 64);
+        var B = g.Blob;
+        if (typeof B === 'function') {
+          var str = ''; for (var i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+          try { cb(new B([str], { type: mime })); return; } catch(e){}
+        }
+        cb(null);
+      };
       cp.getBoundingClientRect = function(){ return { x:0, y:0, top:0, left:0, right:0, bottom:0, width:0, height:0, toJSON:function(){ return this; } }; };
     })();
     d.createElement = function(tag){
@@ -857,5 +1062,196 @@
     };
     d.getSelection = function(){ return sel; };
     if (!g.getSelection) g.getSelection = function(){ return sel; };
+  })();
+
+  // ── <iframe> second realm (bridged, same-isolate) ───────────────────────────────
+  // A real cross-origin iframe hosts its OWN window/document realm and talks to the
+  // parent only over postMessage (reCAPTCHA's anchor↔bframe handshake works exactly
+  // this way). A separate V8 context is not available inside this single-isolate
+  // binding, so `iframe.contentWindow` is a BRIDGED child window: a distinct window
+  // object with its own event registry, a lightweight child document (native elements,
+  // detached from the parent tree), its own location/origin, and DIRECTIONAL postMessage:
+  //   parent → child:  iframe.contentWindow.postMessage(d,o)  fires the CHILD's message
+  //                     listeners with { source: <parent view>, origin: <parent origin> }.
+  //   child  → parent:  window.parent.postMessage(d,o)  (or e.source.postMessage inside
+  //                     the child) fires the PARENT's message listeners with
+  //                     { source: iframe.contentWindow, origin: <child origin> }.
+  // The event's `source` is what lets each side reply to the other (the protocol reads
+  // e.source + e.origin and posts back through e.source), so the two directional views
+  // form a coherent two-window message channel.
+  //
+  // Fidelity tradeoff: globals/prototypes are SHARED — no true origin isolation, no
+  // separate realm identity, and the child document is a lightweight facade over native
+  // element construction rather than a second live-rendered tree. A determined script can
+  // still detect the shared object graph. It is faithful enough for the message-channel
+  // semantics a cross-frame handshake relies on, which is what this unblocks.
+  (function(){
+    // A `message` event shaped like the fields cross-frame protocols read.
+    var mkMsgEvent = function(data, origin, source, ports){
+      return { type:'message', data:data, origin: origin||'', lastEventId:'', source: source||null,
+        ports: ports||[], bubbles:false, cancelable:false, composed:false, defaultPrevented:false,
+        target:null, currentTarget:null, eventPhase:0, isTrusted:false, timeStamp: Date.now(),
+        preventDefault:function(){}, stopPropagation:function(){}, stopImmediatePropagation:function(){} };
+    };
+    // Deliver a message event to a window-like target's `message` listeners + onmessage.
+    // Async via setTimeout when present (matches the real message-loop ordering + the
+    // render tier's virtual timer queue); synchronous fallback for a bare isolate.
+    var deliver = function(win, ev){
+      var st = g.setTimeout || function(f){ return f(); };
+      st(function(){
+        ev.target = win; ev.currentTarget = win;
+        try { if (typeof win.onmessage === 'function') win.onmessage(ev); } catch(e){}
+        try { if (typeof win.dispatchEvent === 'function') win.dispatchEvent(ev); } catch(e){}
+      }, 0);
+    };
+    // Minimal child document: real (native) elements forming a subtree DETACHED from the
+    // parent's live tree, so the child realm builds + queries its own DOM without
+    // scribbling into the host page. Element construction delegates to the native binding.
+    var makeChildDocument = function(){
+      // Detached container elements for the child's documentElement/head/body. Plain <div>s,
+      // NOT <html>/<head>/<body>: the native binding treats those three as document
+      // singletons (createElement('head') attaches to the live documentElement), which would
+      // leak the child realm's nodes into the PARENT's serialized tree. Divs stay detached.
+      var root = d.createElement('div');
+      var head = d.createElement('div');
+      var body = d.createElement('div');
+      try { root.appendChild(head); root.appendChild(body); } catch(e){}
+      var dl = {};
+      // Walk the child's OWN detached subtree (native element-scoped querySelector isn't
+      // reliable on a subtree that never entered the live tree, so recurse childNodes).
+      // Handles the id / tag / .class selectors the child code uses; anything fancier
+      // falls back to the native element querySelector best-effort.
+      var attr = function(n, name){ try { return n.getAttribute ? n.getAttribute(name) : null; } catch(e){ return null; } };
+      var walk = function(node, pred){
+        var kids = node && node.childNodes ? node.childNodes : null;
+        if (!kids) return null;
+        for (var i = 0; i < kids.length; i++){
+          var k = kids[i];
+          if (k && k.nodeType === 1){
+            if (pred(k)) return k;
+            var deep = walk(k, pred); if (deep) return deep;
+          }
+        }
+        return null;
+      };
+      var walkAll = function(node, pred, out){
+        var kids = node && node.childNodes ? node.childNodes : null;
+        if (!kids) return out;
+        for (var i = 0; i < kids.length; i++){
+          var k = kids[i];
+          if (k && k.nodeType === 1){ if (pred(k)) out.push(k); walkAll(k, pred, out); }
+        }
+        return out;
+      };
+      var predFor = function(sel){
+        sel = String(sel || '').trim();
+        if (sel.charAt(0) === '#'){ var id = sel.slice(1); return function(n){ return attr(n,'id') === id || n.id === id; }; }
+        if (sel.charAt(0) === '.'){ var cls = sel.slice(1); return function(n){ var c = attr(n,'class') || n.className || ''; return (' '+c+' ').indexOf(' '+cls+' ') >= 0; }; }
+        var tag = sel.toUpperCase(); return function(n){ return String(n.tagName).toUpperCase() === tag; };
+      };
+      var q1 = function(s){
+        var r = walk(root, predFor(s));
+        if (r == null){ try { r = root.querySelector(s); } catch(e){} }
+        return r;
+      };
+      var cd = {
+        nodeType: 9, __childDoc: true,
+        documentElement: root, head: head, body: body,
+        readyState: 'complete', contentType: 'text/html', characterSet: 'UTF-8',
+        cookie: '', title: '', hidden: false, visibilityState: 'visible',
+        createElement: function(t){ return d.createElement(t); },
+        createElementNS: function(ns,t){ return d.createElementNS ? d.createElementNS(ns,t) : d.createElement(t); },
+        createTextNode: function(t){ return d.createTextNode(t); },
+        createComment: function(t){ return d.createComment ? d.createComment(t) : d.createTextNode(String(t)); },
+        createDocumentFragment: function(){ return d.createDocumentFragment(); },
+        getElementById: function(id){ return walk(root, function(n){ return attr(n,'id') === String(id) || n.id === String(id); }); },
+        querySelector: q1,
+        querySelectorAll: function(s){ return walkAll(root, predFor(s), []); },
+        getElementsByTagName: function(s){ return walkAll(root, predFor(String(s)), []); },
+        addEventListener: function(t,f){ if (typeof f==='function') (dl[t]=dl[t]||[]).push(f); },
+        removeEventListener: function(t,f){ var a=dl[t]; if(a){ var i=a.indexOf(f); if(i>=0) a.splice(i,1); } },
+        dispatchEvent: function(ev){ if(!ev) return true; var a=dl[ev.type]; if(a) a.slice().forEach(function(f){ try{f.call(cd,ev);}catch(e){} }); return !(ev&&ev.defaultPrevented); },
+      };
+      return cd;
+    };
+    // origin (scheme://host[:port]) of a URL string; 'null' when not absolute http(s).
+    var originOf = function(u){ try { var m=/^(https?:\/\/[^\/]+)/i.exec(String(u||'')); return m?m[1]:'null'; } catch(e){ return 'null'; } };
+
+    // Build (once) a bridged child realm for the <iframe> `hostEl`. `parentWin` defaults
+    // to the top window `g`. Returns the child window; also sets hostEl.contentWindow /
+    // contentDocument. Reused by turbo-surf's render tier for the reCAPTCHA bframe.
+    g.__makeFrameRealm = function(hostEl, parentWin){
+      parentWin = parentWin || g;
+      if (hostEl && hostEl.__realm) return hostEl.__realm;
+      var childDoc = makeChildDocument();
+      var srcAttr = hostEl && (hostEl.src || (hostEl.getAttribute && hostEl.getAttribute('src')));
+      var childOrigin = originOf(srcAttr);
+      var parentOrigin = (parentWin.location && parentWin.location.origin) || originOf(parentWin.location && parentWin.location.href) || '';
+      var wl = {}; // the child window's own event listeners
+      var childWin, parentView;
+      childWin = {
+        document: childDoc, closed: false, name: (hostEl && hostEl.name) || '',
+        origin: childOrigin, length: 0, frames: [], devicePixelRatio: 1,
+        innerWidth: 0, innerHeight: 0, outerWidth: 0, outerHeight: 0, screenX: 0, screenY: 0,
+        location: { href: String(srcAttr || 'about:blank'), origin: childOrigin,
+          protocol: (childOrigin.split(':')[0] || 'about') + ':',
+          host: childOrigin.replace(/^https?:\/\//,''),
+          hostname: childOrigin.replace(/^https?:\/\//,'').split(':')[0],
+          port: '', pathname: '/', search: '', hash: '',
+          assign:function(){}, replace:function(){}, reload:function(){}, toString:function(){ return this.href; } },
+        navigator: g.navigator, screen: g.screen, history: g.history,
+        onmessage: null, onerror: null, onload: null,
+        setTimeout: g.setTimeout, clearTimeout: g.clearTimeout,
+        setInterval: g.setInterval, clearInterval: g.clearInterval,
+        requestAnimationFrame: g.requestAnimationFrame, cancelAnimationFrame: g.cancelAnimationFrame,
+        getComputedStyle: g.getComputedStyle, matchMedia: g.matchMedia,
+        atob: g.atob, btoa: g.btoa, crypto: g.crypto, performance: g.performance,
+        addEventListener: function(t,f){ if(typeof f==='function') (wl[t]=wl[t]||[]).push(f); },
+        removeEventListener: function(t,f){ var a=wl[t]; if(a){ var i=a.indexOf(f); if(i>=0) a.splice(i,1); } },
+        dispatchEvent: function(ev){ if(!ev) return true; if(ev.target==null){ try{ev.target=childWin;}catch(e){} } var a=wl[ev.type]; if(a) a.slice().forEach(function(f){ try{f.call(childWin,ev);}catch(e){} }); return !ev.defaultPrevented; },
+        focus:function(){}, blur:function(){}, close:function(){ childWin.closed = true; },
+        // parent → child: fire the CHILD's listeners; source is the parent view.
+        postMessage: function(msg, targetOrigin, transfer){
+          var ports = Array.isArray(transfer)?transfer:(transfer&&transfer.length?Array.prototype.slice.call(transfer):[]);
+          deliver(childWin, mkMsgEvent(msg, parentOrigin, parentView, ports));
+        },
+      };
+      childWin.window = childWin; childWin.self = childWin; childWin.globalThis = childWin;
+      childDoc.defaultView = childWin;
+      // parentView: what the child holds to reach the parent (child.parent / child.top /
+      // the e.source it replies through). child → parent: fire the PARENT's listeners;
+      // source is the iframe's own contentWindow so the parent can match + reply.
+      parentView = {
+        postMessage: function(msg, targetOrigin, transfer){
+          var ports = Array.isArray(transfer)?transfer:(transfer&&transfer.length?Array.prototype.slice.call(transfer):[]);
+          deliver(parentWin, mkMsgEvent(msg, childOrigin, childWin, ports));
+        },
+        location: { origin: parentOrigin, href: (parentWin.location && parentWin.location.href) || '' },
+      };
+      childWin.parent = parentView; childWin.top = parentView; childWin.frameElement = hostEl || null;
+      if (hostEl) { hostEl.__realm = childWin; try { hostEl.contentWindow = childWin; hostEl.contentDocument = childDoc; } catch(e){} }
+      return childWin;
+    };
+
+    // Wire createElement('iframe') to expose a real contentWindow/contentDocument, built
+    // lazily on first access (or when src is set). Kept general so any consumer gets it;
+    // the lazy build means an unused iframe costs nothing.
+    var origCreateEl = d.createElement.bind(d);
+    d.createElement = function(tag){
+      var el = origCreateEl(tag);
+      if (el && String(tag).toLowerCase() === 'iframe' && !el.__iframeWired) {
+        el.__iframeWired = true;
+        try {
+          Object.defineProperty(el, 'contentWindow', { configurable: true,
+            get: function(){ return el.__realm || g.__makeFrameRealm(el, g); } });
+          Object.defineProperty(el, 'contentDocument', { configurable: true,
+            get: function(){ return (el.__realm || g.__makeFrameRealm(el, g)).document; } });
+        } catch(e){
+          // Native element rejected the accessor → fall back to an eager realm.
+          try { g.__makeFrameRealm(el, g); } catch(e2){}
+        }
+      }
+      return el;
+    };
   })();
 })();

@@ -199,7 +199,7 @@ pub fn default_profile() -> Profile {
         user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
                      (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
             .to_string(),
-        sec_ch_ua: "\"Google Chrome\";v=\"153\", \"Chromium\";v=\"153\", \"Not)A;Brand\";v=\"24\""
+        sec_ch_ua: "\"Google Chrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\""
             .to_string(),
         sec_ch_ua_platform: "\"macOS\"",
         nav_platform: "MacIntel",

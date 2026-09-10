@@ -52,3 +52,94 @@ fn flags_canvas_fingerprinting() {
         .iter()
         .any(|a| a.target == "canvas" && a.prop == "getContext"));
 }
+
+// Helper: did the probe record a `get` (read) of target.prop?
+fn touched(r: &turbo_surf_render::ProbeReport, t: &str, p: &str) -> bool {
+    r.accesses
+        .iter()
+        .any(|a| a.target == t && a.prop == p && a.kind == "get")
+}
+
+#[test]
+fn instruments_the_window_surface_and_document_beyond_create_element() {
+    // The extended recon must capture window-level reads AND document members other
+    // than createElement (BotGuard reads readyState/contentType/currentScript, etc.).
+    let script = r#"
+        const _ = [window.self, window.navigator, window.document, window.performance,
+                   document.readyState, document.contentType];
+        ''
+    "#;
+    let r = probe_globals("<body></body>", script).unwrap();
+    assert!(touched(&r, "window", "self"));
+    assert!(touched(&r, "window", "navigator"));
+    assert!(touched(&r, "window", "performance"));
+    // document.contentType is backfilled in ENV_BOOTSTRAP → recorded and NOT a gap.
+    assert!(touched(&r, "document", "contentType"));
+    assert!(touched(&r, "document", "readyState"));
+    assert!(!r.shim_needed.iter().any(|s| s == "document.contentType"));
+}
+
+#[test]
+fn wraps_2d_and_webgl_contexts_no_longer_a_gap() {
+    // getContext('2d') yields a context whose reads register under `ctx:2d`. WebGL now
+    // returns a coherent SwiftShader context (vendored binding) rather than null, so it is
+    // recorded under `ctx:webgl` and is NOT a shim gap — a null WebGL is itself a bot tell.
+    let script = r#"
+        const c = document.createElement('canvas');
+        const ctx = c.getContext('2d');
+        try { ctx.measureText('x'); } catch (e) {}
+        const gl = c.getContext('webgl');
+        try { gl.getParameter(gl.VERSION); } catch (e) {}
+        ''
+    "#;
+    let r = probe_globals("<body></body>", script).unwrap();
+    assert!(r
+        .accesses
+        .iter()
+        .any(|a| a.target == "canvas" && a.prop == "getContext(2d)" && a.kind == "call"));
+    assert!(r.accesses.iter().any(|a| a.target == "ctx:2d"));
+    // WebGL context is present (not null) → recorded, and not surfaced as a shim gap.
+    assert!(r
+        .accesses
+        .iter()
+        .any(|a| a.target == "canvas" && a.prop == "getContext(webgl)=>ctx" && a.defined));
+    assert!(r.accesses.iter().any(|a| a.target == "ctx:webgl"));
+    assert!(!r
+        .shim_needed
+        .iter()
+        .any(|s| s == "canvas.getContext(webgl)=>null"));
+}
+
+#[test]
+fn counts_function_prototype_tostring_anti_tamper_reads() {
+    // Anti-tamper `fn.toString()` reads (native-code probes) are counted so recon can
+    // quantify how aggressively a VM inspects the function surface.
+    let script = r#"
+        const f = function foo() {};
+        f.toString();
+        Array.prototype.push.toString();
+        ''
+    "#;
+    let r = probe_globals("<body></body>", script).unwrap();
+    assert!(r
+        .accesses
+        .iter()
+        .any(|a| a.target == "Function.prototype" && a.prop == "toString" && a.kind == "call"));
+}
+
+#[test]
+fn host_protocol_shims_are_present_not_gaps() {
+    // The reCAPTCHA host-protocol backfills (window.postMessage / onmessage /
+    // trustedTypes) must read as defined, not surface as shim gaps.
+    let script = r#"
+        const _ = [typeof window.postMessage, window.onmessage, typeof window.trustedTypes,
+                   typeof window.MessageChannel];
+        ''
+    "#;
+    let r = probe_globals("<body></body>", script).unwrap();
+    assert!(touched(&r, "window", "postMessage"));
+    assert!(!r.shim_needed.iter().any(|s| s == "window.postMessage"));
+    // onmessage defaults to null (defined), never undefined.
+    assert!(!r.shim_needed.iter().any(|s| s == "window.onmessage"));
+    assert!(!r.shim_needed.iter().any(|s| s == "window.trustedTypes"));
+}

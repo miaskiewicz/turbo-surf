@@ -3,6 +3,75 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.4.4] — client-hint parity + in-isolate reCAPTCHA execution
+
+Fingerprint-parity + browserless reCAPTCHA/BotGuard execution work. Note: this does
+**not** unblock google search — google `/search` is served an enablejs shell at
+request #1 and `/sorry` is IP-reputation-gated (hits real Chrome too), and a
+reCAPTCHA token is Google-server-verified. These land the client-side capability +
+fingerprint fidelity; the residual walls are IP reputation and server-side scoring.
+
+### Added
+- **Full Chrome-153 client-hint parity on the impersonate wire** — the complete
+  `sec-ch-ua-*` family (`arch`/`bitness`/`wow64`/`model`/`form-factors`/
+  `platform-version`/`full-version`/`full-version-list`), Apple-Silicon-coherent, plus
+  the corrected greased brand token (`"Not_A Brand";v="8"`). wreq's Chrome149
+  emulation only sent the low-entropy trio.
+- **In-isolate reCAPTCHA/BotGuard execution** in the V8 render tier: the reCAPTCHA
+  main-frame VM now runs to completion (`window.postMessage` + host-protocol shims:
+  `___grecaptcha_cfg`, on* slots, `contentType`, `trustedTypes`); a **bridged
+  bframe cross-origin iframe** (second window realm, `contentWindow`/`contentDocument`)
+  with two-way cross-realm `postMessage`; a **network handshake** that fetches
+  `api2/anchor`+`bframe` over `op_fetch` and runs the bframe VM in the child realm
+  (`grecaptcha.execute()` resolves with a client token); a coherent **SwiftShader
+  WebGL** context (identity strings + limits + extensions + deterministic readback,
+  was null); content-dependent **canvas2d** readback; and a much-extended `probe`
+  recon surface (window/WebGL/performance/Date/Intl/MessageChannel/`toString`).
+- **reCAPTCHA solver** in the challenge framework: `Vendor::Recaptcha` + `detect()`
+  (google `/sorry`, "unusual traffic", or a `g-recaptcha`/`grecaptcha.render` widget →
+  lifts sitekey + v3 action), a `RecaptchaSolver` that drives the in-isolate flow to
+  mint a `g-recaptcha-response` token, `TURBO_SURF_SOLVER=recaptcha`, and a
+  `solve_recaptcha {url, sitekey?, action?} -> {token}` MCP tool. Clears v3/invisible/
+  score flows and google `/sorry` **only with a clean `TURBO_SURF_PROXY` IP** (token is
+  server-scored); v2 visual image-grid is refused (`SolveError::VisualChallenge`) to
+  route to an external solver.
+- **Google `/sorry` → SERP clearance loop**: parses the `/sorry` reCAPTCHA form,
+  submits a solved token (`g-recaptcha-response`) to `/sorry/index`, captures the
+  `GOOGLE_ABUSE_EXEMPTION` cookie, and re-fetches the original SERP with it — wired
+  into the `web_search` native path. Token-source-agnostic (in-isolate v3/invisible,
+  or an external solver for v2 image-grid). Loop is offline-tested; live `/sorry` is
+  usually a v2 image challenge needing an external solver for the token.
+- **Browser sidecar: `headless` is a per-call choice** (stdin `headless` >
+  `TURBO_SURF_SIDECAR_HEADLESS` env > **headed default**) and a `headless?` arg on
+  `web_search`. Measured: headless Chrome trips google's `/sorry` (an automation tell,
+  not the IP — headed on the same IP returns the real SERP), so headed is the default.
+- **Real EU consent-save handshake → earns google `NID`** (the native `/search`
+  unlock). The "Before you continue" interstitial's **Accept all** POSTs to
+  `consent.google.com/save?…escs=<token>` and *that* 302 `Set-Cookie`s `NID` (+ SOCS/
+  STRP) — the trusted-session cookie `/search` requires. `consent::handshake_if_consent`
+  now parses the interstitial, replays the accept form, and ingests NID (previously we
+  only hard-coded a synthetic `SOCS` that *visually* dismissed the wall but never earned
+  the session — which is why the homepage rendered but `/search` stayed on enablejs).
+  Proven offline: enablejs shell → real SERP once NID is in the jar.
+- **Fix: `Set-Cookie` dropped on redirect hops.** `fetch_html` auto-follow ingested
+  cookies only on the final response, silently dropping the `NID` set on the consent
+  302; the consent handshake + render-tier `op_fetch` now follow redirects manually so
+  session cookies earned mid-redirect land in the jar (browser-equivalent).
+- **Native google search via a reused, sidecar-minted `__Secure-ENID`.** google's
+  `/search` serves the real SERP to a plain **native (no-browser)** wreq request that
+  carries a *trusted* `__Secure-ENID` — that cookie alone is sufficient, it's long-lived
+  (~2027) and client-agnostic. A trusted token is minted only by a real browser's homepage
+  load, so the sidecar mints it **rarely** (new `{"mint":true}` stdin mode → `{"cookies":…}`)
+  and the engine reuses it across many native searches, persisted to a gitignored
+  `.enid-cache.json`. google's strategy is now `mode:"enid"` (was `"browser"`): fetch
+  `/search` natively with the cached token; on the `enablejs` shell (a stale/rotated token —
+  no `#rso`/`<h3>`) auto re-mint **exactly once** + retry. `web_search { remint:true }` (or
+  `TURBO_SURF_ENID_REMINT=1`) forces a fresh mint; `browser:true` still routes the whole SERP
+  through the browser. Reuse holds only while the ENID stays trusted **and** on a non-flagged
+  exit IP (a `/sorry`'d IP won't serve the SERP to any token — orthogonal, handled by the
+  `/sorry` clearance path); it does **not** defeat IP-reputation blocking.
+- Requires turbo-test browser_env ≥ 0.4.2 (vendored) for the iframe + WebGL + canvas.
+
 ## [0.4.3] — Chrome 153 fingerprint
 
 Freshened the emulated browser identity from Chrome 149 to **Chrome 153** (current
@@ -27,6 +96,13 @@ version mismatch on the default impersonate path.
   search — its SERP is BotGuard/JS-gated and stays on the real-Chrome sidecar.)
 
 ### Changed
+- **Request-#1 network-fingerprint parity with real Chrome** (the layer served
+  before any JS): the impersonate HEADERS frame is now byte-for-byte Chrome —
+  H2 priority weight 256 (was 220), `upgrade-insecure-requests` + `sec-fetch-user`
+  added, exact Chrome navigation header ORDER (via `orig_headers`), `accept-encoding`
+  = `gzip, deflate, br, zstd`, and the high-entropy `sec-ch-ua-*` hints are **no longer
+  sent on a cold request** (real Chrome sends only the low-entropy trio until the
+  server sends `Accept-CH`). The impersonate e2e asserts these against a live echo.
 - **Emulated Chrome 149 → 153**: `fingerprint::default_profile` (UA + `sec-ch-ua`),
   the profile major pool, and the render-tier `navigator.userAgent` / `chromeMajor`
   now report Chrome 153.

@@ -158,6 +158,59 @@ fn window_and_navigator_present() {
     );
 }
 
+// window.postMessage delivers a `message` event to this realm's window listeners (the
+// reCAPTCHA/BotGuard host-protocol scheduler drives itself over it). Async via the
+// timer queue, so drain before asserting delivery.
+#[test]
+fn window_post_message_delivers_to_listeners() {
+    let out = run_with_dom(
+        "<body></body>",
+        r#"
+        globalThis.__got = "";
+        window.addEventListener('message', function (e) { globalThis.__got = String(e.data) + ':' + (e.source === window); });
+        window.postMessage('hi', '*');
+        __runTimers();
+        globalThis.__got
+        "#,
+    )
+    .unwrap();
+    assert_eq!(out, "hi:true");
+}
+
+// Canvas 2D readback is deterministic AND content-dependent: identical draws hash to the
+// same non-empty data URL, different draws to a different one (empty/constant output is a
+// canvas-fingerprint dead tell). Backed by the vendored turbo-test binding.
+#[test]
+fn canvas_to_data_url_is_deterministic_and_content_dependent() {
+    let draw = |text: &str| {
+        run_with_dom(
+            "<body></body>",
+            &format!(
+                r#"(() => {{
+            const c = document.createElement('canvas'); c.width = 200; c.height = 50;
+            const x = c.getContext('2d');
+            x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 50);
+            x.font = '16px sans-serif'; x.fillStyle = '#039';
+            x.fillText({text:?}, 10, 30);
+            return c.toDataURL();
+            }})()"#,
+                text = text
+            ),
+        )
+        .unwrap()
+    };
+    let a1 = draw("BotGuard-probe-A");
+    let a2 = draw("BotGuard-probe-A");
+    let b = draw("BotGuard-probe-B");
+    assert!(a1.starts_with("data:image/png;base64,"), "prefix: {a1}");
+    assert!(
+        a1.len() > "data:image/png;base64,".len() + 8,
+        "non-empty payload: {a1}"
+    );
+    assert_eq!(a1, a2, "same draws must hash identically");
+    assert_ne!(a1, b, "different text must change the hash");
+}
+
 // Page JS that profiles the browser must see a coherent real-Chrome navigator,
 // not the old `turbo-surf`/`turbo-test` tell — the no-Chromium env emulation that
 // gets past consistency-only anti-bot gates (see ENV_BOOTSTRAP in runtime.rs).
@@ -1971,7 +2024,170 @@ async fn esm_src_chunk_with_module_body_loads_and_resolves_imports() {
     );
 }
 
+// The render tier exposes a coherent SwiftShader WebGL context (vendored from turbo-test):
+// the GPU identity a fingerprinter reads (UNMASKED_VENDOR/RENDERER via WEBGL_debug_renderer_info,
+// VENDOR/RENDERER/VERSION, MAX_TEXTURE_SIZE) plus deterministic, content-dependent readback.
+// A null WebGL context is itself a strong headless tell; SwiftShader is the real GPU-less
+// Chrome signature. This raises the score fidelity of any client-collected token.
+#[test]
+fn webgl_swiftshader_signature_in_render_isolate() {
+    let out = run_with_dom(
+        "<body></body>",
+        r#"(() => {
+          const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+          const gl = c.getContext('webgl');
+          if (!gl) return 'NULL';
+          const d = gl.getExtension('WEBGL_debug_renderer_info');
+          const px1 = new Uint8Array(16); gl.readPixels(0,0,2,2,0x1908,0x1401,px1);
+          gl.clearColor(0.2,0.4,0.6,1); gl.clear(0x4000); gl.drawArrays(0x0004,0,3);
+          const px2 = new Uint8Array(16); gl.readPixels(0,0,2,2,0x1908,0x1401,px2);
+          return [
+            gl.getParameter(gl.VENDOR),
+            gl.getParameter(gl.RENDERER),
+            gl.getParameter(d.UNMASKED_VENDOR_WEBGL),
+            gl.getParameter(d.UNMASKED_RENDERER_WEBGL),
+            gl.getParameter(gl.MAX_TEXTURE_SIZE),
+            gl.getSupportedExtensions().indexOf('WEBGL_debug_renderer_info') >= 0,
+            Array.from(px1).join(',') !== Array.from(px2).join(','),
+          ].join('||');
+        })()"#,
+    )
+    .unwrap();
+    assert!(
+        out.contains("WebKit||WebKit WebGL||Google Inc. (Google)"),
+        "SwiftShader identity: {out}"
+    );
+    assert!(
+        out.contains("ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"),
+        "SwiftShader unmasked renderer: {out}"
+    );
+    assert!(
+        out.contains("||8192||true||true"),
+        "max-texture + debug ext + content-dependent readback: {out}"
+    );
+}
+
+// reCAPTCHA-shaped bframe handshake, end to end and offline. A page bundle stands in for
+// the main reCAPTCHA VM (whose execute() creates the cross-origin bframe iframe and drives
+// the challenge over postMessage); a localhost server serves the bframe DOCUMENT + its own
+// VM. The render tier must: upgrade the bframe iframe to a real second realm, fetch the
+// frame + its VM over the net stack, run that VM inside the realm, and bridge the parent↔
+// bframe postMessage so the token reply reaches the parent and execute() resolves.
+#[tokio::test]
+async fn recaptcha_bframe_handshake_resolves_with_a_client_token() {
+    // The bframe document loads its own VM by <script src>; the VM greets the parent on
+    // load, and on the challenge posts a client-computed token back through e.source.
+    let port = spawn_recaptcha_bframe_server().await;
+    let base = base(port);
+    // Stand-in for reCAPTCHA's main VM: execute() creates the bframe, posts the challenge
+    // once the frame signals ready, and resolves the token onto #token.
+    let bundle = format!(
+        r#"
+        const out = document.getElementById('token');
+        let resolved = '';
+        function execute() {{
+          const iframe = document.createElement('iframe');
+          window.addEventListener('message', (e) => {{
+            const m = e.data || {{}};
+            if (m.type === 'bframe-ready' && e.source === iframe.contentWindow) {{
+              // Post the challenge INTO the bframe realm.
+              iframe.contentWindow.postMessage({{ type: 'challenge', c: 'SITEKEY-XYZ' }}, '*');
+            }} else if (m.type === 'token' && e.source === iframe.contentWindow) {{
+              resolved = m.token;
+              out.setAttribute('data-token', resolved);
+              out.textContent = 'RESOLVED:' + resolved;
+            }}
+          }});
+          iframe.src = '{base}recaptcha/api2/bframe?k=SITEKEY-XYZ';
+          document.body.appendChild(iframe);
+        }}
+        execute();
+        "#
+    );
+    let html = render_page(
+        "<html><body><div id='token'>pending</div></body></html>",
+        &base,
+        &bundle,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains("RESOLVED:bframe-token-"),
+        "execute() must resolve with the client token the bframe VM posted back: {html}"
+    );
+    assert!(
+        html.contains(r#"data-token="bframe-token-SITEKEY-XYZ""#),
+        "the token must echo the challenge the parent posted into the bframe realm: {html}"
+    );
+    // The bframe realm's own (detached) document must NOT leak into the parent's serialized
+    // tree: exactly one <body>, and no bframe/recaptcha frame content injected into the page.
+    // (The trailing empty <head> is a pre-existing render_page serialization artifact present
+    // on every render, unrelated to the child realm — not asserted on here.)
+    assert!(
+        html.matches("<body").count() == 1
+            && !html.contains("frame-vm")
+            && !html.contains("<script"),
+        "the child realm DOM must stay out of the parent's serialized tree: {html}"
+    );
+}
+
 // --- helpers ----------------------------------------------------------------
+// Serves the reCAPTCHA bframe document (text/html) + its VM (application/javascript). The
+// bframe VM runs in the iframe's second realm: on load it posts `bframe-ready` to the parent,
+// and on the `challenge` it posts a `token` back through e.source (→ the parent).
+async fn spawn_recaptcha_bframe_server() -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut b = [0u8; 4096];
+            let n = s.read(&mut b).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&b[..n]).to_string();
+            let path = req
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("/")
+                .split('?')
+                .next()
+                .unwrap_or("/")
+                .to_string();
+            let (ctype, body): (&str, String) = if !path.ends_with(".js") {
+                (
+                    "text/html",
+                    r#"<!DOCTYPE html><html><head><script src="/recaptcha/api2/frame-vm.js"></script></head><body></body></html>"#.to_string(),
+                )
+            } else {
+                (
+                    "application/javascript",
+                    // Runs inside the child realm: `window`/`parent`/`addEventListener`/
+                    // `postMessage` are the realm's. Greet the parent on load; answer the
+                    // challenge with a token derived from it, posted back through e.source.
+                    r#"
+                    addEventListener('message', function (e) {
+                      var m = e.data || {};
+                      if (m.type === 'challenge') {
+                        e.source.postMessage({ type: 'token', token: 'bframe-token-' + m.c }, '*');
+                      }
+                    });
+                    addEventListener('load', function () {
+                      parent.postMessage({ type: 'bframe-ready' }, '*');
+                    });
+                    "#
+                    .to_string(),
+                )
+            };
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nConnection: close\r\n\r\n{body}"
+            );
+            let _ = s.write_all(resp.as_bytes()).await;
+            let _ = s.flush().await;
+        }
+    });
+    port
+}
+
 // Serves distinct JS bodies per request path (matched against the request line) —
 // for ESM import graphs where the chunk and its dependency differ.
 async fn spawn_paths_js_server(routes: &[(&'static str, &'static str)]) -> u16 {
@@ -2226,5 +2442,96 @@ async fn tcresolvescoped_walks_nth_chain() {
         .await
         .unwrap();
     assert_eq!(a, "1:A", "selector leaf scoped to the 1st step");
+    session.close();
+}
+
+// --- render-tier cookie-jar plumbing ---------------------------------------
+// The session jar must capture cookies established DURING a page's life from BOTH
+// sources a browser has: `document.cookie` writes AND `Set-Cookie` on the page's own
+// fetch/XHR responses. This is what lets a later navigation carry a session the page's
+// JS earned (e.g. Google's homepage-JS consent handshake minting `NID`).
+
+// `document.cookie = "NID=…"` in page JS must land in the session jar (op_cookie_set
+// bridges the in-isolate document.cookie to the shared CookieJar).
+#[tokio::test]
+async fn render_tier_document_cookie_write_reaches_jar() {
+    let mut session = PageSession::open(
+        "<html><body></body></html>",
+        "https://example.test/",
+        "",
+        "",
+        DEFAULT_RENDER_BUDGET_MS,
+    )
+    .await
+    .expect("session opens");
+    session
+        .eval(
+            r#"document.cookie = "NID=js_written_session; path=/";
+               globalThis.__RESULT = document.cookie;"#,
+        )
+        .await
+        .unwrap();
+    let jar = session.cookies();
+    assert!(
+        jar.contains("NID") && jar.contains("js_written_session"),
+        "document.cookie write must reach the session jar, got: {jar}"
+    );
+    session.close();
+}
+
+// A render-tier `fetch()` whose response mints a cookie via `Set-Cookie` — INCLUDING on
+// a redirect hop — must land that cookie in the session jar. This proves op_fetch's
+// per-hop Set-Cookie ingestion (the browser-equivalent path that earns Google's `NID`,
+// which is set on the consent `/save` 302).
+#[tokio::test]
+async fn render_tier_fetch_set_cookie_on_redirect_reaches_jar() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let base = format!("http://127.0.0.1:{port}/");
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut b = [0u8; 4096];
+            let n = s.read(&mut b).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&b[..n]).to_string();
+            let line = req.lines().next().unwrap_or("").to_string();
+            // GET /mint → 302 to /done, minting NID on the redirect hop (as Google's
+            // consent /save does). Anything else → 200.
+            let resp = if line.starts_with("GET /mint") {
+                "HTTP/1.1 302 Found\r\nSet-Cookie: NID=fetch_earned_session; Path=/\r\nLocation: /done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+            } else {
+                let body = "<html><body>done</body></html>";
+                format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body)
+            };
+            let _ = s.write_all(resp.as_bytes()).await;
+            let _ = s.flush().await;
+        }
+    });
+
+    let mut session = PageSession::open(
+        "<html><body></body></html>",
+        &base,
+        "",
+        "",
+        DEFAULT_RENDER_BUDGET_MS,
+    )
+    .await
+    .expect("session opens");
+    // Fire the fetch from page JS and await it (eval drains to quiescence, and op_fetch
+    // is counted in __pendingFetches so the drain waits for it).
+    session
+        .eval(&format!(
+            r#"globalThis.__RESULT = 'pending';
+               (async () => {{ try {{ await fetch("{base}mint"); }} catch (e) {{}}
+                              globalThis.__RESULT = 'done'; }})();"#
+        ))
+        .await
+        .unwrap();
+    let jar = session.cookies();
+    assert!(
+        jar.contains("NID") && jar.contains("fetch_earned_session"),
+        "Set-Cookie on the fetch's 302 hop must reach the session jar, got: {jar}"
+    );
     session.close();
 }

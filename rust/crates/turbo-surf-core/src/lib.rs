@@ -24,7 +24,9 @@ pub mod fingerprint;
 pub mod frontier;
 pub mod measure;
 pub mod net;
+pub mod recaptcha;
 pub mod robots;
+pub mod sorry;
 pub mod url;
 
 /// The active HTTP backend, re-exported so this crate's `net` module and every
@@ -40,4 +42,4 @@ pub use reqwest as http_backend;
 pub use wreq as http_backend;
 
 /// Library version — kept in lockstep with `package.json` per the release rules.
-pub const VERSION: &str = "0.4.3";
+pub const VERSION: &str = "0.4.4";

@@ -238,18 +238,82 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     let builder = {
         use wreq::IntoEmulation;
         let profile = crate::fingerprint::default_profile();
-        let mut hints = http::header::HeaderMap::new();
-        if let Ok(v) = profile.sec_ch_ua.parse() {
-            hints.insert("sec-ch-ua", v);
-        }
         // Resolve the wreq-util Chrome 149 profile to a concrete `Emulation` so its
-        // TlsOptions can be tweaked before it's applied.
-        #[allow(unused_mut)]
+        // header set, header ORDER and TLS options can be tuned to match a real
+        // Chrome *cold* top-level navigation before it's applied.
         let mut emulation = wreq_util::Emulation::builder()
             .profile(wreq_util::Profile::Chrome149)
             .platform(wreq_util::Platform::MacOS)
             .build()
             .into_emulation();
+
+        // Freshen the low-entropy `sec-ch-ua` from wreq-util's 149 to the pinned
+        // Chrome 153 identity (kept in lockstep with the UA override below and the
+        // rustls path's `default_profile`), and add the two request headers a real
+        // Chrome navigation sends that wreq-util's profile omits:
+        // `upgrade-insecure-requests: 1` and `sec-fetch-user: ?1`.
+        //
+        // Deliberately NO high-entropy client hints. Real Chrome sends only the
+        // low-entropy trio (`sec-ch-ua`/`-mobile`/`-platform`) plus
+        // `upgrade-insecure-requests` on a cold request; the
+        // arch/bitness/wow64/model/form-factors/platform-version/full-version(-list)
+        // family is emitted only AFTER a server answers with `Accept-CH`
+        // (request #2+). Emitting them unconditionally is itself a tell — a real
+        // cold Chrome hit never carries them. (google's /search *does* receive them,
+        // but only because google returns `Accept-CH`; that is a later request, not
+        // the request-#1 fingerprint gate mirrored here.)
+        let mut put = |k: &'static str, v: &str| {
+            if let Ok(val) = v.parse() {
+                emulation.headers.insert(k, val);
+            }
+        };
+        put("sec-ch-ua", &profile.sec_ch_ua);
+        put("upgrade-insecure-requests", "1");
+        put("sec-fetch-user", "?1");
+        // Chrome's Accept-Encoding spelling + order (`gzip, deflate, br, zstd`).
+        // Left unset, wreq lets tower-http synthesize `zstd,gzip,deflate,br` (its
+        // own order, no spaces) — a value tell. Setting it here wins because
+        // tower-http only fills Accept-Encoding when the header is *vacant*.
+        put("accept-encoding", "gzip, deflate, br, zstd");
+
+        // Pin the exact Chrome-153 top-level-navigation header ORDER (order is itself
+        // a fingerprint). wreq emits the headers named here first, in this order, via
+        // `OrigHeaderMap`, then appends any others (cache validators, extra caller
+        // headers) after; a header absent from a given request is skipped. `cookie`
+        // is listed in Chrome's slot so a jar/consent cookie lands correctly when
+        // present.
+        let mut order = http::header::OrigHeaderMap::new();
+        for name in [
+            "sec-ch-ua",
+            "sec-ch-ua-mobile",
+            "sec-ch-ua-platform",
+            "upgrade-insecure-requests",
+            "user-agent",
+            "accept",
+            "sec-fetch-site",
+            "sec-fetch-mode",
+            "sec-fetch-user",
+            "sec-fetch-dest",
+            "accept-encoding",
+            "accept-language",
+            "cookie",
+            "priority",
+        ] {
+            order.insert(name);
+        }
+        emulation.orig_headers = order;
+
+        // Real Chrome sends a HEADERS-frame priority weight of 256; wreq-util's
+        // Chrome149 profile bakes in 220 (the on-wire byte is weight-1, so
+        // `StreamDependency::new`'s `u8` takes 255). Overriding the resolved
+        // profile's stream dependency HERE — rather than editing a vendored
+        // wreq-util — keeps the fix in turbo-surf's own source: it survives a stock
+        // (unpatched) wreq-util and reaches crates.io consumers of this crate.
+        if let Some(h2) = emulation.http2_options.as_mut() {
+            use wreq::http2::{StreamDependency, StreamId};
+            h2.headers_stream_dependency = Some(StreamDependency::new(StreamId::zero(), 255, true));
+        }
+
         // With the `trust-anchors` feature, additionally emit Chrome 152+'s
         // `trust_anchors` extension (codepoint 0xCA34). wreq-util's Chrome149
         // profile omits it, leaving JA4 at `t13d1516h2` vs real Chrome's
@@ -266,7 +330,6 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
             // Override AFTER emulation (wreq applies the profile immediately, so
             // later fine-tuning wins) to freshen the reported version 149 -> 153.
             .user_agent(profile.user_agent.as_str())
-            .default_headers(hints)
     };
     builder
 }

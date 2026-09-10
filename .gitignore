@@ -59,6 +59,9 @@ harness/crawlers/storage/
 scripts/browser-sidecar/node_modules/
 scripts/browser-sidecar/.chrome-profile/
 scripts/browser-sidecar/package-lock.json
+# Minted trusted __Secure-ENID token cache (per-machine, reused by native google search)
+scripts/browser-sidecar/.enid-cache.json
+scripts/browser-sidecar/.enid-cache.json.tmp
 
 # browser-solver stealth Chrome user-data profile (32M, holds cookies/creds)
 harness/browser-solver/.stealth-chrome-profile/

@@ -238,10 +238,35 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     let builder = {
         use wreq::IntoEmulation;
         let profile = crate::fingerprint::default_profile();
+        // Full Chrome-153 / macOS client-hint set on the wire (matches what real
+        // Chrome sends to a site that requests high-entropy hints, e.g. google).
+        // wreq's Chrome149 emulation only carries the low-entropy trio; a client that
+        // sends `sec-ch-ua` but omits the arch/bitness/full-version-list family reads
+        // as non-Chrome to walls that parse client hints. Values are Apple-Silicon
+        // coherent (UA platform token stays the frozen "Intel 10_15_7" as Chrome does,
+        // while `sec-ch-ua-arch` reports "arm"). `sec-ch-ua`/`-mobile`/`-platform`
+        // stay sourced from `default_profile` so they can't drift from the UA.
         let mut hints = http::header::HeaderMap::new();
-        if let Ok(v) = profile.sec_ch_ua.parse() {
-            hints.insert("sec-ch-ua", v);
-        }
+        let mut put = |k: &'static str, v: &str| {
+            if let Ok(val) = v.parse() {
+                hints.insert(k, val);
+            }
+        };
+        put("sec-ch-ua", &profile.sec_ch_ua);
+        put("sec-ch-ua-mobile", "?0");
+        put("sec-ch-ua-platform", profile.sec_ch_ua_platform);
+        put("sec-ch-ua-platform-version", "\"27.0.0\"");
+        put("sec-ch-ua-arch", "\"arm\"");
+        put("sec-ch-ua-bitness", "\"64\"");
+        put("sec-ch-ua-wow64", "?0");
+        put("sec-ch-ua-model", "\"\"");
+        put("sec-ch-ua-form-factors", "\"Desktop\"");
+        put("sec-ch-ua-full-version", "\"153.0.8010.36\"");
+        put(
+            "sec-ch-ua-full-version-list",
+            "\"Google Chrome\";v=\"153.0.8010.36\", \"Not_A Brand\";v=\"8.0.0.0\", \
+             \"Chromium\";v=\"153.0.8010.36\"",
+        );
         // Resolve the wreq-util Chrome 149 profile to a concrete `Emulation` so its
         // TlsOptions can be tweaked before it's applied.
         #[allow(unused_mut)]

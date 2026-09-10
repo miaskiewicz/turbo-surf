@@ -1,6 +1,15 @@
 (function(){
   var g = globalThis;
   if (typeof g.navigator === 'undefined') g.navigator = { userAgent: 'turbo-test', platform: 'rust', language: 'en-US', languages: ['en-US'], clipboard: {}, maxTouchPoints: 0 };
+  // Top-level window self-references (browsers + jsdom + vitest): a non-framed window is its own
+  // parent/top, and `self`/`frames` alias the window. `window === globalThis` here, so point them at
+  // g. Configurable so a test can stub framing (Object.defineProperty(window,'parent',{value:...})).
+  // Without these, `window.parent !== window` reads as "always inside an iframe" and silently breaks
+  // top-level/iframe detection that works under vitest.
+  ['self', 'parent', 'top', 'frames'].forEach(function(k){
+    if (g[k] !== g) { try { Object.defineProperty(g, k, { value: g, writable: true, configurable: true, enumerable: false }); } catch(e){ try { g[k] = g; } catch(e2){} } }
+  });
+  if (typeof g.frameElement === 'undefined') { try { Object.defineProperty(g, 'frameElement', { value: null, writable: true, configurable: true, enumerable: false }); } catch(e){ try { g.frameElement = null; } catch(e2){} } }
   // ---- CSS shorthand expansion ----------------------------------------------------------------
   // getComputedStyle in jsdom derives longhands from shorthands; tests read e.g. marginTop,
   // borderWidth, backgroundColor, rowGap, flexBasis. Expand the common shorthands into longhands so

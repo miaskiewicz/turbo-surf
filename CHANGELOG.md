@@ -70,7 +70,7 @@ fingerprint fidelity; the residual walls are IP reputation and server-side scori
   through the browser. Reuse holds only while the ENID stays trusted **and** on a non-flagged
   exit IP (a `/sorry`'d IP won't serve the SERP to any token — orthogonal, handled by the
   `/sorry` clearance path); it does **not** defeat IP-reputation blocking.
-- Requires turbo-test browser_env ≥ 0.3.16 (vendored) for the iframe + WebGL + canvas.
+- Requires turbo-test browser_env ≥ 0.4.2 (vendored) for the iframe + WebGL + canvas.
 
 ## [0.4.3] — Chrome 153 fingerprint
 

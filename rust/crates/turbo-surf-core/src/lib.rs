@@ -24,6 +24,7 @@ pub mod fingerprint;
 pub mod frontier;
 pub mod measure;
 pub mod net;
+pub mod recaptcha;
 pub mod robots;
 pub mod url;
 

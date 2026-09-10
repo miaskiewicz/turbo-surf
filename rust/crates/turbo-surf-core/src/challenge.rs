@@ -20,7 +20,7 @@ use crate::http_backend as http;
 use std::time::Duration;
 
 /// The anti-bot vendor behind a detected wall.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Vendor {
     Akamai,
     DataDome,
@@ -28,6 +28,12 @@ pub enum Vendor {
     Cloudflare,
     /// AWS WAF Bot Control (the bot layer behind CloudFront / ALB).
     AwsWaf,
+    /// Google reCAPTCHA — the `/sorry` unusual-traffic wall or a `g-recaptcha`
+    /// widget on the page. Solved in-isolate by [`crate::recaptcha::RecaptchaSolver`].
+    // `#[default]` only so `Challenge` can derive `Default` — the MCP `solve_recaptcha`
+    // tool builds a `Challenge` by filling its fields explicitly.
+    #[default]
+    Recaptcha,
 }
 
 impl Vendor {
@@ -38,15 +44,34 @@ impl Vendor {
             Vendor::Kasada => "kasada",
             Vendor::Cloudflare => "cloudflare",
             Vendor::AwsWaf => "awswaf",
+            Vendor::Recaptcha => "recaptcha",
         }
     }
 }
 
 /// A detected challenge wall on a response.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Challenge {
     pub vendor: Vendor,
     pub page_url: String,
+    /// reCAPTCHA site key lifted from the page (`data-sitekey`, the `render=` query
+    /// param, or a `grecaptcha.render(...)` literal). `None` for the other vendors.
+    pub sitekey: Option<String>,
+    /// reCAPTCHA v3 `action` label, when the page declares one. `None` otherwise.
+    pub action: Option<String>,
+}
+
+impl Challenge {
+    /// Construct a bare challenge (no reCAPTCHA site key/action) — the shape the
+    /// header/cookie-driven vendors use.
+    pub fn new(vendor: Vendor, page_url: impl Into<String>) -> Self {
+        Self {
+            vendor,
+            page_url: page_url.into(),
+            sitekey: None,
+            action: None,
+        }
+    }
 }
 
 /// Identity to pin the solve to — must match what you replay the token through.
@@ -73,6 +98,11 @@ pub enum SolveError {
     Http(String),
     Parse(String),
     Unsupported(Vendor),
+    /// A reCAPTCHA case that CANNOT be solved in-isolate — a **v2 visual image-grid
+    /// challenge** (needs vision/human). Honest boundary: the client VM produces a
+    /// token only for score-based / invisible flows; a "select all squares with…"
+    /// grid is out of reach without a real solver (route to Scrapfly/Hyper instead).
+    VisualChallenge,
 }
 
 impl std::fmt::Display for SolveError {
@@ -82,6 +112,11 @@ impl std::fmt::Display for SolveError {
             SolveError::Http(e) => write!(f, "solver HTTP error: {e}"),
             SolveError::Parse(e) => write!(f, "solver response parse error: {e}"),
             SolveError::Unsupported(v) => write!(f, "solver does not support {}", v.as_str()),
+            SolveError::VisualChallenge => write!(
+                f,
+                "reCAPTCHA v2 image-grid challenge needs vision/human — not solvable \
+                 in-isolate (route to an external solver)"
+            ),
         }
     }
 }
@@ -103,6 +138,27 @@ pub trait PowEngine: Send + Sync {
     /// Evaluate `script` (the challenge's compute) and return the answer string it
     /// produces (e.g. the value it assigns to the answer field).
     fn compute(&self, script: &str) -> Result<String, String>;
+}
+
+/// Runs the **in-isolate reCAPTCHA token flow** and returns the client
+/// `g-recaptcha-response` token. Implemented by the render tier
+/// (`turbo-surf-render`), which loads the page's own reCAPTCHA integration in a V8
+/// isolate — the main-frame VM runs, `grecaptcha.render()`/`execute()` resolve over
+/// a bridged bframe iframe + parent↔bframe postMessage handshake — and extracts the
+/// token. Injected into [`RecaptchaSolver`] so `turbo-surf-core` stays render-free.
+#[async_trait::async_trait]
+pub trait RecaptchaEngine: Send + Sync {
+    /// Run `page_html` (served from `page_url`, carrying the reCAPTCHA widget +
+    /// `api.js`) in the isolate, drive `grecaptcha.execute(sitekey, {action})`, and
+    /// return the token it produces. `Ok("")` / `Err` when no token could be minted
+    /// (e.g. the flow escalated to a visual challenge).
+    async fn execute(
+        &self,
+        page_html: &str,
+        page_url: &str,
+        sitekey: &str,
+        action: &str,
+    ) -> Result<String, String>;
 }
 
 /// Try `primary`; on a solve error fall back to `fallback`. Lets an *experimental*
@@ -158,12 +214,7 @@ pub fn detect(
     headers: &[(String, String)],
     body: &str,
 ) -> Option<Challenge> {
-    let here = |vendor| {
-        Some(Challenge {
-            vendor,
-            page_url: page_url.to_string(),
-        })
-    };
+    let here = |vendor| Some(Challenge::new(vendor, page_url));
 
     // Cloudflare managed challenge / Turnstile.
     if header(headers, "cf-mitigated").is_some_and(|v| v.contains("challenge"))
@@ -205,6 +256,30 @@ pub fn detect(
         || body.contains("challenge.js")
     {
         return here(Vendor::AwsWaf);
+    }
+    // Google reCAPTCHA. Two shapes: the `/sorry` unusual-traffic interstitial, and a
+    // `g-recaptcha` widget embedded on a page. Carry the site key/action so the solver
+    // (or the MCP tool) can drive the token flow without re-parsing.
+    let sorry_wall = page_url.contains("/sorry/")
+        || body.contains("our systems have detected unusual traffic")
+        || body.contains("unusual traffic from your computer network");
+    let has_widget = body.contains("g-recaptcha")
+        || body.contains("grecaptcha.render")
+        || body.contains("grecaptcha.execute")
+        || body.contains("/recaptcha/api.js")
+        || body.contains("/recaptcha/enterprise.js");
+    if sorry_wall || has_widget {
+        let sitekey = crate::recaptcha::extract_sitekey(body);
+        // A `/sorry` wall with no discoverable widget is still a reCAPTCHA wall; a bare
+        // widget mention with no site key is not actionable, so require one there.
+        if sorry_wall || sitekey.is_some() {
+            return Some(Challenge {
+                vendor: Vendor::Recaptcha,
+                page_url: page_url.to_string(),
+                sitekey,
+                action: crate::recaptcha::extract_action(body),
+            });
+        }
     }
     None
 }
@@ -579,7 +654,7 @@ fn load_dotenv() {
 /// `hyper`|`scrapfly`; otherwise the first key present wins. Returns `None` when
 /// nothing is configured — so the whole feature is inert until a real key is set.
 pub fn solver_from_env() -> Option<Box<dyn ChallengeSolver>> {
-    solver_from_env_pow(None)
+    solver_from_env_pow(None, None)
 }
 
 // Wrap an in-house solver so a failed solve falls back to the browser sidecar when
@@ -597,11 +672,15 @@ fn maybe_browser_fallback(primary: Box<dyn ChallengeSolver>) -> Box<dyn Challeng
     }
 }
 
-/// Like [`solver_from_env`] but with an optional [`PowEngine`] — when the selected
-/// solver is Cloudflare and an engine is supplied, the solver runs the challenge's
-/// own JS to compute the answer (the proper path). The render tier passes a V8
-/// engine here; everything else ignores it.
-pub fn solver_from_env_pow(pow: Option<Box<dyn PowEngine>>) -> Option<Box<dyn ChallengeSolver>> {
+/// Like [`solver_from_env`] but with the render-tier engines injected — a
+/// [`PowEngine`] (Cloudflare/AWS run the challenge's own JS to compute the answer,
+/// the proper path) and a [`RecaptchaEngine`] (`TURBO_SURF_SOLVER=recaptcha` drives
+/// the in-isolate token flow). The render tier passes V8 engines here; a solver that
+/// doesn't need one ignores it.
+pub fn solver_from_env_pow(
+    pow: Option<Box<dyn PowEngine>>,
+    recaptcha: Option<Box<dyn RecaptchaEngine>>,
+) -> Option<Box<dyn ChallengeSolver>> {
     load_dotenv();
     let hyper = std::env::var("HYPER_API_KEY")
         .ok()
@@ -644,6 +723,16 @@ pub fn solver_from_env_pow(pow: Option<Box<dyn PowEngine>>) -> Option<Box<dyn Ch
                 waf = waf.with_pow_engine(engine);
             }
             Some(maybe_browser_fallback(Box::new(waf)))
+        }
+        // reCAPTCHA runs the token flow in the V8 render tier (the RecaptchaEngine).
+        // When a browser sidecar is also configured, a failed in-isolate solve (e.g.
+        // a v2 image challenge) falls back to the real browser.
+        "recaptcha" => {
+            let mut solver = crate::recaptcha::RecaptchaSolver::new();
+            if let Some(engine) = recaptcha {
+                solver = solver.with_engine(engine);
+            }
+            Some(maybe_browser_fallback(Box::new(solver)))
         }
         _ => hyper
             .map(|k| Box::new(HyperSolver::new(k)) as Box<dyn ChallengeSolver>)
@@ -708,6 +797,47 @@ mod tests {
     }
 
     #[test]
+    fn detects_recaptcha_sorry_and_widget() {
+        // The google `/sorry` unusual-traffic wall (URL marker), with its embedded widget.
+        let sorry = detect(
+            "https://www.google.com/sorry/index?continue=https://x",
+            429,
+            &[],
+            r#"<div>Our systems have detected unusual traffic</div>
+               <div class="g-recaptcha" data-sitekey="6Lc_sorry_key"></div>"#,
+        )
+        .expect("/sorry is a reCAPTCHA wall");
+        assert_eq!(sorry.vendor, Vendor::Recaptcha);
+        assert_eq!(sorry.sitekey.as_deref(), Some("6Lc_sorry_key"));
+
+        // The unusual-traffic body phrase alone (no /sorry path) also trips it.
+        assert_eq!(
+            detect(
+                "https://x.test/",
+                200,
+                &[],
+                "our systems have detected unusual traffic from your computer network"
+            )
+            .map(|c| c.vendor),
+            Some(Vendor::Recaptcha)
+        );
+
+        // A bare `g-recaptcha` widget on an ordinary page — a solvable v3 site key.
+        let widget = detect(
+            "https://shop.test/checkout",
+            200,
+            &[],
+            r#"<script src="https://www.google.com/recaptcha/api.js?render=6Lc_v3"></script>"#,
+        )
+        .expect("a reCAPTCHA widget is actionable");
+        assert_eq!(widget.vendor, Vendor::Recaptcha);
+        assert_eq!(widget.sitekey.as_deref(), Some("6Lc_v3"));
+
+        // A plain page (no wall, no widget) is not a challenge.
+        assert!(detect("https://x.test/", 200, &[], "<html>hello</html>").is_none());
+    }
+
+    #[test]
     fn env_selection_ignores_placeholders() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Fresh keys for this test; placeholders must read as unset.
@@ -733,10 +863,7 @@ mod tests {
             "cat >/dev/null; printf '{\"cookies\":{\"datadome\":\"DD\"},\"headers\":{\"x-kpsdk-ct\":\"K\"}}'"
                 .into(),
         );
-        let ch = Challenge {
-            vendor: Vendor::DataDome,
-            page_url: "https://x.test/".into(),
-        };
+        let ch = Challenge::new(Vendor::DataDome, "https://x.test/");
         let token = solver.solve(&ch, &SolveContext::default()).await.unwrap();
         assert_eq!(
             token.cookies,
@@ -787,10 +914,7 @@ mod tests {
         });
         let solver =
             ScrapflySolver::new("k".into()).with_base_url(format!("http://127.0.0.1:{port}"));
-        let ch = Challenge {
-            vendor: Vendor::Cloudflare,
-            page_url: "https://x.test/".into(),
-        };
+        let ch = Challenge::new(Vendor::Cloudflare, "https://x.test/");
         let token = solver.solve(&ch, &SolveContext::default()).await.unwrap();
         assert_eq!(
             token.cookies,
@@ -832,18 +956,12 @@ mod tests {
         let base = format!("http://127.0.0.1:{port}");
         // Target page URL = same mock (non-/v2/sensor path).
         let solver = HyperSolver::new("KEY".into()).with_base_url(base.clone());
-        let ch = Challenge {
-            vendor: Vendor::Akamai,
-            page_url: format!("{base}/target"),
-        };
+        let ch = Challenge::new(Vendor::Akamai, format!("{base}/target"));
         let token = solver.solve(&ch, &SolveContext::default()).await.unwrap();
         let abck = token.cookies.iter().find(|(k, _)| k == "_abck").unwrap();
         assert!(abck.1.starts_with("REAL"), "expected harvested _abck");
         // Non-Akamai vendors fall through as Unsupported.
-        let cf = Challenge {
-            vendor: Vendor::Cloudflare,
-            page_url: base,
-        };
+        let cf = Challenge::new(Vendor::Cloudflare, base);
         assert!(matches!(
             solver.solve(&cf, &SolveContext::default()).await,
             Err(SolveError::Unsupported(Vendor::Cloudflare))

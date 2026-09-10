@@ -245,10 +245,7 @@ mod tests {
             }
         });
         let solver = AwsWafSolver::new();
-        let ch = Challenge {
-            vendor: Vendor::AwsWaf,
-            page_url: format!("http://127.0.0.1:{port}/"),
-        };
+        let ch = Challenge::new(Vendor::AwsWaf, format!("http://127.0.0.1:{port}/"));
         let token = solver.solve(&ch, &SolveContext::default()).await.unwrap();
         assert_eq!(token.cookies[0].0, "aws-waf-token");
         assert!(!token.cookies[0].1.is_empty());

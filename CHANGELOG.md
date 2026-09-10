@@ -27,6 +27,18 @@ fingerprint fidelity; the residual walls are IP reputation and server-side scori
   WebGL** context (identity strings + limits + extensions + deterministic readback,
   was null); content-dependent **canvas2d** readback; and a much-extended `probe`
   recon surface (window/WebGL/performance/Date/Intl/MessageChannel/`toString`).
+- **reCAPTCHA solver** in the challenge framework: `Vendor::Recaptcha` + `detect()`
+  (google `/sorry`, "unusual traffic", or a `g-recaptcha`/`grecaptcha.render` widget →
+  lifts sitekey + v3 action), a `RecaptchaSolver` that drives the in-isolate flow to
+  mint a `g-recaptcha-response` token, `TURBO_SURF_SOLVER=recaptcha`, and a
+  `solve_recaptcha {url, sitekey?, action?} -> {token}` MCP tool. Clears v3/invisible/
+  score flows and google `/sorry` **only with a clean `TURBO_SURF_PROXY` IP** (token is
+  server-scored); v2 visual image-grid is refused (`SolveError::VisualChallenge`) to
+  route to an external solver.
+- **Browser sidecar: `headless` is a per-call choice** (stdin `headless` >
+  `TURBO_SURF_SIDECAR_HEADLESS` env > **headed default**) and a `headless?` arg on
+  `web_search`. Measured: headless Chrome trips google's `/sorry` (an automation tell,
+  not the IP — headed on the same IP returns the real SERP), so headed is the default.
 - Requires turbo-test browser_env ≥ 0.3.16 (vendored) for the iframe + WebGL + canvas.
 
 ## [0.4.3] — Chrome 153 fingerprint

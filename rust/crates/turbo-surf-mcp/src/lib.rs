@@ -1484,20 +1484,84 @@ async fn fetch_serp(
         return browser_fetch_serp(url, headless).await;
     }
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
+    // A throwaway jar so a google /sorry clearance's exemption cookie can be captured
+    // and replayed on the re-fetch — the caller's session jar is never touched (this
+    // function is stateless re: the session).
+    let mut jar = CookieJar::new();
     let opts = FetchOptions {
         allow_non_html: true, // json engines return non-HTML bodies
         profile: Some(&profile),
         bypass_consent: true,
+        jar: Some(&mut jar),
         ..Default::default()
     };
     let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
+    // If the SERP fetch was bounced to google's /sorry unusual-traffic wall, run the
+    // reCAPTCHA → GOOGLE_ABUSE_EXEMPTION → SERP clearance loop and continue with the
+    // cleared SERP HTML (a no-op for any other engine / a non-walled response).
+    let (final_url, html) = maybe_clear_sorry(&mut jar, res.final_url, res.html).await?;
     if matches!(strategy.mode.as_str(), "fast" | "secure" | "js") {
         let mut tmp = Session::new();
-        tmp.load(&res.final_url, &res.html);
+        tmp.load(&final_url, &html);
         tmp.render_current().await?;
         return Ok(serialize_doc(tmp.tree()?));
     }
-    Ok(res.html)
+    Ok(html)
+}
+
+/// If `html` (fetched from `final_url`) is google's `/sorry` unusual-traffic wall, run
+/// the [`turbo_surf_core::sorry`] clearance loop and return the cleared `(url, SERP)`;
+/// otherwise pass the page through unchanged. The token is minted in-isolate by the V8
+/// [`turbo_surf_render::V8RecaptchaEngine`] (v3/invisible/score flows); a v2 image grid
+/// surfaces [`SolveError::VisualChallenge`], which defers to the env-configured external
+/// solver ([`challenge::solver_from_env`]) if one is present, else a clear error.
+async fn maybe_clear_sorry(
+    jar: &mut CookieJar,
+    final_url: String,
+    html: String,
+) -> Result<(String, String), String> {
+    use turbo_surf_core::challenge::SolveError;
+    use turbo_surf_core::recaptcha::RecaptchaSolver;
+    use turbo_surf_core::sorry;
+    if !sorry::is_sorry_wall(&final_url, &html) {
+        return Ok((final_url, html));
+    }
+    let ctx = SolveContext {
+        user_agent: fingerprint::default_profile().user_agent,
+        proxy: std::env::var("TURBO_SURF_PROXY")
+            .ok()
+            .filter(|s| !s.is_empty()),
+    };
+    // In-isolate first (no external cost); it produces a token for score/invisible flows.
+    let in_isolate =
+        RecaptchaSolver::new().with_engine(Box::new(turbo_surf_render::V8RecaptchaEngine));
+    match sorry::clear_if_sorry(&in_isolate, jar, &final_url, &html, &ctx, 0.0).await {
+        Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
+        Ok(None) => Ok((final_url, html)),
+        // v2 image grid / no engine: defer to a configured external solver if present.
+        Err(e @ (SolveError::VisualChallenge | SolveError::NotConfigured)) => {
+            match challenge::solver_from_env() {
+                Some(external) => {
+                    match sorry::clear_if_sorry(external.as_ref(), jar, &final_url, &html, &ctx, 0.0)
+                        .await
+                    {
+                        Ok(Some(c)) => Ok((c.final_url, c.serp_html)),
+                        Ok(None) => Ok((final_url, html)),
+                        Err(ext) => Err(format!(
+                            "google /sorry clearance failed (in-isolate: {e}; external {}: {ext})",
+                            external.name()
+                        )),
+                    }
+                }
+                None => Err(format!(
+                    "google /sorry is a v2 image / score-gated challenge the in-isolate flow \
+                     can't clear ({e}); configure an external solver (TURBO_SURF_SOLVER + key) \
+                     or use the headed browser sidecar"
+                )),
+            }
+        }
+        Err(e) => Err(format!("google /sorry clearance failed: {e}")),
+    }
 }
 
 /// Fetch a SERP through the opt-in browser sidecar named by the
@@ -1727,7 +1791,11 @@ pub fn tools() -> Value {
              for engines behind a browser-integrity wall (google BotGuard). headless? \
              (browser mode) picks the sidecar's Chrome mode — omit for the reliable \
              headed default (headless trips google's /sorry); true only where there's \
-             no display. Stateless: does not touch the session page/jar",
+             no display. On the native (non-browser) path, a google /sorry \
+             unusual-traffic wall is auto-cleared in-isolate (reCAPTCHA → \
+             GOOGLE_ABUSE_EXEMPTION → SERP) for v3/invisible/score flows; a v2 image \
+             grid defers to an external solver or errors. Stateless: does not touch \
+             the session page/jar",
         ),
         (
             "web_search_set_engine",

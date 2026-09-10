@@ -3,6 +3,44 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.4.3] — Chrome 153 fingerprint
+
+Freshened the emulated browser identity from Chrome 149 to **Chrome 153** (current
+stable) across every layer an anti-bot wall reads, and fixed a latent cross-layer
+version mismatch on the default impersonate path.
+
+### Added
+- **`trust-anchors` cargo feature** (off by default; implies `impersonate`) — emits
+  Chrome 152+'s `trust_anchors` TLS extension (codepoint `0xCA34`), taking the
+  ClientHello JA4 from `t13d1516h2` to `t13d1517h2` to match current Chrome. Built on
+  a small **vendored fork of `wreq`** under `rust/vendor/wreq` (adds a `trust_anchors`
+  field to `TlsOptions`, wired to BoringSSL's `SSL_CTX_set1_requested_trust_anchors`),
+  applied via `[patch.crates-io]`. An empty list still emits the extension. See the
+  caveat in `PUBLISHING.md` — the `[patch]` is workspace-local, so the feature works
+  in the shipped binary but not for crates.io library consumers who enable it.
+- **Render tier: real `navigator.sendBeacon` delivery + a complete `XMLHttpRequest`
+  surface** (responseType, response headers, readyState transitions/constants, abort/
+  timeout/withCredentials) over the isolate's `op_fetch` + shared cookie jar, in the
+  non-vendored `ENV_BOOTSTRAP` injection layer (native-branded via the `toString`
+  WeakSet). Any page whose anti-bot/analytics flow ships a token via `sendBeacon` or a
+  fuller XHR now completes the round-trip. (Note: this does **not** unblock google
+  search — its SERP is BotGuard/JS-gated and stays on the real-Chrome sidecar.)
+
+### Changed
+- **Emulated Chrome 149 → 153**: `fingerprint::default_profile` (UA + `sec-ch-ua`),
+  the profile major pool, and the render-tier `navigator.userAgent` / `chromeMajor`
+  now report Chrome 153.
+
+### Fixed
+- **Impersonate wire UA was silently stuck at Chrome 149.** Under `--features
+  impersonate` (the default), wreq's bundled emulation owns the request headers and
+  kept advertising Chrome 149 on the wire even after the rest of the stack moved to
+  153 — a cross-layer version mismatch that is itself a bot tell. `emulate()` now
+  pins the on-wire UA + `sec-ch-ua` to the same Chrome 153 identity, while wreq still
+  owns the header order and the TLS/HTTP-2 ClientHello (Chrome's TLS hello is stable
+  across minor versions, so the 149 template is byte-for-byte what Chrome 153 sends).
+  Verified against a live TLS/HTTP-2 echo; the impersonate network e2e guards it.
+
 ## [0.4.2] — screenshot render fidelity
 
 Raster-tier fixes so synthetic screenshots of real, JS-heavy sites match a browser

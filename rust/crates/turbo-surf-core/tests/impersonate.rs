@@ -49,4 +49,14 @@ async fn presents_a_chrome_tls_and_http2_fingerprint() {
     // UA/JA4 mismatch is itself a classic bot tell).
     let ua = json["user_agent"].as_str().unwrap_or_default();
     assert!(ua.contains("Chrome/"), "unexpected UA: {ua}");
+
+    // `emulate` pins the wire UA to `fingerprint::default_profile` so the reported
+    // version stays current even though wreq's bundled emulation lags a few Chrome
+    // versions behind. Regression guard: the on-wire UA must be exactly that pinned
+    // identity (not wreq's older bundled UA), keeping every layer on one version.
+    let expected_ua = turbo_surf_core::fingerprint::default_profile().user_agent;
+    assert_eq!(
+        ua, expected_ua,
+        "wire UA is wreq's bundled UA, not the pinned default_profile override"
+    );
 }

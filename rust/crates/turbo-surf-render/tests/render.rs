@@ -203,11 +203,11 @@ fn fingerprint_override_applies_and_resets() {
         "override not applied: {out}"
     );
 
-    // Reset → Chrome 149 macOS defaults return.
+    // Reset → Chrome 153 macOS defaults return.
     turbo_surf_render::set_fingerprint("{}");
     let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
     assert!(
-        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|149\""),
+        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|153\""),
         "reset to defaults failed: {out}"
     );
 }
@@ -1254,6 +1254,82 @@ async fn mock_spa_fetches_data_via_xhr() {
     assert!(html.contains("From XHR"), "got: {html}");
 }
 
+// XHR must expose the fuller transfer surface anti-bot/analytics collectors read:
+// responseType-typed `response`, response headers, statusText, and the DONE constant.
+#[tokio::test]
+async fn xhr_exposes_response_type_headers_and_states() {
+    let port = spawn_json_server(r#"{"tok":"abc","n":7}"#).await;
+    let bundle = r#"
+        const xhr = new XMLHttpRequest();
+        xhr.responseType = 'json';
+        const states = [];
+        xhr.open('GET', '/token');
+        xhr.addEventListener('readystatechange', () => states.push(xhr.readyState));
+        xhr.addEventListener('load', () => {
+          const r = xhr.response;                      // parsed JSON (responseType=json)
+          const ct = xhr.getResponseHeader('content-type') || '';
+          const all = xhr.getAllResponseHeaders();
+          const done = (xhr.readyState === XMLHttpRequest.DONE);
+          const sawHeaders = states.indexOf(2) >= 0 && states.indexOf(3) >= 0 && states.indexOf(4) >= 0;
+          document.getElementById('root').textContent =
+            r.tok + ':' + r.n + '|ct=' + ct.split(';')[0] + '|all=' + (all.indexOf('content-type') >= 0)
+            + '|done=' + done + '|states=' + sawHeaders + '|st=' + xhr.status;
+        });
+        xhr.send();
+    "#;
+    let html = render_page(
+        "<body><div id='root'>loading</div></body>",
+        &base(port),
+        bundle,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains("abc:7|ct=application/json|all=true|done=true|states=true|st=200"),
+        "XHR responseType/headers/states surface: {html}"
+    );
+}
+
+// `navigator.sendBeacon` must ACTUALLY deliver its payload (a POST over the tier-1 net
+// stack, sharing the cookie jar) — the way an anti-bot collector ships its token — not
+// merely return `true`. The hydration drain must wait for the fire-and-forget POST to
+// land before serializing. Verified against a localhost server that records the request.
+#[tokio::test]
+async fn send_beacon_actually_posts_the_payload() {
+    let (port, seen) = spawn_capture_server().await;
+    let bundle = r#"
+        const ok = navigator.sendBeacon('/collect', 'token=deadbeef');
+        document.getElementById('root').textContent = 'queued=' + ok;
+    "#;
+    let html = render_page("<body><div id='root'>x</div></body>", &base(port), bundle)
+        .await
+        .unwrap();
+    assert!(
+        html.contains("queued=true"),
+        "sendBeacon returns true synchronously: {html}"
+    );
+    let req = { seen.lock().unwrap().clone() };
+    let req = req.expect("beacon POST reached the server");
+    assert!(
+        req.starts_with("POST /collect "),
+        "beacon is a POST to the target: {req}"
+    );
+    assert!(
+        req.contains("token=deadbeef"),
+        "beacon delivers the payload body: {req}"
+    );
+}
+
+// A `.toString()` on the beacon (a JS closure) must read native — a collector's
+// anti-tamper flags polyfilled source.
+#[test]
+fn send_beacon_reports_native() {
+    assert_eq!(
+        run_with_dom("<body></body>", "navigator.sendBeacon.toString()").unwrap(),
+        "function sendBeacon() { [native code] }"
+    );
+}
+
 #[tokio::test]
 async fn fetch_over_net_hydrates_from_localhost() {
     let port = spawn_json_server(r#"{"msg":"from-fetch"}"#).await;
@@ -1979,6 +2055,36 @@ async fn spawn_json_server(body: &'static str) -> u16 {
 
 fn base(port: u16) -> String {
     format!("http://127.0.0.1:{port}/")
+}
+
+// Records the FIRST request it receives (request line + headers + body) into the shared
+// slot, then replies 204 — for asserting a fire-and-forget POST (sendBeacon) actually
+// went out over the net stack.
+async fn spawn_capture_server() -> (u16, std::sync::Arc<std::sync::Mutex<Option<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+    let seen_srv = seen.clone();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut b = [0u8; 8192];
+            let n = s.read(&mut b).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&b[..n]).to_string();
+            {
+                let mut g = seen_srv.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(req);
+                }
+            }
+            let _ = s
+                .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                .await;
+            let _ = s.flush().await;
+        }
+    });
+    (port, seen)
 }
 
 // CSS :hover-revealed content (a hover dropdown / menu) must become visible when the shim

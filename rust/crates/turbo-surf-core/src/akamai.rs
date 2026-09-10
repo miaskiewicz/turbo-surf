@@ -291,7 +291,7 @@ mod tests {
     fn input() -> SensorInput {
         SensorInput {
             user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
-                         (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+                         (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
                 .into(),
             page_url: "https://shop.example.com/".into(),
             abck: "0~seed~-1~-1".into(),

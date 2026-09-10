@@ -20,13 +20,18 @@ default = ["impersonate"]
 # (BoringSSL, via turbo-surf-core's `impersonate`). Off by default — it needs a C
 # toolchain (cmake/nasm) at build time. ON by default (anti-bot). See turbo-surf-core/src/net.rs.
 impersonate = ["turbo-surf-core/impersonate"]
+# Also emit Chrome 152+'s `trust_anchors` TLS extension (codepoint 0xCA34 /
+# 51764) so JA4 matches real Chrome's `t13d1517h2`. Off by default (new/
+# non-standard ext); implies `impersonate`. See turbo-surf-core's `trust-anchors`
+# feature and net.rs `emulate()`.
+trust-anchors = ["turbo-surf-core/trust-anchors"]
 
 [dependencies]
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.2" }
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.4.2" }
-turbo-surf-page = { path = "../turbo-surf-page", version = "0.4.2" }
-turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.4.2" }
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.4.2" }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.3" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.4.3" }
+turbo-surf-page = { path = "../turbo-surf-page", version = "0.4.3" }
+turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.4.3" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.4.3" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
 async-trait = "0.1"
 base64 = "0.22"

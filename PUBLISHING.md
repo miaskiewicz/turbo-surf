@@ -69,3 +69,18 @@ can't be reused) — only cut a tag when a release is intended.
   dep; path deps carry an explicit `version` so crates.io accepts them.
 - Browser/crawler packages used only by the harness (`playwright`, `crawlee`, …) are
   not committed deps — install ad-hoc to run the benchmarks.
+
+## Caveat: the `trust-anchors` feature + vendored wreq
+
+`turbo-surf-core`'s optional `trust-anchors` feature depends on a **vendored fork of
+`wreq`** (`rust/vendor/wreq`) wired via `[patch.crates-io]` in `rust/Cargo.toml`. A
+`[patch]` is **workspace-local — it is NOT carried into a published crate**. So:
+
+- The shipped `turbo-surf-mcp` binary (built from this workspace) gets the patch and
+  the feature works — including if you build the binary with `--features trust-anchors`.
+- A crates.io **library** consumer of `turbo-surf-core` who enables `trust-anchors`
+  resolves **upstream** `wreq` (no `trust_anchors` field) and **fails to compile**.
+  The default (feature-off) crate is unaffected and publishes/builds normally.
+- `cargo publish` of `turbo-surf-core` still succeeds (its default-feature verify build
+  never references the patched field). The feature is simply binary-only until `wreq`
+  ships `trust_anchors` upstream, at which point drop the vendored fork + `[patch]`.

@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.4.2 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.4.3 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -203,7 +203,7 @@ platform there's no prebuilt binary (build from a checkout as above).
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
-By default every request carries a real **Chrome 149** identity — full UA + client
+By default every request carries a real **Chrome 153** identity — full UA + client
 hints (`sec-ch-ua`, `sec-fetch-*`, …) on the wire, and a matching Chrome
 `navigator` (`platform`, `vendor`, `webdriver: false`, plugins, `window.chrome`,
 native-`toString`) inside the JS render tier. **Nothing to configure for the
@@ -253,6 +253,10 @@ and route straight to the sidecar.
 
 Build feature (not env): **`--features impersonate`** swaps rustls → BoringSSL
 (`wreq`) for a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint. Needs `cmake`+`nasm`.
+Add **`--features trust-anchors`** (implies `impersonate`) to also emit Chrome 152+'s
+`trust_anchors` TLS extension (JA4 `t13d1516h2` → `t13d1517h2`); it's built on a
+vendored `wreq` fork (`rust/vendor/wreq`), so it works in this binary but not for
+crates.io library consumers — see [`PUBLISHING.md`](./PUBLISHING.md).
 
 MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
@@ -336,7 +340,7 @@ Set `TURBO_SURF_PROXY` so the token's IP/JA3 matches your egress (and build with
 `--features impersonate` so the replay JA3 matches the Chrome that minted it).
 
 **Controllable render fingerprint.** Every render-tier `navigator` field has a
-Chrome 149 default and is overridable at runtime via the MCP `set_fingerprint`
+Chrome 153 default and is overridable at runtime via the MCP `set_fingerprint`
 tool (or `turbo_surf_render::set_fingerprint(json)`):
 
 ```jsonc
@@ -348,7 +352,7 @@ tool (or `turbo_surf_render::set_fingerprint(json)`):
     "devicePixelRatio": 2,
     "connection": { "effectiveType": "4g", "rtt": 50, "downlink": 10 },
     "userAgentData": { "platform": "Windows", "brands": [ /* … */ ] }
-} }   // {} resets to Chrome 149 macOS defaults
+} }   // {} resets to Chrome 153 macOS defaults
 ```
 
 `stealth_status` reports the active profile, the wired solver, the pool size, and

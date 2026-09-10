@@ -60,19 +60,94 @@ async fn presents_a_chrome_tls_and_http2_fingerprint() {
         "wire UA is wreq's bundled UA, not the pinned default_profile override"
     );
 
-    // Client-hint parity: the full Chrome sec-ch-ua-* family must reach the wire, not
-    // just the low-entropy trio — a wall that parses client hints (google) flags a
-    // client that sends `sec-ch-ua` but omits the high-entropy hints. The echo reflects
-    // sent request headers, so their names appear in the response body.
+    // Request-#1 network parity vs real Chrome (the layer sorted BEFORE any JS runs).
+    // The echo reflects the exact HTTP/2 HEADERS frame we sent, so we assert on it
+    // directly: the sent header names (order preserved) and the HEADERS priority.
+    let headers_frame = json["http2"]["sent_frames"]
+        .as_array()
+        .and_then(|frames| frames.iter().find(|f| f["frame_type"] == "HEADERS"))
+        .expect("no HEADERS frame in echo");
+    // Non-pseudo header names, in the order they went on the wire. Pseudo-headers
+    // (":method" etc.) start with ':', so we drop them and take each name as the
+    // text before the first ':' in "name: value".
+    let names: Vec<&str> = headers_frame["headers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|h| h.as_str())
+        .filter(|h| !h.starts_with(':'))
+        .map(|h| h.split(':').next().unwrap_or_default().trim())
+        .collect();
+
+    // 1. HEADERS-frame priority weight is Chrome's 256 (wire byte 255), not
+    //    wreq-util's stock 220 — closed via the vendored wreq-util patch.
+    assert_eq!(
+        headers_frame["priority"]["weight"].as_u64(),
+        Some(256),
+        "HEADERS priority weight is not Chrome's 256"
+    );
+
+    // 2. `upgrade-insecure-requests: 1` is present, in Chrome's slot (right after the
+    //    low-entropy sec-ch-ua trio, right before user-agent).
+    let uir = names
+        .iter()
+        .position(|n| *n == "upgrade-insecure-requests")
+        .expect("upgrade-insecure-requests missing on the wire");
+    assert_eq!(
+        names.get(uir - 1),
+        Some(&"sec-ch-ua-platform"),
+        "upgrade-insecure-requests not after sec-ch-ua-platform"
+    );
+    assert_eq!(
+        names.get(uir + 1),
+        Some(&"user-agent"),
+        "upgrade-insecure-requests not before user-agent"
+    );
+
+    // 3. NO high-entropy client hints on a cold request. Real Chrome sends only the
+    //    low-entropy trio + upgrade-insecure-requests until a server replies with
+    //    `Accept-CH`; emitting the arch/bitness/model/full-version(-list) family
+    //    unconditionally is itself a bot tell.
     for hint in [
         "sec-ch-ua-full-version-list",
+        "sec-ch-ua-full-version",
         "sec-ch-ua-arch",
         "sec-ch-ua-platform-version",
         "sec-ch-ua-bitness",
+        "sec-ch-ua-wow64",
+        "sec-ch-ua-model",
+        "sec-ch-ua-form-factors",
     ] {
         assert!(
-            body.contains(hint),
-            "client hint missing on the wire: {hint}"
+            !names.contains(&hint),
+            "high-entropy client hint leaked on a cold request: {hint}"
         );
     }
+
+    // 4. The full Chrome-153 navigation header order, verbatim.
+    let expected_order = [
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "upgrade-insecure-requests",
+        "user-agent",
+        "accept",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-user",
+        "sec-fetch-dest",
+        "accept-encoding",
+        "accept-language",
+        "priority",
+    ];
+    assert_eq!(
+        names, expected_order,
+        "header order diverges from Chrome 153"
+    );
+
+    // 5. Accept-Encoding uses Chrome's spelling/order, not tower-http's default.
+    assert!(
+        body.contains("gzip, deflate, br, zstd"),
+        "accept-encoding is not Chrome's `gzip, deflate, br, zstd`"
+    );
 }

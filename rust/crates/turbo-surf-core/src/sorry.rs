@@ -123,8 +123,9 @@ pub fn parse_sorry_form(page_url: &str, html: &str) -> Option<SorryForm> {
 
 // Value of a `name="…"` / `name='…'` / `name=bare` attribute in a single HTML tag.
 // Requires `name` to sit at an attribute boundary (preceded by whitespace or `<`)
-// so `data-name` doesn't match `name`.
-fn attr_value(tag: &str, name: &str) -> Option<String> {
+// so `data-name` doesn't match `name`. Shared with [`crate::consent`] (the consent
+// handshake parses the same shape of hidden-field form).
+pub(crate) fn attr_value(tag: &str, name: &str) -> Option<String> {
     let lower = tag.to_ascii_lowercase();
     let mut from = 0;
     while let Some(i) = lower[from..].find(name) {
@@ -165,7 +166,8 @@ fn attr_value(tag: &str, name: &str) -> Option<String> {
 
 // Minimal HTML entity unescape for attribute values — chiefly `&amp;` in the
 // `continue` URL's query string (the only entity Google emits there in practice).
-fn html_unescape(s: &str) -> String {
+// Shared with [`crate::consent`].
+pub(crate) fn html_unescape(s: &str) -> String {
     s.replace("&amp;", "&")
         .replace("&#38;", "&")
         .replace("&#x26;", "&")

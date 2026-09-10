@@ -16,6 +16,7 @@ use turbo_dom_parser::rtdom::serialize::serialize_inner;
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
 use turbo_surf_core::challenge::{self, ChallengeSolver, SolveContext};
+use turbo_surf_core::consent;
 use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::crawl::{crawl as run_crawl, CrawlOptions};
 use turbo_surf_core::fingerprint;
@@ -162,19 +163,74 @@ impl Session {
             ..Default::default()
         };
         let res = fetch_html_with(url, opts).await?;
-        self.load(&res.0, &res.1);
-        let mut status = res.2;
+        let (mut cur_url, mut cur_html, mut status) = res;
+        self.load(&cur_url, &cur_html);
+        // If the response is a Google "Before you continue" consent interstitial,
+        // replay its Accept-all form to earn the real trusted session (`NID`) into the
+        // jar, then re-fetch — the synthetic `SOCS` un-hides the page, but only this
+        // handshake mints the cookie a JS-free `/search` needs. Runs before challenge
+        // solving so the re-fetched (consented) page is what a `/sorry` check sees.
+        if let Some((u, h, s)) = self.try_consent_handshake(&cur_url, &cur_html).await? {
+            cur_url = u;
+            cur_html = h;
+            status = s;
+        }
         // If the response is a JS-challenge / PoW wall and a solver is configured,
         // solve it, inject the cleared cookies, and re-fetch on the fast path.
-        if let Some(new_status) = self.try_solve_challenge(&res.0, status, &res.1).await? {
+        if let Some(new_status) = self
+            .try_solve_challenge(&cur_url, status, &cur_html)
+            .await?
+        {
             status = new_status;
         }
         if self.render_mode() {
             self.render_current().await?;
         }
         Ok(
-            json!({ "url": res.0, "status": status, "title": title_of(self.tree.as_ref().unwrap()) }),
+            json!({ "url": cur_url, "status": status, "title": title_of(self.tree.as_ref().unwrap()) }),
         )
+    }
+
+    // Detect a Google consent interstitial on a just-fetched response and, if
+    // `bypass_consent` is on, replay its Accept-all form (the real
+    // `consent.google.com/save` handshake) to earn the trusted session (`NID`) into
+    // the session jar, then re-fetch the same URL with the earned cookies. Returns the
+    // re-fetched `(url, html, status)` when it ran, else `None` (not a consent wall /
+    // bypass off / handshake earned nothing). A parse/handshake failure leaves the
+    // interstitial in place rather than aborting the navigation.
+    async fn try_consent_handshake(
+        &mut self,
+        url: &str,
+        body: &str,
+    ) -> Result<Option<(String, String, u16)>, String> {
+        if !self.bypass_consent.unwrap_or(true) {
+            return Ok(None);
+        }
+        if !consent::is_consent_interstitial(url, body) {
+            return Ok(None);
+        }
+        let ua = self.ua.clone().unwrap_or_default();
+        let earned = match consent::handshake_if_consent(&mut self.jar, url, body, &ua, 0.0).await {
+            Ok(Some(e)) if e.earned_nid => e,
+            // No accept form, handshake error, or no NID minted: leave the page as-is.
+            _ => return Ok(None),
+        };
+        // Re-fetch (prefer the consent `continue` URL; fall back to the current URL).
+        // The jar now replays NID, and the synthetic SOCS still un-hides the page, so
+        // this returns the real post-consent content.
+        let target = earned.continue_url.as_deref().unwrap_or(url).to_string();
+        let profile = self.profile_for(&target);
+        let opts = FetchOptions {
+            allow_non_html: true,
+            headers: self.request_headers(),
+            jar: Some(&mut self.jar),
+            profile: Some(&profile),
+            bypass_consent: true,
+            ..Default::default()
+        };
+        let res = fetch_html_with(&target, opts).await?;
+        self.load(&res.0, &res.1);
+        Ok(Some(res))
     }
 
     // Detect an anti-bot wall on a just-fetched response and, if a solver is set,

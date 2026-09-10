@@ -26,6 +26,7 @@ pub mod measure;
 pub mod net;
 pub mod recaptcha;
 pub mod robots;
+pub mod sorry;
 pub mod url;
 
 /// The active HTTP backend, re-exported so this crate's `net` module and every

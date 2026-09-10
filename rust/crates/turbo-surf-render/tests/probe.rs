@@ -80,14 +80,16 @@ fn instruments_the_window_surface_and_document_beyond_create_element() {
 }
 
 #[test]
-fn flags_webgl_context_as_a_shim_gap_but_wraps_2d() {
-    // getContext('2d') yields a context whose reads register under `ctx:2d`; WebGL
-    // returns null in the vendored binding → surfaced as a shim gap to backfill.
+fn wraps_2d_and_webgl_contexts_no_longer_a_gap() {
+    // getContext('2d') yields a context whose reads register under `ctx:2d`. WebGL now
+    // returns a coherent SwiftShader context (vendored binding) rather than null, so it is
+    // recorded under `ctx:webgl` and is NOT a shim gap — a null WebGL is itself a bot tell.
     let script = r#"
         const c = document.createElement('canvas');
         const ctx = c.getContext('2d');
         try { ctx.measureText('x'); } catch (e) {}
         const gl = c.getContext('webgl');
+        try { gl.getParameter(gl.VERSION); } catch (e) {}
         ''
     "#;
     let r = probe_globals("<body></body>", script).unwrap();
@@ -96,7 +98,13 @@ fn flags_webgl_context_as_a_shim_gap_but_wraps_2d() {
         .iter()
         .any(|a| a.target == "canvas" && a.prop == "getContext(2d)" && a.kind == "call"));
     assert!(r.accesses.iter().any(|a| a.target == "ctx:2d"));
+    // WebGL context is present (not null) → recorded, and not surfaced as a shim gap.
     assert!(r
+        .accesses
+        .iter()
+        .any(|a| a.target == "canvas" && a.prop == "getContext(webgl)=>ctx" && a.defined));
+    assert!(r.accesses.iter().any(|a| a.target == "ctx:webgl"));
+    assert!(!r
         .shim_needed
         .iter()
         .any(|s| s == "canvas.getContext(webgl)=>null"));

@@ -66,7 +66,13 @@ async function main() {
       try {
         out.push(await fetchOne(page, url));
       } catch (e) {
-        out.push({ url, status: 0, ok: false, html: "", error: String(e && e.message ? e.message : e) });
+        out.push({
+          url,
+          status: 0,
+          ok: false,
+          html: "",
+          error: String(e && e.message ? e.message : e),
+        });
       }
     }
   } finally {

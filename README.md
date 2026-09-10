@@ -253,6 +253,10 @@ and route straight to the sidecar.
 
 Build feature (not env): **`--features impersonate`** swaps rustls → BoringSSL
 (`wreq`) for a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint. Needs `cmake`+`nasm`.
+Add **`--features trust-anchors`** (implies `impersonate`) to also emit Chrome 152+'s
+`trust_anchors` TLS extension (JA4 `t13d1516h2` → `t13d1517h2`); it's built on a
+vendored `wreq` fork (`rust/vendor/wreq`), so it works in this binary but not for
+crates.io library consumers — see [`PUBLISHING.md`](./PUBLISHING.md).
 
 MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see

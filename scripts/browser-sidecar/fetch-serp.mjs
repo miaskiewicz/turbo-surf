@@ -52,9 +52,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // Browser) — the caller uses it directly.
 async function launchContext(proxy) {
   const userDataDir = join(HERE, ".chrome-profile"); // gitignored, persists between runs
+  // HEADED by default. Measured: headless real Chrome trips google's /sorry
+  // "unusual traffic" wall (headless zeroes plugins + breaks Notification↔Permissions
+  // coherence — an automation tell) while HEADED Chrome on the same IP returns the
+  // real SERP. So the default is headed; set TURBO_SURF_SIDECAR_HEADLESS=1 for
+  // display-less environments (CI/servers — wrap in xvfb, or accept the /sorry risk).
+  const headless = process.env.TURBO_SURF_SIDECAR_HEADLESS === "1";
   const opts = {
     channel: "chrome",
-    headless: true,
+    headless,
     viewport: null,
     locale: "en-US",
     timezoneId: "America/New_York",

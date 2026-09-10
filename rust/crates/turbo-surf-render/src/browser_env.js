@@ -661,36 +661,110 @@
         }
       } catch(e){}
     };
-    // <canvas>.getContext('2d') — a no-op 2D context stub (no rasterization). Covers components that
-    // probe a context (signature pads, charts) without a real GPU/layout backend.
+    // <canvas>.getContext('2d') — a 2D context that does NOT rasterize but RECORDS the draw
+    // operations (with the paint state at each) so readback (toDataURL/getImageData/toBlob)
+    // is DETERMINISTIC and CONTENT-DEPENDENT: identical draws always hash to identical bytes,
+    // different draws to different bytes. An empty `data:image/png;base64,` or an all-zero
+    // getImageData is a canvas-fingerprint dead tell (real canvases vary with content); a
+    // stable content-derived hash reads like a real — if device-invariant — canvas. There is
+    // no GPU/font rasterizer here, so the output is synthetic: honest about being computed
+    // from the op log, not a specific device's pixels. Covers signature pads/charts too.
+    var __cvHash = function(str){
+      // FNV-1a (32-bit), avalanched at the end.
+      var h = 0x811c9dc5;
+      for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+      h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0; h ^= h >>> 13; return h >>> 0;
+    };
+    var __CV_B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var __cvB64 = function(bytes){
+      var out = '';
+      for (var i = 0; i < bytes.length; i += 3) {
+        var a = bytes[i], b = (i+1 < bytes.length) ? bytes[i+1] : 0, c = (i+2 < bytes.length) ? bytes[i+2] : 0;
+        var n = (a << 16) | (b << 8) | c;
+        out += __CV_B64[(n>>18)&63] + __CV_B64[(n>>12)&63] + ((i+1 < bytes.length) ? __CV_B64[(n>>6)&63] : '=') + ((i+2 < bytes.length) ? __CV_B64[n&63] : '=');
+      }
+      return out;
+    };
+    // Deterministic byte stream of length n from a 32-bit seed (an LCG).
+    var __cvBytes = function(seed, n){
+      var b = new Array(n), x = (seed ^ 0x9e3779b9) >>> 0;
+      for (var i = 0; i < n; i++) { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; b[i] = (x >>> 16) & 0xff; }
+      return b;
+    };
+    var __cvSeed = function(canvas, ctx, extra){
+      var w = (canvas && canvas.width) || 300, h = (canvas && canvas.height) || 150;
+      var ops = (ctx && ctx._ops) ? ctx._ops : [];
+      return __cvHash(w + 'x' + h + '|' + (extra || '') + '|' + JSON.stringify(ops));
+    };
     var mkCanvasCtx = function(canvas){
       var noop = function(){};
-      return {
+      var ctx = {
         canvas: canvas,
-        fillRect: noop, clearRect: noop, strokeRect: noop, beginPath: noop, closePath: noop,
-        moveTo: noop, lineTo: noop, bezierCurveTo: noop, quadraticCurveTo: noop, arc: noop, arcTo: noop,
-        rect: noop, ellipse: noop, fill: noop, stroke: noop, clip: noop, save: noop, restore: noop,
-        scale: noop, rotate: noop, translate: noop, transform: noop, setTransform: noop, resetTransform: noop,
-        drawImage: noop, putImageData: noop, setLineDash: noop, getLineDash: function(){ return []; },
+        _ops: [],
+        setLineDash: noop, getLineDash: function(){ return []; },
         createLinearGradient: function(){ return { addColorStop: noop }; },
         createRadialGradient: function(){ return { addColorStop: noop }; },
+        createConicGradient: function(){ return { addColorStop: noop }; },
         createPattern: function(){ return {}; },
-        getImageData: function(x,y,w,h){ return { data: new Uint8ClampedArray(Math.max(0,(w||0)*(h||0)*4)), width: w||0, height: h||0 }; },
-        createImageData: function(w,h){ return { data: new Uint8ClampedArray(Math.max(0,(w||0)*(h||0)*4)), width: w||0, height: h||0 }; },
-        measureText: function(s){ return { width: (String(s||'').length)*6, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2 }; },
-        fillText: noop, strokeText: noop, isPointInPath: function(){ return false; },
-        fillStyle: '#000', strokeStyle: '#000', lineWidth: 1, lineCap: 'butt', lineJoin: 'miter',
-        font: '10px sans-serif', textAlign: 'start', textBaseline: 'alphabetic', globalAlpha: 1, globalCompositeOperation: 'source-over'
+        getImageData: function(x,y,w,h){
+          w = w||0; h = h||0;
+          var data = new Uint8ClampedArray(Math.max(0, w*h*4));
+          // Content-dependent, deterministic pixels derived from the op log — not all-zero.
+          if (data.length) {
+            var src = __cvBytes(__cvSeed(canvas, ctx, 'getImageData:'+x+','+y+','+w+','+h), Math.min(data.length, 4096));
+            for (var i = 0; i < data.length; i++) data[i] = src[i % src.length];
+          }
+          return { data: data, width: w, height: h, colorSpace: 'srgb' };
+        },
+        createImageData: function(w,h){ if (w && w.width != null) { h = w.height; w = w.width; } return { data: new Uint8ClampedArray(Math.max(0,(w||0)*(h||0)*4)), width: w||0, height: h||0, colorSpace: 'srgb' }; },
+        measureText: function(s){ this._ops.push(['measureText', String(s||''), this.font]); var wdt = (String(s||'').length)*6; return { width: wdt, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2, actualBoundingBoxLeft: 0, actualBoundingBoxRight: wdt, fontBoundingBoxAscent: 8, fontBoundingBoxDescent: 2 }; },
+        isPointInPath: function(){ return false; }, isPointInStroke: function(){ return false; },
+        fillStyle: '#000000', strokeStyle: '#000000', lineWidth: 1, lineCap: 'butt', lineJoin: 'miter',
+        miterLimit: 10, lineDashOffset: 0, shadowBlur: 0, shadowColor: 'rgba(0, 0, 0, 0)', shadowOffsetX: 0, shadowOffsetY: 0,
+        font: '10px sans-serif', textAlign: 'start', textBaseline: 'alphabetic', direction: 'ltr',
+        globalAlpha: 1, globalCompositeOperation: 'source-over', imageSmoothingEnabled: true, imageSmoothingQuality: 'low'
       };
+      // Record-only paint/path methods: log the call (args + relevant paint state) so the
+      // readback hash reflects what was drawn, but perform no rasterization.
+      var recorded = ['fillRect','clearRect','strokeRect','beginPath','closePath','moveTo','lineTo',
+        'bezierCurveTo','quadraticCurveTo','arc','arcTo','rect','roundRect','ellipse','fill','stroke',
+        'clip','save','restore','scale','rotate','translate','transform','setTransform','resetTransform',
+        'drawImage','putImageData','fillText','strokeText','drawFocusIfNeeded'];
+      recorded.forEach(function(name){
+        ctx[name] = function(){
+          var a = Array.prototype.slice.call(arguments).map(function(v){ return (v && typeof v === 'object') ? (v.tagName || v.nodeName || 'obj') : v; });
+          this._ops.push([name, a, this.fillStyle, this.strokeStyle, this.font, this.textBaseline, this.textAlign, this.globalAlpha, this.globalCompositeOperation]);
+        };
+      });
+      return ctx;
     };
     // <canvas> methods live on HTMLCanvasElement.prototype (not own) so tests can mock
     // HTMLCanvasElement.prototype.getContext / getBoundingClientRect (signature pads) and the mock
     // isn't shadowed by an own method.
     (function(){
       var cp = protoFor.HTMLCanvasElement;
+      // WebGL stays null on purpose: a coherent GPU signature (VENDOR/RENDERER/getParameter/
+      // getExtension/getSupportedExtensions consistent with a real device) can't be synthesized
+      // here, and a WRONG/partial WebGL signature is a STRONGER fingerprint tell than a missing
+      // context. Absence reads as a GPU-less/blocked-WebGL client (plausible), so leave it null
+      // until a real GL rasterizer backs it.
       cp.getContext = function(kind){ if (kind === '2d') { if (!this.__ctx2d) this.__ctx2d = mkCanvasCtx(this); return this.__ctx2d; } return null; };
-      cp.toDataURL = function(){ return 'data:image/png;base64,'; };
-      cp.toBlob = function(cb){ if (cb) cb(null); };
+      cp.toDataURL = function(type){
+        var mime = (typeof type === 'string' && type) ? type : 'image/png';
+        var seed = __cvSeed(this, this.__ctx2d, 'toDataURL:'+mime);
+        return 'data:' + mime + ';base64,' + __cvB64(__cvBytes(seed, 54));
+      };
+      cp.toBlob = function(cb, type){
+        if (!cb) return;
+        var mime = (typeof type === 'string' && type) ? type : 'image/png';
+        var bytes = __cvBytes(__cvSeed(this, this.__ctx2d, 'toBlob:'+mime), 64);
+        var B = g.Blob;
+        if (typeof B === 'function') {
+          var str = ''; for (var i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+          try { cb(new B([str], { type: mime })); return; } catch(e){}
+        }
+        cb(null);
+      };
       cp.getBoundingClientRect = function(){ return { x:0, y:0, top:0, left:0, right:0, bottom:0, width:0, height:0, toJSON:function(){ return this; } }; };
     })();
     d.createElement = function(tag){

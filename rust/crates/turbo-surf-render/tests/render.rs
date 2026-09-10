@@ -158,6 +158,59 @@ fn window_and_navigator_present() {
     );
 }
 
+// window.postMessage delivers a `message` event to this realm's window listeners (the
+// reCAPTCHA/BotGuard host-protocol scheduler drives itself over it). Async via the
+// timer queue, so drain before asserting delivery.
+#[test]
+fn window_post_message_delivers_to_listeners() {
+    let out = run_with_dom(
+        "<body></body>",
+        r#"
+        globalThis.__got = "";
+        window.addEventListener('message', function (e) { globalThis.__got = String(e.data) + ':' + (e.source === window); });
+        window.postMessage('hi', '*');
+        __runTimers();
+        globalThis.__got
+        "#,
+    )
+    .unwrap();
+    assert_eq!(out, "hi:true");
+}
+
+// Canvas 2D readback is deterministic AND content-dependent: identical draws hash to the
+// same non-empty data URL, different draws to a different one (empty/constant output is a
+// canvas-fingerprint dead tell). Backed by the vendored turbo-test binding.
+#[test]
+fn canvas_to_data_url_is_deterministic_and_content_dependent() {
+    let draw = |text: &str| {
+        run_with_dom(
+            "<body></body>",
+            &format!(
+                r#"(() => {{
+            const c = document.createElement('canvas'); c.width = 200; c.height = 50;
+            const x = c.getContext('2d');
+            x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 50);
+            x.font = '16px sans-serif'; x.fillStyle = '#039';
+            x.fillText({text:?}, 10, 30);
+            return c.toDataURL();
+            }})()"#,
+                text = text
+            ),
+        )
+        .unwrap()
+    };
+    let a1 = draw("BotGuard-probe-A");
+    let a2 = draw("BotGuard-probe-A");
+    let b = draw("BotGuard-probe-B");
+    assert!(a1.starts_with("data:image/png;base64,"), "prefix: {a1}");
+    assert!(
+        a1.len() > "data:image/png;base64,".len() + 8,
+        "non-empty payload: {a1}"
+    );
+    assert_eq!(a1, a2, "same draws must hash identically");
+    assert_ne!(a1, b, "different text must change the hash");
+}
+
 // Page JS that profiles the browser must see a coherent real-Chrome navigator,
 // not the old `turbo-surf`/`turbo-test` tell — the no-Chromium env emulation that
 // gets past consistency-only anti-bot gates (see ENV_BOOTSTRAP in runtime.rs).

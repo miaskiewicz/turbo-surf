@@ -114,7 +114,60 @@ pub fn is_consent_interstitial(page_url: &str, body: &str) -> bool {
 /// Manual string parsing (this crate stays tree-parser-free — same as
 /// [`crate::sorry`]). `None` when no accept form is present.
 pub fn parse_accept_form(page_url: &str, html: &str) -> Option<ConsentForm> {
-    iter_forms(page_url, html).into_iter().find(is_accept_form)
+    // Older/simple interstitials use a real <input> form.
+    if let Some(f) = iter_forms(page_url, html).into_iter().find(is_accept_form) {
+        return Some(f);
+    }
+    // Live google consent page has NO accept <form> — the "Accept all" target is a JS
+    // string, hex-escaped: `var rAU='https://consent.google.com/save?...set_aps\x3dtrue
+    // \x26set_sc\x3dtrue...\x26escs\x3d<token>'`. All params (incl. the signed escs and
+    // `continue`) are already in the query, so it's a plain GET. Pick the accept variant
+    // (set_aps=true & set_sc=true), not the reject one (set_eom=true).
+    extract_js_save_url(html).map(|action| ConsentForm {
+        action,
+        method: "GET".to_string(),
+        fields: Vec::new(),
+    })
+}
+
+// Extract google's consent `/save` "accept all" URL from the interstitial's inline JS,
+// decoding `\xHH` escapes. Returns the first URL whose (decoded) query selects accept.
+fn extract_js_save_url(html: &str) -> Option<String> {
+    let needle = "https://consent.google.com/save?";
+    let mut from = 0;
+    while let Some(i) = html[from..].find(needle) {
+        let start = from + i;
+        let rest = &html[start..];
+        // The JS string literal ends at the next quote.
+        let end = rest.find(['\'', '"']).unwrap_or(rest.len());
+        from = start + end;
+        let url = js_unescape(&rest[..end]);
+        let q = url.to_ascii_lowercase();
+        if q.contains("set_aps=true") && q.contains("set_sc=true") {
+            return Some(url);
+        }
+    }
+    None
+}
+
+// Decode JS `\xHH` hex escapes (Google encodes `=`→`\x3d`, `&`→`\x26` in the save URL).
+// Non-escape bytes pass through; the payload is ASCII.
+fn js_unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\' && i + 4 <= b.len() && b[i + 1] == b'x' {
+            if let Ok(v) = u8::from_str_radix(&s[i + 2..i + 4], 16) {
+                out.push(v as char);
+                i += 4;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
 }
 
 // True when a form's fields select "accept all": both `set_aps` and `set_sc` present
@@ -322,6 +375,32 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn parses_the_live_js_var_accept_url() {
+        // Live google interstitial: no accept <form>; the target is a hex-escaped JS
+        // string. Accept = set_aps/set_sc true; reject = set_eom true. Must pick accept.
+        let html = r#"<!doctype html><html><body>
+          <form action="/search" method="GET"><input name="q"></form>
+          <script>var rAU='https://consent.google.com/save?continue\x3dhttps://www.google.com/\x26gl\x3dMT\x26set_eom\x3dtrue\x26escs\x3dREJECT';
+          var rAU2='https://consent.google.com/save?continue\x3dhttps://www.google.com/\x26gl\x3dMT\x26set_eom\x3dfalse\x26set_aps\x3dtrue\x26set_sc\x3dtrue\x26escs\x3dACCEPTTOKEN';</script>
+        </body></html>"#;
+        let form = parse_accept_form("https://www.google.com/", html).expect("accept url");
+        assert_eq!(form.method, "GET");
+        assert!(form.action.starts_with("https://consent.google.com/save?"));
+        assert!(form.action.contains("set_aps=true") && form.action.contains("set_sc=true"));
+        assert!(
+            form.action.contains("escs=ACCEPTTOKEN"),
+            "picked accept, not reject"
+        );
+        assert!(!form.action.contains("set_eom=true"));
+    }
+
+    #[test]
+    fn js_unescape_decodes_hex() {
+        assert_eq!(js_unescape(r"a\x3db\x26c"), "a=b&c");
+        assert_eq!(js_unescape("plain"), "plain");
+    }
 
     #[test]
     fn google_hosts_get_socs() {

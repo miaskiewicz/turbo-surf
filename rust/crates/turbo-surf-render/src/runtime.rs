@@ -346,8 +346,48 @@ globalThis.navigator = {
   cookieEnabled: true, doNotTrack: null,
   // Fire-and-forget telemetry beacon: real Chrome exposes it, and its absence is a
   // headless tell (google's homepage reads `navigator.sendBeacon` before hydrating).
-  // No network here — accept + report success, matching the spec's boolean return.
-  sendBeacon: (_url, _data) => true,
+  // Anti-bot collectors (Botguard/reCAPTCHA-class) and analytics POST their COLLECTED
+  // TOKEN back over sendBeacon — so a no-op that merely returns `true` fingerprints
+  // fine yet never completes the exchange (the token is dropped on the floor). Actually
+  // send it: a fire-and-forget POST over the tier-1 net stack (`globalThis.fetch` →
+  // `op_fetch`), which shares the page cookie jar and is counted in `__pendingFetches`
+  // so the hydration drain waits for it to land before serializing. Returns `true`
+  // synchronously, per the spec (the boolean reports whether the UA QUEUED the transfer,
+  // not whether it succeeded). `globalThis.fetch`/Blob/etc. are defined later in this
+  // bootstrap, but this runs only at call time, by when they exist.
+  sendBeacon: (url, data) => {
+    try {
+      if (url == null || url === "") return false;
+      // Normalize the payload + its implicit content-type the way the spec's
+      // `extractBody` does for the common beacon body types.
+      let body = null;
+      let contentType = "";
+      if (data != null) {
+        const B = globalThis.Blob, USP = globalThis.URLSearchParams, FD = globalThis.FormData;
+        if (typeof data === "string") { body = data; contentType = "text/plain;charset=UTF-8"; }
+        else if (B && data instanceof B) { body = data._s != null ? String(data._s) : ""; contentType = data.type || ""; }
+        else if (USP && data instanceof USP) { body = data.toString(); contentType = "application/x-www-form-urlencoded;charset=UTF-8"; }
+        else if (FD && data instanceof FD) {
+          // No multipart encoder headless; serialize the fields url-encoded (Blob/File
+          // parts become their string content) — enough for a token round-trip.
+          const p = new USP();
+          data.forEach((v, k) => p.append(k, typeof v === "string" ? v : (v && v._s != null ? String(v._s) : "")));
+          body = p.toString(); contentType = "application/x-www-form-urlencoded;charset=UTF-8";
+        }
+        else if (data instanceof ArrayBuffer || (data && data.buffer instanceof ArrayBuffer)) {
+          try { body = new globalThis.TextDecoder().decode(data instanceof ArrayBuffer ? new Uint8Array(data) : data); }
+          catch (_e) { body = ""; }
+        }
+        else { try { body = String(data); } catch (_e) { body = ""; } }
+      }
+      const headers = contentType ? { "content-type": contentType } : {};
+      // Direct (not deferred) call so `fetch` bumps `__pendingFetches` synchronously and
+      // the drain can't quiesce before the beacon completes. `keepalive` mirrors the real
+      // beacon flag (informational here).
+      try { globalThis.fetch(String(url), { method: "POST", body, headers, keepalive: true }); } catch (_e) {}
+      return true;
+    } catch (_e) { return true; }
+  },
   plugins: __plugins, mimeTypes: [],
   // NetworkInformation — real Chrome exposes it; anti-bot scripts (found via the
   // `probe` example on a real Akamai sensor) read it, and its absence is a tell.
@@ -654,12 +694,33 @@ globalThis.fetch = async (url, init) => {
 // crashed with "req.addEventListener is not a function", aborting the module.
 globalThis.XMLHttpRequest = class {
   constructor() {
-    this.readyState = 0; this.status = 0; this.responseText = ""; this.response = "";
-    this._h = {}; // request headers
-    this._l = {}; // event listeners by type
+    this.readyState = 0; this.status = 0; this.statusText = ""; this.responseText = ""; this.response = "";
+    this.responseType = ""; this.responseURL = ""; this.withCredentials = false; this.timeout = 0;
+    // Real XHR exposes an XMLHttpRequestUpload EventTarget; collectors sometimes wire
+    // `xhr.upload.onprogress`, and a missing `.upload` throws on assignment.
+    this.upload = { onprogress: null, onload: null, onerror: null, onloadend: null,
+      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } };
+    this._h = {};       // request headers
+    this._l = {};       // event listeners by type
+    this._rh = "";      // raw response headers (for get*ResponseHeader)
+    this._ct = "";      // response content-type
+    this._aborted = false;
   }
-  open(method, url) { this._m = method || "GET"; this._u = url; this._setState(1); }
+  open(method, url) { this._m = method || "GET"; this._u = url; this._aborted = false; this._setState(1); }
   setRequestHeader(k, v) { this._h[String(k)] = String(v); }
+  // Anti-bot/analytics code inspects response headers (e.g. a token-echo or a
+  // cache/CSP header); expose both accessors over the one header op_fetch returns.
+  getResponseHeader(k) {
+    const want = String(k).toLowerCase();
+    if (want === "content-type") return this._ct || null;
+    return null;
+  }
+  getAllResponseHeaders() { return this._rh; }
+  abort() {
+    this._aborted = true;
+    if (this.readyState > 0 && this.readyState < 4) { this._setState(4); this._emit("abort"); this._emit("loadend"); }
+    this.status = 0;
+  }
   addEventListener(type, fn) { if (typeof fn === "function") (this._l[type] = this._l[type] || []).push(fn); }
   removeEventListener(type, fn) { const a = this._l[type]; if (a) { const i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } }
   dispatchEvent(ev) { this._emit(ev && ev.type, ev); return true; }
@@ -672,21 +733,45 @@ globalThis.XMLHttpRequest = class {
     for (const fn of (this._l[type] || []).slice()) { try { fn.call(this, e); } catch (_e) {} }
   }
   _setState(s) { this.readyState = s; this._emit("readystatechange"); }
+  // Marshal the raw body into the value `response` should hold for the requested
+  // responseType. `responseText` is only defined for "" / "text" (spec), but we keep
+  // it populated for lenient callers.
+  _finishResponse(text) {
+    this.responseText = text;
+    const t = this.responseType;
+    if (t === "json") { try { this.response = JSON.parse(text || "null"); } catch (_e) { this.response = null; } }
+    else if (t === "arraybuffer") { try { this.response = new globalThis.TextEncoder().encode(text).buffer; } catch (_e) { this.response = null; } }
+    else if (t === "blob") { try { this.response = new globalThis.Blob([text], { type: this._ct }); } catch (_e) { this.response = null; } }
+    else { this.response = text; }
+  }
   send(body) {
     const self = this;
+    self._emit("loadstart");
     globalThis
       .fetch(this._u, { method: this._m, body, headers: self._h })
       .then(async (r) => {
+        if (self._aborted) return;
         self.status = r.status;
-        self.responseText = await r.text();
-        self.response = self.responseText;
+        self.statusText = r.status === 200 ? "OK" : "";
+        self.responseURL = self._u ? String(self._u) : "";
+        self._ct = (r.headers && r.headers.get && r.headers.get("content-type")) || "";
+        self._rh = self._ct ? ("content-type: " + self._ct + "\r\n") : "";
+        // HEADERS_RECEIVED → LOADING → DONE, like a real transfer (some collectors
+        // gate on readyState 2/3 transitions, not only 4).
+        self._setState(2);
+        self._setState(3);
+        self._finishResponse(await r.text());
         self._setState(4);
         self._emit("load");
         self._emit("loadend");
       })
-      .catch(() => { self._setState(4); self._emit("error"); self._emit("loadend"); });
+      .catch(() => { if (self._aborted) return; self._setState(4); self._emit("error"); self._emit("loadend"); });
   }
 };
+// XHR readyState constants (both on the instance-facing class and its prototype), as
+// real code branches on `XMLHttpRequest.DONE` / `this.HEADERS_RECEIVED`.
+Object.assign(globalThis.XMLHttpRequest, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
+Object.assign(globalThis.XMLHttpRequest.prototype, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
 // Observers: no live mutation notifications over the static tree → no-op stubs.
 class __NoopObserver {
   constructor(cb) { this._cb = cb; }
@@ -2216,6 +2301,10 @@ globalThis.__domSig = () => {
   if (globalThis.Headers) mark(globalThis.Headers, "Headers");
   const nav = globalThis.navigator;
   if (nav && nav.clipboard) { mark(nav.clipboard.writeText, "writeText"); mark(nav.clipboard.readText, "readText"); }
+  // navigator.sendBeacon is a JS closure (it POSTs the collected token over op_fetch); a
+  // collector that reads its `.toString()` would see source and flag a tampered/polyfilled
+  // beacon. Report native, like every other shim.
+  if (nav && typeof nav.sendBeacon === "function") mark(nav.sendBeacon, "sendBeacon");
 
   // ── Structural browser-surface fidelity ──────────────────────────────────────
   // A no-Chromium engine exposes navigator/screen/document as plain object literals
@@ -2319,6 +2408,15 @@ globalThis.__domSig = () => {
   defClass("Blob", "slice");
   defClass("Headers", null);
   defClass("XMLHttpRequest", "open");
+  // defClass native-marks only the one probed method (`open`); mark the rest of the XHR
+  // surface too, so `.toString()` on any of them reads native.
+  guard(() => {
+    const xp = G.XMLHttpRequest && G.XMLHttpRequest.prototype;
+    if (xp) ["send", "setRequestHeader", "getResponseHeader", "getAllResponseHeaders",
+      "abort", "addEventListener", "removeEventListener", "dispatchEvent"].forEach((m) => {
+      if (typeof xp[m] === "function") mark(xp[m], m);
+    });
+  });
   defClass("URL", null);
   defClass("Event", null);
   defClass("DOMParser", "parseFromString");

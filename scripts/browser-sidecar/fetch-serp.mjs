@@ -1,10 +1,18 @@
 #!/usr/bin/env node
-// Stealth browser SERP sidecar for turbo-surf's `web_search { browser:true }`.
+// Stealth browser SERP sidecar for turbo-surf's `web_search`.
 // Chromium stays OUT of the engine binary; the mcp server shells out over a tiny
-// JSON contract:
-//   stdin  : {"url":"…","headless"?:bool,"userAgent"?:"…","proxy"?:"…"}
-//            headless defaults to false (headed) — see launchContext.
-//   stdout : {"html":"…","finalUrl":"…","status":200,"blocked":bool}
+// JSON contract, two modes on stdin:
+//   FETCH (browser:true / a mode:"browser" strategy):
+//     stdin  : {"url":"…","headless"?:bool,"userAgent"?:"…","proxy"?:"…"}
+//     stdout : {"html":"…","finalUrl":"…","status":200,"blocked":bool}
+//   MINT (the native-google ENID path — mint a trusted __Secure-ENID rarely):
+//     stdin  : {"mint":true,"headless"?:bool,"proxy"?:"…"}
+//     stdout : {"cookies":[{"name","value","domain","path","expires"}, …]}
+//     Loads the google homepage in REAL headed Chrome so google issues a TRUSTED
+//     __Secure-ENID; the engine then reuses that cookie in fast native (no-browser)
+//     /search fetches. A native/raw homepage GET earns only an UNtrusted ENID, so
+//     minting MUST go through the real browser here.
+//   headless defaults to false (headed) — see launchContext.
 //   nonzero exit + stderr on failure.
 //
 // Wire it (opt-in):
@@ -70,6 +78,29 @@ async function launchContext(proxy, headless) {
   return await chromium.launchPersistentContext(userDataDir, opts);
 }
 
+// MINT: load the google homepage in real headed Chrome and return the earned
+// cookies (at least __Secure-ENID, plus AEC/SOCS/NID when present). The engine
+// caches + replays __Secure-ENID on native /search fetches. A brief human-ish
+// pause after load lets google set its full cookie set.
+async function mintEnid(context) {
+  await context.addCookies([{ name: "SOCS", value: "CAI", domain: ".google.com", path: "/" }]);
+  const page = context.pages()[0] || (await context.newPage());
+  await page.goto("https://www.google.com/", {
+    waitUntil: "domcontentloaded",
+    timeout: 30000,
+  });
+  await page.waitForTimeout(1200);
+  // Only google.com cookies are relevant; map to the engine's cookie record.
+  const cookies = (await context.cookies("https://www.google.com/")).map((c) => ({
+    name: c.name,
+    value: c.value,
+    domain: c.domain,
+    path: c.path,
+    expires: c.expires, // epoch seconds; -1 == session
+  }));
+  process.stdout.write(JSON.stringify({ cookies }));
+}
+
 async function main() {
   const raw = await readStdin();
   let req = {};
@@ -78,18 +109,27 @@ async function main() {
   } catch {
     /* empty → error below */
   }
-  if (!req.url) {
-    process.stderr.write("fetch-serp: missing 'url' on stdin\n");
+  if (!req.mint && !req.url) {
+    process.stderr.write("fetch-serp: missing 'url' (or 'mint') on stdin\n");
     process.exit(2);
   }
 
   // Headless precedence: per-call `headless` on stdin > TURBO_SURF_SIDECAR_HEADLESS env
-  // > headed (false). Headed is the reliable default (see launchContext).
+  // > headed (false). Headed is the reliable default (see launchContext) — and a
+  // trusted __Secure-ENID is only earned headed (headless trips google's checks).
   const headless =
     typeof req.headless === "boolean"
       ? req.headless
       : process.env.TURBO_SURF_SIDECAR_HEADLESS === "1";
   const context = await launchContext(req.proxy, headless);
+  if (req.mint) {
+    try {
+      await mintEnid(context);
+    } finally {
+      await context.close();
+    }
+    return;
+  }
   try {
     // Google consent so the SERP isn't gated by the "before you continue" wall.
     await context.addCookies([

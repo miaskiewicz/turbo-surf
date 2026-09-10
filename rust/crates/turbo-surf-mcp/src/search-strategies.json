@@ -24,10 +24,10 @@
   },
   {
     "engine": "google",
-    "version": "2026-07-27",
+    "version": "2026-09-10",
     "query_url": "https://www.google.com/search?q={query}",
     "format": "structural",
-    "mode": "browser"
+    "mode": "enid"
   },
   {
     "engine": "searxng",

@@ -57,6 +57,19 @@ fingerprint fidelity; the residual walls are IP reputation and server-side scori
   cookies only on the final response, silently dropping the `NID` set on the consent
   302; the consent handshake + render-tier `op_fetch` now follow redirects manually so
   session cookies earned mid-redirect land in the jar (browser-equivalent).
+- **Native google search via a reused, sidecar-minted `__Secure-ENID`.** google's
+  `/search` serves the real SERP to a plain **native (no-browser)** wreq request that
+  carries a *trusted* `__Secure-ENID` — that cookie alone is sufficient, it's long-lived
+  (~2027) and client-agnostic. A trusted token is minted only by a real browser's homepage
+  load, so the sidecar mints it **rarely** (new `{"mint":true}` stdin mode → `{"cookies":…}`)
+  and the engine reuses it across many native searches, persisted to a gitignored
+  `.enid-cache.json`. google's strategy is now `mode:"enid"` (was `"browser"`): fetch
+  `/search` natively with the cached token; on the `enablejs` shell (a stale/rotated token —
+  no `#rso`/`<h3>`) auto re-mint **exactly once** + retry. `web_search { remint:true }` (or
+  `TURBO_SURF_ENID_REMINT=1`) forces a fresh mint; `browser:true` still routes the whole SERP
+  through the browser. Reuse holds only while the ENID stays trusted **and** on a non-flagged
+  exit IP (a `/sorry`'d IP won't serve the SERP to any token — orthogonal, handled by the
+  `/sorry` clearance path); it does **not** defeat IP-reputation blocking.
 - Requires turbo-test browser_env ≥ 0.3.16 (vendored) for the iframe + WebGL + canvas.
 
 ## [0.4.3] — Chrome 153 fingerprint

@@ -27,6 +27,9 @@ use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 
+mod enid;
+use enid::{EnidCache, EnidCookie};
+
 pub const VERSION: &str = "0.4.4";
 
 /// One agent session: the current page URL + parsed tree + nav history, plus the
@@ -1529,15 +1532,24 @@ async fn fetch_serp(
     url: &str,
     force_browser: bool,
     headless: Option<bool>,
+    remint: bool,
 ) -> Result<String, String> {
     // Browser mode: hand the SERP URL to a real-browser sidecar (opt-in, chromium
-    // stays OUT of the engine) and parse the rendered results HTML it returns. This
-    // is the path for engines gated behind a browser-integrity wall (google's
-    // BotGuard/enablejs), which no headless fetch/JS-tier clears — a real browser does.
+    // stays OUT of the engine) and parse the rendered results HTML it returns. An
+    // explicit `browser:true` escape hatch still routes the WHOLE SERP through the
+    // real browser (for a walled engine that even ENID reuse can't clear).
     // `headless` (from the caller) picks the sidecar's mode; None lets the sidecar
-    // default (headed — headless trips google's /sorry).
+    // default (headed — headless trips google's /sorry). A custom `mode:"browser"`
+    // strategy still routes the whole SERP through the browser as before.
     if force_browser || strategy.mode == "browser" {
         return browser_fetch_serp(url, headless).await;
+    }
+    // ENID mode (google): fetch `/search` NATIVELY (wreq, the impersonate stack)
+    // reusing a trusted `__Secure-ENID` minted rarely by the headed sidecar — NOT
+    // routing every SERP through the browser. A stale/missing token (the response
+    // is the `enablejs` shell) triggers exactly one re-mint + native retry.
+    if strategy.mode == "enid" {
+        return google_enid_fetch(url, headless, remint).await;
     }
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
     // A throwaway jar so a google /sorry clearance's exemption cookie can be captured
@@ -1563,6 +1575,117 @@ async fn fetch_serp(
         return Ok(serialize_doc(tmp.tree()?));
     }
     Ok(html)
+}
+
+// --- native google SERP via a reused, sidecar-minted `__Secure-ENID` -----------
+
+/// The sidecar dir (holds `fetch-serp.mjs` + the gitignored ENID cache). Override
+/// with `TURBO_SURF_SIDECAR_DIR`; defaults to the committed `scripts/browser-sidecar`.
+fn sidecar_dir() -> String {
+    std::env::var("TURBO_SURF_SIDECAR_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "scripts/browser-sidecar".to_string())
+}
+
+/// Fetch a google SERP NATIVELY (no browser) reusing a trusted `__Secure-ENID`,
+/// reading the sidecar command from `TURBO_SURF_BROWSER_FETCH_CMD` and the cache
+/// from the default location. See [`google_enid_flow`] for the mechanism.
+async fn google_enid_fetch(
+    url: &str,
+    headless: Option<bool>,
+    remint: bool,
+) -> Result<String, String> {
+    let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
+        "google web_search needs the TURBO_SURF_BROWSER_FETCH_CMD env var (the headed \
+         sidecar that mints a trusted __Secure-ENID; run web_search_setup_browser, or \
+         `node scripts/browser-sidecar/fetch-serp.mjs`)"
+            .to_string()
+    })?;
+    let cache = EnidCache::default_for(&sidecar_dir());
+    google_enid_flow(url, &cache, &cmd, headless, remint).await
+}
+
+/// The testable core of the native-google path (no env reads):
+///  1. Reuse the cached trusted `__Secure-ENID` (unless `remint` forces a fresh one
+///     or the cache misses/expired) — minting via the headed sidecar only when
+///     needed. Minting is rare; the token is long-lived + client-agnostic.
+///  2. Fetch `/search` NATIVELY (wreq, the impersonate stack) with the token in the
+///     jar. Google's `/sorry` IP-reputation wall (orthogonal) is still cleared.
+///  3. If the response is the `enablejs` shell (a stale/untrusted token — no
+///     `id="rso"`/`<h3>`), re-mint via the sidecar EXACTLY once, cache it, and retry
+///     the native fetch. A second shell is surfaced as an error (don't loop).
+async fn google_enid_flow(
+    url: &str,
+    cache: &EnidCache,
+    mint_cmd: &str,
+    headless: Option<bool>,
+    remint: bool,
+) -> Result<String, String> {
+    let cookies = match (remint, cache.get_valid(enid::now_secs())) {
+        (false, Some(c)) => c,
+        _ => mint_and_cache(cache, mint_cmd, headless).await?,
+    };
+    let html = native_google_fetch(url, &cookies).await?;
+    if !is_enablejs_shell(&html) {
+        return Ok(html);
+    }
+    // Stale/untrusted token → re-mint once and retry natively.
+    let fresh = mint_and_cache(cache, mint_cmd, headless).await?;
+    let retry = native_google_fetch(url, &fresh).await?;
+    if is_enablejs_shell(&retry) {
+        return Err(
+            "google served the enablejs shell even after a fresh __Secure-ENID mint — the \
+             exit IP is likely flagged (a /sorry'd IP won't serve the SERP to any token) or \
+             google has changed the gate; try a clean exit IP or the browser:true sidecar"
+                .to_string(),
+        );
+    }
+    Ok(retry)
+}
+
+/// Mint a fresh trusted ENID via the sidecar and persist it. A cache-write failure
+/// is non-fatal (log-and-continue): the freshly minted cookies still drive this
+/// call; only cross-restart reuse is lost.
+async fn mint_and_cache(
+    cache: &EnidCache,
+    mint_cmd: &str,
+    headless: Option<bool>,
+) -> Result<Vec<EnidCookie>, String> {
+    let cookies = enid::mint_enid_cmd(mint_cmd, headless).await?;
+    if let Err(e) = cache.set(&cookies) {
+        eprintln!("web_search: ENID minted but cache write failed ({e}); reuse won't persist");
+    }
+    Ok(cookies)
+}
+
+/// One native `/search` fetch with the minted cookies injected into a throwaway jar
+/// (the caller's session jar is never touched). Google's `/sorry` clearance loop
+/// still applies (IP-reputation is orthogonal to the ENID token).
+async fn native_google_fetch(url: &str, cookies: &[EnidCookie]) -> Result<String, String> {
+    let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
+    let mut jar = CookieJar::new();
+    for c in cookies {
+        jar.add(&c.name, &c.value, &c.domain, &c.path, c.expires);
+    }
+    let opts = FetchOptions {
+        allow_non_html: true,
+        profile: Some(&profile),
+        bypass_consent: true,
+        jar: Some(&mut jar),
+        ..Default::default()
+    };
+    let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
+    let (_final_url, html) = maybe_clear_sorry(&mut jar, res.final_url, res.html).await?;
+    Ok(html)
+}
+
+/// True when `html` is google's `enablejs` JS shell rather than the real SERP. The
+/// real SERP carries the results container (`id="rso"`) and organic `<h3>` titles;
+/// the shell has neither (it's the "enable JavaScript" bootstrap). Cheap substring
+/// checks — the SERP is large and we only need presence.
+fn is_enablejs_shell(html: &str) -> bool {
+    !(html.contains("id=\"rso\"") || html.contains("<h3"))
 }
 
 /// If `html` (fetched from `final_url`) is google's `/sorry` unusual-traffic wall, run
@@ -1722,7 +1845,11 @@ async fn tool_search(session: &Session, args: &Value) -> Result<Value, String> {
     // `headless:true|false` picks the sidecar's Chrome mode for this call (browser mode
     // only); omit to let the sidecar default (headed — headless trips google's /sorry).
     let headless = args.get("headless").and_then(Value::as_bool);
-    let body = fetch_serp(&strategy, &url, force_browser, headless).await?;
+    // `remint:true` (or TURBO_SURF_ENID_REMINT=1) forces a fresh sidecar mint on the
+    // native-google (ENID) path, ignoring any cached token for this call.
+    let remint = args.get("remint").and_then(Value::as_bool).unwrap_or(false)
+        || std::env::var("TURBO_SURF_ENID_REMINT").is_ok_and(|v| v == "1");
+    let body = fetch_serp(&strategy, &url, force_browser, headless, remint).await?;
     let results = parse_serp(&strategy, &body, limit);
     Ok(json!(results
         .iter()
@@ -1849,16 +1976,19 @@ pub fn tools() -> Value {
              most reliable no-JS endpoint; google/bing are best-effort scrapes that \
              may drift or captcha; searxng/baidu also bundled; or set a session \
              default via web_search_set_engine). base? is the instance URL for \
-             engine:searxng. limit? (default 10). browser? routes the SERP fetch \
-             through a real-browser sidecar (TURBO_SURF_BROWSER_FETCH_CMD) — needed \
-             for engines behind a browser-integrity wall (google BotGuard). headless? \
-             (browser mode) picks the sidecar's Chrome mode — omit for the reliable \
-             headed default (headless trips google's /sorry); true only where there's \
-             no display. On the native (non-browser) path, a google /sorry \
-             unusual-traffic wall is auto-cleared in-isolate (reCAPTCHA → \
-             GOOGLE_ABUSE_EXEMPTION → SERP) for v3/invisible/score flows; a v2 image \
-             grid defers to an external solver or errors. Stateless: does not touch \
-             the session page/jar",
+             engine:searxng. limit? (default 10). engine:google fetches /search \
+             NATIVELY (no browser) reusing a trusted __Secure-ENID minted rarely by \
+             the headed sidecar (TURBO_SURF_BROWSER_FETCH_CMD); a stale/missing token \
+             (google's enablejs shell) auto re-mints once + retries. remint? (or \
+             TURBO_SURF_ENID_REMINT=1) forces a fresh mint. browser? instead routes \
+             the WHOLE SERP through the real-browser sidecar (escape hatch for an \
+             engine behind a browser-integrity wall). headless? picks the sidecar's \
+             Chrome mode for a mint/browser fetch — omit for the reliable headed \
+             default (headless trips google's /sorry); true only where there's no \
+             display (xvfb). On the native path, a google /sorry unusual-traffic wall \
+             is auto-cleared in-isolate (reCAPTCHA → GOOGLE_ABUSE_EXEMPTION → SERP) \
+             for v3/invisible/score flows; a v2 image grid defers to an external \
+             solver or errors. Stateless: does not touch the session page/jar",
         ),
         (
             "web_search_set_engine",
@@ -2684,6 +2814,187 @@ mod tests {
             off.contains("headless=undefined"),
             "headless should be absent when None: {off}"
         );
+    }
+
+    // --- native-google ENID reuse (offline: localhost /search + a stub mint) -----
+
+    #[test]
+    fn enablejs_shell_detected_by_missing_rso_h3() {
+        // The real SERP carries #rso + <h3>; the enablejs bootstrap has neither.
+        assert!(is_enablejs_shell(
+            "<html><body>Please enable JavaScript</body></html>"
+        ));
+        assert!(!is_enablejs_shell(
+            "<html><body><div id=\"rso\"><h3>hit</h3></div></body></html>"
+        ));
+        assert!(!is_enablejs_shell("<h3>only a title</h3>"));
+    }
+
+    // A localhost stand-in for google `/search`: returns the real SERP only when the
+    // request carries `__Secure-ENID=TRUSTED`, else the enablejs JS shell — the exact
+    // gate the trusted-ENID reuse targets. Returns the bound port.
+    async fn spawn_enid_search_server() -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut b = [0u8; 4096];
+                    let n = sock.read(&mut b).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&b[..n]);
+                    let trusted = req.lines().any(|l| {
+                        l.to_ascii_lowercase().starts_with("cookie:")
+                            && l.contains("__Secure-ENID=TRUSTED")
+                    });
+                    let body = if trusted {
+                        "<html><body><div id=\"rso\"><h3>Real Result</h3></div></body></html>"
+                    } else {
+                        "<html><body>enablejs: please enable javascript</body></html>"
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.flush().await;
+                });
+            }
+        });
+        port
+    }
+
+    // A whitespace-free path to a bash mint stub that (a) bumps a counter file so a
+    // test can assert the mint count and (b) prints a cookie set with a TRUSTED ENID.
+    // Returns `(mint_cmd, counter_path)`.
+    fn write_mint_stub(tag: &str) -> (String, std::path::PathBuf) {
+        use std::io::Write as _;
+        let base = std::env::temp_dir();
+        let counter = base.join(format!("enid-mint-count-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_file(&counter);
+        let script = base.join(format!("enid-mint-{}-{}.sh", std::process::id(), tag));
+        let src = format!(
+            "cat >/dev/null\nprintf x >> '{}'\nprintf '{{\"cookies\":[{{\"name\":\"__Secure-ENID\",\"value\":\"TRUSTED\",\"domain\":\"127.0.0.1\",\"path\":\"/\"}}]}}'\n",
+            counter.display()
+        );
+        let mut f = std::fs::File::create(&script).unwrap();
+        f.write_all(src.as_bytes()).unwrap();
+        (format!("bash {}", script.display()), counter)
+    }
+
+    fn mint_count(counter: &std::path::Path) -> usize {
+        std::fs::read(counter).map(|b| b.len()).unwrap_or(0)
+    }
+
+    fn tmp_enid_cache(tag: &str) -> EnidCache {
+        let p = std::env::temp_dir().join(format!(
+            "enid-flow-cache-{}-{}.json",
+            std::process::id(),
+            tag
+        ));
+        let _ = std::fs::remove_file(&p);
+        EnidCache::new(p)
+    }
+
+    #[tokio::test]
+    async fn enid_flow_cache_miss_mints_then_native_fetch_gets_serp() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let (cmd, counter) = write_mint_stub("miss");
+        let cache = tmp_enid_cache("miss"); // no file → cache miss
+
+        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+            .await
+            .unwrap();
+        assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
+        assert_eq!(
+            mint_count(&counter),
+            1,
+            "cache miss should mint exactly once"
+        );
+        // The mint was persisted → a follow-up is a cache hit.
+        assert!(cache.get_valid(enid::now_secs()).is_some());
+    }
+
+    #[tokio::test]
+    async fn enid_flow_cache_hit_skips_mint() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let (cmd, counter) = write_mint_stub("hit");
+        let cache = tmp_enid_cache("hit");
+        // Pre-seed a live, trusted token → no mint should happen.
+        cache
+            .set(&[EnidCookie {
+                name: enid::ENID_NAME.into(),
+                value: "TRUSTED".into(),
+                domain: "127.0.0.1".into(),
+                path: "/".into(),
+                expires: Some(enid::now_secs() + 86_400.0),
+            }])
+            .unwrap();
+
+        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+            .await
+            .unwrap();
+        assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
+        assert_eq!(mint_count(&counter), 0, "cached token → no mint");
+    }
+
+    #[tokio::test]
+    async fn enid_flow_stale_token_triggers_one_remint_and_retry() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let (cmd, counter) = write_mint_stub("stale");
+        let cache = tmp_enid_cache("stale");
+        // A cached token the cache considers live but the server rejects (untrusted)
+        // → first native fetch returns the enablejs shell.
+        cache
+            .set(&[EnidCookie {
+                name: enid::ENID_NAME.into(),
+                value: "STALE".into(),
+                domain: "127.0.0.1".into(),
+                path: "/".into(),
+                expires: Some(enid::now_secs() + 86_400.0),
+            }])
+            .unwrap();
+
+        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+            .await
+            .unwrap();
+        assert!(
+            html.contains("id=\"rso\""),
+            "want SERP after re-mint, got: {html}"
+        );
+        assert_eq!(
+            mint_count(&counter),
+            1,
+            "enablejs shell should trigger EXACTLY one re-mint"
+        );
+    }
+
+    #[tokio::test]
+    async fn enid_flow_remint_flag_forces_fresh_mint_over_cache() {
+        let port = spawn_enid_search_server().await;
+        let url = format!("http://127.0.0.1:{port}/search?q=x");
+        let (cmd, counter) = write_mint_stub("force");
+        let cache = tmp_enid_cache("force");
+        cache
+            .set(&[EnidCookie {
+                name: enid::ENID_NAME.into(),
+                value: "TRUSTED".into(),
+                domain: "127.0.0.1".into(),
+                path: "/".into(),
+                expires: Some(enid::now_secs() + 86_400.0),
+            }])
+            .unwrap();
+
+        // remint:true → mint despite a valid cache.
+        let html = google_enid_flow(&url, &cache, &cmd, None, true)
+            .await
+            .unwrap();
+        assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
+        assert_eq!(mint_count(&counter), 1, "remint flag forces a mint");
     }
 
     #[tokio::test]

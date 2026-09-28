@@ -137,6 +137,22 @@ fn substitute_params(v: &mut Value, params: &Value) {
     }
 }
 
+/// First whole-string `{param}` value that survived substitution (an omitted/misspelled param).
+/// Typing a literal `{query}` into a search box would be a silent, absurd failure, so callers
+/// treat any survivor as an error.
+fn unresolved_placeholder(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => s
+            .strip_prefix('{')
+            .and_then(|x| x.strip_suffix('}'))
+            .filter(|inner| !inner.is_empty() && !inner.contains('{') && !inner.contains('}'))
+            .map(|_| s.clone()),
+        Value::Array(a) => a.iter().find_map(unresolved_placeholder),
+        Value::Object(o) => o.values().find_map(unresolved_placeholder),
+        _ => None,
+    }
+}
+
 /// Resolve the step list + routine-level opts from `human_interact` args: either an inline
 /// `steps` array, or a named `routine` (with `params` substituted).
 fn resolve_interaction_steps(args: &Value) -> Result<(Value, Value), String> {
@@ -146,6 +162,11 @@ fn resolve_interaction_steps(args: &Value) -> Result<(Value, Value), String> {
             .ok_or_else(|| format!("unknown interaction routine '{name}'"))?;
         let mut steps = r.get("steps").cloned().ok_or("routine has no 'steps'")?;
         substitute_params(&mut steps, args.get("params").unwrap_or(&Value::Null));
+        if let Some(ph) = unresolved_placeholder(&steps) {
+            return Err(format!(
+                "routine '{name}' has unresolved placeholder {ph} — pass it in 'params'"
+            ));
+        }
         let mut opts = serde_json::Map::new();
         for k in ["startDelay", "startJitter"] {
             if let Some(v) = r.get(k) {
@@ -3089,6 +3110,16 @@ mod tests {
         let (steps, _opts) =
             super::resolve_interaction_steps(&json!({ "steps": [{ "click": true }] })).unwrap();
         assert_eq!(steps.as_array().map(|a| a.len()), Some(1));
+        // A routine placeholder with no matching param must error, not type a literal "{query}".
+        let miss = super::resolve_interaction_steps(&json!({ "routine": "google-serp" }));
+        assert!(
+            miss.is_err(),
+            "omitted routine param → Err, not a literal {{query}}"
+        );
+        assert!(
+            miss.unwrap_err().contains("{query}"),
+            "error names the unresolved placeholder"
+        );
     }
 
     // human_interact with an unknown routine surfaces the error through the tool dispatch.
@@ -3128,6 +3159,52 @@ mod tests {
             b64.len() > 1000,
             "a real rasterized PNG should be sizeable (was the ~94-byte stub); got {} base64 chars",
             b64.len()
+        );
+    }
+
+    // toDataURL with a non-PNG MIME (the webp/jpeg support probe) must NOT be answered with a
+    // raster PNG relabelled — it delegates to the vendored path so the data-URL prefix matches
+    // the requested type. Returning image/png for a toDataURL('image/webp') is a tell.
+    #[tokio::test]
+    async fn canvas_todataurl_honours_non_png_mime() {
+        let _s = Session::new(); // raster hook installed
+        let draw = "var c=document.createElement('canvas');c.width=40;c.height=20;\
+            var x=c.getContext('2d');x.fillStyle='#111';x.fillRect(0,0,40,20);\
+            document.body.setAttribute('data-png', c.toDataURL('image/png').slice(0,22));\
+            document.body.setAttribute('data-webp', c.toDataURL('image/webp').slice(0,23));";
+        let out = turbo_surf_render::render_html("<body></body>", draw).unwrap();
+        assert!(
+            out.contains(r#"data-png="data:image/png;base64,""#),
+            "png request → png raster URL: {out}"
+        );
+        // The vendored fallback labels the URL with the requested MIME; it must not be png.
+        assert!(
+            !out.contains(r#"data-webp="data:image/png"#),
+            "webp request must not be answered with a png data URL: {out}"
+        );
+    }
+
+    // getContext returns the same context object per (canvas, kind); calling it twice must not
+    // re-wrap our getParameter/readPixels overrides (the second wrap would double-record draws /
+    // recurse). The spoofed WebGL identity must still be correct after a repeat getContext.
+    #[tokio::test]
+    async fn getcontext_is_idempotent_on_repeat_calls() {
+        let _s = Session::new();
+        let script = "var c=document.createElement('canvas');\
+            var a=c.getContext('webgl'); var b=c.getContext('webgl');\
+            var same=(a===b);\
+            var dbg=a.getExtension('WEBGL_debug_renderer_info');\
+            var rend=a.getParameter(dbg.UNMASKED_RENDERER_WEBGL);\
+            document.body.setAttribute('data-same', String(same));\
+            document.body.setAttribute('data-rend', rend);";
+        let out = turbo_surf_render::render_html("<body></body>", script).unwrap();
+        assert!(
+            out.contains(r#"data-same="true""#),
+            "repeat getContext returns the same object: {out}"
+        );
+        assert!(
+            out.contains("ANGLE (Apple, ANGLE Metal Renderer"),
+            "spoofed renderer intact after repeat getContext: {out}"
         );
     }
 

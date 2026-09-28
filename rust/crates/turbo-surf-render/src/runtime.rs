@@ -934,11 +934,16 @@ Object.assign(globalThis.XMLHttpRequest.prototype, { UNSENT: 0, OPENED: 1, HEADE
 // async entry per observed element (Chrome does this even for an off-screen/zero-size node, with
 // isIntersecting:false), so visibility-gated init isn't silently dead.
 function __mkObserver(name, withEntries) {
-  const C = { [name]: class { constructor(cb) { this._cb = cb; } unobserve() {} disconnect() {} takeRecords() { return []; }
+  const C = { [name]: class { constructor(cb) { this._cb = cb; this._dead = false; } unobserve() {} takeRecords() { return []; }
+    disconnect() { this._dead = true; }
     observe(el) {
       if (!withEntries || typeof this._cb !== "function") return;
       const cb = this._cb, self = this;
-      setTimeout(() => { try {
+      setTimeout(() => {
+        // Chrome delivers the initial entry asynchronously; disconnect() before it fires
+        // cancels it. Honour that so a page that observes-then-disconnects sees no callback.
+        if (self._dead) return;
+        try {
         let box = { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
         try { if (el && el.getBoundingClientRect) box = el.getBoundingClientRect(); } catch (e) {}
         cb([{ target: el, isIntersecting: false, intersectionRatio: 0, boundingClientRect: box,
@@ -3177,11 +3182,17 @@ globalThis.__domSig = () => {
       };
     };
     const origGetContext = canvasProto.getContext;
+    // getContext returns the SAME context object on every call for a given (canvas, kind),
+    // so a page that calls it twice would otherwise re-wrap getParameter/readPixels over our
+    // own overrides — double-recording draws and eventually stack-overflowing the bind chain.
+    // Track patched contexts so each is spoofed + instrumented exactly once.
+    const glPatched = new WeakSet();
     const wrapped = function getContext(kind, opts) {
       const ctx = origGetContext.call(this, kind, opts);
       if (ctx) {
         const k = String(kind || "");
-        if (k === "webgl" || k === "experimental-webgl" || k === "webgl2") {
+        if ((k === "webgl" || k === "experimental-webgl" || k === "webgl2") && !glPatched.has(ctx)) {
+          glPatched.add(ctx);
           try { patchGl(ctx, k === "webgl2"); } catch (e) {}
           try { installWebglRecorder(ctx); } catch (e) {}
         }
@@ -3199,9 +3210,14 @@ globalThis.__domSig = () => {
     const origToDataURL = canvasProto.toDataURL;
     if (typeof origToDataURL === "function") {
       canvasProto.toDataURL = function toDataURL(type) {
+        // The raster op only encodes PNG. For a non-PNG request (e.g. the webp-support probe
+        // toDataURL('image/webp') or an explicit image/jpeg) defer to the vendored path, which
+        // labels the data URL with the requested MIME — returning PNG for a webp request would be
+        // both wrong bytes and a tell.
+        const mime = typeof type === "string" && type ? type.toLowerCase() : "image/png";
         try {
           const ctx = this.__ctx2d;
-          if (rasterOp && ctx && ctx._ops) {
+          if (mime === "image/png" && rasterOp && ctx && ctx._ops) {
             const b64 = rasterOp(this.width || 300, this.height || 150, JSON.stringify(ctx._ops));
             if (b64) return "data:image/png;base64," + b64;
           }

@@ -342,6 +342,29 @@ async fn observers_are_distinct_and_intersection_fires_an_entry() {
     );
 }
 
+// disconnect() before the async initial entry fires must cancel it — Chrome delivers the entry
+// on a later task, and a page that observes-then-disconnects synchronously sees no callback.
+// (A stale callback firing after disconnect is both wrong and a behavioural tell.)
+#[tokio::test]
+async fn intersection_observer_disconnect_cancels_initial_entry() {
+    let script = r#"
+        var fired = false;
+        var el = document.createElement('div'); document.body.appendChild(el);
+        var io = new IntersectionObserver(function(){ fired = true; });
+        io.observe(el);
+        io.disconnect(); // synchronous, before the scheduled initial entry
+        // Give the scheduled timer a chance, then record whether the callback (wrongly) ran.
+        setTimeout(function(){ document.body.setAttribute('data-io-fired', String(fired)); }, 5);
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    assert!(
+        out.contains("data-io-fired=\"false\""),
+        "disconnect() before the initial entry must cancel the callback: {out}"
+    );
+}
+
 // Page-load lifecycle: the main document/window must fire the real sequence — readyState
 // loading → interactive (+readystatechange, DOMContentLoaded) → complete (+readystatechange,
 // window load, pageshow) — in order, with DOMContentLoaded BEFORE load. A collector that gates

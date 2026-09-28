@@ -248,7 +248,16 @@ fn parse_rgb_fn(t: &str) -> Option<Rgba> {
             .map(|f| f.clamp(0.0, 255.0) as u8)
     };
     let alpha = match parts.get(3) {
-        Some(a) => (a.trim().parse::<f32>().ok()?.clamp(0.0, 1.0) * 255.0).round() as u8,
+        // Alpha is either a 0..1 number or a `N%` percentage (the CSS4 rgb()/rgba()
+        // slash form yields the same token here since we split on '/' above).
+        Some(a) => {
+            let a = a.trim();
+            let frac = match a.strip_suffix('%') {
+                Some(pct) => pct.trim().parse::<f32>().ok()? / 100.0,
+                None => a.parse::<f32>().ok()?,
+            };
+            (frac.clamp(0.0, 1.0) * 255.0).round() as u8
+        }
         None => 255,
     };
     Some(Rgba::new(
@@ -308,13 +317,15 @@ pub(crate) fn parse_font(shorthand: &str) -> (f32, Vec<String>) {
 
 /// Find the first `NNpx`/`NNpt` size token, returning `(px, tail_after_token)`.
 fn split_font_size(shorthand: &str) -> Option<(f32, &str)> {
-    for (i, tok) in shorthand.split_whitespace().enumerate() {
+    // Iterate with byte offsets so the family tail is sliced from the same string;
+    // `split_whitespace` collapses whitespace runs, so an index-based re-split would
+    // desync on a double space (`bold  20px Arial`).
+    for (start, tok) in shorthand.split_whitespace().map(|t| {
+        let off = t.as_ptr() as usize - shorthand.as_ptr() as usize;
+        (off, t)
+    }) {
         if let Some(px) = font_size_px(tok) {
-            // The family list is the remainder of the string after this token.
-            let tail = shorthand
-                .splitn(i + 2, char::is_whitespace)
-                .last()
-                .unwrap_or("");
+            let tail = shorthand[start + tok.len()..].trim_start();
             return Some((px, tail));
         }
     }
@@ -738,4 +749,41 @@ fn last_local(cur: &[(f32, f32)], m: Matrix, fallback: (f32, f32)) -> (f32, f32)
     }
     let (px, py) = (dx - e, dy - f);
     ((d * px - c * py) / det, (a * py - b * px) / det)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgba_accepts_fractional_and_percentage_alpha() {
+        // 0..1 fractional alpha.
+        let c = parse_css_color("rgba(10, 20, 30, 0.5)").unwrap();
+        assert_eq!((c.r, c.g, c.b), (10, 20, 30));
+        assert_eq!(c.a, 128); // round(0.5 * 255)
+                              // CSS4 percentage alpha — must map N% → N/100, not reject.
+        let p = parse_css_color("rgba(10, 20, 30, 50%)").unwrap();
+        assert_eq!(p.a, 128);
+        // Space/slash CSS4 form: `rgb(r g b / a)`.
+        let s = parse_css_color("rgb(10 20 30 / 50%)").unwrap();
+        assert_eq!((s.r, s.g, s.b, s.a), (10, 20, 30, 128));
+        let s2 = parse_css_color("rgb(10 20 30 / 0.25)").unwrap();
+        assert_eq!(s2.a, 64);
+    }
+
+    #[test]
+    fn font_shorthand_tolerates_whitespace_runs() {
+        // Single space (baseline).
+        let (size, fams) = parse_font("bold 20px Arial");
+        assert_eq!(size, 20.0);
+        assert_eq!(fams, vec!["Arial".to_string()]);
+        // Double space before the size token must not desync the family tail.
+        let (size2, fams2) = parse_font("bold  20px Arial, sans-serif");
+        assert_eq!(size2, 20.0);
+        assert_eq!(fams2, vec!["Arial".to_string(), "sans-serif".to_string()]);
+        // Leading/interior runs, pt→px conversion.
+        let (size3, fams3) = parse_font("  italic   12pt   'Times New Roman'");
+        assert_eq!(size3, 16.0); // 12pt * 96/72
+        assert_eq!(fams3, vec!["Times New Roman".to_string()]);
+    }
 }

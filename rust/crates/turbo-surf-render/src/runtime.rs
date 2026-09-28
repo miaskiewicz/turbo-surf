@@ -517,6 +517,36 @@ globalThis.navigator = {
   // In-memory clipboard: an app that writeText()s a value (e.g. a copy-link button)
   // and reads it back round-trips, with no OS clipboard.
   clipboard: (() => { let v = ""; return { writeText: async (t) => { v = String(t == null ? "" : t); }, readText: async () => v }; })(),
+  // Permissions API — real Chrome always exposes `navigator.permissions.query`; its
+  // absence (a thrown TypeError on `navigator.permissions.query`) is a headless tell
+  // BotGuard/reCAPTCHA-class collectors read directly. Return a spec-shaped
+  // PermissionStatus (an EventTarget-ish with `state`/`name`/`onchange`) with the
+  // default states a fresh Chrome profile reports: most permissions 'prompt', and the
+  // headless-detector special case `notifications` → 'denied' iff Notification.permission
+  // is 'denied' (real Chrome couples them; a mismatch is itself a tell).
+  permissions: (() => {
+    const status = (name, state) => ({
+      name, state, onchange: null,
+      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+    });
+    const DEFAULTS = { geolocation: "prompt", notifications: "prompt", push: "prompt",
+      "persistent-storage": "prompt", "background-sync": "granted", midi: "granted",
+      camera: "prompt", microphone: "prompt", "clipboard-read": "prompt", "clipboard-write": "granted" };
+    return {
+      query: (desc) => {
+        const name = desc && desc.name ? String(desc.name) : "";
+        let state = Object.prototype.hasOwnProperty.call(DEFAULTS, name) ? DEFAULTS[name] : "prompt";
+        // Couple notifications to Notification.permission the way Chrome does.
+        try {
+          if (name === "notifications" && globalThis.Notification && globalThis.Notification.permission) {
+            state = globalThis.Notification.permission === "denied" ? "denied"
+              : globalThis.Notification.permission === "granted" ? "granted" : "prompt";
+          }
+        } catch (e) {}
+        return Promise.resolve(status(name, state));
+      },
+    };
+  })(),
 };
 // `screen` — overridable as a unit; defaults to a common 1080p desktop.
 {
@@ -3195,6 +3225,34 @@ globalThis.__domSig = () => {
           glPatched.add(ctx);
           try { patchGl(ctx, k === "webgl2"); } catch (e) {}
           try { installWebglRecorder(ctx); } catch (e) {}
+          // Give the context its OWN dedicated prototype carrying its methods, then wire it to
+          // the named global constructor, so `gl instanceof WebGLRenderingContext` holds and
+          // `WebGLRenderingContext.prototype.getParameter` resolves natively. We must NOT reuse
+          // the vendored context's shared fallback prototype (a generic object also backing
+          // `location` etc.) as the constructor prototype — that would make `location instanceof
+          // WebGLRenderingContext` true and collapse the webgl/webgl2 protos onto one, both worse
+          // tells. The context methods are per-instance bound closures (they don't read `this`),
+          // so moving them onto a private per-context prototype is behaviour-preserving.
+          try {
+            const ctorName = k === "webgl2" ? "WebGL2RenderingContext" : "WebGLRenderingContext";
+            const C = globalThis[ctorName];
+            if (C) {
+              const proto = {};
+              for (const nm of Object.getOwnPropertyNames(ctx)) {
+                const dsc = Object.getOwnPropertyDescriptor(ctx, nm);
+                if (dsc && typeof dsc.value === "function") {
+                  mark(dsc.value, nm); // native-mask the method (now prototype-resident)
+                  Object.defineProperty(proto, nm, { value: dsc.value, configurable: true, writable: true });
+                  try { delete ctx[nm]; } catch (e) {}
+                }
+              }
+              Object.setPrototypeOf(proto, Object.getPrototypeOf(ctx));
+              Object.defineProperty(proto, Symbol.toStringTag, { value: ctorName, configurable: true });
+              Object.defineProperty(proto, "constructor", { value: C, configurable: true, writable: true });
+              C.prototype = proto;
+              Object.setPrototypeOf(ctx, proto);
+            }
+          } catch (e) {}
         }
         markOwn(ctx);
       }
@@ -3355,6 +3413,38 @@ globalThis.__domSig = () => {
    "IntersectionObserver", "ResizeObserver", "AbortController", "URL", "PerformanceObserver",
    "MutationObserver", "Worker"].forEach(ensureCtor);
   guard(() => { ["fetch", "requestAnimationFrame", "queueMicrotask", "matchMedia"].forEach((n) => { if (typeof G[n] === "function") mark(G[n], n); }); });
+
+  // Document encoding accessors — a real Chrome document reports characterSet/charset/
+  // inputEncoding = "UTF-8"; the vendored no-layout document leaves them undefined, a tell
+  // an anti-bot collector reads (`document.characterSet`). Define on the document's own
+  // prototype so all documents (incl. child realms) inherit; skip if already present.
+  guard(() => {
+    const d = G.document; if (!d) return;
+    // The vendored document already has an OWN `characterSet` that returns undefined, so an
+    // `in`/existence check would skip it — force-define the encoding accessors to "UTF-8".
+    for (const k of ["characterSet", "charset", "inputEncoding"]) {
+      try { Object.defineProperty(d, k, { configurable: true, get() { return "UTF-8"; } }); } catch (e) {}
+    }
+  });
+
+  // Native-mask the Permissions API method: real `navigator.permissions.query.toString()`
+  // reports "[native code]"; our JS closure would leak source (an anti-tamper tell).
+  guard(() => {
+    const q = G.navigator && G.navigator.permissions && G.navigator.permissions.query;
+    if (typeof q === "function") mark(q, "query");
+  });
+
+  // window.location must class-tag as "[object Location]". The vendored location is a plain
+  // object (Object.prototype.toString → the wrong tag, e.g. "[object DOMImplementation]" or
+  // "[object Object]"), a trivial `Object.prototype.toString.call(location)` bot tell. Tag it
+  // (and its prototype, so a page that reads the tag off the proto also sees Location).
+  guard(() => {
+    const loc = G.location; if (!loc || typeof loc !== "object") return;
+    const tagLocation = (o) => { try { Object.defineProperty(o, Symbol.toStringTag, { value: "Location", configurable: true }); } catch (e) {} };
+    tagLocation(loc);
+    const p = Object.getPrototypeOf(loc);
+    if (p && p !== Object.prototype) tagLocation(p);
+  });
 
   // OfflineAudioContext with a non-silent DSP buffer (audio-silent needs energy > 0). A deterministic
   // synthetic waveform — device-invariant, indistinguishable from a real offline render to a hash+energy

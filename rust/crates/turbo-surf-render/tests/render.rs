@@ -342,6 +342,62 @@ async fn observers_are_distinct_and_intersection_fires_an_entry() {
     );
 }
 
+// Fingerprint parity closed against real Chrome (the Chrome-vs-turbo-surf detection
+// differential): navigator.permissions.query exists + is native + returns a spec-shaped
+// PermissionStatus; document.characterSet is "UTF-8"; window.location class-tags as
+// "[object Location]"; and a WebGL context is `instanceof WebGLRenderingContext` with a
+// native, prototype-resident getParameter (and webgl/webgl2 protos are distinct, and
+// location is NOT an instanceof the GL ctor). Each was a live tell before these fixes.
+#[tokio::test]
+async fn fingerprint_parity_permissions_location_charset_webgl() {
+    let script = r#"
+        var nat = function(f){ try { return Function.prototype.toString.call(f).includes('[native code]'); } catch(e){ return 'throw'; } };
+        var out = {};
+        // permissions
+        out.permType = typeof (navigator.permissions && navigator.permissions.query);
+        out.permNative = nat(navigator.permissions.query);
+        // characterSet + location tag
+        out.charset = document.characterSet;
+        out.locTag = Object.prototype.toString.call(location);
+        // webgl identity
+        var gl = document.createElement('canvas').getContext('webgl');
+        var C = window.WebGLRenderingContext, C2 = window.WebGL2RenderingContext;
+        out.instOf = gl instanceof C;
+        out.protoGetParam = 'getParameter' in C.prototype;
+        out.getParamNative = nat(C.prototype.getParameter);
+        out.protosDiffer = C.prototype !== C2.prototype;
+        out.locationNotGl = !(location instanceof C);
+        // permission state resolves (async) — write it after the promise settles
+        navigator.permissions.query({name:'notifications'}).then(function(s){
+            document.body.setAttribute('data-perm-state', s.state + ':' + s.name);
+        });
+        document.body.setAttribute('data-fp', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    // The snapshot lands in an HTML attribute, so `"` serializes as `&quot;`.
+    let q = |s: &str| s.replace('"', "&quot;");
+    let want = [
+        (r#""permType":"function""#, "permissions.query is a function"),
+        (r#""permNative":true"#, "permissions.query is native-masked"),
+        (r#""charset":"UTF-8""#, "document.characterSet is UTF-8"),
+        (r#""locTag":"[object Location]""#, "location class-tags as Location"),
+        (r#""instOf":true"#, "gl instanceof WebGLRenderingContext"),
+        (r#""protoGetParam":true"#, "getParameter is prototype-resident"),
+        (r#""getParamNative":true"#, "getParameter is native"),
+        (r#""protosDiffer":true"#, "webgl/webgl2 protos are distinct"),
+        (r#""locationNotGl":true"#, "location is not instanceof the GL ctor"),
+    ];
+    for (needle, why) in want {
+        assert!(out.contains(&q(needle)), "{why}: {out}");
+    }
+    assert!(
+        out.contains(r#"data-perm-state="prompt:notifications""#),
+        "permissions.query resolves to a spec-shaped PermissionStatus: {out}"
+    );
+}
+
 // disconnect() before the async initial entry fires must cancel it — Chrome delivers the entry
 // on a later task, and a page that observes-then-disconnects synchronously sees no callback.
 // (A stale callback firing after disconnect is both wrong and a behavioural tell.)

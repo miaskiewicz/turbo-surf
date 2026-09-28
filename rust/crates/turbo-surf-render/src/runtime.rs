@@ -2639,6 +2639,20 @@ globalThis.__domSig = () => {
   const G = globalThis;
   const guard = (fn) => { try { fn(); } catch (e) {} };
   const tag = (obj, name) => { if (obj) Object.defineProperty(obj, Symbol.toStringTag, { value: name, configurable: true }); };
+  // Event.isTrusted as a real Chrome-shaped PROTOTYPE ACCESSOR (Chrome exposes it on
+  // Event.prototype, read-only, not as an own instance prop). The vendored Event ctor sets an
+  // own `isTrusted=false`; we install a proto getter reading a hidden `__trusted` flag so a
+  // synthesized human-input event marked trusted reads `true`, while ordinary script events stay
+  // false. A trusted-dispatch helper (see the human-input synthesizer) deletes the own prop and
+  // sets `__trusted`, leaving isTrusted only on the prototype — matching Chrome's descriptor
+  // shape (an anti-bot check reads Object.getOwnPropertyDescriptor(Event.prototype,'isTrusted')).
+  guard(() => {
+    if (typeof G.Event === "function" && G.Event.prototype) {
+      const get = function isTrusted() { return this.__trusted === true; };
+      mark(get, "get isTrusted");
+      Object.defineProperty(G.Event.prototype, "isTrusted", { get, enumerable: true, configurable: true });
+    }
+  });
   // A native-reporting getter (its source reads "[native code]" via the trap above).
   const nativeGetter = (val) => { const g = function () { return val; }; mark(g); return g; };
   // Insert a correctly-named host prototype between `obj` and its current prototype, carrying
@@ -3440,6 +3454,273 @@ pub async fn render_page_pooled(
 /// scope (successive `execute_script`s reuse the same V8 context). A bundle with no
 /// boundary is a single script (arbitrary callers) and runs whole, as before.
 pub const SCRIPT_BOUNDARY: &str = "\n/*__ts_script_boundary_9f3a__*/\n";
+
+/// Human-input synthesizer (installer). Evaluating this defines `globalThis.__hi`, a small
+/// API that generates a realistic pointer path A→B and dispatches a coherent, **trusted**
+/// pointer/mouse/keyboard sequence into the DOM the page's own listeners (and a BotGuard-class
+/// collector) observe. It exists to satisfy the interaction-gate + input-entropy blocker in the
+/// render isolate — the one place we control the whole event pipeline (unlike a real automated
+/// browser, where injected events are trusted-but-CDP-detectable). Two path modes:
+/// `"straight"` is a linear A→B at uniform cadence (a baseline / sanity path). `"human"` is a
+/// cubic-Bézier arc bowed off the A→B line (curvature) with per-step Gaussian coordinate noise, a
+/// slow→fast→slow velocity profile (non-uniform time deltas), and an occasional overshoot+settle
+/// near the target.
+/// Dispatched events carry `isTrusted:true` (via the `__trusted` flag the Event.prototype getter
+/// reads) and `timeStamp = performance.now()` (origin-relative, fractional), on the hi-res clock.
+///
+/// Callers that need to leave no enumerable global should `delete globalThis.__hi` after use;
+/// tests read `__hi.path(...)` directly. This is generation + dispatch only — it does NOT defeat
+/// GPU/audio/server-side scoring; it addresses the input-entropy + interaction-gate signal.
+pub const HUMAN_INPUT_JS: &str = r#"(() => {
+  const rand = Math.random;
+  // Gaussian noise (Box–Muller) — real cursor coordinates jitter, they don't lie on an ideal curve.
+  const gauss = (sd) => { let u = 0, v = 0; while (!u) u = rand(); while (!v) v = rand(); return sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const bez = (p0, p1, p2, p3, t) => { const m = 1 - t; return m*m*m*p0 + 3*m*m*t*p1 + 3*m*t*t*p2 + t*t*t*p3; };
+  const ease = (u) => (u < 0.5 ? 2*u*u : 1 - Math.pow(-2*u + 2, 2) / 2); // ease-in-out (velocity)
+
+  // Generate an ordered [{x,y,t}] path from A to B. Sampled the way a real browser samples a
+  // pointer GESTURE: NOT one event per pixel/ms, but a coordinate read every ~12ms (± a few ms
+  // stddev) along the trajectory — so inter-event Δt clusters near the ~10–15ms sampling rate and
+  // SPEED shows up as distance-per-sample (small near the ends, large mid-flight), not as Δt.
+  // `t` is an origin-relative ms offset from gesture start. mode: "straight" | "human".
+  function path(ax, ay, bx, by, mode) {
+    const dist = Math.hypot(bx - ax, by - ay) || 1;
+    // Gesture duration scales with distance (a longer throw takes longer), human range.
+    const dur = mode === "human" ? 120 + dist * (0.7 + rand() * 0.6) : Math.max(50, dist * 0.5);
+    let c1x, c1y, c2x, c2y;
+    if (mode === "human") {
+      const nx = -(by - ay) / dist, ny = (bx - ax) / dist;          // unit normal to A→B
+      const bow = (rand() * 0.5 + 0.15) * dist * (rand() < 0.5 ? -1 : 1); // arc height, either side
+      c1x = ax + (bx - ax) / 3 + nx * bow * 0.7; c1y = ay + (by - ay) / 3 + ny * bow * 0.7;
+      c2x = ax + 2 * (bx - ax) / 3 + nx * bow;   c2y = ay + 2 * (by - ay) / 3 + ny * bow;
+    } else {
+      c1x = ax + (bx - ax) / 3; c1y = ay + (by - ay) / 3;
+      c2x = ax + 2 * (bx - ax) / 3; c2y = ay + 2 * (by - ay) / 3;
+    }
+    const pts = [];
+    let t = 0;
+    while (t < dur) {
+      const u = t / dur;
+      const e = mode === "human" ? ease(u) : u;                     // ease → varying speed
+      let x = bez(ax, c1x, c2x, bx, e), y = bez(ay, c1y, c2y, by, e);
+      if (mode === "human" && t > 0) { x += gauss(1.2); y += gauss(1.2); }
+      pts.push({ x: Math.round(x), y: Math.round(y), t: Math.round(t * 10) / 10 });
+      // Browser pointer sampling interval: ~12ms with a few ms of stddev, floored so it never
+      // degenerates to a per-ms firehose.
+      t += Math.max(6, 12 + gauss(2.5));
+    }
+    pts.push({ x: bx, y: by, t: Math.round(dur * 10) / 10 });       // final sample lands on B
+    if (mode === "human" && rand() < 0.6) {                         // overshoot + settle
+      let tt = dur + Math.max(6, 12 + gauss(2.5));
+      pts.push({ x: Math.round(bx + gauss(3)), y: Math.round(by + gauss(3)), t: Math.round(tt * 10) / 10 });
+      tt += 16 + rand() * 12; pts.push({ x: bx, y: by, t: Math.round(tt * 10) / 10 });
+    }
+    return pts;
+  }
+
+  // A jittered programmatic delay: base ms plus a random offset in [0, jitter]. Humans don't
+  // react instantly (bots fire at t=0) — used as the START delay before an interaction, and as
+  // the reaction gap between move-end and click.
+  const delay = (base, jitter) => Math.max(0, (base || 0) + rand() * (jitter || 0));
+
+  // Human keyboard timeline: for each character emit keydown → keypress → input → keyup, spaced
+  // by a realistic inter-key gap (dwell + flight). Gap ~90–170ms, +extra after space/punctuation,
+  // with an occasional "think" pause; each key is held ~40–90ms (keydown→keyup). `base` is the
+  // origin-relative ms at which typing starts. Returns { events:[{name,type,props,ts}], end }.
+  function typePlan(text, base) {
+    const events = [];
+    let t = base || 0;
+    const s = String(text);
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      let gap = 90 + rand() * 80;                          // base inter-key flight
+      if (i > 0 && (s[i - 1] === " " || /[.,!?;:]/.test(s[i - 1]))) gap += 60 + rand() * 90;
+      if (rand() < 0.06) gap += 250 + rand() * 450;        // occasional hesitation
+      t += gap;
+      const hold = 40 + rand() * 50;                       // key dwell time
+      events.push({ name: "KeyboardEvent", type: "keydown", props: { key: ch }, ts: Math.round(t * 10) / 10 });
+      events.push({ name: "KeyboardEvent", type: "keypress", props: { key: ch }, ts: Math.round((t + 1) * 10) / 10 });
+      events.push({ name: "InputEvent", type: "input", props: { data: ch, inputType: "insertText" }, ts: Math.round((t + 2) * 10) / 10 });
+      events.push({ name: "KeyboardEvent", type: "keyup", props: { key: ch }, ts: Math.round((t + hold) * 10) / 10 });
+    }
+    return { events, end: t };
+  }
+
+  // Build a trusted event (isTrusted:true via the __trusted flag + Event.prototype getter),
+  // stamped with an EXPLICIT origin-relative `ts` (the human timeline) — not live performance.now,
+  // so the cadence shows in event.timeStamp deltas regardless of the isolate's virtual clock.
+  function ev(name, type, props, ts) {
+    const C = globalThis[name] || globalThis.Event;
+    const e = new C(type, Object.assign({ bubbles: true, cancelable: true }, props || {}));
+    try { delete e.isTrusted; } catch (_) {}   // drop the ctor's own false → proto getter wins
+    e.__trusted = true;
+    try { e.timeStamp = ts == null ? performance.now() : ts; } catch (_) {}
+    return e;
+  }
+  const fire = (target, e) => { try { (target || document).dispatchEvent(e); } catch (_) {} };
+
+  // Dispatch a pointer/mouse move stream along `pts`, each stamped base + p.t (human timeline).
+  function move(target, pts, buttons, base) {
+    const b = base || 0;
+    for (const p of pts) {
+      const props = { clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y, buttons: buttons || 0 };
+      fire(target, ev("PointerEvent", "pointermove", props, b + p.t));
+      fire(target, ev("MouseEvent", "mousemove", props, b + p.t));
+    }
+    return pts.length ? b + pts[pts.length - 1].t : b;
+  }
+
+  // Type `text` into `target` on the human keyboard timeline starting at `base`. Returns end ts.
+  function type(target, text, base) {
+    const plan = typePlan(text, base);
+    for (const k of plan.events) fire(target, ev(k.name, k.type, k.props, k.ts));
+    return plan.end;
+  }
+
+  // Full human interaction (synchronous dispatch, human-timeline timestamps): optional start
+  // delay → curved move to (bx,by) → reaction gap → press/focus → type → release/click.
+  function moveAndClick(target, ax, ay, bx, by, text, opts) {
+    opts = opts || {};
+    const base = (performance.now ? performance.now() : 0) + delay(opts.startDelay || 0, opts.startJitter || 0);
+    const pts = path(ax, ay, bx, by, "human");
+    let t = move(target, pts, 0, base);
+    t += delay(40, 120);                                    // reaction before the click
+    const at = { clientX: bx, clientY: by, pageX: bx, pageY: by };
+    fire(target, ev("PointerEvent", "pointerdown", Object.assign({ buttons: 1 }, at), t));
+    fire(target, ev("MouseEvent", "mousedown", Object.assign({ buttons: 1 }, at), t + 1));
+    fire(target, ev("FocusEvent", "focus", {}, t + 2));
+    if (text) t = type(target, text, t + delay(120, 180));
+    fire(target, ev("PointerEvent", "pointerup", at, t + 30));
+    fire(target, ev("MouseEvent", "mouseup", at, t + 31));
+    fire(target, ev("MouseEvent", "click", at, t + 32));
+    return { points: pts, start: base, end: t + 32 };
+  }
+
+  // Async variant: schedule the same interaction over the VIRTUAL event loop via setTimeout, so
+  // events are genuinely SPACED in (virtual) time — the collector sees them arrive over ~seconds,
+  // not all in one drain — while still stamped on the human timeline. Resolves when done.
+  function play(target, o) {
+    o = o || {};
+    return new Promise((resolve) => {
+      const start = delay(o.startDelay == null ? 300 : o.startDelay, o.startJitter == null ? 500 : o.startJitter);
+      const perfBase = (performance.now ? performance.now() : 0) + start;
+      const pts = path(o.startX || 0, o.startY || 0, o.toX || 0, o.toY || 0, "human");
+      const clickAt = pts.length ? pts[pts.length - 1].t : 0;
+      const at = { clientX: o.toX || 0, clientY: o.toY || 0, pageX: o.toX || 0, pageY: o.toY || 0 };
+      const typeStart = clickAt + delay(150, 200);
+      const plan = o.text ? typePlan(o.text, typeStart) : { events: [], end: typeStart };
+      const sched = (wait, name, type, props, ts) =>
+        setTimeout(() => fire(target, ev(name, type, props, perfBase + ts)), Math.max(0, Math.round(start + wait)));
+      for (const p of pts) {
+        sched(p.t, "PointerEvent", "pointermove", { clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y }, p.t);
+        sched(p.t, "MouseEvent", "mousemove", { clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y }, p.t);
+      }
+      sched(clickAt, "PointerEvent", "pointerdown", Object.assign({ buttons: 1 }, at), clickAt);
+      sched(clickAt, "MouseEvent", "mousedown", Object.assign({ buttons: 1 }, at), clickAt);
+      sched(clickAt, "FocusEvent", "focus", {}, clickAt);
+      for (const k of plan.events) sched(k.ts, k.name, k.type, k.props, k.ts);
+      sched(plan.end + 30, "MouseEvent", "click", at, plan.end + 30);
+      setTimeout(() => resolve({ start: perfBase, end: perfBase + plan.end + 30 }), Math.max(0, Math.round(start + plan.end + 40)));
+    });
+  }
+
+  // Composable interaction SEQUENCE — the general API. Plays an ordered list of steps over the
+  // virtual event loop, threading the cursor position and a running clock so every event is both
+  // temporally spaced (setTimeout) and stamped on one continuous human timeline. Steps:
+  //   { move:{toX,toY} }  curved human move from the current cursor to the target
+  //   { click:true }      pointerdown+mousedown → a real press DWELL (~60–140ms) → up → click
+  //   { focus:true }      a focus event
+  //   { type:"text" }     human keyboard typing (per-key rhythm) at the current focus
+  //   { wait:ms }         an explicit pause
+  // e.g. move → click (search box) → focus → type("query") → move → click (button):
+  //   __hi.sequence(document, [ {move:{toX:400,toY:60}}, {click:true}, {focus:true},
+  //     {type:"weather"}, {move:{toX:520,toY:62}}, {click:true} ], { startDelay:400, startJitter:600 });
+  function sequence(target, steps, o) {
+    o = o || {};
+    return new Promise((resolve) => {
+      let cx = o.startX || 0, cy = o.startY || 0, t = 0;
+      let focused = null;                                   // the element currently holding focus
+      let hovered = null;                                   // the element currently under the cursor
+      const startDelay = delay(o.startDelay == null ? 300 : o.startDelay, o.startJitter == null ? 500 : o.startJitter);
+      const perfBase = (performance.now ? performance.now() : 0) + startDelay;
+      const jobs = [];
+      const at = () => ({ clientX: cx, clientY: cy, pageX: cx, pageY: cy });
+      // Events fire at the element when one is given (focus/blur/click target it, and bubble to
+      // document/window); otherwise at `target` (document) at the cursor.
+      const job = (tgt, name, type, props, ts) => jobs.push({ tgt: tgt || target, name, type, props, ts });
+      // Blur fires both blur (non-bubbling) and focusout (bubbling), like real Chrome.
+      const blurIfFocused = (ts) => {
+        if (focused) {
+          job(focused, "FocusEvent", "blur", {}, ts);
+          job(focused, "FocusEvent", "focusout", { bubbles: true }, ts + 0.1);
+          focused = null;
+        }
+      };
+      for (const step of steps || []) {
+        if (step.move) {
+          const el = step.move.el || null;
+          // Leaving the previously-hovered element: mouseout/pointerout bubble; mouseleave/
+          // pointerleave don't (fire on the element), at the OLD cursor position.
+          if (hovered && hovered !== el) {
+            job(target, "MouseEvent", "mouseout", at(), t);
+            job(hovered, "MouseEvent", "mouseleave", at(), t);
+            job(hovered, "PointerEvent", "pointerout", at(), t);
+            job(hovered, "PointerEvent", "pointerleave", at(), t);
+          }
+          const pts = path(cx, cy, step.move.toX, step.move.toY, "human");
+          for (const p of pts) {
+            const mp = { clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y };
+            job(target, "PointerEvent", "pointermove", mp, t + p.t);
+            job(target, "MouseEvent", "mousemove", mp, t + p.t);
+          }
+          t += pts.length ? pts[pts.length - 1].t : 0;
+          cx = step.move.toX; cy = step.move.toY;
+          // Arriving over a target element: mouseover/pointerover bubble; mouseenter/pointerenter
+          // don't (fire on the element), at the NEW cursor position.
+          if (el && hovered !== el) {
+            job(target, "MouseEvent", "mouseover", at(), t);
+            job(el, "MouseEvent", "mouseenter", at(), t);
+            job(target, "PointerEvent", "pointerover", at(), t);
+            job(el, "PointerEvent", "pointerenter", at(), t);
+            hovered = el;
+          }
+        } else if (step.click) {
+          t += delay(60, 120);                              // reaction before press
+          // A mousedown elsewhere steals focus — a real user clicking the search button blurs
+          // the input first. Blur any prior focus at press time (unless clicking that same el).
+          if (focused && focused !== step.click) blurIfFocused(t);
+          job(target, "PointerEvent", "pointerdown", Object.assign({ buttons: 1 }, at()), t);
+          job(step.click === true ? target : step.click, "MouseEvent", "mousedown", Object.assign({ buttons: 1 }, at()), t + 1);
+          t += 60 + rand() * 80;                            // real DWELL between down and up
+          job(target, "PointerEvent", "pointerup", at(), t);
+          job(step.click === true ? target : step.click, "MouseEvent", "mouseup", at(), t + 1);
+          job(step.click === true ? target : step.click, "MouseEvent", "click", at(), t + 2);
+          t += 2;
+        } else if (step.focus) {
+          if (focused && focused !== step.focus) blurIfFocused(t);   // focus change blurs the old
+          const el = step.focus === true ? target : step.focus;
+          job(el, "FocusEvent", "focus", {}, t);                     // non-bubbling
+          job(el, "FocusEvent", "focusin", { bubbles: true }, t + 0.1); // bubbling
+          focused = el; t += delay(20, 60);
+        } else if (step.blur) {
+          blurIfFocused(t); t += delay(10, 40);
+        } else if (step.type != null) {
+          t += delay(120, 180);
+          const plan = typePlan(step.type, t);
+          for (const k of plan.events) job(focused || target, k.name, k.type, k.props, k.ts);
+          t = plan.end;
+        } else if (step.wait != null) {
+          t += step.wait;
+        }
+      }
+      blurIfFocused(t);                                     // leave nothing focused at the end
+      for (const j of jobs) setTimeout(() => fire(j.tgt, ev(j.name, j.type, j.props, perfBase + j.ts)), Math.max(0, Math.round(startDelay + j.ts)));
+      setTimeout(() => resolve({ start: perfBase, end: perfBase + t }), Math.max(0, Math.round(startDelay + t + 20)));
+    });
+  }
+
+  globalThis.__hi = { path, typePlan, delay, move, type, moveAndClick, play, sequence, ev };
+})()"#;
 
 /// Run a page-script bundle the browser way: each boundary-delimited part as its own
 /// top-level `execute_script`, so a throwing script is isolated from the others

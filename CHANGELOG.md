@@ -3,6 +3,77 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [Unreleased] — client-side fingerprint fidelity + browserless anti-bot recon
+
+Closes every **client-side** divergence from real Chrome that a BotGuard-class collector
+reads, verified **same-machine/same-IP** against a real headed-Chrome capture. Honest scope:
+a **trusted** google `__Secure-ENID` remains out of reach browserless — BotGuard is
+**interaction-gated**, VM-interpreted + introspection-heavy (Error-stack + descriptor probes),
+and **server-scored**, with real-input / real-GPU / real-audio / live-DOM blockers a headless
+V8 isolate cannot satisfy (measured: even real headed Chrome on this exit IP minted no ENID
+this run — google appears to have changed the gate). The trusted-token path stays the
+real-browser sidecar, now interaction-driven. These land the achievable client parity; they
+harden the engine broadly against presence/string/timing/interaction-gated walls.
+
+### Added
+- **`probe_mint {url}` MCP tool** + **`probe_page_async`** (render): execution-complete
+  in-isolate anti-bot recon — runs a page's own integrity JS to completion (dynamic
+  `<script>` injection + `op_fetch` + timers) under instrumented fingerprint globals and
+  reports `{shim_needed, accesses, earned_cookies, minted_enid}` (what env the VM demands +
+  whether an in-isolate run mints anything, no browser).
+- **`TURBO_SURF_TRACE`** — env-gated `serp:` diagnostics across the native-google path
+  (cache-vs-mint decision + ENID age, native status/final_url/body_len, the enablejs-shell
+  verdict, the one-shot re-mint retry, and `/sorry` detection).
+- **`human_interact` MCP tool** — a **generic** page-interaction driver: string together
+  `move` / `click` / `focus` / `type` / `blur` / `wait` steps (targeting CSS selectors or
+  coords) and play them as realistic, **trusted** input on the current page, then keep the
+  hydrated result. Takes inline `steps` or a saved **`routine`** (with `{param}` substitution).
+  Ships the **`google-serp`** routine (move→click search box→focus→type query→click Search) — a
+  real-user flow to *attempt* the interaction-gated SERP; the driver is general, google is one
+  caller.
+- **Human-input synthesizer** (`turbo_surf_render::HUMAN_INPUT_JS`) backing the tool:
+  `__hi.{path,move,type,typePlan,delay,moveAndClick,play,sequence,ev}`. Generates a pointer
+  **path A→B sampled the way a browser samples a gesture** — a coordinate every ~12ms (±stddev),
+  NOT per-pixel/ms, so speed shows as distance-per-sample. Modes `"straight"` and `"human"`
+  (cubic-Bézier curvature + Gaussian coordinate noise + slow→fast→slow velocity + overshoot).
+  `sequence()` chains gestures over the virtual event loop, firing the full real-event families:
+  pointer/mouse **move** stream, **mouseenter/leave + mouseover/out** on hover changes, a real
+  **mousedown → dwell → mouseup → click**, **focus/blur (+focusin/out)** on focus changes, and
+  **human-paced keyboard** (keydown→keypress→input→keyup with per-key rhythm, extra gaps after
+  space/punctuation, occasional hesitation). A jittered **start delay** (events begin after N±rand
+  ms — humans don't fire at t=0). `Event.isTrusted` is now a Chrome-shaped **prototype accessor**;
+  synthesized events read `isTrusted:true` (ordinary script events stay `false`) and carry
+  `timeStamp` on the hi-res clock. Addresses the interaction-gate + input-entropy signal
+  in-isolate (not GPU/audio/server scoring).
+- **Raster-backed canvas `toDataURL`** — `turbo-surf-raster::canvas_ops_png` replays the 2D
+  display list (`ctx._ops`) into a real PNG (was a ~94-byte synthetic stub — an impossible
+  size for rendered content); wired as a host hook (`set_raster_fn`) from mcp + napi.
+
+### Changed — render fingerprint fidelity (ENV_BOOTSTRAP)
+- **WebGL identity → real Chrome/ANGLE-Metal (Apple).** `UNMASKED_VENDOR/RENDERER`, numeric
+  limits (`MAX_TEXTURE_SIZE` 16384, …) and the exact `getSupportedExtensions` lists (39 webgl
+  / 36 webgl2) — was SwiftShader ("ANGLE (Google, … SwiftShader)"), a headless/VM signal.
+- **Native-code masking** for canvas/WebGL context methods — `toDataURL`/`getParameter`/… now
+  report `[native code]` (were JS source, an instant anti-tamper flag).
+- **Timezone pinned** — ICU `TZ` + per-isolate `date_time_configuration_change_notification`
+  give a coherent `America/New_York` (was leaking the host machine's zone, incoherent with the
+  en-US identity). Override with **`TURBO_SURF_TZ`**.
+- **High-resolution clock** — `performance.now()` is origin-relative + fractional + monotonic
+  on Chrome's 100µs grid, `timeOrigin` is a fractional epoch anchor, and `requestAnimationFrame`
+  delivers a fractional origin-relative `DOMHighResTimeStamp` (was integer epoch ms, no arg).
+- **UA-CH greased brand** → `"Not_A Brand";v="8"` in the middle slot, matching the on-wire
+  `sec-ch-ua`; coherent `getHighEntropyValues.fullVersionList` (was a stale `Not)A;Brand;v=24`).
+- **Coherence surfaces** real Chrome exposes that deno_core omits: `navigator.pdfViewerEnabled`,
+  a populated `mimeTypes` (PDF types linked to the plugins), `Notification.permission`,
+  `performance.memory`, `document.scrollingElement`, `window.sessionStorage`, legacy
+  `performance.timing`/`navigation`, and `window.scheduler`.
+
+### Changed — sidecar + deps
+- **Browser sidecar mint** (`fetch-serp.mjs`): BotGuard is interaction-gated, so `mintEnid`
+  now performs a genuine human-paced search-box interaction to trigger the VM before harvesting
+  cookies (the old idle homepage dwell earned no trusted `__Secure-ENID`).
+- **deps:** turbo-dom `0.4.0` → `0.5.1` across all six consumer crates.
+
 ## [0.4.4] — client-hint parity + in-isolate reCAPTCHA execution
 
 Fingerprint-parity + browserless reCAPTCHA/BotGuard execution work. Note: this does

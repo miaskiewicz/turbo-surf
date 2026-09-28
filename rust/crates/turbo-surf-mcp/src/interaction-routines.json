@@ -1,0 +1,20 @@
+{
+  "google-serp": {
+    "description": "Real-user Google search: move to the search box, click it, focus, type the query, pause, move to the Search button, click. Used to attempt an interaction-gated SERP (BotGuard fires on engagement). `{query}` is substituted from params.query.",
+    "startDelay": 400,
+    "startJitter": 800,
+    "steps": [
+      { "move": { "selector": "textarea[name=q], input[name=q]" } },
+      { "click": "textarea[name=q], input[name=q]" },
+      { "focus": "textarea[name=q], input[name=q]" },
+      { "type": "{query}" },
+      { "wait": 350 },
+      {
+        "move": {
+          "selector": "input[name=btnK], button[type=submit], [aria-label='Google Search']"
+        }
+      },
+      { "click": "input[name=btnK], button[type=submit], [aria-label='Google Search']" }
+    ]
+  }
+}

@@ -263,6 +263,273 @@ fn legacy_timing_and_scheduler_are_present() {
     );
 }
 
+// STEP 1 — trusted-event capability. A synthesized human-input event must read isTrusted:true to
+// a real listener (window/document/node), an ordinary script event must stay false, and isTrusted
+// must live as a prototype ACCESSOR (Chrome's descriptor shape), not an own instance prop.
+#[test]
+fn synthesized_events_are_trusted() {
+    let script = format!(
+        "{hi}\n;(() => {{\
+          const seen = {{}};\
+          const el = document.createElement('div'); document.body.appendChild(el);\
+          window.addEventListener('mousemove', e => {{ seen.win = e.isTrusted; }});\
+          window.dispatchEvent(__hi.ev('MouseEvent','mousemove',{{clientX:3,clientY:4}}));\
+          document.addEventListener('mousemove', e => {{ seen.doc = e.isTrusted; }});\
+          document.dispatchEvent(__hi.ev('MouseEvent','mousemove',{{clientX:3,clientY:4}}));\
+          el.addEventListener('click', e => {{ seen.node = e.isTrusted; }});\
+          el.dispatchEvent(__hi.ev('MouseEvent','click',{{}}));\
+          seen.plain = new MouseEvent('mousemove',{{}}).isTrusted;\
+          const d = Object.getOwnPropertyDescriptor(Event.prototype,'isTrusted');\
+          seen.protoAccessor = !!(d && typeof d.get === 'function');\
+          seen.tsFractional = (__hi.ev('MouseEvent','mousemove',{{}}).timeStamp % 1) !== 0;\
+          return JSON.stringify(seen);\
+        }})()",
+        hi = turbo_surf_render::HUMAN_INPUT_JS
+    );
+    let out = turbo_surf_render::run_with_dom("<body></body>", &script).unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("json {e}: {out}"));
+    assert_eq!(
+        v["win"], true,
+        "window listener must see isTrusted:true: {out}"
+    );
+    assert_eq!(
+        v["doc"], true,
+        "document listener must see isTrusted:true: {out}"
+    );
+    assert_eq!(
+        v["node"], true,
+        "node listener must see isTrusted:true: {out}"
+    );
+    assert_eq!(
+        v["plain"], false,
+        "an ordinary script event must be isTrusted:false: {out}"
+    );
+    assert_eq!(
+        v["protoAccessor"], true,
+        "isTrusted must be a prototype accessor (Chrome shape): {out}"
+    );
+    assert_eq!(
+        v["tsFractional"], true,
+        "trusted event timeStamp rides the hi-res clock: {out}"
+    );
+}
+
+fn synth_path(mode: &str, ax: f64, ay: f64, bx: f64, by: f64) -> Vec<(f64, f64, f64)> {
+    let script = format!(
+        "{hi}\n;JSON.stringify(__hi.path({ax},{ay},{bx},{by},'{mode}'))",
+        hi = turbo_surf_render::HUMAN_INPUT_JS
+    );
+    let out = turbo_surf_render::run_with_dom("<body></body>", &script).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["x"].as_f64().unwrap(),
+                p["y"].as_f64().unwrap(),
+                p["t"].as_f64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+// Perpendicular distance of (px,py) from the infinite line through A→B.
+fn perp_dist(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    ((p.0 - a.0) * dy - (p.1 - a.1) * dx).abs() / len
+}
+
+// STEP 2 — a straight-line A→B pointer sequence: collinear, monotonic, correct endpoints.
+#[test]
+fn straight_path_is_linear_a_to_b() {
+    let pts = synth_path("straight", 0.0, 0.0, 300.0, 0.0);
+    assert!(pts.len() >= 7, "enough steps: {}", pts.len());
+    assert_eq!(pts.first().unwrap().0.round(), 0.0);
+    assert_eq!(pts.last().unwrap().0.round(), 300.0);
+    // All on the y=0 line, x monotonic non-decreasing, time strictly increasing.
+    let a = (0.0, 0.0);
+    let b = (300.0, 0.0);
+    for w in pts.windows(2) {
+        assert!(w[1].0 >= w[0].0 - 0.5, "x monotonic: {:?}", w);
+        assert!(w[1].2 > w[0].2, "time increasing: {:?}", w);
+    }
+    let max_dev = pts
+        .iter()
+        .map(|&(x, y, _)| perp_dist(a, b, (x, y)))
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_dev < 1.5,
+        "straight path must not curve, max dev = {max_dev}"
+    );
+}
+
+// STEP 3 — a HUMAN path A→B must look real: it curves (bows off the straight line), carries
+// coordinate noise, and its velocity varies (non-uniform time deltas) — the input-entropy a
+// BotGuard-class scorer looks for. Statistical, tolerant of the RNG (run a few seeds).
+#[test]
+fn human_path_curves_with_noise_and_varying_velocity() {
+    let a = (0.0, 0.0);
+    let b = (300.0, 120.0);
+    // Aggregate a few generations so a single unlucky RNG draw can't flake the assertions.
+    let mut curved = 0;
+    let mut varied_velocity = 0;
+    let mut noisy = 0;
+    let runs = 6;
+    for _ in 0..runs {
+        let pts = synth_path("human", a.0, a.1, b.0, b.1);
+        assert!(pts.len() >= 7, "enough steps");
+        assert_eq!(pts.first().unwrap().0.round(), 0.0, "starts at A.x");
+        assert_eq!(pts.first().unwrap().1.round(), 0.0, "starts at A.y");
+        assert_eq!(pts.last().unwrap().0.round(), 300.0, "ends at B.x");
+        assert_eq!(pts.last().unwrap().1.round(), 120.0, "ends at B.y");
+
+        // Curvature: max perpendicular deviation from the A→B chord.
+        let max_dev = pts
+            .iter()
+            .map(|&(x, y, _)| perp_dist(a, b, (x, y)))
+            .fold(0.0_f64, f64::max);
+        if max_dev > 8.0 {
+            curved += 1;
+        }
+
+        // Sampling model: inter-event Δt clusters near a browser's ~10–15ms pointer-sampling
+        // rate (NOT a per-ms firehose) — mean Δt in a sane band.
+        let dts: Vec<f64> = pts.windows(2).map(|w| w[1].2 - w[0].2).collect();
+        let dt_mean = dts.iter().sum::<f64>() / dts.len() as f64;
+        assert!(
+            dt_mean > 8.0 && dt_mean < 22.0,
+            "Δt must be ~sampling rate, got {dt_mean}"
+        );
+        // Velocity variation now lives in SPACE (uniform sampling time, varying distance): the
+        // ease profile makes mid-flight steps far longer than the slow ends.
+        let dists: Vec<f64> = pts
+            .windows(2)
+            .map(|w| ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt())
+            .collect();
+        let dmean = dists.iter().sum::<f64>() / dists.len() as f64;
+        let dvar = dists.iter().map(|d| (d - dmean).powi(2)).sum::<f64>() / dists.len() as f64;
+        if dmean > 0.0 && dvar.sqrt() / dmean > 0.25 {
+            varied_velocity += 1;
+        }
+
+        // Noise: interior points must not lie exactly on a smooth monotone-in-x line — check that
+        // some steps deviate from the local linear interpolation of their neighbours.
+        let mut wobble = 0.0_f64;
+        for w in pts.windows(3) {
+            let midx = (w[0].0 + w[2].0) / 2.0;
+            let midy = (w[0].1 + w[2].1) / 2.0;
+            wobble = wobble.max(((w[1].0 - midx).powi(2) + (w[1].1 - midy).powi(2)).sqrt());
+        }
+        if wobble > 0.7 {
+            noisy += 1;
+        }
+        // Time strictly increasing always.
+        for win in pts.windows(2) {
+            assert!(win[1].2 > win[0].2, "time strictly increasing");
+        }
+    }
+    assert!(
+        curved >= runs - 1,
+        "human path must curve off the chord ({curved}/{runs})"
+    );
+    assert!(
+        varied_velocity >= runs - 1,
+        "human path velocity must vary ({varied_velocity}/{runs})"
+    );
+    assert!(
+        noisy >= runs - 1,
+        "human path must carry coordinate noise ({noisy}/{runs})"
+    );
+}
+
+// Full composable interaction — the real-user Google flow: move to the search box, click it
+// (mousedown→dwell→mouseup→click), focus, type a query, move to the Search button, click it.
+// Every gesture must fire its real event family (move stream + enter/over, down/up/click, focus/
+// focusin, key down/press/input/up, blur/focusout on the focus change) in the right order.
+#[tokio::test]
+async fn sequence_plays_full_google_like_flow() {
+    let html = "<body><input id='q' type='text'><button id='btn'>Search</button></body>";
+    let script = format!(
+        "{hi}\n;(() => {{\
+          const rec = [];\
+          const R = () => (e) => rec.push(e.type);\
+          const doc = ['mousemove','mousedown','mouseup','click','mouseover','mouseout',\
+            'pointerdown','pointerup','pointermove','keydown','keypress','keyup','input','focusin','focusout'];\
+          for (const t of doc) document.addEventListener(t, R(), true);\
+          const q = document.getElementById('q'), btn = document.getElementById('btn');\
+          for (const el of [q, btn]) for (const t of ['mouseenter','mouseleave','focus','blur']) el.addEventListener(t, R());\
+          __hi.sequence(document, [\
+            {{ move: {{ toX: 100, toY: 30, el: q }} }}, {{ click: q }}, {{ focus: q }},\
+            {{ type: 'weather' }}, {{ move: {{ toX: 260, toY: 31, el: btn }} }}, {{ click: btn }}\
+          ], {{ startDelay: 40, startJitter: 40 }}).then(() => {{ document.body.setAttribute('data-seq', JSON.stringify(rec)); }});\
+        }})()",
+        hi = turbo_surf_render::HUMAN_INPUT_JS
+    );
+    let out = turbo_surf_render::render_page(html, "https://x.test/", &script)
+        .await
+        .unwrap();
+    let start = out
+        .find("data-seq=\"")
+        .expect("sequence completed + recorded")
+        + 10;
+    let end = out[start..].find('"').unwrap() + start;
+    let raw = out[start..end].replace("&quot;", "\"");
+    let rec: Vec<String> =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("seq json {e}: {raw}"));
+
+    let has = |t: &str| rec.iter().any(|e| e == t);
+    let first = |t: &str| rec.iter().position(|e| e == t);
+    let last = |t: &str| rec.iter().rposition(|e| e == t);
+    // Every family fired.
+    for t in [
+        "mousemove",
+        "mousedown",
+        "mouseup",
+        "click",
+        "keydown",
+        "keyup",
+        "input",
+    ] {
+        assert!(has(t), "missing {t} in sequence: {rec:?}");
+    }
+    assert!(
+        has("mouseover") || has("mouseenter"),
+        "no hover-enter: {rec:?}"
+    );
+    assert!(has("focus") || has("focusin"), "no focus: {rec:?}");
+    assert!(
+        has("blur") || has("focusout"),
+        "no blur (button click must blur the input): {rec:?}"
+    );
+    // Realistic counts + ordering.
+    assert_eq!(
+        rec.iter().filter(|e| *e == "keydown").count(),
+        7,
+        "one keydown per char of 'weather': {rec:?}"
+    );
+    assert!(
+        first("mousemove") < first("mousedown"),
+        "move precedes the first press: {rec:?}"
+    );
+    let focus_at = first("focus").or_else(|| first("focusin")).unwrap();
+    assert!(
+        focus_at < first("keydown").unwrap(),
+        "focus precedes typing: {rec:?}"
+    );
+    let blur_at = first("blur").or_else(|| first("focusout")).unwrap();
+    assert!(
+        blur_at > last("keydown").unwrap(),
+        "blur happens after typing (on the button click): {rec:?}"
+    );
+    assert!(
+        blur_at < last("click").unwrap(),
+        "blur precedes the final button click: {rec:?}"
+    );
+}
+
 // Timing fidelity: a BotGuard-class collector reads performance.now ×100+ and checks Chrome's
 // clock shape — origin-relative (now() ≈ Date.now()-timeOrigin, NOT epoch), fractional, monotonic,
 // 100µs-grid resolution, with a fractional timeOrigin. The old shim returned integer epoch ms.

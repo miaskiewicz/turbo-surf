@@ -118,8 +118,8 @@ npx turbo-surf-mcp          # stdio MCP server (76 tools), e.g.:
 #              web_search_strategies, web_search_load_strategy, web_search_reset_strategy
 # fetch:       fetch_markdown, fetch_markdown_batch, fetch_json, fetch_raw
 # render/JS:   render, set_mode, eval_js, inject_js, latest_dom, dom_history,
-#              evaluate, detect, detect_js, run_playwright, probe
-# stealth:     stealth_status, set_fingerprint, analyze_akamai
+#              evaluate, detect, detect_js, run_playwright, probe, human_interact
+# stealth:     stealth_status, set_fingerprint, analyze_akamai, probe_mint
 # session:     get_cookies, set_cookie, set_extra_headers, robots_check
 ```
 
@@ -260,8 +260,23 @@ crates.io library consumers — see [`PUBLISHING.md`](./PUBLISHING.md).
 
 MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
-what a page's anti-bot JS reads), **`analyze_akamai`** (experimental: rebuild +
-test Akamai sensors). Detailed below.
+what a page's anti-bot JS reads), **`probe_mint`** (browserless recon: run a page's
+integrity JS in-isolate → the env surface it demands + any cookies earned),
+**`human_interact`** (play realistic **trusted** input — curved browser-sampled mouse
+motion, real mousedown→dwell→mouseup→click, human typing, hover + focus/blur — as a
+generic `move`/`click`/`focus`/`type` step sequence or a saved `routine`), and
+**`analyze_akamai`** (experimental: rebuild + test Akamai sensors). Detailed below.
+
+**Human interaction (`human_interact`).** Some walls (e.g. google's BotGuard) are
+*interaction-gated* — their integrity VM only runs, and only scores you, once a real
+person engages the page. `human_interact` strings together trusted input gestures on
+the current page so the page's own listeners (and the collector) see genuine,
+entropy-bearing mouse/keyboard activity: `goto` a page, then drive a `steps` array or a
+named `routine`. The bundled **`google-serp`** routine composes the real-user search
+flow (move → click the box → focus → type `{query}` → click Search). Honest scope: this
+supplies the interaction-gate + input-entropy signal in-isolate; a *trusted* google
+`__Secure-ENID` also needs real-GPU pixels + server-side scoring (see `probe_mint` and
+the CHANGELOG), so it is not by itself a SERP unlock.
 
 ---
 

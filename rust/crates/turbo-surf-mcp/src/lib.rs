@@ -82,6 +82,79 @@ fn serp_marker(html: &str) -> &'static str {
     }
 }
 
+// --- generic human-interaction driver (the `human_interact` MCP tool) ----------
+
+// In-page driver: resolves each step's CSS `selector` to an element + its box center (or uses
+// explicit coords), maps to the render-tier `__hi.sequence` step shape, plays it, and marks the
+// DOM done. `__STEPS__` / `__OPTS__` are substituted with JSON. (No real layout → a selector's
+// box center is best-effort; events still target the resolved element, which is what matters.)
+const HUMAN_DRIVER_TMPL: &str = r#"(() => {
+  const raw = __STEPS__;
+  const q = (s) => { try { return s ? document.querySelector(s) : null; } catch (e) { return null; } };
+  const center = (el) => { try { const r = el.getBoundingClientRect(); return { x: Math.round((r.left || 0) + (r.width || 0) / 2), y: Math.round((r.top || 0) + (r.height || 0) / 2) }; } catch (e) { return { x: 0, y: 0 }; } };
+  const steps = (raw || []).map((st) => {
+    if (st.move) { const el = q(st.move.selector); const c = el ? center(el) : { x: 0, y: 0 }; return { move: { toX: st.move.toX != null ? st.move.toX : c.x, toY: st.move.toY != null ? st.move.toY : c.y, el } }; }
+    if (st.click !== undefined) return { click: (typeof st.click === "string") ? (q(st.click) || true) : true };
+    if (st.focus !== undefined) return { focus: (typeof st.focus === "string") ? (q(st.focus) || true) : true };
+    if (st.type != null) return { type: String(st.type) };
+    if (st.blur) return { blur: true };
+    if (st.wait != null) return { wait: st.wait };
+    return {};
+  });
+  __hi.sequence(document, steps, __OPTS__).then(() => { try { document.body.setAttribute("data-hi-done", "1"); } catch (e) {} });
+})()"#;
+
+/// Saved interaction routines (named step-lists with `{param}` placeholders), e.g. `google-serp`.
+fn interaction_routines() -> &'static Value {
+    static R: OnceLock<Value> = OnceLock::new();
+    R.get_or_init(|| {
+        serde_json::from_str(include_str!("interaction-routines.json")).unwrap_or(Value::Null)
+    })
+}
+
+/// Recursively replace whole-string `{param}` values from `params` (a JSON object).
+fn substitute_params(v: &mut Value, params: &Value) {
+    match v {
+        Value::String(s) => {
+            if let Some(inner) = s.strip_prefix('{').and_then(|x| x.strip_suffix('}')) {
+                if let Some(rep) = params.get(inner).and_then(Value::as_str) {
+                    *s = rep.to_string();
+                }
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| substitute_params(x, params)),
+        Value::Object(o) => o.values_mut().for_each(|x| substitute_params(x, params)),
+        _ => {}
+    }
+}
+
+/// Resolve the step list + routine-level opts from `human_interact` args: either an inline
+/// `steps` array, or a named `routine` (with `params` substituted).
+fn resolve_interaction_steps(args: &Value) -> Result<(Value, Value), String> {
+    if let Some(name) = args.get("routine").and_then(Value::as_str) {
+        let r = interaction_routines()
+            .get(name)
+            .ok_or_else(|| format!("unknown interaction routine '{name}'"))?;
+        let mut steps = r.get("steps").cloned().ok_or("routine has no 'steps'")?;
+        substitute_params(&mut steps, args.get("params").unwrap_or(&Value::Null));
+        let mut opts = serde_json::Map::new();
+        for k in ["startDelay", "startJitter"] {
+            if let Some(v) = r.get(k) {
+                opts.insert(k.to_string(), v.clone());
+            }
+        }
+        return Ok((steps, Value::Object(opts)));
+    }
+    let steps = args
+        .get("steps")
+        .cloned()
+        .ok_or("human_interact needs 'steps' (array) or 'routine' (name)")?;
+    if !steps.is_array() {
+        return Err("'steps' must be an array".into());
+    }
+    Ok((steps, Value::Null))
+}
+
 /// One agent session: the current page URL + parsed tree + nav history, plus the
 /// browser-ish state agents expect (UA / extra headers / cookie jar / JS mode) and
 /// the trails the JS server exposes (rendered-DOM history + a request log).
@@ -534,6 +607,42 @@ impl Session {
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
         Ok(json!({ "ok": true }))
+    }
+
+    // Generic human-interaction driver: play an ordered sequence of realistic, TRUSTED input
+    // gestures on the CURRENT page — move (curved, browser-sampled ~12ms), click (down→dwell→up→
+    // click), focus/blur (+focusin/out), human typing, hover (enter/leave/over/out), wait — then
+    // reload the session from the hydrated result. Steps target CSS selectors (resolved in-page
+    // to elements + their box centers) or explicit coords. `steps` is inline, or a saved `routine`
+    // (e.g. "google-serp") with `params` substituted. This is the general "string interactions
+    // together on a loaded page" capability; the google flow is just one saved routine.
+    async fn human_interact(&mut self, args: &Value) -> Result<Value, String> {
+        let (steps, routine_opts) = resolve_interaction_steps(args)?;
+        // Opts: explicit args win over the routine's defaults.
+        let pick = |k: &str| args.get(k).or_else(|| routine_opts.get(k)).cloned();
+        let mut opts = serde_json::Map::new();
+        for k in ["startDelay", "startJitter", "startX", "startY"] {
+            if let Some(v) = pick(k) {
+                if !v.is_null() {
+                    opts.insert(k.to_string(), v);
+                }
+            }
+        }
+        let steps_json = serde_json::to_string(&steps).map_err(|e| e.to_string())?;
+        let opts_json = serde_json::to_string(&Value::Object(opts)).map_err(|e| e.to_string())?;
+        let driver = HUMAN_DRIVER_TMPL
+            .replace("__STEPS__", &steps_json)
+            .replace("__OPTS__", &opts_json);
+        let script = format!("{}\n;{driver}", turbo_surf_render::HUMAN_INPUT_JS);
+        let html = serialize_doc(self.tree()?);
+        let base = self.url.clone();
+        let hydrated = turbo_surf_render::render_page(&html, &base, &script).await?;
+        let completed = hydrated.contains("data-hi-done=");
+        self.dom_history.push(hydrated.clone());
+        self.tree = Some(Tree::parse(&hydrated));
+        Ok(
+            json!({ "ok": true, "completed": completed, "steps": steps.as_array().map(|a| a.len()).unwrap_or(0) }),
+        )
     }
 
     // Debug/probe mode: run the current page's own scripts with the fingerprint
@@ -2285,6 +2394,18 @@ pub fn tools() -> Value {
              Recon only — a completed run can still be server-side/IP-score-rejected.",
         ),
         (
+            "human_interact",
+            "Play a sequence of realistic, TRUSTED human input gestures on the CURRENT page \
+             (goto first), then keep the hydrated result. Generic page-interaction driver: \
+             string together move / click / focus / type / blur / wait steps — curved \
+             browser-sampled (~12ms) mouse motion, a real mousedown→dwell→mouseup→click, \
+             human-paced typing, hover (enter/leave) + focus/blur (+focusin/out), all \
+             isTrusted:true on the hi-res clock. Args: `steps` (array; each {move:{selector|\
+             toX,toY}} | {click:selector|true} | {focus:selector} | {type:'…'} | {blur:true} | \
+             {wait:ms}) OR `routine` (saved preset, e.g. 'google-serp') + `params` ({query:'…'}); \
+             plus startDelay?/startJitter?. Events are dispatched in-isolate (no browser).",
+        ),
+        (
             "set_fingerprint",
             "Override render-tier navigator fields (JSON: userAgent, platform, \
              vendor, languages, hardwareConcurrency, deviceMemory, chromeMajor, \
@@ -2465,6 +2586,7 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             let url = arg_str(args, "url").ok_or("probe_mint: missing 'url'")?;
             probe_mint(url).await
         }
+        "human_interact" => session.human_interact(args).await,
         "stealth_status" => Ok(session.stealth_status()),
         "set_fingerprint" => session.set_fingerprint(args.get("overrides").unwrap_or(args)),
         "latest_dom" => Ok(json!(session.dom_history.last())),
@@ -2846,6 +2968,57 @@ mod tests {
 
     async fn call(s: &mut Session, name: &str, args: Value) -> Value {
         call_tool(s, name, &args).await.unwrap()
+    }
+
+    // The generic human_interact tool plays a step sequence on the current page to completion
+    // (the driver sets data-hi-done once __hi.sequence resolves), and rehydrates the session.
+    #[tokio::test]
+    async fn human_interact_plays_a_step_sequence() {
+        let mut s = Session::new();
+        s.load(
+            "https://x.test/",
+            "<body><input id='q' type='text'><button id='btn'>Search</button></body>",
+        );
+        let args = json!({
+            "steps": [
+                { "move": { "selector": "#q" } }, { "click": "#q" }, { "focus": "#q" },
+                { "type": "weather" }, { "move": { "selector": "#btn" } }, { "click": "#btn" }
+            ],
+            "startDelay": 10, "startJitter": 10
+        });
+        let res = call_tool(&mut s, "human_interact", &args).await.unwrap();
+        assert_eq!(res["completed"], true, "sequence ran to completion: {res}");
+        assert_eq!(res["steps"], 6);
+        let dom = serialize_doc(s.tree().unwrap());
+        assert!(
+            dom.contains("data-hi-done"),
+            "done flag written to the page: {dom}"
+        );
+    }
+
+    // The google-serp routine is a saved step-list; {query} is substituted from params.
+    #[test]
+    fn google_serp_routine_substitutes_query() {
+        let args = json!({ "routine": "google-serp", "params": { "query": "rust lang" } });
+        let (steps, opts) = super::resolve_interaction_steps(&args).unwrap();
+        let arr = steps.as_array().unwrap();
+        assert!(
+            arr.iter()
+                .any(|s| s.get("type").and_then(|t| t.as_str()) == Some("rust lang")),
+            "query substituted into the type step: {steps}"
+        );
+        assert!(
+            arr.iter().any(|s| s
+                .get("click")
+                .and_then(|c| c.as_str())
+                .map(|c| c.contains("name=q"))
+                .unwrap_or(false)),
+            "clicks the search box: {steps}"
+        );
+        assert!(
+            opts.get("startDelay").is_some(),
+            "routine carries startDelay: {opts}"
+        );
     }
 
     // Canvas fingerprint fidelity: with the raster hook installed (Session::new), the render

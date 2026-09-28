@@ -1283,6 +1283,12 @@ struct Strategy {
     /// Merged over the impersonate/rustls defaults. Empty for most engines.
     #[serde(default)]
     headers: BTreeMap<String, String>,
+    /// Hosts to treat as engine-internal (nav/asset/account links) in the `structural` extractor,
+    /// so they're never emitted as organic results. A pattern starting with `.` matches as a
+    /// substring (e.g. `.google.`), otherwise as a host suffix (e.g. `gstatic.com`). Data-driven
+    /// per engine — empty means no filtering (the `structural` format is not google-only).
+    #[serde(default)]
+    internal_hosts: Vec<String>,
     // --- html strategies: selectors, `title`/`link`/`snippet` scoped to `result_container` ---
     #[serde(default)]
     result_container: String,
@@ -1415,30 +1421,32 @@ fn build_query_url(
 fn parse_serp(strategy: &Strategy, body: &str, limit: usize) -> Vec<SearchResult> {
     match strategy.format.as_str() {
         "json" => parse_json_serp(strategy, body, limit),
-        "structural" => parse_structural_serp(body, limit),
+        "structural" => parse_structural_serp(strategy, body, limit),
         _ => parse_html_serp(strategy, body, limit),
     }
 }
 
-/// True when `url`'s host is a search-engine-internal / asset host (google's own
-/// nav, gstatic, googleusercontent, google account/policy links) — never an organic
-/// result, so it's filtered out of the structural pass.
-fn is_serp_internal_host(url: &str) -> bool {
+/// True when `url`'s host matches one of the strategy's engine-internal host patterns
+/// (nav/asset/account links) — never an organic result, so it's filtered out of the structural
+/// pass. A pattern starting with `.` is a substring match (e.g. `.google.`), otherwise a host
+/// suffix (e.g. `gstatic.com`). An empty list means no filtering.
+fn is_serp_internal_host(url: &str, internal_hosts: &[String]) -> bool {
     let host = turbo_surf_core::url::host_of(url).unwrap_or_default();
-    host.ends_with("google.com")
-        || host.ends_with("gstatic.com")
-        || host.ends_with("googleusercontent.com")
-        || host.ends_with("google.co")
-        || host.contains(".google.")
+    internal_hosts.iter().any(|p| {
+        if let Some(sub) = p.strip_prefix('.') {
+            host.contains(&format!(".{sub}")) || host.contains(p.as_str())
+        } else {
+            host == *p || host.ends_with(&format!(".{p}"))
+        }
+    })
 }
 
-/// Classname-free organic-result extraction — for engines (google) whose result
-/// container/title classes are obfuscated and rotate frequently, making a selector
-/// strategy brittle. The stable STRUCTURE doesn't change: an organic result is an
-/// `<a href="http…">` that CONTAINS an `<h3>` (its title) and points off-site. We
-/// walk those anchors, take the h3 text as the title and the anchor href as the URL,
-/// skip engine-internal hosts, and dedup by URL.
-fn parse_structural_serp(html: &str, limit: usize) -> Vec<SearchResult> {
+/// Classname-free organic-result extraction — for engines whose result container/title classes
+/// are obfuscated and rotate frequently (google), making a selector strategy brittle. The stable
+/// STRUCTURE doesn't change: an organic result is an `<a href="http…">` that CONTAINS an `<h3>`
+/// (its title) and points off-site. We walk those anchors, take the h3 text as the title and the
+/// anchor href as the URL, skip the strategy's engine-internal hosts, and dedup by URL.
+fn parse_structural_serp(strategy: &Strategy, html: &str, limit: usize) -> Vec<SearchResult> {
     let tree = Tree::parse(html);
     let mut out: Vec<SearchResult> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1448,7 +1456,7 @@ fn parse_structural_serp(html: &str, limit: usize) -> Vec<SearchResult> {
         }
         let href = tree.get_attribute(a, "href").unwrap_or_default();
         let url = href.trim();
-        if !url.starts_with("http") || is_serp_internal_host(url) {
+        if !url.starts_with("http") || is_serp_internal_host(url, &strategy.internal_hosts) {
             continue;
         }
         // The title-carrying <h3> must be INSIDE this anchor (the organic-result shape).
@@ -4194,7 +4202,7 @@ mod tests {
           <a href="https://ex.com/2"><h3>Real Two</h3></a>
         </body></html>"#;
         let google = strat(
-            r#"{"engine":"google","query_url":"https://g/?q={query}","format":"structural"}"#,
+            r#"{"engine":"google","query_url":"https://g/?q={query}","format":"structural","internal_hosts":["google.com","gstatic.com",".google."]}"#,
         );
         let r = parse_serp(&google, html, 10);
         assert_eq!(r.len(), 2, "internal/no-h3/dup filtered: {r:?}");
@@ -4239,6 +4247,38 @@ mod tests {
         );
         // Other engines carry no extra headers by default.
         assert!(reg.get("bing").unwrap().headers.is_empty());
+        // The structural internal-host filter is also config-driven on the google strategy.
+        assert!(reg
+            .get("google")
+            .unwrap()
+            .internal_hosts
+            .iter()
+            .any(|h| h == "gstatic.com"));
+    }
+
+    // The structural extractor's internal-host filter is data-driven (not google-hardcoded):
+    // suffix patterns match a host or subdomain; a `.`-prefixed pattern is a substring; an empty
+    // list disables filtering (so `structural` isn't secretly google-only).
+    #[test]
+    fn structural_internal_host_filter_is_config_driven() {
+        let hosts = [
+            "google.com".to_string(),
+            ".google.".to_string(),
+            "gstatic.com".to_string(),
+        ];
+        assert!(is_serp_internal_host("https://www.google.com/foo", &hosts));
+        assert!(is_serp_internal_host("https://ssl.gstatic.com/x", &hosts));
+        assert!(
+            is_serp_internal_host("https://policies.google.de/", &hosts),
+            ".google. substring"
+        );
+        assert!(!is_serp_internal_host("https://example.com/", &hosts));
+        assert!(
+            !is_serp_internal_host("https://notgoogle.com/", &hosts),
+            "suffix, not substring"
+        );
+        // Empty list → nothing filtered (structural is a general format).
+        assert!(!is_serp_internal_host("https://www.google.com/", &[]));
     }
 
     #[test]

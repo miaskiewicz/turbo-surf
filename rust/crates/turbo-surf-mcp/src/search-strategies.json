@@ -31,7 +31,14 @@
     "headers": {
       "referer": "https://www.google.com/",
       "sec-fetch-site": "same-origin"
-    }
+    },
+    "internal_hosts": [
+      "google.com",
+      "gstatic.com",
+      "googleusercontent.com",
+      "google.co",
+      ".google."
+    ]
   },
   {
     "engine": "searxng",

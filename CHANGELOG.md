@@ -102,7 +102,11 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   full kitchen-sink — GPU + interaction + parity — does not earn a trusted google
   `__Secure-ENID`; that residual is server-side IP-reputation + attestation scoring.)
 
-### Added — per-strategy request headers (data-driven)
+### Added — per-strategy config (data-driven, not google-hardcoded)
+- The `structural` result extractor's engine-internal host filter is now a per-strategy
+  **`internal_hosts`** list (`.`-prefixed = substring, else host suffix; empty = no filtering)
+  instead of a google-hardcoded blocklist baked into the shared extractor — so `structural` is a
+  general format, not secretly google-only. The google list moved to `search-strategies.json`.
 - Search strategies (`search-strategies.json`) gain an optional **`headers`** map, applied to the
   SERP fetch and merged over the impersonate/rustls defaults — a general, config-driven knob (not
   google-hardcoded). The google strategy uses it to send `Referer: https://www.google.com/` +

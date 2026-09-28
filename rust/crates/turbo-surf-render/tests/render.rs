@@ -38,6 +38,9 @@ async fn a_throwing_script_does_not_abort_later_scripts() {
 // set_fingerprint is a PROCESS-global override; serialize the tests that read or
 // mutate it so a parallel override can't leak into a default-assuming test.
 static FP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// Serializes tests that install the process-global WebGL executor hook (set_webgl_fn), so their
+// renders don't race each other's hook value under cargo's parallel test threads.
+static WEBGL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // --- pooled render (reused isolate) keeps fresh-navigation isolation --------
 // `render_page_pooled` reuses one V8 isolate across pages for speed; the cross-page
@@ -314,12 +317,75 @@ async fn page_load_lifecycle_fires_in_order() {
     );
 }
 
+// Human-input synthesizer edge cases: empty typing, delay bounds, and a degenerate A==B path
+// must all behave sanely (no empty/NaN/non-monotonic output, no throw).
+#[test]
+fn human_input_edge_cases() {
+    let script = format!(
+        "{hi}\n;JSON.stringify({{\
+          emptyType: __hi.typePlan('', 100),\
+          delayFixed: __hi.delay(100, 0),\
+          delayInRange: (function(){{ for (var i=0;i<80;i++){{ var d=__hi.delay(10,40); if(d<10||d>50) return false; }} return true; }})(),\
+          ab: (function(){{ var p=__hi.path(5,5,5,5,'human'); var mono=true; for(var i=1;i<p.length;i++) if(p[i].t<=p[i-1].t) mono=false; return {{ len:p.length, mono:mono, lastx:p[p.length-1].x, lasty:p[p.length-1].y }}; }})(),\
+        }})",
+        hi = turbo_surf_render::HUMAN_INPUT_JS
+    );
+    let out = turbo_surf_render::run_with_dom("<body></body>", &script).unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("json {e}: {out}"));
+    assert_eq!(
+        v["emptyType"]["events"].as_array().map(|a| a.len()),
+        Some(0),
+        "empty text → no key events"
+    );
+    assert_eq!(
+        v["emptyType"]["end"], 100.0,
+        "empty typing keeps the base clock"
+    );
+    assert_eq!(v["delayFixed"], 100.0, "delay(base,0) == base (no jitter)");
+    assert_eq!(
+        v["delayInRange"], true,
+        "delay stays within [base, base+jitter]"
+    );
+    assert!(
+        v["ab"]["len"].as_u64().unwrap_or(0) >= 1,
+        "degenerate A==B path still yields samples"
+    );
+    assert_eq!(
+        v["ab"]["mono"], true,
+        "A==B path timestamps still strictly increase"
+    );
+    assert_eq!(v["ab"]["lastx"], 5.0, "A==B path ends at the target x");
+    assert_eq!(v["ab"]["lasty"], 5.0, "A==B path ends at the target y");
+}
+
+// WebGL bridge with NO host executor installed: readPixels must fall back to the synthetic
+// vendored readback without throwing (the executor is optional; only present under gpu-metal).
+#[test]
+fn webgl_readpixels_falls_back_without_host_fn() {
+    let _g = WEBGL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    turbo_surf_render::set_webgl_fn(Box::new(|_w, _h, _calls| None)); // executor declines
+    let script = r#"
+        var c=document.createElement('canvas'); c.width=2; c.height=2;
+        var gl=c.getContext('webgl');
+        var px=new Uint8Array(2*2*4);
+        var threw=false; try { gl.readPixels(0,0,2,2,0x1908,0x1401,px); } catch(e){ threw=true; }
+        document.body.setAttribute('data-fb', threw ? 'threw' : 'ok');
+    "#;
+    let out = turbo_surf_render::render_html("<body></body>", script).unwrap();
+    assert!(
+        out.contains(r#"data-fb="ok""#),
+        "readPixels must not throw when no executor is installed: {out}"
+    );
+}
+
 // WebGL→GPU bridge plumbing (no real GPU): with a stub executor installed, the isolate's WebGL
 // context must RECORD a page's gl.* calls and, on readPixels, fill the destination from the
 // executor's returned framebuffer. Proves the recorder + op boundary + readPixels flip/slice
 // end to end; the real GPU executor is exercised separately under `gpu-metal`.
 #[test]
 fn webgl_readpixels_uses_the_host_executor() {
+    let _g = WEBGL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Stub: return a solid-red RGBA framebuffer of the requested size.
     turbo_surf_render::set_webgl_fn(Box::new(|w, h, _calls| {
         let mut px = Vec::with_capacity((w * h * 4) as usize);

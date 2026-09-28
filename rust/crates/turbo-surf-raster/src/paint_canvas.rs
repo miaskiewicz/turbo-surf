@@ -126,6 +126,45 @@ mod tests {
         assert_eq!(png_dims(&png), (40, 30));
     }
 
+    // Edge cases in the op-log parser: malformed / non-array JSON errors; junk entries, unknown
+    // ops, and short/typeless tuples are skipped without panicking (forward-compatible).
+    #[test]
+    fn parse_ops_edge_cases() {
+        assert!(
+            canvas_ops::parse_ops("not json").is_err(),
+            "malformed JSON → Err"
+        );
+        assert!(
+            canvas_ops::parse_ops(r#"{"op":"x"}"#).is_err(),
+            "non-array top level → Err"
+        );
+        assert!(
+            canvas_ops::parse_ops("[]").unwrap().is_empty(),
+            "empty array → no ops"
+        );
+        // A junk tuple, an unknown op, a short fillRect (missing args), and a valid one: only the
+        // valid op survives; nothing panics.
+        let ops = canvas_ops::parse_ops(
+            r##"[123, ["frobnicate",[1,2]], ["fillRect",[0,0]], ["fillRect",[0,0,4,4],"#f00",null,null,null,null,1,null]]"##,
+        )
+        .unwrap();
+        // The two fillRects both parse (missing args default to 0 → a 0-size rect is harmless);
+        // junk (123) and the unknown op are dropped. Either way replay must not panic.
+        let png = replay(8, 8, &ops).unwrap();
+        assert_eq!(png_dims(&png), (8, 8));
+    }
+
+    #[test]
+    fn clamps_zero_size_to_valid_png() {
+        // The public entry clamps 0-dims to 1×1 (replay itself requires a valid pixmap).
+        let png = crate::canvas_ops_png(0, 0, "[]").unwrap();
+        assert_eq!(
+            png_dims(&png),
+            (1, 1),
+            "0×0 clamps to 1×1, still a valid PNG"
+        );
+    }
+
     // The op-log is the render tier's `ctx._ops` tuple format:
     // [name, argsArray, fillStyle, strokeStyle, font, textBaseline, textAlign, globalAlpha, comp].
     #[test]

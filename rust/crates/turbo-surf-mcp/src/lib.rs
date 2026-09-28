@@ -3027,6 +3027,40 @@ mod tests {
         );
     }
 
+    // Edge cases in interaction step resolution: unknown routine, missing steps, and a non-array
+    // `steps` all error clearly rather than panicking or silently running nothing.
+    #[test]
+    fn resolve_interaction_steps_rejects_bad_input() {
+        assert!(
+            super::resolve_interaction_steps(&json!({ "routine": "no-such-routine" })).is_err(),
+            "unknown routine → Err"
+        );
+        assert!(
+            super::resolve_interaction_steps(&json!({})).is_err(),
+            "neither steps nor routine → Err"
+        );
+        assert!(
+            super::resolve_interaction_steps(&json!({ "steps": "not-an-array" })).is_err(),
+            "non-array steps → Err"
+        );
+        // Inline steps pass through.
+        let (steps, _opts) =
+            super::resolve_interaction_steps(&json!({ "steps": [{ "click": true }] })).unwrap();
+        assert_eq!(steps.as_array().map(|a| a.len()), Some(1));
+    }
+
+    // human_interact with an unknown routine surfaces the error through the tool dispatch.
+    #[tokio::test]
+    async fn human_interact_unknown_routine_errors() {
+        let mut s = Session::new();
+        s.load("https://x.test/", "<body></body>");
+        let res = call_tool(&mut s, "human_interact", &json!({ "routine": "nope" })).await;
+        assert!(
+            res.is_err(),
+            "unknown routine must error through the tool: {res:?}"
+        );
+    }
+
     // Canvas fingerprint fidelity: with the raster hook installed (Session::new), the render
     // isolate's toDataURL must return a REAL, sizeable PNG (the vendored stub was ~94 bytes —
     // an impossible size for rendered content, a canvas-fingerprint tell).

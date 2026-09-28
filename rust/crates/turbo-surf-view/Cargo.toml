@@ -7,7 +7,7 @@ repository.workspace = true
 description = "turbo-surf tier 2 views: text / xpath / query over the turbo-dom Tree"
 
 [dependencies]
-turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.1" }
 # default-features off (see turbo-surf-render): keep the `impersonate` BoringSSL
 # backend out of non-binary consumers (the PyO3 wheel) — the mcp binary still gets it.
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.4", default-features = false }

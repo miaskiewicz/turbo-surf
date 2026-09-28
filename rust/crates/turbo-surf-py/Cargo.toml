@@ -18,7 +18,7 @@ turbo-surf-view = { path = "../turbo-surf-view", version = "0.4.4" }
 turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.4.4" }
 turbo-surf-render = { path = "../turbo-surf-render", version = "0.4.4" }
 turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.4.4" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.1" }
 serde = "1"
 serde_json = "1"
 # A current-thread tokio runtime drives the async render tier from a sync Python

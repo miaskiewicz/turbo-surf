@@ -15,7 +15,7 @@ deno_error = "=0.7.1"
 # the `v8` crate by its bare name) compiles. Pinned to the exact version deno_core
 # resolves so both share one v8 — the binding installs into deno_core's own context.
 v8 = "=149.4.0"
-turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.1" }
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
 # fetch backend, so downstream non-binary consumers (the PyO3 wheel) don't drag it in
 # and need a C toolchain. The shipped mcp binary still gets impersonate — it requests

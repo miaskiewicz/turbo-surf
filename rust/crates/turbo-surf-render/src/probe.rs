@@ -279,21 +279,25 @@ pub async fn probe_page_async(
     script: &str,
     budget_ms: u64,
 ) -> Result<(ProbeReport, String), String> {
-    // Assemble three programs joined by the render tier's SCRIPT_BOUNDARY so each runs
-    // as its own top-level script (like a browser): (1) PROBE_INSTALL wraps the globals
-    // first; (2) the page's own scripts — themselves already boundary-delimited, and
-    // each tolerated independently by `exec_page_scripts`; (3) a late timer that writes
-    // the accumulated log into the sink node AFTER the async event loop drains (so reads
-    // from fetch/timer callbacks, not just the sync init phase, are captured — `run_async`
-    // runs `__runTimers()` after the first drain). NB: no `try {}` may span a boundary —
-    // the wrapper would fragment across the split (the source of spurious SyntaxErrors).
+    // Assemble three programs joined by the render tier's SCRIPT_BOUNDARY so each runs as its own
+    // top-level script (like a browser): (1) PROBE_INSTALL wraps the globals first; (2) the page's
+    // own scripts — themselves boundary-delimited, each tolerated by `exec_page_scripts`; (3) a
+    // writer that snapshots the accumulated log into the sink node, RE-writing (last wins) on both
+    // an early timer AND the window `load` event. The window-`load` write is critical: `run_async`
+    // fires DOMContentLoaded/load AFTER the first `__runTimers` pass, and a BotGuard/reCAPTCHA-class
+    // collector commonly does its heavy env reads in a `load` handler — capturing only at
+    // setTimeout(0) would miss them and under-report `shim_needed`. NB: no `try {}` may span a
+    // SCRIPT_BOUNDARY — the wrapper would fragment across the split.
     let sink_writer = format!(
-        "setTimeout(function(){{ try {{\n\
-           var __el = document.createElement('div');\n\
+        "(function(){{ var __w = function(){{ try {{\n\
+           var __el = document.getElementById({sink:?}) || document.createElement('div');\n\
            __el.id = {sink:?};\n\
            __el.textContent = JSON.stringify(globalThis.__probe || []);\n\
-           (document.body || document.documentElement).appendChild(__el);\n\
-         }} catch (e) {{}} }}, 0);",
+           if (!__el.parentNode) (document.body || document.documentElement).appendChild(__el);\n\
+         }} catch (e) {{}} }};\n\
+         try {{ globalThis.addEventListener('load', __w); }} catch (e) {{}}\n\
+         setTimeout(__w, 0);\n\
+       }})();",
         sink = PROBE_SINK,
     );
     let boundary = crate::runtime::SCRIPT_BOUNDARY;

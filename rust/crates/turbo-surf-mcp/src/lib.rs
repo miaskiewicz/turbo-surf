@@ -1433,8 +1433,8 @@ fn parse_serp(strategy: &Strategy, body: &str, limit: usize) -> Vec<SearchResult
 fn is_serp_internal_host(url: &str, internal_hosts: &[String]) -> bool {
     let host = turbo_surf_core::url::host_of(url).unwrap_or_default();
     internal_hosts.iter().any(|p| {
-        if let Some(sub) = p.strip_prefix('.') {
-            host.contains(&format!(".{sub}")) || host.contains(p.as_str())
+        if p.starts_with('.') {
+            host.contains(p.as_str()) // e.g. ".google." matches policies.google.de
         } else {
             host == *p || host.ends_with(&format!(".{p}"))
         }

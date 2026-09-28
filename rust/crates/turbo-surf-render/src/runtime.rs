@@ -247,6 +247,14 @@ fn op_webgl_readback(width: u32, height: u32, #[string] calls_json: &str) -> Str
     }
 }
 
+// Whether a host WebGL executor is installed. The op itself is always registered, so the JS
+// recorder can't infer presence from `typeof op`; it checks this so it only overrides the WebGL
+// context when a GPU backend exists (else the vendored synthetic context is left untouched).
+#[op2(fast)]
+fn op_webgl_available() -> bool {
+    WEBGL_EXEC.read().map(|g| g.is_some()).unwrap_or(false)
+}
+
 // `document.cookie` setter: ingest a `name=value; attrs` line against the base.
 #[op2(fast)]
 fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
@@ -361,7 +369,8 @@ deno_core::extension!(
         op_fingerprint,
         op_measure_text,
         op_raster_png,
-        op_webgl_readback
+        op_webgl_readback,
+        op_webgl_available
     ],
 );
 
@@ -1152,16 +1161,25 @@ globalThis.MessageEvent = class MessageEvent {
   stopImmediatePropagation() {}
 };
 globalThis.MessagePort = class MessagePort {
-  constructor() { this.onmessage = null; this._peer = null; this._l = []; this._started = false; this._q = []; }
+  constructor() {
+    this._onmessage = null; this._peer = null; this._l = []; this._started = false; this._q = [];
+    // Setting `onmessage` implies start() (Chrome), which must FLUSH anything queued before a
+    // listener existed — an assignment-only receiver otherwise strands early messages in _q.
+    Object.defineProperty(this, "onmessage", {
+      configurable: true, enumerable: true,
+      get() { return this._onmessage; },
+      set(fn) { this._onmessage = fn; if (typeof fn === "function") this.start(); },
+    });
+  }
   _fire(data) {
     const ev = new globalThis.MessageEvent("message", { data });
     ev.target = this;
-    if (typeof this.onmessage === "function") { try { this.onmessage(ev); } catch (e) {} }
+    if (typeof this._onmessage === "function") { try { this._onmessage(ev); } catch (e) {} }
     for (const fn of this._l.slice()) { try { fn.call(this, ev); } catch (e) {} }
   }
   postMessage(data) {
     const p = this._peer; if (!p) return;
-    globalThis.setTimeout(() => { if (p._started || typeof p.onmessage === "function") p._fire(data); else p._q.push(data); }, 0);
+    globalThis.setTimeout(() => { if (p._started) p._fire(data); else p._q.push(data); }, 0);
   }
   start() { if (this._started) return; this._started = true; const q = this._q; this._q = []; for (const d of q) this._fire(d); }
   close() { this._peer = null; }
@@ -2613,7 +2631,11 @@ globalThis.__domSig = () => {
   const resolveFrameUrl = (el) => {
     const s = frameSrcOf(el);
     if (!s) return "";
-    try { return new URL(s, (globalThis.location && globalThis.location.href) || "http://localhost/").href; }
+    // Resolve a relative src against the OWNING frame's URL (not always the top window), so a
+    // relative src in a nested/grandchild frame resolves correctly.
+    const owner = el.__ownerWin || globalThis;
+    const base = (owner.location && owner.location.href) || (globalThis.location && globalThis.location.href) || "http://localhost/";
+    try { return new URL(s, base).href; }
     catch (_e) { return s; }
   };
   // Walk `parent` links to the real top window (self-aliased at the top, so it terminates).
@@ -3087,7 +3109,11 @@ globalThis.__domSig = () => {
     };
     const installWebglRecorder = (gl) => {
       const op = (Deno.core.ops && Deno.core.ops.op_webgl_readback) || null;
-      if (!op) return;
+      // op_webgl_readback is ALWAYS registered, so `typeof op` can't tell whether a GPU executor
+      // is installed. Only override the (vendored synthetic) WebGL context when one actually is —
+      // otherwise the default build would replace the context with recording stubs for nothing.
+      const avail = Deno.core.ops && Deno.core.ops.op_webgl_available;
+      if (!op || !avail || !avail()) return;
       const rec = [];
       let hid = 0, lid = 0;
       const H = () => ({ __h: ++hid });

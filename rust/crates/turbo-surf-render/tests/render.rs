@@ -281,6 +281,11 @@ async fn messaging_apis_deliver_message_events() {
         var b1 = new BroadcastChannel('x'), b2 = new BroadcastChannel('x');
         b2.onmessage = function(e){ log.push('bc:' + e.data); };
         b1.postMessage('cast');
+        // A message posted BEFORE a listener exists is queued and flushed when onmessage is later
+        // assigned (setting onmessage implies start()).
+        var ch2 = new MessageChannel();
+        ch2.port2.postMessage('early');
+        setTimeout(function(){ ch2.port1.onmessage = function(e){ log.push('q:' + e.data); }; }, 5);
         var natv = Function.prototype.toString.call(MessageChannel).indexOf('[native code]') >= 0
                 && Function.prototype.toString.call(MessageEvent).indexOf('[native code]') >= 0
                 && Function.prototype.toString.call(BroadcastChannel).indexOf('[native code]') >= 0;
@@ -289,7 +294,13 @@ async fn messaging_apis_deliver_message_events() {
     let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
         .await
         .unwrap();
-    for want in ["mc:42:true:true", "wm:hi:true", "bc:cast", "native:true"] {
+    for want in [
+        "mc:42:true:true",
+        "wm:hi:true",
+        "bc:cast",
+        "q:early",
+        "native:true",
+    ] {
         assert!(out.contains(want), "missing {want:?} in messaging: {out}");
     }
 }

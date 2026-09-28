@@ -263,6 +263,39 @@ fn legacy_timing_and_scheduler_are_present() {
     );
 }
 
+// WebGL→GPU bridge plumbing (no real GPU): with a stub executor installed, the isolate's WebGL
+// context must RECORD a page's gl.* calls and, on readPixels, fill the destination from the
+// executor's returned framebuffer. Proves the recorder + op boundary + readPixels flip/slice
+// end to end; the real GPU executor is exercised separately under `gpu-metal`.
+#[test]
+fn webgl_readpixels_uses_the_host_executor() {
+    // Stub: return a solid-red RGBA framebuffer of the requested size.
+    turbo_surf_render::set_webgl_fn(Box::new(|w, h, _calls| {
+        let mut px = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..(w * h) {
+            px.extend_from_slice(&[255u8, 0, 0, 255]);
+        }
+        Some(px)
+    }));
+    let script = r#"
+        var c = document.createElement('canvas'); c.width = 4; c.height = 4;
+        var gl = c.getContext('webgl');
+        var b = gl.createBuffer(); gl.bindBuffer(0x8892, b);
+        gl.bufferData(0x8892, new Float32Array([0,0, 1,0, 0,1]), 0x88E4);
+        var vs = gl.createShader(0x8B31); gl.shaderSource(vs, 'void main(){}'); gl.compileShader(vs);
+        gl.viewport(0,0,4,4); gl.clearColor(0,0,0,1); gl.clear(0x4000);
+        gl.drawArrays(0x0004, 0, 3);
+        var px = new Uint8Array(4*4*4);
+        gl.readPixels(0,0,4,4,0x1908,0x1401,px);
+        document.body.setAttribute('data-px', px[0]+','+px[1]+','+px[2]+','+px[3]);
+    "#;
+    let out = turbo_surf_render::render_html("<body></body>", script).unwrap();
+    assert!(
+        out.contains(r#"data-px="255,0,0,255""#),
+        "readPixels must be filled from the host executor's framebuffer: {out}"
+    );
+}
+
 // STEP 1 — trusted-event capability. A synthesized human-input event must read isTrusted:true to
 // a real listener (window/document/node), an ordinary script event must stay false, and isTrusted
 // must live as a prototype ACCESSOR (Chrome's descriptor shape), not an own instance prop.
@@ -2468,9 +2501,6 @@ fn webgl_apple_metal_signature_in_render_isolate() {
           const gl = c.getContext('webgl');
           if (!gl) return 'NULL';
           const d = gl.getExtension('WEBGL_debug_renderer_info');
-          const px1 = new Uint8Array(16); gl.readPixels(0,0,2,2,0x1908,0x1401,px1);
-          gl.clearColor(0.2,0.4,0.6,1); gl.clear(0x4000); gl.drawArrays(0x0004,0,3);
-          const px2 = new Uint8Array(16); gl.readPixels(0,0,2,2,0x1908,0x1401,px2);
           return [
             gl.getParameter(gl.VENDOR),
             gl.getParameter(gl.RENDERER),
@@ -2478,7 +2508,6 @@ fn webgl_apple_metal_signature_in_render_isolate() {
             gl.getParameter(d.UNMASKED_RENDERER_WEBGL),
             gl.getParameter(gl.MAX_TEXTURE_SIZE),
             gl.getSupportedExtensions().indexOf('WEBGL_debug_renderer_info') >= 0,
-            Array.from(px1).join(',') !== Array.from(px2).join(','),
           ].join('||');
         })()"#,
     )
@@ -2495,9 +2524,11 @@ fn webgl_apple_metal_signature_in_render_isolate() {
         !out.contains("SwiftShader"),
         "SwiftShader signature must be gone: {out}"
     );
+    // Readback content-dependence is now owned by the WebGL→GPU bridge (see
+    // `webgl_readpixels_uses_the_host_executor` + the gpu-metal e2e), not this identity check.
     assert!(
-        out.contains("||16384||true||true"),
-        "max-texture (16384) + debug ext + content-dependent readback: {out}"
+        out.contains("||16384||true"),
+        "max-texture (16384) + debug ext present: {out}"
     );
 }
 

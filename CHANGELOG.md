@@ -69,15 +69,23 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   `performance.timing`/`navigation`, and `window.scheduler`.
 
 ### Added — GPU (opt-in)
-- **`gpu-metal` cargo feature** (off by default; macOS/Metal) — real Apple-GPU canvas
-  rasterization via `wgpu`→Metal, backing the render tier's `toDataURL` with genuine GPU
-  pixels instead of tiny-skia's software raster. Fixes the coherence tell of claiming an
-  Apple-Metal renderer while producing device-invariant/software pixels. Zero cost to the
-  default build/PyPI wheels (0 wgpu crates unless the feature is on); enabled via
-  `turbo-surf-mcp`/`napi`/`py`'s own `gpu-metal` pass-through. NOTE: this covers **canvas
-  2D**; the live **WebGL→wgpu** bridge (so a page's own `gl.*` calls execute on the GPU and
-  `readPixels` returns real pixels) is the follow-up — the recorded WebGL op-log is lossy
-  (`bufferData` keeps only byte length), so WebGL scene pixels can't be replayed, only bridged.
+- **`gpu-metal` cargo feature** (off by default; macOS/Metal) — real Apple-GPU rendering via
+  `wgpu`→Metal for the render tier's fingerprint surface, fixing the coherence tell of claiming
+  an Apple-Metal renderer while producing device-invariant/software pixels. Two paths:
+  - **Canvas 2D** — `toDataURL` rasterizes on the GPU instead of tiny-skia (falls back on any
+    GPU error, so it never regresses).
+  - **WebGL** — a **live WebGL→wgpu bridge**: the render tier overrides the isolate's WebGL
+    methods to record a page's `gl.*` calls *at the live call site* (real buffer bytes + shader
+    source — nothing lossy), then executes the batch on the real GPU (`naga` translates the
+    page's GLSL-ES → WGSL) and returns genuine framebuffer pixels for `readPixels`. Synthetic
+    fallback when no GPU backend is installed.
+  A broad fidelity win for **any** wall that hashes canvas/WebGL (DataDome, Kasada, reCAPTCHA,
+  Akamai, Cloudflare, Incapsula), not just google. Zero cost to the default build / PyPI wheels
+  (0 wgpu/naga crates unless the feature is on); enabled via `turbo-surf-mcp`/`napi`/`py`'s own
+  `gpu-metal` pass-through. Real Apple-GPU pixels ≠ Chrome's *exact* ANGLE hash — beats
+  device-invariance/SwiftShader detection, not exact-corpus matching. (Live-measured: even the
+  full kitchen-sink — GPU + interaction + parity — does not earn a trusted google
+  `__Secure-ENID`; that residual is server-side IP-reputation + attestation scoring.)
 
 ### Changed — sidecar + deps
 - **Browser sidecar mint** (`fetch-serp.mjs`): BotGuard is interaction-gated, so `mintEnid`

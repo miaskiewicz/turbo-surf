@@ -13,7 +13,7 @@ pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};
 pub use runtime::{
     ensure_platform, eval_async, render_html, render_html_async, render_hydrate,
     render_hydrate_with_budget, render_page, render_page_pooled, render_page_with_budget,
-    run_with_dom, set_fingerprint, set_measure_fn, set_raster_fn, PageSession,
+    run_with_dom, set_fingerprint, set_measure_fn, set_raster_fn, set_webgl_fn, PageSession,
     DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
 

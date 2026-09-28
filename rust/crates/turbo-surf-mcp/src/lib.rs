@@ -210,6 +210,12 @@ fn ensure_render_hooks() {
         turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {
             raster::canvas_ops_png(w, h, ops_json).ok()
         }));
+        // WebGL→GPU bridge: execute a recorded WebGL draw batch on the real GPU so readPixels
+        // returns genuine Apple-GPU pixels (only under `gpu-metal`; else the synthetic stub stands).
+        #[cfg(feature = "gpu-metal")]
+        turbo_surf_render::set_webgl_fn(Box::new(|w, h, calls| {
+            raster::webgl_readback(w, h, calls)
+        }));
     });
 }
 
@@ -3046,6 +3052,32 @@ mod tests {
             b64.len() > 1000,
             "a real rasterized PNG should be sizeable (was the ~94-byte stub); got {} base64 chars",
             b64.len()
+        );
+    }
+
+    // Real-GPU WebGL bridge end to end (only under `gpu-metal`): Session::new injects the
+    // wgpu-backed executor, a page's WebGL fingerprint draw runs on the real Apple GPU, and
+    // readPixels returns genuine, content-dependent pixels (a gradient here — non-zero + varied).
+    #[cfg(feature = "gpu-metal")]
+    #[tokio::test]
+    async fn webgl_readpixels_real_gpu_renders_gradient() {
+        let _s = Session::new(); // injects set_webgl_fn(raster::webgl_readback)
+        let script = "\
+            var c=document.createElement('canvas'); c.width=8; c.height=8;\
+            var gl=c.getContext('webgl');\
+            var vs=gl.createShader(0x8B31); gl.shaderSource(vs,'attribute vec2 p;varying vec2 v;void main(){v=p;gl_Position=vec4(p,0.0,1.0);}'); gl.compileShader(vs);\
+            var fs=gl.createShader(0x8B30); gl.shaderSource(fs,'precision mediump float;varying vec2 v;void main(){gl_FragColor=vec4(v.x*0.5+0.5,v.y*0.5+0.5,0.5,1.0);}'); gl.compileShader(fs);\
+            var pr=gl.createProgram(); gl.attachShader(pr,vs); gl.attachShader(pr,fs); gl.linkProgram(pr); gl.useProgram(pr);\
+            var b=gl.createBuffer(); gl.bindBuffer(0x8892,b); gl.bufferData(0x8892,new Float32Array([-1,-1, 3,-1, -1,3]),0x88E4);\
+            var loc=gl.getAttribLocation(pr,'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,0x1406,false,0,0);\
+            gl.viewport(0,0,8,8); gl.clearColor(0,0,0,1); gl.clear(0x4000); gl.drawArrays(0x0004,0,3);\
+            var px=new Uint8Array(8*8*4); gl.readPixels(0,0,8,8,0x1908,0x1401,px);\
+            var allZero=true, varied=false; for(var i=0;i<px.length;i++){ if(px[i]!==0)allZero=false; if(px[i]!==px[i%4])varied=true; }\
+            document.body.setAttribute('data-gl',(allZero?'zero':'nonzero')+'|'+(varied?'varied':'uniform'));";
+        let out = turbo_surf_render::render_html("<body></body>", script).unwrap();
+        assert!(
+            out.contains(r#"data-gl="nonzero|varied""#),
+            "real GPU must render a content-dependent gradient (not blank/uniform): {out}"
         );
     }
 

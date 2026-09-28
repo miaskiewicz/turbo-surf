@@ -45,12 +45,17 @@ wgpu = { version = "22", optional = true }
 pollster = { version = "0.3", optional = true }
 # Tessellate canvas paths + glyph outlines into GPU triangles (fill + stroke).
 lyon_tessellation = { version = "1", optional = true }
+# Translate a page's GLSL-ES WebGL shaders for wgpu: `naga::front::glsl` → IR → validate →
+# `naga::back::wgsl`. Pinned to wgpu 22's naga so the WGSL it emits is accepted.
+naga = { version = "22", optional = true, features = ["glsl-in", "wgsl-out"] }
+# Decode the recorded WebGL `bufferData` bytes (the recorder base64s them for a lossless capture).
+base64 = { version = "0.22", optional = true }
 
 [features]
-# Rasterize `canvas_ops_png` on the real Apple GPU (wgpu → Metal) instead of tiny-skia. On any
-# GPU failure the call transparently falls back to tiny-skia, so enabling it never regresses
-# correctness — only the pixel backend changes.
-gpu-metal = ["dep:wgpu", "dep:pollster", "dep:lyon_tessellation"]
+# Real-GPU (wgpu → Metal) rasterization: `canvas_ops_png` (canvas 2D) + `webgl_readback` (a live
+# WebGL draw batch). On any GPU failure both transparently fall back, so enabling it never
+# regresses correctness — only the pixel backend changes.
+gpu-metal = ["dep:wgpu", "dep:pollster", "dep:lyon_tessellation", "dep:naga", "dep:base64"]
 
 [dev-dependencies]
 # Screenshot tests build a fixture PNG and decode the rendered output to sample

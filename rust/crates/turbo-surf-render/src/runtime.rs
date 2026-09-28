@@ -215,6 +215,38 @@ fn op_raster_png(width: u32, height: u32, #[string] ops_json: &str) -> String {
     }
 }
 
+// Host WebGL executor: run a recorded WebGL call batch on the real GPU and return the
+// framebuffer RGBA. Same injection pattern as the rasterizer; installed by the crate that owns
+// the wgpu backend (raster, `gpu-metal`). Until set, WebGL readback keeps the synthetic stub.
+type WebglFn = Box<dyn Fn(u32, u32, &str) -> Option<Vec<u8>> + Send + Sync>;
+static WEBGL_EXEC: std::sync::RwLock<Option<WebglFn>> = std::sync::RwLock::new(None);
+
+/// Install the host's WebGL→GPU executor: `(width, height, calls_json) -> RGBA8 bytes`.
+/// `calls_json` is the batch the render tier records live off a page's `gl.*` calls (with real
+/// buffer bytes + shader source). Until set, the isolate's WebGL `readPixels` stays synthetic.
+pub fn set_webgl_fn(f: WebglFn) {
+    if let Ok(mut g) = WEBGL_EXEC.write() {
+        *g = Some(f);
+    }
+}
+
+// Execute a recorded WebGL batch → base64 RGBA8 (full framebuffer, top-left origin), or "" when
+// no host executor is installed (the JS override then keeps its synthetic readback). The JS side
+// slices the caller's requested rect out of the returned framebuffer. Never throws.
+#[op2]
+#[string]
+fn op_webgl_readback(width: u32, height: u32, #[string] calls_json: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    match WEBGL_EXEC
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|f| f(width, height, calls_json)))
+    {
+        Some(bytes) => STANDARD.encode(bytes),
+        None => String::new(),
+    }
+}
+
 // `document.cookie` setter: ingest a `name=value; attrs` line against the base.
 #[op2(fast)]
 fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
@@ -328,7 +360,8 @@ deno_core::extension!(
         op_user_agent,
         op_fingerprint,
         op_measure_text,
-        op_raster_png
+        op_raster_png,
+        op_webgl_readback
     ],
 );
 
@@ -2767,12 +2800,108 @@ globalThis.__domSig = () => {
       }
       return obj;
     };
+    // Live WebGL→GPU bridge: override the drawing/state methods to RECORD each call with its
+    // REAL args (buffer bytes + shader source — captured at the live call site, so nothing is
+    // lossy) into a batch, and on readPixels flush the batch to the host GPU executor
+    // (op_webgl_readback) and fill the destination from genuine GPU pixels. Only installed when a
+    // host executor is present; otherwise the vendored synthetic context is left as-is. getShader/
+    // Program*Parameter report success so a page's compile/link checks pass. Returns real GPU
+    // pixels for the common fingerprint draw (shaders + a vertex buffer + drawArrays + readPixels).
+    const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const enc64 = (u8) => {
+      let o = "";
+      for (let i = 0; i < u8.length; i += 3) {
+        const a = u8[i], b = i + 1 < u8.length ? u8[i + 1] : 0, c = i + 2 < u8.length ? u8[i + 2] : 0;
+        o += B64[a >> 2] + B64[((a & 3) << 4) | (b >> 4)];
+        o += i + 1 < u8.length ? B64[((b & 15) << 2) | (c >> 6)] : "=";
+        o += i + 2 < u8.length ? B64[c & 63] : "=";
+      }
+      return o;
+    };
+    const dec64 = (s) => {
+      const L = {}; for (let i = 0; i < 64; i++) L[B64[i]] = i;
+      const out = []; let buf = 0, bits = 0;
+      for (let i = 0; i < s.length; i++) {
+        const v = L[s[i]]; if (v === undefined) continue;
+        buf = (buf << 6) | v; bits += 6;
+        if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 0xff); }
+      }
+      return out;
+    };
+    const installWebglRecorder = (gl) => {
+      const op = (Deno.core.ops && Deno.core.ops.op_webgl_readback) || null;
+      if (!op) return;
+      const rec = [];
+      let hid = 0, lid = 0;
+      const H = () => ({ __h: ++hid });
+      const bytesOf = (view) => {
+        try {
+          if (view instanceof ArrayBuffer) return new Uint8Array(view);
+          if (view && view.buffer) return new Uint8Array(view.buffer, view.byteOffset || 0, view.byteLength);
+        } catch (e) {}
+        return new Uint8Array(0);
+      };
+      const bufType = (v) => (v instanceof Float32Array ? "f32" : v instanceof Uint16Array ? "u16" : "u8");
+      const put = (m, a, id) => { const o = { m, a }; if (id != null) o.id = id; rec.push(o); };
+      const origReadPixels = gl.readPixels;
+      gl.createShader = function (type) { const h = H(); put("createShader", [type], h.__h); return h; };
+      gl.shaderSource = function (sh, src) { put("shaderSource", [sh && sh.__h, String(src)]); };
+      gl.compileShader = function (sh) { put("compileShader", [sh && sh.__h]); };
+      gl.getShaderParameter = function () { return true; };
+      gl.getProgramParameter = function () { return true; };
+      gl.getShaderInfoLog = function () { return ""; };
+      gl.getProgramInfoLog = function () { return ""; };
+      gl.createProgram = function () { const h = H(); put("createProgram", [], h.__h); return h; };
+      gl.attachShader = function (p, s) { put("attachShader", [p && p.__h, s && s.__h]); };
+      gl.linkProgram = function (p) { put("linkProgram", [p && p.__h]); };
+      gl.useProgram = function (p) { put("useProgram", [p && p.__h]); };
+      gl.createBuffer = function () { const h = H(); put("createBuffer", [], h.__h); return h; };
+      gl.bindBuffer = function (t, b) { put("bindBuffer", [t, b ? b.__h : 0]); };
+      gl.bufferData = function (t, data, usage) {
+        if (typeof data === "number") put("bufferData", [t, { b64: "", t: "u8" }, usage]);
+        else put("bufferData", [t, { b64: enc64(bytesOf(data)), t: bufType(data) }, usage]);
+      };
+      gl.getAttribLocation = function (p, name) { const loc = lid++; put("attribLocation", [p && p.__h, loc, String(name)]); return loc; };
+      gl.enableVertexAttribArray = function (loc) { put("enableVertexAttribArray", [loc]); };
+      gl.vertexAttribPointer = function (loc, size, type, norm, stride, offset) { put("vertexAttribPointer", [loc, size, type, !!norm, stride | 0, offset | 0]); };
+      gl.getUniformLocation = function (p, name) { return { __p: p && p.__h, __u: String(name) }; };
+      const uni = (kind) => function (loc) { const vals = Array.prototype.slice.call(arguments, 1); if (loc) put("uniform", [loc.__p, loc.__u, kind, vals]); };
+      gl.uniform1f = uni("1f"); gl.uniform2f = uni("2f"); gl.uniform3f = uni("3f"); gl.uniform4f = uni("4f"); gl.uniform1i = uni("1i");
+      gl.uniformMatrix4fv = function (loc, transpose, val) { if (loc) put("uniform", [loc.__p, loc.__u, "Matrix4fv", Array.prototype.slice.call(val || [])]); };
+      gl.viewport = function (x, y, w, h) { put("viewport", [x, y, w, h]); };
+      gl.clearColor = function (r, g, b, a) { put("clearColor", [r, g, b, a]); };
+      gl.clear = function (mask) { put("clear", [mask]); };
+      gl.drawArrays = function (mode, first, count) { put("drawArrays", [mode, first, count]); };
+      gl.drawElements = function (mode, count, type, offset) { put("drawElements", [mode, count, type, offset | 0]); };
+      gl.readPixels = function (x, y, w, h, format, type, dst) {
+        try {
+          const W = gl.drawingBufferWidth || (gl.canvas && gl.canvas.width) || 300;
+          const Hh = gl.drawingBufferHeight || (gl.canvas && gl.canvas.height) || 150;
+          const out = op(W, Hh, JSON.stringify(rec));
+          if (out && dst && dst.length) {
+            const bin = dec64(out); // framebuffer RGBA8, top-left origin, W×Hh
+            for (let row = 0; row < h; row++) {
+              const srcRow = Hh - 1 - (y + row); // readPixels is bottom-left origin → flip
+              for (let col = 0; col < w; col++) {
+                const si = (srcRow * W + (x + col)) * 4, di = (row * w + col) * 4;
+                for (let c = 0; c < 4; c++) dst[di + c] = si + c < bin.length ? bin[si + c] : 0;
+              }
+            }
+            return;
+          }
+        } catch (e) {}
+        if (typeof origReadPixels === "function") { try { return origReadPixels.call(gl, x, y, w, h, format, type, dst); } catch (e) {} }
+      };
+    };
     const origGetContext = canvasProto.getContext;
     const wrapped = function getContext(kind, opts) {
       const ctx = origGetContext.call(this, kind, opts);
       if (ctx) {
         const k = String(kind || "");
-        if (k === "webgl" || k === "experimental-webgl" || k === "webgl2") { try { patchGl(ctx, k === "webgl2"); } catch (e) {} }
+        if (k === "webgl" || k === "experimental-webgl" || k === "webgl2") {
+          try { patchGl(ctx, k === "webgl2"); } catch (e) {}
+          try { installWebglRecorder(ctx); } catch (e) {}
+        }
         markOwn(ctx);
       }
       return ctx;

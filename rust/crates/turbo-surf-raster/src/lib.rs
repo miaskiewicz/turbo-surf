@@ -28,6 +28,14 @@ mod paint_canvas_gpu;
 mod paint_png;
 mod paint_svg;
 mod style_extract;
+#[cfg(feature = "gpu-metal")]
+mod webgl;
+
+/// Execute a recorded WebGL call batch on the GPU; return the framebuffer as RGBA8 bytes
+/// (len `width*height*4`, row-major, TOP-left origin). `None` on any failure (caller falls back
+/// to its stub). See [`webgl`] for the JSON call protocol.
+#[cfg(feature = "gpu-metal")]
+pub use webgl::webgl_readback;
 
 /// Replay a recorded 2D-canvas draw list (the render tier's `ctx._ops` tuple log — see
 /// [`canvas_ops`] for the format) into a `width × height` PNG. Default build rasterizes with

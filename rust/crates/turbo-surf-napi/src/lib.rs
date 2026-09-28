@@ -38,6 +38,11 @@ pub(crate) fn ensure_render_init() {
         turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {
             raster::canvas_ops_png(w, h, ops_json).ok()
         }));
+        // WebGL→GPU bridge (only under `gpu-metal`; else the synthetic stub stands).
+        #[cfg(feature = "gpu-metal")]
+        turbo_surf_render::set_webgl_fn(Box::new(|w, h, calls| {
+            raster::webgl_readback(w, h, calls)
+        }));
     });
     turbo_surf_render::ensure_platform();
 }

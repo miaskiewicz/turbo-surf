@@ -292,9 +292,12 @@ drives the real **page-load lifecycle** (`readyState` loading→interactive→co
 `DOMContentLoaded` → window `load` → `pageshow`, in order), a Chrome-shaped **high-resolution
 clock** (fractional `performance.now`/`timeOrigin`, batched rAF timestamps) with spread
 `performance.timing` phases, **distinct** `Intersection`/`Resize`/`MutationObserver`
-constructors (with an initial IntersectionObserver entry), and — under `--features gpu-metal` —
-real Apple-GPU **canvas + WebGL** pixels. Search strategies also take an optional **`headers`**
-map (e.g. `Referer` + `sec-fetch-site` for a real in-site-navigation shape).
+constructors (with an initial IntersectionObserver entry), real `MessagePort`/`MessageChannel`/
+`MessageEvent` (instances, not stubs), general **nested-iframe realms** (any iframe/`srcdoc` runs
+its own scripts with a distinct `contentWindow` + wired frame tree + depth cap), and — under
+`--features gpu-metal` — real Apple-GPU **canvas + WebGL** pixels. Search strategies also take
+optional **`headers`** + **`internal_hosts`** maps (e.g. `Referer` + `sec-fetch-site` for a real
+in-site-navigation shape). Opt into a coherent timezone with **`TURBO_SURF_TZ`**.
 
 ---
 

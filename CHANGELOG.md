@@ -67,9 +67,11 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   / 36 webgl2) — was SwiftShader ("ANGLE (Google, … SwiftShader)"), a headless/VM signal.
 - **Native-code masking** for canvas/WebGL context methods — `toDataURL`/`getParameter`/… now
   report `[native code]` (were JS source, an instant anti-tamper flag).
-- **Timezone pinned** — ICU `TZ` + per-isolate `date_time_configuration_change_notification`
-  give a coherent `America/New_York` (was leaking the host machine's zone, incoherent with the
-  en-US identity). Override with **`TURBO_SURF_TZ`**.
+- **Timezone pinning (opt-in)** — set **`TURBO_SURF_TZ`** (e.g. `America/New_York`) for a coherent
+  zone; the isolate then reports it via `Intl`/`Date` (ICU `TZ` + per-isolate
+  `date_time_configuration_change_notification`). Not set by default: mutating the process `TZ` env
+  would race other threads + silently change the host process's timezone when embedded in the napi
+  addon / PyO3 wheel. Without the opt-in the isolate uses the host zone.
 - **High-resolution clock** — `performance.now()` is origin-relative + fractional + monotonic
   on Chrome's 100µs grid, `timeOrigin` is a fractional epoch anchor, and `requestAnimationFrame`
   is **batched** like Chrome — all callbacks scheduled for one frame fire with the SAME fractional

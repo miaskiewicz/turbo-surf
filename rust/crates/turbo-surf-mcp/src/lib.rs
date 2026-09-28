@@ -88,8 +88,7 @@ fn serp_marker(html: &str) -> &'static str {
 // explicit coords), maps to the render-tier `__hi.sequence` step shape, plays it, and marks the
 // DOM done. `__STEPS__` / `__OPTS__` are substituted with JSON. (No real layout → a selector's
 // box center is best-effort; events still target the resolved element, which is what matters.)
-const HUMAN_DRIVER_TMPL: &str = r#"(() => {
-  const raw = __STEPS__;
+const HUMAN_DRIVER_TMPL: &str = r#"((raw, __opts) => {
   const q = (s) => { try { return s ? document.querySelector(s) : null; } catch (e) { return null; } };
   const center = (el) => { try { const r = el.getBoundingClientRect(); return { x: Math.round((r.left || 0) + (r.width || 0) / 2), y: Math.round((r.top || 0) + (r.height || 0) / 2) }; } catch (e) { return { x: 0, y: 0 }; } };
   const steps = (raw || []).map((st) => {
@@ -101,8 +100,18 @@ const HUMAN_DRIVER_TMPL: &str = r#"(() => {
     if (st.wait != null) return { wait: st.wait };
     return {};
   });
-  __hi.sequence(document, steps, __OPTS__).then(() => { try { document.body.setAttribute("data-hi-done", "1"); } catch (e) {} });
-})()"#;
+  __hi.sequence(document, steps, __opts).then(() => { try { document.body.setAttribute("data-hi-done", "1"); } catch (e) {} });
+})"#;
+
+/// Serialize a JSON value for embedding as a JS expression: standard JSON plus escaping U+2028 /
+/// U+2029, which are valid in JSON strings but are JS line terminators (unescaped they break the
+/// surrounding program).
+fn js_safe_json(v: &Value) -> Result<String, String> {
+    Ok(serde_json::to_string(v)
+        .map_err(|e| e.to_string())?
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029"))
+}
 
 /// Saved interaction routines (named step-lists with `{param}` placeholders), e.g. `google-serp`.
 fn interaction_routines() -> &'static Value {
@@ -634,14 +643,19 @@ impl Session {
                 }
             }
         }
-        let steps_json = serde_json::to_string(&steps).map_err(|e| e.to_string())?;
-        let opts_json = serde_json::to_string(&Value::Object(opts)).map_err(|e| e.to_string())?;
-        let driver = HUMAN_DRIVER_TMPL
-            .replace("__STEPS__", &steps_json)
-            .replace("__OPTS__", &opts_json);
-        let script = format!("{}\n;{driver}", turbo_surf_render::HUMAN_INPUT_JS);
+        // Inject as function arguments (not string-replace) + escape JS line terminators, so a
+        // step/query value can't break or clobber the driver program.
+        let steps_json = js_safe_json(&steps)?;
+        let opts_json = js_safe_json(&Value::Object(opts))?;
+        let driver = format!("({HUMAN_DRIVER_TMPL})({steps_json}, {opts_json})");
+        // Run the page's OWN scripts first (so its listeners — the interaction-gated JS this tool
+        // exists to trigger — are installed), then the synthesizer, then the driver. install_dom
+        // doesn't auto-run inline <script>, so page_script() supplies them (as render_current does).
+        let page = self.page_script().await;
         let html = serialize_doc(self.tree()?);
         let base = self.url.clone();
+        let b = turbo_surf_render::SCRIPT_BOUNDARY;
+        let script = format!("{page}{b}{}{b}{driver}", turbo_surf_render::HUMAN_INPUT_JS);
         let hydrated = turbo_surf_render::render_page(&html, &base, &script).await?;
         let completed = hydrated.contains("data-hi-done=");
         self.dom_history.push(hydrated.clone());

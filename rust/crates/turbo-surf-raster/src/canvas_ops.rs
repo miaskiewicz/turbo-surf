@@ -421,6 +421,9 @@ struct State {
     fill: Rgba,
     stroke: Rgba,
     alpha: f32,
+    // Strokes render at the CSS default 1px: the render tier's recorded op-log tuple carries no
+    // lineWidth (it snapshots only fillStyle/strokeStyle/font/globalAlpha), so per-stroke widths
+    // can't be reconstructed here. Honest limitation of the vendored recorder, not a bug to fake.
     line_width: f32,
     font_px: f32,
     font_families: Vec<String>,
@@ -602,7 +605,12 @@ fn arc_into(
             a1 -= tau;
         }
     }
-    let sweep = (a1 - a0).abs();
+    // Canvas clamps the drawn sweep to a single full turn — an end angle > 2π from start does not
+    // overdraw multiple laps. Clamp the endpoint (not just the segment count) so the interpolation
+    // below spans at most 2π.
+    let dir = if a1 >= a0 { 1.0 } else { -1.0 };
+    let sweep = (a1 - a0).abs().min(tau);
+    a1 = a0 + dir * sweep;
     let segs = ((sweep / tau) * 64.0).ceil().max(6.0) as usize;
     // Sample a0 → a1 in `segs` steps. The first point connects from the current
     // point (canvas draws a line to the arc's start); `append_point` handles that.

@@ -3502,21 +3502,24 @@ pub fn ensure_platform() {
     });
 }
 
-// Pin a coherent timezone for the synthetic browser. An isolate that reports the HOST
-// machine's timezone — leaked through `Intl.DateTimeFormat().resolvedOptions().timeZone` +
-// `Date.getTimezoneOffset`, incoherent with the en-US Chrome identity — is a fingerprint tell
-// (measured live: the isolate reported the host's Europe/Lisbon vs real Chrome's
-// America/New_York). ICU reads the `TZ` env; honor an explicit TURBO_SURF_TZ, else default
-// America/New_York (coherent with en-US) only when the environment hasn't chosen a TZ. Setting
-// the env alone is not enough once ICU has cached a default, so each isolate additionally calls
-// `date_time_configuration_change_notification(Redetect)` (see make_runtime) to re-read it.
+// Pin a coherent timezone for the synthetic browser — OPT-IN via `TURBO_SURF_TZ`. An isolate that
+// reports the host machine's zone (leaked via `Intl.DateTimeFormat().resolvedOptions().timeZone` +
+// `Date.getTimezoneOffset`, incoherent with the en-US identity) is a fingerprint tell, but ICU
+// reads the timezone from the `TZ` env, and mutating a process-global env var is a data race with
+// other threads + would silently change the HOST process's timezone when this crate is embedded in
+// the napi addon / PyO3 wheel. So we set `TZ` ONLY when the operator explicitly opts in with
+// `TURBO_SURF_TZ` (e.g. `America/New_York`), once, before the platform initializes; we never touch
+// it by default. The per-isolate `date_time_configuration_change_notification(Redetect)` (see
+// make_runtime) then re-reads it. Without the opt-in, the isolate uses the host zone.
 fn pin_timezone() {
     use std::sync::Once;
     static ONCE: Once = Once::new();
-    ONCE.call_once(|| match std::env::var("TURBO_SURF_TZ") {
-        Ok(tz) if !tz.is_empty() => std::env::set_var("TZ", tz),
-        _ if std::env::var_os("TZ").is_none() => std::env::set_var("TZ", "America/New_York"),
-        _ => {}
+    ONCE.call_once(|| {
+        if let Ok(tz) = std::env::var("TURBO_SURF_TZ") {
+            if !tz.is_empty() {
+                std::env::set_var("TZ", tz);
+            }
+        }
     });
 }
 

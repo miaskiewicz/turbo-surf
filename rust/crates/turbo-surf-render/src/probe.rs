@@ -310,8 +310,19 @@ pub async fn probe_page_async(
     Ok((aggregate(raw), storage))
 }
 
-// Read the text content of the sink node out of the serialized document (the id is
-// unique + ASCII, so a plain substring scan is enough).
+// Read the text content of the sink node out of the serialized document (the id is unique + ASCII,
+// so a plain substring scan is enough). The JSON was written as textContent, so serialization
+// HTML-escapes `<`/`>`/`&`/`"` — un-escape them before the caller parses, or a recorded prop/arg
+// containing any of those would make the parse fail and silently drop the whole recon log.
+fn html_unescape(s: &str) -> String {
+    // Order matters: resolve `&amp;` LAST so `&amp;lt;` doesn't become `<`.
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&#x27;", "'")
+        .replace("&amp;", "&")
+}
 fn extract_sink(html: &str, sink_id: &str) -> String {
     let needle = format!("id=\"{sink_id}\"");
     let Some(i) = html.find(&needle) else {
@@ -322,7 +333,7 @@ fn extract_sink(html: &str, sink_id: &str) -> String {
     };
     let start = i + gt + 1;
     match html[start..].find('<') {
-        Some(lt) => html[start..start + lt].trim().to_string(),
+        Some(lt) => html_unescape(html[start..start + lt].trim()),
         None => "[]".to_string(),
     }
 }

@@ -287,6 +287,15 @@ supplies the interaction-gate + input-entropy signal in-isolate; a *trusted* goo
 `__Secure-ENID` also needs real-GPU pixels + server-side scoring (see `probe_mint` and
 the CHANGELOG), so it is not by itself a SERP unlock.
 
+**Render-tier realism.** Beyond the static navigator/screen surface, the render isolate now
+drives the real **page-load lifecycle** (`readyState` loading→interactive→complete with
+`DOMContentLoaded` → window `load` → `pageshow`, in order), a Chrome-shaped **high-resolution
+clock** (fractional `performance.now`/`timeOrigin`, batched rAF timestamps) with spread
+`performance.timing` phases, **distinct** `Intersection`/`Resize`/`MutationObserver`
+constructors (with an initial IntersectionObserver entry), and — under `--features gpu-metal` —
+real Apple-GPU **canvas + WebGL** pixels. Search strategies also take an optional **`headers`**
+map (e.g. `Referer` + `sec-fetch-site` for a real in-site-navigation shape).
+
 ---
 
 **TLS/HTTP-2 fingerprint (`impersonate`).** rustls can't forge Chrome's

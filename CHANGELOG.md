@@ -99,6 +99,25 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   full kitchen-sink — GPU + interaction + parity — does not earn a trusted google
   `__Secure-ENID`; that residual is server-side IP-reputation + attestation scoring.)
 
+### Added — per-strategy request headers (data-driven)
+- Search strategies (`search-strategies.json`) gain an optional **`headers`** map, applied to the
+  SERP fetch and merged over the impersonate/rustls defaults — a general, config-driven knob (not
+  google-hardcoded). The google strategy uses it to send `Referer: https://www.google.com/` +
+  `sec-fetch-site: same-origin` (overriding the emulation's cold-nav `sec-fetch-site: none` / no
+  referer) so the `/search` fetch looks like a real in-site navigation, and its `query_url` carries
+  `&source=hp`. Measured vs a real incognito Chrome `/search` (which returns the real SERP on this
+  same IP — the IP is not the wall), a missing `Referer` + `sec-fetch-site: none` + a bare `?q=`
+  were the top "direct/scripted fetch" tells. Honest note: these close real tells but aren't a
+  standalone SERP unlock — the residual is the session params `ei`/`iflsig`/`sxsrf` (minted into
+  the homepage HTML, not synthesizable browserlessly) + a *trusted* ENID (real-browser mint).
+
+### Changed — observers (render)
+- `IntersectionObserver` / `ResizeObserver` / `MutationObserver` are now three **distinct**
+  constructors (were one shared object — `IntersectionObserver === ResizeObserver` was a trivial
+  `===` / `.name` fingerprint tell), `PerformanceObserver.supportedEntryTypes` returns a populated
+  Chrome list (was `[]`), and `IntersectionObserver` fires one initial async entry per observed
+  element (`isIntersecting:false`, like Chrome for an off-screen node) so visibility-gated init runs.
+
 ### Changed — sidecar + deps
 - **Browser sidecar mint** (`fetch-serp.mjs`): BotGuard is interaction-gated, so `mintEnid`
   now performs a genuine human-paced search-box interaction to trigger the VM before harvesting

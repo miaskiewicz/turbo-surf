@@ -266,6 +266,43 @@ fn legacy_timing_and_scheduler_are_present() {
     );
 }
 
+// Observers must be three DISTINCT constructors (real Chrome: IntersectionObserver !==
+// ResizeObserver !== MutationObserver, each with its own .name — collapsing them is a trivial
+// === / .name tell), PerformanceObserver.supportedEntryTypes must be populated, and
+// IntersectionObserver must fire one initial async entry per observed element.
+#[tokio::test]
+async fn observers_are_distinct_and_intersection_fires_an_entry() {
+    let script = r#"
+        var distinct = (IntersectionObserver !== ResizeObserver)
+            && (ResizeObserver !== MutationObserver) && (IntersectionObserver !== MutationObserver);
+        var names = IntersectionObserver.name + ',' + ResizeObserver.name + ',' + MutationObserver.name;
+        var perfTypes = PerformanceObserver.supportedEntryTypes.length;
+        document.body.setAttribute('data-obs', distinct + '|' + names + '|' + perfTypes);
+        var el = document.createElement('div'); document.body.appendChild(el);
+        var io = new IntersectionObserver(function(entries, obs){
+            var e = entries[0];
+            document.body.setAttribute('data-io', entries.length + ':' + e.isIntersecting
+                + ':' + (typeof e.intersectionRatio) + ':' + (e.boundingClientRect ? 'rect' : 'norect'));
+        });
+        io.observe(el);
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    assert!(
+        out.contains("data-obs=\"true|IntersectionObserver,ResizeObserver,MutationObserver|"),
+        "observers must be distinct with correct names: {out}"
+    );
+    assert!(
+        !out.contains("data-obs=\"true|IntersectionObserver,ResizeObserver,MutationObserver|0\""),
+        "PerformanceObserver.supportedEntryTypes must be non-empty: {out}"
+    );
+    assert!(
+        out.contains("data-io=\"1:false:number:rect\""),
+        "IntersectionObserver must fire one initial entry (isIntersecting:false, ratio number, rect): {out}"
+    );
+}
+
 // Page-load lifecycle: the main document/window must fire the real sequence — readyState
 // loading → interactive (+readystatechange, DOMContentLoaded) → complete (+readystatechange,
 // window load, pageshow) — in order, with DOMContentLoaded BEFORE load. A collector that gates

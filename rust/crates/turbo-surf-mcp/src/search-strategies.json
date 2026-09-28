@@ -24,10 +24,14 @@
   },
   {
     "engine": "google",
-    "version": "2026-09-10",
-    "query_url": "https://www.google.com/search?q={query}",
+    "version": "2026-09-28",
+    "query_url": "https://www.google.com/search?q={query}&source=hp",
     "format": "structural",
-    "mode": "enid"
+    "mode": "enid",
+    "headers": {
+      "referer": "https://www.google.com/",
+      "sec-fetch-site": "same-origin"
+    }
   },
   {
     "engine": "searxng",

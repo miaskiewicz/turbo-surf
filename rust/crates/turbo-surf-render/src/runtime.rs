@@ -902,17 +902,30 @@ globalThis.XMLHttpRequest = class {
 // real code branches on `XMLHttpRequest.DONE` / `this.HEADERS_RECEIVED`.
 Object.assign(globalThis.XMLHttpRequest, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
 Object.assign(globalThis.XMLHttpRequest.prototype, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
-// Observers: no live mutation notifications over the static tree → no-op stubs.
-class __NoopObserver {
-  constructor(cb) { this._cb = cb; }
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-  takeRecords() { return []; }
+// Observers: no live mutation notifications over the static tree → no-op stubs. Each must be a
+// DISTINCT constructor: real Chrome has three separate classes, so `IntersectionObserver ===
+// ResizeObserver` is false and each `.name` is its own — collapsing them onto one object is a
+// trivial `===` / `.name` fingerprint tell. IntersectionObserver additionally fires ONE initial
+// async entry per observed element (Chrome does this even for an off-screen/zero-size node, with
+// isIntersecting:false), so visibility-gated init isn't silently dead.
+function __mkObserver(name, withEntries) {
+  const C = { [name]: class { constructor(cb) { this._cb = cb; } unobserve() {} disconnect() {} takeRecords() { return []; }
+    observe(el) {
+      if (!withEntries || typeof this._cb !== "function") return;
+      const cb = this._cb, self = this;
+      setTimeout(() => { try {
+        let box = { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
+        try { if (el && el.getBoundingClientRect) box = el.getBoundingClientRect(); } catch (e) {}
+        cb([{ target: el, isIntersecting: false, intersectionRatio: 0, boundingClientRect: box,
+          intersectionRect: { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 },
+          rootBounds: null, time: (globalThis.performance && performance.now) ? performance.now() : 0 }], self);
+      } catch (e) {} }, 0);
+    } } }[name];
+  return C;
 }
-globalThis.MutationObserver = __NoopObserver;
-globalThis.IntersectionObserver = __NoopObserver;
-globalThis.ResizeObserver = __NoopObserver;
+globalThis.MutationObserver = __mkObserver("MutationObserver", false);
+globalThis.IntersectionObserver = __mkObserver("IntersectionObserver", true);
+globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
 // structuredClone — apps/SDKs use it (and probe `globalThis.structuredClone.prototype`);
 // absent, that probe throws. deno_core doesn't ship it. Structured-ish deep clone with a
 // few common types; falls back to JSON for the rest.
@@ -1908,7 +1921,13 @@ if (typeof globalThis.URL === "undefined") {
     constructor(cb) { this._cb = cb; }
     observe() {} disconnect() {} takeRecords() { return []; }
   });
-  try { globalThis.PerformanceObserver.supportedEntryTypes = []; } catch (_e) {}
+  // Real Chrome exposes a populated static list here; an empty array is a tell.
+  try {
+    globalThis.PerformanceObserver.supportedEntryTypes = [
+      "element", "event", "first-input", "largest-contentful-paint", "layout-shift",
+      "longtask", "mark", "measure", "navigation", "paint", "resource", "visibility-state",
+    ];
+  } catch (_e) {}
 })();
 
 // `Node.prototype.replaceChild(new, old)` — jQuery's `replaceWith`/`domManip` call

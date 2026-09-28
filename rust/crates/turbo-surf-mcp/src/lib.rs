@@ -1278,6 +1278,11 @@ struct Strategy {
     /// the SERP's own JS on a throwaway session before parsing.
     #[serde(default)]
     mode: String,
+    /// Extra request headers applied to the SERP fetch (per-strategy, data-driven — e.g. a
+    /// `Referer` + `sec-fetch-site` that make the request look like a real in-site navigation).
+    /// Merged over the impersonate/rustls defaults. Empty for most engines.
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
     // --- html strategies: selectors, `title`/`link`/`snippet` scoped to `result_container` ---
     #[serde(default)]
     result_container: String,
@@ -1719,7 +1724,7 @@ async fn fetch_serp(
     // routing every SERP through the browser. A stale/missing token (the response
     // is the `enablejs` shell) triggers exactly one re-mint + native retry.
     if strategy.mode == "enid" {
-        return google_enid_fetch(url, headless, remint).await;
+        return google_enid_fetch(url, headless, remint, &strategy.headers).await;
     }
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
     // A throwaway jar so a google /sorry clearance's exemption cookie can be captured
@@ -1730,6 +1735,7 @@ async fn fetch_serp(
         allow_non_html: true, // json engines return non-HTML bodies
         profile: Some(&profile),
         bypass_consent: true,
+        headers: strategy.headers.clone(), // per-strategy request headers (data-driven)
         jar: Some(&mut jar),
         ..Default::default()
     };
@@ -1765,6 +1771,7 @@ async fn google_enid_fetch(
     url: &str,
     headless: Option<bool>,
     remint: bool,
+    headers: &BTreeMap<String, String>,
 ) -> Result<String, String> {
     let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
         "google web_search needs the TURBO_SURF_BROWSER_FETCH_CMD env var (the headed \
@@ -1773,7 +1780,7 @@ async fn google_enid_fetch(
             .to_string()
     })?;
     let cache = EnidCache::default_for(&sidecar_dir());
-    google_enid_flow(url, &cache, &cmd, headless, remint).await
+    google_enid_flow(url, &cache, &cmd, headless, remint, headers).await
 }
 
 /// The testable core of the native-google path (no env reads):
@@ -1791,6 +1798,7 @@ async fn google_enid_flow(
     mint_cmd: &str,
     headless: Option<bool>,
     remint: bool,
+    headers: &BTreeMap<String, String>,
 ) -> Result<String, String> {
     strace!("enid: cache path {}", cache.path_str());
     let cookies = match (remint, cache.get_valid(enid::now_secs())) {
@@ -1815,7 +1823,7 @@ async fn google_enid_flow(
             mint_and_cache(cache, mint_cmd, headless).await?
         }
     };
-    let html = native_google_fetch(url, &cookies).await?;
+    let html = native_google_fetch(url, &cookies, headers).await?;
     if !is_enablejs_shell(&html) {
         strace!("verdict: real SERP (matched {})", serp_marker(&html));
         return Ok(html);
@@ -1828,7 +1836,7 @@ async fn google_enid_flow(
     );
     strace!("remint: stale/untrusted token → one re-mint + native retry");
     let fresh = mint_and_cache(cache, mint_cmd, headless).await?;
-    let retry = native_google_fetch(url, &fresh).await?;
+    let retry = native_google_fetch(url, &fresh, headers).await?;
     if is_enablejs_shell(&retry) {
         strace!(
             "verdict: still enablejs shell after fresh mint (body_len={}) → IP likely flagged",
@@ -1862,20 +1870,29 @@ async fn mint_and_cache(
 /// One native `/search` fetch with the minted cookies injected into a throwaway jar
 /// (the caller's session jar is never touched). Google's `/sorry` clearance loop
 /// still applies (IP-reputation is orthogonal to the ENID token).
-async fn native_google_fetch(url: &str, cookies: &[EnidCookie]) -> Result<String, String> {
+async fn native_google_fetch(
+    url: &str,
+    cookies: &[EnidCookie],
+    headers: &BTreeMap<String, String>,
+) -> Result<String, String> {
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
     let mut jar = CookieJar::new();
     for c in cookies {
         jar.add(&c.name, &c.value, &c.domain, &c.path, c.expires);
     }
     strace!(
-        "native fetch {url} with cookies [{}]",
-        cookie_names(cookies)
+        "native fetch {url} with cookies [{}] headers {:?}",
+        cookie_names(cookies),
+        headers.keys().collect::<Vec<_>>()
     );
+    // Extra request headers come from the strategy config (data-driven, not hardcoded) — e.g. the
+    // google strategy sets a `Referer` + `sec-fetch-site: same-origin` so the SERP fetch looks
+    // like a real in-site navigation. Merged over the impersonate/rustls defaults.
     let opts = FetchOptions {
         allow_non_html: true,
         profile: Some(&profile),
         bypass_consent: true,
+        headers: headers.clone(),
         jar: Some(&mut jar),
         ..Default::default()
     };
@@ -2284,9 +2301,12 @@ pub fn tools() -> Value {
             "web_search_load_strategy",
             "Register/override a search parse-strategy (session-scoped) for its \
              engine id. Arg: strategy (the JSON object: engine, version, query_url \
-             with {query}/{limit}/{base}, format html|json, selectors or json_path). \
-             Enables new engines or hotfixes a stale built-in with no release → \
-             {engine,version,ok}",
+             with {query}/{limit}/{base}, format html|json|structural, mode \
+             no-js|fast|secure|enid|browser, selectors or json_path, and an optional \
+             `headers` map of extra request headers applied to the SERP fetch — e.g. \
+             {\"referer\":\"https://www.google.com/\",\"sec-fetch-site\":\"same-origin\"} \
+             to shape the request as a real in-site navigation). Enables new engines or \
+             hotfixes a stale built-in with no release → {engine,version,ok}",
         ),
         (
             "web_search_reset_strategy",
@@ -3347,7 +3367,7 @@ mod tests {
         let (cmd, counter) = write_mint_stub("miss");
         let cache = tmp_enid_cache("miss"); // no file → cache miss
 
-        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+        let html = google_enid_flow(&url, &cache, &cmd, None, false, &BTreeMap::new())
             .await
             .unwrap();
         assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
@@ -3377,7 +3397,7 @@ mod tests {
             }])
             .unwrap();
 
-        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+        let html = google_enid_flow(&url, &cache, &cmd, None, false, &BTreeMap::new())
             .await
             .unwrap();
         assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
@@ -3402,7 +3422,7 @@ mod tests {
             }])
             .unwrap();
 
-        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+        let html = google_enid_flow(&url, &cache, &cmd, None, false, &BTreeMap::new())
             .await
             .unwrap();
         assert!(
@@ -3433,7 +3453,7 @@ mod tests {
             .unwrap();
 
         // remint:true → mint despite a valid cache.
-        let html = google_enid_flow(&url, &cache, &cmd, None, true)
+        let html = google_enid_flow(&url, &cache, &cmd, None, true, &BTreeMap::new())
             .await
             .unwrap();
         assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
@@ -4203,6 +4223,24 @@ mod tests {
         );
     }
 
+    // The strategy `headers` field parses + is exposed on the built-in google strategy (the
+    // data-driven nav-header knob, applied to the SERP fetch).
+    #[test]
+    fn google_strategy_exposes_nav_headers() {
+        let reg = built_in();
+        let g = reg.get("google").unwrap();
+        assert_eq!(
+            g.headers.get("referer").map(String::as_str),
+            Some("https://www.google.com/")
+        );
+        assert_eq!(
+            g.headers.get("sec-fetch-site").map(String::as_str),
+            Some("same-origin")
+        );
+        // Other engines carry no extra headers by default.
+        assert!(reg.get("bing").unwrap().headers.is_empty());
+    }
+
     #[test]
     fn build_query_url_interpolates_and_searxng_requires_base() {
         let reg = built_in();
@@ -4212,7 +4250,7 @@ mod tests {
         );
         assert_eq!(
             build_query_url(reg.get("google").unwrap(), "rust", 5, None).unwrap(),
-            "https://www.google.com/search?q=rust"
+            "https://www.google.com/search?q=rust&source=hp"
         );
         assert_eq!(
             build_query_url(

@@ -72,7 +72,10 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   en-US identity). Override with **`TURBO_SURF_TZ`**.
 - **High-resolution clock** — `performance.now()` is origin-relative + fractional + monotonic
   on Chrome's 100µs grid, `timeOrigin` is a fractional epoch anchor, and `requestAnimationFrame`
-  delivers a fractional origin-relative `DOMHighResTimeStamp` (was integer epoch ms, no arg).
+  is **batched** like Chrome — all callbacks scheduled for one frame fire with the SAME fractional
+  origin-relative `DOMHighResTimeStamp` (~16.6ms cadence + jitter, ≤ `now()`), a re-scheduled
+  callback runs on the next frame, and it returns an integer id with a correct `cancelAnimationFrame`
+  (was: per-callback incrementing timestamp, no arg, `clearTimeout` alias — a tell).
 - **UA-CH greased brand** → `"Not_A Brand";v="8"` in the middle slot, matching the on-wire
   `sec-ch-ua`; coherent `getHighEntropyValues.fullVersionList` (was a stale `Not)A;Brand;v=24`).
 - **Coherence surfaces** real Chrome exposes that deno_core omits: `navigator.pdfViewerEnabled`,

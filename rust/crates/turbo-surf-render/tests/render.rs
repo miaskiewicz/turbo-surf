@@ -779,6 +779,47 @@ async fn raf_passes_highres_timestamp() {
     );
 }
 
+// rAF batching: real Chrome gives every rAF callback scheduled for one frame the SAME timestamp,
+// and a callback that re-schedules runs on the NEXT frame (a later timestamp). A per-callback
+// incrementing clock is a tell.
+#[tokio::test]
+async fn raf_batches_one_frame_timestamp_and_reschedules_next() {
+    let script = r#"
+        var log = [];
+        function f(t){ log.push(t); }
+        requestAnimationFrame(f);
+        requestAnimationFrame(f);
+        requestAnimationFrame(function(t){ log.push(t); requestAnimationFrame(function(t2){ log.push('R'+t2); }); });
+        setTimeout(function(){ document.body.setAttribute('data-raf', JSON.stringify(log)); }, 120);
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let i = out.find(r#"data-raf=""#).expect("rAF frames ran") + 10;
+    let j = out[i..].find('"').unwrap() + i;
+    let raw = out[i..j].replace("&quot;", "\"");
+    let log: Vec<serde_json::Value> =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("raf json {e}: {raw}"));
+    assert!(log.len() >= 4, "3 same-frame + 1 rescheduled: {raw}");
+    let t0 = log[0].as_f64().unwrap();
+    assert_eq!(
+        log[1].as_f64(),
+        Some(t0),
+        "same-frame rAFs share one timestamp"
+    );
+    assert_eq!(
+        log[2].as_f64(),
+        Some(t0),
+        "same-frame rAFs share one timestamp"
+    );
+    let resched = log[3].as_str().unwrap();
+    let t2: f64 = resched.strip_prefix('R').unwrap().parse().unwrap();
+    assert!(
+        t2 > t0,
+        "a re-scheduled rAF fires on a LATER frame ({t2} > {t0})"
+    );
+}
+
 // Anti-bot fingerprint fidelity vs real Chrome (measured diffs it must close): (1) canvas/WebGL
 // context methods must report native `.toString()`, not JS source (anti-tamper); (2) the WebGL
 // identity must be the real GPU (ANGLE Metal / Apple), not SwiftShader, with real limits +

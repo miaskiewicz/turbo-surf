@@ -618,17 +618,33 @@ const __perfNow = () => {
   __perfLast = t;
   return t;
 };
-// rAF: deliver a fractional, origin-relative DOMHighResTimeStamp (~60fps + jitter), never before
-// now() — Chrome's callback arg is on the perf.now scale (the old shim passed no argument).
-let __rafClock = null;
-globalThis.requestAnimationFrame = (fn) =>
-  globalThis.setTimeout(() => {
-    const floor = __perfNow();
-    __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
-    if (__rafClock < floor) __rafClock = floor;
-    fn(Math.round(__rafClock * 10) / 10);
-  }, 16);
-globalThis.cancelAnimationFrame = globalThis.clearTimeout;
+// rAF: BATCH like a real browser (measured against Chrome). All callbacks scheduled for a frame
+// fire together with the SAME fractional, origin-relative DOMHighResTimeStamp (~16.6ms cadence +
+// sub-ms jitter, never before __perfNow()); a callback that re-schedules runs on the NEXT frame.
+// A per-callback-incrementing clock (the naive shim) is a tell — Chrome gives every rAF in one
+// frame an identical timestamp. requestAnimationFrame returns an integer id; cancelAnimationFrame
+// removes only that pending callback (not clearTimeout — rAF ids are their own namespace).
+let __rafClock = null, __rafId = 0, __rafScheduled = false;
+let __rafQueue = [];
+globalThis.requestAnimationFrame = (fn) => {
+  const id = ++__rafId;
+  __rafQueue.push({ id, fn });
+  if (!__rafScheduled) {
+    __rafScheduled = true;
+    globalThis.setTimeout(() => {
+      const floor = __perfNow();
+      __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
+      if (__rafClock < floor) __rafClock = floor;
+      const ts = Math.round(__rafClock * 10) / 10; // one timestamp for the whole frame
+      const batch = __rafQueue;
+      __rafQueue = [];
+      __rafScheduled = false;
+      for (const cb of batch) { try { cb.fn(ts); } catch (e) {} }
+    }, 16);
+  }
+  return id;
+};
+globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };
 // Route queueMicrotask through the virtual timer queue (NOT a real V8 microtask).
 // The "correct" Promise.resolve().then is unbounded — a reactivity lib that
 // re-schedules a flush each microtask spins V8's microtask queue forever, which the
@@ -2674,7 +2690,8 @@ globalThis.__domSig = () => {
   mark(requestAnimationFrame, "requestAnimationFrame");
   mark(queueMicrotask, "queueMicrotask");
   mark(fetch, "fetch");
-  mark(setInterval); mark(clearInterval); mark(cancelAnimationFrame);
+  mark(setInterval); mark(clearInterval);
+  mark(cancelAnimationFrame, "cancelAnimationFrame"); // now its own fn, not a clearTimeout alias
   if (globalThis.Headers) mark(globalThis.Headers, "Headers");
   const nav = globalThis.navigator;
   if (nav && nav.clipboard) { mark(nav.clipboard.writeText, "writeText"); mark(nav.clipboard.readText, "readText"); }

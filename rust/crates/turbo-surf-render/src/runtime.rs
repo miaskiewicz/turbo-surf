@@ -458,15 +458,21 @@ globalThis.chrome = globalThis.chrome || {
   csi: function () { return {}; },
 };
 globalThis.location = globalThis.location || { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
-globalThis.localStorage = (() => {
+const __mkStorage = () => {
   const m = new Map();
   return {
     getItem: (k) => (m.has(k) ? m.get(k) : null),
     setItem: (k, v) => m.set(k, String(v)),
     removeItem: (k) => m.delete(k),
     clear: () => m.clear(),
+    key: (i) => (Array.from(m.keys())[i] ?? null),
+    get length() { return m.size; },
   };
-})();
+};
+globalThis.localStorage = __mkStorage();
+// sessionStorage: a real Chrome global (per-tab web storage). deno_core ships neither;
+// google's homepage reads window.sessionStorage, so its absence is a consistency tell.
+globalThis.sessionStorage = __mkStorage();
 const __log = (...a) => Deno.core.print(a.map(String).join(" ") + "\n");
 globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: () => {} };
 const __timers = [];
@@ -1052,6 +1058,68 @@ globalThis.performance = globalThis.performance || {
   clearMarks() {}, clearMeasures() {},
   getEntries: () => [], getEntriesByName: () => [], getEntriesByType: () => [],
 };
+// Legacy navigation timing: performance.timing (PerformanceTiming) + performance.navigation
+// (PerformanceNavigation). Deprecated but Chrome still exposes both, and deno_core's
+// `performance` ships neither — google's homepage reads them, so an anti-bot consistency
+// check sees `undefined` where real Chrome has objects. Coherent, monotonic values off
+// timeOrigin; the redirect/unload marks are 0 (a fresh top-level navigation).
+try {
+  const P = globalThis.performance;
+  if (P && !P.timing) {
+    const t = Math.floor(P.timeOrigin || Date.now());
+    const timing = {
+      navigationStart: t, unloadEventStart: 0, unloadEventEnd: 0, redirectStart: 0,
+      redirectEnd: 0, fetchStart: t, domainLookupStart: t, domainLookupEnd: t,
+      connectStart: t, connectEnd: t, secureConnectionStart: t, requestStart: t,
+      responseStart: t, responseEnd: t, domLoading: t, domInteractive: t,
+      domContentLoadedEventStart: t, domContentLoadedEventEnd: t, domComplete: t,
+      loadEventStart: t, loadEventEnd: t,
+    };
+    timing.toJSON = function () { return timing; };
+    try { Object.defineProperty(P, "timing", { value: timing, configurable: true, enumerable: true }); }
+    catch (e) { P.timing = timing; }
+  }
+  if (P && !P.navigation) {
+    const nav = { type: 0, redirectCount: 0 };
+    Object.defineProperties(nav, {
+      TYPE_NAVIGATE: { value: 0 }, TYPE_RELOAD: { value: 1 },
+      TYPE_BACK_FORWARD: { value: 2 }, TYPE_RESERVED: { value: 255 },
+    });
+    try { Object.defineProperty(P, "navigation", { value: nav, configurable: true, enumerable: true }); }
+    catch (e) { P.navigation = nav; }
+  }
+  // performance.memory — Chrome-only non-standard heap gauge; real Chrome exposes it, and
+  // fingerprinters read it. Static, coherent values (a fresh page's small heap).
+  if (P && !P.memory) {
+    const mem = { jsHeapSizeLimit: 2190000000, totalJSHeapSize: 12000000, usedJSHeapSize: 10000000 };
+    try { Object.defineProperty(P, "memory", { value: mem, configurable: true, enumerable: true }); }
+    catch (e) { P.memory = mem; }
+  }
+} catch (e) {}
+// document.scrollingElement — real Chrome returns the root <html> in standards mode. rtdom's
+// document has no layout, so point it at documentElement (google's homepage reads it).
+try {
+  const D = globalThis.document;
+  if (D && !D.scrollingElement) {
+    Object.defineProperty(D, "scrollingElement", {
+      get() { return D.documentElement || null; }, configurable: true,
+    });
+  }
+} catch (e) {}
+// window.scheduler — the Prioritized Task Scheduling API (Chrome). google's homepage reads
+// window.scheduler; deno_core doesn't ship it. postTask runs the callback through the virtual
+// timer queue (honoring `delay`) and resolves with its result; yield() defers to a macrotask.
+if (typeof globalThis.scheduler === "undefined") {
+  globalThis.scheduler = {
+    postTask(cb, opts) {
+      return new Promise((resolve, reject) => {
+        const delay = (opts && +opts.delay) || 0;
+        setTimeout(() => { try { resolve(typeof cb === "function" ? cb() : undefined); } catch (e) { reject(e); } }, delay);
+      });
+    },
+    yield() { return new Promise((r) => setTimeout(r, 0)); },
+  };
+}
 // The CSS interface (window.CSS): CSS.supports (feature detection) + CSS.escape (identifier
 // escaping). Bundles reference it at load — Google's deferred `xjs` bundle aborted with
 // "CSS is not defined". No layout/CSS engine headless, so supports() validates the query
@@ -2991,6 +3059,55 @@ pub async fn render_page_with_budget(
     let out = result.map_err(|e| budget_msg(&e, budget_ms));
     crate::browser_env::reset();
     out
+}
+
+/// Full async render that ALSO returns the isolate's earned cookies (the shared jar
+/// as a storage_state JSON string). Seeds the jar from `cookies` (storage_state or
+/// "") and the navigator UA from `ua`, runs the page's own scripts to completion
+/// (dynamic `<script>` injection + `op_fetch` + timers), then reads the jar back —
+/// the in-isolate anti-bot recon path (did the page's integrity JS set a session
+/// cookie, e.g. google's `__Secure-ENID`, with no browser?). Cookie read-back
+/// happens even on a budget kill so a partial run's cookies aren't lost.
+pub async fn render_capture_cookies(
+    html: &str,
+    base: &str,
+    ua: &str,
+    cookies: &str,
+    script: &str,
+    budget_ms: u64,
+) -> Result<(String, String), String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let mut rt = make_runtime(base, cookies, ua);
+    let handle = rt.v8_isolate().thread_safe_handle();
+    let done = Arc::new(AtomicBool::new(false));
+    let watch = done.clone();
+    let watchdog = std::thread::spawn(move || {
+        let start = std::time::Instant::now();
+        while !watch.load(Ordering::Relaxed) {
+            if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
+                handle.terminate_execution();
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    });
+
+    let result = run_async(&mut rt, html, base, script).await;
+    done.store(true, Ordering::Relaxed);
+    let _ = watchdog.join();
+    // Read the earned cookies out of the shared jar regardless of run outcome.
+    let storage = {
+        let state = rt.op_state();
+        let st = state.borrow();
+        let jar = st.borrow::<Jar>();
+        let out = jar.borrow().storage_state();
+        out
+    };
+    let doc = result.map_err(|e| budget_msg(&e, budget_ms));
+    crate::browser_env::reset();
+    Ok((doc?, storage))
 }
 
 thread_local! {

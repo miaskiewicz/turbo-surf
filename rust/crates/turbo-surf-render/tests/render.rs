@@ -234,6 +234,35 @@ fn navigator_looks_like_chrome() {
     );
 }
 
+// Legacy navigation-timing + Prioritized Task Scheduling shims: google's homepage JS
+// reads performance.timing / performance.navigation / window.scheduler; deno_core ships
+// none, so without the ENV_BOOTSTRAP shims an anti-bot consistency check sees `undefined`
+// where real Chrome has objects. Assert presence + coherent shape.
+#[test]
+fn legacy_timing_and_scheduler_are_present() {
+    let probe = "document.body.setAttribute('data-t', [\
+        typeof performance.timing, performance.timing.navigationStart > 0,\
+        typeof performance.navigation, performance.navigation.type,\
+        typeof scheduler, typeof scheduler.postTask, typeof scheduler.yield,\
+        typeof sessionStorage, typeof performance.memory,\
+        performance.memory.jsHeapSizeLimit > 0, document.scrollingElement === document.documentElement].join('|'))";
+    let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
+    assert!(
+        out.contains(
+            "data-t=\"object|true|object|0|object|function|function|object|object|true|true\""
+        ),
+        "legacy timing / scheduler / storage shims missing or wrong shape: {out}"
+    );
+    // sessionStorage must actually store (round-trip), not just exist.
+    let rt = "sessionStorage.setItem('k','v'); \
+        document.body.setAttribute('data-s', sessionStorage.getItem('k') + '|' + sessionStorage.length)";
+    let out2 = turbo_surf_render::render_html("<body></body>", rt).unwrap();
+    assert!(
+        out2.contains("data-s=\"v|1\""),
+        "sessionStorage round-trip: {out2}"
+    );
+}
+
 // Runtime fingerprint override: every navigator field has a default and is
 // controllable via set_fingerprint (the MCP `set_fingerprint` tool). Uses
 // render_html (a fresh isolate per call, so ENV_BOOTSTRAP re-reads the override),

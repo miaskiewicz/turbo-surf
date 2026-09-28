@@ -32,6 +32,56 @@ use enid::{EnidCache, EnidCookie};
 
 pub const VERSION: &str = "0.4.4";
 
+// --- native-google SERP diagnostics (env-gated) ------------------------------
+// `TURBO_SURF_TRACE` (any non-empty, non-"0" value) turns on single-line `serp:`
+// diagnostics on stderr for the native google path: the cache-vs-mint decision, the
+// native response shape (status / final_url / body_len), the enablejs-shell verdict
+// (which marker was/wasn't found + a body prefix), the re-mint retry, and the /sorry
+// outcome — all otherwise observable only through the final `Err` string. Off by
+// default; one cached env read when off, zero formatting cost.
+fn serp_trace_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("TURBO_SURF_TRACE")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false)
+    })
+}
+
+macro_rules! strace {
+    ($($arg:tt)*) => {
+        if $crate::serp_trace_on() {
+            eprintln!("serp: {}", format_args!($($arg)*));
+        }
+    };
+}
+
+/// Comma-joined cookie names (diagnostics; values are secrets, never logged).
+fn cookie_names(cookies: &[EnidCookie]) -> String {
+    cookies
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// A one-line, newline-flattened prefix of a page body (diagnostics only).
+fn body_prefix(html: &str) -> String {
+    html.chars()
+        .take(160)
+        .collect::<String>()
+        .replace(['\n', '\r'], " ")
+}
+
+/// Which SERP marker `is_enablejs_shell` matched on (diagnostics for a real SERP).
+fn serp_marker(html: &str) -> &'static str {
+    if html.contains("id=\"rso\"") {
+        "id=rso"
+    } else {
+        "<h3>"
+    }
+}
+
 /// One agent session: the current page URL + parsed tree + nav history, plus the
 /// browser-ish state agents expect (UA / extra headers / cookie jar / JS mode) and
 /// the trails the JS server exposes (rendered-DOM history + a request log).
@@ -1622,18 +1672,48 @@ async fn google_enid_flow(
     headless: Option<bool>,
     remint: bool,
 ) -> Result<String, String> {
+    strace!("enid: cache path {}", cache.path_str());
     let cookies = match (remint, cache.get_valid(enid::now_secs())) {
-        (false, Some(c)) => c,
-        _ => mint_and_cache(cache, mint_cmd, headless).await?,
+        (false, Some(c)) => {
+            let age = cache
+                .minted_at()
+                .map(|m| format!("{:.0}s ago", (enid::now_secs() - m).max(0.0)))
+                .unwrap_or_else(|| "age unknown".to_string());
+            strace!(
+                "enid: cache hit — {} cookie(s) [{}], minted {age}",
+                c.len(),
+                cookie_names(&c)
+            );
+            c
+        }
+        (true, _) => {
+            strace!("enid: remint forced (remint:true) → sidecar mint");
+            mint_and_cache(cache, mint_cmd, headless).await?
+        }
+        (false, None) => {
+            strace!("enid: cache miss (no live __Secure-ENID) → sidecar mint");
+            mint_and_cache(cache, mint_cmd, headless).await?
+        }
     };
     let html = native_google_fetch(url, &cookies).await?;
     if !is_enablejs_shell(&html) {
+        strace!("verdict: real SERP (matched {})", serp_marker(&html));
         return Ok(html);
     }
     // Stale/untrusted token → re-mint once and retry natively.
+    strace!(
+        "verdict: enablejs shell (no id=rso / <h3>); body_len={} prefix={:?}",
+        html.len(),
+        body_prefix(&html)
+    );
+    strace!("remint: stale/untrusted token → one re-mint + native retry");
     let fresh = mint_and_cache(cache, mint_cmd, headless).await?;
     let retry = native_google_fetch(url, &fresh).await?;
     if is_enablejs_shell(&retry) {
+        strace!(
+            "verdict: still enablejs shell after fresh mint (body_len={}) → IP likely flagged",
+            retry.len()
+        );
         return Err(
             "google served the enablejs shell even after a fresh __Secure-ENID mint — the \
              exit IP is likely flagged (a /sorry'd IP won't serve the SERP to any token) or \
@@ -1668,6 +1748,10 @@ async fn native_google_fetch(url: &str, cookies: &[EnidCookie]) -> Result<String
     for c in cookies {
         jar.add(&c.name, &c.value, &c.domain, &c.path, c.expires);
     }
+    strace!(
+        "native fetch {url} with cookies [{}]",
+        cookie_names(cookies)
+    );
     let opts = FetchOptions {
         allow_non_html: true,
         profile: Some(&profile),
@@ -1676,6 +1760,12 @@ async fn native_google_fetch(url: &str, cookies: &[EnidCookie]) -> Result<String
         ..Default::default()
     };
     let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
+    strace!(
+        "native response status={} final_url={} body_len={}",
+        res.status,
+        res.final_url,
+        res.html.len()
+    );
     let (_final_url, html) = maybe_clear_sorry(&mut jar, res.final_url, res.html).await?;
     Ok(html)
 }
@@ -1705,6 +1795,7 @@ async fn maybe_clear_sorry(
     if !sorry::is_sorry_wall(&final_url, &html) {
         return Ok((final_url, html));
     }
+    strace!("sorry: unusual-traffic wall at {final_url} → in-isolate reCAPTCHA clearance");
     let ctx = SolveContext {
         user_agent: fingerprint::default_profile().user_agent,
         proxy: std::env::var("TURBO_SURF_PROXY")
@@ -1748,6 +1839,72 @@ async fn maybe_clear_sorry(
         }
         Err(e) => Err(format!("google /sorry clearance failed: {e}")),
     }
+}
+
+/// Cookie NAMES from a jar storage_state JSON array (values are secrets — never
+/// surfaced). `[]`/malformed → empty.
+fn earned_cookie_names(storage: &str) -> Vec<String> {
+    serde_json::from_str::<Value>(storage)
+        .ok()
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| c.get("name").and_then(Value::as_str).map(String::from))
+        .collect()
+}
+
+/// BROWSERLESS anti-bot recon for the native-mint goal: fetch `url` natively (the
+/// impersonate stack), then run its OWN scripts to completion in the V8 render
+/// isolate under the instrumented fingerprint globals, and report (a) `shim_needed`
+/// — the env surface the page's integrity JS (BotGuard/reCAPTCHA-class) read that we
+/// still return `undefined`, i.e. the exact shims to add to satisfy it in-isolate —
+/// and (b) the cookies the isolate earned, flagging whether a trusted `__Secure-ENID`
+/// was set with no browser. This answers "what do we need in our env to execute
+/// [BotGuard], and did executing it mint anything?" — it does NOT itself defeat
+/// server-side scoring (a completed run can still be IP/score-rejected).
+async fn probe_mint(url: &str) -> Result<Value, String> {
+    let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
+    let mut jar = CookieJar::new();
+    let res = fetch_html(
+        url,
+        FetchOptions {
+            allow_non_html: true,
+            profile: Some(&profile),
+            bypass_consent: true,
+            jar: Some(&mut jar),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    // Reuse the session's script collector (inline + external <script src>, fetched).
+    let mut tmp = Session::new();
+    tmp.load(&res.final_url, &res.html);
+    let script = tmp.page_script().await;
+    let ua = profile.user_agent.clone();
+    let (report, storage) =
+        turbo_surf_render::probe_page_async(&res.html, &res.final_url, &ua, "", &script, 8000)
+            .await?;
+    let earned = earned_cookie_names(&storage);
+    let minted_enid = earned.iter().any(|n| n == enid::ENID_NAME);
+    strace!(
+        "probe_mint {} status={} scripts_len={} shim_gaps={} earned=[{}] enid={}",
+        res.final_url,
+        res.status,
+        script.len(),
+        report.shim_needed.len(),
+        earned.join(","),
+        minted_enid
+    );
+    Ok(json!({
+        "url": res.final_url,
+        "status": res.status,
+        "scripts_bytes": script.len(),
+        "shim_needed": report.shim_needed,
+        "accesses": report.accesses,
+        "earned_cookies": earned,
+        "minted_enid": minted_enid,
+    }))
 }
 
 /// Fetch a SERP through the opt-in browser sidecar named by the
@@ -2113,6 +2270,16 @@ pub fn tools() -> Value {
              in-isolate → clear error (route to an external solver).",
         ),
         (
+            "probe_mint",
+            "BROWSERLESS anti-bot recon: fetch {url} natively, run its own integrity \
+             JS (BotGuard/reCAPTCHA-class) to completion in the V8 isolate under \
+             instrumented globals → {shim_needed (env surface still returning \
+             undefined — the shims to add), accesses, earned_cookies, minted_enid}. \
+             Point at https://www.google.com/ to see what BotGuard demands + whether \
+             an in-isolate homepage run mints a trusted __Secure-ENID (no browser). \
+             Recon only — a completed run can still be server-side/IP-score-rejected.",
+        ),
+        (
             "set_fingerprint",
             "Override render-tier navigator fields (JSON: userAgent, platform, \
              vendor, languages, hardwareConcurrency, deviceMemory, chromeMajor, \
@@ -2288,6 +2455,10 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
                     arg_str(args, "action").map(str::to_string),
                 )
                 .await
+        }
+        "probe_mint" => {
+            let url = arg_str(args, "url").ok_or("probe_mint: missing 'url'")?;
+            probe_mint(url).await
         }
         "stealth_status" => Ok(session.stealth_status()),
         "set_fingerprint" => session.set_fingerprint(args.get("overrides").unwrap_or(args)),

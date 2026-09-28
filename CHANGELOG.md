@@ -68,6 +68,17 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   `performance.memory`, `document.scrollingElement`, `window.sessionStorage`, legacy
   `performance.timing`/`navigation`, and `window.scheduler`.
 
+### Added — GPU (opt-in)
+- **`gpu-metal` cargo feature** (off by default; macOS/Metal) — real Apple-GPU canvas
+  rasterization via `wgpu`→Metal, backing the render tier's `toDataURL` with genuine GPU
+  pixels instead of tiny-skia's software raster. Fixes the coherence tell of claiming an
+  Apple-Metal renderer while producing device-invariant/software pixels. Zero cost to the
+  default build/PyPI wheels (0 wgpu crates unless the feature is on); enabled via
+  `turbo-surf-mcp`/`napi`/`py`'s own `gpu-metal` pass-through. NOTE: this covers **canvas
+  2D**; the live **WebGL→wgpu** bridge (so a page's own `gl.*` calls execute on the GPU and
+  `readPixels` returns real pixels) is the follow-up — the recorded WebGL op-log is lossy
+  (`bufferData` keeps only byte length), so WebGL scene pixels can't be replayed, only bridged.
+
 ### Changed — sidecar + deps
 - **Browser sidecar mint** (`fetch-serp.mjs`): BotGuard is interaction-gated, so `mintEnid`
   now performs a genuine human-paced search-box interaction to trigger the VM before harvesting

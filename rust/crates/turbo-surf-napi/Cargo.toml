@@ -14,6 +14,8 @@ default = ["impersonate"]
 # Forward turbo-surf-core's BoringSSL Chrome-fingerprint client (dev/harness use
 # of the impersonation path). See turbo-surf-core/src/net.rs.
 impersonate = ["turbo-surf-core/impersonate", "turbo-surf-page/impersonate"]
+# Real Apple-GPU (wgpu→Metal) canvas rasterization (off by default; see turbo-surf-raster).
+gpu-metal = ["turbo-surf-raster/gpu-metal"]
 
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi6", "tokio_rt"] }

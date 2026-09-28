@@ -25,6 +25,10 @@ impersonate = ["turbo-surf-core/impersonate"]
 # non-standard ext); implies `impersonate`. See turbo-surf-core's `trust-anchors`
 # feature and net.rs `emulate()`.
 trust-anchors = ["turbo-surf-core/trust-anchors"]
+# Real Apple-GPU (wgpu→Metal) canvas rasterization for the render tier's toDataURL — genuine
+# GPU pixels instead of tiny-skia's software raster. OFF by default (macOS-only, pulls wgpu +
+# a C/Metal toolchain); enable where a real GPU is present. See turbo-surf-raster's `gpu-metal`.
+gpu-metal = ["turbo-surf-raster/gpu-metal"]
 
 [dependencies]
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.4" }

@@ -32,6 +32,25 @@ image = { version = "0.25", default-features = false, features = [
 # Pinned to match turbo-html2pdf's svg tier (0.45.1; 0.46+ changes raster output).
 # resvg re-exports `usvg` + `tiny-skia`, used only inside the SVG decode path.
 resvg = { version = "=0.45.1", default-features = false }
+# Parse the 2D-canvas op-log JSON (`canvas_ops_png`). Value-tree parse only — the op set is
+# small + forgiving (unknown ops are skipped), so no derive is needed.
+serde_json = "1"
+
+# --- `gpu-metal` (off by default) --------------------------------------------
+# Real-GPU (wgpu → Metal) rasterizer for the canvas op-log. All three are `optional` and only
+# pulled in by the `gpu-metal` feature; the default build links ZERO GPU crates and keeps the
+# tiny-skia replay.
+wgpu = { version = "22", optional = true }
+# Block on wgpu's async adapter/device/readback futures (offscreen, no async runtime).
+pollster = { version = "0.3", optional = true }
+# Tessellate canvas paths + glyph outlines into GPU triangles (fill + stroke).
+lyon_tessellation = { version = "1", optional = true }
+
+[features]
+# Rasterize `canvas_ops_png` on the real Apple GPU (wgpu → Metal) instead of tiny-skia. On any
+# GPU failure the call transparently falls back to tiny-skia, so enabling it never regresses
+# correctness — only the pixel backend changes.
+gpu-metal = ["dep:wgpu", "dep:pollster", "dep:lyon_tessellation"]
 
 [dev-dependencies]
 # Screenshot tests build a fixture PNG and decode the rendered output to sample

@@ -258,6 +258,15 @@ Add **`--features trust-anchors`** (implies `impersonate`) to also emit Chrome 1
 vendored `wreq` fork (`rust/vendor/wreq`), so it works in this binary but not for
 crates.io library consumers — see [`PUBLISHING.md`](./PUBLISHING.md).
 
+Build feature (not env): **`--features gpu-metal`** (macOS/Metal, off by default) backs
+the render tier's canvas `toDataURL` with **real Apple-GPU pixels** (`wgpu`→Metal) instead
+of the software (tiny-skia) raster — so the canvas/WebGL fingerprint a wall reads
+(DataDome/Kasada/reCAPTCHA/Akamai/Cloudflare/Incapsula — anything hashing canvas) is genuine
+GPU output, not device-invariant/software pixels. Zero cost to the default build + the PyPI
+wheels (no `wgpu` unless enabled). It gives *a real Apple GPU*, not Chrome's exact ANGLE hash,
+so it beats device-invariance detection, not exact-corpus matching. (Covers canvas 2D; the
+live WebGL→wgpu bridge is a follow-up.)
+
 MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
 what a page's anti-bot JS reads), **`probe_mint`** (browserless recon: run a page's

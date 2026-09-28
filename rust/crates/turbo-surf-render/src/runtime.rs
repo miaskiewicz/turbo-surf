@@ -569,7 +569,32 @@ globalThis.clearTimeout = (id) => {
   if (i >= 0) __timers.splice(i, 1);
 };
 globalThis.clearInterval = globalThis.clearTimeout;
-globalThis.requestAnimationFrame = (fn) => globalThis.setTimeout(fn, 16);
+// High-resolution monotonic clock matching Chrome (origin-relative, fractional, 100µs grid).
+// A BotGuard-class collector reads performance.now ×100+ and rAF ×20: it checks the resolution
+// (Chrome quantizes to 0.1ms), fractionality, monotonicity, that now() ≈ Date.now()-timeOrigin,
+// and that rAF/event timestamps ride the SAME origin-relative scale. The old fallback returned
+// integer epoch ms (wrong scale, 1ms grid, no fraction) — a timing tell. timeOrigin is a
+// fractional epoch anchor ~0.8–2.5s in the past (a just-navigated page); now() quantizes wall
+// elapsed to the 100µs grid, monotonic with a bounded creep so a tight loop shows 0.1ms deltas.
+const __perfTimeOrigin = Date.now() - (Math.random() * 1700 + 800) - Math.random();
+let __perfLast = 0;
+const __perfNow = () => {
+  let t = Math.floor((Date.now() - __perfTimeOrigin) * 10) / 10;
+  const wall = Date.now() - __perfTimeOrigin;
+  if (t <= __perfLast) t = __perfLast - wall < 2 ? __perfLast + 0.1 : __perfLast;
+  __perfLast = t;
+  return t;
+};
+// rAF: deliver a fractional, origin-relative DOMHighResTimeStamp (~60fps + jitter), never before
+// now() — Chrome's callback arg is on the perf.now scale (the old shim passed no argument).
+let __rafClock = null;
+globalThis.requestAnimationFrame = (fn) =>
+  globalThis.setTimeout(() => {
+    const floor = __perfNow();
+    __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
+    if (__rafClock < floor) __rafClock = floor;
+    fn(Math.round(__rafClock * 10) / 10);
+  }, 16);
 globalThis.cancelAnimationFrame = globalThis.clearTimeout;
 // Route queueMicrotask through the virtual timer queue (NOT a real V8 microtask).
 // The "correct" Promise.resolve().then is unbounded — a reactivity lib that
@@ -1106,19 +1131,23 @@ if (typeof globalThis.trustedTypes === "undefined") {
 // `const {startTime} = performance.mark(name)` (and reads `.duration`/`.entryType` off the
 // measure), so returning undefined crashed with "Cannot destructure property 'startTime' …"
 // (seen on nike.com's Boomerang beacon).
-globalThis.performance = globalThis.performance || {
-  now: () => Date.now(),
-  timeOrigin: 0,
-  mark(name, opts) {
-    return { name: String(name == null ? "" : name), entryType: "mark",
-      startTime: (opts && +opts.startTime) || Date.now(), duration: 0, detail: (opts && opts.detail) || null };
-  },
-  measure(name) {
-    return { name: String(name == null ? "" : name), entryType: "measure", startTime: 0, duration: 0, detail: null };
-  },
-  clearMarks() {}, clearMeasures() {},
-  getEntries: () => [], getEntriesByName: () => [], getEntriesByType: () => [],
-};
+// Install the hi-res clock onto `performance` (defineProperty, not the `||` guard, so it wins
+// whether or not deno_core preinstalled a coarse one). mark()/measure() ride the same clock.
+{
+  const P = globalThis.performance || (globalThis.performance = {});
+  try { Object.defineProperty(P, "now", { value: __perfNow, configurable: true, writable: true }); }
+  catch (e) { P.now = __perfNow; }
+  try { Object.defineProperty(P, "timeOrigin", { value: __perfTimeOrigin, configurable: true, enumerable: true }); }
+  catch (e) { P.timeOrigin = __perfTimeOrigin; }
+  if (typeof P.mark !== "function") P.mark = (name, opts) => ({ name: String(name == null ? "" : name), entryType: "mark",
+    startTime: (opts && +opts.startTime) || __perfNow(), duration: 0, detail: (opts && opts.detail) || null });
+  if (typeof P.measure !== "function") P.measure = (name) => ({ name: String(name == null ? "" : name), entryType: "measure", startTime: 0, duration: 0, detail: null });
+  if (typeof P.clearMarks !== "function") P.clearMarks = () => {};
+  if (typeof P.clearMeasures !== "function") P.clearMeasures = () => {};
+  if (typeof P.getEntries !== "function") P.getEntries = () => [];
+  if (typeof P.getEntriesByName !== "function") P.getEntriesByName = () => [];
+  if (typeof P.getEntriesByType !== "function") P.getEntriesByType = () => [];
+}
 // Legacy navigation timing: performance.timing (PerformanceTiming) + performance.navigation
 // (PerformanceNavigation). Deprecated but Chrome still exposes both, and deno_core's
 // `performance` ships neither — google's homepage reads them, so an anti-bot consistency

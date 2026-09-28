@@ -263,6 +263,68 @@ fn legacy_timing_and_scheduler_are_present() {
     );
 }
 
+// Timing fidelity: a BotGuard-class collector reads performance.now ×100+ and checks Chrome's
+// clock shape — origin-relative (now() ≈ Date.now()-timeOrigin, NOT epoch), fractional, monotonic,
+// 100µs-grid resolution, with a fractional timeOrigin. The old shim returned integer epoch ms.
+#[test]
+fn perf_clock_matches_chrome_shape() {
+    let probe = r#"
+        var a = performance.now(), b = performance.now();
+        var deltas = [], prev = performance.now();
+        for (var i=0;i<3000;i++){ var n=performance.now(); if(n>prev) deltas.push(n-prev); prev=n; }
+        var minD = deltas.length ? Math.min.apply(null, deltas) : -1;
+        JSON.stringify({
+          origin_relative: performance.now() < 1e9,                 // ~seconds since nav, not epoch
+          origin_fractional: (performance.timeOrigin % 1) !== 0,
+          monotonic: b >= a,
+          min_delta_grid: Math.abs(minD - 0.1) < 1e-6,              // 100µs quantum
+          scale_ok: Math.abs((Date.now() - performance.timeOrigin) - performance.now()) < 50,
+        })
+    "#;
+    let out = turbo_surf_render::run_with_dom("<body></body>", probe).unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("clock json: {e}: {out}"));
+    assert_eq!(
+        v["origin_relative"], true,
+        "now() must be origin-relative, not epoch: {out}"
+    );
+    assert_eq!(
+        v["origin_fractional"], true,
+        "timeOrigin must be fractional: {out}"
+    );
+    assert_eq!(v["monotonic"], true, "now() must be monotonic: {out}");
+    assert_eq!(
+        v["min_delta_grid"], true,
+        "min non-zero delta must be the 0.1ms grid: {out}"
+    );
+    assert_eq!(
+        v["scale_ok"], true,
+        "now() must ≈ Date.now()-timeOrigin: {out}"
+    );
+}
+
+// rAF must deliver a fractional, origin-relative DOMHighResTimeStamp on the perf.now scale (the
+// old shim passed no argument). Async: the virtual event loop fires the frame timer.
+#[tokio::test]
+async fn raf_passes_highres_timestamp() {
+    let html = "<body></body>";
+    let script = "requestAnimationFrame(function(ts){ \
+        document.body.setAttribute('data-raf', JSON.stringify({ num: typeof ts === 'number', \
+        origin: ts < 1e9, near: Math.abs(ts - performance.now()) < 60 })); });";
+    let out = turbo_surf_render::render_page(html, "https://x.test/", script)
+        .await
+        .unwrap();
+    assert!(out.contains(r#"data-raf="#), "rAF callback ran: {out}");
+    assert!(
+        out.contains("&quot;num&quot;:true") || out.contains("\"num\":true"),
+        "rAF arg is a number: {out}"
+    );
+    assert!(
+        out.contains("&quot;origin&quot;:true") || out.contains("\"origin\":true"),
+        "rAF arg origin-relative: {out}"
+    );
+}
+
 // Anti-bot fingerprint fidelity vs real Chrome (measured diffs it must close): (1) canvas/WebGL
 // context methods must report native `.toString()`, not JS source (anti-tamper); (2) the WebGL
 // identity must be the real GPU (ANGLE Metal / Apple), not SwiftShader, with real limits +
@@ -2124,13 +2186,14 @@ async fn esm_src_chunk_with_module_body_loads_and_resolves_imports() {
     );
 }
 
-// The render tier exposes a coherent SwiftShader WebGL context (vendored from turbo-test):
-// the GPU identity a fingerprinter reads (UNMASKED_VENDOR/RENDERER via WEBGL_debug_renderer_info,
-// VENDOR/RENDERER/VERSION, MAX_TEXTURE_SIZE) plus deterministic, content-dependent readback.
-// A null WebGL context is itself a strong headless tell; SwiftShader is the real GPU-less
-// Chrome signature. This raises the score fidelity of any client-collected token.
+// The render tier exposes a coherent WebGL context whose identity is spoofed (in ENV_BOOTSTRAP)
+// to this host's real Chrome/ANGLE-Metal profile — the GPU identity a fingerprinter reads
+// (UNMASKED_VENDOR/RENDERER via WEBGL_debug_renderer_info, VENDOR/RENDERER, MAX_TEXTURE_SIZE)
+// plus deterministic, content-dependent readback. A null context is a headless tell, and the
+// vendored default was SwiftShader ("ANGLE (Google, … SwiftShader)") — itself a headless/VM
+// signal; we present the coherent Apple-Metal signature instead (see fix #3).
 #[test]
-fn webgl_swiftshader_signature_in_render_isolate() {
+fn webgl_apple_metal_signature_in_render_isolate() {
     let out = run_with_dom(
         "<body></body>",
         r#"(() => {
@@ -2154,16 +2217,20 @@ fn webgl_swiftshader_signature_in_render_isolate() {
     )
     .unwrap();
     assert!(
-        out.contains("WebKit||WebKit WebGL||Google Inc. (Google)"),
-        "SwiftShader identity: {out}"
+        out.contains("WebKit||WebKit WebGL||Google Inc. (Apple)"),
+        "Apple-Metal masked identity: {out}"
     );
     assert!(
-        out.contains("ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"),
-        "SwiftShader unmasked renderer: {out}"
+        out.contains("ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"),
+        "Apple-Metal unmasked renderer: {out}"
     );
     assert!(
-        out.contains("||8192||true||true"),
-        "max-texture + debug ext + content-dependent readback: {out}"
+        !out.contains("SwiftShader"),
+        "SwiftShader signature must be gone: {out}"
+    );
+    assert!(
+        out.contains("||16384||true||true"),
+        "max-texture (16384) + debug ext + content-dependent readback: {out}"
     );
 }
 

@@ -2567,28 +2567,83 @@ globalThis.__domSig = () => {
   const fireIframeLoad = (el) => {
     if (el.__tcLoadFired) return;
     el.__tcLoadFired = true;
+    el.__loaded = true;
     globalThis.setTimeout(() => {
       const ev = { type: "load", target: el, currentTarget: el };
       try { if (typeof el.onload === "function") el.onload(ev); } catch (_e) {}
+      try { (el.__loadCbs || []).forEach((f) => { try { f(ev); } catch (_e) {} }); } catch (_e) {}
       try { if (typeof el.dispatchEvent === "function") el.dispatchEvent(ev); } catch (_e) {}
     }, 0);
   };
-  // ── reCAPTCHA bframe handshake (network + second realm) ─────────────────────────
-  // reCAPTCHA's main VM (recaptcha__en.js) FULLY executes here; execute() then loads the
-  // cross-origin **bframe** iframe and drives the challenge over postMessage to its
-  // contentWindow, awaiting a token reply. Offline/in-isolate that iframe never loads, so
-  // execute() hangs. This upgrades a bframe (or anchor) iframe from the lightweight stub to
-  // a REAL bridged second realm (browser_env's __makeFrameRealm), FETCHES the frame + its
-  // own VM over op_fetch (shared cookie jar), runs that VM INSIDE the child realm, and lets
-  // the realm's directional postMessage carry the parent↔bframe handshake — so execute()
-  // can progress past "awaiting bframe" toward a client-side token.
-  const BFRAME_RE = /\/recaptcha\/.*(bframe|anchor)/i;
+  // ── <iframe> realms (generic, depth-capped) ──────────────────────────────────────
+  // Every iframe — created via createElement, present in the parsed HTML, or carrying
+  // `srcdoc` — instantiates a REAL bridged child realm (browser_env's __makeFrameRealm)
+  // that runs the frame's OWN inline + `<script src>` scripts, with a DISTINCT
+  // contentWindow/contentDocument, a wired frame tree (parent/top/frames/length), and a
+  // depth cap that guards frame-bombs. reCAPTCHA's bframe/anchor handshake is now just the
+  // special case this generalizes: it flows through the same loader. A hidden / src-less /
+  // blocklisted iframe stays an inert stub (the analytics/auth churn fix) so it costs nothing.
+  //
+  // Fidelity tradeoff (unchanged): a single V8 isolate, so realms SHARE prototypes/globals —
+  // no true origin isolation or separate realm IDENTITY; the child document is a lightweight
+  // facade over native element construction, not a second live-rendered tree. Faithful enough
+  // for the frame-tree + cross-frame message-channel semantics apps actually rely on.
+  const FRAME_DEPTH_CAP = 12; // beyond this a nested iframe is an inert stub (frame-bomb guard)
+  // Hosts whose iframes are analytics/auth CHURN (created + torn down hundreds of times during
+  // hydration): keep them inert so the churn stays nearly free and the budget goes to the real
+  // DOM. Config-driven so the list can grow without touching the loader.
+  const FRAME_STUB_HOST_RE = /posthog|propelauth/i;
+
+  const frameSrcOf = (el) =>
+    String((el && (el.__src != null ? el.__src : el.src)) || (el && el.getAttribute && el.getAttribute("src")) || "");
+  const frameSrcdocOf = (el) => {
+    let s = el && (el.__srcdoc != null ? el.__srcdoc : el.srcdoc);
+    if ((s == null || s === "") && el && el.getAttribute) s = el.getAttribute("srcdoc");
+    return s == null ? null : String(s);
+  };
+  // A meaningful frame earns a realm; a hidden / src-less / blocklisted one stays inert.
+  const frameWantsRealm = (el) => {
+    const sd = frameSrcdocOf(el);
+    if (sd != null && sd.length) return true;
+    const s = frameSrcOf(el);
+    if (!s || s === "about:blank") return false;
+    if (FRAME_STUB_HOST_RE.test(s)) return false;
+    return true;
+  };
+  const resolveFrameUrl = (el) => {
+    const s = frameSrcOf(el);
+    if (!s) return "";
+    try { return new URL(s, (globalThis.location && globalThis.location.href) || "http://localhost/").href; }
+    catch (_e) { return s; }
+  };
+  // Walk `parent` links to the real top window (self-aliased at the top, so it terminates).
+  const realTopOf = (win) => {
+    let w = win, guard = 0;
+    while (w && w.parent && w.parent !== w && guard++ < 64) w = w.parent;
+    return w || globalThis;
+  };
+  // Frame tree on `parentWin`: window.length = child count, window[i]/frames[i] = child
+  // windows, and frames === window (as in a real browser).
+  const registerChildFrame = (parentWin, childWin) => {
+    const n = parentWin.__frameCount || 0;
+    try { parentWin[n] = childWin; } catch (_e) {}
+    parentWin.__frameCount = n + 1;
+    try { parentWin.length = n + 1; } catch (_e) {}
+    if (parentWin.frames == null || parentWin.frames === parentWin) {
+      try { parentWin.frames = parentWin; } catch (_e) {}
+    } else {
+      try { parentWin.frames[n] = childWin; parentWin.frames.length = n + 1; } catch (_e) {}
+    }
+  };
+
   // Run a sub-VM's source inside the child realm: shadow the realm-scoped identifiers
-  // (window/self/globalThis/document/parent/top/location/postMessage/…) as function params so
-  // the VM's `window`/`parent`/bare `postMessage` resolve to the child window + parent view,
-  // not the host globals. Builtins (fetch, JSON, crypto, Math, typed arrays) intentionally
-  // fall through to the real globals. This is the same-isolate realm trick — the documented
-  // fidelity tradeoff (no separate V8 context; shared prototypes).
+  // (window/self/globalThis/document/parent/top/…) as function params so the VM's
+  // `window`/`parent`/bare `postMessage` resolve to the child window + parent VIEW, not the
+  // host globals. `parent` is the source-tagging parent VIEW (so `parent.postMessage` fires
+  // the parent's listeners with source === this frame's contentWindow — the cross-frame
+  // handshake relies on it); `top` is the REAL top window (so `top.foo` property reads work).
+  // Builtins (fetch, JSON, crypto, Math) intentionally fall through to the real globals — the
+  // documented shared-isolate tradeoff (no separate V8 context; shared prototypes).
   const runVmInRealm = (cw, code) => {
     const cd = cw.document;
     const fn = new Function(
@@ -2597,13 +2652,14 @@ globalThis.__domSig = () => {
       "dispatchEvent",
       code
     );
-    return fn.call(cw, cw, cw, cw, cd, cw.parent, cw.top, cw.frames, cw.frameElement,
+    return fn.call(cw, cw, cw, cw, cd, cw.__parentView || cw.parent, cw.top, cw.frames, cw.frameElement,
       cw.location, cw.navigator, cw.screen,
       cw.postMessage.bind(cw), cw.addEventListener.bind(cw), cw.removeEventListener.bind(cw),
       cw.dispatchEvent.bind(cw));
   };
   // Extract + run the frame document's scripts in the realm, in document order: inline
-  // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL).
+  // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL,
+  // shared cookie jar).
   const loadFrameScripts = async (cw, html, frameUrl) => {
     const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
     let m;
@@ -2632,74 +2688,165 @@ globalThis.__domSig = () => {
       try { cw.dispatchEvent(load); } catch (_e) {}
     }, 0);
   };
-  // The full handshake: build the realm, fetch the frame + its VM, run it, fire load.
-  // Counted in __pendingFetches so the hydration/interaction drain stays awake until it
-  // settles. Idempotent per element.
-  globalThis.__recaptchaBframeHandshake = async (el, url) => {
-    if (typeof globalThis.__makeFrameRealm !== "function") return;
-    if (el.__bframeStarted) return; el.__bframeStarted = true;
+
+  // Augment browser_env's child realm FROM RUNTIME (without editing the vendored binding):
+  // give it the REAL parent + top window objects (identity: frames[0].parent === window),
+  // keep the source-tagging parent VIEW as __parentView for the message bridge, expose its
+  // own frame tree, and wire its document.createElement so a grandchild iframe builds a
+  // grandchild realm at depth+1.
+  const augmentRealm = (cw, parentWin, hostEl, depth) => {
+    if (!cw || cw.__augmented) return cw;
+    cw.__augmented = true;
+    cw.__depth = depth;
+    cw.__parentWin = parentWin;
+    cw.__parentView = cw.parent;              // browser_env's source-tagging view (parent.postMessage)
+    cw.parent = parentWin;                    // real immediate parent (identity check)
+    cw.top = realTopOf(parentWin);            // real top window (top.foo reads work)
+    cw.frameElement = hostEl || null;
+    cw.frames = cw;                           // window.frames === window
+    cw.length = 0; cw.__frameCount = 0;
+    installFrameFactory(cw, cw.document, depth + 1);
+    return cw;
+  };
+
+  // Build (sync, idempotent) the child realm for `el` and wire its frame tree. Script loading
+  // is separate (async, see __loadFrame) so contentWindow is available immediately.
+  globalThis.__frameRealm = (el, depth) => {
+    if (el.__realm) return el.__realm;
+    if (typeof globalThis.__makeFrameRealm !== "function") return globalThis;
+    const parentWin = el.__ownerWin || globalThis;
+    const cw = globalThis.__makeFrameRealm(el, parentWin);
+    augmentRealm(cw, parentWin, el, depth == null ? (el.__depth || 0) : depth);
+    registerChildFrame(parentWin, cw);
+    return cw;
+  };
+
+  // The full frame load: ensure the realm, fetch the frame HTML (op_fetch for `src`, or the
+  // `srcdoc` attribute directly), run its scripts in the realm, fire load. Counted in
+  // __pendingFetches so the hydration drain waits for it. Idempotent per element.
+  globalThis.__loadFrame = async (el, depth) => {
+    if (el.__frameStarted) return el.__realm;
+    el.__frameStarted = true;
+    const cw = globalThis.__frameRealm(el, depth);
+    if (!cw || cw === globalThis) { fireIframeLoad(el); return cw; }
     globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+    let frameUrl = (globalThis.location && globalThis.location.href) || "http://localhost/";
     try {
-      const cw = globalThis.__makeFrameRealm(el, globalThis);
-      const r = await ops.op_fetch(url, "{}");
-      const html = (r && r.body) || "";
-      await loadFrameScripts(cw, html, url);
+      let html = "";
+      const sd = frameSrcdocOf(el);
+      if (sd != null && sd.length) {
+        html = sd;
+      } else {
+        const url = resolveFrameUrl(el);
+        if (url) { frameUrl = url; const r = await ops.op_fetch(url, "{}"); html = (r && r.body) || ""; }
+      }
+      await loadFrameScripts(cw, html, frameUrl);
       fireRealmLoad(cw);
     } catch (_e) {
     } finally {
       globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
+      fireIframeLoad(el);
     }
+    return cw;
   };
-  // Route a bframe/anchor src to the handshake; every other iframe keeps the lightweight
-  // load-once stub (the PostHog/PropelAuth churn fix). Returns true when it routed.
-  const routeIframeSrc = (el, v) => {
-    const url = String(v);
-    if (BFRAME_RE.test(url)) { try { globalThis.__recaptchaBframeHandshake(el, url); } catch (_e) {} return true; }
-    return false;
+  // Back-compat shim: the reCAPTCHA bframe/anchor path is now just a frame load through the
+  // generic loader. `url` is the bframe src; set it so the loader fetches + runs the bframe VM.
+  globalThis.__recaptchaBframeHandshake = (el, url) => {
+    try { if (url != null) el.__src = String(url); } catch (_e) {}
+    return globalThis.__loadFrame(el, el.__depth || 1);
   };
-  // Analytics SDKs (PostHog) churn HUNDREDS of hidden <iframe>s during hydration. With
-  // no real navigation each one never loads, so the SDK keeps recreating them — and the
-  // tree append/remove + serialize cost of that churn starves the render budget so the
-  // real page never finishes. Hand these a LIGHTWEIGHT detached stub (never enters the
-  // rtdom tree; append/remove/measure are no-ops; load fires once; contentWindow/Document
-  // are present) so the churn is nearly free and the budget goes to the real DOM.
-  const makeIframeStub = () => {
+
+  // A realm-capable iframe host: a plain object (it does NOT enter the rtdom tree, matching the
+  // pre-existing created-iframe behavior). `depth` is this frame's depth; `ownerWin` is the
+  // realm whose document created it (its parent). The src/srcdoc setters trigger a real realm
+  // load unless the frame is inert (churn / no meaningful src) or past the depth cap. Its lazy
+  // contentWindow/contentDocument mean an unused iframe still costs nothing.
+  const buildIframe = (depth, ownerWin) => {
     const noop = () => {};
-    // contentWindow IS globalThis: analytics SDKs (PostHog) create a throwaway iframe
-    // purely to read the *native* prototype of a builtin off `iframe.contentWindow[name]`
-    // (to defeat page monkey-patching). If contentWindow is missing they bail WITHOUT
-    // caching and recreate an iframe on EVERY call → 700+ iframe churn that starves the
-    // render budget. Pointing contentWindow at our realm makes `contentWindow[name].prototype`
-    // resolve, so the SDK caches and the loop stops after one lookup per builtin.
-    const win = globalThis;
-    const stub = {
-      nodeType: 1, nodeName: "IFRAME", tagName: "IFRAME", __iframeStub: true,
-      style: {}, dataset: {}, contentWindow: win, contentDocument: globalThis.document,
-      onload: null, onerror: null,
-      // Route 'src' through the accessor below (single source of truth: bframe → handshake,
-      // else load-once); other attributes are plain data props.
-      setAttribute(n, v) { if (n === "src") { this.src = v; return; } this[n] = v; },
-      getAttribute(n) { return this[n] != null ? String(this[n]) : null; },
+    const el = {
+      nodeType: 1, nodeName: "IFRAME", tagName: "IFRAME", __iframeEl: true,
+      __depth: depth, __ownerWin: ownerWin || globalThis,
+      style: {}, dataset: {}, onload: null, onerror: null,
+      setAttribute(n, v) { if (n === "src") { this.src = v; return; } if (n === "srcdoc") { this.srcdoc = v; return; } this[n] = v; },
+      getAttribute(n) {
+        if (n === "src") return this.__src || null;
+        if (n === "srcdoc") return this.__srcdoc != null ? this.__srcdoc : null;
+        return this[n] != null ? String(this[n]) : null;
+      },
       removeAttribute(n) { delete this[n]; },
       appendChild(c) { return c; }, removeChild(c) { return c; },
       insertBefore(c) { return c; }, remove: noop,
-      addEventListener(t, f) { if (t === "load") { this.onload = f; fireIframeLoad(this); } },
+      addEventListener(t, f) { if (t === "load") { (this.__loadCbs = this.__loadCbs || []).push(f); if (this.__loaded) fireIframeLoad(this); } },
       removeEventListener: noop, dispatchEvent: noop,
       getBoundingClientRect: () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }),
       focus: noop, blur: noop, contains: () => false,
     };
-    Object.defineProperty(stub, "src", {
-      configurable: true,
-      get() { return stub.__src || ""; },
-      set(v) { stub.__src = String(v); if (stub.__src && !routeIframeSrc(stub, stub.__src)) fireIframeLoad(stub); },
-    });
-    return stub;
+    // Decide realm vs inert, then (for a realm) kick the async load. Idempotent.
+    const maybeLoad = () => {
+      if (el.__frameStarted) return;
+      if (depth > FRAME_DEPTH_CAP || !frameWantsRealm(el)) { fireIframeLoad(el); return; }
+      try { globalThis.__loadFrame(el, depth); } catch (_e) { fireIframeLoad(el); }
+    };
+    Object.defineProperty(el, "src", { configurable: true,
+      get() { return el.__src || ""; },
+      set(v) { el.__src = String(v); maybeLoad(); } });
+    Object.defineProperty(el, "srcdoc", { configurable: true,
+      get() { return el.__srcdoc || ""; },
+      set(v) { el.__srcdoc = String(v); maybeLoad(); } });
+    // contentWindow/contentDocument are the child realm's DISTINCT window/document once the
+    // frame wants a realm; otherwise (inert/churn or past the cap) they point at the TOP
+    // window/doc so an analytics SDK's builtin-prototype probe still resolves + caches.
+    Object.defineProperty(el, "contentWindow", { configurable: true,
+      get() {
+        if (el.__realm) return el.__realm;
+        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return globalThis.__frameRealm(el, depth);
+        return globalThis;
+      } });
+    Object.defineProperty(el, "contentDocument", { configurable: true,
+      get() {
+        if (el.__realm) return el.__realm.document;
+        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return globalThis.__frameRealm(el, depth).document;
+        return globalThis.document;
+      } });
+    return el;
   };
-  const origCreate = document.createElement.bind(document);
-  document.createElement = (tag) => {
-    if (String(tag).toLowerCase() === "iframe") return makeIframeStub();
-    return addShadow(origCreate(tag));
+
+  // Wire a document's createElement so `iframe` → a realm-capable host at `nextDepth`, owned by
+  // `win`. Non-iframe tags fall through to the original createElement (with the top document's
+  // shadow-DOM shim preserved for the top realm only).
+  const installFrameFactory = (win, doc, nextDepth) => {
+    if (!doc || doc.__frameFactory) return;
+    doc.__frameFactory = true;
+    const orig = typeof doc.createElement === "function" ? doc.createElement.bind(doc) : null;
+    const isTop = win === globalThis;
+    doc.createElement = (tag) => {
+      if (String(tag).toLowerCase() === "iframe") return buildIframe(nextDepth, win);
+      if (!orig) return null;
+      return isTop ? addShadow(orig(tag)) : orig(tag);
+    };
   };
+  // Wire the TOP document: the iframes it creates are depth 1.
+  installFrameFactory(globalThis, document, 1);
+
+  // Pre-existing <iframe> elements in the parsed HTML get a realm too (created ones go through
+  // the factory above). They are REAL rtdom nodes, so wire lazy contentWindow/contentDocument
+  // accessors and load their content at depth 1.
+  const wireExistingIframe = (el) => {
+    if (!el || el.__frameStarted || el.__iframeWiredRT) return;
+    el.__iframeWiredRT = true;
+    el.__ownerWin = globalThis;
+    el.__depth = 1;
+    try {
+      Object.defineProperty(el, "contentWindow", { configurable: true, get() { return el.__realm || globalThis; } });
+      Object.defineProperty(el, "contentDocument", { configurable: true, get() { return el.__realm ? el.__realm.document : globalThis.document; } });
+    } catch (_e) {}
+    if (frameWantsRealm(el)) { try { globalThis.__loadFrame(el, 1); } catch (_e) {} }
+  };
+  try {
+    const pre = document.querySelectorAll ? document.querySelectorAll("iframe") : [];
+    for (let i = 0; i < pre.length; i++) wireExistingIframe(pre[i]);
+  } catch (_e) {}
+
   if (document.body) addShadow(document.body);
   if (document.documentElement) addShadow(document.documentElement);
 })();

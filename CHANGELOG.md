@@ -118,6 +118,16 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   standalone SERP unlock — the residual is the session params `ei`/`iflsig`/`sxsrf` (minted into
   the homepage HTML, not synthesizable browserlessly) + a *trusted* ENID (real-browser mint).
 
+### Changed — general iframes (render)
+- **Any** iframe (created, parsed from HTML, or `srcdoc`) now instantiates a real bridged child
+  realm that runs its own inline + `<script src>` scripts, with a **distinct** `contentWindow`/
+  `contentDocument` (was `=== window`/`=== document`, a hard bot-tell), a wired frame tree
+  (`window.frames`/`window.length`/`frames[i]`, child `top` = real top, `parent` = immediate
+  parent), and a **depth cap (12)** against frame-bombs. Was: only reCAPTCHA bframe/anchor URLs
+  got a realm; every other iframe was an inert stub whose scripts never ran. The reCAPTCHA
+  handshake still works (now via the same generic loader). Honest limit: still one V8 isolate, so
+  frames share prototypes (no true origin isolation).
+
 ### Changed — messaging APIs (render)
 - `MessagePort`/`MessageChannel` are now real classes (ports are `MessagePort` instances with a
   working `addEventListener('message')` + `start()`, not object-literal stubs), `MessageEvent` is

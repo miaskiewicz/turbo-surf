@@ -2820,6 +2820,173 @@ async fn recaptcha_bframe_handshake_resolves_with_a_client_token() {
     );
 }
 
+// A generic iframe (here via `srcdoc`, so it stays offline) must instantiate a REAL child
+// realm: its contentWindow/contentDocument are DISTINCT from the top window/document — not the
+// old top-pointing stub (whose `contentWindow === window` is a hard bot-tell).
+#[tokio::test]
+async fn iframe_realm_has_distinct_window_and_document() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        f.srcdoc = "<div>child</div>";
+        const root = document.getElementById('root');
+        root.setAttribute('data-win', String(f.contentWindow !== window));
+        root.setAttribute('data-doc', String(f.contentDocument !== document));
+        root.setAttribute('data-wobj', String(!!f.contentWindow && f.contentWindow.document === f.contentDocument));
+        "#,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains(r#"data-win="true""#)
+            && html.contains(r#"data-doc="true""#)
+            && html.contains(r#"data-wobj="true""#),
+        "iframe realm must expose a DISTINCT window/document: {html}"
+    );
+}
+
+// A `srcdoc` iframe runs its OWN inline script inside the child realm: the script mutates the
+// CHILD document (title + an appended node), and the child's contentDocument reflects that
+// while the TOP document does not.
+#[tokio::test]
+async fn iframe_srcdoc_inline_script_mutates_child_document_only() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        f.srcdoc = "<scr" + "ipt>"
+          + "document.title='child-was-here';"
+          + "var e=document.createElement('span');e.id='made';document.body.appendChild(e);"
+          + "var r=top.document.getElementById('root');"
+          + "r.setAttribute('data-child-doc-title', document.title);"
+          + "r.setAttribute('data-distinct-doc', String(document !== top.document));"
+          + "r.setAttribute('data-top-title-differs', String(top.document.title !== document.title));"
+          + "r.setAttribute('data-child-has-made', String(!!document.getElementById('made')));"
+          + "</scr" + "ipt>";
+        // keep a reference so the created iframe isn't a churn candidate
+        globalThis.__f = f;
+        "#,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains(r#"data-child-doc-title="child-was-here""#),
+        "the child's inline script must run in the CHILD document: {html}"
+    );
+    assert!(
+        html.contains(r#"data-distinct-doc="true""#)
+            && html.contains(r#"data-top-title-differs="true""#),
+        "the child document must be distinct from the top document (mutation stays child-local): {html}"
+    );
+    assert!(
+        html.contains(r#"data-child-has-made="true""#),
+        "the node the child script appended must be visible in the child document: {html}"
+    );
+    // The child realm's own (detached) DOM must not leak into the parent's serialized tree.
+    assert!(
+        !html.contains("id=\"made\"") && !html.contains("<span"),
+        "the child realm DOM must stay out of the parent's serialized tree: {html}"
+    );
+}
+
+// The frame tree: window.length equals the child-frame count, window/frames are indexable, and
+// a child's `parent` is the (real) parent window — so `frames[0].parent === window`.
+#[tokio::test]
+async fn iframe_frame_tree_length_and_parent_link() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f1 = document.createElement('iframe'); f1.srcdoc = "<div>a</div>";
+        const f2 = document.createElement('iframe'); f2.srcdoc = "<div>b</div>";
+        const root = document.getElementById('root');
+        root.setAttribute('data-len', String(window.length));
+        root.setAttribute('data-frames-len', String(frames.length));
+        root.setAttribute('data-f0-is-win', String(frames[0] === f1.contentWindow));
+        root.setAttribute('data-f0-parent', String(!!frames[0] && frames[0].parent === window));
+        root.setAttribute('data-f1-idx', String(window[1] === f2.contentWindow));
+        "#,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains(r#"data-len="2""#) && html.contains(r#"data-frames-len="2""#),
+        "window.length / frames.length must equal the child-frame count: {html}"
+    );
+    assert!(
+        html.contains(r#"data-f0-is-win="true""#)
+            && html.contains(r#"data-f1-idx="true""#)
+            && html.contains(r#"data-f0-parent="true""#),
+        "frames[i]/window[i] must index child windows and frames[0].parent === window: {html}"
+    );
+}
+
+// A grandchild iframe (an iframe created inside another iframe's srcdoc script) gets its OWN
+// realm: its `parent` is the immediate child window, and its `top` walks to the REAL top window.
+#[tokio::test]
+async fn grandchild_iframe_realm_tops_out_at_the_real_top_window() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        f.srcdoc = "<scr" + "ipt>"
+          + "var g=document.createElement('iframe');"
+          + "g.srcdoc='<div>gc</div>';"
+          + "var gw=g.contentWindow;"
+          + "var r=top.document.getElementById('root');"
+          + "r.setAttribute('data-gc-top-is-top', String(gw.top === top));"
+          + "r.setAttribute('data-gc-parent-is-child', String(gw.parent === window));"
+          + "r.setAttribute('data-gc-distinct', String(gw !== window && gw !== top));"
+          + "</scr" + "ipt>";
+        globalThis.__f = f;
+        "#,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains(r#"data-gc-top-is-top="true""#),
+        "the grandchild's top must be the real top window: {html}"
+    );
+    assert!(
+        html.contains(r#"data-gc-parent-is-child="true""#)
+            && html.contains(r#"data-gc-distinct="true""#),
+        "the grandchild's parent must be the immediate child window, distinct from top: {html}"
+    );
+}
+
+// A self-replicating frame bomb (each frame's srcdoc creates another with the same srcdoc) must
+// be bounded by the depth cap: beyond ~12 levels the loader hands back an inert stub instead of
+// recursing forever, so the render completes and the observed depth is capped.
+#[tokio::test]
+async fn nested_iframe_depth_cap_stops_the_recursion() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        window.__BOMB = "<scr" + "ipt>"
+          + "var t=top;t.__depthReached=(t.__depthReached||0)+1;"
+          + "try{t.document.getElementById('root').setAttribute('data-depth', String(t.__depthReached));}catch(e){}"
+          + "var f=document.createElement('iframe');f.srcdoc=t.__BOMB;"
+          + "</scr" + "ipt>";
+        const f0 = document.createElement('iframe');
+        f0.srcdoc = window.__BOMB;
+        "#,
+    )
+    .await
+    .unwrap();
+    // The cap is 12: the depth-12 frame's script runs (and creates a depth-13 host), but the
+    // depth-13 frame is an inert stub whose script never runs — so the deepest recorded depth
+    // is exactly 12 and the recursion terminated (render returned Ok).
+    assert!(
+        html.contains(r#"data-depth="12""#),
+        "the nested-frame depth must be capped at 12 (no runaway recursion): {html}"
+    );
+}
+
 // --- helpers ----------------------------------------------------------------
 // Serves the reCAPTCHA bframe document (text/html) + its VM (application/javascript). The
 // bframe VM runs in the iframe's second realm: on load it posts `bframe-ready` to the parent,

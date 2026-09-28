@@ -1117,21 +1117,66 @@ if (typeof globalThis.customElements === "undefined") {
 }
 // (CSSStyleSheet, document.adoptedStyleSheets, and the HTML*Element constructor
 // family are all provided by the vendored browser_env binding.)
-// MessageChannel — React 18's scheduler drains its work queue by posting to a
-// MessagePort and running the handler on the other port's onmessage. Route the
-// message through the timer queue (setTimeout 0) so the hydration pump drains it;
-// without this, React's scheduled mount/hydration never runs.
+// MessagePort / MessageChannel — real classes (not object-literal stubs), so `port instanceof
+// MessagePort` holds and `port.addEventListener('message', fn)` works, not just `onmessage=`
+// (Chrome shape; the object-literal stub was a brand/instanceof tell). React 18's scheduler
+// drains its queue by posting to a MessagePort and running the peer's onmessage; google's SERP/
+// homepage use the same `new MessageChannel; port1.onmessage=…; port2.postMessage(0)` next-tick
+// idiom — delivery routes through the virtual timer queue (setTimeout 0) so the hydration/
+// interaction pump drains it. Setting `onmessage` implies `start()` (Chrome); the addEventListener
+// path queues until start().
+// MessageEvent — a REAL constructor (the vendored binding ships only a hollow `function(){}`
+// stub, so `new MessageEvent('message',{data}).data` was undefined). Our postMessage / port /
+// BroadcastChannel dispatch build events via this so `ev instanceof MessageEvent` holds and the
+// event carries data/origin/source/ports like Chrome. Defined before the ports that use it.
+globalThis.MessageEvent = class MessageEvent {
+  constructor(type, init) {
+    init = init || {};
+    this.type = String(type);
+    this.data = init.data !== undefined ? init.data : null;
+    this.origin = init.origin || "";
+    this.lastEventId = init.lastEventId || "";
+    this.source = init.source || null;
+    this.ports = init.ports || [];
+    this.bubbles = !!init.bubbles;
+    this.cancelable = !!init.cancelable;
+    this.composed = !!init.composed;
+    this.isTrusted = false;
+    this.timeStamp = Date.now();
+    this.target = null;
+    this.currentTarget = null;
+    this.defaultPrevented = false;
+  }
+  preventDefault() { this.defaultPrevented = true; }
+  stopPropagation() {}
+  stopImmediatePropagation() {}
+};
+globalThis.MessagePort = class MessagePort {
+  constructor() { this.onmessage = null; this._peer = null; this._l = []; this._started = false; this._q = []; }
+  _fire(data) {
+    const ev = new globalThis.MessageEvent("message", { data });
+    ev.target = this;
+    if (typeof this.onmessage === "function") { try { this.onmessage(ev); } catch (e) {} }
+    for (const fn of this._l.slice()) { try { fn.call(this, ev); } catch (e) {} }
+  }
+  postMessage(data) {
+    const p = this._peer; if (!p) return;
+    globalThis.setTimeout(() => { if (p._started || typeof p.onmessage === "function") p._fire(data); else p._q.push(data); }, 0);
+  }
+  start() { if (this._started) return; this._started = true; const q = this._q; this._q = []; for (const d of q) this._fire(d); }
+  close() { this._peer = null; }
+  addEventListener(t, fn) { if (t === "message" && typeof fn === "function") this._l.push(fn); }
+  removeEventListener(t, fn) { if (t === "message") { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); } }
+  dispatchEvent() { return true; }
+};
 globalThis.MessageChannel = class MessageChannel {
   constructor() {
-    const p1 = { onmessage: null, close() {}, start() {}, addEventListener() {}, removeEventListener() {} };
-    const p2 = { onmessage: null, close() {}, start() {}, addEventListener() {}, removeEventListener() {} };
-    p1.postMessage = (data) => globalThis.setTimeout(() => { if (typeof p2.onmessage === "function") p2.onmessage({ data, target: p2 }); }, 0);
-    p2.postMessage = (data) => globalThis.setTimeout(() => { if (typeof p1.onmessage === "function") p1.onmessage({ data, target: p1 }); }, 0);
-    this.port1 = p1;
-    this.port2 = p2;
+    this.port1 = new globalThis.MessagePort();
+    this.port2 = new globalThis.MessagePort();
+    this.port1._peer = this.port2;
+    this.port2._peer = this.port1;
   }
 };
-globalThis.MessagePort = function MessagePort() {};
 // window.postMessage — deliver a `message` event to THIS realm's window listeners
 // (async, via the timer queue so the hydration/interaction drain processes it). Real
 // same-window `postMessage(msg)` fires `message` handlers with `{data, origin, source}`
@@ -1147,12 +1192,9 @@ globalThis.postMessage = function postMessage(message, targetOrigin, transfer) {
   const origin = (globalThis.location && globalThis.location.origin) || "";
   const ports = Array.isArray(transfer) ? transfer : (transfer && transfer.length ? Array.prototype.slice.call(transfer) : []);
   globalThis.setTimeout(() => {
-    const ev = {
-      type: "message", data: message, origin, lastEventId: "", source: globalThis, ports,
-      bubbles: false, cancelable: false, composed: false, defaultPrevented: false,
-      target: globalThis, currentTarget: globalThis, eventPhase: 0, isTrusted: false, timeStamp: Date.now(),
-      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
-    };
+    const ev = new globalThis.MessageEvent("message", { data: message, origin, source: globalThis, ports });
+    ev.target = globalThis;
+    ev.currentTarget = globalThis;
     try { if (typeof globalThis.onmessage === "function") globalThis.onmessage(ev); } catch (_e) {}
     try { if (typeof globalThis.dispatchEvent === "function") globalThis.dispatchEvent(ev); } catch (_e) {}
   }, 0);
@@ -1464,7 +1506,7 @@ if (typeof globalThis.BroadcastChannel === "undefined") {
     }
     postMessage(data) {
       for (const c of __chans[this.name] || []) {
-        if (c !== this && !c._closed) globalThis.setTimeout(() => { if (typeof c.onmessage === "function") c.onmessage({ data, target: c }); }, 0);
+        if (c !== this && !c._closed) globalThis.setTimeout(() => { if (typeof c.onmessage === "function") { const ev = new globalThis.MessageEvent("message", { data }); ev.target = c; c.onmessage(ev); } }, 0);
       }
     }
     close() { this._closed = true; const a = __chans[this.name]; if (a) { const i = a.indexOf(this); if (i >= 0) a.splice(i, 1); } }
@@ -2702,6 +2744,17 @@ globalThis.__domSig = () => {
   // window.postMessage + trustedTypes are JS shims (see their defs); a collector reading
   // their `.toString()` must see native source, like every other shim.
   if (typeof globalThis.postMessage === "function") mark(globalThis.postMessage, "postMessage");
+  // Native-mark the message constructors — they're defined (not created by the NAMES loop), so
+  // their `.toString()` would otherwise leak JS source (a tamper tell). Also mark MessagePort's
+  // prototype methods so `port.postMessage.toString()` reads native.
+  for (const __c of [globalThis.MessageChannel, globalThis.MessagePort, globalThis.BroadcastChannel, globalThis.MessageEvent]) {
+    if (typeof __c === "function") mark(__c, __c.name);
+  }
+  if (globalThis.MessagePort && globalThis.MessagePort.prototype) {
+    for (const __m of ["postMessage", "start", "close", "addEventListener", "removeEventListener"]) {
+      mark(globalThis.MessagePort.prototype[__m], __m);
+    }
+  }
   if (globalThis.trustedTypes && typeof globalThis.trustedTypes.createPolicy === "function") mark(globalThis.trustedTypes.createPolicy, "createPolicy");
 
   // ── Structural browser-surface fidelity ──────────────────────────────────────

@@ -118,6 +118,14 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   standalone SERP unlock — the residual is the session params `ei`/`iflsig`/`sxsrf` (minted into
   the homepage HTML, not synthesizable browserlessly) + a *trusted* ENID (real-browser mint).
 
+### Changed — messaging APIs (render)
+- `MessagePort`/`MessageChannel` are now real classes (ports are `MessagePort` instances with a
+  working `addEventListener('message')` + `start()`, not object-literal stubs), `MessageEvent` is
+  a real constructor (`new MessageEvent('message',{data}).data` was `undefined`), and
+  `window.postMessage`/port/`BroadcastChannel` dispatch real `MessageEvent` instances. All four
+  message constructors are native-marked (`.toString()` was leaking JS source). The React/google
+  `new MessageChannel; port1.onmessage=…; port2.postMessage(0)` scheduler idiom still fires.
+
 ### Changed — observers (render)
 - `IntersectionObserver` / `ResizeObserver` / `MutationObserver` are now three **distinct**
   constructors (were one shared object — `IntersectionObserver === ResizeObserver` was a trivial

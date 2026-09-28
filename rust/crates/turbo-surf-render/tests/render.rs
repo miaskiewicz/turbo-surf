@@ -266,6 +266,34 @@ fn legacy_timing_and_scheduler_are_present() {
     );
 }
 
+// Messaging APIs: the MessageChannel scheduler idiom (React/google), window.postMessage, and
+// BroadcastChannel all deliver real MessageEvent instances; ports are MessagePort instances; and
+// the constructors report native `.toString()` (were object-literal stubs / un-native-marked).
+#[tokio::test]
+async fn messaging_apis_deliver_message_events() {
+    let script = r#"
+        var log = [];
+        var ch = new MessageChannel();
+        ch.port1.onmessage = function(e){ log.push('mc:' + e.data + ':' + (e instanceof MessageEvent) + ':' + (ch.port1 instanceof MessagePort)); };
+        ch.port2.postMessage(42);
+        window.addEventListener('message', function(e){ log.push('wm:' + e.data + ':' + (e instanceof MessageEvent)); });
+        window.postMessage('hi', '*');
+        var b1 = new BroadcastChannel('x'), b2 = new BroadcastChannel('x');
+        b2.onmessage = function(e){ log.push('bc:' + e.data); };
+        b1.postMessage('cast');
+        var natv = Function.prototype.toString.call(MessageChannel).indexOf('[native code]') >= 0
+                && Function.prototype.toString.call(MessageEvent).indexOf('[native code]') >= 0
+                && Function.prototype.toString.call(BroadcastChannel).indexOf('[native code]') >= 0;
+        setTimeout(function(){ document.body.setAttribute('data-pm', log.sort().join('|') + '||native:' + natv); }, 60);
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    for want in ["mc:42:true:true", "wm:hi:true", "bc:cast", "native:true"] {
+        assert!(out.contains(want), "missing {want:?} in messaging: {out}");
+    }
+}
+
 // Observers must be three DISTINCT constructors (real Chrome: IntersectionObserver !==
 // ResizeObserver !== MutationObserver, each with its own .name — collapsing them is a trivial
 // === / .name tell), PerformanceObserver.supportedEntryTypes must be populated, and
@@ -473,7 +501,8 @@ fn synthesized_events_are_trusted() {
         }})()",
         hi = turbo_surf_render::HUMAN_INPUT_JS
     );
-    let out = turbo_surf_render::run_with_dom("<body></body>", &script).unwrap();
+    let out =
+        turbo_surf_render::run_with_dom("<body id=\"ts-trusted-evt\"></body>", &script).unwrap();
     let v: serde_json::Value =
         serde_json::from_str(&out).unwrap_or_else(|e| panic!("json {e}: {out}"));
     assert_eq!(

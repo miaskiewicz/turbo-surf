@@ -1189,14 +1189,23 @@ if (typeof globalThis.trustedTypes === "undefined") {
 try {
   const P = globalThis.performance;
   if (P && !P.timing) {
+    // Realistic SPREAD of navigation phases (real Chrome: navigationStart < dns < connect <
+    // request < response < domInteractive < DCL < domComplete < loadEventEnd). All-equal
+    // timestamps are an obvious synthetic tell, so lay them out with plausible ordered gaps.
     const t = Math.floor(P.timeOrigin || Date.now());
+    const r = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo));
+    const fetchStart = t + r(1, 4), dlS = fetchStart + r(1, 5), dlE = dlS + r(1, 6);
+    const cS = dlE + r(0, 3), sc = cS + r(4, 14), cE = sc + r(8, 26), reqS = cE + r(1, 4);
+    const resS = reqS + r(30, 120), resE = resS + r(15, 90), domL = resE + r(1, 6);
+    const domI = domL + r(60, 220), dclS = domI + r(2, 18), dclE = dclS + r(1, 6);
+    const domC = dclE + r(80, 400), lES = domC + r(1, 5), lEE = lES + r(1, 8);
     const timing = {
-      navigationStart: t, unloadEventStart: 0, unloadEventEnd: 0, redirectStart: 0,
-      redirectEnd: 0, fetchStart: t, domainLookupStart: t, domainLookupEnd: t,
-      connectStart: t, connectEnd: t, secureConnectionStart: t, requestStart: t,
-      responseStart: t, responseEnd: t, domLoading: t, domInteractive: t,
-      domContentLoadedEventStart: t, domContentLoadedEventEnd: t, domComplete: t,
-      loadEventStart: t, loadEventEnd: t,
+      navigationStart: t, unloadEventStart: 0, unloadEventEnd: 0, redirectStart: 0, redirectEnd: 0,
+      fetchStart, domainLookupStart: dlS, domainLookupEnd: dlE, connectStart: cS,
+      secureConnectionStart: sc, connectEnd: cE, requestStart: reqS, responseStart: resS,
+      responseEnd: resE, domLoading: domL, domInteractive: domI,
+      domContentLoadedEventStart: dclS, domContentLoadedEventEnd: dclE, domComplete: domC,
+      loadEventStart: lES, loadEventEnd: lEE,
     };
     timing.toJSON = function () { return timing; };
     try { Object.defineProperty(P, "timing", { value: timing, configurable: true, enumerable: true }); }
@@ -2686,6 +2695,18 @@ globalThis.__domSig = () => {
       Object.defineProperty(G.Event.prototype, "isTrusted", { get, enumerable: true, configurable: true });
     }
   });
+  // document.readyState as a MUTABLE accessor backed by a hidden Symbol slot, so the render loop
+  // can drive the real page-load sequence (loading → interactive → complete) and fire the matching
+  // events. The vendored binding hard-codes 'complete'; a collector that watches readyState
+  // transitions + gates init on DOMContentLoaded/load (google's homepage does) saw a frozen
+  // 'complete' and no lifecycle events on the main document/window — init never ran. Default
+  // (slot unset, e.g. the sync run_with_dom path) still reads 'complete', preserving old behavior.
+  guard(() => {
+    const SLOT = Symbol.for("__ts_rs");
+    const get = function readyState() { const v = G.document[SLOT]; return v === undefined ? "complete" : v; };
+    mark(get, "get readyState");
+    Object.defineProperty(G.document, "readyState", { get, configurable: true, enumerable: true });
+  });
   // A native-reporting getter (its source reads "[native code]" via the trap above).
   const nativeGetter = (val) => { const g = function () { return val; }; mark(g); return g; };
   // Insert a correctly-named host prototype between `obj` and its current prototype, carrying
@@ -3872,6 +3893,32 @@ fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Page-load lifecycle phases, driven by the async render loop so the main document/window fire
+// the real sequence a browser does — a collector that gates init on these (google's homepage
+// registers on DOMContentLoaded/load) otherwise never runs. `document.readyState` reads a hidden
+// Symbol slot (installed in ENV_BOOTSTRAP); each phase sets it + dispatches the matching TRUSTED
+// events. All fully guarded so a lifecycle hiccup can't break a render.
+const LIFECYCLE_LOADING: &str =
+    r#"try { document[Symbol.for("__ts_rs")] = "loading"; } catch (e) {}"#;
+const LIFECYCLE_INTERACTIVE: &str = r#"(() => { try {
+  document[Symbol.for("__ts_rs")] = "interactive";
+  const mk = (t, b) => { let e; try { e = new Event(t, { bubbles: !!b }); } catch (_) { e = { type: t }; } try { delete e.isTrusted; } catch (_) {} e.__trusted = true; try { e.timeStamp = performance.now(); } catch (_) {} return e; };
+  try { document.dispatchEvent(mk("readystatechange", false)); } catch (_) {}
+  try { if (typeof document.onreadystatechange === "function") document.onreadystatechange(mk("readystatechange", false)); } catch (_) {}
+  try { document.dispatchEvent(mk("DOMContentLoaded", true)); } catch (_) {}
+  try { globalThis.dispatchEvent(mk("DOMContentLoaded", true)); } catch (_) {} // window listeners (DCL bubbles to window)
+} catch (e) {} })()"#;
+const LIFECYCLE_COMPLETE: &str = r#"(() => { try {
+  document[Symbol.for("__ts_rs")] = "complete";
+  const mk = (t, b) => { let e; try { e = new Event(t, { bubbles: !!b }); } catch (_) { e = { type: t }; } try { delete e.isTrusted; } catch (_) {} e.__trusted = true; try { e.timeStamp = performance.now(); } catch (_) {} return e; };
+  try { document.dispatchEvent(mk("readystatechange", false)); } catch (_) {}
+  try { if (typeof document.onreadystatechange === "function") document.onreadystatechange(mk("readystatechange", false)); } catch (_) {}
+  const load = mk("load", false);
+  try { globalThis.dispatchEvent(load); } catch (_) {}
+  try { if (typeof globalThis.onload === "function") globalThis.onload(load); } catch (_) {}
+  try { globalThis.dispatchEvent(mk("pageshow", false)); } catch (_) {}
+} catch (e) {} })()"#;
+
 async fn run_async(
     rt: &mut JsRuntime,
     html: &str,
@@ -3879,11 +3926,15 @@ async fn run_async(
     script: &str,
 ) -> Result<String, String> {
     install_dom(rt, html, base)?;
+    let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING); // readyState "loading" while scripts run
     exec_page_scripts(rt, script)?;
-    drain_event_loop(rt).await?; // promises/microtasks + fetch from the page
+    let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // interactive + DOMContentLoaded
+    drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
     rt.execute_script("<timers>", "__runTimers()")
         .map_err(|e| e.to_string())?;
     drain_event_loop(rt).await?; // promises queued by timer callbacks
+    let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // complete + window load + pageshow
+    drain_event_loop(rt).await?; // load handlers' async work
     Ok(crate::browser_env::document_html())
 }
 
@@ -3920,10 +3971,14 @@ async fn run_async_pooled(
     install_dom(rt, html, base)?;
     rt.execute_script("<scrub>", SCRUB_GLOBALS)
         .map_err(|e| e.to_string())?;
+    let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING);
     exec_page_scripts(rt, script)?;
+    let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // DOMContentLoaded (before load)
     drain_event_loop(rt).await?;
     rt.execute_script("<timers>", "__runTimers()")
         .map_err(|e| e.to_string())?;
+    drain_event_loop(rt).await?;
+    let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // window load + pageshow (after DCL)
     drain_event_loop(rt).await?;
     Ok(crate::browser_env::document_html())
 }

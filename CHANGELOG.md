@@ -49,6 +49,18 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   display list (`ctx._ops`) into a real PNG (was a ~94-byte synthetic stub — an impossible
   size for rendered content); wired as a host hook (`set_raster_fn`) from mcp + napi.
 
+### Changed — page-load lifecycle
+- **Real document/window load sequence.** The render tier now drives `document.readyState`
+  through `loading → interactive → complete` and fires the matching events **in order** on the
+  main document + window: `readystatechange`, `DOMContentLoaded` (at interactive, reaching window
+  listeners), then window `load` + `pageshow` (at complete, after DCL). Previously `readyState`
+  was a frozen `'complete'` and `DOMContentLoaded`/`load` fired only in child (iframe) realms — so
+  a page (or a collector) that gates init on them never ran. Events are trusted + hi-res stamped.
+- **Realistic `performance.timing` spread.** The navigation phases are now laid out with plausible
+  ordered gaps (`navigationStart < dns < connect < request < response < domInteractive < DCL <
+  domComplete < loadEventEnd`) instead of all sharing one timestamp (an all-equal timing was a
+  synthetic tell).
+
 ### Changed — render fingerprint fidelity (ENV_BOOTSTRAP)
 - **WebGL identity → real Chrome/ANGLE-Metal (Apple).** `UNMASKED_VENDOR/RENDERER`, numeric
   limits (`MAX_TEXTURE_SIZE` 16384, …) and the exact `getSupportedExtensions` lists (39 webgl

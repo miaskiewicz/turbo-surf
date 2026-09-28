@@ -263,6 +263,57 @@ fn legacy_timing_and_scheduler_are_present() {
     );
 }
 
+// Page-load lifecycle: the main document/window must fire the real sequence — readyState
+// loading → interactive (+readystatechange, DOMContentLoaded) → complete (+readystatechange,
+// window load, pageshow) — in order, with DOMContentLoaded BEFORE load. A collector that gates
+// init on these otherwise never runs (the vendored readyState was a frozen 'complete', no events).
+#[tokio::test]
+async fn page_load_lifecycle_fires_in_order() {
+    let script = r#"
+        var log = [];
+        document.body.setAttribute('data-rs0', document.readyState); // during scripts: "loading"
+        document.addEventListener('readystatechange', function(){ log.push('rsc:' + document.readyState); });
+        document.addEventListener('DOMContentLoaded', function(){ log.push('DCL:' + document.readyState); });
+        window.addEventListener('DOMContentLoaded', function(){ log.push('winDCL'); });
+        window.addEventListener('load', function(){
+            log.push('load:' + document.readyState);
+            document.body.setAttribute('data-seq', log.join('|'));
+        });
+        window.addEventListener('pageshow', function(){ log.push('pageshow'); });
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    assert!(
+        out.contains(r#"data-rs0="loading""#),
+        "readyState is 'loading' during scripts: {out}"
+    );
+    let i = out
+        .find(r#"data-seq=""#)
+        .expect("load fired + wrote the sequence")
+        + 10;
+    let j = out[i..].find('"').unwrap() + i;
+    let seq = &out[i..j];
+    let dcl = seq
+        .find("DCL:interactive")
+        .unwrap_or_else(|| panic!("DOMContentLoaded at interactive: {seq}"));
+    let load = seq
+        .find("load:complete")
+        .unwrap_or_else(|| panic!("window load at complete: {seq}"));
+    assert!(
+        dcl < load,
+        "DOMContentLoaded must fire BEFORE window load: {seq}"
+    );
+    assert!(
+        seq.contains("rsc:interactive") && seq.contains("rsc:complete"),
+        "readystatechange transitions: {seq}"
+    );
+    assert!(
+        seq.contains("winDCL"),
+        "DOMContentLoaded reaches window listeners: {seq}"
+    );
+}
+
 // WebGL→GPU bridge plumbing (no real GPU): with a stub executor installed, the isolate's WebGL
 // context must RECORD a page's gl.* calls and, on readPixels, fill the destination from the
 // executor's returned framebuffer. Proves the recorder + op boundary + readPixels flip/slice

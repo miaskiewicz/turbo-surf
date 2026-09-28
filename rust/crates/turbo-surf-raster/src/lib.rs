@@ -21,10 +21,12 @@
 
 mod glyph;
 mod image_paint;
+mod paint_canvas;
 mod paint_png;
 mod paint_svg;
 mod style_extract;
 
+pub use paint_canvas::canvas_ops_png;
 pub use style_extract::{delazy_images, image_urls, image_urls_in_css, stylesheet_hrefs};
 
 use std::collections::HashMap;

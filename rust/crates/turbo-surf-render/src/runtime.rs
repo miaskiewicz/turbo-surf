@@ -181,6 +181,40 @@ fn op_measure_text(#[string] text: &str, #[string] family: &str, size: f64) -> S
     }
 }
 
+// Host canvas rasterizer: replay a 2D draw list into real PNG bytes. Same injection
+// pattern as `set_measure_fn` — the crate that owns the raster/paint engine installs it,
+// so the render crate keeps no tiny-skia/font dep (matters for the PyO3 wheel build). Until
+// set, `toDataURL` keeps the vendored synthetic behavior.
+type RasterFn = Box<dyn Fn(u32, u32, &str) -> Option<Vec<u8>> + Send + Sync>;
+static RASTER_PNG: std::sync::RwLock<Option<RasterFn>> = std::sync::RwLock::new(None);
+
+/// Install the host's canvas rasterizer: `(width, height, ops_json) -> PNG bytes`.
+/// `ops_json` is the recorded 2D display list (the vendored `ctx._ops`). Injected once at
+/// startup by the crate that owns the raster engine (raster). Until set, `toDataURL` returns
+/// the vendored synthetic blob.
+pub fn set_raster_fn(f: RasterFn) {
+    if let Ok(mut g) = RASTER_PNG.write() {
+        *g = Some(f);
+    }
+}
+
+// Rasterize a canvas draw list to a base64 PNG (no `data:` prefix), or "" when no host
+// rasterizer is installed (the JS override then falls back to the vendored blob). Never
+// throws across the boundary.
+#[op2]
+#[string]
+fn op_raster_png(width: u32, height: u32, #[string] ops_json: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    match RASTER_PNG
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|f| f(width, height, ops_json)))
+    {
+        Some(bytes) => STANDARD.encode(bytes),
+        None => String::new(),
+    }
+}
+
 // `document.cookie` setter: ingest a `name=value; attrs` line against the base.
 #[op2(fast)]
 fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
@@ -293,7 +327,8 @@ deno_core::extension!(
         op_fetch,
         op_user_agent,
         op_fingerprint,
-        op_measure_text
+        op_measure_text,
+        op_raster_png
     ],
 );
 
@@ -334,6 +369,14 @@ const __major = String(__pick("chromeMajor", 153));
 // viewer; `navigator.plugins.length === 0` is a classic headless giveaway.
 const __plugin = (name) => ({ name, filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 });
 const __plugins = ["PDF Viewer", "Chrome PDF Viewer", "Chromium PDF Viewer", "Microsoft Edge PDF Viewer", "WebKit built-in PDF"].map(__plugin);
+// Chrome's two PDF MIME types, both bound to the internal viewer. `navigator.mimeTypes`
+// empty while `plugins` is populated is an INCOHERENCE tell (real Chrome: plugins imply
+// their mimeTypes) — google's homepage reads mimeTypes.length. enabledPlugin cross-links
+// back to a plugin, as in a real MimeType.
+const __mimeTypes = [
+  { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format", enabledPlugin: __plugins[0] },
+  { type: "text/pdf", suffixes: "pdf", description: "Portable Document Format", enabledPlugin: __plugins[0] },
+];
 const __langs = __pick("languages", ["en-US", "en"]);
 const __platform = __pick("platform", "MacIntel");
 const __uaPlatform = __pick("uaPlatform", "macOS");
@@ -393,22 +436,40 @@ globalThis.navigator = {
       return true;
     } catch (_e) { return true; }
   },
-  plugins: __plugins, mimeTypes: [],
+  plugins: __plugins, mimeTypes: __mimeTypes,
+  // Real Chrome exposes navigator.pdfViewerEnabled === true (it ships the internal PDF
+  // viewer); its absence is a headless tell google's homepage reads.
+  pdfViewerEnabled: __pick("pdfViewerEnabled", true),
   // NetworkInformation — real Chrome exposes it; anti-bot scripts (found via the
   // `probe` example on a real Akamai sensor) read it, and its absence is a tell.
   connection: __pick("connection", { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false }),
   // UA-Client-Hints high-entropy surface, consistent with the UA above.
   userAgentData: __pick("userAgentData", {
+    // Order + greased token must match the on-wire sec-ch-ua (net.rs): real Chrome 153 emits
+    // `"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"` with the greased brand
+    // in the MIDDLE. The old render-tier value (`Not)A;Brand v24`, greased last) was a stale
+    // cross-layer mismatch vs the 0.4.4 wire fix — itself a tell.
     brands: [
       { brand: "Google Chrome", version: __major },
+      { brand: "Not_A Brand", version: "8" },
       { brand: "Chromium", version: __major },
-      { brand: "Not)A;Brand", version: "24" },
     ],
     mobile: false,
     platform: __uaPlatform,
     getHighEntropyValues: async () => ({
-      architecture: "arm", bitness: "64", model: "",
+      architecture: "arm", bitness: "64", model: "", wow64: false,
       platform: __uaPlatform, platformVersion: "15.0.0", uaFullVersion: __major + ".0.0.0",
+      mobile: false,
+      brands: [
+        { brand: "Google Chrome", version: __major },
+        { brand: "Not_A Brand", version: "8" },
+        { brand: "Chromium", version: __major },
+      ],
+      fullVersionList: [
+        { brand: "Google Chrome", version: __major + ".0.0.0" },
+        { brand: "Not_A Brand", version: "8.0.0.0" },
+        { brand: "Chromium", version: __major + ".0.0.0" },
+      ],
     }),
   }),
   // In-memory clipboard: an app that writeText()s a value (e.g. a copy-link button)
@@ -1119,6 +1180,17 @@ if (typeof globalThis.scheduler === "undefined") {
     },
     yield() { return new Promise((r) => setTimeout(r, 0)); },
   };
+}
+// Notification API: real Chrome exposes `Notification` with a `permission` static ("default"
+// until granted). Missing `Notification`/`permission` is a headless tell google's homepage reads.
+if (typeof globalThis.Notification === "undefined") {
+  const N = function Notification() {};
+  N.permission = "default";
+  N.maxActions = 2;
+  N.requestPermission = function (cb) { if (typeof cb === "function") cb("default"); return Promise.resolve("default"); };
+  globalThis.Notification = N;
+} else if (globalThis.Notification.permission === undefined) {
+  try { globalThis.Notification.permission = "default"; } catch (e) {}
 }
 // The CSS interface (window.CSS): CSS.supports (feature detection) + CSS.escape (identifier
 // escaping). Bundles reference it at load — Google's deferred `xjs` bundle aborted with
@@ -2581,6 +2653,112 @@ globalThis.__domSig = () => {
     }
   });
 
+  // canvas / WebGL fidelity. Two tells the vendored (synthetic) canvas leaks: (a) its 2D +
+  // WebGL context methods are JS closures whose `.toString()` reveals source (anti-tamper
+  // flag), and (b) the WebGL identity is SwiftShader ("ANGLE (Google, Vulkan… SwiftShader)")
+  // — the classic headless/VM signal — with lower limits + fewer extensions than a real GPU.
+  // Wrap getContext to (1) spoof the WebGL surface to this host's real Chrome/ANGLE-Metal
+  // profile (measured live: Apple M4 Pro via ANGLE Metal) and (2) native-mark every own
+  // method on the returned context (they're per-instance own funcs, so the WeakSet mark must
+  // run per context). Canvas prototype readback methods (toDataURL/toBlob/getContext) are
+  // marked once. Pixel VALUES stay honest — this fixes the identity + toString tells, not the
+  // render hash (see the raster-backed toDataURL below for the byte-size fix).
+  guard(() => {
+    const canvasProto = Object.getPrototypeOf(G.document.createElement("canvas"));
+    if (!canvasProto || typeof canvasProto.getContext !== "function" || native.has(canvasProto.getContext)) return;
+    // Real-Chrome WebGL extension lists for this host (webgl vs webgl2 differ).
+    const EXT1 = ["ANGLE_instanced_arrays","EXT_blend_minmax","EXT_clip_control","EXT_color_buffer_half_float","EXT_depth_clamp","EXT_disjoint_timer_query","EXT_float_blend","EXT_frag_depth","EXT_polygon_offset_clamp","EXT_sRGB","EXT_shader_texture_lod","EXT_texture_compression_bptc","EXT_texture_compression_rgtc","EXT_texture_filter_anisotropic","EXT_texture_mirror_clamp_to_edge","KHR_parallel_shader_compile","OES_element_index_uint","OES_fbo_render_mipmap","OES_standard_derivatives","OES_texture_float","OES_texture_float_linear","OES_texture_half_float","OES_texture_half_float_linear","OES_vertex_array_object","WEBGL_blend_func_extended","WEBGL_color_buffer_float","WEBGL_compressed_texture_astc","WEBGL_compressed_texture_etc","WEBGL_compressed_texture_etc1","WEBGL_compressed_texture_pvrtc","WEBGL_compressed_texture_s3tc","WEBGL_compressed_texture_s3tc_srgb","WEBGL_debug_renderer_info","WEBGL_debug_shaders","WEBGL_depth_texture","WEBGL_draw_buffers","WEBGL_lose_context","WEBGL_multi_draw","WEBGL_polygon_mode"];
+    const EXT2 = ["EXT_clip_control","EXT_color_buffer_float","EXT_color_buffer_half_float","EXT_conservative_depth","EXT_depth_clamp","EXT_disjoint_timer_query_webgl2","EXT_float_blend","EXT_polygon_offset_clamp","EXT_render_snorm","EXT_texture_compression_bptc","EXT_texture_compression_rgtc","EXT_texture_filter_anisotropic","EXT_texture_mirror_clamp_to_edge","EXT_texture_norm16","KHR_parallel_shader_compile","NV_shader_noperspective_interpolation","OES_draw_buffers_indexed","OES_sample_variables","OES_shader_multisample_interpolation","OES_texture_float_linear","WEBGL_blend_func_extended","WEBGL_clip_cull_distance","WEBGL_compressed_texture_astc","WEBGL_compressed_texture_etc","WEBGL_compressed_texture_etc1","WEBGL_compressed_texture_pvrtc","WEBGL_compressed_texture_s3tc","WEBGL_compressed_texture_s3tc_srgb","WEBGL_debug_renderer_info","WEBGL_debug_shaders","WEBGL_lose_context","WEBGL_multi_draw","WEBGL_polygon_mode","WEBGL_provoking_vertex","WEBGL_render_shared_exponent","WEBGL_stencil_texturing"];
+    const UNMASKED_VENDOR = 0x9245, UNMASKED_RENDERER = 0x9246, ANISO = 0x84ff;
+    const patchGl = (gl, is2) => {
+      const M = new Map();
+      const set = (name, lit, val) => { const k = (gl[name] !== undefined ? gl[name] : lit); M.set(k, val); };
+      set("VENDOR", 0x1f00, "WebKit");
+      set("RENDERER", 0x1f01, "WebKit WebGL");
+      set("VERSION", 0x1f02, is2 ? "WebGL 2.0 (OpenGL ES 3.0 Chromium)" : "WebGL 1.0 (OpenGL ES 2.0 Chromium)");
+      set("SHADING_LANGUAGE_VERSION", 0x8b8c, is2 ? "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)" : "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)");
+      M.set(UNMASKED_VENDOR, "Google Inc. (Apple)");
+      M.set(UNMASKED_RENDERER, "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)");
+      set("MAX_TEXTURE_SIZE", 0x0d33, 16384);
+      set("MAX_CUBE_MAP_TEXTURE_SIZE", 0x851c, 16384);
+      set("MAX_RENDERBUFFER_SIZE", 0x84e8, 16384);
+      set("MAX_VIEWPORT_DIMS", 0x0d3a, new Int32Array([16384, 16384]));
+      set("MAX_VERTEX_ATTRIBS", 0x8869, 16);
+      set("MAX_VERTEX_UNIFORM_VECTORS", 0x8dfb, 1024);
+      set("MAX_FRAGMENT_UNIFORM_VECTORS", 0x8dfd, 1024);
+      set("MAX_VARYING_VECTORS", 0x8dfc, 30);
+      set("MAX_VERTEX_TEXTURE_IMAGE_UNITS", 0x8b4c, 16);
+      set("MAX_TEXTURE_IMAGE_UNITS", 0x8872, 16);
+      set("MAX_COMBINED_TEXTURE_IMAGE_UNITS", 0x8b4d, 32);
+      set("ALIASED_LINE_WIDTH_RANGE", 0x846e, new Float32Array([1, 1]));
+      set("ALIASED_POINT_SIZE_RANGE", 0x846d, new Float32Array([1, 511]));
+      set("RED_BITS", 0x0d52, 8); set("GREEN_BITS", 0x0d53, 8); set("BLUE_BITS", 0x0d54, 8);
+      set("ALPHA_BITS", 0x0d55, 8); set("DEPTH_BITS", 0x0d56, 24); set("STENCIL_BITS", 0x0d57, 0);
+      M.set(ANISO, 16);
+      if (is2) {
+        set("MAX_3D_TEXTURE_SIZE", 0x8073, 2048);
+        set("MAX_ARRAY_TEXTURE_LAYERS", 0x88ff, 2048);
+        set("MAX_DRAW_BUFFERS", 0x8824, 8);
+        set("MAX_COLOR_ATTACHMENTS", 0x8cdf, 8);
+        set("MAX_SAMPLES", 0x8d57, 4);
+        set("MAX_UNIFORM_BUFFER_BINDINGS", 0x8a2f, 32);
+      }
+      const origGetParam = gl.getParameter ? gl.getParameter.bind(gl) : () => null;
+      gl.getParameter = function (p) { return M.has(p) ? M.get(p) : origGetParam(p); };
+      gl.getSupportedExtensions = function () { return (is2 ? EXT2 : EXT1).slice(); };
+      const origGetExt = gl.getExtension ? gl.getExtension.bind(gl) : () => null;
+      gl.getExtension = function (name) {
+        if (name === "WEBGL_debug_renderer_info") return { UNMASKED_VENDOR_WEBGL: UNMASKED_VENDOR, UNMASKED_RENDERER_WEBGL: UNMASKED_RENDERER };
+        if (name === "EXT_texture_filter_anisotropic") return { MAX_TEXTURE_MAX_ANISOTROPY_EXT: ANISO, TEXTURE_MAX_ANISOTROPY_EXT: 0x84fe };
+        const known = (is2 ? EXT2 : EXT1).indexOf(name) >= 0;
+        const r = origGetExt(name);
+        return r || (known ? {} : null);
+      };
+    };
+    // Native-mark every own function on a context instance (they're per-instance own funcs).
+    const markOwn = (obj) => {
+      if (!obj) return obj;
+      for (const k of Object.getOwnPropertyNames(obj)) {
+        let d; try { d = Object.getOwnPropertyDescriptor(obj, k); } catch (e) { continue; }
+        if (d && typeof d.value === "function") mark(d.value, k);
+      }
+      return obj;
+    };
+    const origGetContext = canvasProto.getContext;
+    const wrapped = function getContext(kind, opts) {
+      const ctx = origGetContext.call(this, kind, opts);
+      if (ctx) {
+        const k = String(kind || "");
+        if (k === "webgl" || k === "experimental-webgl" || k === "webgl2") { try { patchGl(ctx, k === "webgl2"); } catch (e) {} }
+        markOwn(ctx);
+      }
+      return ctx;
+    };
+    mark(wrapped, "getContext");
+    canvasProto.getContext = wrapped;
+    // Raster-backed toDataURL: replay the vendored 2D display list (ctx._ops) through the
+    // host rasterizer (op_raster_png) into a REAL PNG. The vendored stub returns a ~94-byte
+    // synthetic blob — an impossible size for rendered content, a canvas-fingerprint tell.
+    // Falls back to the vendored blob when no rasterizer is installed or on any error.
+    const rasterOp = (Deno.core.ops && Deno.core.ops.op_raster_png) || null;
+    const origToDataURL = canvasProto.toDataURL;
+    if (typeof origToDataURL === "function") {
+      canvasProto.toDataURL = function toDataURL(type) {
+        try {
+          const ctx = this.__ctx2d;
+          if (rasterOp && ctx && ctx._ops) {
+            const b64 = rasterOp(this.width || 300, this.height || 150, JSON.stringify(ctx._ops));
+            if (b64) return "data:image/png;base64," + b64;
+          }
+        } catch (e) {}
+        return origToDataURL.call(this, type);
+      };
+      mark(canvasProto.toDataURL, "toDataURL");
+    }
+    if (typeof canvasProto.toBlob === "function") mark(canvasProto.toBlob, "toBlob");
+    if (typeof canvasProto.getBoundingClientRect === "function") mark(canvasProto.getBoundingClientRect, "getBoundingClientRect");
+  });
+
   // document → HTMLDocument brand + 5 native getters (best-effort: the native DOM object may
   // reject a prototype swap; the brand tag still lands on the instance).
   guard(() => { if (G.document) tag(G.document, "HTMLDocument"); });
@@ -2852,6 +3030,7 @@ pub fn ensure_platform() {
     use std::sync::OnceLock;
     static KEEPER: OnceLock<()> = OnceLock::new();
     KEEPER.get_or_init(|| {
+        pin_timezone();
         let (ready_tx, ready_rx) = channel::<()>();
         std::thread::Builder::new()
             .name("v8-platform".into())
@@ -2868,7 +3047,26 @@ pub fn ensure_platform() {
     });
 }
 
+// Pin a coherent timezone for the synthetic browser. An isolate that reports the HOST
+// machine's timezone — leaked through `Intl.DateTimeFormat().resolvedOptions().timeZone` +
+// `Date.getTimezoneOffset`, incoherent with the en-US Chrome identity — is a fingerprint tell
+// (measured live: the isolate reported the host's Europe/Lisbon vs real Chrome's
+// America/New_York). ICU reads the `TZ` env; honor an explicit TURBO_SURF_TZ, else default
+// America/New_York (coherent with en-US) only when the environment hasn't chosen a TZ. Setting
+// the env alone is not enough once ICU has cached a default, so each isolate additionally calls
+// `date_time_configuration_change_notification(Redetect)` (see make_runtime) to re-read it.
+fn pin_timezone() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| match std::env::var("TURBO_SURF_TZ") {
+        Ok(tz) if !tz.is_empty() => std::env::set_var("TZ", tz),
+        _ if std::env::var_os("TZ").is_none() => std::env::set_var("TZ", "America/New_York"),
+        _ => {}
+    });
+}
+
 fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
+    pin_timezone();
     // Build the shared cookie jar first so it backs BOTH page `fetch` (op_state) and the
     // ES-module loader (`<script type=module>` import graphs) — same session, one jar.
     let jar: Jar = Rc::new(RefCell::new(if cookies.is_empty() {
@@ -2876,7 +3074,7 @@ fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
     } else {
         CookieJar::from_storage_state(cookies)
     }));
-    let rt = JsRuntime::new(RuntimeOptions {
+    let mut rt = JsRuntime::new(RuntimeOptions {
         extensions: vec![turbo_dom::init()],
         module_loader: Some(Rc::new(NetModuleLoader {
             base: base.to_string(),
@@ -2885,6 +3083,10 @@ fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
         })),
         ..Default::default()
     });
+    // Force ICU to re-detect the timezone from the (now-pinned) TZ env for THIS isolate, so
+    // Date/Intl report the coherent zone rather than a cached host default.
+    rt.v8_isolate()
+        .date_time_configuration_change_notification(v8::TimeZoneDetection::Redetect);
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put::<Base>(Base(base.to_string()));

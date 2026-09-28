@@ -132,6 +132,11 @@ fn ensure_render_hooks() {
             let (w, h) = raster::measure_text(text, family, size as f32, true);
             (w as f64, h as f64)
         }));
+        // Raster-backed canvas toDataURL: replay the isolate's 2D display list into a real PNG
+        // so canvas readback isn't an implausible ~94-byte stub (a fingerprint tell).
+        turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {
+            raster::canvas_ops_png(w, h, ops_json).ok()
+        }));
     });
 }
 
@@ -2841,6 +2846,34 @@ mod tests {
 
     async fn call(s: &mut Session, name: &str, args: Value) -> Value {
         call_tool(s, name, &args).await.unwrap()
+    }
+
+    // Canvas fingerprint fidelity: with the raster hook installed (Session::new), the render
+    // isolate's toDataURL must return a REAL, sizeable PNG (the vendored stub was ~94 bytes —
+    // an impossible size for rendered content, a canvas-fingerprint tell).
+    #[tokio::test]
+    async fn canvas_todataurl_is_a_real_png() {
+        let _s = Session::new(); // installs set_raster_fn (+ set_measure_fn)
+        let draw = "var c=document.createElement('canvas');c.width=200;c.height=60;\
+            var x=c.getContext('2d');x.fillStyle='#f60';x.fillRect(0,0,120,30);\
+            x.fillStyle='#069';x.font='14px Arial';x.fillText('turbo-surf',5,20);\
+            document.body.setAttribute('data-u', c.toDataURL())";
+        // render_html returns the serialized DOM (run_with_dom returns the trailing value).
+        let out = turbo_surf_render::render_html("<body></body>", draw).unwrap();
+        let i = out.find("data-u=\"").expect("data-u present") + 8;
+        let j = out[i..].find('"').unwrap() + i;
+        let url = &out[i..j];
+        assert!(
+            url.starts_with("data:image/png;base64,"),
+            "expected a PNG data URL: {}",
+            &url[..url.len().min(40)]
+        );
+        let b64 = &url["data:image/png;base64,".len()..];
+        assert!(
+            b64.len() > 1000,
+            "a real rasterized PNG should be sizeable (was the ~94-byte stub); got {} base64 chars",
+            b64.len()
+        );
     }
 
     // The `solve_recaptcha` MCP tool, end to end and offline: a localhost fixture stands

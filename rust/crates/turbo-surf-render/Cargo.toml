@@ -23,6 +23,8 @@ turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.4", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# base64-encode raster PNG bytes for the toDataURL op boundary (op returns a base64 string).
+base64 = "0.22"
 # For the async `RecaptchaEngine` trait impl (same trait style as turbo-surf-core).
 async-trait = "0.1"
 # The reCAPTCHA engine drives the (`!Send`) deno_core render on a dedicated thread with

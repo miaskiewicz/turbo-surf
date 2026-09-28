@@ -263,6 +263,77 @@ fn legacy_timing_and_scheduler_are_present() {
     );
 }
 
+// Anti-bot fingerprint fidelity vs real Chrome (measured diffs it must close): (1) canvas/WebGL
+// context methods must report native `.toString()`, not JS source (anti-tamper); (2) the WebGL
+// identity must be the real GPU (ANGLE Metal / Apple), not SwiftShader, with real limits +
+// extension count; (3) the greased UA-CH brand must be `Not_A Brand;v=8` in the middle slot,
+// matching the on-wire sec-ch-ua; (4) pdfViewerEnabled/mimeTypes/Notification coherence.
+#[test]
+fn chrome_fingerprint_identity_is_coherent() {
+    let probe = r#"
+        var c1 = document.createElement('canvas');
+        var gl = c1.getContext('webgl');
+        var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+        var ts = Function.prototype.toString;
+        var out = {
+          renderer: gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL),
+          vendor: gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL),
+          maxTex: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+          extCount: gl.getSupportedExtensions().length,
+          getParamNative: ts.call(gl.getParameter).indexOf('[native code]') >= 0,
+          toDataURLNative: ts.call(document.createElement('canvas').toDataURL).indexOf('[native code]') >= 0,
+          getContextNative: ts.call(document.createElement('canvas').getContext).indexOf('[native code]') >= 0,
+          brands: navigator.userAgentData.brands.map(function(b){return b.brand+' '+b.version;}).join(','),
+          pdf: navigator.pdfViewerEnabled,
+          mimeLen: navigator.mimeTypes.length,
+          notif: (typeof Notification !== 'undefined') ? Notification.permission : 'absent',
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        };
+        document.body.setAttribute('data-fp', JSON.stringify(out));
+    "#;
+    let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
+    let start = out.find("data-fp=\"").expect("data-fp present") + 9;
+    let end = out[start..].find('"').unwrap() + start;
+    let raw = out[start..end]
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&");
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("fp json: {e}: {raw}"));
+
+    let renderer = v["renderer"].as_str().unwrap_or("");
+    assert!(
+        renderer.contains("Apple") && renderer.contains("Metal"),
+        "WebGL must be ANGLE Metal/Apple, not SwiftShader: {renderer}"
+    );
+    assert!(
+        !renderer.contains("SwiftShader"),
+        "SwiftShader leak: {renderer}"
+    );
+    assert_eq!(v["vendor"], "Google Inc. (Apple)");
+    assert_eq!(v["maxTex"], 16384);
+    assert_eq!(v["extCount"], 39);
+    assert_eq!(
+        v["getParamNative"], true,
+        "getParameter.toString must be native"
+    );
+    assert_eq!(
+        v["toDataURLNative"], true,
+        "toDataURL.toString must be native"
+    );
+    assert_eq!(
+        v["getContextNative"], true,
+        "getContext.toString must be native"
+    );
+    assert_eq!(v["brands"], "Google Chrome 153,Not_A Brand 8,Chromium 153");
+    assert_eq!(v["pdf"], true);
+    assert_eq!(v["mimeLen"], 2);
+    assert_eq!(v["notif"], "default");
+    assert!(
+        v["tz"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+        "timezone present"
+    );
+}
+
 // Runtime fingerprint override: every navigator field has a default and is
 // controllable via set_fingerprint (the MCP `set_fingerprint` tool). Uses
 // render_html (a fresh isolate per call, so ENV_BOOTSTRAP re-reads the override),

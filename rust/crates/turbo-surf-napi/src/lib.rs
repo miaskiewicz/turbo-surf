@@ -34,6 +34,10 @@ pub(crate) fn ensure_render_init() {
             let (w, h) = raster::measure_text(text, family, size as f32, true);
             (w as f64, h as f64)
         }));
+        // Raster-backed canvas toDataURL (real PNG bytes vs the vendored ~94-byte stub).
+        turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {
+            raster::canvas_ops_png(w, h, ops_json).ok()
+        }));
     });
     turbo_surf_render::ensure_platform();
 }

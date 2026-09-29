@@ -117,8 +117,20 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   and a busy loop shows real µs drift (the maxIdenticalRun over repeated `performance.now()` fell
   13989 → 1110). `Date.now` is overridden so `timeOrigin + performance.now() == Date.now()` (coherent
   residual 0), passing BotGuard's `perf.now()`-vs-`Date.now()` chronometric cross-check. Timer *delays*
-  stay on the virtual clock so the crawler never blocks on a real `setTimeout`. Covered by
+  stay on the virtual clock so the crawler never blocks on a real `setTimeout`. The `Date`
+  **constructor** is wrapped too, so `new Date()` / `+new Date()` / `Date()` read the same coherent
+  clock (they otherwise diverged from `Date.now()` by the accumulated virtual time — a coherence
+  tell); the wrapper preserves statics, `instanceof`, `Date.length===7`, `prototype.constructor`,
+  subclassing (`class X extends Date {}` via `Reflect.construct`), and native fn shape (`Date` /
+  `Date.now` report `[native code]`, not the JS override source). Covered by
   `clock_reflects_virtual_time_and_is_coherent`.
+- **`Object.prototype.toString` brand pollution fixed.** A node-branding pass was tagging
+  `document.implementation`'s prototype — which *is* `Object.prototype` — so `Symbol.toStringTag`
+  landed on `Object.prototype` and `Object.prototype.toString.call({})` / `[]` / `new Date()` all
+  read **`"[object DOMImplementation]"`**, a trivial, high-severity bot tell on *every* un-branded
+  object (and it had clobbered `Object.prototype.constructor` too). Branding now targets the instance,
+  never a shared root proto: `{}` → `[object Object]`, `[]` → `[object Array]`, `new Date()` →
+  `[object Date]` again, with `document.implementation` still correctly branded.
 - **UA-CH greased brand** → `"Not_A Brand";v="8"` in the middle slot, matching the on-wire
   `sec-ch-ua`; coherent `getHighEntropyValues.fullVersionList` (was a stale `Not)A;Brand;v=24`).
 - **Coherence surfaces** real Chrome exposes that deno_core omits: `navigator.pdfViewerEnabled`,
@@ -225,9 +237,12 @@ reach for a synthetic DOM — documented.
   for a scaled/rotated text matrix. **Live-measured vs real Chrome**: `getImageData` over "Hello"
   20px Arial → bbox `[3,13,46,28]` + avgAlpha 163, matching Chrome's bbox `[3,13,46,28]` + avgAlpha
   163 (pixel count within 2%). Enabled via `turbo-surf-mcp`/`napi`/`py`'s `coretext` pass-through;
-  zero cost to the default build. (Canvas-2D `toDataURL` byte-parity remains intentionally out of
-  scope — PNG-container/encoder differences, not a glyph-shape tell.) Covered by
-  `coretext_rasterizes_text_into_pixmap` + `coretext_declines_non_translate_ctm`.
+  zero cost to the default build. Attribute ranges are counted in UTF-16 code units (not scalars),
+  so an astral char (emoji, CJK-ext) styles its whole glyph run; `set_should_smooth_fonts(true)` is
+  the measured Chrome-parity choice (avgAlpha 163.3 vs Chrome 163; grayscale/`false` drifts to
+  147.3). (Canvas-2D `toDataURL` byte-parity remains intentionally out of scope — PNG-container/
+  encoder differences, not a glyph-shape tell.) Covered by `coretext_rasterizes_text_into_pixmap`
+  + `coretext_declines_non_translate_ctm`.
 
 ### Added — per-strategy config (data-driven, not google-hardcoded)
 - The `structural` result extractor's engine-internal host filter is now a per-strategy

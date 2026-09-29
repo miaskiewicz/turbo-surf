@@ -16,6 +16,8 @@ default = ["impersonate"]
 impersonate = ["turbo-surf-core/impersonate", "turbo-surf-page/impersonate"]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization (off by default; see turbo-surf-raster).
 gpu-metal = ["turbo-surf-raster/gpu-metal"]
+# CoreText/CoreGraphics canvas-text raster (macOS only). See turbo-surf-raster's `coretext`.
+coretext = ["turbo-surf-raster/coretext"]
 
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi6", "tokio_rt"] }

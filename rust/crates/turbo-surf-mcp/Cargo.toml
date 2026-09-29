@@ -29,6 +29,10 @@ trust-anchors = ["turbo-surf-core/trust-anchors"]
 # GPU pixels instead of tiny-skia's software raster. OFF by default (macOS-only, pulls wgpu +
 # a C/Metal toolchain); enable where a real GPU is present. See turbo-surf-raster's `gpu-metal`.
 gpu-metal = ["turbo-surf-raster/gpu-metal"]
+# CoreText/CoreGraphics canvas-TEXT rasterization for getImageData (macOS only) — glyph pixels that
+# match a real Mac Chrome instead of the tiny-skia glyph trace. OFF by default; macOS system
+# frameworks only. See turbo-surf-raster's `coretext`.
+coretext = ["turbo-surf-raster/coretext"]
 
 [dependencies]
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.0" }

@@ -51,7 +51,21 @@ naga = { version = "22", optional = true, features = ["glsl-in", "wgsl-out"] }
 # Decode the recorded WebGL `bufferData` bytes (the recorder base64s them for a lossless capture).
 base64 = { version = "0.22", optional = true }
 
+# --- `coretext` (off by default; macOS only) ---------------------------------
+# Rasterize canvas 2D TEXT via the system CoreText/CoreGraphics stack (the same one Chrome's Skia
+# uses for glyphs on macOS), so `getImageData` over rendered text matches a real Mac Chrome instead
+# of our ttf-parser+tiny-skia glyph raster. macOS-only system frameworks (no download, unlike Skia);
+# gated so non-macOS + the default build never reference them. Shapes stay on tiny-skia (already
+# pixel-matching), so this only swaps the glyph raster — no shape regression.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = { version = "0.23", optional = true }
+core-text = { version = "20", optional = true }
+core-foundation = { version = "0.9", optional = true }
+
 [features]
+# CoreText/CoreGraphics canvas-text raster (macOS only — the deps are macOS-gated, so on other
+# platforms this feature is inert). See the deps note above.
+coretext = ["dep:core-graphics", "dep:core-text", "dep:core-foundation"]
 # Real-GPU (wgpu → Metal) rasterization: `canvas_ops_png` (canvas 2D) + `webgl_readback` (a live
 # WebGL draw batch). On any GPU failure both transparently fall back, so enabling it never
 # regresses correctness — only the pixel backend changes.

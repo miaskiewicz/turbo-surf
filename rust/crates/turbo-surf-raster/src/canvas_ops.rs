@@ -423,12 +423,22 @@ pub(crate) trait CanvasBackend {
     /// Clear a (possibly transformed) quad to transparent black, replacing — not
     /// compositing — the covered pixels (`ctx.clearRect`).
     fn clear(&mut self, quad: &[(f32, f32); 4]);
+    /// Fill text. Default: trace glyph outlines (ttf-parser) into subpaths + fill. A backend may
+    /// override to rasterize text through a system stack (CoreText) whose glyph hinting/AA matches a
+    /// real browser's — `getImageData` over the text then reads back like Chrome.
+    fn fill_text(&mut self, st: &State, text: &str, x: f32, y: f32, color: Rgba) {
+        self.fill(&glyph_subpaths(st, text, x, y), color);
+    }
+    /// Stroke text (same default-trace path as [`fill_text`]).
+    fn stroke_text(&mut self, st: &State, text: &str, x: f32, y: f32, color: Rgba, width: f32) {
+        self.stroke(&glyph_subpaths(st, text, x, y), color, width);
+    }
 }
 
 /// Mutable drawing state, snapshotted by `save`/restored by `restore`.
 #[derive(Clone)]
-struct State {
-    ctm: Matrix,
+pub(crate) struct State {
+    pub(crate) ctm: Matrix,
     fill: Rgba,
     stroke: Rgba,
     alpha: f32,
@@ -436,8 +446,8 @@ struct State {
     // lineWidth (it snapshots only fillStyle/strokeStyle/font/globalAlpha), so per-stroke widths
     // can't be reconstructed here. Honest limitation of the vendored recorder, not a bug to fake.
     line_width: f32,
-    font_px: f32,
-    font_families: Vec<String>,
+    pub(crate) font_px: f32,
+    pub(crate) font_families: Vec<String>,
 }
 
 impl Default for State {
@@ -523,13 +533,14 @@ pub(crate) fn run(ops: &[Op], backend: &mut dyn CanvasBackend) {
                 device_line_width(&st.ctm, st.line_width),
             ),
             Op::FillText { text, x, y } => {
-                let subs = glyph_subpaths(&st, text, *x, *y);
-                backend.fill(&subs, alpha_mul(st.fill, st.alpha));
+                backend.fill_text(&st, text, *x, *y, alpha_mul(st.fill, st.alpha));
             }
             Op::StrokeText { text, x, y } => {
-                let subs = glyph_subpaths(&st, text, *x, *y);
-                backend.stroke(
-                    &subs,
+                backend.stroke_text(
+                    &st,
+                    text,
+                    *x,
+                    *y,
                     alpha_mul(st.stroke, st.alpha),
                     device_line_width(&st.ctm, st.line_width),
                 );
@@ -634,7 +645,7 @@ fn arc_into(
 /// Shape `text` with the state's font and trace each glyph's outline into
 /// device-space subpaths (flattened) at baseline `(x, y)`. Empty if no bundled
 /// face resolves for the family list.
-fn glyph_subpaths(st: &State, text: &str, x: f32, y: f32) -> Vec<SubPath> {
+pub(crate) fn glyph_subpaths(st: &State, text: &str, x: f32, y: f32) -> Vec<SubPath> {
     let Some(face) = resolve_face(&st.font_families) else {
         return Vec::new();
     };

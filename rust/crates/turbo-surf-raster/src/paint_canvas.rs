@@ -9,7 +9,7 @@
 use tiny_skia::{BlendMode, FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
 use turbo_html2pdf_core::Rgba;
 
-use crate::canvas_ops::{self, CanvasBackend, Op, SubPath};
+use crate::canvas_ops::{self, CanvasBackend, Op, State, SubPath};
 
 /// Rasterize the parsed op stream at `width × height` (both already clamped ≥ 1 by
 /// the caller) into a PNG. `Err` only on pixmap allocation or PNG encoding.
@@ -84,6 +84,20 @@ fn solid(c: Rgba) -> Paint<'static> {
 }
 
 impl CanvasBackend for SkiaCanvas {
+    // Text: on macOS with `coretext`, rasterize glyphs through CoreText/CoreGraphics (Chrome's
+    // glyph stack) and composite onto the pixmap — so getImageData over text matches a real Mac
+    // Chrome. Falls back to the vector glyph trace (the trait default) off-macOS, without the
+    // feature, or for a scaled/rotated CTM the CoreText path doesn't handle.
+    fn fill_text(&mut self, st: &State, text: &str, x: f32, y: f32, color: Rgba) {
+        #[cfg(all(target_os = "macos", feature = "coretext"))]
+        {
+            if crate::paint_canvas_coretext::render_text(&mut self.pm, st, text, x, y, color) {
+                return;
+            }
+        }
+        self.fill(&canvas_ops::glyph_subpaths(st, text, x, y), color);
+    }
+
     fn fill(&mut self, subs: &[SubPath], color: Rgba) {
         if color.a == 0 {
             return;

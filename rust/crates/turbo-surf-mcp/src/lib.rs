@@ -30,7 +30,7 @@ use view::{Field, FieldType, QueryType, TextMode};
 mod enid;
 use enid::{EnidCache, EnidCookie};
 
-pub const VERSION: &str = "0.5.0";
+pub const VERSION: &str = "0.5.1";
 
 // --- native-google SERP diagnostics (env-gated) ------------------------------
 // `TURBO_SURF_TRACE` (any non-empty, non-"0" value) turns on single-line `serp:`
@@ -253,7 +253,7 @@ pub struct Session {
     /// `None` (the default) leaves the solve path inert.
     solver: Option<Box<dyn ChallengeSolver>>,
     /// Render-tier navigator fingerprint overrides (JSON object), applied via
-    /// `set_fingerprint`. Empty = Chrome 153 defaults.
+    /// `set_fingerprint`. Empty = current-stable (Chrome 154) defaults.
     fingerprint: String,
     /// Layout viewport for `screenshot` (and any future geometry). Defaults to a
     /// common desktop size; overridable via `set_viewport` or per-call args.
@@ -947,7 +947,7 @@ impl Session {
     }
 
     // Override render-tier navigator fingerprint fields (JSON object merged over
-    // the Chrome 153 defaults; every field is individually overridable). Persisted
+    // the current-stable (Chrome 154) defaults; every field is individually overridable). Persisted
     // on the session and pushed to the render isolate. `{}` resets to defaults.
     fn set_fingerprint(&mut self, overrides: &Value) -> Result<Value, String> {
         let json = if overrides.is_null() {
@@ -2269,6 +2269,12 @@ pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
 
     // 4) Run the homepage's own integrity JS to completion in-isolate (seeded with the earned
     //    jar), so any in-isolate cookie refresh happens on top of the trusted session.
+    //    Push the wire profile's version into the render navigator so userAgentData
+    //    (brands + fullVersionList) is coherent with the UA/sec-ch-ua we sent on the wire.
+    turbo_surf_render::set_fingerprint(
+        &json!({ "chromeMajor": profile.chrome_major, "fullVersion": profile.full_version })
+            .to_string(),
+    );
     let mut tmp = Session::new();
     tmp.load(home, &home_html);
     let script = tmp.page_script().await;

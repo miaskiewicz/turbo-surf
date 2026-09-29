@@ -71,7 +71,7 @@ pub struct FetchOptions<'a> {
     /// when `None`.
     pub client: Option<&'a http::Client>,
     /// Fingerprint identity for the default (rustls) header set. `None` uses
-    /// [`crate::fingerprint::default_profile`] (the fixed Chrome 153 / macOS set);
+    /// [`crate::fingerprint::default_profile`] (the fixed current-stable / macOS set);
     /// pass [`crate::fingerprint::select`]`(key)` to rotate per client. This per-call
     /// arg is ignored on the `impersonate` path, where wreq's emulation owns the
     /// header set/order and `default_profile`'s UA + `sec-ch-ua` are pinned on top
@@ -234,11 +234,12 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str, socs: Optio
 // HTTP-2 (Akamai) fingerprint are Chrome 149's — and Chrome's TLS hello is stable
 // across minor versions, so that hello is byte-for-byte what current Chrome still
 // sends. The *reported* version (UA + `sec-ch-ua`), however, is what anti-bot walls
-// read as "stale", so we override just those two header VALUES to the same
-// Chrome 153 identity that `fingerprint::default_profile` (the rustls path) and the
-// render-tier navigator report — keeping wreq's header ORDER/casing intact (order is
-// itself a fingerprint). Single source of truth: both backends now present the exact
-// same HTTP identity, only the (version-stable) TLS hello lags at 149.
+// read as "stale", so we override just those two header VALUES to the same current
+// identity that `fingerprint::default_profile` (the rustls path) and the render-tier
+// navigator report — and set wreq's header ORDER from the profile's per-version
+// `crate::browser` config (order is itself a fingerprint). Single source of truth:
+// both backends present the exact same HTTP identity, only the (version-stable) TLS
+// hello lags at 149.
 fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     #[cfg(feature = "impersonate")]
     let builder = {
@@ -253,9 +254,9 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
             .build()
             .into_emulation();
 
-        // Freshen the low-entropy `sec-ch-ua` from wreq-util's 149 to the pinned
-        // Chrome 153 identity (kept in lockstep with the UA override below and the
-        // rustls path's `default_profile`), and add the two request headers a real
+        // Freshen the low-entropy `sec-ch-ua` from wreq-util's 149 to the current
+        // pinned identity (`default_profile`, kept in lockstep with the UA override
+        // below and the rustls path), and add the two request headers a real
         // Chrome navigation sends that wreq-util's profile omits:
         // `upgrade-insecure-requests: 1` and `sec-fetch-user: ?1`.
         //
@@ -282,30 +283,17 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
         // tower-http only fills Accept-Encoding when the header is *vacant*.
         put("accept-encoding", "gzip, deflate, br, zstd");
 
-        // Pin the exact Chrome-153 top-level-navigation header ORDER (order is itself
-        // a fingerprint). wreq emits the headers named here first, in this order, via
-        // `OrigHeaderMap`, then appends any others (cache validators, extra caller
-        // headers) after; a header absent from a given request is skipped. `cookie`
-        // is listed in Chrome's slot so a jar/consent cookie lands correctly when
-        // present.
+        // Pin the exact top-level-navigation header ORDER for the profile's Chrome
+        // version (order is itself a fingerprint, and Chrome reorders it across
+        // releases — e.g. 154 hoists `accept-language` ahead of `accept`). The order
+        // comes from the per-version `crate::browser` registry via
+        // `profile.header_order`. wreq emits the named headers first, in this order,
+        // via `OrigHeaderMap`, then appends any others (cache validators, extra caller
+        // headers); a header absent from a request is skipped. `cookie` sits in
+        // Chrome's slot so a jar/consent cookie lands correctly when present.
         let mut order = http::header::OrigHeaderMap::new();
-        for name in [
-            "sec-ch-ua",
-            "sec-ch-ua-mobile",
-            "sec-ch-ua-platform",
-            "upgrade-insecure-requests",
-            "user-agent",
-            "accept",
-            "sec-fetch-site",
-            "sec-fetch-mode",
-            "sec-fetch-user",
-            "sec-fetch-dest",
-            "accept-encoding",
-            "accept-language",
-            "cookie",
-            "priority",
-        ] {
-            order.insert(name);
+        for name in profile.header_order {
+            order.insert(*name);
         }
         emulation.orig_headers = order;
 
@@ -334,7 +322,8 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
         builder
             .emulation(emulation)
             // Override AFTER emulation (wreq applies the profile immediately, so
-            // later fine-tuning wins) to freshen the reported version 149 -> 153.
+            // later fine-tuning wins) to freshen the reported version 149 -> current
+            // (`default_profile`'s major, from the browser registry).
             .user_agent(profile.user_agent.as_str())
     };
     builder

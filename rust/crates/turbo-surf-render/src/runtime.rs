@@ -131,7 +131,7 @@ static FINGERPRINT_OVERRIDES: std::sync::RwLock<String> = std::sync::RwLock::new
 /// Override the render-tier navigator fields at runtime with a JSON object, e.g.
 /// `{"platform":"Win32","hardwareConcurrency":16,"languages":["en-GB","en"],
 /// "screen":{"width":2560,"height":1440},"userAgent":"…"}`. Unset keys keep their
-/// Chrome 153 defaults. Pass `"{}"` (or `""`) to reset to defaults.
+/// current-stable (Chrome 154) defaults. Pass `"{}"` (or `""`) to reset to defaults.
 pub fn set_fingerprint(overrides_json: &str) {
     if let Ok(mut g) = FINGERPRINT_OVERRIDES.write() {
         *g = overrides_json.to_string();
@@ -443,14 +443,24 @@ globalThis.self = globalThis;
 // cookie when the browser reports online — an undefined/falsy onLine made a cold load of
 // an authed page skip the refresh and render nothing.
 // Runtime fingerprint overrides (JSON object from op_fingerprint). Every navigator
-// field below has a Chrome 153 default and is overridable by the matching key —
+// field below has a current-stable (Chrome 154) default and is overridable by the matching key —
 // settable per process via `set_fingerprint` (MCP `set_fingerprint` tool).
 const __fp = (() => { try { return JSON.parse(Deno.core.ops.op_fingerprint()); } catch (e) { return {}; } })();
 const __pick = (k, d) => (__fp[k] !== undefined ? __fp[k] : d);
 const __ua = __pick("userAgent",
   (Deno.core.ops.op_user_agent && Deno.core.ops.op_user_agent()) ||
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36");
-const __major = String(__pick("chromeMajor", 153));
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36");
+// Derive the major from the ACTUAL UA string so navigator.userAgentData.brands always
+// agree with navigator.userAgent (a UA-string `Chrome/153` with `brands` v154 is a hard
+// tell). An explicit chromeMajor override still wins; else parse `Chrome/<major>` from
+// __ua, falling back to the current-stable default.
+const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || [])[1]) || 154));
+// Full build for high-entropy UA-CH (fullVersionList / uaFullVersion) — real Chrome
+// reports the FULL version here (e.g. 154.0.7258.66), NOT the reduced <major>.0.0.0
+// the UA string carries. Default matches turbo-surf-core's browser registry default
+// release; a caller rotating to a non-default major should pass fullVersion too (the
+// session pushes it from the wire profile so both layers stay coherent).
+const __fullVersion = String(__pick("fullVersion", "154.0.7258.66"));
 // Chrome ships exactly these five PDF-viewer plugins, all aliased to the internal
 // viewer; `navigator.plugins.length === 0` is a classic headless giveaway.
 const __plugin = (name) => ({ name, filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 });
@@ -553,7 +563,7 @@ const __navData = {
     platform: __uaPlatform,
     getHighEntropyValues: async () => ({
       architecture: "arm", bitness: "64", model: "", wow64: false,
-      platform: __uaPlatform, platformVersion: "15.0.0", uaFullVersion: __major + ".0.0.0",
+      platform: __uaPlatform, platformVersion: "15.0.0", uaFullVersion: __fullVersion,
       mobile: false,
       brands: [
         { brand: "Chromium", version: __major },
@@ -561,8 +571,8 @@ const __navData = {
         { brand: "Not A(Brand", version: "99" },
       ],
       fullVersionList: [
-        { brand: "Chromium", version: __major + ".0.0.0" },
-        { brand: "Google Chrome", version: __major + ".0.0.0" },
+        { brand: "Chromium", version: __fullVersion },
+        { brand: "Google Chrome", version: __fullVersion },
         { brand: "Not A(Brand", version: "99.0.0.0" },
       ],
     }),

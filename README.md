@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.5.0 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.5.1 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -204,11 +204,19 @@ platform there's no prebuilt binary (build from a checkout as above).
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
-By default every request carries a real **Chrome 153** identity — full UA + client
-hints (`sec-ch-ua`, `sec-fetch-*`, …) on the wire, and a matching Chrome
-`navigator` (`platform`, `vendor`, `webdriver: false`, plugins, `window.chrome`,
-native-`toString`) inside the JS render tier. **Nothing to configure for the
-common case** — it just looks like Chrome.
+By default every request carries a real **Chrome 154** identity — full UA + client
+hints (`sec-ch-ua`, `sec-fetch-*`, …) **in Chrome's exact per-version header order**
+on the wire, and a matching Chrome `navigator` (`platform`, `vendor`,
+`webdriver: false`, plugins, `window.chrome`, native-`toString`, coherent
+`userAgentData` brands + `fullVersionList`) inside the JS render tier. **Nothing to
+configure for the common case** — it just looks like Chrome.
+
+Version-specific fingerprint data (reported major, full build for high-entropy
+UA-CH, and the navigation **header order** — which Chrome reorders across releases)
+lives in a declarative per-version registry (`turbo-surf-core`'s `browser` module):
+one coherent config per Chrome version, defaulting to the current stable. Both the
+wire headers and the render-tier navigator read from it, so the two layers stay in
+lockstep, and supporting a new Chrome (e.g. 155) is a one-line config drop-in.
 
 ### Quick start (anti-bot)
 
@@ -414,7 +422,7 @@ Set `TURBO_SURF_PROXY` so the token's IP/JA3 matches your egress (and build with
 `--features impersonate` so the replay JA3 matches the Chrome that minted it).
 
 **Controllable render fingerprint.** Every render-tier `navigator` field has a
-Chrome 153 default and is overridable at runtime via the MCP `set_fingerprint`
+Chrome 154 default and is overridable at runtime via the MCP `set_fingerprint`
 tool (or `turbo_surf_render::set_fingerprint(json)`):
 
 ```jsonc
@@ -426,7 +434,7 @@ tool (or `turbo_surf_render::set_fingerprint(json)`):
     "devicePixelRatio": 2,
     "connection": { "effectiveType": "4g", "rtt": 50, "downlink": 10 },
     "userAgentData": { "platform": "Windows", "brands": [ /* … */ ] }
-} }   // {} resets to Chrome 153 macOS defaults
+} }   // {} resets to Chrome 154 macOS defaults
 ```
 
 `stealth_status` reports the active profile, the wired solver, the pool size, and

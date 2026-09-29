@@ -1444,7 +1444,7 @@ fn chrome_fingerprint_identity_is_coherent() {
     );
     // Grease + order validated against a live real-Chrome capture (greased brand LAST,
     // token `Not A(Brand` v99); must match the on-wire sec-ch-ua in fingerprint.rs.
-    assert_eq!(v["brands"], "Chromium 153,Google Chrome 153,Not A(Brand 99");
+    assert_eq!(v["brands"], "Chromium 154,Google Chrome 154,Not A(Brand 99");
     assert_eq!(v["pdf"], true);
     assert_eq!(v["mimeLen"], 2);
     assert_eq!(v["notif"], "default");
@@ -1476,11 +1476,11 @@ fn fingerprint_override_applies_and_resets() {
         "override not applied: {out}"
     );
 
-    // Reset → Chrome 153 macOS defaults return.
+    // Reset → current-stable (Chrome 154) macOS defaults return.
     turbo_surf_render::set_fingerprint("{}");
     let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
     assert!(
-        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|153\""),
+        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|154\""),
         "reset to defaults failed: {out}"
     );
 }

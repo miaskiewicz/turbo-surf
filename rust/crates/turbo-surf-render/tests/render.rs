@@ -1795,7 +1795,7 @@ async fn live_session_dispatches_events_into_running_app() {
 
 // RSC soft-nav must preserve the target's QUERY STRING. Next App Router client
 // navigation (`router.push('/x?employeeIds=42')`) fetches the target's RSC flight with
-// an `RSC` header; we record the target on `__rscNav` and the live-session driver hard-
+// an `RSC` header; we record the target on `globalThis[Symbol.for('ts')].rscNav` and the live-session driver hard-
 // reloads it. Recording only `u.pathname` dropped the query, so the off-cycle termination
 // flow (which passes the selected employee as `?employeeIds=`) landed on the bare route and
 // `waitForURL(/…\/termination\?employeeIds=/)` never matched. The recorded target must keep
@@ -1816,22 +1816,22 @@ async fn rsc_soft_nav_preserves_query_and_strips_rsc_param() {
 
     let nav = session
         .eval(
-            r#"globalThis.__rscNav = '';
+            r#"globalThis[Symbol.for('ts')].rscNav = '';
         globalThis.fetch('/entity/x/admin/payroll/off-cycle/new/termination?employeeIds=42&_rsc=abc123',
             { headers: { RSC: '1' } }).catch(() => {});
-        globalThis.__RESULT = globalThis.__rscNav || '';"#,
+        globalThis.__RESULT = globalThis[Symbol.for('ts')].rscNav || '';"#,
         )
         .await
         .unwrap();
     assert_eq!(
         nav, "/entity/x/admin/payroll/off-cycle/new/termination?employeeIds=42",
-        "__rscNav must preserve the app query string (employeeIds) and drop Next's _rsc param"
+        "globalThis[Symbol.for('ts')].rscNav must preserve the app query string (employeeIds) and drop Next's _rsc param"
     );
 
     session.close();
 }
 
-// __tcResolveScoped must apply a Locator.filter({hasNotText}) BEFORE indexing, so
+// globalThis[Symbol.for('ts')].tcResolveScoped must apply a Locator.filter({hasNotText}) BEFORE indexing, so
 // `cards.filter({hasNotText: x}).first().getByTestId('y')` scopes the child to the SAME
 // element the static read path picks. The pay-schedule delete-409 guard does exactly this
 // (target a SEEDED card by filtering OUT the just-created one); without filter-in-scope the
@@ -1857,7 +1857,7 @@ async fn scoped_resolve_applies_filter_before_indexing() {
     // del button. The resolved element's parent card text must be the BETA card's.
     let card_text = session
         .eval(
-            r#"globalThis.__tcResolveScoped(
+            r#"globalThis[Symbol.for('ts')].tcResolveScoped(
             [{ sel: '.card', idx: 0, filter: { hasNotText: 'alpha cycle' } }],
             { selector: '[data-test-id="del"]' });
         const arr = JSON.parse(globalThis.__RESULT);
@@ -2551,7 +2551,7 @@ async fn nomodule_scripts_are_skipped() {
 // Dev-build support (B): an injected script that reads `import.meta.url` must NOT
 // abort the page. We run every <script> as a CLASSIC script, where `import.meta` is a
 // SyntaxError ("Cannot use 'import.meta' outside a module") — a turbopack `next dev`
-// HMR runtime trips exactly this. The rewrite maps it onto the `__importMeta` global, so
+// HMR runtime trips exactly this. The rewrite maps it onto the `globalThis.__importMeta` global, so
 // the read works AND a following script still runs.
 #[tokio::test]
 async fn import_meta_in_injected_script_does_not_abort_page() {
@@ -3045,7 +3045,7 @@ async fn react_document_root_hydrates_and_commits() {
 }
 
 // Client-side export capture: `URL.createObjectURL(blob)` → `<a download href=…>` →
-// `link.click()` must be recorded in `__downloads` (filename + bytes) so the shim's
+// `link.click()` must be recorded in `globalThis[Symbol.for('ts')].downloads` (filename + bytes) so the shim's
 // page.waitForEvent('download') + download.path() work (CSV-template / file exports).
 #[tokio::test]
 async fn createobjecturl_anchor_download_is_captured() {
@@ -3057,7 +3057,7 @@ async fn createobjecturl_anchor_download_is_captured() {
         a.setAttribute('download', 'template.csv');
         a.setAttribute('href', url);
         a.click();
-        var d = (globalThis.__downloads || [])[0] || {};
+        var d = (globalThis[Symbol.for('ts')].downloads || [])[0] || {};
         document.body.setAttribute('data-fn', String(d.filename));
         document.body.setAttribute('data-content', String(d.content));
       </script></body>"#;
@@ -3072,7 +3072,7 @@ async fn createobjecturl_anchor_download_is_captured() {
     );
 }
 
-// __tcGetBy resolves getByRole/getByText/getByLabel IN the live isolate, returning each
+// globalThis[Symbol.for('ts')].tcGetBy resolves getByRole/getByText/getByLabel IN the live isolate, returning each
 // match's LIVE document-order index (querySelectorAll('*') position) so the shim dispatches
 // on the SAME node it matched (a re-serialized snapshot can reorder portal'd nodes → wrong
 // index). Guards role + accessible-name matching + that the returned idx maps to the right
@@ -3094,7 +3094,7 @@ async fn live_getby_returns_live_indices() {
     .expect("session opens");
     // role=option → two matches; verify each idx points at an <li role=option> in the live tree.
     let r = session
-        .eval(r#"globalThis.__tcGetBy('role','option',null);
+        .eval(r#"globalThis[Symbol.for('ts')].tcGetBy('role','option',null);
           var hits=JSON.parse(globalThis.__RESULT);
           var all=Array.prototype.slice.call(document.querySelectorAll('*'));
           globalThis.__RESULT = JSON.stringify(hits.map(function(h){ var e=all[h.idx]; return e.tagName+'/'+e.getAttribute('role')+'/'+e.textContent; }));"#)
@@ -3106,7 +3106,7 @@ async fn live_getby_returns_live_indices() {
     );
     // role=button with accessible-name filter → the Cancel button only.
     let b = session
-        .eval(r#"globalThis.__tcGetBy('role','button','Cancel');
+        .eval(r#"globalThis[Symbol.for('ts')].tcGetBy('role','button','Cancel');
           var hits=JSON.parse(globalThis.__RESULT);
           var all=Array.prototype.slice.call(document.querySelectorAll('*'));
           globalThis.__RESULT = JSON.stringify(hits.map(function(h){ return all[h.idx].tagName+':'+all[h.idx].textContent; }));"#)
@@ -3850,7 +3850,7 @@ async fn spawn_capture_server() -> (u16, std::sync::Arc<std::sync::Mutex<Option<
 // CSS :hover-revealed content (a hover dropdown / menu) must become visible when the shim
 // hovers the trigger. turbo-dom's cascade does not apply the :hover pseudo-class (no pointer
 // state), so a menu shown via `.trigger:hover .menu { display:block }` stays display:none and
-// waitFor(visible) hangs. __tcApplyHover marks the hovered chain with [data-tc-hover], rewrites
+// waitFor(visible) hangs. globalThis[Symbol.for('ts')].tcApplyHover marks the hovered chain with [data-tc-hover], rewrites
 // each stylesheet rule's `:hover` → `[data-tc-hover]`, and applies the matched rules' decls
 // INLINE so both the JS getComputedStyle and rtdom's native cascade (is_visible) see the reveal.
 // Real case: the app's UserMenu (overridden to open on hover) — the logout item lives in a
@@ -3873,14 +3873,14 @@ async fn hover_reveals_css_hover_menu() {
     .expect("session opens");
     // The `<style>` rule lives in rtdom's cascade (which is_visible reads); this env's
     // getComputedStyle doesn't parse <style> text, so assert on the inline style
-    // __tcApplyHover applies — exactly what feeds the Rust cascade / is_visible.
+    // globalThis[Symbol.for('ts')].tcApplyHover applies — exactly what feeds the Rust cascade / is_visible.
     let before = session
         .eval(r#"globalThis.__RESULT = document.getElementById('d').style.visibility || '';"#)
         .await
         .unwrap();
     assert_eq!(before, "", "no inline visibility before hover");
     session
-        .eval(r#"globalThis.__tcApplyHover(document.getElementById('m')); globalThis.__RESULT = 'ok';"#)
+        .eval(r#"globalThis[Symbol.for('ts')].tcApplyHover(document.getElementById('m')); globalThis.__RESULT = 'ok';"#)
         .await
         .unwrap();
     let after = session
@@ -3901,7 +3901,7 @@ async fn hover_reveals_css_hover_menu() {
     session.close();
 }
 
-// __tcGetBy(kind,value,name,root) scopes role/text/label matching to within elements matching
+// globalThis[Symbol.for('ts')].tcGetBy(kind,value,name,root) scopes role/text/label matching to within elements matching
 // `root` (descendant-or-self) — backs the shim's `parentLocator.getByRole/getByText/getByLabel`,
 // so `step.getByTestId('x').getByRole('combobox')` drives the combobox INSIDE that step, not the
 // first one in the document. idx stays the GLOBAL position so the shim dispatches on `*`[idx].
@@ -3922,7 +3922,7 @@ async fn tcgetby_scopes_to_root() {
     .expect("session opens");
     let unscoped = session
         .eval(
-            r#"globalThis.__tcGetBy('role','combobox',null,null);
+            r#"globalThis[Symbol.for('ts')].tcGetBy('role','combobox',null,null);
                globalThis.__RESULT = String(JSON.parse(globalThis.__RESULT).length);"#,
         )
         .await
@@ -3930,7 +3930,7 @@ async fn tcgetby_scopes_to_root() {
     assert_eq!(unscoped, "2", "unscoped sees both comboboxes");
     let scoped = session
         .eval(
-            r#"globalThis.__tcGetBy('role','combobox',null,'#a');
+            r#"globalThis[Symbol.for('ts')].tcGetBy('role','combobox',null,'#a');
                var h = JSON.parse(globalThis.__RESULT);
                var all = Array.prototype.slice.call(document.querySelectorAll('*'));
                globalThis.__RESULT = h.length + ':' + (h[0] ? all[h[0].idx].textContent : '');"#,
@@ -3944,7 +3944,7 @@ async fn tcgetby_scopes_to_root() {
 // nth-scoped descendant resolution: `steps.nth(i).getByTestId('x').getByRole('combobox')` must
 // drive the combobox inside the i-th step, not the first in the document. A CSS-concat selector
 // can't express "the nth match's subtree", so the shim carries a scope CHAIN of {sel, idx} and
-// __tcResolveScoped walks it (picking idx at each level) before matching the leaf (a selector OR
+// globalThis[Symbol.for('ts')].tcResolveScoped walks it (picking idx at each level) before matching the leaf (a selector OR
 // a getBy). idx stays the GLOBAL position so the shim dispatches on `*`[idx]. Backs the
 // payroll-approval-chain flow (two steps, each configured independently).
 #[tokio::test]
@@ -3965,7 +3965,7 @@ async fn tcresolvescoped_walks_nth_chain() {
     // getBy leaf scoped to the 2nd step → combobox "B"
     let b = session
         .eval(
-            r#"globalThis.__tcResolveScoped(
+            r#"globalThis[Symbol.for('ts')].tcResolveScoped(
                  [{"sel":".s","idx":1},{"sel":"[data-testid=\"x\"]","idx":null}],
                  {"getBy":{"kind":"role","value":"combobox","name":null}});
                var h = JSON.parse(globalThis.__RESULT);
@@ -3978,7 +3978,7 @@ async fn tcresolvescoped_walks_nth_chain() {
     // selector leaf scoped to the 1st step → its [data-testid=x]
     let a = session
         .eval(
-            r#"globalThis.__tcResolveScoped([{"sel":".s","idx":0}], {"selector":"[data-testid=\"x\"]"});
+            r#"globalThis[Symbol.for('ts')].tcResolveScoped([{"sel":".s","idx":0}], {"selector":"[data-testid=\"x\"]"});
                var h = JSON.parse(globalThis.__RESULT);
                var all = Array.prototype.slice.call(document.querySelectorAll('*'));
                globalThis.__RESULT = h.length + ':' + (h[0] ? all[h[0].idx].querySelector('[role=combobox]').textContent : '');"#,

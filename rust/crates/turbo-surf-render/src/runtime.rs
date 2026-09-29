@@ -2011,18 +2011,26 @@ if (typeof globalThis.URL === "undefined") {
       try { globalThis[k] = v; } catch (_e) {}
     }
   };
-  // A real browser window is TALLER than its viewport: the tab strip + omnibox (+ any
-  // bookmarks bar) sit above the content, so `outerHeight > innerHeight` always. Width is
-  // normally equal (Chrome has no left/right window chrome; the scrollbar is inside inner).
-  // Equal inner/outer height (the old 800==800) is impossible for a real window — a tell.
-  const __iw = __pick("innerWidth", 1280);
-  const __ih = __pick("innerHeight", 800);
-  // ~40px tab strip + ~48px toolbar (no bookmarks bar) — a plausible desktop-Chrome chrome height.
-  const __chromeH = 88;
+  // Window/viewport geometry, kept physically coherent with the screen:
+  //   screen.height >= availHeight >= outerHeight >= innerHeight   (the window fits ON the
+  // screen; the viewport fits IN the window under the tab strip + omnibox). Widths are equal
+  // (Chrome has no left/right window chrome; the scrollbar lives inside inner). A window taller
+  // than its screen — or equal inner/outer height — is impossible and a tell. `screen` was set
+  // earlier in this bootstrap, so derive the defaults from it and clamp to fit.
+  const __chromeH = 88; // ~40px tab strip + ~48px toolbar (no bookmarks bar)
+  const __scr = globalThis.screen || {};
+  const __availW = typeof __scr.availWidth === "number" ? __scr.availWidth : 1920;
+  const __availH = typeof __scr.availHeight === "number" ? __scr.availHeight : 1055;
+  // Outer window: default to the available screen area (a maximized-ish window), never larger.
+  const __ow = Math.min(__pick("outerWidth", Math.min(1280, __availW)), __availW);
+  const __oh = Math.min(__pick("outerHeight", Math.min(800 + __chromeH, __availH)), __availH);
+  // Inner viewport: window minus chrome (height) and equal width; never larger than the window.
+  const __iw = Math.min(__pick("innerWidth", __ow), __ow);
+  const __ih = Math.min(__pick("innerHeight", Math.max(__oh - __chromeH, 0)), __oh);
   set("innerWidth", __iw);
   set("innerHeight", __ih);
-  set("outerWidth", __pick("outerWidth", __iw));
-  set("outerHeight", __pick("outerHeight", __ih + __chromeH));
+  set("outerWidth", __ow);
+  set("outerHeight", __oh);
   set("devicePixelRatio", 1);
   set("screenX", 0);
   set("screenY", 0);
@@ -2038,8 +2046,11 @@ if (typeof globalThis.URL === "undefined") {
     colorDepth: __colorDepth, pixelDepth: __pixelDepth,
     orientation: { type: "landscape-primary", angle: 0, addEventListener() {}, removeEventListener() {} },
   });
+  // visualViewport tracks the layout viewport (unpinched) — must equal innerWidth/innerHeight,
+  // else `visualViewport.width !== innerWidth` is an incoherence tell. Derive from the values
+  // set just above rather than repeating a stale 1280x800.
   set("visualViewport", {
-    width: 1280, height: 800, scale: 1, offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0,
+    width: __iw, height: __ih, scale: 1, offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0,
     addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
   });
   // PerformanceObserver — analytics / experiment code (e.g. Wikipedia's header

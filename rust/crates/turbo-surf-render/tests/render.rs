@@ -420,7 +420,9 @@ async fn window_and_screen_geometry_is_coherent() {
         var o = {
             iw: window.innerWidth, ih: window.innerHeight,
             ow: window.outerWidth, oh: window.outerHeight,
-            sh: screen.height, ah: screen.availHeight,
+            sw: screen.width, sh: screen.height,
+            aw: screen.availWidth, ah: screen.availHeight,
+            vw: visualViewport.width, vh: visualViewport.height,
             cd: screen.colorDepth, pd: screen.pixelDepth,
         };
         document.body.setAttribute('data-geo', JSON.stringify(o));
@@ -437,21 +439,37 @@ async fn window_and_screen_geometry_is_coherent() {
         .unwrap();
     let g: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
     let n = |k: &str| g[k].as_i64().unwrap();
+    // Height containment chain: screen.height >= availHeight >= outerHeight > innerHeight
+    // (window fits ON the screen; viewport fits IN the window under the tab strip + omnibox).
     assert!(
-        n("oh") > n("ih"),
-        "outerHeight must exceed innerHeight (browser chrome): {g}"
+        n("sh") >= n("ah") && n("ah") >= n("oh") && n("oh") > n("ih"),
+        "height chain screen>=avail>=outer>inner (window fits on screen, chrome above viewport): {g}"
     );
+    // Width containment: outerWidth == innerWidth (no side chrome), both <= screen width.
     assert_eq!(
         n("ow"),
         n("iw"),
         "outerWidth equals innerWidth (no side chrome): {g}"
     );
+    assert!(n("aw") <= n("sw"), "availWidth <= screen width: {g}");
+    assert!(
+        n("ow") <= n("aw"),
+        "window width fits the available screen: {g}"
+    );
     assert!(
         n("ah") < n("sh"),
-        "availHeight must be less than screen height (menubar): {g}"
+        "availHeight < screen height (menubar reserved): {g}"
     );
+    // visualViewport (unpinched) must equal the layout viewport — a mismatch is an incoherence tell.
+    assert_eq!(n("vw"), n("iw"), "visualViewport.width == innerWidth: {g}");
+    assert_eq!(
+        n("vh"),
+        n("ih"),
+        "visualViewport.height == innerHeight: {g}"
+    );
+    // macOS profile → 30-bit wide-gamut color, and pixelDepth mirrors colorDepth.
     assert_eq!(n("cd"), 30, "macOS default colorDepth is 30-bit: {g}");
-    assert_eq!(n("pd"), 30, "macOS default pixelDepth is 30-bit: {g}");
+    assert_eq!(n("pd"), n("cd"), "pixelDepth mirrors colorDepth: {g}");
 }
 
 // disconnect() before the async initial entry fires must cancel it — Chrome delivers the entry

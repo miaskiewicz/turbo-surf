@@ -29,6 +29,13 @@ image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
     pub chrome_major: u16,
+    /// Full build version for high-entropy UA-CH (`fullVersionList` /
+    /// `uaFullVersion`), from the per-version [`crate::browser`] registry, e.g.
+    /// `"154.0.7258.66"`. The UA string stays reduced to `<major>.0.0.0`.
+    pub full_version: &'static str,
+    /// Top-level navigation header ORDER for this Chrome version (a fingerprint),
+    /// from the [`crate::browser`] registry — Chrome reorders it across releases.
+    pub header_order: &'static [&'static str],
     pub user_agent: String,
     pub sec_ch_ua: String,
     /// `sec-ch-ua-platform` value, already quoted (e.g. `"\"macOS\""`).
@@ -97,9 +104,11 @@ const OSES: &[Os] = &[
     },
 ];
 
-// Recent Chrome majors. Kept within wreq-util's emulated range so the same pool
-// can later drive a per-profile TLS client without an unmatched version.
-const MAJORS: &[u16] = &[153, 152, 151, 150, 149, 148];
+// Recent Chrome majors, newest first. The reported version is independent of the
+// (wreq-util BoringSSL) TLS profile, so this can lead the current stable. Each
+// major resolves its version-specific data (full build, header order) through the
+// `crate::browser` registry, so every profile stays coherent.
+const MAJORS: &[u16] = &[154, 153, 152, 151, 150, 149];
 
 // Plausible logical-core counts for desktops.
 const CORES: &[u8] = &[4, 8, 12, 16];
@@ -166,8 +175,11 @@ pub fn profile_at(index: usize) -> Profile {
     i /= SCREENS.len();
     let (accept_language, languages) = LANGS[i % LANGS.len()];
 
+    let rel = crate::browser::release(major);
     Profile {
         chrome_major: major,
+        full_version: rel.full_version,
+        header_order: rel.header_order,
         user_agent: format!(
             "Mozilla/5.0 ({}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{}.0.0.0 Safari/537.36",
             os.ua_token, major
@@ -192,18 +204,25 @@ pub fn profile_at(index: usize) -> Profile {
     }
 }
 
-/// The fixed identity used when no profile is selected: Chrome 153 on macOS,
-/// matching the tier-1 default headers and the render-tier navigator. Keeping
-/// this stable means turning the pool *off* (passing no key) reproduces the
-/// pre-pool wire behaviour exactly.
+/// The fixed identity used when no profile is selected: the current stable Chrome
+/// ([`crate::browser::DEFAULT_MAJOR`]) on macOS, matching the tier-1 default headers
+/// and the render-tier navigator. Its version-specific data (full build, header
+/// order) comes from the [`crate::browser`] registry, so bumping `DEFAULT_MAJOR`
+/// flips the wire + render default coherently.
 pub fn default_profile() -> Profile {
+    let rel = crate::browser::default_release();
+    let major = rel.major;
     Profile {
-        chrome_major: 153,
-        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
-                     (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-            .to_string(),
-        sec_ch_ua: "\"Chromium\";v=\"153\", \"Google Chrome\";v=\"153\", \"Not A(Brand\";v=\"99\""
-            .to_string(),
+        chrome_major: major,
+        full_version: rel.full_version,
+        header_order: rel.header_order,
+        user_agent: format!(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+             (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+        ),
+        sec_ch_ua: format!(
+            "\"Chromium\";v=\"{major}\", \"Google Chrome\";v=\"{major}\", \"Not A(Brand\";v=\"99\""
+        ),
         sec_ch_ua_platform: "\"macOS\"",
         nav_platform: "MacIntel",
         vendor: "Google Inc.",
@@ -265,14 +284,44 @@ mod tests {
     }
 
     #[test]
-    fn default_profile_matches_chrome_153_macos() {
+    fn default_profile_matches_current_stable_macos() {
         let p = default_profile();
-        assert_eq!(p.chrome_major, 153);
-        assert!(p.user_agent.contains("Chrome/153") && p.user_agent.contains("Macintosh"));
+        let major = crate::browser::DEFAULT_MAJOR;
+        assert_eq!(p.chrome_major, major);
+        assert!(
+            p.user_agent.contains(&format!("Chrome/{major}")) && p.user_agent.contains("Macintosh")
+        );
+        assert!(p.sec_ch_ua.contains(&format!("\"{major}\"")));
         assert_eq!(p.sec_ch_ua_platform, "\"macOS\"");
+        // Version-specific data comes from the browser registry.
+        assert_eq!(
+            p.full_version,
+            crate::browser::default_release().full_version
+        );
+        assert_eq!(
+            p.header_order,
+            crate::browser::default_release().header_order
+        );
         // The default's headers are exactly the tier-1 set.
         let h = p.nav_headers();
         assert!(h.iter().any(|(k, _)| *k == "sec-fetch-mode"));
         assert!(!h.iter().any(|(k, _)| *k == "accept-encoding"));
+    }
+
+    #[test]
+    fn profile_header_order_tracks_its_major() {
+        // A 154 profile carries the 154 order; a 153 profile the 153 order — coherent
+        // per-version sets, driven by the registry.
+        for idx in 0..pool_size() {
+            let p = profile_at(idx);
+            assert_eq!(
+                p.header_order,
+                crate::browser::release(p.chrome_major).header_order
+            );
+            assert_eq!(
+                p.full_version,
+                crate::browser::release(p.chrome_major).full_version
+            );
+        }
     }
 }

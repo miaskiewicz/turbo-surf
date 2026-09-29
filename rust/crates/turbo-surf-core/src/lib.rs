@@ -14,6 +14,7 @@
 
 pub mod akamai;
 pub mod aws_waf;
+pub mod browser;
 pub mod cache;
 pub mod challenge;
 pub mod cloudflare;
@@ -42,4 +43,4 @@ pub use reqwest as http_backend;
 pub use wreq as http_backend;
 
 /// Library version — kept in lockstep with `package.json` per the release rules.
-pub const VERSION: &str = "0.5.0";
+pub const VERSION: &str = "0.5.1";

@@ -9,6 +9,111 @@ use turbo_surf_render::{
     DEFAULT_RENDER_BUDGET_MS, SCRIPT_BOUNDARY,
 };
 
+// The deno_core `Deno` global must NOT leak to page scope — `'Deno' in window` /
+// `typeof window.Deno` is the single most-checked browserless/electron tell. Bootstrap
+// captures the op table into closures then deletes the global. This also exercises the
+// REUSED-isolate path (run_with_dom re-runs bootstrap after the delete), so it verifies
+// the Symbol-stash recovery keeps ops working across re-bootstrap. Runs twice to hit reuse.
+#[test]
+fn deno_global_is_deleted_from_page_scope() {
+    for _ in 0..2 {
+        let out = run_with_dom(
+            "<body></body>",
+            "JSON.stringify({\
+               t: typeof globalThis.Deno,\
+               inWin: ('Deno' in globalThis),\
+               ownName: Object.getOwnPropertyNames(globalThis).includes('Deno'),\
+               clockOk: (typeof performance.now() === 'number' && performance.now() > 0),\
+             })",
+        )
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["t"], "undefined", "typeof Deno must be undefined: {v}");
+        assert_eq!(v["inWin"], false, "'Deno' in window must be false: {v}");
+        assert_eq!(
+            v["ownName"], false,
+            "Deno absent from getOwnPropertyNames: {v}"
+        );
+        // Ops still work after the delete (clock reads through the captured op ref).
+        assert_eq!(
+            v["clockOk"], true,
+            "performance.now (op_now_perf) works post-delete: {v}"
+        );
+    }
+}
+
+// window.addEventListener/removeEventListener/dispatchEvent must be INHERITED (from
+// EventTarget.prototype via Window.prototype), NOT window own-props — real Chrome:
+// window.hasOwnProperty('addEventListener') === false. They must still work + be native-shaped.
+#[test]
+fn window_event_methods_are_inherited_not_own() {
+    let out = run_with_dom(
+        "<body></body>",
+        "(() => { let fired = false; const h = () => { fired = true; }; \
+           globalThis.addEventListener('x', h); globalThis.dispatchEvent(Object.assign(new Event('x'))); \
+           return JSON.stringify({ \
+             ownAEL: Object.prototype.hasOwnProperty.call(globalThis, 'addEventListener'), \
+             ownRM: Object.prototype.hasOwnProperty.call(globalThis, 'removeEventListener'), \
+             ownDE: Object.prototype.hasOwnProperty.call(globalThis, 'dispatchEvent'), \
+             inherited: (typeof globalThis.addEventListener === 'function'), \
+             etOwns: Object.prototype.hasOwnProperty.call(globalThis.EventTarget.prototype, 'addEventListener'), \
+             noProto: !('prototype' in globalThis.addEventListener), \
+             native: Function.prototype.toString.call(globalThis.addEventListener).includes('[native code]'), \
+             fired, \
+           }); })()",
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        v["ownAEL"], false,
+        "window must NOT own addEventListener: {v}"
+    );
+    assert_eq!(
+        v["ownRM"], false,
+        "window must NOT own removeEventListener: {v}"
+    );
+    assert_eq!(v["ownDE"], false, "window must NOT own dispatchEvent: {v}");
+    assert_eq!(
+        v["inherited"], true,
+        "window.addEventListener still resolves (inherited): {v}"
+    );
+    assert_eq!(
+        v["etOwns"], true,
+        "EventTarget.prototype owns addEventListener: {v}"
+    );
+    assert_eq!(
+        v["noProto"], true,
+        "inherited addEventListener has no own prototype: {v}"
+    );
+    assert_eq!(
+        v["native"], true,
+        "inherited addEventListener is native-shaped: {v}"
+    );
+    assert_eq!(
+        v["fired"], true,
+        "addEventListener/dispatchEvent still function end-to-end: {v}"
+    );
+}
+
+// Error.stack must NOT name page scripts "<page>" — a real Chrome inline script shows the
+// document URL (here about:blank), and "<page>" is a turbo-surf tell BotGuard parses from stacks.
+#[test]
+fn page_script_stack_is_not_named_page() {
+    let out = run_with_dom(
+        "<body></body>",
+        "(() => { try { (function trigger(){ null.x; })(); } catch (e) { return e.stack || ''; } return ''; })()",
+    )
+    .unwrap();
+    assert!(
+        !out.contains("<page>"),
+        "stack must not contain '<page>': {out}"
+    );
+    assert!(
+        out.contains("about:blank"),
+        "inline script stack names the document (about:blank): {out}"
+    );
+}
+
 // --- per-script isolation: a throw in one <script> doesn't abort the rest -----
 // A browser runs each <script> as a separate top-level program: an uncaught error in
 // one does NOT stop later scripts, and top-level let/const/function/var still populate
@@ -1444,7 +1549,7 @@ fn chrome_fingerprint_identity_is_coherent() {
     );
     // Grease + order validated against a live real-Chrome capture (greased brand LAST,
     // token `Not A(Brand` v99); must match the on-wire sec-ch-ua in fingerprint.rs.
-    assert_eq!(v["brands"], "Chromium 153,Google Chrome 153,Not A(Brand 99");
+    assert_eq!(v["brands"], "Chromium 154,Google Chrome 154,Not A(Brand 99");
     assert_eq!(v["pdf"], true);
     assert_eq!(v["mimeLen"], 2);
     assert_eq!(v["notif"], "default");
@@ -1476,11 +1581,11 @@ fn fingerprint_override_applies_and_resets() {
         "override not applied: {out}"
     );
 
-    // Reset → Chrome 153 macOS defaults return.
+    // Reset → current-stable (Chrome 154) macOS defaults return.
     turbo_surf_render::set_fingerprint("{}");
     let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
     assert!(
-        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|153\""),
+        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|154\""),
         "reset to defaults failed: {out}"
     );
 }

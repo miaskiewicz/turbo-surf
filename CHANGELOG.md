@@ -3,6 +3,45 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.5.1] — 2026-09-29 — Chrome 154 + versioned browser-config registry
+
+Default reported identity bumped **Chrome 153 → 154**, and — the substantive change — all
+version-specific fingerprint data moved into a **declarative per-version registry** so the
+reported browser is a coherent, swappable set (and adding Chrome 155 later is a one-line
+drop-in, no code-digging). Driven by a live header/request diff vs real Chrome 154: header
+**set, values, casing, h2 pseudo-order and TLS all matched already**; the one real tell was
+the navigation **header ORDER**, which Chrome reordered in 154.
+
+### Added
+- **`turbo-surf-core::browser` — versioned Chrome release registry.** One `ChromeRelease`
+  literal per version (`major`, `full_version`, `header_order`) in a `RELEASES` table, with
+  `DEFAULT_MAJOR` = current stable. `crate::fingerprint` (both `default_profile` and the seed
+  pool) and `crate::net` read every version-specific value from here; the render tier receives
+  it over `op_fingerprint`. Adding a new Chrome is a single literal + (if its header order
+  changed) one `HEADER_ORDER_*` const — no scattered code/doc edits. `release(major)` resolves
+  exact/nearest configs (unlisted-newer → newest listed; older-than-listed → oldest/classic).
+
+### Changed — Chrome 154 identity (wire + render, coherent)
+- **Navigation header ORDER is now per-version.** Chrome 154 hoists `accept-language` up right
+  after `user-agent` (before `accept`); 153 kept `accept` first with `accept-language` late.
+  `net::emulate` sets wreq's `OrigHeaderMap` from `profile.header_order` (registry-driven)
+  instead of a hardcoded 153 list — closing the one confirmed header tell vs live Chrome 154.
+  The 153 order is retained + correct, so switching identities stays coherent.
+- **Default identity → Chrome 154** across `default_profile` (UA + `sec-ch-ua`), the render-tier
+  navigator, and the seed pool's leading major. UA string stays reduced to `<major>.0.0.0`.
+- **High-entropy UA-CH now reports the real full build.** `getHighEntropyValues`
+  `fullVersionList` / `uaFullVersion` emit the registry's `full_version` (e.g. `154.0.7258.66`)
+  instead of the reduced `<major>.0.0.0` (a prior tell — real Chrome gives the full build here).
+- **UA ↔ `userAgentData` coherence.** The render tier now derives `navigator.userAgentData`'s
+  major from the actual UA string, so brands can never disagree with `navigator.userAgent`; and
+  the google path pushes the wire profile's `chromeMajor`/`fullVersion` into the render navigator
+  so both layers report the same version for any pooled profile.
+
+### Notes
+- The BoringSSL TLS/HTTP-2 hello stays Chrome 149 (wreq-util), which is byte-stable across
+  Chrome minors — only the *reported* version (UA/`sec-ch-ua`/header order) tracks 154. The
+  browserless google `__Secure-ENID` remains server-scored (unchanged from 0.5.0).
+
 ## [0.5.0] — 2026-09-29 — client-side fingerprint fidelity + browserless anti-bot recon
 
 Closes every **client-side** divergence from real Chrome that a BotGuard-class collector

@@ -124,25 +124,22 @@ async fn presents_a_chrome_tls_and_http2_fingerprint() {
         );
     }
 
-    // 4. The full Chrome-153 navigation header order, verbatim.
-    let expected_order = [
-        "sec-ch-ua",
-        "sec-ch-ua-mobile",
-        "sec-ch-ua-platform",
-        "upgrade-insecure-requests",
-        "user-agent",
-        "accept",
-        "sec-fetch-site",
-        "sec-fetch-mode",
-        "sec-fetch-user",
-        "sec-fetch-dest",
-        "accept-encoding",
-        "accept-language",
-        "priority",
-    ];
+    // 4. The wire order matches the configured default Chrome release's navigation
+    //    header order (the `browser` registry is the source of truth for Chrome's
+    //    per-version order). `cookie` is in the config's order but absent on a cold
+    //    request, so drop it from the expected list. This tracks the default major,
+    //    so a version bump updates the expectation via the registry, not by hand.
+    let expected_order: Vec<&str> = turbo_surf_core::browser::default_release()
+        .header_order
+        .iter()
+        .copied()
+        .filter(|h| *h != "cookie")
+        .collect();
     assert_eq!(
-        names, expected_order,
-        "header order diverges from Chrome 153"
+        names,
+        expected_order,
+        "header order diverges from the configured Chrome {} release",
+        turbo_surf_core::browser::DEFAULT_MAJOR
     );
 
     // 5. Accept-Encoding uses Chrome's spelling/order, not tower-http's default.

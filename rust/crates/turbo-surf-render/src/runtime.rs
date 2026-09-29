@@ -131,7 +131,7 @@ static FINGERPRINT_OVERRIDES: std::sync::RwLock<String> = std::sync::RwLock::new
 /// Override the render-tier navigator fields at runtime with a JSON object, e.g.
 /// `{"platform":"Win32","hardwareConcurrency":16,"languages":["en-GB","en"],
 /// "screen":{"width":2560,"height":1440},"userAgent":"…"}`. Unset keys keep their
-/// Chrome 153 defaults. Pass `"{}"` (or `""`) to reset to defaults.
+/// current-stable (Chrome 154) defaults. Pass `"{}"` (or `""`) to reset to defaults.
 pub fn set_fingerprint(overrides_json: &str) {
     if let Ok(mut g) = FINGERPRINT_OVERRIDES.write() {
         *g = overrides_json.to_string();
@@ -430,7 +430,18 @@ deno_core::extension!(
 // inside the IIFE they're per-invocation. Globals are assigned to `globalThis`
 // (idempotent) and the cookie bridge re-applies to the current `document`.
 const ENV_BOOTSTRAP: &str = r##"(() => {
-const ops = Deno.core.ops;
+// Capture deno_core's op table + print BEFORE removing the `Deno` global from page scope.
+// `'Deno' in window` / getOwnPropertyNames(window).includes('Deno') is the single biggest
+// browserless tell (deno_core leaks `Deno` onto globalThis), so we delete it at the end of
+// bootstrap. Our shims call ops through the captured `ops`/`__print` closures, not the global.
+// A reused isolate (run_with_dom / pooled) re-runs this bootstrap AFTER the delete, so stash
+// the core under a Symbol (absent from getOwnPropertyNames, so it doesn't reintroduce a
+// string-named tell) to recover it on the second pass.
+const __DC = Symbol.for("ts.dc");
+const __core = globalThis.Deno ? Deno.core : globalThis[__DC];
+try { Object.defineProperty(globalThis, __DC, { value: __core, configurable: true, enumerable: false, writable: false }); } catch (e) {}
+const ops = __core.ops;
+const __print = __core.print;
 globalThis.self = globalThis;
 // Present a real Chrome (macOS) navigator so page JS that profiles the browser
 // (consistency-only anti-bot gates, feature detection) sees Chrome, not the old
@@ -443,14 +454,24 @@ globalThis.self = globalThis;
 // cookie when the browser reports online — an undefined/falsy onLine made a cold load of
 // an authed page skip the refresh and render nothing.
 // Runtime fingerprint overrides (JSON object from op_fingerprint). Every navigator
-// field below has a Chrome 153 default and is overridable by the matching key —
+// field below has a current-stable (Chrome 154) default and is overridable by the matching key —
 // settable per process via `set_fingerprint` (MCP `set_fingerprint` tool).
-const __fp = (() => { try { return JSON.parse(Deno.core.ops.op_fingerprint()); } catch (e) { return {}; } })();
+const __fp = (() => { try { return JSON.parse(ops.op_fingerprint()); } catch (e) { return {}; } })();
 const __pick = (k, d) => (__fp[k] !== undefined ? __fp[k] : d);
 const __ua = __pick("userAgent",
-  (Deno.core.ops.op_user_agent && Deno.core.ops.op_user_agent()) ||
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36");
-const __major = String(__pick("chromeMajor", 153));
+  (ops.op_user_agent && ops.op_user_agent()) ||
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36");
+// Derive the major from the ACTUAL UA string so navigator.userAgentData.brands always
+// agree with navigator.userAgent (a UA-string `Chrome/153` with `brands` v154 is a hard
+// tell). An explicit chromeMajor override still wins; else parse `Chrome/<major>` from
+// __ua, falling back to the current-stable default.
+const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || [])[1]) || 154));
+// Full build for high-entropy UA-CH (fullVersionList / uaFullVersion) — real Chrome
+// reports the FULL version here (e.g. 154.0.7258.66), NOT the reduced <major>.0.0.0
+// the UA string carries. Default matches turbo-surf-core's browser registry default
+// release; a caller rotating to a non-default major should pass fullVersion too (the
+// session pushes it from the wire profile so both layers stay coherent).
+const __fullVersion = String(__pick("fullVersion", "154.0.8037.58"));
 // Chrome ships exactly these five PDF-viewer plugins, all aliased to the internal
 // viewer; `navigator.plugins.length === 0` is a classic headless giveaway.
 const __plugin = (name) => ({ name, filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 });
@@ -553,7 +574,7 @@ const __navData = {
     platform: __uaPlatform,
     getHighEntropyValues: async () => ({
       architecture: "arm", bitness: "64", model: "", wow64: false,
-      platform: __uaPlatform, platformVersion: "15.0.0", uaFullVersion: __major + ".0.0.0",
+      platform: __uaPlatform, platformVersion: "15.0.0", uaFullVersion: __fullVersion,
       mobile: false,
       brands: [
         { brand: "Chromium", version: __major },
@@ -561,8 +582,8 @@ const __navData = {
         { brand: "Not A(Brand", version: "99" },
       ],
       fullVersionList: [
-        { brand: "Chromium", version: __major + ".0.0.0" },
-        { brand: "Google Chrome", version: __major + ".0.0.0" },
+        { brand: "Chromium", version: __fullVersion },
+        { brand: "Google Chrome", version: __fullVersion },
         { brand: "Not A(Brand", version: "99.0.0.0" },
       ],
     }),
@@ -689,6 +710,9 @@ const __navData = {
   const __availH = __pick("availHeight", __scr.availHeight || (__h - (__isMac ? 25 : 0)));
   globalThis.screen = {
     width: __w, height: __h, availWidth: __availW, availHeight: __availH,
+    // Real Chrome exposes availLeft/availTop (0 on a primary, top-left display); their
+    // absence (undefined) is a headless tell.
+    availLeft: __pick("availLeft", 0), availTop: __pick("availTop", 0),
     colorDepth: __colorDepth, pixelDepth: __pixelDepth,
     // ScreenOrientation is an EventTarget — apps listen for orientation changes;
     // a missing `addEventListener` throws and can trip a component during hydration.
@@ -720,10 +744,12 @@ if (globalThis.document && !globalThis.document.fonts) {
 }
 // `window.chrome` presence (with loadTimes/csi/app, but no extension `runtime`) is
 // what a plain Chrome page exposes; its absence flags a non-Chrome/headless client.
+// Key insertion order matches real Chrome (`Object.keys(chrome)` = loadTimes, csi, app)
+// — a reordered set is a checkable tell.
 globalThis.chrome = globalThis.chrome || {
-  app: { isInstalled: false },
   loadTimes: function () { return {}; },
   csi: function () { return {}; },
+  app: { isInstalled: false },
 };
 globalThis.location = globalThis.location || { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
 const __mkStorage = () => {
@@ -741,7 +767,21 @@ globalThis.localStorage = __mkStorage();
 // sessionStorage: a real Chrome global (per-tab web storage). deno_core ships neither;
 // google's homepage reads window.sessionStorage, so its absence is a consistency tell.
 globalThis.sessionStorage = __mkStorage();
-const __log = (...a) => Deno.core.print(a.map(String).join(" ") + "\n");
+// indexedDB — a real Chrome window global (IDBFactory). `typeof indexedDB === "undefined"`
+// is a classic headless tell. A shape stub (no real persistence) that answers presence +
+// class-tag + the IDBFactory method surface; requests stay pending (no backing store).
+if (typeof globalThis.indexedDB === "undefined") {
+  const __idbReq = () => ({ onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null, result: null, error: null, readyState: "pending", addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } });
+  const __idb = {
+    open() { return __idbReq(); },
+    deleteDatabase() { return __idbReq(); },
+    databases() { return Promise.resolve([]); },
+    cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; },
+  };
+  try { Object.defineProperty(__idb, Symbol.toStringTag, { value: "IDBFactory", configurable: true }); } catch (e) {}
+  globalThis.indexedDB = __idb;
+}
+const __log = (...a) => __print(a.map(String).join(" ") + "\n");
 globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: () => {} };
 const __timers = [];
 let __tid = 1;
@@ -790,7 +830,7 @@ globalThis.clearInterval = globalThis.clearTimeout;
 // loop still consumes real time (real hrtime advances). `Date.now()` is redefined from the SAME
 // quantity so `timeOrigin + performance.now() == Date.now()` holds (BotGuard's chronometric check).
 const __origDateNow = Date.now.bind(Date);
-const __hrNow = () => { try { return Deno.core.ops.op_now_perf(); } catch (e) { return 0; } };
+const __hrNow = () => { try { return ops.op_now_perf(); } catch (e) { return 0; } };
 const __hr0 = __hrNow();               // monotonic anchor at bootstrap
 const __epoch0 = __origDateNow();      // wall epoch at bootstrap
 const __pageAge = Math.random() * 1700 + 800 + Math.random(); // a page open ~0.8–2.5s (perf.now start)
@@ -888,7 +928,7 @@ globalThis.__runTimers = (max = 100000) => {
     __timers.splice(bi, 1);
     if (t.due > __now) __now = t.due; // advance the virtual clock
     n++;
-    try { t.fn(...t.args); } catch (e) { Deno.core.print("timer error: " + (e && e.stack ? e.stack : e) + "\n"); }
+    try { t.fn(...t.args); } catch (e) { __print("timer error: " + (e && e.stack ? e.stack : e) + "\n"); }
   }
   return n; // count fired — lets the hydration pump detect quiescence
 };
@@ -1227,6 +1267,14 @@ if (typeof globalThis.structuredClone === "undefined") {
       if (/hover\s*:\s*none/.test(feat)) ok = false;
       if (/pointer\s*:\s*coarse/.test(feat)) ok = false;
       if (/any-pointer\s*:\s*coarse/.test(feat)) ok = false;
+      // Accessibility features all default OFF in a stock Chrome, so their "active"
+      // queries must NOT match (a true here reads as a non-default a11y env — a tell).
+      if (/prefers-reduced-motion\s*:\s*reduce/.test(feat)) ok = false;
+      if (/prefers-reduced-transparency\s*:\s*reduce/.test(feat)) ok = false;
+      if (/prefers-reduced-data\s*:\s*reduce/.test(feat)) ok = false;
+      if (/prefers-contrast\s*:\s*(more|less|custom)/.test(feat)) ok = false;
+      if (/forced-colors\s*:\s*active/.test(feat)) ok = false;
+      if (/inverted-colors\s*:\s*inverted/.test(feat)) ok = false;
     }
     return ok;
   };
@@ -1529,9 +1577,10 @@ try {
     catch (e) { P.navigation = nav; }
   }
   // performance.memory — Chrome-only non-standard heap gauge; real Chrome exposes it, and
-  // fingerprinters read it. Static, coherent values (a fresh page's small heap).
+  // fingerprinters read it. jsHeapSizeLimit is Chrome's exact quantized ~4GB constant
+  // (4294705152), NOT a round synthetic number; total/used are plausible fresh-page values.
   if (P && !P.memory) {
-    const mem = { jsHeapSizeLimit: 2190000000, totalJSHeapSize: 12000000, usedJSHeapSize: 10000000 };
+    const mem = { jsHeapSizeLimit: 4294705152, totalJSHeapSize: 12100000, usedJSHeapSize: 10300000 };
     try { Object.defineProperty(P, "memory", { value: mem, configurable: true, enumerable: true }); }
     catch (e) { P.memory = mem; }
   }
@@ -2443,7 +2492,7 @@ globalThis.__execScriptEl = async function (el) {
     __fireScriptEvent(el, "load");
   } catch (e) {
     __fireScriptEvent(el, "error", e);
-    Deno.core.print("script error (" + (src || "inline") + "): " + e + "\n");
+    __print("script error (" + (src || "inline") + "): " + e + "\n");
   }
 };
 // Run every not-yet-run <script> in DOM order, drain timers, repeat while new
@@ -3167,20 +3216,51 @@ globalThis.__domSig = () => {
   mark(cancelAnimationFrame, "cancelAnimationFrame"); // now its own fn, not a clearTimeout alias
   // Event API: the vendored addEventListener/removeEventListener/dispatchEvent are `function`
   // shims — their `.toString()` leaks source AND they carry an own `prototype` (native methods
-  // don't), both tamper tells BotGuard reads. Replace with prototype-less native-shaped forwarders
-  // on their OWN object (window/document may hold their own copies; EventTarget.prototype the
-  // shared one — reassign wherever it's an own prop so we don't add a new own prop that itself is
-  // a tell).
-  for (const name of ["addEventListener", "removeEventListener", "dispatchEvent"]) {
-    const owners = [globalThis, globalThis.document, globalThis.EventTarget && globalThis.EventTarget.prototype];
-    for (const o of owners) {
+  // don't). WORSE, they sit as WINDOW OWN-PROPS: real Chrome inherits them from
+  // EventTarget.prototype, so `window.hasOwnProperty('addEventListener')` is FALSE in Chrome but
+  // was TRUE for us — a checkable tell. Fix: native-shape the methods on EventTarget.prototype,
+  // wire window's prototype chain window -> Window.prototype -> EventTarget.prototype (as Chrome
+  // does), and DELETE the window (and document) own copies so they're inherited, not own.
+  const __evNames = ["addEventListener", "removeEventListener", "dispatchEvent"];
+  (() => { try {
+    const ET = globalThis.EventTarget;
+    if (!ET || !ET.prototype) return;
+    for (const name of __evNames) {
+      // Prefer a working impl (window's own, else the proto's) and native-shape it on the proto.
+      const impl = (Object.prototype.hasOwnProperty.call(globalThis, name) && globalThis[name])
+        || ET.prototype[name]
+        || (globalThis.document && globalThis.document[name]);
+      if (typeof impl === "function") {
+        try { ET.prototype[name] = nativize(impl, name, name === "dispatchEvent" ? 1 : 2); } catch (e) {}
+      }
+    }
+    // window -> Window.prototype -> EventTarget.prototype (Chrome's chain). If Window is absent,
+    // fall back to inheriting EventTarget.prototype directly so the methods still resolve.
+    const W = globalThis.Window;
+    try {
+      if (W && W.prototype) {
+        if (Object.getPrototypeOf(W.prototype) !== ET.prototype) Object.setPrototypeOf(W.prototype, ET.prototype);
+        if (Object.getPrototypeOf(globalThis) !== W.prototype) Object.setPrototypeOf(globalThis, W.prototype);
+      } else if (Object.getPrototypeOf(globalThis) !== ET.prototype) {
+        Object.setPrototypeOf(globalThis, ET.prototype);
+      }
+    } catch (e) {}
+    // Remove the WINDOW own copies so they're inherited via the chain (Chrome: hasOwnProperty
+    // false on window). Document keeps native-shaped OWN copies (rtdom's document has no
+    // EventTarget proto chain to inherit through; a prototype-less native-marked own method still
+    // matches the native-fn SHAPE a collector reads on document.addEventListener).
+    for (const name of __evNames) {
       try {
-        if (o && Object.prototype.hasOwnProperty.call(o, name) && typeof o[name] === "function") {
-          o[name] = nativize(o[name], name, name === "dispatchEvent" ? 1 : 2);
+        if (Object.prototype.hasOwnProperty.call(globalThis, name)) delete globalThis[name];
+      } catch (e) {}
+      try {
+        const d = globalThis.document;
+        if (d && Object.prototype.hasOwnProperty.call(d, name) && typeof d[name] === "function") {
+          d[name] = nativize(d[name], name, name === "dispatchEvent" ? 1 : 2);
         }
       } catch (e) {}
     }
-  }
+  } catch (e) {} })();
   if (globalThis.Headers) mark(globalThis.Headers, "Headers");
   const nav = globalThis.navigator;
   if (nav && nav.clipboard) { mark(nav.clipboard.writeText, "writeText"); mark(nav.clipboard.readText, "readText"); }
@@ -3531,11 +3611,11 @@ globalThis.__domSig = () => {
       return out;
     };
     const installWebglRecorder = (gl) => {
-      const op = (Deno.core.ops && Deno.core.ops.op_webgl_readback) || null;
+      const op = (ops && ops.op_webgl_readback) || null;
       // op_webgl_readback is ALWAYS registered, so `typeof op` can't tell whether a GPU executor
       // is installed. Only override the (vendored synthetic) WebGL context when one actually is —
       // otherwise the default build would replace the context with recording stubs for nothing.
-      const avail = Deno.core.ops && Deno.core.ops.op_webgl_available;
+      const avail = ops && ops.op_webgl_available;
       if (!op || !avail || !avail()) return;
       const rec = [];
       let hid = 0, lid = 0;
@@ -3676,7 +3756,7 @@ globalThis.__domSig = () => {
           // CoreText face Chrome does → width matches Chrome exactly. The bounding-box fields are
           // derived from the size with Arial-typical ratios (the measurer returns width+height only;
           // real per-glyph boxes would need a richer measurer — width is the load-bearing metric).
-          const measureOp = Deno.core.ops && Deno.core.ops.op_measure_text;
+          const measureOp = ops && ops.op_measure_text;
           if (typeof ctx.measureText === "function" && measureOp) {
             const origMT = ctx.measureText;
             ctx.measureText = nativize(({ measureText(text) {
@@ -3706,7 +3786,7 @@ globalThis.__domSig = () => {
         }
         if (k === "2d" && Object.prototype.hasOwnProperty.call(ctx, "getImageData")) {
           const origGID = ctx.getImageData;
-          const rgbaOp2 = Deno.core.ops && Deno.core.ops.op_raster_rgba;
+          const rgbaOp2 = ops && ops.op_raster_rgba;
           const b64ToBytes = (b64) => { try { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; } catch (e) { return null; } };
           ctx.getImageData = nativize(({ getImageData(sx, sy, sw, sh) {
             try {
@@ -3747,7 +3827,7 @@ globalThis.__domSig = () => {
     // host rasterizer (op_raster_png) into a REAL PNG. The vendored stub returns a ~94-byte
     // synthetic blob — an impossible size for rendered content, a canvas-fingerprint tell.
     // Falls back to the vendored blob when no rasterizer is installed or on any error.
-    const rasterOp = (Deno.core.ops && Deno.core.ops.op_raster_png) || null;
+    const rasterOp = (ops && ops.op_raster_png) || null;
     const origToDataURL = canvasProto.toDataURL;
     if (typeof origToDataURL === "function") {
       // Concise-method form (no own `prototype`, native shape); toDataURL.length === 0.
@@ -3985,7 +4065,7 @@ globalThis.__domSig = () => {
     const measure = (elm) => {
       try {
         const t = elm && elm.textContent; if (!t) return null;
-        const op = Deno.core.ops.op_measure_text; if (!op) return null;
+        const op = ops.op_measure_text; if (!op) return null;
         const cs = G.getComputedStyle(elm);
         const fam = (cs && cs.fontFamily) || "sans-serif";
         const size = parseFloat((cs && cs.fontSize) || "16") || 16;
@@ -4237,7 +4317,8 @@ globalThis.__domSig = () => {
       "getScreenDetails moveBy moveTo open print prompt queryLocalFonts releaseEvents reportError requestResize " +
       "resizeBy resizeTo showDirectoryPicker showOpenFilePicker showSaveFilePicker stop webkitCancelAnimationFrame " +
       "webkitRequestAnimationFrame webkitRequestFileSystem webkitResolveLocalFileSystemURL " +
-      "webkitSpeechGrammar webkitSpeechGrammarList webkitSpeechRecognition").split(/\s+/);
+      "webkitSpeechGrammar webkitSpeechGrammarList webkitSpeechRecognition " +
+      "webkitSpeechRecognitionError webkitSpeechRecognitionEvent").split(/\s+/);
     for (const n of METHODS) { if (typeof G[n] !== "function") { try { G[n] = nativize(() => undefined, n); } catch (e) {} } }
   });
 
@@ -4254,6 +4335,10 @@ globalThis.__domSig = () => {
     }
   });
 })();
+// LAST: remove the deno_core `Deno` global from page scope. Ops were captured into `ops`/
+// `__print` closures above, so our shims keep working; page JS now sees `typeof window.Deno
+// === "undefined"` and no `Deno` in getOwnPropertyNames(window), like real Chrome.
+try { delete globalThis.Deno; } catch (e) {}
 })();"##;
 
 /// Initialize the V8 platform ONCE, on a dedicated thread that lives for the whole
@@ -4411,7 +4496,7 @@ pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
             installed.push_str(html);
         }
         let global = rt
-            .execute_script("<page>", script.to_string())
+            .execute_script(page_script_name("about:blank"), script.to_string())
             .map_err(|e| e.to_string())?;
         read_string(rt, global)
     })
@@ -4429,7 +4514,7 @@ pub fn render_html(html: &str, script: &str) -> Result<String, String> {
 
 fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, String> {
     install_dom(rt, html, "about:blank")?;
-    rt.execute_script("<page>", script.to_string())
+    rt.execute_script(page_script_name("about:blank"), script.to_string())
         .map_err(|e| e.to_string())?;
     rt.execute_script("<timers>", "__runTimers()")
         .map_err(|e| e.to_string())?;
@@ -4999,12 +5084,23 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
 /// (logged + skipped) instead of aborting every later script. Only a real isolate
 /// termination (the render-budget watchdog / cancellation) stops the loop and
 /// propagates — a plain JS throw leaves the isolate healthy to run the next part.
-fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str) -> Result<(), String> {
+// Name inline page scripts after the document URL, the way a real Chrome inline <script>
+// appears in Error.stack frames (`at https://site/:12:5`). Our old fixed `<page>` name was a
+// tell (BotGuard parses stack frame sources). about:blank / empty keep a plausible name.
+fn page_script_name(base: &str) -> String {
+    if base.is_empty() || base == "about:blank" {
+        "about:blank".to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str, base: &str) -> Result<(), String> {
     for part in bundle.split(SCRIPT_BOUNDARY) {
         if part.trim().is_empty() {
             continue;
         }
-        if let Err(e) = rt.execute_script("<page>", part.to_string()) {
+        if let Err(e) = rt.execute_script(page_script_name(base), part.to_string()) {
             if rt.v8_isolate().is_execution_terminating() {
                 return Err(e.to_string()); // budget / termination — stop the page
             }
@@ -5049,7 +5145,7 @@ async fn run_async(
 ) -> Result<String, String> {
     install_dom(rt, html, base)?;
     let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING); // readyState "loading" while scripts run
-    exec_page_scripts(rt, script)?;
+    exec_page_scripts(rt, script, base)?;
     let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
     rt.execute_script("<timers>", "__runTimers()")
@@ -5094,7 +5190,7 @@ async fn run_async_pooled(
     rt.execute_script("<scrub>", SCRUB_GLOBALS)
         .map_err(|e| e.to_string())?;
     let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING);
-    exec_page_scripts(rt, script)?;
+    exec_page_scripts(rt, script, base)?;
     let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // DOMContentLoaded (before load)
     drain_event_loop(rt).await?;
     rt.execute_script("<timers>", "__runTimers()")

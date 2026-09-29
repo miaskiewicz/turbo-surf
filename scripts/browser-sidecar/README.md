@@ -44,6 +44,23 @@ mint.
 
 Or from an agent: call the MCP tool **`web_search_setup_browser`**, which runs the script.
 
+## Network tracer (`net-trace.mjs`) — reusable, any page
+
+A standalone diagnostic (not part of the sidecar contract): load any URL in real Chrome and
+dump the **full network cascade** — every request (method/URL/type), every cookie-setting
+response, every POST — so you can diff what a real browser fires against what turbo-surf fires
+in-isolate. Not google-specific.
+
+```bash
+node scripts/browser-sidecar/net-trace.mjs <url> [--wait <ms>] [--fill "<sel>=<text>"]... [--headless] [--json]
+# e.g. real-browser cascade on a page, with an engagement interaction:
+node scripts/browser-sidecar/net-trace.mjs https://www.google.com/ --fill "textarea[name=q]=rust lang" --wait 1500
+node scripts/browser-sidecar/net-trace.mjs https://example.com/ --json > trace.json   # machine-diffable
+```
+
+`--fill` triggers engagement-gated requests; `--json` emits `{requests, cookieSetters}` for diffing.
+Each run uses an ephemeral temp profile (clean + independent).
+
 ## Contract
 
 Two stdin modes, both write to **stdout**:

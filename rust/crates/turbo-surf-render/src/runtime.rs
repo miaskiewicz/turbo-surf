@@ -3841,6 +3841,16 @@ globalThis.__domSig = () => {
     for (const k of ["characterSet", "charset", "inputEncoding"]) {
       try { Object.defineProperty(d, k, { configurable: true, get() { return "UTF-8"; } }); } catch (e) {}
     }
+    // Document event-handler slots (real Chrome exposes them as writable, default null). Framework
+    // code reads/sets document.onreadystatechange etc.; absence reads as undefined (a minor tell).
+    for (const k of ["onreadystatechange", "onvisibilitychange", "onfullscreenchange", "onfullscreenerror", "onpointerlockchange", "onpointerlockerror", "onsecuritypolicyviolation", "onbeforecopy", "onbeforecut", "onbeforepaste", "onfreeze", "onresume", "onsearch"]) {
+      // Force-define (the vendored document may already have it as an undefined-returning slot, so
+      // an `in` check would skip it — same as characterSet). A settable null handler, like Chrome.
+      try {
+        let cur = null;
+        Object.defineProperty(d, k, { enumerable: true, configurable: true, get() { return cur; }, set(v) { cur = v; } });
+      } catch (e) {}
+    }
   });
 
   // Native-mask the Permissions API method: real `navigator.permissions.query.toString()`

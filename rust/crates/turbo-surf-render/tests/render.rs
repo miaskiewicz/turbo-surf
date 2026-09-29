@@ -1022,7 +1022,7 @@ fn synthesized_events_are_trusted() {
           seen.plain = new MouseEvent('mousemove',{{}}).isTrusted;\
           const d = Object.getOwnPropertyDescriptor(Event.prototype,'isTrusted');\
           seen.protoAccessor = !!(d && typeof d.get === 'function');\
-          seen.tsFractional = (__hi.ev('MouseEvent','mousemove',{{}}).timeStamp % 1) !== 0;\
+          seen.ts = __hi.ev('MouseEvent','mousemove',{{}}).timeStamp;\
           return JSON.stringify(seen);\
         }})()",
         hi = turbo_surf_render::HUMAN_INPUT_JS
@@ -1051,9 +1051,15 @@ fn synthesized_events_are_trusted() {
         v["protoAccessor"], true,
         "isTrusted must be a prototype accessor (Chrome shape): {out}"
     );
-    assert_eq!(
-        v["tsFractional"], true,
-        "trusted event timeStamp rides the hi-res clock: {out}"
+    // The synthesized event's timeStamp must ride the hi-res clock (performance.now, origin-relative)
+    // — NOT the vendored `new Event()` default of Date.now() (a ~1.7e12 epoch). Assert it's an
+    // origin-relative magnitude (0 < ts < 1e6 ms ≈ under 16 min since timeOrigin), which cleanly
+    // separates performance.now() from the epoch. (Fractionality is not asserted: on Chrome's 0.1ms
+    // grid a hi-res stamp can legitimately land on an integer, so that would be a flaky proxy.)
+    let ts = v["ts"].as_f64().unwrap();
+    assert!(
+        ts > 0.0 && ts < 1_000_000.0,
+        "timeStamp is origin-relative (performance.now), not the Date.now epoch: {out}"
     );
 }
 

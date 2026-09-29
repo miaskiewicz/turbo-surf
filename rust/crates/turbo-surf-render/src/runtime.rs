@@ -421,7 +421,7 @@ deno_core::extension!(
 // Non-DOM browser globals, layered over the ops AFTER the native DOM binding is
 // installed (`browser_env` owns document/Element/window/navigator/Event/etc.; this
 // adds what a network-free test env lacks and overrides a few brand/host values).
-// Virtual timers are queued and drained synchronously by `__runTimers`, ordered by
+// Virtual timers are queued and drained synchronously by `__G.runTimers`, ordered by
 // delay — no wall-clock waits. `fetch`/XHR go over the tier-1 net stack.
 //
 // Wrapped in an IIFE so it is RE-RUNNABLE on a reused isolate: a persistent
@@ -442,6 +442,8 @@ const __core = globalThis.Deno ? Deno.core : globalThis[__DC];
 try { Object.defineProperty(globalThis, __DC, { value: __core, configurable: true, enumerable: false, writable: false }); } catch (e) {}
 const ops = __core.ops;
 const __print = __core.print;
+const __NS = Symbol.for("ts");
+const __G = globalThis[__NS] || (Object.defineProperty(globalThis, __NS, { value: {}, configurable: true, enumerable: false, writable: false }), globalThis[__NS]);
 globalThis.self = globalThis;
 // Present a real Chrome (macOS) navigator so page JS that profiles the browser
 // (consistency-only anti-bot gates, feature detection) sees Chrome, not the old
@@ -915,7 +917,7 @@ globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) =
 // timer queue is bounded by the hydration pump's timer budget, so a runaway loop
 // fails fast instead of leaking. (Such an app doesn't converge headlessly anyway.)
 globalThis.queueMicrotask = (fn) => globalThis.setTimeout(fn, 0);
-globalThis.__runTimers = (max = 100000) => {
+__G.runTimers = (max = 100000) => {
   let n = 0;
   while (__timers.length && n < max) {
     // Earliest-due first.
@@ -2402,7 +2404,7 @@ if (typeof globalThis.__name === "undefined") {
 // DOM that merely *appends* the <script> node never runs it, so the loader
 // promise hangs and the app never mounts. So: execute each <script> element once
 // (inline → eval in global scope; external → fetch its src then eval), and fire
-// load/error so the loader resolves. `__hydrate()` drives this to quiescence.
+// load/error so the loader resolves. `__G.hydrate()` drives this to quiescence.
 const __EXECUTABLE_TYPES = new Set(["", "text/javascript", "application/javascript", "module"]);
 function __fireScriptEvent(el, kind, err) {
   const ev = { type: kind, target: el, currentTarget: el, error: err };
@@ -2497,7 +2499,7 @@ globalThis.__execScriptEl = async function (el) {
 };
 // Run every not-yet-run <script> in DOM order, drain timers, repeat while new
 // scripts appear or timers keep firing. Bounded by maxRounds (+ the render budget).
-globalThis.__hydrate = async function (maxRounds = 300, timerBudget = 200000) {
+__G.hydrate = async function (maxRounds = 300, timerBudget = 200000) {
   let timersLeft = timerBudget; // total timer-callback budget across rounds — an app
   // whose scheduler never reaches idle (e.g. React polling a backend that never
   // answers) would otherwise spin until the render budget; cap it and return the
@@ -2522,13 +2524,13 @@ globalThis.__hydrate = async function (maxRounds = 300, timerBudget = 200000) {
     for (const el of ordered) {
       if (!el.__tcDone) { ranScript = true; await globalThis.__execScriptEl(el); }
     }
-    const fired = globalThis.__runTimers(Math.min(timersLeft, 5000));
+    const fired = __G.runTimers(Math.min(timersLeft, 5000));
     timersLeft -= fired;
     if (!ranScript && fired === 0) break;
   }
 };
 // Claim the next un-run ES-module script (`<script type=module>` or an inline script
-// with `import`/`export`) in DOM order → `__RESULT = {src, code}` JSON, or "" when
+// with `import`/`export`) in DOM order → `globalThis.__RESULT = {src, code}` JSON, or "" when
 // none. The Rust module pump evaluates each through deno_core's real module graph
 // (`__execScriptEl` deliberately skips them). `__tcModule` is the claim marker.
 globalThis.__moduleStmt = /(^|[;{}\n\r])\s*(import\s+[^(]|import\s*['"]|export\s+|export\s*\{|export\s*\*)/;
@@ -2826,18 +2828,18 @@ globalThis.__tcApplyHover = function (el) {
 // Pending-work signal for the Rust pump loop: "1" while timers are queued, a
 // <script> hasn't run, an ES module is unclaimed, or a fetch is in-flight (more to do
 // after the next async drain), else "0".
-globalThis.__pendingWork = () =>
+__G.pendingWork = () =>
   (globalThis.__pendingFetches || 0) > 0 || __timers.length > 0 || ((globalThis.__esmSrcQueue || []).length) > 0 || Array.prototype.some.call(document.querySelectorAll("script"), (s) => !s.__tcDone || (((s.getAttribute && s.getAttribute("type")) || "").toLowerCase() === "module" && !s.__tcModule)) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
-globalThis.__pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
+__G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
 
 // A cheap "has the DOM changed?" signal for the interaction drain: element count + the
 // total length of input values (so a controlled-input edit registers). Lets the drain
 // stop once the render has SETTLED even though background timers (analytics polling,
 // React's idle scheduler) never stop — otherwise an interaction would always run to the
 // full budget. Not for correctness, just to detect quiescence of the visible tree.
-globalThis.__domSig = () => {
+__G.domSig = () => {
   try {
     const els = document.getElementsByTagName("*");
     let n = els.length, vlen = 0;
@@ -4516,7 +4518,7 @@ fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, Stri
     install_dom(rt, html, "about:blank")?;
     rt.execute_script(page_script_name("about:blank"), script.to_string())
         .map_err(|e| e.to_string())?;
-    rt.execute_script("<timers>", "__runTimers()")
+    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
         .map_err(|e| e.to_string())?;
     Ok(crate::browser_env::document_html())
 }
@@ -5148,7 +5150,7 @@ async fn run_async(
     exec_page_scripts(rt, script, base)?;
     let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
-    rt.execute_script("<timers>", "__runTimers()")
+    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
         .map_err(|e| e.to_string())?;
     drain_event_loop(rt).await?; // promises queued by timer callbacks
     let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // complete + window load + pageshow
@@ -5193,7 +5195,7 @@ async fn run_async_pooled(
     exec_page_scripts(rt, script, base)?;
     let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // DOMContentLoaded (before load)
     drain_event_loop(rt).await?;
-    rt.execute_script("<timers>", "__runTimers()")
+    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
         .map_err(|e| e.to_string())?;
     drain_event_loop(rt).await?;
     let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // window load + pageshow (after DCL)
@@ -5309,7 +5311,7 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
         rt.execute_script("<script>", script.to_string())
             .map_err(|e| e.to_string())?;
         drain_event_loop(&mut rt).await?;
-        rt.execute_script("<timers>", "__runTimers()")
+        rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
             .map_err(|e| e.to_string())?;
         drain_event_loop(&mut rt).await?;
         let g = rt
@@ -5335,13 +5337,16 @@ async fn run_hydrate(rt: &mut JsRuntime, html: &str, base: &str) -> Result<Strin
     // quiesces. The watchdog bounds wall time; MAX_PUMPS bounds a pathological spin.
     const MAX_PUMPS: usize = 500;
     for _ in 0..MAX_PUMPS {
-        rt.execute_script("<hydrate>", "globalThis.__tcHydrate = __hydrate();")
-            .map_err(|e| e.to_string())?;
+        rt.execute_script(
+            "<hydrate>",
+            "globalThis.__tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
+        )
+        .map_err(|e| e.to_string())?;
         drain_event_loop(rt).await?;
         drain_module_scripts(rt, base).await?;
         drain_event_loop(rt).await?;
         let pending = rt
-            .execute_script("<pending>", "__pendingWork()")
+            .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
             .map_err(|e| e.to_string())?;
         if read_string(rt, pending)? != "1" {
             break;
@@ -5483,21 +5488,27 @@ async fn drain_to_quiescence(rt: &mut JsRuntime) -> Result<(), String> {
         // etc.) appends a <script src> when the component first renders. Without running it
         // the chunk never executes, the import() promise never resolves, and the modal never
         // appears. __hydrate is idempotent (skips already-run scripts via __tcDone).
-        rt.execute_script("<hydrate>", "globalThis.__tcHydrate = __hydrate();")
-            .map_err(|e| e.to_string())?;
+        rt.execute_script(
+            "<hydrate>",
+            "globalThis.__tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
+        )
+        .map_err(|e| e.to_string())?;
         drain_event_loop(rt).await?;
         let fired = rt
-            .execute_script("<timers>", "__runTimers(2000)")
+            .execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers(2000)")
             .map_err(|e| e.to_string())?;
         drain_event_loop(rt).await?;
         let pending = rt
-            .execute_script("<pending>", "__pendingWork()")
+            .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
             .map_err(|e| e.to_string())?;
         let sig_v = rt
-            .execute_script("<domsig>", "__domSig()")
+            .execute_script("<domsig>", "globalThis[Symbol.for('ts')].domSig()")
             .map_err(|e| e.to_string())?;
         let fetches = rt
-            .execute_script("<fetches>", "__pendingFetchCount()")
+            .execute_script(
+                "<fetches>",
+                "globalThis[Symbol.for('ts')].pendingFetchCount()",
+            )
             .map_err(|e| e.to_string())?;
         let still = read_string(rt, pending)? == "1";
         let fired_any = read_string(rt, fired)? != "0";

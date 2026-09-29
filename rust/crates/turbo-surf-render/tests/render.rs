@@ -95,6 +95,55 @@ fn window_event_methods_are_inherited_not_own() {
     );
 }
 
+// turbo-surf's internal render machinery must NOT sit as `__*` string globals on window
+// (getOwnPropertyNames(window) would expose them — a bot tell; real Chrome has none). They live
+// on a Symbol-keyed namespace instead, reachable cross-context but absent from own-prop NAMES.
+#[test]
+fn internal_globals_are_off_window() {
+    let out = run_with_dom(
+        "<body></body>",
+        "JSON.stringify({\
+           names: Object.getOwnPropertyNames(globalThis).filter(k => k.startsWith('__')),\
+           runTimersOnWin: ('__runTimers' in globalThis),\
+           hydrateOnWin: ('__hydrate' in globalThis),\
+           nsHasRunTimers: (typeof globalThis[Symbol.for('ts')].runTimers === 'function'),\
+           nsHasHydrate: (typeof globalThis[Symbol.for('ts')].hydrate === 'function'),\
+           nsSymbolInNames: Object.getOwnPropertyNames(globalThis).includes('Symbol(ts)'),\
+         })",
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    // The names we've moved must be gone from window own-prop NAMES + `in` checks.
+    for n in [
+        "__runTimers",
+        "__hydrate",
+        "__domSig",
+        "__pendingWork",
+        "__pendingFetchCount",
+    ] {
+        assert!(
+            !v["names"].as_array().unwrap().iter().any(|x| x == n),
+            "{n} must not be a window own-prop name: {v}"
+        );
+    }
+    assert_eq!(v["runTimersOnWin"], false, "__runTimers not on window: {v}");
+    assert_eq!(v["hydrateOnWin"], false, "__hydrate not on window: {v}");
+    // Still reachable + functional via the namespace.
+    assert_eq!(
+        v["nsHasRunTimers"], true,
+        "runTimers reachable via namespace: {v}"
+    );
+    assert_eq!(
+        v["nsHasHydrate"], true,
+        "hydrate reachable via namespace: {v}"
+    );
+    // The Symbol namespace is a Symbol key (not a string), so it's absent from getOwnPropertyNames.
+    assert_eq!(
+        v["nsSymbolInNames"], false,
+        "Symbol namespace absent from own-prop NAMES: {v}"
+    );
+}
+
 // Error.stack must NOT name page scripts "<page>" — a real Chrome inline script shows the
 // document URL (here about:blank), and "<page>" is a turbo-surf tell BotGuard parses from stacks.
 #[test]
@@ -277,7 +326,7 @@ fn window_post_message_delivers_to_listeners() {
         globalThis.__got = "";
         window.addEventListener('message', function (e) { globalThis.__got = String(e.data) + ':' + (e.source === window); });
         window.postMessage('hi', '*');
-        __runTimers();
+        globalThis[Symbol.for('ts')].runTimers();
         globalThis.__got
         "#,
     )
@@ -3091,7 +3140,7 @@ async fn portal_element_onclick_dispatches() {
     // Let the post-hydration effect mount the portal.
     for _ in 0..5 {
         session
-            .eval(r#"if(globalThis.__runTimers)__runTimers(2000); globalThis.__RESULT = String(!!document.getElementById('leaf'));"#)
+            .eval(r#"if(globalThis[Symbol.for('ts')].runTimers)globalThis[Symbol.for('ts')].runTimers(2000); globalThis.__RESULT = String(!!document.getElementById('leaf'));"#)
             .await
             .unwrap();
     }

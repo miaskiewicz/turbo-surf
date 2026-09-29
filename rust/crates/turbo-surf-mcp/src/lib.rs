@@ -2087,6 +2087,71 @@ async fn probe_mint(url: &str) -> Result<Value, String> {
     }))
 }
 
+/// FULLY BROWSERLESS google SERP attempt — no sidecar, no Chromium, at all. Mints an
+/// `__Secure-ENID` IN-ISOLATE (runs the homepage's own scripts to completion via
+/// `probe_page_async` under the fidelity globals), then replays exactly those in-isolate-earned
+/// cookies on a NATIVE `/search` fetch, and reports whether that browserless ENID is TRUSTED
+/// (real SERP) or not (the `enablejs` shell). This is the definitive test of "can the browserless
+/// mint alone unlock the SERP" — the one path the sidecar-gated `web_search` never exercises.
+pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
+    let session = Session::new();
+    let (strategy, _src) = resolve_strategy(&session, "google")?;
+    // 1) in-isolate mint: fetch the homepage natively, then run its scripts to completion.
+    let home = "https://www.google.com/";
+    let profile = fingerprint::select("www.google.com");
+    let mut jar = CookieJar::new();
+    let res = fetch_html(
+        home,
+        FetchOptions {
+            allow_non_html: true,
+            profile: Some(&profile),
+            bypass_consent: true,
+            jar: Some(&mut jar),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut tmp = Session::new();
+    tmp.load(&res.final_url, &res.html);
+    let script = tmp.page_script().await;
+    let ua = profile.user_agent.clone();
+    let (_report, storage) =
+        turbo_surf_render::probe_page_async(&res.html, &res.final_url, &ua, "", &script, 8000)
+            .await?;
+    // 2) the storage_state array is exactly EnidCookie's shape — parse the earned cookies.
+    let cookies: Vec<enid::EnidCookie> = serde_json::from_str(&storage).unwrap_or_default();
+    let minted_enid = cookies.iter().any(|c| c.name == enid::ENID_NAME);
+    if !minted_enid {
+        return Ok(json!({
+            "minted_enid": false,
+            "enid_trusted": false,
+            "verdict": "no __Secure-ENID earned in-isolate (nothing to replay)",
+        }));
+    }
+    // 3) replay the BROWSERLESS-minted cookies on a native /search — no sidecar involved.
+    let url = build_query_url(&strategy, query, 10, None)?;
+    let html = native_google_fetch(&url, &cookies, &strategy.headers).await?;
+    let shell = is_enablejs_shell(&html);
+    let results = if shell {
+        vec![]
+    } else {
+        parse_serp(&strategy, &html, 10)
+    };
+    Ok(json!({
+        "minted_enid": true,
+        "enid_trusted": !shell,
+        "verdict": if shell {
+            "enablejs shell — the in-isolate __Secure-ENID is NOT trusted"
+        } else {
+            "real SERP — the in-isolate __Secure-ENID IS trusted"
+        },
+        "marker": if shell { "" } else { serp_marker(&html) },
+        "body_len": html.len(),
+        "results": results.iter().map(SearchResult::to_json).collect::<Vec<_>>(),
+    }))
+}
+
 /// Fetch a SERP through the opt-in browser sidecar named by the
 /// `TURBO_SURF_BROWSER_FETCH_CMD` env var (e.g. `node harness/browser-solver/fetch-serp.mjs`).
 /// Contract: we write `{"url":"…","headless"?:bool}\n` to its stdin; it navigates a

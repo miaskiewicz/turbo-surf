@@ -9,9 +9,11 @@
 //      full fidelity globals; report what env it demanded + any cookie it minted browserlessly.
 //   2. goto homepage + human_interact google-serp — trusted, entropy-bearing search-box
 //      interaction in the render isolate, then keep the hydrated result.
-//   3. web_search  — the native (browserless) SERP fetch path; report enablejs-shell vs real SERP.
+//   3. browserless_google_serp — mint an __Secure-ENID IN-ISOLATE and replay it on a native
+//      /search (no sidecar, no Chromium); report whether that ENID is trusted (real SERP vs shell).
+//   4. web_search duckduckgo — browserless control (not botguarded) proving the pipeline works.
 use serde_json::json;
-use turbo_surf_mcp::{call_tool, Session};
+use turbo_surf_mcp::{browserless_google_serp, call_tool, Session};
 
 fn short(s: &str, n: usize) -> String {
     let s = s.replace('\n', " ");
@@ -116,26 +118,34 @@ async fn main() {
         Err(e) => println!("    goto ERR: {e}"),
     }
 
-    // 3) native BROWSERLESS google SERP fetch (engine:google, no forced browser sidecar).
-    //    This is the real google test — the default engine is duckduckgo, so we MUST name google.
-    println!("\n[3] web_search engine=google (native browserless — no sidecar)");
-    match call_tool(
-        &mut s,
-        "web_search",
-        &json!({ "query": query, "engine": "google", "browser": false }),
-    )
-    .await
-    {
+    // 3) THE definitive fully-browserless test: mint an __Secure-ENID in-isolate and replay it
+    //    on a native /search — no sidecar, no Chromium. Reports whether that ENID is TRUSTED.
+    println!("\n[3] browserless_google_serp (in-isolate ENID → native /search, NO sidecar)");
+    match browserless_google_serp(&query).await {
         Ok(v) => {
-            let n = v.as_array().map(|a| a.len()).unwrap_or(0);
-            println!("    google results: {n}");
-            println!("    {}", short(&v.to_string(), 500));
+            let g = |k: &str| v.get(k).cloned().unwrap_or(json!("?"));
+            println!("    minted_enid  : {}", g("minted_enid"));
+            println!("    enid_trusted : {}", g("enid_trusted"));
+            println!(
+                "    verdict      : {}",
+                g("verdict").as_str().unwrap_or("?")
+            );
+            println!("    body_len     : {}", g("body_len"));
+            let n = v
+                .get("results")
+                .and_then(|r| r.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            println!("    results      : {n}");
+            if n > 0 {
+                println!("    {}", short(&v["results"].to_string(), 400));
+            }
         }
-        Err(e) => println!("    google verdict: {e}"),
+        Err(e) => println!("    ERR: {e}"),
     }
 
-    // 4) control: duckduckgo (not botguarded) — confirms the pipeline itself works.
-    println!("\n[4] web_search engine=duckduckgo (control)");
+    // 4) control: duckduckgo (not botguarded, browserless) — confirms the pipeline itself works.
+    println!("\n[4] web_search engine=duckduckgo (browserless control)");
     match call_tool(
         &mut s,
         "web_search",

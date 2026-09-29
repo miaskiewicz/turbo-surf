@@ -33,7 +33,8 @@ pub(crate) fn replay_rgba(width: u32, height: u32, ops: &[Op]) -> Result<Vec<u8>
     canvas_ops::run(ops, &mut backend);
     let src = backend.pm.data(); // premultiplied RGBA8
     let mut out = Vec::with_capacity(src.len());
-    for px in src.chunks_exact(4) {
+    let (pixels, _rem) = src.as_chunks::<4>();
+    for px in pixels {
         let a = px[3];
         if a == 0 {
             out.extend_from_slice(&[0, 0, 0, 0]);

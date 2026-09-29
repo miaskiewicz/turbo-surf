@@ -275,7 +275,8 @@ impl GpuCanvas {
 
     /// Emit an indexed triangle mesh (lyon output) as individual triangles.
     fn mesh(&mut self, kind: Kind, mesh: &VertexBuffers<[f32; 2], u32>, c: Rgba) {
-        for idx in mesh.indices.chunks_exact(3) {
+        let (tris, _rem) = mesh.indices.as_chunks::<3>();
+        for idx in tris {
             let v = |i: u32| {
                 let p = mesh.vertices[i as usize];
                 (p[0], p[1])

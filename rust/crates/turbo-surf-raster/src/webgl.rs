@@ -1470,9 +1470,9 @@ mod tests {
         assert_eq!(px.len(), 64 * 64 * 4, "tight RGBA8 buffer");
         assert!(px.iter().any(|&b| b != 0), "something drew (not all-zero)");
         // The gradient makes distinct pixels differ (content, not a flat fill).
-        let first = &px[0..4];
+        let first: [u8; 4] = px[0..4].try_into().unwrap();
         assert!(
-            px.chunks_exact(4).any(|p| p != first),
+            px.as_chunks::<4>().0.iter().any(|p| *p != first),
             "gradient produced varying pixels"
         );
     }

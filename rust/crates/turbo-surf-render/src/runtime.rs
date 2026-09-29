@@ -4286,7 +4286,8 @@ globalThis.__domSig = () => {
       "getScreenDetails moveBy moveTo open print prompt queryLocalFonts releaseEvents reportError requestResize " +
       "resizeBy resizeTo showDirectoryPicker showOpenFilePicker showSaveFilePicker stop webkitCancelAnimationFrame " +
       "webkitRequestAnimationFrame webkitRequestFileSystem webkitResolveLocalFileSystemURL " +
-      "webkitSpeechGrammar webkitSpeechGrammarList webkitSpeechRecognition").split(/\s+/);
+      "webkitSpeechGrammar webkitSpeechGrammarList webkitSpeechRecognition " +
+      "webkitSpeechRecognitionError webkitSpeechRecognitionEvent").split(/\s+/);
     for (const n of METHODS) { if (typeof G[n] !== "function") { try { G[n] = nativize(() => undefined, n); } catch (e) {} } }
   });
 
@@ -4464,7 +4465,7 @@ pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
             installed.push_str(html);
         }
         let global = rt
-            .execute_script("<page>", script.to_string())
+            .execute_script(page_script_name("about:blank"), script.to_string())
             .map_err(|e| e.to_string())?;
         read_string(rt, global)
     })
@@ -4482,7 +4483,7 @@ pub fn render_html(html: &str, script: &str) -> Result<String, String> {
 
 fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, String> {
     install_dom(rt, html, "about:blank")?;
-    rt.execute_script("<page>", script.to_string())
+    rt.execute_script(page_script_name("about:blank"), script.to_string())
         .map_err(|e| e.to_string())?;
     rt.execute_script("<timers>", "__runTimers()")
         .map_err(|e| e.to_string())?;
@@ -5052,12 +5053,23 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
 /// (logged + skipped) instead of aborting every later script. Only a real isolate
 /// termination (the render-budget watchdog / cancellation) stops the loop and
 /// propagates — a plain JS throw leaves the isolate healthy to run the next part.
-fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str) -> Result<(), String> {
+// Name inline page scripts after the document URL, the way a real Chrome inline <script>
+// appears in Error.stack frames (`at https://site/:12:5`). Our old fixed `<page>` name was a
+// tell (BotGuard parses stack frame sources). about:blank / empty keep a plausible name.
+fn page_script_name(base: &str) -> String {
+    if base.is_empty() || base == "about:blank" {
+        "about:blank".to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str, base: &str) -> Result<(), String> {
     for part in bundle.split(SCRIPT_BOUNDARY) {
         if part.trim().is_empty() {
             continue;
         }
-        if let Err(e) = rt.execute_script("<page>", part.to_string()) {
+        if let Err(e) = rt.execute_script(page_script_name(base), part.to_string()) {
             if rt.v8_isolate().is_execution_terminating() {
                 return Err(e.to_string()); // budget / termination — stop the page
             }
@@ -5102,7 +5114,7 @@ async fn run_async(
 ) -> Result<String, String> {
     install_dom(rt, html, base)?;
     let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING); // readyState "loading" while scripts run
-    exec_page_scripts(rt, script)?;
+    exec_page_scripts(rt, script, base)?;
     let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
     rt.execute_script("<timers>", "__runTimers()")
@@ -5147,7 +5159,7 @@ async fn run_async_pooled(
     rt.execute_script("<scrub>", SCRUB_GLOBALS)
         .map_err(|e| e.to_string())?;
     let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING);
-    exec_page_scripts(rt, script)?;
+    exec_page_scripts(rt, script, base)?;
     let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // DOMContentLoaded (before load)
     drain_event_loop(rt).await?;
     rt.execute_script("<timers>", "__runTimers()")

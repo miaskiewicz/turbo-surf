@@ -42,6 +42,25 @@ fn deno_global_is_deleted_from_page_scope() {
     }
 }
 
+// Error.stack must NOT name page scripts "<page>" — a real Chrome inline script shows the
+// document URL (here about:blank), and "<page>" is a turbo-surf tell BotGuard parses from stacks.
+#[test]
+fn page_script_stack_is_not_named_page() {
+    let out = run_with_dom(
+        "<body></body>",
+        "(() => { try { (function trigger(){ null.x; })(); } catch (e) { return e.stack || ''; } return ''; })()",
+    )
+    .unwrap();
+    assert!(
+        !out.contains("<page>"),
+        "stack must not contain '<page>': {out}"
+    );
+    assert!(
+        out.contains("about:blank"),
+        "inline script stack names the document (about:blank): {out}"
+    );
+}
+
 // --- per-script isolation: a throw in one <script> doesn't abort the rest -----
 // A browser runs each <script> as a separate top-level program: an uncaught error in
 // one does NOT stop later scripts, and top-level let/const/function/var still populate

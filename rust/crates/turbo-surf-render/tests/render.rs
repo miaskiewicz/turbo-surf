@@ -410,6 +410,63 @@ async fn fingerprint_parity_permissions_location_charset_webgl() {
     );
 }
 
+// The window surface must have real Chrome's breadth — a `X in window` / `typeof` presence check
+// for a common interface / on* handler / bar object must pass (our old ~527 own props vs Chrome's
+// ~1235 was a surface tell). Spot-check representatives across the three groups + the count floor.
+#[tokio::test]
+async fn window_surface_matches_chrome_breadth() {
+    let script = r#"
+        var iface = ['AudioBufferSourceNode','Bluetooth','CSSStyleValue','Cache','BatteryManager',
+                     'BarcodeDetector','GPUDevice','SpeechSynthesisUtterance','USBDevice'];
+        var onh = ['onbeforeunload','onpointerrawupdate','onbeforeinstallprompt','ongamepadconnected'];
+        var misc = ['locationbar','menubar','scrollbars','crossOriginIsolated','isSecureContext','caches'];
+        var out = {
+            count: Object.getOwnPropertyNames(globalThis).length,
+            ifaceMissing: iface.filter(function(n){ return typeof globalThis[n] !== 'function'; }),
+            onMissing: onh.filter(function(n){ return !(n in globalThis); }),
+            miscMissing: misc.filter(function(n){ return !(n in globalThis); }),
+            onclickNull: globalThis.onclick === null && ('onclick' in globalThis),
+            barVisible: globalThis.locationbar && globalThis.locationbar.visible === true,
+        };
+        document.body.setAttribute('data-w', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-w=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    assert!(
+        v["count"].as_i64().unwrap() >= 1000,
+        "window own-prop count near Chrome's ~1235: {v}"
+    );
+    assert_eq!(
+        v["ifaceMissing"],
+        serde_json::json!([]),
+        "all common interfaces present: {v}"
+    );
+    assert_eq!(
+        v["onMissing"],
+        serde_json::json!([]),
+        "all on* handler slots present: {v}"
+    );
+    assert_eq!(
+        v["miscMissing"],
+        serde_json::json!([]),
+        "misc window props present: {v}"
+    );
+    assert_eq!(
+        v["onclickNull"], true,
+        "on* handlers are null like Chrome: {v}"
+    );
+    assert_eq!(v["barVisible"], true, "bar objects have visible:true: {v}");
+}
+
 // navigator must be a real `Navigator` INSTANCE like Chrome: zero own properties, all members on
 // `Navigator.prototype` (Chrome exposes ~84), `navigator instanceof Navigator`, and the identity
 // props (userAgent/webdriver) resolved via native-marked prototype getters (not own data props —

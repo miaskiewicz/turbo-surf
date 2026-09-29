@@ -3722,6 +3722,161 @@ globalThis.__domSig = () => {
       "CanvasGradient CanvasPattern CanvasRenderingContext2D OffscreenCanvasRenderingContext2D Path2D TextMetrics").split(/\s+/);
     for (const n of NAMES) { if (n && typeof G[n] === "undefined") { const c = function () {}; try { Object.defineProperty(c, "name", { value: n, configurable: true }); } catch (e) {} G[n] = c; mark(c, n); } }
   });
+
+  // Extend the window surface to real Chrome's full breadth (measured live: 1235 own props vs our
+  // ~527) so `X in window` / `typeof window.X` presence checks pass for the ~740 globals we lacked.
+  // Three groups from a Chrome-vs-turbo-surf diff: interface constructors (stub fns), on* event-
+  // handler slots (null, like Chrome until assigned), and misc methods/props/bar objects. Weak
+  // corroborating surface (BotGuard reads presence), not load-bearing.
+  guard(() => {
+    const IFACES = ("AbsoluteOrientationSensor Accelerometer AnimationTrigger AudioBufferSourceNode AudioDecoder " +
+      "AudioDestinationNode AudioEncoder AudioListener AudioParam AudioParamMap AudioPlaybackStats " +
+      "AudioProcessingEvent AudioScheduledSourceNode AudioSinkInfo AuthenticatorAssertionResponse " +
+      "AuthenticatorAttestationResponse AuthenticatorResponse BackgroundFetchManager BackgroundFetchRecord " +
+      "BackgroundFetchRegistration BarcodeDetector BaseAudioContext BatteryManager BeforeInstallPromptEvent " +
+      "BlobEvent Bluetooth BluetoothCharacteristicProperties BluetoothDevice " +
+      "BluetoothRemoteGATTCharacteristic BluetoothRemoteGATTDescriptor BluetoothRemoteGATTServer " +
+      "BluetoothRemoteGATTService BluetoothUUID BrowserCaptureMediaStreamTrack ByteLengthQueuingStrategy " +
+      "CSPViolationReportBody CSSContainerRule CSSFontPaletteValuesRule CSSFunctionDeclarations " +
+      "CSSFunctionDescriptors CSSFunctionRule CSSImageValue CSSMarginRule CSSMathClamp CSSMathInvert " +
+      "CSSMathMax CSSMathMin CSSMathNegate CSSMathProduct CSSMathValue CSSMatrixComponent CSSNumericArray " +
+      "CSSPerspective CSSPositionTryDescriptors CSSPositionValue CSSPseudoElement CSSRotate CSSRuleList " +
+      "CSSScale CSSScopeRule CSSSkew CSSSkewX CSSSkewY CSSStartingStyleRule CSSStyleValue " +
+      "CSSTransformComponent CSSTranslate CSSViewTransitionRule CanvasCaptureMediaStreamTrack " +
+      "CaptureController CaretPosition ChannelMergerNode ChannelSplitterNode ChapterInformation " +
+      "CharacterBoundsUpdateEvent Clipboard ClipboardChangeEvent ClipboardItem CloseWatcher CommandEvent " +
+      "ConstantSourceNode ContentVisibilityAutoStateChangeEvent ConvolverNode CookieStoreManager " +
+      "CountQueuingStrategy CrashReportContext CreateMonitor Credential CredentialsContainer CropTarget " +
+      "CustomElementRegistry CustomStateSet DOMError DOMMatrixReadOnly DOMPointReadOnly DataTransfer " +
+      "DataTransferItem DataTransferItemList DelayNode DelegatedInkTrailPresenter DeviceMotionEvent " +
+      "DeviceMotionEventAcceleration DeviceMotionEventRotationRate DeviceOrientationEvent DevicePosture " +
+      "DigitalCredential DocumentPictureInPicture DocumentPictureInPictureEvent EditContext " +
+      "ElementInternals EventCounts EventSource External FeaturePolicy FederatedCredential Fence " +
+      "FencedFrameConfig FetchLaterResult FileSystemObserver FontData FontFace FontFaceSet " +
+      "FontFaceSetLoadEvent GPU GPUAdapterInfo GPUBindGroup GPUBindGroupLayout GPUBufferUsage GPUColorWrite " +
+      "GPUCommandBuffer GPUCommandEncoder GPUCompilationInfo GPUCompilationMessage GPUComputePassEncoder " +
+      "GPUComputePipeline GPUDeviceLostInfo GPUError GPUExternalTexture GPUInternalError GPUMapMode " +
+      "GPUOutOfMemoryError GPUPipelineError GPUPipelineLayout GPUQuerySet GPUQueue GPURenderBundle " +
+      "GPURenderBundleEncoder GPURenderPassEncoder GPURenderPipeline GPUSampler GPUShaderModule " +
+      "GPUShaderStage GPUSupportedFeatures GPUSupportedLimits GPUTextureUsage GPUTextureView " +
+      "GPUUncapturedErrorEvent GPUValidationError Gamepad GamepadButton GamepadHapticActuator " +
+      "GeolocationCoordinates GeolocationPosition GeolocationPositionError GravitySensor Gyroscope HID " +
+      "HIDConnectionEvent HIDDevice HIDInputReportEvent HTMLAllCollection HTMLCameraElement " +
+      "HTMLDirectoryElement HTMLFencedFrameElement HTMLFormControlsCollection HTMLFrameElement " +
+      "HTMLFrameSetElement HTMLGeolocationElement HTMLMicrophoneElement HTMLOptionsCollection " +
+      "HTMLSelectedContentElement HTMLUserMediaElement IDBCursorWithValue IDBOpenDBRequest IDBRecord " +
+      "IDBVersionChangeEvent IIRFilterNode IdentityCredential IdentityCredentialError IdentityProvider " +
+      "IdleDeadline IdleDetector ImageBitmapRenderingContext ImageCapture ImageTrackList Ink " +
+      "InputDeviceCapabilities InputDeviceInfo IntegrityViolationReportBody InteractionContentfulPaint " +
+      "InterestEvent Keyboard KeyboardLayoutMap LanguageDetector LanguageModel LargestContentfulPaint " +
+      "LaunchParams LaunchQueue LayoutShift LayoutShiftAttribution LinearAccelerationSensor Lock " +
+      "LockManager MIDIAccess MIDIConnectionEvent MIDIInput MIDIInputMap MIDIMessageEvent MIDIOutput " +
+      "MIDIOutputMap MIDIPort MathMLElement MediaCapabilities MediaDeviceInfo MediaDevices " +
+      "MediaElementAudioSourceNode MediaKeyMessageEvent MediaKeySession MediaKeyStatusMap " +
+      "MediaKeySystemAccess MediaKeys MediaMetadata MediaRecorder MediaSession MediaSourceHandle " +
+      "MediaStreamAudioDestinationNode MediaStreamAudioSourceNode MediaStreamEvent " +
+      "MediaStreamTrackAudioStats MediaStreamTrackEvent MediaStreamTrackGenerator MediaStreamTrackProcessor " +
+      "MediaStreamTrackVideoStats MimeType MimeTypeArray NavigationActivation " +
+      "NavigationCurrentEntryChangeEvent NavigationDestination NavigationPrecommitController " +
+      "NavigationPreloadManager NavigatorLogin NavigatorManagedData NetworkInformation NodeRange " +
+      "NotRestoredReasonDetails NotRestoredReasons OTPCredential Observable OfflineAudioCompletionEvent " +
+      "OpaqueRange OrientationSensor Origin OverconstrainedError PageRevealEvent PageSwapEvent PannerNode " +
+      "PasswordCredential PaymentAddress PaymentManager PaymentMethodChangeEvent PaymentRequest " +
+      "PaymentRequestUpdateEvent PaymentResponse Performance PerformanceElementTiming " +
+      "PerformanceEventTiming PerformanceLongAnimationFrameTiming PerformanceLongTaskTiming " +
+      "PerformanceNavigation PerformanceScriptTiming PerformanceServerTiming PerformanceSoftNavigation " +
+      "PerformanceTiming PerformanceTimingConfidence PeriodicSyncManager PeriodicWave PermissionsPolicy " +
+      "Plugin PluginArray Presentation PresentationAvailability PresentationConnection " +
+      "PresentationConnectionAvailableEvent PresentationConnectionCloseEvent PresentationConnectionList " +
+      "PresentationReceiver PresentationRequest PressureRecord Profiler PromiseRejectionEvent " +
+      "ProtectedAudience PublicKeyCredential PushSubscription PushSubscriptionOptions QuotaExceededError " +
+      "RTCCertificate RTCDTMFSender RTCDTMFToneChangeEvent RTCDataChannelEvent RTCDtlsTransport " +
+      "RTCEncodedAudioFrame RTCEncodedVideoFrame RTCError RTCErrorEvent RTCIceCandidate RTCIceTransport " +
+      "RTCPeerConnectionIceErrorEvent RTCPeerConnectionIceEvent RTCRtpReceiver RTCRtpScriptTransform " +
+      "RTCRtpSender RTCRtpTransceiver RTCSctpTransport RTCSessionDescription RTCStatsReport RTCTrackEvent " +
+      "RadioNodeList ReadableByteStreamController ReadableStreamBYOBReader ReadableStreamBYOBRequest " +
+      "ReadableStreamDefaultController ReadableStreamDefaultReader RelativeOrientationSensor ReportBody " +
+      "ResizeObserverSize RestrictionTarget SVGAElement SVGAngle SVGAnimateMotionElement " +
+      "SVGAnimateTransformElement SVGAnimatedAngle SVGAnimatedBoolean SVGAnimatedEnumeration " +
+      "SVGAnimatedInteger SVGAnimatedLength SVGAnimatedLengthList SVGAnimatedNumber SVGAnimatedNumberList " +
+      "SVGAnimatedPreserveAspectRatio SVGAnimatedRect SVGAnimatedString SVGAnimatedTransformList " +
+      "SVGAnimationElement SVGComponentTransferFunctionElement SVGFEBlendElement SVGFEColorMatrixElement " +
+      "SVGFEComponentTransferElement SVGFECompositeElement SVGFEConvolveMatrixElement " +
+      "SVGFEDiffuseLightingElement SVGFEDisplacementMapElement SVGFEDistantLightElement " +
+      "SVGFEDropShadowElement SVGFEFloodElement SVGFEFuncAElement SVGFEFuncBElement SVGFEFuncGElement " +
+      "SVGFEFuncRElement SVGFEGaussianBlurElement SVGFEImageElement SVGFEMergeElement SVGFEMergeNodeElement " +
+      "SVGFEMorphologyElement SVGFEOffsetElement SVGFEPointLightElement SVGFESpecularLightingElement " +
+      "SVGFESpotLightElement SVGFETileElement SVGFETurbulenceElement SVGGeometryElement SVGGradientElement " +
+      "SVGGraphicsElement SVGLength SVGLengthList SVGMPathElement SVGMatrix SVGMetadataElement SVGNumber " +
+      "SVGNumberList SVGPoint SVGPointList SVGPreserveAspectRatio SVGRect SVGScriptElement SVGSetElement " +
+      "SVGStringList SVGStyleElement SVGTextContentElement SVGTextPositioningElement SVGTransform " +
+      "SVGTransformList SVGUnitTypes Scheduler Scheduling ScreenOrientation ScriptProcessorNode " +
+      "ScrollTimeline SecurityPolicyViolationEvent Sensor SensorErrorEvent Serial SerialPort SnapEvent " +
+      "SourceBufferList SpeechGrammar SpeechGrammarList SpeechRecognition SpeechRecognitionErrorEvent " +
+      "SpeechRecognitionEvent SpeechRecognitionPhrase SpeechSynthesis SpeechSynthesisErrorEvent " +
+      "SpeechSynthesisEvent SpeechSynthesisUtterance SpeechSynthesisVoice StereoPannerNode Storage " +
+      "StorageBucket StorageBucketManager StylePropertyMap StylePropertyMapReadOnly StyleSheetList " +
+      "Subscriber Summarizer SyncManager TaskAttributionTiming TaskController TaskPriorityChangeEvent " +
+      "TaskSignal TextEvent TextFormat TextFormatUpdateEvent TextTrackCueList TextUpdateEvent " +
+      "TimelineTrigger TimelineTriggerRange TimelineTriggerRangeList ToggleEvent Touch TouchList TrackEvent " +
+      "TransformStreamDefaultController Translator URLPattern USB USBAlternateInterface USBConfiguration " +
+      "USBConnectionEvent USBDevice USBEndpoint USBInTransferResult USBInterface " +
+      "USBIsochronousInTransferPacket USBIsochronousInTransferResult USBIsochronousOutTransferPacket " +
+      "USBIsochronousOutTransferResult USBOutTransferResult UserActivation ValidityState VideoColorSpace " +
+      "VideoDecoder VideoEncoder VideoPlaybackQuality ViewTimeline ViewTransition ViewTransitionTypeSet " +
+      "Viewport VirtualKeyboard VirtualKeyboardGeometryChangeEvent VisibilityStateEntry " +
+      "WGSLLanguageFeatures WaveShaperNode WebGLObject WebGLQuery WebGLSampler WebGLShaderPrecisionFormat " +
+      "WebGLSync WebGLTransformFeedback WebKitCSSMatrix WebKitMutationObserver WebSocketError " +
+      "WebSocketStream WebTransport WebTransportBidirectionalStream WebTransportDatagramDuplexStream " +
+      "WebTransportError WindowControlsOverlay WindowControlsOverlayGeometryChangeEvent " +
+      "WritableStreamDefaultController WritableStreamDefaultWriter XMLDocument XMLHttpRequestEventTarget " +
+      "XPathExpression XRAnchor XRAnchorSet XRBoundedReferenceSpace XRCPUDepthInformation XRCamera " +
+      "XRCompositionLayer XRCubeLayer XRCylinderLayer XRDOMOverlayState XRDepthInformation XREquirectLayer " +
+      "XRFrame XRHand XRHitTestResult XRHitTestSource XRInputSource XRInputSourceArray XRInputSourceEvent " +
+      "XRInputSourcesChangeEvent XRJointPose XRJointSpace XRLayer XRLayerEvent XRLightEstimate XRLightProbe " +
+      "XRPlane XRPlaneSet XRPose XRProjectionLayer XRQuadLayer XRRay XRReferenceSpace XRReferenceSpaceEvent " +
+      "XRRenderState XRRigidTransform XRSession XRSessionEvent XRSpace XRSubImage XRSystem " +
+      "XRTransientInputHitTestResult XRTransientInputHitTestSource XRView XRViewerPose XRViewport " +
+      "XRVisibilityMaskChangeEvent XRWebGLBinding XRWebGLDepthInformation XRWebGLLayer XRWebGLSubImage " +
+      "XSLTProcessor").split(/\s+/);
+    for (const n of IFACES) { if (n && typeof G[n] === "undefined") { const c = function () {}; try { Object.defineProperty(c, "name", { value: n, configurable: true }); } catch (e) {} G[n] = c; mark(c, n); } }
+    const ON = ("onabort onafterprint onanimationcancel onanimationend onanimationiteration onanimationstart " +
+      "onappinstalled onauxclick onbeforeinput onbeforeinstallprompt onbeforematch onbeforeprint " +
+      "onbeforetoggle onbeforexrselect onblur oncancel oncanplay oncanplaythrough onchange onclick onclose " +
+      "oncommand oncontentvisibilityautostatechange oncontextlost oncontextmenu oncontextrestored " +
+      "oncuechange ondblclick ondevicemotion ondeviceorientation ondeviceorientationabsolute ondrag " +
+      "ondragend ondragenter ondragleave ondragover ondragstart ondrop ondurationchange onemptied onended " +
+      "onfocus onformdata ongamepadconnected ongamepaddisconnected ongotpointercapture oninput oninvalid " +
+      "onkeydown onkeypress onkeyup onlanguagechange onloadeddata onloadedmetadata onloadstart " +
+      "onlostpointercapture onmousedown onmouseenter onmouseleave onmousemove onmouseout onmouseover " +
+      "onmouseup onmousewheel onpagehide onpagereveal onpageshow onpageswap onpause onplay onplaying " +
+      "onpointercancel onpointerdown onpointerenter onpointerleave onpointermove onpointerout onpointerover " +
+      "onpointerrawupdate onpointerup onprogress onratechange onrejectionhandled onreset onresize onscroll " +
+      "onscrollend onscrollsnapchange onscrollsnapchanging onsearch onsecuritypolicyviolation onseeked " +
+      "onseeking onselect onselectionchange onselectstart onslotchange onstalled onstorage onsubmit " +
+      "onsuspend ontimeupdate ontoggle ontransitioncancel ontransitionend ontransitionrun ontransitionstart " +
+      "onunhandledrejection onvolumechange onwaiting onwebkitanimationend onwebkitanimationiteration " +
+      "onwebkitanimationstart onwebkittransitionend onwheel").split(/\s+/);
+    for (const n of ON) { if (n && !(n in G)) { try { Object.defineProperty(G, n, { value: null, writable: true, enumerable: true, configurable: true }); } catch (e) {} } }
+    const bar = () => ({ visible: true });
+    const misc = {
+      closed: false, length: 0, name: "", opener: null, status: "", crossOriginIsolated: false,
+      isSecureContext: true, originAgentCluster: true, offscreenBuffering: true, credentialless: false,
+      origin: (G.location && G.location.origin) || "https://www.google.com", clientInformation: G.navigator,
+      locationbar: bar(), menubar: bar(), personalbar: bar(), scrollbars: bar(), statusbar: bar(), toolbar: bar(),
+      caches: {}, cookieStore: {}, navigation: {}, speechSynthesis: {}, viewport: {}, launchQueue: {},
+      external: {}, fence: null, crashReport: {}, documentPictureInPicture: {}, event: undefined,
+      styleMedia: { type: "screen", matchMedium: () => false }, screenLeft: 0, screenTop: 0,
+      webkitURL: G.URL, webkitMediaStream: G.MediaStream, webkitRTCPeerConnection: G.RTCPeerConnection,
+    };
+    for (const k in misc) { if (!(k in G)) { try { G[k] = misc[k]; } catch (e) {} } }
+    const METHODS = ("alert blur captureEvents close confirm createImageBitmap fetchLater find focus " +
+      "getScreenDetails moveBy moveTo open print prompt queryLocalFonts releaseEvents reportError requestResize " +
+      "resizeBy resizeTo showDirectoryPicker showOpenFilePicker showSaveFilePicker stop webkitCancelAnimationFrame " +
+      "webkitRequestAnimationFrame webkitRequestFileSystem webkitResolveLocalFileSystemURL " +
+      "webkitSpeechGrammar webkitSpeechGrammarList webkitSpeechRecognition").split(/\s+/);
+    for (const n of METHODS) { if (typeof G[n] !== "function") { try { G[n] = nativize(() => undefined, n); } catch (e) {} } }
+  });
 })();
 })();"##;
 

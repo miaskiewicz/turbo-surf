@@ -347,7 +347,7 @@ class Locator {
       if (leaf) {
         const raw = await native.liveEval(
           this._page._session,
-          `globalThis.__tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
+          `globalThis[Symbol.for('ts')].tcResolveScoped(${JSON.stringify(this._scope)},${JSON.stringify(leaf)});`,
         );
         let matches = [];
         try {
@@ -372,7 +372,7 @@ class Locator {
       const g = this._getBy;
       const raw = await native.liveEval(
         this._page._session,
-        `globalThis.__tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
+        `globalThis[Symbol.for('ts')].tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)},${g.root == null ? "null" : JSON.stringify(g.root)});`,
       );
       let matches = [];
       try {
@@ -678,7 +678,7 @@ function interactionScript(selector, index, kind, value) {
       t.dispatchEvent(new MouseEvent("mousemove", o));
       // Also apply CSS :hover styles — a menu revealed purely by a hover descendant rule has
       // no JS handler; without this it stays display:none (no pointer state in the cascade).
-      if (typeof globalThis.__tcApplyHover === "function") globalThis.__tcApplyHover(el);
+      if (typeof globalThis[Symbol.for('ts')].tcApplyHover === "function") globalThis[Symbol.for('ts')].tcApplyHover(el);
       globalThis.__RESULT = "OK";
     } })();`;
   }
@@ -819,7 +819,7 @@ class Page {
     try {
       const nav = await native.liveEval(
         this._session,
-        "globalThis.__RESULT = globalThis.__rscNav || ''; globalThis.__rscNav = '';",
+        "globalThis.__RESULT = globalThis[Symbol.for('ts')].rscNav || ''; globalThis[Symbol.for('ts')].rscNav = '';",
       );
       if (nav && pathOf(nav) !== this._loadedPath) {
         this._url = this._resolveUrl(nav);
@@ -873,7 +873,7 @@ class Page {
     try {
       raw = await native.liveEval(
         this._session,
-        "globalThis.__RESULT = JSON.stringify((globalThis.__netLog || []).splice(0));",
+        "globalThis.__RESULT = JSON.stringify((globalThis[Symbol.for('ts')].netLog || []).splice(0));",
       );
     } catch {
       return;
@@ -1297,7 +1297,7 @@ class Page {
       } else if (arg.getBy) {
         const g = arg.getBy;
         argExpr =
-          `(function(){ globalThis.__tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)}); ` +
+          `(function(){ globalThis[Symbol.for('ts')].tcGetBy(${JSON.stringify(g.kind)},${JSON.stringify(g.value)},${g.name == null ? "null" : JSON.stringify(g.name)}); ` +
           `var h=JSON.parse(globalThis.__RESULT||"[]"); var all=document.querySelectorAll("*"); return h[${arg.index}]?all[h[${arg.index}].idx]:undefined; })()`;
       } else {
         argExpr = "undefined";
@@ -1359,7 +1359,7 @@ class Page {
       try {
         raw = await native.liveEval(
           this._session,
-          "globalThis.__RESULT = JSON.stringify((globalThis.__downloads || []).splice(0));",
+          "globalThis.__RESULT = JSON.stringify((globalThis[Symbol.for('ts')].downloads || []).splice(0));",
         );
       } catch {
         raw = null;

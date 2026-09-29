@@ -4803,7 +4803,12 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
       // degenerates to a per-ms firehose.
       t += Math.max(6, 12 + gauss(2.5));
     }
-    pts.push({ x: bx, y: by, t: Math.round(dur * 10) / 10 });       // final sample lands on B
+    // Final sample lands on B. Its timestamp must be STRICTLY greater than the last loop
+    // sample's: the loop's last point sits just under `dur`, and rounding both to 0.1ms can
+    // collide (dur - t_last < 0.05 → equal rounded t → a duplicate/non-increasing timestamp).
+    // Clamp to last + 0.1ms so pointer timestamps are always strictly monotonic.
+    const __lastT = pts.length ? pts[pts.length - 1].t : 0;
+    pts.push({ x: bx, y: by, t: Math.max(Math.round(dur * 10) / 10, __lastT + 0.1) });
     if (mode === "human" && rand() < 0.6) {                         // overshoot + settle
       let tt = dur + Math.max(6, 12 + gauss(2.5));
       pts.push({ x: Math.round(bx + gauss(3)), y: Math.round(by + gauss(3)), t: Math.round(tt * 10) / 10 });

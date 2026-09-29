@@ -2381,7 +2381,7 @@ try {
 // record to attach a real `import.meta` to, so expose a stand-in global the script
 // rewrite below maps `import.meta` onto. `url` is the page URL; `env` is empty (no
 // build-time define table headless); `resolve` echoes the spec back as an absolute URL.
-globalThis.__importMeta = {
+__G.importMeta = {
   get url() { return (globalThis.location && globalThis.location.href) || ""; },
   env: {},
   resolve(spec) { try { return new globalThis.URL(spec, globalThis.location.href).href; } catch (_e) { return String(spec); } },
@@ -2411,7 +2411,7 @@ function __fireScriptEvent(el, kind, err) {
   try { const h = kind === "load" ? el.onload : el.onerror; if (typeof h === "function") h.call(el, ev); } catch (_e) {}
   try { if (typeof el.dispatchEvent === "function") el.dispatchEvent(ev); } catch (_e) {}
 }
-// Rewrite `import.meta` (a SyntaxError in a classic script) onto the `globalThis.__importMeta` global
+// Rewrite `import.meta` (a SyntaxError in a classic script) onto the namespaced importMeta
 // stub the dev HMR runtime reads (`.url`/`.env`). Whether a chunk is a REAL ES module is
 // NOT decided by a regex here — a regex matches `import`/`export` inside comments + strings
 // too (e.g. a vendored package's JSDoc `import {X} from 'y'`), which would wrongly route a
@@ -2423,7 +2423,7 @@ function __fireScriptEvent(el, kind, err) {
 __G.rewriteEsmForClassic = function (code) {
   if (typeof code !== "string" || !code) return code;
   if (/import\s*\.\s*meta/.test(code)) {
-    code = code.replace(/import\s*\.\s*meta/g, "globalThis.__importMeta");
+    code = code.replace(/import\s*\.\s*meta/g, "globalThis[Symbol.for('ts')].importMeta");
   }
   return code;
 }
@@ -2456,7 +2456,7 @@ __G.execScriptEl = async function (el) {
     // (`import.meta`, bare `import`/`export`), but we run every <script> as a CLASSIC
     // script, and classic V8 rejects those tokens with a SyntaxError that aborts the
     // whole chunk. `import.meta` is the common, fixable case (the dev HMR runtime reads
-    // `import.meta.url`/`.env`): rewrite it onto the `globalThis.__importMeta` global so the read
+    // `import.meta.url`/`.env`): rewrite it onto the namespaced importMeta so the read
     // works. Real `import`/`export` statements need a module loader + resolved graph we
     // don't have headless — those scripts are SKIPPED gracefully (logged) rather than
     // hung/aborted.

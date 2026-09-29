@@ -129,6 +129,8 @@ fn internal_globals_are_off_window() {
         "__makeFrameRealm",
         "__winListeners",
         "__ttEvent",
+        // import.meta rewrite target (namespaced def + rewrite output):
+        "__importMeta",
     ] {
         assert!(
             !v["names"].as_array().unwrap().iter().any(|x| x == n),

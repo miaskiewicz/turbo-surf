@@ -3866,7 +3866,7 @@ globalThis.__domSig = () => {
       locationbar: bar(), menubar: bar(), personalbar: bar(), scrollbars: bar(), statusbar: bar(), toolbar: bar(),
       caches: {}, cookieStore: {}, navigation: {}, speechSynthesis: {}, viewport: {}, launchQueue: {},
       external: {}, fence: null, crashReport: {}, documentPictureInPicture: {}, event: undefined,
-      styleMedia: { type: "screen", matchMedium: () => false }, screenLeft: 0, screenTop: 0,
+      styleMedia: { type: "screen", matchMedium: nativize(() => false, "matchMedium") }, screenLeft: 0, screenTop: 0,
       webkitURL: G.URL, webkitMediaStream: G.MediaStream, webkitRTCPeerConnection: G.RTCPeerConnection,
     };
     for (const k in misc) { if (!(k in G)) { try { G[k] = misc[k]; } catch (e) {} } }
@@ -3876,6 +3876,19 @@ globalThis.__domSig = () => {
       "webkitRequestAnimationFrame webkitRequestFileSystem webkitResolveLocalFileSystemURL " +
       "webkitSpeechGrammar webkitSpeechGrammarList webkitSpeechRecognition").split(/\s+/);
     for (const n of METHODS) { if (typeof G[n] !== "function") { try { G[n] = nativize(() => undefined, n); } catch (e) {} } }
+  });
+
+  // Final safety net: in a real browser EVERY window-global function reports "[native code]".
+  // Native-mark any DATA-property function on window still unmarked (a shim/vendored fn that
+  // slipped through) so its toString can't leak JS source. Descriptor-based (never triggers a
+  // getter → no side effects); functions behind getters are covered where they're defined.
+  guard(() => {
+    for (const k of Object.getOwnPropertyNames(G)) {
+      try {
+        const d = Object.getOwnPropertyDescriptor(G, k);
+        if (d && typeof d.value === "function" && !native.has(d.value)) mark(d.value, k);
+      } catch (e) {}
+    }
   });
 })();
 })();"##;

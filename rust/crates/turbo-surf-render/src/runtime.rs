@@ -2889,7 +2889,7 @@ __G.domSig = () => {
   };
   // ── <iframe> realms (generic, depth-capped) ──────────────────────────────────────
   // Every iframe — created via createElement, present in the parsed HTML, or carrying
-  // `srcdoc` — instantiates a REAL bridged child realm (browser_env's __makeFrameRealm)
+  // `srcdoc` — instantiates a REAL bridged child realm (browser_env.s namespaced makeFrameRealm)
   // that runs the frame's OWN inline + `<script src>` scripts, with a DISTINCT
   // contentWindow/contentDocument, a wired frame tree (parent/top/frames/length), and a
   // depth cap that guards frame-bombs. reCAPTCHA's bframe/anchor handshake is now just the
@@ -3029,9 +3029,9 @@ __G.domSig = () => {
   // is separate (async, see __G.loadFrame) so contentWindow is available immediately.
   __G.frameRealm = (el, depth) => {
     if (el.__realm) return el.__realm;
-    if (typeof globalThis.__makeFrameRealm !== "function") return globalThis;
+    if (typeof __G.makeFrameRealm !== "function") return globalThis;
     const parentWin = el.__ownerWin || globalThis;
-    const cw = globalThis.__makeFrameRealm(el, parentWin);
+    const cw = __G.makeFrameRealm(el, parentWin);
     augmentRealm(cw, parentWin, el, depth == null ? (el.__depth || 0) : depth);
     registerChildFrame(parentWin, cw);
     return cw;

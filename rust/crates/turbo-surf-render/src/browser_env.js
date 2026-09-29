@@ -1,5 +1,9 @@
 (function(){
   var g = globalThis;
+  // turbo-surf shares this binding; its internal cross-context state lives on a Symbol-keyed
+  // namespace (absent from getOwnPropertyNames(window) — real Chrome has no such __* globals),
+  // not as `__*` string globals. Reachable from every realm via globalThis[Symbol.for('ts')].
+  var __ns = g[Symbol.for('ts')] || (Object.defineProperty(g, Symbol.for('ts'), { value: {}, configurable: true, enumerable: false }), g[Symbol.for('ts')]);
   if (typeof g.navigator === 'undefined') g.navigator = { userAgent: 'turbo-test', platform: 'rust', language: 'en-US', languages: ['en-US'], clipboard: {}, maxTouchPoints: 0 };
   // Top-level window self-references (browsers + jsdom + vitest): a non-framed window is its own
   // parent/top, and `self`/`frames` alias the window. `window === globalThis` here, so point them at
@@ -166,7 +170,7 @@
   }
   // DOM interface constructors (for `instanceof` / global presence). Stubs; identity not enforced.
   // Real Event base class (dispatch in browser_env.rs reads type/bubbles/defaultPrevented/__stop*).
-  if (!g.__ttEvent) {
+  if (!__ns.ttEvent) {
     function Event(type, init){ init = init || {}; this.type = type; this.bubbles = !!init.bubbles; this.cancelable = !!init.cancelable; this.composed = !!init.composed; this.defaultPrevented = false; this.target = null; this.currentTarget = null; this.__stop = false; this.__stopImmediate = false; this.eventPhase = 0; this.timeStamp = Date.now(); this.isTrusted = false; this.detail = init.detail; }
     Event.prototype.preventDefault = function(){ if (this.cancelable) this.defaultPrevented = true; };
     Event.prototype.stopPropagation = function(){ this.__stop = true; };
@@ -184,7 +188,7 @@
     sub('FocusEvent', function(self, init){ self.relatedTarget = init.relatedTarget||null; });
     sub('CompositionEvent'); sub('WheelEvent', mouseExtra); sub('DragEvent', mouseExtra); sub('TouchEvent'); sub('ClipboardEvent');
     g.document.createEvent = function(){ return new Event('', {}); };
-    g.__ttEvent = true;
+    __ns.ttEvent = true;
   }
   var ctors = ['Node','Element','HTMLElement','HTMLDivElement','HTMLInputElement','HTMLButtonElement','HTMLAnchorElement','HTMLSelectElement','HTMLTextAreaElement','HTMLFormElement','HTMLImageElement','HTMLLabelElement','HTMLOptionElement','HTMLUListElement','HTMLLIElement','HTMLSpanElement','HTMLParagraphElement','HTMLHeadingElement','HTMLTableElement','HTMLIFrameElement','HTMLCanvasElement','HTMLStyleElement','HTMLScriptElement','HTMLDocument','Document','DocumentFragment','ShadowRoot','Text','Comment','SVGElement','SVGSVGElement','DOMParser','EventTarget','AbortController','AbortSignal','DOMException',
     'UIEvent','MouseEvent','KeyboardEvent','FocusEvent','InputEvent','TouchEvent','PointerEvent','WheelEvent','DragEvent','ClipboardEvent','AnimationEvent','TransitionEvent','MessageEvent','ProgressEvent','CompositionEvent','PopStateEvent','HashChangeEvent','StorageEvent','ErrorEvent','CloseEvent',
@@ -307,8 +311,8 @@
   })();
   // window-level event listeners — a real registry so window.addEventListener('keydown', …) +
   // window.dispatchEvent(new KeyboardEvent(...)) work (e.g. global keyboard shortcuts).
-  if (!g.__winListeners) {
-    var winL = g.__winListeners = {};
+  if (!__ns.winListeners) {
+    var winL = __ns.winListeners = {};
     g.addEventListener = function(type, fn){ if (typeof fn !== 'function') return; (winL[type] = winL[type] || []).push(fn); };
     g.removeEventListener = function(type, fn){ var a = winL[type]; if (a){ var i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } };
     g.dispatchEvent = function(ev){ if (!ev) return true; if (ev.target == null) { try { ev.target = g; } catch(e){} } var a = winL[ev.type]; if (a) a.slice().forEach(function(fn){ try { fn.call(g, ev); } catch(e){} }); return !ev.defaultPrevented; };
@@ -1180,7 +1184,7 @@
     // Build (once) a bridged child realm for the <iframe> `hostEl`. `parentWin` defaults
     // to the top window `g`. Returns the child window; also sets hostEl.contentWindow /
     // contentDocument. Reused by turbo-surf's render tier for the reCAPTCHA bframe.
-    g.__makeFrameRealm = function(hostEl, parentWin){
+    __ns.makeFrameRealm = function(hostEl, parentWin){
       parentWin = parentWin || g;
       if (hostEl && hostEl.__realm) return hostEl.__realm;
       var childDoc = makeChildDocument();
@@ -1243,12 +1247,12 @@
         el.__iframeWired = true;
         try {
           Object.defineProperty(el, 'contentWindow', { configurable: true,
-            get: function(){ return el.__realm || g.__makeFrameRealm(el, g); } });
+            get: function(){ return el.__realm || __ns.makeFrameRealm(el, g); } });
           Object.defineProperty(el, 'contentDocument', { configurable: true,
-            get: function(){ return (el.__realm || g.__makeFrameRealm(el, g)).document; } });
+            get: function(){ return (el.__realm || __ns.makeFrameRealm(el, g)).document; } });
         } catch(e){
           // Native element rejected the accessor → fall back to an eager realm.
-          try { g.__makeFrameRealm(el, g); } catch(e2){}
+          try { __ns.makeFrameRealm(el, g); } catch(e2){}
         }
       }
       return el;

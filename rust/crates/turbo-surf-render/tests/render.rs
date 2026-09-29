@@ -113,13 +113,22 @@ fn internal_globals_are_off_window() {
     )
     .unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    // The names we've moved must be gone from window own-prop NAMES + `in` checks.
+    // The names we've moved must be gone from window own-prop NAMES + `in` checks — the
+    // turbo-surf-defined ones AND the (re-vendored) turbo-test binding's window internals.
     for n in [
         "__runTimers",
         "__hydrate",
         "__domSig",
         "__pendingWork",
         "__pendingFetchCount",
+        "__tcGetBy",
+        "__loadFrame",
+        "__frameRealm",
+        "__takeModuleScript",
+        // vendored (turbo-test browser_env) internals, now namespaced there too:
+        "__makeFrameRealm",
+        "__winListeners",
+        "__ttEvent",
     ] {
         assert!(
             !v["names"].as_array().unwrap().iter().any(|x| x == n),

@@ -136,6 +136,34 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   neither matched real Chrome — a cross-layer mismatch is a hard tell. (The UA *string* itself was
   already a correct reduced Chrome UA — verified character-identical to real Chrome bar the major.)
 
+### Changed — BotGuard/SearchGuard anti-tamper hardening
+Driven by a committed **integrity-trap probe** (`scripts/browser-sidecar/probes/botguard-probe.js`,
+run in real Chrome via `run-probe.mjs` and in the isolate via the `fp_snapshot` example, then
+diffed) against the checks the research surfaced (native-fn shape, toString anti-hook, chronometric
+trap, env surface). Closes the tractable traps; the residual (Canvas/WebGL render-hash + VM
+execution integrity) needs a real browser and is out of reach for a synthetic DOM — documented.
+- **Native-fn SHAPE.** A real native function reports `[native code]` AND has **no own
+  `prototype`** (a stealth-detection tell: `'prototype' in HTMLCanvasElement.prototype.toDataURL`
+  is `false` in Chrome). Our `function`-expression shims carried an own, non-deletable prototype.
+  The toString trap is now a concise method (no prototype); a `nativize` forwarder (prototype-less,
+  name/length pinned) backs the canvas/WebGL/event shims; `addEventListener`/`removeEventListener`/
+  `dispatchEvent` are native-shaped on their own object. A final sweep native-marks every remaining
+  window data-property function, so no window global leaks JS source via toString.
+- **`navigator` is a real `Navigator` instance.** Was a plain object literal (26 own props + a thin
+  15-member prototype); now `window.Navigator` + an **84-member `Navigator.prototype`** (the exact
+  member list captured from live Chrome — 56 getters + 27 methods + constructor) with
+  `navigator = Object.create(navProto)` → **zero own properties**, `instanceof Navigator`,
+  `[object Navigator]`, and native-marked prototype getters (incl. a `webdriver` getter, no own
+  prop). Real values where we have them; plausible object stubs otherwise (e.g. `scheduling.
+  isInputPending` for React). Removed the old `hostInterface` re-parenting that produced a 13-getter
+  stub prototype.
+- **Full window surface breadth.** A window own-prop diff vs real Chrome found ~740 missing globals;
+  added them — 554 interface constructors (stub fns), 115 `on*` handler slots (null, like Chrome),
+  and ~70 misc methods/props/bar objects — taking the own-prop count from **527 → ~1263** (Chrome
+  1235), so `X in window` / `typeof window.X` / `window.onX === null` presence checks pass.
+- **Coverage:** `masked_native_functions_have_no_prototype`, `navigator_is_a_prototype_backed_instance`,
+  `window_surface_matches_chrome_breadth` (render-tier regression tests).
+
 ### Added — GPU (opt-in)
 - **`gpu-metal` cargo feature** (off by default; macOS/Metal) — real Apple-GPU rendering via
   `wgpu`→Metal for the render tier's fingerprint surface, fixing the coherence tell of claiming

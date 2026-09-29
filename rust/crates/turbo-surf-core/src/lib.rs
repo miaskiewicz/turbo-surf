@@ -43,4 +43,4 @@ pub use reqwest as http_backend;
 pub use wreq as http_backend;
 
 /// Library version — kept in lockstep with `package.json` per the release rules.
-pub const VERSION: &str = "0.5.2";
+pub const VERSION: &str = "0.5.3";

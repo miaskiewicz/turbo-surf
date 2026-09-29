@@ -5167,8 +5167,11 @@ async fn run_async(
 // `ENV_BOOTSTRAP` re-runs each page and re-seeds the env, covering the usual polyfills.)
 const SCRUB_GLOBALS: &str = r#"(() => {
   if (!globalThis[Symbol.for('ts')].TS_BASELINE) {
+    // Baseline of the page's string own-prop globals. The baseline itself + all turbo-surf
+    // internals live on the Symbol namespace (globalThis[Symbol.for('ts')]) — a Symbol key, never
+    // in getOwnPropertyNames — so the scrub below (which only walks string names) never touches
+    // them, and no name needs adding to the set to protect it.
     const b = new Set(Object.getOwnPropertyNames(globalThis));
-    b.add("globalThis[Symbol.for('ts')].TS_BASELINE");
     globalThis[Symbol.for('ts')].TS_BASELINE = b;
     return;
   }

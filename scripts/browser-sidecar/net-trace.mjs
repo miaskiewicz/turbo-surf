@@ -130,7 +130,13 @@ const page = context.pages()[0] || (await context.newPage());
 
 const requests = [];
 page.on("request", (r) =>
-  requests.push({ method: r.method(), url: r.url(), type: r.resourceType() }),
+  requests.push({
+    method: r.method(),
+    url: r.url(),
+    type: r.resourceType(),
+    // POST body (token/beacon payloads) — capped so a huge upload doesn't bloat the trace.
+    postData: r.method() === "POST" ? (r.postData() || "").slice(0, 4000) : null,
+  }),
 );
 const cookieSetters = [];
 page.on("response", async (r) => {
@@ -199,10 +205,24 @@ if (args.json) {
   if (!cookieSetters.length) process.stdout.write("  (none)\n");
   for (const c of cookieSetters)
     process.stdout.write(`  ${c.status}  ${c.cookies.join(",")}  <-  ${norm(c.url)}\n`);
-  process.stdout.write(`\n=== POSTs ===\n`);
+  process.stdout.write(`\n=== POSTs (with body preview) ===\n`);
   const posts = requests.filter((r) => r.method === "POST");
   if (!posts.length) process.stdout.write("  (none)\n");
-  for (const r of posts) process.stdout.write(`  ${norm(r.url)}\n`);
+  for (const r of posts) {
+    process.stdout.write(`  ${norm(r.url)}\n`);
+    if (r.postData)
+      process.stdout.write(`      body: ${r.postData.slice(0, 300).replace(/\n/g, " ")}\n`);
+  }
+  // Beacon/attestation endpoints: dump the FULL URL (query carries the token params for GET-style
+  // beacons like /gen_204) so the token shape is visible.
+  process.stdout.write(
+    `\n=== beacon URLs (full query) — gen_204 / client_204 / log / batchexecute ===\n`,
+  );
+  const beacons = requests.filter((r) =>
+    /\/(gen_204|client_204|log|batchexecute|async\/)/.test(r.url),
+  );
+  if (!beacons.length) process.stdout.write("  (none)\n");
+  for (const r of beacons) process.stdout.write(`  ${r.method} ${r.url.slice(0, 500)}\n`);
   process.stdout.write(`\ntotal requests: ${requests.length}\n`);
 }
 

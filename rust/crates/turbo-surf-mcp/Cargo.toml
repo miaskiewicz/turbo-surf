@@ -15,17 +15,23 @@ name = "turbo-surf-mcp"
 path = "src/main.rs"
 
 [features]
-# `trust-anchors` is ON by default: real Chrome 152+ sends the trust_anchors ClientHello
-# extension, so a default build that claims Chrome 154 in the UA but omits it has a JA4
-# (t13d1516h2 vs Chrome's t13d1517h2) that mismatches the reported version — a tell. It
-# builds on the already-default BoringSSL toolchain (no extra deps).
-default = ["impersonate", "trust-anchors"]
+# NB: `trust-anchors` is deliberately NOT in `default`. It relies on a field
+# (`TlsOptions::trust_anchors`) that exists ONLY in turbo-surf's VENDORED `wreq`
+# (rust/vendor/wreq), not in the crates.io `wreq` release. `cargo publish` verifies the
+# `turbo-surf-mcp` crate against the REGISTRY `wreq` (path/patch overrides don't apply to a
+# published crate's deps), so a default that enables trust-anchors fails `cargo publish` with
+# `no field 'trust_anchors' on type '&mut TlsOptions'` (this bit us on v0.5.1). The SHIPPED
+# npm binary still gets trust-anchors: release.yml builds it with `--features trust-anchors`
+# against the vendored wreq. Local builds/tests use the vendored wreq too, so the feature is
+# testable there. Keep any vendored-wreq-only feature OUT of every crate `default`.
+default = ["impersonate"]
 # Build the MCP binary with a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint
 # (BoringSSL, via turbo-surf-core's `impersonate`). Needs a C toolchain (cmake/nasm) at
 # build time. ON by default (anti-bot). See turbo-surf-core/src/net.rs.
 impersonate = ["turbo-surf-core/impersonate"]
 # Emit Chrome 152+'s `trust_anchors` TLS extension (codepoint 0xCA34 / 51764) so JA4
-# matches real Chrome's `t13d1517h2`. ON by default (see above); implies `impersonate`.
+# matches real Chrome's `t13d1517h2`. OFF by default (vendored-wreq-only — see the note on
+# `default` above); the release binary enables it. Implies `impersonate`.
 # See turbo-surf-core's `trust-anchors` feature and net.rs `emulate()`.
 trust-anchors = ["turbo-surf-core/trust-anchors"]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization for the render tier's toDataURL — genuine
@@ -38,11 +44,11 @@ gpu-metal = ["turbo-surf-raster/gpu-metal"]
 coretext = ["turbo-surf-raster/coretext"]
 
 [dependencies]
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.1" }
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.1" }
-turbo-surf-page = { path = "../turbo-surf-page", version = "0.5.1" }
-turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.5.1" }
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.1" }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.2" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.2" }
+turbo-surf-page = { path = "../turbo-surf-page", version = "0.5.2" }
+turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.5.2" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.2" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.5.1" }
 async-trait = "0.1"
 base64 = "0.22"

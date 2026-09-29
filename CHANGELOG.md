@@ -3,6 +3,28 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.5.2] — 2026-09-29 — fix crates.io publish (trust-anchors default)
+
+Hotfix for the v0.5.1 crates.io publish, which failed on `turbo-surf-mcp` with
+`no field 'trust_anchors' on type '&mut TlsOptions'`.
+
+### Fixed
+- **`trust-anchors` removed from `turbo-surf-mcp`'s `default` features.** It relies on
+  `TlsOptions::trust_anchors`, a field that exists only in turbo-surf's **vendored** `wreq`
+  (`rust/vendor/wreq`), not the crates.io release. `cargo publish` verifies the crate against the
+  **registry** `wreq` (path/patch overrides don't apply to a published crate's deps), so a default
+  that enabled trust-anchors failed to compile at publish time — even though local + CI builds
+  (which use the vendored wreq) passed. The **shipped npm binary still gets trust-anchors**:
+  `release.yml` now builds it with `--features trust-anchors` (vendored wreq present in CI). JA4
+  fidelity (Chrome 152+ `0xCA34`) is unchanged for the product; only the crate default changed.
+
+### Added
+- **Regression guard** (`turbo-surf-mcp/tests/publishability.rs`): asserts no crate `default`
+  feature enables a vendored-wreq-only capability (`trust-anchors`), so this publish break can't
+  recur. Offline, part of `cargo test`.
+
+
+
 ## [0.5.1] — 2026-09-29 — Chrome 154 + versioned browser-config registry
 
 Default reported identity bumped **Chrome 153 → 154**, and — the substantive change — all

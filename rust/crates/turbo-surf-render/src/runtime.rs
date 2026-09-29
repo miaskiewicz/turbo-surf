@@ -4076,6 +4076,25 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
   // by a realistic inter-key gap (dwell + flight). Gap ~90–170ms, +extra after space/punctuation,
   // with an occasional "think" pause; each key is held ~40–90ms (keydown→keyup). `base` is the
   // origin-relative ms at which typing starts. Returns { events:[{name,type,props,ts}], end }.
+  // Realistic KeyboardEvent init for a character or named key. Real Chrome events carry
+  // key/code/keyCode/which (plus location) — a `{key}`-only event is a tell (BotGuard reads
+  // keyCode/code). `code` is the physical key ("KeyR"/"Digit1"/"Enter"/"Space"); keyCode/which
+  // are the legacy numeric codes (kept equal, as Chrome does).
+  function keyInfo(ch) {
+    const NAMED = {
+      Enter: { code: "Enter", keyCode: 13 }, Tab: { code: "Tab", keyCode: 9 },
+      Backspace: { code: "Backspace", keyCode: 8 }, Escape: { code: "Escape", keyCode: 27 },
+      " ": { code: "Space", keyCode: 32 },
+    };
+    if (NAMED[ch]) return { key: ch === " " ? " " : ch, code: NAMED[ch].code, keyCode: NAMED[ch].keyCode, which: NAMED[ch].keyCode };
+    let code;
+    if (/[a-z]/i.test(ch)) code = "Key" + ch.toUpperCase();
+    else if (/[0-9]/.test(ch)) code = "Digit" + ch;
+    else code = "";
+    const kc = ch.length === 1 ? ch.toUpperCase().charCodeAt(0) : 0;
+    return { key: ch, code, keyCode: kc, which: kc };
+  }
+
   function typePlan(text, base) {
     const events = [];
     let t = base || 0;
@@ -4087,12 +4106,33 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
       if (rand() < 0.06) gap += 250 + rand() * 450;        // occasional hesitation
       t += gap;
       const hold = 40 + rand() * 50;                       // key dwell time
-      events.push({ name: "KeyboardEvent", type: "keydown", props: { key: ch }, ts: Math.round(t * 10) / 10 });
-      events.push({ name: "KeyboardEvent", type: "keypress", props: { key: ch }, ts: Math.round((t + 1) * 10) / 10 });
+      const k = keyInfo(ch);
+      // Full per-character sequence a browser fires for a printable key: keydown → keypress →
+      // beforeinput → input → keyup, each with the real key identifiers.
+      events.push({ name: "KeyboardEvent", type: "keydown", props: k, ts: Math.round(t * 10) / 10 });
+      events.push({ name: "KeyboardEvent", type: "keypress", props: { key: k.key, code: k.code, keyCode: k.which, which: k.which, charCode: k.which }, ts: Math.round((t + 1) * 10) / 10 });
+      events.push({ name: "InputEvent", type: "beforeinput", props: { data: ch, inputType: "insertText" }, ts: Math.round((t + 1.5) * 10) / 10 });
       events.push({ name: "InputEvent", type: "input", props: { data: ch, inputType: "insertText" }, ts: Math.round((t + 2) * 10) / 10 });
-      events.push({ name: "KeyboardEvent", type: "keyup", props: { key: ch }, ts: Math.round((t + hold) * 10) / 10 });
+      events.push({ name: "KeyboardEvent", type: "keyup", props: k, ts: Math.round((t + hold) * 10) / 10 });
     }
     return { events, end: t };
+  }
+
+  // A single named-key press (e.g. "Enter") — keydown → keypress (for keys that produce one) →
+  // keyup, with the real key identifiers. Returns { events, end } like typePlan.
+  function pressPlan(keyName, base) {
+    let t = (base || 0) + 30 + rand() * 40;                 // reaction before the press
+    const k = keyInfo(keyName);
+    const hold = 40 + rand() * 50;
+    const events = [
+      { name: "KeyboardEvent", type: "keydown", props: k, ts: Math.round(t * 10) / 10 },
+    ];
+    // keypress fires for Enter + printable keys (not for Tab/Escape/arrows).
+    if (keyName === "Enter" || k.key.length === 1) {
+      events.push({ name: "KeyboardEvent", type: "keypress", props: { key: k.key, code: k.code, keyCode: k.which, which: k.which, charCode: keyName === "Enter" ? 13 : k.which }, ts: Math.round((t + 1) * 10) / 10 });
+    }
+    events.push({ name: "KeyboardEvent", type: "keyup", props: k, ts: Math.round((t + hold) * 10) / 10 });
+    return { events, end: t + hold };
   }
 
   // Build a trusted event (isTrusted:true via the __trusted flag + Event.prototype getter),
@@ -4271,6 +4311,13 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
             jobs.push(j);
           }
           t = plan.end;
+        } else if (step.press != null) {
+          // A named-key press (e.g. Enter to submit a search) at the focused field — fires the
+          // real keydown/keypress/keyup so the page's key handler runs (google's Enter handler
+          // builds the /search URL); the nav-follow then loads it.
+          const plan = pressPlan(String(step.press), t);
+          for (const k of plan.events) job(focused || target, k.name, k.type, k.props, k.ts);
+          t = plan.end;
         } else if (step.wait != null) {
           t += step.wait;
         }
@@ -4286,7 +4333,7 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
     });
   }
 
-  globalThis.__hi = { path, typePlan, delay, move, type, moveAndClick, play, sequence, ev };
+  globalThis.__hi = { path, typePlan, pressPlan, keyInfo, delay, move, type, moveAndClick, play, sequence, ev };
 })()"#;
 
 /// Run a page-script bundle the browser way: each boundary-delimited part as its own

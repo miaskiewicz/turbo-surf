@@ -41,6 +41,13 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   - **Typing now mutates the field value.** The synthesizer sets the focused element's `.value`
     as each character's `input` event fires (real-browser order), so a submitted form carries the
     typed text (previously typing dispatched events only — the field stayed empty).
+  - **Full, realistic key-event sequence.** Each typed character now fires
+    keydown→keypress→**beforeinput**→input→keyup, and every keyboard event carries the real
+    identifiers (`key`/`code`/`keyCode`/`which`, e.g. `KeyR`/`72`) instead of `{key}` only — a
+    `{key}`-only event is a tell BotGuard-class collectors read. A new **`press`** step fires a
+    named key (e.g. `Enter`) with the correct identifiers (Enter → keyCode 13, code `Enter`); the
+    `google-serp` routine now presses Enter to search (how users actually do it) rather than
+    clicking the button, so the page's own Enter handler runs and the nav-follow loads the result.
 - **Human-input synthesizer** (`turbo_surf_render::HUMAN_INPUT_JS`) backing the tool:
   `__hi.{path,move,type,typePlan,delay,moveAndClick,play,sequence,ev}`. Generates a pointer
   **path A→B sampled the way a browser samples a gesture** — a coordinate every ~12ms (±stddev),

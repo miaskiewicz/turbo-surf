@@ -96,6 +96,7 @@ const HUMAN_DRIVER_TMPL: &str = r#"((raw, __opts) => {
     if (st.click !== undefined) return { click: (typeof st.click === "string") ? (q(st.click) || true) : true };
     if (st.focus !== undefined) return { focus: (typeof st.focus === "string") ? (q(st.focus) || true) : true };
     if (st.type != null) return { type: String(st.type) };
+    if (st.press != null) return { press: String(st.press) };
     if (st.blur) return { blur: true };
     if (st.wait != null) return { wait: st.wait };
     return {};
@@ -3391,6 +3392,63 @@ mod tests {
             dom.contains("Results for weather"),
             "loaded the results page for the typed query: {dom}"
         );
+    }
+
+    // The synthesizer fires the FULL, realistic key-event sequence: per typed char
+    // keydown→keypress→beforeinput→input→keyup, and a `press` step for a named key (Enter) with
+    // the real identifiers (key/code/keyCode). BotGuard-class collectors read keyCode/code, so a
+    // {key}-only event is a tell. Uses a form-less input so no navigation is triggered.
+    #[tokio::test]
+    async fn human_interact_fires_full_key_sequence() {
+        let mut s = Session::new();
+        // Listeners accumulate a compact log into a body attribute so it survives serialization.
+        s.load(
+            "https://x.test/",
+            "<body><input id='q'>\
+             <script>\
+             var push=function(v){document.body.setAttribute('data-k',(document.body.getAttribute('data-k')||'')+'|'+v);};\
+             document.addEventListener('keydown',function(e){push('d:'+e.key+':'+e.keyCode+':'+e.code);});\
+             document.addEventListener('keypress',function(e){push('p:'+e.key);});\
+             document.addEventListener('beforeinput',function(e){push('bi:'+e.data);});\
+             document.addEventListener('input',function(e){push('i:'+e.data);});\
+             document.addEventListener('keyup',function(e){push('u:'+e.key);});\
+             </script></body>",
+        );
+        let res = call_tool(
+            &mut s,
+            "human_interact",
+            &json!({
+                "steps": [
+                    { "click": "#q" }, { "focus": "#q" },
+                    { "type": "hi" }, { "press": "Enter" }
+                ],
+                "startDelay": 10, "startJitter": 10
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            res["navigated"], false,
+            "form-less input triggers no navigation: {res}"
+        );
+        let dom = serialize_doc(s.tree().unwrap());
+        let log = dom
+            .split("data-k=\"")
+            .nth(1)
+            .unwrap_or("")
+            .split('"')
+            .next()
+            .unwrap_or("");
+        // Per-char full sequence for the first typed char 'h'.
+        for frag in ["d:h:72:KeyH", "p:h", "bi:h", "i:h", "u:h"] {
+            assert!(log.contains(frag), "expected key frag {frag:?} in: {log}");
+        }
+        // Enter press with the real named-key identifiers.
+        assert!(
+            log.contains("d:Enter:13:Enter"),
+            "Enter keydown (keyCode 13, code Enter): {log}"
+        );
+        assert!(log.contains("u:Enter"), "Enter keyup: {log}");
     }
 
     // human_interact with an unknown routine surfaces the error through the tool dispatch.

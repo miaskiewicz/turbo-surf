@@ -23,6 +23,32 @@ pub(crate) fn replay(width: u32, height: u32, ops: &[Op]) -> Result<Vec<u8>, Str
         .map_err(|e| format!("png encode: {e}"))
 }
 
+/// Rasterize the op stream into RAW, straight-alpha RGBA8 (top-left origin, tightly packed) —
+/// the byte layout `getImageData` returns. tiny-skia stores premultiplied alpha, so unpremultiply
+/// back to straight alpha (else a browser reading `getImageData` after a translucent draw would
+/// see premultiplied values a real canvas never returns).
+pub(crate) fn replay_rgba(width: u32, height: u32, ops: &[Op]) -> Result<Vec<u8>, String> {
+    let pm = Pixmap::new(width, height).ok_or_else(|| format!("bad canvas {width}x{height}"))?;
+    let mut backend = SkiaCanvas { pm };
+    canvas_ops::run(ops, &mut backend);
+    let src = backend.pm.data(); // premultiplied RGBA8
+    let mut out = Vec::with_capacity(src.len());
+    for px in src.chunks_exact(4) {
+        let a = px[3];
+        if a == 0 {
+            out.extend_from_slice(&[0, 0, 0, 0]);
+        } else {
+            // straight = round(premul * 255 / a)
+            let un = |c: u8| (((c as u32) * 255 + (a as u32) / 2) / a as u32).min(255) as u8;
+            out.push(un(px[0]));
+            out.push(un(px[1]));
+            out.push(un(px[2]));
+            out.push(a);
+        }
+    }
+    Ok(out)
+}
+
 /// A tiny-skia pixmap wearing the [`CanvasBackend`] primitives.
 struct SkiaCanvas {
     pm: Pixmap,

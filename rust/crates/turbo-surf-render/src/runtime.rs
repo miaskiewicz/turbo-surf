@@ -215,6 +215,35 @@ fn op_raster_png(width: u32, height: u32, #[string] ops_json: &str) -> String {
     }
 }
 
+// Same rasterizer, RAW straight-alpha RGBA output (not PNG) — for getImageData, which returns
+// pixels with no encoder in the loop. So `fillRect(red); getImageData(...)` reads back the actual
+// rendered red (the vendored synthetic getImageData returned unrelated bytes — a broken-canvas
+// tell). Raw pixels also mean solids/shapes match a real browser exactly (no PNG-encoder variance).
+static RASTER_RGBA: std::sync::RwLock<Option<RasterFn>> = std::sync::RwLock::new(None);
+
+/// Install the host's raw-RGBA canvas rasterizer: `(width, height, ops_json) -> RGBA8 bytes`
+/// (straight alpha, top-left origin, tightly packed). Until set, getImageData keeps the vendored
+/// behavior.
+pub fn set_raster_rgba_fn(f: RasterFn) {
+    if let Ok(mut g) = RASTER_RGBA.write() {
+        *g = Some(f);
+    }
+}
+
+#[op2]
+#[string]
+fn op_raster_rgba(width: u32, height: u32, #[string] ops_json: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    match RASTER_RGBA
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|f| f(width, height, ops_json)))
+    {
+        Some(bytes) => STANDARD.encode(bytes),
+        None => String::new(),
+    }
+}
+
 // Host WebGL executor: run a recorded WebGL call batch on the real GPU and return the
 // framebuffer RGBA. Same injection pattern as the rasterizer; installed by the crate that owns
 // the wgpu backend (raster, `gpu-metal`). Until set, WebGL readback keeps the synthetic stub.
@@ -369,6 +398,7 @@ deno_core::extension!(
         op_fingerprint,
         op_measure_text,
         op_raster_png,
+        op_raster_rgba,
         op_webgl_readback,
         op_webgl_available
     ],
@@ -3553,6 +3583,43 @@ globalThis.__domSig = () => {
             }
           } catch (e) {}
         }
+        // 2D context: replace the vendored getImageData (an OWN instance method returning synthetic
+        // bytes — `fillRect(red); getImageData` read back NON-red, a broken-canvas tell) with one
+        // that reads the ACTUAL rendered pixels back through the raw-RGBA rasterizer. Raw pixels
+        // have no PNG encoder in the loop, so shapes/solids read back exactly like a real browser.
+        if (k === "2d" && Object.prototype.hasOwnProperty.call(ctx, "getImageData")) {
+          const origGID = ctx.getImageData;
+          const rgbaOp2 = Deno.core.ops && Deno.core.ops.op_raster_rgba;
+          const b64ToBytes = (b64) => { try { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; } catch (e) { return null; } };
+          ctx.getImageData = nativize(({ getImageData(sx, sy, sw, sh) {
+            try {
+              const cv = this.canvas, ops = this._ops;
+              const W = (cv && cv.width) || 300, H = (cv && cv.height) || 150;
+              if (rgbaOp2 && cv && ops && sw > 0 && sh > 0) {
+                const full = b64ToBytes(rgbaOp2(W, H, JSON.stringify(ops)));
+                if (full && full.length >= W * H * 4) {
+                  sx = sx | 0; sy = sy | 0; sw = sw | 0; sh = sh | 0;
+                  const out = new Uint8ClampedArray(sw * sh * 4);
+                  for (let row = 0; row < sh; row++) {
+                    for (let col = 0; col < sw; col++) {
+                      const yy = sy + row, xx = sx + col, di = (row * sw + col) * 4;
+                      if (yy >= 0 && yy < H && xx >= 0 && xx < W) {
+                        const si = (yy * W + xx) * 4;
+                        out[di] = full[si]; out[di + 1] = full[si + 1]; out[di + 2] = full[si + 2]; out[di + 3] = full[si + 3];
+                      }
+                    }
+                  }
+                  // The stub `ImageData` ctor ignores its args (no `.data`), so build the object
+                  // directly and brand it so `Object.prototype.toString.call(img)` reads ImageData.
+                  const img = { data: out, width: sw, height: sh, colorSpace: "srgb" };
+                  try { Object.defineProperty(img, Symbol.toStringTag, { value: "ImageData", configurable: true }); } catch (e) {}
+                  return img;
+                }
+              }
+            } catch (e) {}
+            return origGID ? origGID.call(this, sx, sy, sw, sh) : { data: new Uint8ClampedArray(Math.max(0, sw | 0) * Math.max(0, sh | 0) * 4), width: sw | 0, height: sh | 0 };
+          } }).getImageData, "getImageData", 4);
+        }
         markOwn(ctx);
       }
       return ctx;
@@ -3585,6 +3652,7 @@ globalThis.__domSig = () => {
     }
     if (typeof canvasProto.toBlob === "function") canvasProto.toBlob = nativize(canvasProto.toBlob, "toBlob", 1);
     if (typeof canvasProto.getBoundingClientRect === "function") canvasProto.getBoundingClientRect = nativize(canvasProto.getBoundingClientRect, "getBoundingClientRect", 0);
+
   });
 
   // document → HTMLDocument brand + 5 native getters (best-effort: the native DOM object may

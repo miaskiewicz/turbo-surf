@@ -286,6 +286,12 @@ fn ensure_render_hooks() {
         turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {
             raster::canvas_ops_png(w, h, ops_json).ok()
         }));
+        // Raw-RGBA rasterizer for getImageData: read back the ACTUAL rendered pixels (the vendored
+        // synthetic getImageData returned unrelated bytes — `fillRect(red); getImageData` ≠ red, a
+        // broken-canvas tell). Raw pixels (no encoder) → shapes/solids match a real browser exactly.
+        turbo_surf_render::set_raster_rgba_fn(Box::new(|w, h, ops_json| {
+            raster::canvas_ops_rgba(w, h, ops_json).ok()
+        }));
         // WebGL→GPU bridge: execute a recorded WebGL draw batch on the real GPU so readPixels
         // returns genuine Apple-GPU pixels (only under `gpu-metal`; else the synthetic stub stands).
         #[cfg(feature = "gpu-metal")]
@@ -3488,6 +3494,23 @@ mod tests {
             b64.len() > 1000,
             "a real rasterized PNG should be sizeable (was the ~94-byte stub); got {} base64 chars",
             b64.len()
+        );
+    }
+
+    // getImageData must read back the ACTUAL rendered pixels (via the raw-RGBA rasterizer), not
+    // the vendored synthetic bytes — `fillRect(red); getImageData` returning non-red is a
+    // broken/fake-canvas tell. Raw pixels (no PNG encoder) match a real browser for solids/shapes.
+    #[tokio::test]
+    async fn canvas_getimagedata_reads_rendered_pixels() {
+        let _s = Session::new(); // installs set_raster_rgba_fn
+        let draw = "var c=document.createElement('canvas');c.width=16;c.height=16;\
+            var x=c.getContext('2d');x.fillStyle='#ff0000';x.fillRect(0,0,16,16);\
+            var d=x.getImageData(8,8,1,1).data;\
+            document.body.setAttribute('data-px', d[0]+','+d[1]+','+d[2]+','+d[3]);";
+        let out = turbo_surf_render::render_html("<body></body>", draw).unwrap();
+        assert!(
+            out.contains(r#"data-px="255,0,0,255""#),
+            "getImageData must return the filled red pixel (raw), not synthetic bytes: {out}"
         );
     }
 

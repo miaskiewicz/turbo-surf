@@ -57,6 +57,14 @@ pub fn canvas_ops_png(width: u32, height: u32, ops_json: &str) -> Result<Vec<u8>
         paint_canvas::replay(w, h, &ops)
     }
 }
+/// Replay a 2D-canvas draw list into RAW straight-alpha RGBA8 (top-left origin, tightly packed) —
+/// the byte layout `getImageData` returns. Software (tiny-skia): getImageData reads back exact
+/// pixels with no PNG-encoder in the loop, so shapes/solids match a real browser byte-for-byte.
+pub fn canvas_ops_rgba(width: u32, height: u32, ops_json: &str) -> Result<Vec<u8>, String> {
+    let (w, h) = (width.max(1), height.max(1));
+    let ops = canvas_ops::parse_ops(ops_json)?;
+    paint_canvas::replay_rgba(w, h, &ops)
+}
 pub use style_extract::{delazy_images, image_urls, image_urls_in_css, stylesheet_hrefs};
 
 use std::collections::HashMap;

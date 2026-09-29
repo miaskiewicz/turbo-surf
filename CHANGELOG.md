@@ -65,6 +65,21 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
 - **Raster-backed canvas `toDataURL`** — `turbo-surf-raster::canvas_ops_png` replays the 2D
   display list (`ctx._ops`) into a real PNG (was a ~94-byte synthetic stub — an impossible
   size for rendered content); wired as a host hook (`set_raster_fn`) from mcp + napi.
+- **Canvas-2D surface fidelity** (diffed vs real Chrome):
+  - **`getImageData` reads the real rendered pixels** (a new raw-RGBA rasterizer path,
+    `canvas_ops_rgba` + `op_raster_rgba`), not the vendored synthetic bytes — `fillRect(red);
+    getImageData` returned non-red before, a broken/fake-canvas tell. Raw pixels have no PNG
+    encoder in the loop, so solids/shapes read back **byte-identical to a real browser**.
+  - **`measureText` width** routes through the host system-font measurer (`op_measure_text`, the
+    same CoreText face Chrome uses) — matches Chrome **exactly** (`82.3984375` for `16px Arial`,
+    was a synthetic ~66; a font-detection tell).
+  - Context **class tag** → `[object CanvasRenderingContext2D]` (was `[object DOMImplementation]`),
+    and **`getContextAttributes`** added (`{alpha, colorSpace, colorType, desynchronized,
+    toneMapping, willReadFrequently}`).
+  - Residual: `toDataURL` hash still differs (needs Chrome's Skia+CoreText rasterization AND its
+    exact libpng encoder — no shared final layer, unlike WebGL's raw GPU pixels), and glyph
+    rasterization pixels differ. `getImageData` (the raw-pixel path fingerprinters use to verify a
+    fill) is the one that now matches.
 
 ### Changed — page-load lifecycle
 - **Real document/window load sequence.** The render tier now drives `document.readyState`

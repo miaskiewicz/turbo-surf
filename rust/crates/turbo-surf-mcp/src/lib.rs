@@ -3514,6 +3514,48 @@ mod tests {
         );
     }
 
+    // Canvas 2D surface fidelity: the context class-tags as CanvasRenderingContext2D (was
+    // "[object DOMImplementation]"), exposes getContextAttributes, and measureText routes width
+    // through the real system-font measurer (matches a real browser; the vendored width was a
+    // synthetic approximation — a font-detection tell).
+    #[tokio::test]
+    async fn canvas2d_surface_matches_browser() {
+        let _s = Session::new(); // installs set_measure_fn
+        let draw = "var x=document.createElement('canvas').getContext('2d');\
+            x.font='16px Arial';\
+            var w=x.measureText('Hello World').width;\
+            var a=x.getContextAttributes();\
+            document.body.setAttribute('data-c', JSON.stringify({\
+              tag: Object.prototype.toString.call(x),\
+              w: w, alpha: a.alpha, cs: a.colorSpace, wrf: a.willReadFrequently\
+            }));";
+        let out = turbo_surf_render::render_html("<body></body>", draw).unwrap();
+        let s = out
+            .split("data-c=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let v: Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+        assert_eq!(
+            v["tag"], "[object CanvasRenderingContext2D]",
+            "ctx class tag: {v}"
+        );
+        assert_eq!(v["alpha"], true, "getContextAttributes.alpha: {v}");
+        assert_eq!(v["cs"], "srgb", "getContextAttributes.colorSpace: {v}");
+        assert_eq!(
+            v["wrf"], false,
+            "getContextAttributes.willReadFrequently: {v}"
+        );
+        // Real system-font Arial width (not the ~66 synthetic approximation); ~82 for this string.
+        let w = v["w"].as_f64().unwrap();
+        assert!(
+            w > 78.0 && w < 86.0,
+            "measureText width from the real measurer (~82): {v}"
+        );
+    }
+
     // toDataURL with a non-PNG MIME (the webp/jpeg support probe) must NOT be answered with a
     // raster PNG relabelled — it delegates to the vendored path so the data-URL prefix matches
     // the requested type. Returning image/png for a toDataURL('image/webp') is a tell.

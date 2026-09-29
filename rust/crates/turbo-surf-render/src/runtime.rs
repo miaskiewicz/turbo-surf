@@ -3587,6 +3587,55 @@ globalThis.__domSig = () => {
         // bytes — `fillRect(red); getImageData` read back NON-red, a broken-canvas tell) with one
         // that reads the ACTUAL rendered pixels back through the raw-RGBA rasterizer. Raw pixels
         // have no PNG encoder in the loop, so shapes/solids read back exactly like a real browser.
+        if (k === "2d") {
+          // Class tag: real Chrome is "[object CanvasRenderingContext2D]"; the vendored ctx tagged
+          // as "[object DOMImplementation]" (its shared fallback proto) — a tell. Brand the instance
+          // (not the shared proto — that would mistag every other object backed by it, incl.
+          // `location`, like the WebGL-proto lesson).
+          try {
+            Object.defineProperty(ctx, Symbol.toStringTag, { value: "CanvasRenderingContext2D", configurable: true });
+          } catch (e) {}
+          // getContextAttributes: real Chrome exposes it; its absence is a tell. Return the default
+          // 2D context attributes (native-masked), matching a fresh getContext('2d').
+          if (typeof ctx.getContextAttributes !== "function") {
+            ctx.getContextAttributes = nativize(({ getContextAttributes() {
+              return { alpha: true, colorSpace: "srgb", colorType: "unorm8", desynchronized: false, toneMapping: { mode: "standard" }, willReadFrequently: false };
+            } }).getContextAttributes, "getContextAttributes", 0);
+          }
+          // measureText: the vendored width was a synthetic approximation (a font-metrics tell —
+          // font-detection fingerprints compare measureText width across families). Route the WIDTH
+          // through the host's real system-font measurer (op_measure_text), which measures the same
+          // CoreText face Chrome does → width matches Chrome exactly. The bounding-box fields are
+          // derived from the size with Arial-typical ratios (the measurer returns width+height only;
+          // real per-glyph boxes would need a richer measurer — width is the load-bearing metric).
+          const measureOp = Deno.core.ops && Deno.core.ops.op_measure_text;
+          if (typeof ctx.measureText === "function" && measureOp) {
+            const origMT = ctx.measureText;
+            ctx.measureText = nativize(({ measureText(text) {
+              try {
+                const font = String(this.font || "10px sans-serif");
+                const m = /(\d+(?:\.\d+)?)px\s+(.+)$/.exec(font);
+                const size = m ? parseFloat(m[1]) : 10;
+                const fam = m ? m[2].replace(/^['"]|['"]$/g, "").split(",")[0].trim() : "sans-serif";
+                const r = JSON.parse(measureOp(String(text == null ? "" : text), fam, size));
+                if (r && r.length === 2) {
+                  const w = r[0];
+                  const round2 = (n) => Math.round(n * 100) / 100;
+                  const asc = round2(size * 0.875), desc = round2(size * 0.212);
+                  return {
+                    width: w,
+                    actualBoundingBoxLeft: 0, actualBoundingBoxRight: w,
+                    actualBoundingBoxAscent: round2(size * 0.72), actualBoundingBoxDescent: round2(size * 0.16),
+                    fontBoundingBoxAscent: asc, fontBoundingBoxDescent: desc,
+                    emHeightAscent: asc, emHeightDescent: desc,
+                    hangingBaseline: round2(asc * 0.8), alphabeticBaseline: 0, ideographicBaseline: -desc,
+                  };
+                }
+              } catch (e) {}
+              return origMT.call(this, text);
+            } }).measureText, "measureText", 1);
+          }
+        }
         if (k === "2d" && Object.prototype.hasOwnProperty.call(ctx, "getImageData")) {
           const origGID = ctx.getImageData;
           const rgbaOp2 = Deno.core.ops && Deno.core.ops.op_raster_rgba;

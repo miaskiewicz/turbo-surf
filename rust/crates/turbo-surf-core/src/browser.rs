@@ -79,12 +79,12 @@ const HEADER_ORDER_153: &[&str] = &[
 pub const RELEASES: &[ChromeRelease] = &[
     ChromeRelease {
         major: 154,
-        full_version: "154.0.7258.66",
+        full_version: "154.0.8037.58", // real Chrome 154 stable build
         header_order: HEADER_ORDER_154,
     },
     ChromeRelease {
         major: 153,
-        full_version: "153.0.7151.119",
+        full_version: "153.0.7938.132", // Chrome 153 build (realistic-shaped; 154 is the default)
         header_order: HEADER_ORDER_153,
     },
 ];

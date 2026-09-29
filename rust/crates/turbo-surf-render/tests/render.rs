@@ -9,6 +9,39 @@ use turbo_surf_render::{
     DEFAULT_RENDER_BUDGET_MS, SCRIPT_BOUNDARY,
 };
 
+// The deno_core `Deno` global must NOT leak to page scope — `'Deno' in window` /
+// `typeof window.Deno` is the single most-checked browserless/electron tell. Bootstrap
+// captures the op table into closures then deletes the global. This also exercises the
+// REUSED-isolate path (run_with_dom re-runs bootstrap after the delete), so it verifies
+// the Symbol-stash recovery keeps ops working across re-bootstrap. Runs twice to hit reuse.
+#[test]
+fn deno_global_is_deleted_from_page_scope() {
+    for _ in 0..2 {
+        let out = run_with_dom(
+            "<body></body>",
+            "JSON.stringify({\
+               t: typeof globalThis.Deno,\
+               inWin: ('Deno' in globalThis),\
+               ownName: Object.getOwnPropertyNames(globalThis).includes('Deno'),\
+               clockOk: (typeof performance.now() === 'number' && performance.now() > 0),\
+             })",
+        )
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["t"], "undefined", "typeof Deno must be undefined: {v}");
+        assert_eq!(v["inWin"], false, "'Deno' in window must be false: {v}");
+        assert_eq!(
+            v["ownName"], false,
+            "Deno absent from getOwnPropertyNames: {v}"
+        );
+        // Ops still work after the delete (clock reads through the captured op ref).
+        assert_eq!(
+            v["clockOk"], true,
+            "performance.now (op_now_perf) works post-delete: {v}"
+        );
+    }
+}
+
 // --- per-script isolation: a throw in one <script> doesn't abort the rest -----
 // A browser runs each <script> as a separate top-level program: an uncaught error in
 // one does NOT stop later scripts, and top-level let/const/function/var still populate

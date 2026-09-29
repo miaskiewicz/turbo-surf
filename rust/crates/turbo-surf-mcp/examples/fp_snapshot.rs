@@ -5,21 +5,54 @@
 //
 //   cargo run -p turbo-surf-mcp --example fp_snapshot -- /path/to/collector.js
 //   cargo run -p turbo-surf-mcp --features gpu-metal --example fp_snapshot -- collector.js
+//
+// Add `--render` to run through the ASYNC render path (render_page) instead of the sync eval
+// runtime (run_with_dom). The GPU WebGL bridge + the full page-lifecycle only run on the render
+// path — so any probe that touches WebGL readPixels / rAF / load events must use `--render`.
 use std::fs;
 
-fn main() {
-    let path = std::env::args()
-        .nth(1)
-        .expect("usage: fp_snapshot <collector.js>");
-    let collector = fs::read_to_string(&path).expect("read collector");
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let render = args.iter().any(|a| a == "--render");
+    let path = args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with("--"))
+        .expect("usage: fp_snapshot [--render] <collector.js>");
+    let collector = fs::read_to_string(path).expect("read collector");
     // Side effect: installs set_measure_fn / set_raster_fn (+ set_webgl_fn under gpu-metal).
     let _s = turbo_surf_mcp::Session::new();
-    let html = "<html><head></head><body></body></html>";
-    match turbo_surf_render::run_with_dom(html, &collector) {
-        Ok(json) => println!("{json}"),
-        Err(e) => {
-            eprintln!("collector error: {e}");
-            std::process::exit(1);
+    if render {
+        // Stash the collector's JSON result in a body attribute, render (drives the event loop +
+        // GPU bridge), then extract it from the serialized DOM.
+        let script =
+            format!("document.body.setAttribute('data-fp', String((function(){{ return ({collector}); }})()));");
+        match turbo_surf_render::render_page("<body></body>", "https://probe.test/", &script).await
+        {
+            Ok(dom) => {
+                let val = dom
+                    .split("data-fp=\"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next())
+                    .unwrap_or("")
+                    .replace("&quot;", "\"")
+                    .replace("&amp;", "&");
+                println!("{val}");
+            }
+            Err(e) => {
+                eprintln!("render error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let html = "<html><head></head><body></body></html>";
+        match turbo_surf_render::run_with_dom(html, &collector) {
+            Ok(json) => println!("{json}"),
+            Err(e) => {
+                eprintln!("collector error: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }

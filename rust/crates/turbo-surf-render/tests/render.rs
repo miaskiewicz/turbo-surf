@@ -410,6 +410,56 @@ async fn fingerprint_parity_permissions_location_charset_webgl() {
     );
 }
 
+// A real WebGL context exposes the full set of ~298 enum constants (VERTEX_SHADER, TRIANGLES, …)
+// on its prototype. Ours had only the handful patchGl set — so `gl.VERTEX_SHADER` was undefined,
+// a fingerprint tell AND a functional break (real WebGL code / the GPU bridge get `undefined` enum
+// args). Verify the constants are present with the correct standard values, on the prototype.
+#[tokio::test]
+async fn webgl_context_exposes_enum_constants() {
+    let script = r#"
+        var gl = document.createElement('canvas').getContext('webgl');
+        var proto = Object.getPrototypeOf(gl);
+        var constCount = Object.getOwnPropertyNames(proto).filter(function(k){
+            return /^[A-Z0-9_]+$/.test(k) && typeof gl[k] === 'number';
+        }).length;
+        var out = {
+            VERTEX_SHADER: gl.VERTEX_SHADER, FRAGMENT_SHADER: gl.FRAGMENT_SHADER,
+            ARRAY_BUFFER: gl.ARRAY_BUFFER, TRIANGLES: gl.TRIANGLES, FLOAT: gl.FLOAT,
+            RGBA: gl.RGBA, UNSIGNED_BYTE: gl.UNSIGNED_BYTE, COLOR_BUFFER_BIT: gl.COLOR_BUFFER_BIT,
+            constCount: constCount, onProto: !Object.prototype.hasOwnProperty.call(gl, 'VERTEX_SHADER'),
+        };
+        document.body.setAttribute('data-gl', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-gl=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    // Standard WebGL enum values (spec constants).
+    assert_eq!(v["VERTEX_SHADER"], 35633, "{v}");
+    assert_eq!(v["FRAGMENT_SHADER"], 35632, "{v}");
+    assert_eq!(v["ARRAY_BUFFER"], 34962, "{v}");
+    assert_eq!(v["TRIANGLES"], 4, "{v}");
+    assert_eq!(v["FLOAT"], 5126, "{v}");
+    assert_eq!(v["RGBA"], 6408, "{v}");
+    assert_eq!(v["UNSIGNED_BYTE"], 5121, "{v}");
+    assert_eq!(v["COLOR_BUFFER_BIT"], 16384, "{v}");
+    assert!(
+        v["constCount"].as_i64().unwrap() >= 290,
+        "full WebGL1 enum set (~298): {v}"
+    );
+    assert_eq!(
+        v["onProto"], true,
+        "constants live on the prototype, not the instance: {v}"
+    );
+}
+
 // The window surface must have real Chrome's breadth — a `X in window` / `typeof` presence check
 // for a common interface / on* handler / bar object must pass (our old ~527 own props vs Chrome's
 // ~1235 was a surface tell). Spot-check representatives across the three groups + the count floor.

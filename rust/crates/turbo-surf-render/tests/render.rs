@@ -436,6 +436,10 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
                 dateCtorLen: Date.length,
                 dateCtorConstructor: ((new Date()).constructor === Date),
                 dateInstanceof: ((new Date()) instanceof Date),
+                // Subclassing must survive the ctor wrap (Reflect.construct + new.target): a broken
+                // wrapper (plain new __RealDate) is a builtin-integrity tell.
+                subclassInstanceof: (() => { class MyDate extends Date {} return (new MyDate()) instanceof MyDate; })(),
+                subclassMethod: (() => { class MyDate extends Date { foo() { return 7; } } return (new MyDate()).foo(); })(),
                 dateTag: Object.prototype.toString.call(new Date()),
                 plainObjTag: Object.prototype.toString.call({}),
                 arrTag: Object.prototype.toString.call([]),
@@ -505,6 +509,14 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
         "(new Date()).constructor === Date: {v}"
     );
     assert_eq!(v["dateInstanceof"], true, "new Date() instanceof Date: {v}");
+    assert_eq!(
+        v["subclassInstanceof"], true,
+        "class extends Date keeps its prototype chain: {v}"
+    );
+    assert_eq!(
+        v["subclassMethod"], 7,
+        "Date subclass methods are reachable: {v}"
+    );
     assert_eq!(
         v["dateTag"], "[object Date]",
         "class-tag is [object Date]: {v}"

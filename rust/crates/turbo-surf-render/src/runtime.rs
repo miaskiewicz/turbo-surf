@@ -823,7 +823,10 @@ try {
   const __RealDate = Date;
   function DateShim(...a) {
     if (!new.target) return new __RealDate(__coherentEpoch()).toString();
-    return a.length ? new __RealDate(...a) : new __RealDate(__coherentEpoch());
+    // Reflect.construct with new.target so `class X extends Date {}` keeps its prototype chain
+    // (`new X() instanceof X`); a plain `new __RealDate(...)` would hand back a bare Date instance
+    // and break subclassing — itself a builtin-integrity tell. Zero-arg → the coherent epoch.
+    return Reflect.construct(__RealDate, a.length ? a : [__coherentEpoch()], new.target);
   }
   // Real Date.prototype is non-writable; match that attribute (writable:true→false is allowed
   // even on the function's non-configurable `prototype` slot).
@@ -3848,6 +3851,10 @@ globalThis.__domSig = () => {
       // wrong brand (a trivial, high-severity bot tell). Brand the INSTANCE itself in that case.
       if (proto === Object.prototype || proto === null) {
         tag(obj, name);
+        // Brand the instance's OWN constructor too (a singleton like document.implementation has
+        // Object.prototype as its proto, so it would otherwise report `.constructor === Object`).
+        const ctor = ({ [name]: function () {} })[name];
+        try { Object.defineProperty(obj, "constructor", { value: ctor, configurable: true }); mark(ctor, name); } catch (e) {}
         proto = null;
       }
       if (proto) {

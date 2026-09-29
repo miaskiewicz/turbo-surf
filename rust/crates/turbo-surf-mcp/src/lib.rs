@@ -100,7 +100,52 @@ const HUMAN_DRIVER_TMPL: &str = r#"((raw, __opts) => {
     if (st.wait != null) return { wait: st.wait };
     return {};
   });
-  __hi.sequence(document, steps, __opts).then(() => { try { document.body.setAttribute("data-hi-done", "1"); } catch (e) {} });
+  // After the gesture sequence resolves, capture any resulting navigation so the caller can
+  // FOLLOW it (fill-a-form-then-submit only produces a SERP if someone loads the target). Two
+  // sources, general (not page-specific): (1) a JS navigation — location.href the page set on
+  // submit; (2) the enclosing form's serialized GET target — action + every named field's value
+  // (so hidden tokens the page baked into the form, e.g. a search form's session params, ride
+  // along exactly as a browser submit would carry them). A trailing macrotask lets an async
+  // submit handler settle before we read location.
+  const captureNav = () => {
+    try {
+      let jsNav = "";
+      try { jsNav = String(location.href || ""); } catch (e) {}
+      document.body.setAttribute("data-hi-location", jsNav);
+      // Form target: the form holding the last-focused text field, else the first form.
+      let formUrl = "";
+      try {
+        const field = document.querySelector("textarea[name],input[name]");
+        const form = (field && field.form) || document.querySelector("form");
+        if (form) {
+          const method = String(form.getAttribute("method") || "get").toLowerCase();
+          const action = form.getAttribute("action") || location.pathname || "/";
+          const params = new URLSearchParams();
+          const fields = form.querySelectorAll("input[name],textarea[name],select[name]");
+          for (let i = 0; i < fields.length; i++) {
+            const el = fields[i];
+            const name = el.getAttribute("name");
+            if (!name || el.disabled) continue;
+            const type = String(el.getAttribute("type") || "").toLowerCase();
+            if ((type === "checkbox" || type === "radio") && !el.checked) continue;
+            const val = el.value != null ? String(el.value) : "";
+            if (val === "") continue;
+            params.append(name, val);
+          }
+          if (method === "get") {
+            const sep = action.indexOf("?") >= 0 ? "&" : "?";
+            const qs = params.toString();
+            formUrl = new URL(action + (qs ? sep + qs : ""), location.href).href;
+          } else {
+            formUrl = new URL(action, location.href).href;
+          }
+        }
+      } catch (e) {}
+      document.body.setAttribute("data-hi-form-nav", formUrl);
+    } catch (e) {}
+    try { document.body.setAttribute("data-hi-done", "1"); } catch (e) {}
+  };
+  __hi.sequence(document, steps, __opts).then(() => { captureNav(); });
 })"#;
 
 /// Serialize a JSON value for embedding as a JS expression: standard JSON plus escaping U+2028 /
@@ -652,6 +697,37 @@ impl Session {
     // to elements + their box centers) or explicit coords. `steps` is inline, or a saved `routine`
     // (e.g. "google-serp") with `params` substituted. This is the general "string interactions
     // together on a loaded page" capability; the google flow is just one saved routine.
+    // The navigation an interaction triggered, if any: the driver records both the page's JS
+    // navigation (`data-hi-location`) and the enclosing form's serialized GET target
+    // (`data-hi-form-nav`). Return a target only when it's a REAL navigation away from `base`
+    // (different resolved URL, http(s)). JS navigation wins; the serialized form is the fallback
+    // (a plain submit that our isolate doesn't auto-follow). General — not page-specific.
+    fn interaction_nav_target(&self, base: &str) -> Option<String> {
+        let tree = self.tree.as_ref()?;
+        let body = *tree.query_selector_all("body").first()?;
+        let attr = |k: &str| {
+            tree.get_attribute(body, k)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
+        };
+        let norm = |u: &str| {
+            u.trim_end_matches('/')
+                .split('#')
+                .next()
+                .unwrap_or("")
+                .to_string()
+        };
+        let base_n = norm(base);
+        let is_nav =
+            |u: &str| (u.starts_with("http://") || u.starts_with("https://")) && norm(u) != base_n;
+        if let Some(loc) = attr("data-hi-location") {
+            if is_nav(&loc) {
+                return Some(loc);
+            }
+        }
+        attr("data-hi-form-nav").filter(|u| is_nav(u))
+    }
+
     async fn human_interact(&mut self, args: &Value) -> Result<Value, String> {
         let (steps, routine_opts) = resolve_interaction_steps(args)?;
         // Opts: explicit args win over the routine's defaults.
@@ -681,9 +757,35 @@ impl Session {
         let completed = hydrated.contains("data-hi-done=");
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
-        Ok(
-            json!({ "ok": true, "completed": completed, "steps": steps.as_array().map(|a| a.len()).unwrap_or(0) }),
-        )
+        let n_steps = steps.as_array().map(|a| a.len()).unwrap_or(0);
+        // FOLLOW a navigation the interaction triggered (fill-a-form-then-submit only yields a
+        // result page if someone actually loads the target). Fetch it natively THROUGH the session
+        // — the jar carries the cookies the page just set (e.g. a freshly-minted session cookie),
+        // with a Referer of the originating page and a coherent sec-fetch-site, exactly as a real
+        // in-page submit would. `fetch_into` handles consent/challenge + re-renders per the mode.
+        if let Some(target) = self.interaction_nav_target(&base) {
+            let same_site =
+                turbo_surf_core::url::host_of(&base) == turbo_surf_core::url::host_of(&target);
+            let restore = self.headers.clone();
+            self.headers.insert("referer".to_string(), base.clone());
+            self.headers.insert(
+                "sec-fetch-site".to_string(),
+                if same_site {
+                    "same-origin"
+                } else {
+                    "cross-site"
+                }
+                .to_string(),
+            );
+            let followed = self.fetch_into(&target, None, None).await;
+            self.headers = restore;
+            followed?;
+            return Ok(json!({
+                "ok": true, "completed": completed, "steps": n_steps,
+                "navigated": true, "navigated_to": self.url.clone(),
+            }));
+        }
+        Ok(json!({ "ok": true, "completed": completed, "steps": n_steps, "navigated": false }))
     }
 
     // Debug/probe mode: run the current page's own scripts with the fingerprint
@@ -3187,6 +3289,46 @@ mod tests {
         );
     }
 
+    // human_interact FOLLOWS the navigation a form-submit interaction triggers: filling the
+    // search box + clicking submit serializes the form's GET target and loads it natively
+    // through the session (jar/cookies carried), so the result page is what ends up loaded —
+    // the typed query rides along on the URL. This is the fill-then-submit → SERP loop.
+    #[tokio::test]
+    async fn human_interact_follows_form_navigation() {
+        let port = spawn_form_nav_server().await;
+        let mut s = Session::new();
+        s.goto(&format!("http://127.0.0.1:{port}/")).await.unwrap();
+        let res = call_tool(
+            &mut s,
+            "human_interact",
+            &json!({
+                "steps": [
+                    { "move": { "selector": "input[name=q]" } },
+                    { "click": "input[name=q]" },
+                    { "focus": "input[name=q]" },
+                    { "type": "weather" },
+                    { "move": { "selector": "button[type=submit]" } },
+                    { "click": "button[type=submit]" }
+                ],
+                "startDelay": 10, "startJitter": 10
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res["navigated"], true, "followed the form submit: {res}");
+        let to = res["navigated_to"].as_str().unwrap_or("");
+        assert!(to.contains("/results"), "landed on the results path: {res}");
+        assert!(
+            to.contains("q=weather"),
+            "typed query rode along on the GET: {res}"
+        );
+        let dom = serialize_doc(s.tree().unwrap());
+        assert!(
+            dom.contains("Results for weather"),
+            "loaded the results page for the typed query: {dom}"
+        );
+    }
+
     // human_interact with an unknown routine surfaces the error through the tool dispatch.
     #[tokio::test]
     async fn human_interact_unknown_routine_errors() {
@@ -3479,6 +3621,47 @@ mod tests {
                         "<html><body><div id=\"rso\"><h3>Real Result</h3></div></body></html>"
                     } else {
                         "<html><body>enablejs: please enable javascript</body></html>"
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.flush().await;
+                });
+            }
+        });
+        port
+    }
+
+    // Fixture for the human_interact navigation-follow: `/` serves a search form
+    // (GET action=/results, field name=q); `/results?q=…` serves a results page that
+    // echoes the query. Lets a test prove fill-a-form-then-submit actually LOADS the
+    // target page (and that the typed value rides along on the GET).
+    async fn spawn_form_nav_server() -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut b = [0u8; 4096];
+                    let n = sock.read(&mut b).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&b[..n]);
+                    let line = req.lines().next().unwrap_or("");
+                    let path = line.split_whitespace().nth(1).unwrap_or("/");
+                    let body = if path.starts_with("/results") {
+                        let q = path
+                            .split_once("q=")
+                            .map(|(_, r)| r.split(['&', ' ']).next().unwrap_or(""))
+                            .unwrap_or("");
+                        format!("<html><body><div id=\"serp\"><h3>Results for {q}</h3></div></body></html>")
+                    } else {
+                        "<html><body><form action=\"/results\" method=\"get\">\
+                         <input name=\"q\" type=\"text\">\
+                         <button id=\"btn\" type=\"submit\">Go</button></form></body></html>"
+                            .to_string()
                     };
                     let resp = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

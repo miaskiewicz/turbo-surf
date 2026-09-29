@@ -4255,15 +4255,33 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
           blurIfFocused(t); t += delay(10, 40);
         } else if (step.type != null) {
           t += delay(120, 180);
+          const el = focused || target;
           const plan = typePlan(step.type, t);
-          for (const k of plan.events) job(focused || target, k.name, k.type, k.props, k.ts);
+          // Update the focused field's value as each character's `input` event fires — a real
+          // browser mutates .value on keystroke (the value the `input` handler and a later form
+          // submit read). Without this, typing is cosmetic (events only) and a submitted form
+          // carries an empty field.
+          const chars = String(step.type);
+          let acc = "";
+          try { if (el && el !== target && el.value != null) acc = String(el.value); } catch (e) {}
+          let ci = 0;
+          for (const k of plan.events) {
+            const j = { tgt: el, name: k.name, type: k.type, props: k.props, ts: k.ts };
+            if (k.type === "input") { acc += chars[ci++] || ""; j.setValue = acc; }
+            jobs.push(j);
+          }
           t = plan.end;
         } else if (step.wait != null) {
           t += step.wait;
         }
       }
       blurIfFocused(t);                                     // leave nothing focused at the end
-      for (const j of jobs) setTimeout(() => fire(j.tgt, ev(j.name, j.type, j.props, perfBase + j.ts)), Math.max(0, Math.round(startDelay + j.ts)));
+      for (const j of jobs) setTimeout(() => {
+        // Apply the typed value just before its `input` event, so the handler + a later
+        // form submit see the updated field value (real-browser order).
+        if (j.setValue != null) { try { j.tgt.value = j.setValue; } catch (e) {} }
+        fire(j.tgt, ev(j.name, j.type, j.props, perfBase + j.ts));
+      }, Math.max(0, Math.round(startDelay + j.ts)));
       setTimeout(() => resolve({ start: perfBase, end: perfBase + t }), Math.max(0, Math.round(startDelay + t + 20)));
     });
   }

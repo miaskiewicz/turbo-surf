@@ -31,6 +31,16 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   Ships the **`google-serp`** routine (move→click search box→focus→type query→click Search) — a
   real-user flow to *attempt* the interaction-gated SERP; the driver is general, google is one
   caller.
+  - **Follows the resulting navigation.** A fill-a-form-then-submit interaction now records the
+    triggered navigation — the page's JS `location` change and, as a fallback, the enclosing
+    form's serialized GET target (action + every named field's value, so tokens the page baked
+    into the form ride along) — and, when it's a real navigation away from the page, LOADS it
+    natively through the session (jar/cookies carried, a `Referer` of the originating page + a
+    coherent `sec-fetch-site`), then rehydrates. So "type a query, click Search" actually loads
+    the result page instead of stalling on the form. Returns `{navigated, navigated_to}`. General.
+  - **Typing now mutates the field value.** The synthesizer sets the focused element's `.value`
+    as each character's `input` event fires (real-browser order), so a submitted form carries the
+    typed text (previously typing dispatched events only — the field stayed empty).
 - **Human-input synthesizer** (`turbo_surf_render::HUMAN_INPUT_JS`) backing the tool:
   `__hi.{path,move,type,typePlan,delay,moveAndClick,play,sequence,ev}`. Generates a pointer
   **path A→B sampled the way a browser samples a gesture** — a coordinate every ~12ms (±stddev),

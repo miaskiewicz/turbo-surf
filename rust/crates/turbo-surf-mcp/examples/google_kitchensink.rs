@@ -94,6 +94,18 @@ async fn main() {
                         "    steps       : {}",
                         v.get("steps").unwrap_or(&json!("?"))
                     );
+                    // The interaction fills the search box + clicks Search; human_interact then
+                    // FOLLOWS the resulting /search navigation natively (carrying the homepage jar).
+                    println!(
+                        "    navigated   : {}",
+                        v.get("navigated").unwrap_or(&json!("?"))
+                    );
+                    println!(
+                        "    navigated_to: {}",
+                        v.get("navigated_to")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("(none)")
+                    );
                     let dom = call_tool(&mut s, "latest_dom", &json!({}))
                         .await
                         .unwrap_or(json!(null));

@@ -421,7 +421,7 @@ deno_core::extension!(
 // Non-DOM browser globals, layered over the ops AFTER the native DOM binding is
 // installed (`browser_env` owns document/Element/window/navigator/Event/etc.; this
 // adds what a network-free test env lacks and overrides a few brand/host values).
-// Virtual timers are queued and drained synchronously by `__runTimers`, ordered by
+// Virtual timers are queued and drained synchronously by `__G.runTimers`, ordered by
 // delay — no wall-clock waits. `fetch`/XHR go over the tier-1 net stack.
 //
 // Wrapped in an IIFE so it is RE-RUNNABLE on a reused isolate: a persistent
@@ -442,6 +442,8 @@ const __core = globalThis.Deno ? Deno.core : globalThis[__DC];
 try { Object.defineProperty(globalThis, __DC, { value: __core, configurable: true, enumerable: false, writable: false }); } catch (e) {}
 const ops = __core.ops;
 const __print = __core.print;
+const __NS = Symbol.for("ts");
+const __G = globalThis[__NS] || (Object.defineProperty(globalThis, __NS, { value: {}, configurable: true, enumerable: false, writable: false }), globalThis[__NS]);
 globalThis.self = globalThis;
 // Present a real Chrome (macOS) navigator so page JS that profiles the browser
 // (consistency-only anti-bot gates, feature detection) sees Chrome, not the old
@@ -805,7 +807,7 @@ let __now = 0;
 // interaction a fresh window so its transitions complete, while still capping runaway polls.
 const __VIRTUAL_BUDGET_MS = 15000;
 let __budgetBase = 0;
-globalThis.__resetTimerBudget = () => { __budgetBase = __now; };
+__G.resetTimerBudget = () => { __budgetBase = __now; };
 globalThis.setTimeout = (fn, delay = 0, ...args) => {
   __timers.push({ id: __tid, fn, due: __now + (+delay || 0), args });
   return __tid++;
@@ -915,7 +917,7 @@ globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) =
 // timer queue is bounded by the hydration pump's timer budget, so a runaway loop
 // fails fast instead of leaking. (Such an app doesn't converge headlessly anyway.)
 globalThis.queueMicrotask = (fn) => globalThis.setTimeout(fn, 0);
-globalThis.__runTimers = (max = 100000) => {
+__G.runTimers = (max = 100000) => {
   let n = 0;
   while (__timers.length && n < max) {
     // Earliest-due first.
@@ -1048,7 +1050,7 @@ globalThis.fetch = async (url, init) => {
   // redirect) fetches the target route's RSC flight with an `RSC` header — a PREFETCH
   // adds `Next-Router-Prefetch`. We don't do in-place RSC soft-nav (it never completes
   // headlessly, so `location`/`history` never advance and a `waitForURL` hangs). Record
-  // the navigation target on `__rscNav`; the live-session driver re-loads that route as
+  // the navigation target on `__G.rscNav`; the live-session driver re-loads that route as
   // a fresh page (the browser hard-nav equivalent), following the redirect chain hop by
   // hop. Prefetches are ignored.
   try {
@@ -1061,7 +1063,7 @@ globalThis.fetch = async (url, init) => {
         // employee as `?employeeIds=`) but drop Next's internal `_rsc` cache-buster — a hard
         // reload carrying `_rsc` returns a flight payload, not HTML.
         u.searchParams.delete("_rsc");
-        globalThis.__rscNav = u.pathname + u.search + u.hash;
+        __G.rscNav = u.pathname + u.search + u.hash;
       }
     }
   } catch (_e) {}
@@ -1080,13 +1082,13 @@ globalThis.fetch = async (url, init) => {
   // Network log: the Playwright shim drains this to emit `page.on('response')`
   // events (tests subscribe to capture API payloads — payroll period, employments).
   try {
-    globalThis.__netLog = globalThis.__netLog || [];
-    globalThis.__netLog.push({
+    __G.netLog = __G.netLog || [];
+    __G.netLog.push({
       url: String((url && url.url) || url),
       status: r.status, ok: r.ok, method: (o.method || "GET"),
       contentType: r.content_type || "", body: r.body,
     });
-    if (globalThis.__netLog.length > 1000) globalThis.__netLog.splice(0, globalThis.__netLog.length - 1000);
+    if (__G.netLog.length > 1000) __G.netLog.splice(0, __G.netLog.length - 1000);
   } catch (_e) {}
   const headers = {};
   if (r.content_type) headers["content-type"] = r.content_type;
@@ -2047,12 +2049,12 @@ if (typeof globalThis.URL === "undefined") {
     return url;
   };
   globalThis.URL.revokeObjectURL = () => {}; // keep the blob for a later .path() read
-  globalThis.__readBlobUrl = (url) => {
+  __G.readBlobUrl = (url) => {
     const b = blobs.get(url);
     if (b == null) return null;
     return b._s != null ? String(b._s) : "";
   };
-  globalThis.__downloads = globalThis.__downloads || [];
+  __G.downloads = __G.downloads || [];
   const record = (el) => {
     try {
       let n = el;
@@ -2062,12 +2064,12 @@ if (typeof globalThis.URL === "undefined") {
           if (dl == null && n.download) dl = n.download;
           if (dl != null) {
             const href = (n.getAttribute("href") || n.href || "");
-            const content = globalThis.__readBlobUrl(String(href));
+            const content = __G.readBlobUrl(String(href));
             // Dedupe: an attached anchor records via BOTH the document listener and the
             // prototype wrap for one click — keep only one.
-            const last = globalThis.__downloads[globalThis.__downloads.length - 1];
+            const last = __G.downloads[__G.downloads.length - 1];
             if (last && last.url === String(href) && last.filename === (dl || "download")) return true;
-            globalThis.__downloads.push({ filename: dl || "download", url: String(href), content: content == null ? "" : content });
+            __G.downloads.push({ filename: dl || "download", url: String(href), content: content == null ? "" : content });
             return true;
           }
         }
@@ -2379,7 +2381,7 @@ try {
 // record to attach a real `import.meta` to, so expose a stand-in global the script
 // rewrite below maps `import.meta` onto. `url` is the page URL; `env` is empty (no
 // build-time define table headless); `resolve` echoes the spec back as an absolute URL.
-globalThis.__importMeta = {
+__G.importMeta = {
   get url() { return (globalThis.location && globalThis.location.href) || ""; },
   env: {},
   resolve(spec) { try { return new globalThis.URL(spec, globalThis.location.href).href; } catch (_e) { return String(spec); } },
@@ -2402,30 +2404,30 @@ if (typeof globalThis.__name === "undefined") {
 // DOM that merely *appends* the <script> node never runs it, so the loader
 // promise hangs and the app never mounts. So: execute each <script> element once
 // (inline → eval in global scope; external → fetch its src then eval), and fire
-// load/error so the loader resolves. `__hydrate()` drives this to quiescence.
+// load/error so the loader resolves. `__G.hydrate()` drives this to quiescence.
 const __EXECUTABLE_TYPES = new Set(["", "text/javascript", "application/javascript", "module"]);
 function __fireScriptEvent(el, kind, err) {
   const ev = { type: kind, target: el, currentTarget: el, error: err };
   try { const h = kind === "load" ? el.onload : el.onerror; if (typeof h === "function") h.call(el, ev); } catch (_e) {}
   try { if (typeof el.dispatchEvent === "function") el.dispatchEvent(ev); } catch (_e) {}
 }
-// Rewrite `import.meta` (a SyntaxError in a classic script) onto the `__importMeta` global
+// Rewrite `import.meta` (a SyntaxError in a classic script) onto the namespaced importMeta
 // stub the dev HMR runtime reads (`.url`/`.env`). Whether a chunk is a REAL ES module is
 // NOT decided by a regex here — a regex matches `import`/`export` inside comments + strings
 // too (e.g. a vendored package's JSDoc `import {X} from 'y'`), which would wrongly route a
 // CLASSIC turbopack chunk through the deno_core module pump and load it in a SEPARATE
 // module graph → a DUPLICATE module instance (a second react-dom, whose event-system keys
-// don't match the DOM's → portal/delegated onClick never fires). Instead `__execScriptEl`
+// don't match the DOM's → portal/delegated onClick never fires). Instead `__G.execScriptEl`
 // just classic-evals; only a genuine module-syntax SyntaxError (thrown at PARSE, before any
 // code runs) routes the chunk to the module pump. Let V8 be the parser, not a regex.
-globalThis.__rewriteEsmForClassic = function __rewriteEsmForClassic(code) {
+__G.rewriteEsmForClassic = function (code) {
   if (typeof code !== "string" || !code) return code;
   if (/import\s*\.\s*meta/.test(code)) {
-    code = code.replace(/import\s*\.\s*meta/g, "globalThis.__importMeta");
+    code = code.replace(/import\s*\.\s*meta/g, "globalThis[Symbol.for('ts')].importMeta");
   }
   return code;
 }
-globalThis.__execScriptEl = async function (el) {
+__G.execScriptEl = async function (el) {
   if (!el || el.__tcDone) return;
   el.__tcDone = true; // mark before await so a re-entrant pump round can't double-run
   const get = (n) => (typeof el.getAttribute === "function" ? el.getAttribute(n) : null);
@@ -2436,7 +2438,7 @@ globalThis.__execScriptEl = async function (el) {
   // is inert in this env — promises never settle and the render never commits.
   if (get("nomodule") !== null || get("noModule") !== null) return;
   // ES modules (`<script type="module">`) run through the Rust module pump (a real
-  // module graph + loader), NOT classic eval — leave them for `__takeModuleScript`.
+  // module graph + loader), NOT classic eval — leave them for `__G.takeModuleScript`.
   if ((get("type") || "").toLowerCase() === "module") return;
   if (!__EXECUTABLE_TYPES.has((get("type") || "").toLowerCase())) return; // JSON/data blocks etc.
   const src = get("src");
@@ -2454,12 +2456,12 @@ globalThis.__execScriptEl = async function (el) {
     // (`import.meta`, bare `import`/`export`), but we run every <script> as a CLASSIC
     // script, and classic V8 rejects those tokens with a SyntaxError that aborts the
     // whole chunk. `import.meta` is the common, fixable case (the dev HMR runtime reads
-    // `import.meta.url`/`.env`): rewrite it onto the `__importMeta` global so the read
+    // `import.meta.url`/`.env`): rewrite it onto the namespaced importMeta so the read
     // works. Real `import`/`export` statements need a module loader + resolved graph we
     // don't have headless — those scripts are SKIPPED gracefully (logged) rather than
     // hung/aborted.
     const __orig = code;
-    code = globalThis.__rewriteEsmForClassic(code);
+    code = __G.rewriteEsmForClassic(code);
     // Set document.currentScript to THIS element during execution, like a browser.
     // Turbopack/webpack chunk runtimes do `TURBOPACK.push([document.currentScript, …])`
     // to correlate each chunk with the element that loaded it — a single static
@@ -2475,14 +2477,14 @@ globalThis.__execScriptEl = async function (el) {
       // before ANY code runs — so it's safe to re-run through the module pump (a real module
       // graph + loader). This is the ONLY signal we route on: text that merely LOOKS like
       // import/export (in a comment/string of a classic turbopack chunk) parses + runs fine
-      // here, so it stays classic (avoids a duplicate module instance — see __rewriteEsmForClassic).
+      // here, so it stays classic (avoids a duplicate module instance — see __G.rewriteEsmForClassic).
       const msg = String((e && e.message) || e);
       if (e instanceof SyntaxError && /\b(import|export)\b|module/i.test(msg)) {
         // Keep the element: the module pump points document.currentScript at it during eval
         // so turbopack TURBOPACK.push([document.currentScript, …]) derives the right path.
         const abs = src ? new URL(src, globalThis.location.href).href : "";
-        el.__tcModule = true; // claim it so the __takeModuleScript DOM scan won't double-run it
-        (globalThis.__esmSrcQueue || (globalThis.__esmSrcQueue = [])).push({ src: abs, code: __orig, el: el });
+        el.__tcModule = true; // claim it so the __G.takeModuleScript DOM scan won't double-run it
+        (__G.esmSrcQueue || (__G.esmSrcQueue = [])).push({ src: abs, code: __orig, el: el });
         __fireScriptEvent(el, "load");
         return;
       }
@@ -2497,7 +2499,7 @@ globalThis.__execScriptEl = async function (el) {
 };
 // Run every not-yet-run <script> in DOM order, drain timers, repeat while new
 // scripts appear or timers keep firing. Bounded by maxRounds (+ the render budget).
-globalThis.__hydrate = async function (maxRounds = 300, timerBudget = 200000) {
+__G.hydrate = async function (maxRounds = 300, timerBudget = 200000) {
   let timersLeft = timerBudget; // total timer-callback budget across rounds — an app
   // whose scheduler never reaches idle (e.g. React polling a backend that never
   // answers) would otherwise spin until the render budget; cap it and return the
@@ -2520,25 +2522,25 @@ globalThis.__hydrate = async function (maxRounds = 300, timerBudget = 200000) {
     const all = Array.prototype.slice.call(document.querySelectorAll("script"));
     const ordered = all.filter((el) => !isDeferred(el)).concat(all.filter(isDeferred));
     for (const el of ordered) {
-      if (!el.__tcDone) { ranScript = true; await globalThis.__execScriptEl(el); }
+      if (!el.__tcDone) { ranScript = true; await __G.execScriptEl(el); }
     }
-    const fired = globalThis.__runTimers(Math.min(timersLeft, 5000));
+    const fired = __G.runTimers(Math.min(timersLeft, 5000));
     timersLeft -= fired;
     if (!ranScript && fired === 0) break;
   }
 };
 // Claim the next un-run ES-module script (`<script type=module>` or an inline script
-// with `import`/`export`) in DOM order → `__RESULT = {src, code}` JSON, or "" when
+// with `import`/`export`) in DOM order → `globalThis.__RESULT = {src, code}` JSON, or "" when
 // none. The Rust module pump evaluates each through deno_core's real module graph
-// (`__execScriptEl` deliberately skips them). `__tcModule` is the claim marker.
-globalThis.__moduleStmt = /(^|[;{}\n\r])\s*(import\s+[^(]|import\s*['"]|export\s+|export\s*\{|export\s*\*)/;
-globalThis.__takeModuleScript = function () {
-  // src chunks whose body was ESM, already fetched + queued by __execScriptEl. Both
+// (`__G.execScriptEl` deliberately skips them). `__tcModule` is the claim marker.
+__G.moduleStmt = /(^|[;{}\n\r])\s*(import\s+[^(]|import\s*['"]|export\s+|export\s*\{|export\s*\*)/;
+__G.takeModuleScript = function () {
+  // src chunks whose body was ESM, already fetched + queued by __G.execScriptEl. Both
   // `src` (its URL identity, for import resolution) and `code` (the fetched body) set.
-  const q = globalThis.__esmSrcQueue;
+  const q = __G.esmSrcQueue;
   if (q && q.length) {
     const item = q.shift();
-    globalThis.__currentModuleEl = item.el || null; // for document.currentScript during eval
+    __G.currentModuleEl = item.el || null; // for document.currentScript during eval
     globalThis.__RESULT = JSON.stringify({ src: item.src, code: item.code });
     return;
   }
@@ -2549,15 +2551,15 @@ globalThis.__takeModuleScript = function () {
     const type = ((el.getAttribute && el.getAttribute("type")) || "").toLowerCase();
     const src = (el.getAttribute && el.getAttribute("src")) || "";
     const code = src ? "" : (el.textContent || el.text || "");
-    const isModule = type === "module" || (!src && globalThis.__moduleStmt.test(code));
+    const isModule = type === "module" || (!src && __G.moduleStmt.test(code));
     if (!isModule) continue;
     el.__tcModule = true;
     el.__tcDone = true;
-    globalThis.__currentModuleEl = el; // for document.currentScript during eval
+    __G.currentModuleEl = el; // for document.currentScript during eval
     globalThis.__RESULT = JSON.stringify({ src, code });
     return;
   }
-  globalThis.__currentModuleEl = null;
+  __G.currentModuleEl = null;
   globalThis.__RESULT = "";
 };
 // getByRole/getByText/getByLabel resolved IN the LIVE isolate, returning each match's
@@ -2568,7 +2570,7 @@ globalThis.__takeModuleScript = function () {
 // options / dialogs), so the idx pointed at the WRONG live node (a wrapper, not the option),
 // and the click never reached the option's onClick. Resolving here over the live DOM keeps
 // the idx and the dispatch in one context. Mirrors the Rust matchers (aria.rs/locator.rs).
-globalThis.__tcGetBy = function (kind, value, name, root) {
+__G.tcGetBy = function (kind, value, name, root) {
   // `idx` is always the GLOBAL document-order position (so the shim dispatches on `*`[idx]).
   // `root` scopes matching to within elements matching that selector (descendant-or-self) —
   // backs `parentLocator.getByRole/getByText/getByLabel(...)`.
@@ -2644,7 +2646,7 @@ globalThis.__tcGetBy = function (kind, value, name, root) {
 // either {selector} (getByTestId/locator) or {getBy:{kind,value,name}} (getByRole/Text/Label).
 // idx in the output is the GLOBAL document-order position so the shim dispatches on `*`[idx].
 // Needed because a CSS-concat selector can't express "the nth match's subtree".
-globalThis.__tcResolveScoped = function (scope, leaf) {
+__G.tcResolveScoped = function (scope, leaf) {
   let cur = [document];
   for (let si = 0; si < (scope || []).length; si++) {
     const s = scope[si];
@@ -2691,10 +2693,10 @@ globalThis.__tcResolveScoped = function (scope, leaf) {
     return;
   }
   if (leaf && leaf.getBy) {
-    // Reuse __tcGetBy's role/text/label matcher by marking the resolved roots and scoping to
+    // Reuse __G.tcGetBy's role/text/label matcher by marking the resolved roots and scoping to
     // them (descendant-or-self via the [data-tc-scope] root selector).
     for (let ci = 0; ci < cur.length; ci++) if (cur[ci].setAttribute) cur[ci].setAttribute("data-tc-scope", "");
-    globalThis.__tcGetBy(leaf.getBy.kind, leaf.getBy.value, leaf.getBy.name, "[data-tc-scope]");
+    __G.tcGetBy(leaf.getBy.kind, leaf.getBy.value, leaf.getBy.name, "[data-tc-scope]");
     const out = globalThis.__RESULT;
     for (let ci = 0; ci < cur.length; ci++) if (cur[ci].removeAttribute) cur[ci].removeAttribute("data-tc-scope");
     globalThis.__RESULT = out;
@@ -2713,7 +2715,7 @@ globalThis.__tcResolveScoped = function (scope, leaf) {
 // live, and apply the rule's declarations INLINE on the matched elements — inline style feeds
 // both this env's getComputedStyle and rtdom's native cascade (is_visible), so the reveal is
 // observable. Best-effort + flat-rule only (skips nested @media); enough for hover menus.
-globalThis.__tcApplyHover = function (el) {
+__G.tcApplyHover = function (el) {
   if (!el || !el.setAttribute) return;
   const mark = (n) => {
     if (n && n.setAttribute) n.setAttribute("data-tc-hover", "");
@@ -2826,18 +2828,18 @@ globalThis.__tcApplyHover = function (el) {
 // Pending-work signal for the Rust pump loop: "1" while timers are queued, a
 // <script> hasn't run, an ES module is unclaimed, or a fetch is in-flight (more to do
 // after the next async drain), else "0".
-globalThis.__pendingWork = () =>
-  (globalThis.__pendingFetches || 0) > 0 || __timers.length > 0 || ((globalThis.__esmSrcQueue || []).length) > 0 || Array.prototype.some.call(document.querySelectorAll("script"), (s) => !s.__tcDone || (((s.getAttribute && s.getAttribute("type")) || "").toLowerCase() === "module" && !s.__tcModule)) ? "1" : "0";
+__G.pendingWork = () =>
+  (globalThis.__pendingFetches || 0) > 0 || __timers.length > 0 || ((__G.esmSrcQueue || []).length) > 0 || Array.prototype.some.call(document.querySelectorAll("script"), (s) => !s.__tcDone || (((s.getAttribute && s.getAttribute("type")) || "").toLowerCase() === "module" && !s.__tcModule)) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
-globalThis.__pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
+__G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
 
 // A cheap "has the DOM changed?" signal for the interaction drain: element count + the
 // total length of input values (so a controlled-input edit registers). Lets the drain
 // stop once the render has SETTLED even though background timers (analytics polling,
 // React's idle scheduler) never stop — otherwise an interaction would always run to the
 // full budget. Not for correctness, just to detect quiescence of the visible tree.
-globalThis.__domSig = () => {
+__G.domSig = () => {
   try {
     const els = document.getElementsByTagName("*");
     let n = els.length, vlen = 0;
@@ -2887,7 +2889,7 @@ globalThis.__domSig = () => {
   };
   // ── <iframe> realms (generic, depth-capped) ──────────────────────────────────────
   // Every iframe — created via createElement, present in the parsed HTML, or carrying
-  // `srcdoc` — instantiates a REAL bridged child realm (browser_env's __makeFrameRealm)
+  // `srcdoc` — instantiates a REAL bridged child realm (browser_env.s namespaced makeFrameRealm)
   // that runs the frame's OWN inline + `<script src>` scripts, with a DISTINCT
   // contentWindow/contentDocument, a wired frame tree (parent/top/frames/length), and a
   // depth cap that guards frame-bombs. reCAPTCHA's bframe/anchor handshake is now just the
@@ -3024,12 +3026,12 @@ globalThis.__domSig = () => {
   };
 
   // Build (sync, idempotent) the child realm for `el` and wire its frame tree. Script loading
-  // is separate (async, see __loadFrame) so contentWindow is available immediately.
-  globalThis.__frameRealm = (el, depth) => {
+  // is separate (async, see __G.loadFrame) so contentWindow is available immediately.
+  __G.frameRealm = (el, depth) => {
     if (el.__realm) return el.__realm;
-    if (typeof globalThis.__makeFrameRealm !== "function") return globalThis;
+    if (typeof __G.makeFrameRealm !== "function") return globalThis;
     const parentWin = el.__ownerWin || globalThis;
-    const cw = globalThis.__makeFrameRealm(el, parentWin);
+    const cw = __G.makeFrameRealm(el, parentWin);
     augmentRealm(cw, parentWin, el, depth == null ? (el.__depth || 0) : depth);
     registerChildFrame(parentWin, cw);
     return cw;
@@ -3038,10 +3040,10 @@ globalThis.__domSig = () => {
   // The full frame load: ensure the realm, fetch the frame HTML (op_fetch for `src`, or the
   // `srcdoc` attribute directly), run its scripts in the realm, fire load. Counted in
   // __pendingFetches so the hydration drain waits for it. Idempotent per element.
-  globalThis.__loadFrame = async (el, depth) => {
+  __G.loadFrame = async (el, depth) => {
     if (el.__frameStarted) return el.__realm;
     el.__frameStarted = true;
-    const cw = globalThis.__frameRealm(el, depth);
+    const cw = __G.frameRealm(el, depth);
     if (!cw || cw === globalThis) { fireIframeLoad(el); return cw; }
     globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
     let frameUrl = (globalThis.location && globalThis.location.href) || "http://localhost/";
@@ -3065,9 +3067,9 @@ globalThis.__domSig = () => {
   };
   // Back-compat shim: the reCAPTCHA bframe/anchor path is now just a frame load through the
   // generic loader. `url` is the bframe src; set it so the loader fetches + runs the bframe VM.
-  globalThis.__recaptchaBframeHandshake = (el, url) => {
+  __G.recaptchaBframeHandshake = (el, url) => {
     try { if (url != null) el.__src = String(url); } catch (_e) {}
-    return globalThis.__loadFrame(el, el.__depth || 1);
+    return __G.loadFrame(el, el.__depth || 1);
   };
 
   // A realm-capable iframe host: a plain object (it does NOT enter the rtdom tree, matching the
@@ -3099,7 +3101,7 @@ globalThis.__domSig = () => {
     const maybeLoad = () => {
       if (el.__frameStarted) return;
       if (depth > FRAME_DEPTH_CAP || !frameWantsRealm(el)) { fireIframeLoad(el); return; }
-      try { globalThis.__loadFrame(el, depth); } catch (_e) { fireIframeLoad(el); }
+      try { __G.loadFrame(el, depth); } catch (_e) { fireIframeLoad(el); }
     };
     Object.defineProperty(el, "src", { configurable: true,
       get() { return el.__src || ""; },
@@ -3113,13 +3115,13 @@ globalThis.__domSig = () => {
     Object.defineProperty(el, "contentWindow", { configurable: true,
       get() {
         if (el.__realm) return el.__realm;
-        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return globalThis.__frameRealm(el, depth);
+        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return __G.frameRealm(el, depth);
         return globalThis;
       } });
     Object.defineProperty(el, "contentDocument", { configurable: true,
       get() {
         if (el.__realm) return el.__realm.document;
-        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return globalThis.__frameRealm(el, depth).document;
+        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return __G.frameRealm(el, depth).document;
         return globalThis.document;
       } });
     return el;
@@ -3154,7 +3156,7 @@ globalThis.__domSig = () => {
       Object.defineProperty(el, "contentWindow", { configurable: true, get() { return el.__realm || globalThis; } });
       Object.defineProperty(el, "contentDocument", { configurable: true, get() { return el.__realm ? el.__realm.document : globalThis.document; } });
     } catch (_e) {}
-    if (frameWantsRealm(el)) { try { globalThis.__loadFrame(el, 1); } catch (_e) {} }
+    if (frameWantsRealm(el)) { try { __G.loadFrame(el, 1); } catch (_e) {} }
   };
   try {
     const pre = document.querySelectorAll ? document.querySelectorAll("iframe") : [];
@@ -4516,7 +4518,7 @@ fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, Stri
     install_dom(rt, html, "about:blank")?;
     rt.execute_script(page_script_name("about:blank"), script.to_string())
         .map_err(|e| e.to_string())?;
-    rt.execute_script("<timers>", "__runTimers()")
+    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
         .map_err(|e| e.to_string())?;
     Ok(crate::browser_env::document_html())
 }
@@ -4801,7 +4803,12 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
       // degenerates to a per-ms firehose.
       t += Math.max(6, 12 + gauss(2.5));
     }
-    pts.push({ x: bx, y: by, t: Math.round(dur * 10) / 10 });       // final sample lands on B
+    // Final sample lands on B. Its timestamp must be STRICTLY greater than the last loop
+    // sample's: the loop's last point sits just under `dur`, and rounding both to 0.1ms can
+    // collide (dur - t_last < 0.05 → equal rounded t → a duplicate/non-increasing timestamp).
+    // Clamp to last + 0.1ms so pointer timestamps are always strictly monotonic.
+    const __lastT = pts.length ? pts[pts.length - 1].t : 0;
+    pts.push({ x: bx, y: by, t: Math.max(Math.round(dur * 10) / 10, __lastT + 0.1) });
     if (mode === "human" && rand() < 0.6) {                         // overshoot + settle
       let tt = dur + Math.max(6, 12 + gauss(2.5));
       pts.push({ x: Math.round(bx + gauss(3)), y: Math.round(by + gauss(3)), t: Math.round(tt * 10) / 10 });
@@ -5148,7 +5155,7 @@ async fn run_async(
     exec_page_scripts(rt, script, base)?;
     let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
-    rt.execute_script("<timers>", "__runTimers()")
+    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
         .map_err(|e| e.to_string())?;
     drain_event_loop(rt).await?; // promises queued by timer callbacks
     let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // complete + window load + pageshow
@@ -5164,14 +5171,17 @@ async fn run_async(
 // common "page sets window globals" case. (Builtins MUTATED in place aren't reverted —
 // `ENV_BOOTSTRAP` re-runs each page and re-seeds the env, covering the usual polyfills.)
 const SCRUB_GLOBALS: &str = r#"(() => {
-  if (!globalThis.__TS_BASELINE) {
+  if (!globalThis[Symbol.for('ts')].TS_BASELINE) {
+    // Baseline of the page's string own-prop globals. The baseline itself + all turbo-surf
+    // internals live on the Symbol namespace (globalThis[Symbol.for('ts')]) — a Symbol key, never
+    // in getOwnPropertyNames — so the scrub below (which only walks string names) never touches
+    // them, and no name needs adding to the set to protect it.
     const b = new Set(Object.getOwnPropertyNames(globalThis));
-    b.add("__TS_BASELINE");
-    globalThis.__TS_BASELINE = b;
+    globalThis[Symbol.for('ts')].TS_BASELINE = b;
     return;
   }
   for (const k of Object.getOwnPropertyNames(globalThis)) {
-    if (!globalThis.__TS_BASELINE.has(k)) {
+    if (!globalThis[Symbol.for('ts')].TS_BASELINE.has(k)) {
       try { delete globalThis[k]; } catch (_e) { /* non-configurable: leave it */ }
     }
   }
@@ -5193,7 +5203,7 @@ async fn run_async_pooled(
     exec_page_scripts(rt, script, base)?;
     let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // DOMContentLoaded (before load)
     drain_event_loop(rt).await?;
-    rt.execute_script("<timers>", "__runTimers()")
+    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
         .map_err(|e| e.to_string())?;
     drain_event_loop(rt).await?;
     let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // window load + pageshow (after DCL)
@@ -5309,7 +5319,7 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
         rt.execute_script("<script>", script.to_string())
             .map_err(|e| e.to_string())?;
         drain_event_loop(&mut rt).await?;
-        rt.execute_script("<timers>", "__runTimers()")
+        rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
             .map_err(|e| e.to_string())?;
         drain_event_loop(&mut rt).await?;
         let g = rt
@@ -5335,13 +5345,16 @@ async fn run_hydrate(rt: &mut JsRuntime, html: &str, base: &str) -> Result<Strin
     // quiesces. The watchdog bounds wall time; MAX_PUMPS bounds a pathological spin.
     const MAX_PUMPS: usize = 500;
     for _ in 0..MAX_PUMPS {
-        rt.execute_script("<hydrate>", "globalThis.__tcHydrate = __hydrate();")
-            .map_err(|e| e.to_string())?;
+        rt.execute_script(
+            "<hydrate>",
+            "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
+        )
+        .map_err(|e| e.to_string())?;
         drain_event_loop(rt).await?;
         drain_module_scripts(rt, base).await?;
         drain_event_loop(rt).await?;
         let pending = rt
-            .execute_script("<pending>", "__pendingWork()")
+            .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
             .map_err(|e| e.to_string())?;
         if read_string(rt, pending)? != "1" {
             break;
@@ -5350,14 +5363,17 @@ async fn run_hydrate(rt: &mut JsRuntime, html: &str, base: &str) -> Result<Strin
     Ok(crate::browser_env::document_html())
 }
 
-// Evaluate every un-run ES-module `<script>` (claimed via `__takeModuleScript`) through
+// Evaluate every un-run ES-module `<script>` (claimed via `globalThis[Symbol.for('ts')].takeModuleScript`) through
 // deno_core's real module graph: inline modules load from their own code, `src` modules
 // load by URL (the `NetModuleLoader` fetches them + their imports over the host net).
 // This is the path a Next dev / turbopack build (served as ES modules) needs to hydrate.
 async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), String> {
     for n in 0..1000usize {
-        rt.execute_script("<take-mod>", "globalThis.__takeModuleScript();")
-            .map_err(|e| e.to_string())?;
+        rt.execute_script(
+            "<take-mod>",
+            "globalThis[Symbol.for('ts')].takeModuleScript();",
+        )
+        .map_err(|e| e.to_string())?;
         let g = rt
             .execute_script(
                 "<take-mod-r>",
@@ -5385,7 +5401,7 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
             continue;
         };
         // Code in hand (inline module, OR a `<script src>` chunk whose fetched body was
-        // ESM — `__execScriptEl` already fetched it and queued it) → evaluate from that
+        // ESM — `globalThis[Symbol.for('ts')].execScriptEl` already fetched it and queued it) → evaluate from that
         // code with `spec` as its identity so the import graph still resolves relative to
         // the src URL. Only a bare `src` with no body re-fetches through the loader.
         let loaded = if code.is_empty() {
@@ -5402,7 +5418,7 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
                 // Promise.all never resolves (→ the app never hydrates, no error).
                 rt.execute_script(
                     "<mod-cs>",
-                    "try{document.currentScript = globalThis.__currentModuleEl || null;}catch(_e){}",
+                    "try{document.currentScript = globalThis[Symbol.for('ts')].currentModuleEl || null;}catch(_e){}",
                 )
                 .map_err(|e| e.to_string())?;
                 let ev = rt.mod_evaluate(id).await;
@@ -5467,7 +5483,7 @@ async fn drain_to_quiescence(rt: &mut JsRuntime) -> Result<(), String> {
     // MUI modal's Fade-exit timer) fire + complete even when the clock is already large.
     rt.execute_script(
         "<reset-budget>",
-        "globalThis.__resetTimerBudget && globalThis.__resetTimerBudget();",
+        "globalThis[Symbol.for('ts')].resetTimerBudget && globalThis[Symbol.for('ts')].resetTimerBudget();",
     )
     .map_err(|e| e.to_string())?;
     const MAX_ROUNDS: usize = 500;
@@ -5483,21 +5499,27 @@ async fn drain_to_quiescence(rt: &mut JsRuntime) -> Result<(), String> {
         // etc.) appends a <script src> when the component first renders. Without running it
         // the chunk never executes, the import() promise never resolves, and the modal never
         // appears. __hydrate is idempotent (skips already-run scripts via __tcDone).
-        rt.execute_script("<hydrate>", "globalThis.__tcHydrate = __hydrate();")
-            .map_err(|e| e.to_string())?;
+        rt.execute_script(
+            "<hydrate>",
+            "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
+        )
+        .map_err(|e| e.to_string())?;
         drain_event_loop(rt).await?;
         let fired = rt
-            .execute_script("<timers>", "__runTimers(2000)")
+            .execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers(2000)")
             .map_err(|e| e.to_string())?;
         drain_event_loop(rt).await?;
         let pending = rt
-            .execute_script("<pending>", "__pendingWork()")
+            .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
             .map_err(|e| e.to_string())?;
         let sig_v = rt
-            .execute_script("<domsig>", "__domSig()")
+            .execute_script("<domsig>", "globalThis[Symbol.for('ts')].domSig()")
             .map_err(|e| e.to_string())?;
         let fetches = rt
-            .execute_script("<fetches>", "__pendingFetchCount()")
+            .execute_script(
+                "<fetches>",
+                "globalThis[Symbol.for('ts')].pendingFetchCount()",
+            )
             .map_err(|e| e.to_string())?;
         let still = read_string(rt, pending)? == "1";
         let fired_any = read_string(rt, fired)? != "0";

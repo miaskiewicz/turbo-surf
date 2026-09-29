@@ -3,6 +3,30 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.5.3] — 2026-09-29 — hide internal globals from window fingerprint
+
+### Changed — render fingerprint fidelity
+- **turbo-surf's `__*` internal globals no longer sit on `window`.** `Object.getOwnPropertyNames
+  (window)` (a bot-enumeration check) previously exposed ~31 turbo-surf helpers (`__runTimers`,
+  `__hydrate`, `__makeFrameRealm`, `__importMeta`, …) — real Chrome has none. **30 of 31** are now
+  moved onto a **`globalThis[Symbol.for('ts')]` namespace**: a Symbol key, absent from
+  `getOwnPropertyNames`, yet reachable from every context (the bootstrap via `__G`, the Rust host +
+  injected scripts + child iframe realms via `globalThis[Symbol.for('ts')]`). Covers the
+  ENV_BOOTSTRAP internals (render machinery, testctl, the module/frame loader, misc), the
+  `import.meta` rewrite target (`__importMeta`), and — via **turbo-test v0.4.4** (the vendored DOM
+  binding, re-vendored here) — `__makeFrameRealm` / `__ttEvent` / `__winListeners`.
+  - **Not moved (not tells):** `__RESULT` (the public `run_playwright` return API) and `__hi`
+    (`human_interact`) are transient — present only during those flows, never during an anti-bot
+    page load; `__addGetElems` self-deletes in the binding after use.
+  - **Sole residual:** `__name` (esbuild's `keepNames` helper) — transpiled page code references it
+    as a free identifier expecting esbuild's module-local `var __name`; the global is a no-op
+    fallback, and `__name` on window is ambiguous (a real esbuild helper name), so it's left as-is.
+  - Regression test `internal_globals_are_off_window` verifies the moved names are gone from
+    `getOwnPropertyNames`/`in window` yet still callable via the namespace.
+
+### Dependencies
+- Vendored DOM binding bumped to **turbo-test 0.4.4** (`browser_env.{js,rs}`).
+
 ## [0.5.2] — 2026-09-29 — fix crates.io publish (trust-anchors default)
 
 Hotfix for the v0.5.1 crates.io publish, which failed on `turbo-surf-mcp` with

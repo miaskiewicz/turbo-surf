@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.5.2 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.5.3 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -318,6 +318,10 @@ and in-isolate via the `fp_snapshot` example). Highlights:
 - **Window surface breadth** matches Chrome (~1235 own props): the full set of interface
   constructors, `on*` handler slots (null), and bar/API objects — so `X in window` /
   `typeof window.X` presence checks pass.
+- **No `__*` internal globals leak.** turbo-surf's own render helpers (timers, hydration, the
+  module/frame loader, …) live on a `globalThis[Symbol.for('ts')]` namespace — a Symbol key, so
+  `Object.getOwnPropertyNames(window)` shows none of them (real Chrome has no such `__*` globals),
+  while they stay reachable across the isolate, child realms, and the Rust host.
 - **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
   real native functions); the `toString` anti-hook trap is itself shapeless.
 - **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for

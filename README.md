@@ -109,7 +109,8 @@ npx turbo-surf-mcp          # stdio MCP server (76 tools), e.g.:
 # screenshot:  screenshot (PNG/SVG of the page or a dom_history snapshot),
 #              set_viewport
 # interaction: click, fill, submit, click_selector, fill_selector, select_option,
-#              check, uncheck, fill_many, find_text, extract_links, set_bypass_consent
+#              check, uncheck, fill_many, find_text, extract_links,
+#              set_bypass_consent, set_consent_socs
 # accessors:   get_attribute, text_content, inner_html, input_value, count,
 #              is_visible, is_checked, is_enabled, is_editable, is_focused,
 #              is_empty, aria_role, accessible_name, accessible_description
@@ -266,9 +267,17 @@ pixels. Measured: a standard WebGL fingerprint draw is now **byte-identical to r
 ANGLE→Metal on the same GPU). Canvas 2D `toDataURL` also rasterizes on the GPU (falls back to
 tiny-skia on any GPU error, so enabling it never regresses). Zero cost to the default build +
 the PyPI wheels (no `wgpu` unless enabled). Beats device-invariance/SwiftShader detection —
-for WebGL, exact-hash comparison too. (Canvas-2D `toDataURL` still differs from Chrome's hash:
-that needs Chrome's exact Skia+CoreText raster **and** its libpng encoder, no shared final
-layer — but `getImageData` reads back the real rendered pixels, byte-identical for solids/shapes.)
+for WebGL, exact-hash comparison too.
+
+A second build feature **`--features coretext`** (macOS only, off by default) rasterizes canvas
+**text** through CoreText/CoreGraphics — the same system glyph stack Chrome's Skia uses on macOS —
+so `getImageData` over rendered text reads back like a real Mac Chrome (measured: `getImageData` on
+"Hello" 20px Arial matches Chrome's bounding box + average alpha exactly). Double OS-guarded
+(`cfg(macos)` + macOS-only Cargo deps); only text is swapped (shapes stay on tiny-skia), and it
+falls back to the vector glyph trace for a scaled/rotated text matrix. (Canvas-2D `toDataURL` still
+differs from Chrome's *hash*: that also needs Chrome's exact PNG-container/encoder, no shared final
+layer — but `getImageData` reads back the real rendered pixels, byte-identical for solids/shapes and
+now CoreText-matched for text.)
 
 MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
@@ -309,16 +318,24 @@ and in-isolate via the `fp_snapshot` example). Highlights:
 - **WebGL**: full enum-constant set on the context prototype; under `--features gpu-metal`,
   `readPixels` is byte-identical to Chrome (see above).
 - Real **page-load lifecycle** (`readyState` loading→interactive→complete with `DOMContentLoaded`
-  → window `load` → `pageshow`, in order), a Chrome-shaped **high-resolution clock** (fractional
-  `performance.now`/`timeOrigin`, batched rAF) with spread `performance.timing`, **distinct**
+  → window `load` → `pageshow`, in order), a Chrome-shaped **coherent high-resolution clock**
+  (fractional `performance.now`/`timeOrigin`, batched rAF) with spread `performance.timing`. Observable
+  time is **real**: `performance.now()`/`Date.now()` derive from real monotonic hrtime + virtual timer
+  advance, so `setTimeout(fn, 100)` observes ~100ms elapsed (was 0ms — a chronometric-trap tell) and
+  `timeOrigin + performance.now() == Date.now()` holds (passes BotGuard's perf-vs-Date cross-check);
+  timer *delays* stay virtual so the crawler never blocks. Plus **distinct**
   `Intersection`/`Resize`/`MutationObserver` constructors, real `MessagePort`/`MessageChannel`/
   `MessageEvent` instances, spec-shaped `navigator.permissions`, and general **nested-iframe realms**
   (any iframe/`srcdoc` runs its own scripts with a distinct `contentWindow` + wired frame tree + depth cap).
 
 Search strategies also take optional **`headers`** + **`internal_hosts`** maps (e.g. `Referer` +
 `sec-fetch-site` for a real in-site-navigation shape). Opt into a coherent timezone with
-**`TURBO_SURF_TZ`**. Honest scope: these close the client-side/structural tells; google's trusted
-`__Secure-ENID` remains **server-scored** (see the CHANGELOG's BotGuard notes).
+**`TURBO_SURF_TZ`**. The synthetic google/youtube consent (`SOCS`) cookie is param-driven —
+**`set_consent_socs`** overrides the value, and `""` seeds none so the *real*
+`consent.google.com/save` Accept-all handshake runs instead of the shortcut (measured: both paths
+still yield the JS-gated shell, so the consent guard is not the trust gate). Honest scope: these
+close the client-side/structural tells; google's trusted `__Secure-ENID` remains **server-scored**
+(see the CHANGELOG's BotGuard notes).
 
 ---
 

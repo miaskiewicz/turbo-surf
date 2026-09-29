@@ -110,6 +110,15 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   origin-relative `DOMHighResTimeStamp` (~16.6ms cadence + jitter, ≤ `now()`), a re-scheduled
   callback runs on the next frame, and it returns an integer id with a correct `cancelAnimationFrame`
   (was: per-callback incrementing timestamp, no arg, `clearTimeout` alias — a tell).
+- **Coherent clock — observable time is REAL, timer delays stay virtual.** `performance.now()` and
+  `Date.now()` now derive from `page_age + real_monotonic_hrtime + virtual_timer_advance` via a new
+  `op_now_perf` op (a real monotonic `Instant`, sub-ms). So wall-clock reads advance like a real
+  machine's — `setTimeout(fn, 100)` observes ~100ms elapsed (was **0ms**, a chronometric-trap tell),
+  and a busy loop shows real µs drift (the maxIdenticalRun over repeated `performance.now()` fell
+  13989 → 1110). `Date.now` is overridden so `timeOrigin + performance.now() == Date.now()` (coherent
+  residual 0), passing BotGuard's `perf.now()`-vs-`Date.now()` chronometric cross-check. Timer *delays*
+  stay on the virtual clock so the crawler never blocks on a real `setTimeout`. Covered by
+  `clock_reflects_virtual_time_and_is_coherent`.
 - **UA-CH greased brand** → `"Not_A Brand";v="8"` in the middle slot, matching the on-wire
   `sec-ch-ua`; coherent `getHighEntropyValues.fullVersionList` (was a stale `Not)A;Brand;v=24`).
 - **Coherence surfaces** real Chrome exposes that deno_core omits: `navigator.pdfViewerEnabled`,
@@ -206,6 +215,19 @@ reach for a synthetic DOM — documented.
   statement splitter. So this beats device-invariance/SwiftShader **and** exact-hash comparison for
   the common WebGL fingerprint scenes. (Live-measured: even the full kitchen-sink — GPU + interaction
   + parity — does not earn a trusted google `__Secure-ENID`; that residual is server-side attestation.)
+- **`coretext` cargo feature** (off by default; macOS only) — canvas **text** glyphs raster through
+  CoreText/CoreGraphics (the same system glyph stack Chrome's Skia uses on macOS) instead of the
+  ttf-parser + tiny-skia vector glyph trace, so `getImageData` over rendered text reads back like a
+  real Mac Chrome. OS-guarded twice: `#[cfg(all(target_os = "macos", feature = "coretext"))]` on the
+  code path AND macOS-only optional `core-graphics`/`core-text`/`core-foundation` Cargo deps — the
+  frameworks don't exist elsewhere, so nothing to build off-macOS. Only text is swapped (shapes stay
+  on tiny-skia, no regression); handles an identity/translate CTM and falls back to the vector trace
+  for a scaled/rotated text matrix. **Live-measured vs real Chrome**: `getImageData` over "Hello"
+  20px Arial → bbox `[3,13,46,28]` + avgAlpha 163, matching Chrome's bbox `[3,13,46,28]` + avgAlpha
+  163 (pixel count within 2%). Enabled via `turbo-surf-mcp`/`napi`/`py`'s `coretext` pass-through;
+  zero cost to the default build. (Canvas-2D `toDataURL` byte-parity remains intentionally out of
+  scope — PNG-container/encoder differences, not a glyph-shape tell.) Covered by
+  `coretext_rasterizes_text_into_pixmap` + `coretext_declines_non_translate_ctm`.
 
 ### Added — per-strategy config (data-driven, not google-hardcoded)
 - The `structural` result extractor's engine-internal host filter is now a per-strategy

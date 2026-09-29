@@ -427,7 +427,11 @@ const __uaPlatform = __pick("uaPlatform", "macOS");
 const __isMac = __uaPlatform === "macOS" || /mac/i.test(String(__platform));
 const __colorDepth = __pick("colorDepth", __isMac ? 30 : 24);
 const __pixelDepth = __pick("pixelDepth", __colorDepth);
-globalThis.navigator = {
+// The navigator's data + method IMPLEMENTATIONS. Assembled here, then hung off a real
+// `Navigator.prototype` (below) so `navigator` is a prototype-backed instance with ZERO own
+// properties — exactly like Chrome (a plain object literal had 26 own props + a 15-member proto,
+// vs Chrome's 0 own + 84-member Navigator.prototype: a structural tell).
+const __navData = {
   userAgent: __ua,
   appVersion: __ua.replace(/^Mozilla\//, ""),
   appName: "Netscape", appCodeName: "Mozilla", product: "Gecko", productSub: "20030107",
@@ -553,6 +557,84 @@ globalThis.navigator = {
     };
   })(),
 };
+// Build a real `Navigator` interface: `window.Navigator` + a prototype holding all 84 members
+// Chrome exposes (getters for data props, functions for methods), then a zero-own-property
+// instance. Members we implement use __navData; the rest get plausible stubs so presence/`in`/
+// typeof checks + the member count match Chrome. Getters/methods are arrows (no own `prototype`)
+// and get native-masked in the toString IIFE. The exact 84-name list is from a live Chrome 154.
+(() => {
+  const GET = ("appCodeName appName appVersion bluetooth clipboard connection cookieEnabled cpuPerformance " +
+    "credentials deprecatedRunAdAuctionEnforcesKAnonymity deviceMemory devicePosture doNotTrack geolocation gpu " +
+    "hardwareConcurrency hid ink keyboard language languages locks login managed maxTouchPoints mediaCapabilities " +
+    "mediaDevices mediaSession mimeTypes onLine pdfViewerEnabled permissions platform plugins presentation product " +
+    "productSub protectedAudience scheduling serial serviceWorker storage storageBuckets usb userActivation " +
+    "userAgent userAgentData vendor vendorSub virtualKeyboard wakeLock webdriver webkitPersistentStorage " +
+    "webkitTemporaryStorage windowControlsOverlay xr").split(/\s+/);
+  const FN = ("adAuctionComponents canLoadAdAuctionFencedFrame canShare clearAppBadge clearOriginJoinedAdInterestGroups " +
+    "createAuctionNonce deprecatedReplaceInURN deprecatedURNToURL getBattery getGamepads getInstalledRelatedApps " +
+    "getInterestGroupAdAuctionData getUserMedia javaEnabled joinAdInterestGroup leaveAdInterestGroup " +
+    "registerProtocolHandler requestMIDIAccess requestMediaKeySystemAccess runAdAuction sendBeacon setAppBadge share " +
+    "unregisterProtocolHandler updateAdInterestGroups vibrate webkitGetUserMedia").split(/\s+/);
+  // Plausible stubs for members we don't back with real data (presence/shape checks pass).
+  const P = () => Promise.resolve();
+  const REJ = () => Promise.reject(new DOMException("Not supported", "NotSupportedError"));
+  const GET_STUB = {
+    geolocation: { getCurrentPosition() {}, watchPosition() { return 0; }, clearWatch() {} },
+    mediaDevices: { enumerateDevices: () => Promise.resolve([]), getUserMedia: REJ, getSupportedConstraints: () => ({}), addEventListener() {}, removeEventListener() {} },
+    serviceWorker: { register: REJ, getRegistration: () => Promise.resolve(undefined), getRegistrations: () => Promise.resolve([]), ready: new Promise(() => {}), controller: null, addEventListener() {}, removeEventListener() {} },
+    storage: { estimate: () => Promise.resolve({ quota: 0, usage: 0 }), persisted: () => Promise.resolve(false), persist: () => Promise.resolve(false) },
+    credentials: { get: () => Promise.resolve(null), create: () => Promise.resolve(null), store: P, preventSilentAccess: P },
+    userActivation: { hasBeenActive: true, isActive: false },
+    wakeLock: { request: REJ },
+    keyboard: { getLayoutMap: () => Promise.resolve(new Map()), lock: P, unlock() {} },
+    locks: { request: P, query: () => Promise.resolve({ held: [], pending: [] }) },
+    mediaCapabilities: { decodingInfo: () => Promise.resolve({ supported: true, smooth: true, powerEfficient: true }), encodingInfo: () => Promise.resolve({ supported: true, smooth: true, powerEfficient: true }) },
+    mediaSession: { metadata: null, playbackState: "none", setActionHandler() {}, setPositionState() {} },
+    // React's scheduler probes navigator.scheduling.isInputPending — must be an object with the fn.
+    scheduling: { isInputPending: () => false },
+    presentation: { defaultRequest: null, receiver: null },
+    webkitTemporaryStorage: { queryUsageAndQuota() {}, requestQuota() {} },
+    webkitPersistentStorage: { queryUsageAndQuota() {}, requestQuota() {} },
+  };
+  const navProto = {};
+  const def = (name, desc) => { try { Object.defineProperty(navProto, name, desc); } catch (e) {} };
+  for (const name of GET) {
+    const has = Object.prototype.hasOwnProperty.call(__navData, name);
+    // Default an unlisted interface getter to a fresh {} (not null): real Chrome returns an object
+    // for these, and `navigator.X.foo` must read `undefined` rather than throw on null. A fresh
+    // object per property (not one shared ref) so `navigator.a !== navigator.b`.
+    const val = has ? __navData[name] : (Object.prototype.hasOwnProperty.call(GET_STUB, name) ? GET_STUB[name] : {});
+    def(name, { get: () => val, enumerable: true, configurable: true });
+  }
+  const FN_IMPL = {
+    javaEnabled: () => false,
+    vibrate: () => true,
+    canShare: () => false,
+    share: REJ,
+    getBattery: () => Promise.resolve({ charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1, addEventListener() {}, removeEventListener() {} }),
+    getGamepads: () => [null, null, null, null],
+    getInstalledRelatedApps: () => Promise.resolve([]),
+    requestMIDIAccess: REJ,
+    requestMediaKeySystemAccess: REJ,
+    getUserMedia: (_c, _ok, err) => { try { if (err) err(new DOMException("Permission denied", "NotAllowedError")); } catch (e) {} },
+    webkitGetUserMedia: (_c, _ok, err) => { try { if (err) err(new DOMException("Permission denied", "NotAllowedError")); } catch (e) {} },
+    setAppBadge: P, clearAppBadge: P,
+    registerProtocolHandler: () => {}, unregisterProtocolHandler: () => {},
+  };
+  for (const name of FN) {
+    const impl = Object.prototype.hasOwnProperty.call(__navData, name) && typeof __navData[name] === "function"
+      ? __navData[name]
+      : (FN_IMPL[name] || (() => undefined));
+    def(name, { value: impl, writable: true, enumerable: true, configurable: true });
+  }
+  function Navigator() { throw new TypeError("Illegal constructor"); }
+  Navigator.prototype = navProto;
+  def("constructor", { value: Navigator, writable: true, configurable: true });
+  Object.defineProperty(navProto, Symbol.toStringTag, { value: "Navigator", configurable: true });
+  globalThis.Navigator = Navigator;
+  const navigator = Object.create(navProto); // zero own properties, like Chrome
+  globalThis.navigator = navigator;
+})();
 // `screen` — overridable as a unit; defaults to a common 1080p desktop.
 {
   const __scr = __pick("screen", { width: 1920, height: 1080 });
@@ -3004,10 +3086,23 @@ globalThis.__domSig = () => {
   if (globalThis.Headers) mark(globalThis.Headers, "Headers");
   const nav = globalThis.navigator;
   if (nav && nav.clipboard) { mark(nav.clipboard.writeText, "writeText"); mark(nav.clipboard.readText, "readText"); }
-  // navigator.sendBeacon is a JS closure (it POSTs the collected token over op_fetch); a
-  // collector that reads its `.toString()` would see source and flag a tampered/polyfilled
-  // beacon. Report native, like every other shim.
-  if (nav && typeof nav.sendBeacon === "function") mark(nav.sendBeacon, "sendBeacon");
+  // Navigator.prototype now holds all 84 members (getters + methods). Native-mask every one so a
+  // collector reading `Object.getOwnPropertyDescriptor(Navigator.prototype, k).get.toString()` or
+  // a method's `.toString()` sees "[native code]", not JS source. (The getters/methods are arrows,
+  // so they already have no own `prototype` — matching native shape.)
+  try {
+    const np = globalThis.Navigator && globalThis.Navigator.prototype;
+    if (np) {
+      mark(globalThis.Navigator, "Navigator");
+      for (const k of Object.getOwnPropertyNames(np)) {
+        const d = Object.getOwnPropertyDescriptor(np, k);
+        if (!d) continue;
+        if (typeof d.get === "function") mark(d.get, "get " + k);
+        if (typeof d.set === "function") mark(d.set, "set " + k);
+        if (typeof d.value === "function") mark(d.value, k);
+      }
+    }
+  } catch (e) {}
   // window.postMessage + trustedTypes are JS shims (see their defs); a collector reading
   // their `.toString()` must see native source, like every other shim.
   if (typeof globalThis.postMessage === "function") mark(globalThis.postMessage, "postMessage");
@@ -3087,15 +3182,11 @@ globalThis.__domSig = () => {
     Object.setPrototypeOf(obj, proto);
   };
 
-  // navigator → Navigator.prototype (13 native getters). webdriver moves to a native getter
-  // returning false with NO own property (defeats webdriver-getter-tampered + the alt/contradiction
-  // cross-reads, which call the prototype getter).
-  guard(() => hostInterface(nav, "Navigator",
-    ["userAgent", "platform", "language", "languages", "hardwareConcurrency", "vendor",
-     "onLine", "appVersion", "appName", "product", "cookieEnabled", "appCodeName",
-     "maxTouchPoints", "webdriver"], ["webdriver"]));
-  guard(() => { Object.defineProperty(Object.getPrototypeOf(nav), "webdriver", { get: nativeGetter(false), enumerable: true, configurable: true }); });
-  guard(() => { if (nav && typeof nav.javaEnabled !== "function") { nav.javaEnabled = function javaEnabled() { return false; }; mark(nav.javaEnabled, "javaEnabled"); } });
+  // NB: navigator is now a full `Navigator` instance built earlier — zero own props, all 84
+  // members (incl. userAgent/platform/webdriver) as native-marked getters on `Navigator.prototype`
+  // (marked in the loop above). So the old `hostInterface(nav, "Navigator", …)` re-parenting is
+  // GONE — it replaced the real 84-member prototype with a thin 13-getter one (a structural tell).
+  // `webdriver` is already a native getter returning false with no own property.
 
   // screen → Screen.prototype (6 native getters); reserve OS chrome so avail<full (screen-no-os-chrome).
   guard(() => {

@@ -410,6 +410,75 @@ async fn fingerprint_parity_permissions_location_charset_webgl() {
     );
 }
 
+// navigator must be a real `Navigator` INSTANCE like Chrome: zero own properties, all members on
+// `Navigator.prototype` (Chrome exposes ~84), `navigator instanceof Navigator`, and the identity
+// props (userAgent/webdriver) resolved via native-marked prototype getters (not own data props —
+// the old plain-object navigator had 26 own props + a thin 15-member proto, a structural tell).
+#[tokio::test]
+async fn navigator_is_a_prototype_backed_instance() {
+    let script = r#"
+        var np = Object.getPrototypeOf(navigator);
+        var wd = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+        var ua = Object.getOwnPropertyDescriptor(Navigator.prototype, 'userAgent');
+        var out = {
+            instOwn: Object.getOwnPropertyNames(navigator).length,
+            protoCount: Object.getOwnPropertyNames(np).length,
+            isInstance: navigator instanceof Navigator,
+            protoIsNavProto: np === Navigator.prototype,
+            tag: Object.prototype.toString.call(navigator),
+            webdriver: navigator.webdriver,
+            webdriverViaGetter: !!(wd && wd.get),
+            uaViaGetter: !!(ua && ua.get),
+            uaGetterNative: ua && ua.get ? Function.prototype.toString.call(ua.get).indexOf('[native code]') >= 0 : false,
+            // A member we stub must still be present + object-shaped (React reads scheduling.isInputPending).
+            hasScheduling: typeof navigator.scheduling === 'object' && typeof navigator.scheduling.isInputPending === 'function',
+        };
+        document.body.setAttribute('data-nav', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-nav=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    assert_eq!(
+        v["instOwn"], 0,
+        "navigator has zero own properties (a real instance): {v}"
+    );
+    assert!(
+        v["protoCount"].as_i64().unwrap() >= 80,
+        "Navigator.prototype has ~84 members: {v}"
+    );
+    assert_eq!(v["isInstance"], true, "navigator instanceof Navigator: {v}");
+    assert_eq!(
+        v["protoIsNavProto"], true,
+        "immediate proto is Navigator.prototype: {v}"
+    );
+    assert_eq!(v["tag"], "[object Navigator]", "class tag: {v}");
+    assert_eq!(v["webdriver"], false, "webdriver false: {v}");
+    assert_eq!(
+        v["webdriverViaGetter"], true,
+        "webdriver is a prototype getter, not an own prop: {v}"
+    );
+    assert_eq!(
+        v["uaViaGetter"], true,
+        "userAgent is a prototype getter: {v}"
+    );
+    assert_eq!(
+        v["uaGetterNative"], true,
+        "the userAgent getter reports native: {v}"
+    );
+    assert_eq!(
+        v["hasScheduling"], true,
+        "navigator.scheduling.isInputPending present (React): {v}"
+    );
+}
+
 // Anti-tamper native-fn SHAPE: a real native function reports "[native code]" from toString AND
 // has NO own `prototype` property (a `function`-expression shim does — a stealth-detection tell,
 // e.g. `'prototype' in HTMLCanvasElement.prototype.toDataURL` is false in Chrome). The toString

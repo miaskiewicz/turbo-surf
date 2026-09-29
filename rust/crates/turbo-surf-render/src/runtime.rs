@@ -806,11 +806,37 @@ const __perfNow = () => {
 };
 // Redefine Date.now() coherently with performance.now (real epoch + real monotonic + virtual).
 // The native epoch stays available to the host (cookies/TLS live in Rust, not this isolate).
+const __coherentEpoch = () => Math.floor(__perfTimeOrigin + __observed());
 try {
   Object.defineProperty(Date, "now", {
-    value: () => Math.floor(__perfTimeOrigin + __observed()),
+    value: () => __coherentEpoch(),
     configurable: true, writable: true,
   });
+} catch (e) {}
+// Coherence of the CONSTRUCTOR too: `new Date()` / `+new Date()` / `Date()` must read the SAME
+// coherent clock as `Date.now()`, else they diverge by the accumulated virtual time after a timer
+// drain (real Chrome keeps them equal — the delta is a tell). Only the zero-arg path is retimed;
+// every other form (`new Date(ms)`, `new Date(y,m,d,…)`, `new Date(str)`) delegates unchanged.
+// Wrap the real constructor, preserving statics, prototype identity, `instanceof`, the
+// prototype.constructor back-link, and native fn shape (name/length/toString marked below).
+try {
+  const __RealDate = Date;
+  function DateShim(...a) {
+    if (!new.target) return new __RealDate(__coherentEpoch()).toString();
+    return a.length ? new __RealDate(...a) : new __RealDate(__coherentEpoch());
+  }
+  // Real Date.prototype is non-writable; match that attribute (writable:true→false is allowed
+  // even on the function's non-configurable `prototype` slot).
+  Object.defineProperty(DateShim, "prototype", { value: __RealDate.prototype, writable: false });
+  Object.defineProperty(__RealDate.prototype, "constructor", {
+    value: DateShim, configurable: true, writable: true,
+  });
+  DateShim.now = __RealDate.now; // the coherent Date.now defined just above
+  DateShim.parse = __RealDate.parse;
+  DateShim.UTC = __RealDate.UTC;
+  Object.defineProperty(DateShim, "name", { value: "Date", configurable: true });
+  Object.defineProperty(DateShim, "length", { value: 7, configurable: true }); // real Date.length === 7
+  globalThis.Date = DateShim;
 } catch (e) {}
 // rAF: BATCH like a real browser (measured against Chrome). All callbacks scheduled for a frame
 // fire together with the SAME fractional, origin-relative DOMHighResTimeStamp (~16.6ms cadence +
@@ -3757,8 +3783,10 @@ globalThis.__domSig = () => {
   });
   guard(() => { if (G.console) { tag(G.console, "console"); ["log", "info", "warn", "error", "debug"].forEach((m) => mark(G.console[m], m)); } });
   guard(() => { if (G.performance && G.performance.now) mark(G.performance.now, "now"); });
-  // The coherent-clock override replaced Date.now with a plain arrow (leaks JS source via
-  // toString + empty .name) — native-mask it too, else Date.now.toString() is an anti-hook tell.
+  // The coherent-clock override replaced Date.now with a plain arrow and wrapped the Date
+  // constructor with a JS shim — both leak JS source via toString (an anti-hook tell) unless
+  // native-masked. Mark the constructor + its static.
+  guard(() => { if (G.Date) mark(G.Date, "Date"); });
   guard(() => { if (G.Date && G.Date.now) mark(G.Date.now, "now"); });
 
   // createElement was re-wrapped as a JS closure above; re-mark it native (create-element-not-native).
@@ -3813,7 +3841,15 @@ globalThis.__domSig = () => {
   guard(() => {
     const brandNode = (obj, name, method) => {
       if (!obj) return;
-      const proto = Object.getPrototypeOf(obj);
+      let proto = Object.getPrototypeOf(obj);
+      // NEVER brand a shared root proto: some rtdom singletons (e.g. document.implementation) have
+      // Object.prototype as their direct proto, so tagging the proto would set Symbol.toStringTag on
+      // Object.prototype — making Object.prototype.toString.call({}) / [] / new Date() all read the
+      // wrong brand (a trivial, high-severity bot tell). Brand the INSTANCE itself in that case.
+      if (proto === Object.prototype || proto === null) {
+        tag(obj, name);
+        proto = null;
+      }
       if (proto) {
         tag(proto, name);
         const ctor = ({ [name]: function () {} })[name];

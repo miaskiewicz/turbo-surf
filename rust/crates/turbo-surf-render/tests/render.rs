@@ -428,6 +428,19 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
                 dateNowNative: Date.now.toString().includes('[native code]'),
                 dateNowName: Date.now.name,
                 dateNowHasProto: ('prototype' in Date.now),
+                // Constructor coherence + shape (Finding 2): new Date()/+new Date() read the SAME
+                // coherent clock as Date.now(), and the shim keeps native shape + Date semantics.
+                plusDateVsNow: Math.abs((+new Date()) - Date.now()),
+                dateCtorNative: Date.toString().includes('[native code]'),
+                dateCtorName: Date.name,
+                dateCtorLen: Date.length,
+                dateCtorConstructor: ((new Date()).constructor === Date),
+                dateInstanceof: ((new Date()) instanceof Date),
+                dateTag: Object.prototype.toString.call(new Date()),
+                plainObjTag: Object.prototype.toString.call({}),
+                arrTag: Object.prototype.toString.call([]),
+                objProtoHasTag: (Symbol.toStringTag in Object.prototype),
+                dateArgWorks: (new Date(2021, 0, 15).getFullYear()),
             }));
         }, 100);
     "#;
@@ -472,6 +485,46 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
     assert_eq!(
         v["dateNowHasProto"], false,
         "Date.now has no own prototype (native-fn shape): {v}"
+    );
+    // Constructor coherence: +new Date() tracks the coherent Date.now() (was ~100ms behind after
+    // the drain — the virtual time only reached Date.now). Allow a small residual (floor + the
+    // microseconds between the two reads), same spirit as the perf/Date coherence above.
+    assert!(
+        v["plusDateVsNow"].as_f64().unwrap() <= 2.0,
+        "+new Date() is coherent with Date.now() (±2ms): {v}"
+    );
+    // The Date shim keeps native shape + full Date semantics.
+    assert_eq!(
+        v["dateCtorNative"], true,
+        "Date.toString() is [native code]: {v}"
+    );
+    assert_eq!(v["dateCtorName"], "Date", "Date.name is 'Date': {v}");
+    assert_eq!(v["dateCtorLen"], 7, "Date.length is 7: {v}");
+    assert_eq!(
+        v["dateCtorConstructor"], true,
+        "(new Date()).constructor === Date: {v}"
+    );
+    assert_eq!(v["dateInstanceof"], true, "new Date() instanceof Date: {v}");
+    assert_eq!(
+        v["dateTag"], "[object Date]",
+        "class-tag is [object Date]: {v}"
+    );
+    assert_eq!(v["dateArgWorks"], 2021, "new Date(y,m,d) still works: {v}");
+    // Regression guard for the Object.prototype pollution the review surfaced: a node-branding pass
+    // was tagging document.implementation's proto (== Object.prototype), so EVERY un-branded object
+    // read "[object DOMImplementation]". Object.prototype must carry no Symbol.toStringTag, and the
+    // universal tags must be correct.
+    assert_eq!(
+        v["objProtoHasTag"], false,
+        "Object.prototype has no Symbol.toStringTag: {v}"
+    );
+    assert_eq!(
+        v["plainObjTag"], "[object Object]",
+        "toString.call({{}}) is [object Object]: {v}"
+    );
+    assert_eq!(
+        v["arrTag"], "[object Array]",
+        "toString.call([]) is [object Array]: {v}"
     );
 }
 

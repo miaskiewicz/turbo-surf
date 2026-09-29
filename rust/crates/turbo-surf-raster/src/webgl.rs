@@ -1390,14 +1390,26 @@ mod tests {
     // line) fail to translate → clear-only render.
     #[test]
     fn split_top_level_statements_isolates_declarations_keeps_body() {
-        let src = "attribute vec2 p; varying vec2 v; void main(){ v=p; gl_Position=vec4(p,0.0,1.0); }";
+        let src =
+            "attribute vec2 p; varying vec2 v; void main(){ v=p; gl_Position=vec4(p,0.0,1.0); }";
         let out = split_top_level_statements(src);
-        let lines: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-        assert_eq!(lines[0], "attribute vec2 p;", "first decl isolated: {lines:?}");
-        assert_eq!(lines[1], "varying vec2 v;", "second decl isolated: {lines:?}");
+        let lines: Vec<&str> = out
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(
+            lines[0], "attribute vec2 p;",
+            "first decl isolated: {lines:?}"
+        );
+        assert_eq!(
+            lines[1], "varying vec2 v;",
+            "second decl isolated: {lines:?}"
+        );
         // The main() body stays on one piece (its inner `;` at brace depth > 0 not split).
         assert!(
-            lines[2].starts_with("void main(){") && lines[2].contains("gl_Position=vec4(p,0.0,1.0);"),
+            lines[2].starts_with("void main(){")
+                && lines[2].contains("gl_Position=vec4(p,0.0,1.0);"),
             "body kept verbatim: {lines:?}"
         );
     }

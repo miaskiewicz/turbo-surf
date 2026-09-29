@@ -258,14 +258,17 @@ Add **`--features trust-anchors`** (implies `impersonate`) to also emit Chrome 1
 vendored `wreq` fork (`rust/vendor/wreq`), so it works in this binary but not for
 crates.io library consumers — see [`PUBLISHING.md`](./PUBLISHING.md).
 
-Build feature (not env): **`--features gpu-metal`** (macOS/Metal, off by default) backs
-the render tier's canvas `toDataURL` with **real Apple-GPU pixels** (`wgpu`→Metal) instead
-of the software (tiny-skia) raster — so the canvas/WebGL fingerprint a wall reads
-(DataDome/Kasada/reCAPTCHA/Akamai/Cloudflare/Incapsula — anything hashing canvas) is genuine
-GPU output, not device-invariant/software pixels. Zero cost to the default build + the PyPI
-wheels (no `wgpu` unless enabled). It gives *a real Apple GPU*, not Chrome's exact ANGLE hash,
-so it beats device-invariance detection, not exact-corpus matching. (Covers canvas 2D; the
-live WebGL→wgpu bridge is a follow-up.)
+Build feature (not env): **`--features gpu-metal`** (macOS/Metal, off by default) runs the
+render tier's **WebGL on the real Apple GPU** — a live WebGL→wgpu→Metal bridge records the
+page's `gl.*` calls and executes them on the GPU, so `readPixels` returns genuine framebuffer
+pixels. Measured: a standard WebGL fingerprint draw is now **byte-identical to real Chrome**
+(same per-pixel RGBA and the same pixel hash — wgpu→Metal lands on the same result as Chrome's
+ANGLE→Metal on the same GPU). Canvas 2D `toDataURL` also rasterizes on the GPU (falls back to
+tiny-skia on any GPU error, so enabling it never regresses). Zero cost to the default build +
+the PyPI wheels (no `wgpu` unless enabled). Beats device-invariance/SwiftShader detection —
+for WebGL, exact-hash comparison too. (Canvas-2D `toDataURL` still differs from Chrome's hash:
+that needs Chrome's exact Skia+CoreText raster **and** its libpng encoder, no shared final
+layer — but `getImageData` reads back the real rendered pixels, byte-identical for solids/shapes.)
 
 MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
@@ -287,17 +290,35 @@ supplies the interaction-gate + input-entropy signal in-isolate; a *trusted* goo
 `__Secure-ENID` also needs real-GPU pixels + server-side scoring (see `probe_mint` and
 the CHANGELOG), so it is not by itself a SERP unlock.
 
-**Render-tier realism.** Beyond the static navigator/screen surface, the render isolate now
-drives the real **page-load lifecycle** (`readyState` loading→interactive→complete with
-`DOMContentLoaded` → window `load` → `pageshow`, in order), a Chrome-shaped **high-resolution
-clock** (fractional `performance.now`/`timeOrigin`, batched rAF timestamps) with spread
-`performance.timing` phases, **distinct** `Intersection`/`Resize`/`MutationObserver`
-constructors (with an initial IntersectionObserver entry), real `MessagePort`/`MessageChannel`/
-`MessageEvent` (instances, not stubs), general **nested-iframe realms** (any iframe/`srcdoc` runs
-its own scripts with a distinct `contentWindow` + wired frame tree + depth cap), and — under
-`--features gpu-metal` — real Apple-GPU **canvas + WebGL** pixels. Search strategies also take
-optional **`headers`** + **`internal_hosts`** maps (e.g. `Referer` + `sec-fetch-site` for a real
-in-site-navigation shape). Opt into a coherent timezone with **`TURBO_SURF_TZ`**.
+**Render-tier realism.** The isolate is shaped to match real Chrome structurally, verified by
+diffing a shared collector against real headed Chrome (the reusable probes under
+[`scripts/browser-sidecar/probes/`](./scripts/browser-sidecar/), run in Chrome via `run-probe.mjs`
+and in-isolate via the `fp_snapshot` example). Highlights:
+
+- **`navigator` is a real `Navigator` instance** — zero own properties, all ~84 members on
+  `Navigator.prototype` (native-marked getters/methods), `instanceof Navigator`, `webdriver`
+  a prototype getter (not an own prop).
+- **Window surface breadth** matches Chrome (~1235 own props): the full set of interface
+  constructors, `on*` handler slots (null), and bar/API objects — so `X in window` /
+  `typeof window.X` presence checks pass.
+- **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
+  real native functions); the `toString` anti-hook trap is itself shapeless.
+- **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for
+  solids/shapes), `measureText` width matches Chrome exactly (real system-font measurer), context
+  class-tags as `CanvasRenderingContext2D` + `getContextAttributes`.
+- **WebGL**: full enum-constant set on the context prototype; under `--features gpu-metal`,
+  `readPixels` is byte-identical to Chrome (see above).
+- Real **page-load lifecycle** (`readyState` loading→interactive→complete with `DOMContentLoaded`
+  → window `load` → `pageshow`, in order), a Chrome-shaped **high-resolution clock** (fractional
+  `performance.now`/`timeOrigin`, batched rAF) with spread `performance.timing`, **distinct**
+  `Intersection`/`Resize`/`MutationObserver` constructors, real `MessagePort`/`MessageChannel`/
+  `MessageEvent` instances, spec-shaped `navigator.permissions`, and general **nested-iframe realms**
+  (any iframe/`srcdoc` runs its own scripts with a distinct `contentWindow` + wired frame tree + depth cap).
+
+Search strategies also take optional **`headers`** + **`internal_hosts`** maps (e.g. `Referer` +
+`sec-fetch-site` for a real in-site-navigation shape). Opt into a coherent timezone with
+**`TURBO_SURF_TZ`**. Honest scope: these close the client-side/structural tells; google's trusted
+`__Secure-ENID` remains **server-scored** (see the CHANGELOG's BotGuard notes).
 
 ---
 

@@ -19,12 +19,54 @@
 //! Because the input is just an HTML string, any snapshot works: the initial
 //! fetch, or any entry in a hydration trail.
 
+mod canvas_ops;
 mod glyph;
 mod image_paint;
+mod paint_canvas;
+#[cfg(all(target_os = "macos", feature = "coretext"))]
+mod paint_canvas_coretext;
+#[cfg(feature = "gpu-metal")]
+mod paint_canvas_gpu;
 mod paint_png;
 mod paint_svg;
 mod style_extract;
+#[cfg(feature = "gpu-metal")]
+mod webgl;
 
+/// Execute a recorded WebGL call batch on the GPU; return the framebuffer as RGBA8 bytes
+/// (len `width*height*4`, row-major, TOP-left origin). `None` on any failure (caller falls back
+/// to its stub). See [`webgl`] for the JSON call protocol.
+#[cfg(feature = "gpu-metal")]
+pub use webgl::webgl_readback;
+
+/// Replay a recorded 2D-canvas draw list (the render tier's `ctx._ops` tuple log — see
+/// [`canvas_ops`] for the format) into a `width × height` PNG. Default build rasterizes with
+/// tiny-skia (software); under the `gpu-metal` feature it rasterizes on the real GPU (wgpu →
+/// Metal) and, on any GPU failure, transparently falls back to tiny-skia — so enabling the
+/// feature never regresses, it only swaps the pixel backend.
+pub fn canvas_ops_png(width: u32, height: u32, ops_json: &str) -> Result<Vec<u8>, String> {
+    let (w, h) = (width.max(1), height.max(1));
+    let ops = canvas_ops::parse_ops(ops_json)?;
+    #[cfg(feature = "gpu-metal")]
+    {
+        match paint_canvas_gpu::replay(w, h, &ops) {
+            Ok(png) => Ok(png),
+            Err(_) => paint_canvas::replay(w, h, &ops),
+        }
+    }
+    #[cfg(not(feature = "gpu-metal"))]
+    {
+        paint_canvas::replay(w, h, &ops)
+    }
+}
+/// Replay a 2D-canvas draw list into RAW straight-alpha RGBA8 (top-left origin, tightly packed) —
+/// the byte layout `getImageData` returns. Software (tiny-skia): getImageData reads back exact
+/// pixels with no PNG-encoder in the loop, so shapes/solids match a real browser byte-for-byte.
+pub fn canvas_ops_rgba(width: u32, height: u32, ops_json: &str) -> Result<Vec<u8>, String> {
+    let (w, h) = (width.max(1), height.max(1));
+    let ops = canvas_ops::parse_ops(ops_json)?;
+    paint_canvas::replay_rgba(w, h, &ops)
+}
 pub use style_extract::{delazy_images, image_urls, image_urls_in_css, stylesheet_hrefs};
 
 use std::collections::HashMap;

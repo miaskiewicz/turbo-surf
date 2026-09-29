@@ -38,6 +38,9 @@ async fn a_throwing_script_does_not_abort_later_scripts() {
 // set_fingerprint is a PROCESS-global override; serialize the tests that read or
 // mutate it so a parallel override can't leak into a default-assuming test.
 static FP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// Serializes tests that install the process-global WebGL executor hook (set_webgl_fn), so their
+// renders don't race each other's hook value under cargo's parallel test threads.
+static WEBGL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // --- pooled render (reused isolate) keeps fresh-navigation isolation --------
 // `render_page_pooled` reuses one V8 isolate across pages for speed; the cross-page
@@ -231,6 +234,1223 @@ fn navigator_looks_like_chrome() {
     assert!(
         out.contains("data-n=\"true|MacIntel|Google Inc.|false|true|object|4g|macOS|function\""),
         "navigator not coherent Chrome: {out}"
+    );
+}
+
+// Legacy navigation-timing + Prioritized Task Scheduling shims: google's homepage JS
+// reads performance.timing / performance.navigation / window.scheduler; deno_core ships
+// none, so without the ENV_BOOTSTRAP shims an anti-bot consistency check sees `undefined`
+// where real Chrome has objects. Assert presence + coherent shape.
+#[test]
+fn legacy_timing_and_scheduler_are_present() {
+    let probe = "document.body.setAttribute('data-t', [\
+        typeof performance.timing, performance.timing.navigationStart > 0,\
+        typeof performance.navigation, performance.navigation.type,\
+        typeof scheduler, typeof scheduler.postTask, typeof scheduler.yield,\
+        typeof sessionStorage, typeof performance.memory,\
+        performance.memory.jsHeapSizeLimit > 0, document.scrollingElement === document.documentElement].join('|'))";
+    let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
+    assert!(
+        out.contains(
+            "data-t=\"object|true|object|0|object|function|function|object|object|true|true\""
+        ),
+        "legacy timing / scheduler / storage shims missing or wrong shape: {out}"
+    );
+    // sessionStorage must actually store (round-trip), not just exist.
+    let rt = "sessionStorage.setItem('k','v'); \
+        document.body.setAttribute('data-s', sessionStorage.getItem('k') + '|' + sessionStorage.length)";
+    let out2 = turbo_surf_render::render_html("<body></body>", rt).unwrap();
+    assert!(
+        out2.contains("data-s=\"v|1\""),
+        "sessionStorage round-trip: {out2}"
+    );
+}
+
+// Messaging APIs: the MessageChannel scheduler idiom (React/google), window.postMessage, and
+// BroadcastChannel all deliver real MessageEvent instances; ports are MessagePort instances; and
+// the constructors report native `.toString()` (were object-literal stubs / un-native-marked).
+#[tokio::test]
+async fn messaging_apis_deliver_message_events() {
+    let script = r#"
+        var log = [];
+        var ch = new MessageChannel();
+        ch.port1.onmessage = function(e){ log.push('mc:' + e.data + ':' + (e instanceof MessageEvent) + ':' + (ch.port1 instanceof MessagePort)); };
+        ch.port2.postMessage(42);
+        window.addEventListener('message', function(e){ log.push('wm:' + e.data + ':' + (e instanceof MessageEvent)); });
+        window.postMessage('hi', '*');
+        var b1 = new BroadcastChannel('x'), b2 = new BroadcastChannel('x');
+        b2.onmessage = function(e){ log.push('bc:' + e.data); };
+        b1.postMessage('cast');
+        // A message posted BEFORE a listener exists is queued and flushed when onmessage is later
+        // assigned (setting onmessage implies start()).
+        var ch2 = new MessageChannel();
+        ch2.port2.postMessage('early');
+        setTimeout(function(){ ch2.port1.onmessage = function(e){ log.push('q:' + e.data); }; }, 5);
+        var natv = Function.prototype.toString.call(MessageChannel).indexOf('[native code]') >= 0
+                && Function.prototype.toString.call(MessageEvent).indexOf('[native code]') >= 0
+                && Function.prototype.toString.call(BroadcastChannel).indexOf('[native code]') >= 0;
+        setTimeout(function(){ document.body.setAttribute('data-pm', log.sort().join('|') + '||native:' + natv); }, 60);
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    for want in [
+        "mc:42:true:true",
+        "wm:hi:true",
+        "bc:cast",
+        "q:early",
+        "native:true",
+    ] {
+        assert!(out.contains(want), "missing {want:?} in messaging: {out}");
+    }
+}
+
+// Observers must be three DISTINCT constructors (real Chrome: IntersectionObserver !==
+// ResizeObserver !== MutationObserver, each with its own .name — collapsing them is a trivial
+// === / .name tell), PerformanceObserver.supportedEntryTypes must be populated, and
+// IntersectionObserver must fire one initial async entry per observed element.
+#[tokio::test]
+async fn observers_are_distinct_and_intersection_fires_an_entry() {
+    let script = r#"
+        var distinct = (IntersectionObserver !== ResizeObserver)
+            && (ResizeObserver !== MutationObserver) && (IntersectionObserver !== MutationObserver);
+        var names = IntersectionObserver.name + ',' + ResizeObserver.name + ',' + MutationObserver.name;
+        var perfTypes = PerformanceObserver.supportedEntryTypes.length;
+        document.body.setAttribute('data-obs', distinct + '|' + names + '|' + perfTypes);
+        var el = document.createElement('div'); document.body.appendChild(el);
+        var io = new IntersectionObserver(function(entries, obs){
+            var e = entries[0];
+            document.body.setAttribute('data-io', entries.length + ':' + e.isIntersecting
+                + ':' + (typeof e.intersectionRatio) + ':' + (e.boundingClientRect ? 'rect' : 'norect'));
+        });
+        io.observe(el);
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    assert!(
+        out.contains("data-obs=\"true|IntersectionObserver,ResizeObserver,MutationObserver|"),
+        "observers must be distinct with correct names: {out}"
+    );
+    assert!(
+        !out.contains("data-obs=\"true|IntersectionObserver,ResizeObserver,MutationObserver|0\""),
+        "PerformanceObserver.supportedEntryTypes must be non-empty: {out}"
+    );
+    assert!(
+        out.contains("data-io=\"1:false:number:rect\""),
+        "IntersectionObserver must fire one initial entry (isIntersecting:false, ratio number, rect): {out}"
+    );
+}
+
+// Fingerprint parity closed against real Chrome (the Chrome-vs-turbo-surf detection
+// differential): navigator.permissions.query exists + is native + returns a spec-shaped
+// PermissionStatus; document.characterSet is "UTF-8"; window.location class-tags as
+// "[object Location]"; and a WebGL context is `instanceof WebGLRenderingContext` with a
+// native, prototype-resident getParameter (and webgl/webgl2 protos are distinct, and
+// location is NOT an instanceof the GL ctor). Each was a live tell before these fixes.
+#[tokio::test]
+async fn fingerprint_parity_permissions_location_charset_webgl() {
+    let script = r#"
+        var nat = function(f){ try { return Function.prototype.toString.call(f).includes('[native code]'); } catch(e){ return 'throw'; } };
+        var out = {};
+        // permissions
+        out.permType = typeof (navigator.permissions && navigator.permissions.query);
+        out.permNative = nat(navigator.permissions.query);
+        // characterSet + location tag
+        out.charset = document.characterSet;
+        out.locTag = Object.prototype.toString.call(location);
+        // webgl identity
+        var gl = document.createElement('canvas').getContext('webgl');
+        var C = window.WebGLRenderingContext, C2 = window.WebGL2RenderingContext;
+        out.instOf = gl instanceof C;
+        out.protoGetParam = 'getParameter' in C.prototype;
+        out.getParamNative = nat(C.prototype.getParameter);
+        out.protosDiffer = C.prototype !== C2.prototype;
+        out.locationNotGl = !(location instanceof C);
+        // permission state resolves (async) — write it after the promise settles
+        navigator.permissions.query({name:'notifications'}).then(function(s){
+            document.body.setAttribute('data-perm-state', s.state + ':' + s.name);
+        });
+        document.body.setAttribute('data-fp', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    // The snapshot lands in an HTML attribute, so `"` serializes as `&quot;`.
+    let q = |s: &str| s.replace('"', "&quot;");
+    let want = [
+        (
+            r#""permType":"function""#,
+            "permissions.query is a function",
+        ),
+        (r#""permNative":true"#, "permissions.query is native-masked"),
+        (r#""charset":"UTF-8""#, "document.characterSet is UTF-8"),
+        (
+            r#""locTag":"[object Location]""#,
+            "location class-tags as Location",
+        ),
+        (r#""instOf":true"#, "gl instanceof WebGLRenderingContext"),
+        (
+            r#""protoGetParam":true"#,
+            "getParameter is prototype-resident",
+        ),
+        (r#""getParamNative":true"#, "getParameter is native"),
+        (r#""protosDiffer":true"#, "webgl/webgl2 protos are distinct"),
+        (
+            r#""locationNotGl":true"#,
+            "location is not instanceof the GL ctor",
+        ),
+    ];
+    for (needle, why) in want {
+        assert!(out.contains(&q(needle)), "{why}: {out}");
+    }
+    assert!(
+        out.contains(r#"data-perm-state="prompt:notifications""#),
+        "permissions.query resolves to a spec-shaped PermissionStatus: {out}"
+    );
+}
+
+// Timing coherence: the observable clock (performance.now / Date.now) must reflect the virtual
+// timer clock, so a `setTimeout(100)` callback observes ~100ms elapsed (a real browser does; the
+// old pure-wall-clock showed ~0 — a hard tell), while staying coherent (`timeOrigin + now ==
+// Date.now`). performance.now is real sub-ms monotonic (no flatline under a tight loop).
+#[tokio::test]
+async fn clock_reflects_virtual_time_and_is_coherent() {
+    let script = r#"
+        var d0 = Date.now(), p0 = performance.now();
+        setTimeout(function(){
+            var d1 = Date.now(), p1 = performance.now();
+            document.body.setAttribute('data-t', JSON.stringify({
+                dateDelta: d1 - d0,
+                perfDelta: Math.round((p1 - p0) * 10) / 10,
+                coherent: Math.round(performance.timeOrigin + performance.now() - Date.now()),
+                originFractional: (performance.timeOrigin % 1) !== 0,
+                dateNowNative: Date.now.toString().includes('[native code]'),
+                dateNowName: Date.now.name,
+                dateNowHasProto: ('prototype' in Date.now),
+                // Constructor coherence + shape (Finding 2): new Date()/+new Date() read the SAME
+                // coherent clock as Date.now(), and the shim keeps native shape + Date semantics.
+                plusDateVsNow: Math.abs((+new Date()) - Date.now()),
+                dateCtorNative: Date.toString().includes('[native code]'),
+                dateCtorName: Date.name,
+                dateCtorLen: Date.length,
+                dateCtorConstructor: ((new Date()).constructor === Date),
+                dateInstanceof: ((new Date()) instanceof Date),
+                // Subclassing must survive the ctor wrap (Reflect.construct + new.target): a broken
+                // wrapper (plain new __RealDate) is a builtin-integrity tell.
+                subclassInstanceof: (() => { class MyDate extends Date {} return (new MyDate()) instanceof MyDate; })(),
+                subclassMethod: (() => { class MyDate extends Date { foo() { return 7; } } return (new MyDate()).foo(); })(),
+                dateTag: Object.prototype.toString.call(new Date()),
+                plainObjTag: Object.prototype.toString.call({}),
+                arrTag: Object.prototype.toString.call([]),
+                objProtoHasTag: (Symbol.toStringTag in Object.prototype),
+                dateArgWorks: (new Date(2021, 0, 15).getFullYear()),
+            }));
+        }, 100);
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-t=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    let dd = v["dateDelta"].as_f64().unwrap();
+    let pd = v["perfDelta"].as_f64().unwrap();
+    assert!(
+        (100.0..200.0).contains(&dd),
+        "setTimeout(100) observes ~100ms on Date.now: {v}"
+    );
+    assert!(
+        (100.0..200.0).contains(&pd),
+        "setTimeout(100) observes ~100ms on performance.now: {v}"
+    );
+    // The two clock reads are microseconds apart (real hrtime advances between them) + Date.now
+    // floors, so the coherence residual is 0 or ±1 — same as a real browser, not a hard 0.
+    assert!(
+        v["coherent"].as_f64().unwrap().abs() <= 1.0,
+        "timeOrigin + performance.now() ≈ Date.now() (±1): {v}"
+    );
+    assert_eq!(
+        v["originFractional"], true,
+        "timeOrigin is a fractional epoch: {v}"
+    );
+    // The coherent-clock override must not leak the arrow's JS source — Date.now has to look
+    // native (toString + name + no own prototype), like real Chrome, else it's an anti-hook tell.
+    assert_eq!(
+        v["dateNowNative"], true,
+        "Date.now.toString() reports [native code]: {v}"
+    );
+    assert_eq!(v["dateNowName"], "now", "Date.now.name is 'now': {v}");
+    assert_eq!(
+        v["dateNowHasProto"], false,
+        "Date.now has no own prototype (native-fn shape): {v}"
+    );
+    // Constructor coherence: +new Date() tracks the coherent Date.now() (was ~100ms behind after
+    // the drain — the virtual time only reached Date.now). Allow a small residual (floor + the
+    // microseconds between the two reads), same spirit as the perf/Date coherence above.
+    assert!(
+        v["plusDateVsNow"].as_f64().unwrap() <= 2.0,
+        "+new Date() is coherent with Date.now() (±2ms): {v}"
+    );
+    // The Date shim keeps native shape + full Date semantics.
+    assert_eq!(
+        v["dateCtorNative"], true,
+        "Date.toString() is [native code]: {v}"
+    );
+    assert_eq!(v["dateCtorName"], "Date", "Date.name is 'Date': {v}");
+    assert_eq!(v["dateCtorLen"], 7, "Date.length is 7: {v}");
+    assert_eq!(
+        v["dateCtorConstructor"], true,
+        "(new Date()).constructor === Date: {v}"
+    );
+    assert_eq!(v["dateInstanceof"], true, "new Date() instanceof Date: {v}");
+    assert_eq!(
+        v["subclassInstanceof"], true,
+        "class extends Date keeps its prototype chain: {v}"
+    );
+    assert_eq!(
+        v["subclassMethod"], 7,
+        "Date subclass methods are reachable: {v}"
+    );
+    assert_eq!(
+        v["dateTag"], "[object Date]",
+        "class-tag is [object Date]: {v}"
+    );
+    assert_eq!(v["dateArgWorks"], 2021, "new Date(y,m,d) still works: {v}");
+    // Regression guard for the Object.prototype pollution the review surfaced: a node-branding pass
+    // was tagging document.implementation's proto (== Object.prototype), so EVERY un-branded object
+    // read "[object DOMImplementation]". Object.prototype must carry no Symbol.toStringTag, and the
+    // universal tags must be correct.
+    assert_eq!(
+        v["objProtoHasTag"], false,
+        "Object.prototype has no Symbol.toStringTag: {v}"
+    );
+    assert_eq!(
+        v["plainObjTag"], "[object Object]",
+        "toString.call({{}}) is [object Object]: {v}"
+    );
+    assert_eq!(
+        v["arrTag"], "[object Array]",
+        "toString.call([]) is [object Array]: {v}"
+    );
+}
+
+// A real WebGL context exposes the full set of ~298 enum constants (VERTEX_SHADER, TRIANGLES, …)
+// on its prototype. Ours had only the handful patchGl set — so `gl.VERTEX_SHADER` was undefined,
+// a fingerprint tell AND a functional break (real WebGL code / the GPU bridge get `undefined` enum
+// args). Verify the constants are present with the correct standard values, on the prototype.
+#[tokio::test]
+async fn webgl_context_exposes_enum_constants() {
+    let script = r#"
+        var gl = document.createElement('canvas').getContext('webgl');
+        var proto = Object.getPrototypeOf(gl);
+        var constCount = Object.getOwnPropertyNames(proto).filter(function(k){
+            return /^[A-Z0-9_]+$/.test(k) && typeof gl[k] === 'number';
+        }).length;
+        var out = {
+            VERTEX_SHADER: gl.VERTEX_SHADER, FRAGMENT_SHADER: gl.FRAGMENT_SHADER,
+            ARRAY_BUFFER: gl.ARRAY_BUFFER, TRIANGLES: gl.TRIANGLES, FLOAT: gl.FLOAT,
+            RGBA: gl.RGBA, UNSIGNED_BYTE: gl.UNSIGNED_BYTE, COLOR_BUFFER_BIT: gl.COLOR_BUFFER_BIT,
+            constCount: constCount, onProto: !Object.prototype.hasOwnProperty.call(gl, 'VERTEX_SHADER'),
+        };
+        document.body.setAttribute('data-gl', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-gl=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    // Standard WebGL enum values (spec constants).
+    assert_eq!(v["VERTEX_SHADER"], 35633, "{v}");
+    assert_eq!(v["FRAGMENT_SHADER"], 35632, "{v}");
+    assert_eq!(v["ARRAY_BUFFER"], 34962, "{v}");
+    assert_eq!(v["TRIANGLES"], 4, "{v}");
+    assert_eq!(v["FLOAT"], 5126, "{v}");
+    assert_eq!(v["RGBA"], 6408, "{v}");
+    assert_eq!(v["UNSIGNED_BYTE"], 5121, "{v}");
+    assert_eq!(v["COLOR_BUFFER_BIT"], 16384, "{v}");
+    assert!(
+        v["constCount"].as_i64().unwrap() >= 290,
+        "full WebGL1 enum set (~298): {v}"
+    );
+    assert_eq!(
+        v["onProto"], true,
+        "constants live on the prototype, not the instance: {v}"
+    );
+}
+
+// The window surface must have real Chrome's breadth — a `X in window` / `typeof` presence check
+// for a common interface / on* handler / bar object must pass (our old ~527 own props vs Chrome's
+// ~1235 was a surface tell). Spot-check representatives across the three groups + the count floor.
+#[tokio::test]
+async fn window_surface_matches_chrome_breadth() {
+    let script = r#"
+        var iface = ['AudioBufferSourceNode','Bluetooth','CSSStyleValue','Cache','BatteryManager',
+                     'BarcodeDetector','GPUDevice','SpeechSynthesisUtterance','USBDevice'];
+        var onh = ['onbeforeunload','onpointerrawupdate','onbeforeinstallprompt','ongamepadconnected'];
+        var misc = ['locationbar','menubar','scrollbars','crossOriginIsolated','isSecureContext','caches'];
+        var out = {
+            count: Object.getOwnPropertyNames(globalThis).length,
+            ifaceMissing: iface.filter(function(n){ return typeof globalThis[n] !== 'function'; }),
+            onMissing: onh.filter(function(n){ return !(n in globalThis); }),
+            miscMissing: misc.filter(function(n){ return !(n in globalThis); }),
+            onclickNull: globalThis.onclick === null && ('onclick' in globalThis),
+            barVisible: globalThis.locationbar && globalThis.locationbar.visible === true,
+        };
+        document.body.setAttribute('data-w', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-w=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    assert!(
+        v["count"].as_i64().unwrap() >= 1000,
+        "window own-prop count near Chrome's ~1235: {v}"
+    );
+    assert_eq!(
+        v["ifaceMissing"],
+        serde_json::json!([]),
+        "all common interfaces present: {v}"
+    );
+    assert_eq!(
+        v["onMissing"],
+        serde_json::json!([]),
+        "all on* handler slots present: {v}"
+    );
+    assert_eq!(
+        v["miscMissing"],
+        serde_json::json!([]),
+        "misc window props present: {v}"
+    );
+    assert_eq!(
+        v["onclickNull"], true,
+        "on* handlers are null like Chrome: {v}"
+    );
+    assert_eq!(v["barVisible"], true, "bar objects have visible:true: {v}");
+}
+
+// navigator must be a real `Navigator` INSTANCE like Chrome: zero own properties, all members on
+// `Navigator.prototype` (Chrome exposes ~84), `navigator instanceof Navigator`, and the identity
+// props (userAgent/webdriver) resolved via native-marked prototype getters (not own data props —
+// the old plain-object navigator had 26 own props + a thin 15-member proto, a structural tell).
+#[tokio::test]
+async fn navigator_is_a_prototype_backed_instance() {
+    let script = r#"
+        var np = Object.getPrototypeOf(navigator);
+        var wd = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+        var ua = Object.getOwnPropertyDescriptor(Navigator.prototype, 'userAgent');
+        var out = {
+            instOwn: Object.getOwnPropertyNames(navigator).length,
+            protoCount: Object.getOwnPropertyNames(np).length,
+            isInstance: navigator instanceof Navigator,
+            protoIsNavProto: np === Navigator.prototype,
+            tag: Object.prototype.toString.call(navigator),
+            webdriver: navigator.webdriver,
+            webdriverViaGetter: !!(wd && wd.get),
+            uaViaGetter: !!(ua && ua.get),
+            uaGetterNative: ua && ua.get ? Function.prototype.toString.call(ua.get).indexOf('[native code]') >= 0 : false,
+            // A member we stub must still be present + object-shaped (React reads scheduling.isInputPending).
+            hasScheduling: typeof navigator.scheduling === 'object' && typeof navigator.scheduling.isInputPending === 'function',
+        };
+        document.body.setAttribute('data-nav', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-nav=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    assert_eq!(
+        v["instOwn"], 0,
+        "navigator has zero own properties (a real instance): {v}"
+    );
+    assert!(
+        v["protoCount"].as_i64().unwrap() >= 80,
+        "Navigator.prototype has ~84 members: {v}"
+    );
+    assert_eq!(v["isInstance"], true, "navigator instanceof Navigator: {v}");
+    assert_eq!(
+        v["protoIsNavProto"], true,
+        "immediate proto is Navigator.prototype: {v}"
+    );
+    assert_eq!(v["tag"], "[object Navigator]", "class tag: {v}");
+    assert_eq!(v["webdriver"], false, "webdriver false: {v}");
+    assert_eq!(
+        v["webdriverViaGetter"], true,
+        "webdriver is a prototype getter, not an own prop: {v}"
+    );
+    assert_eq!(
+        v["uaViaGetter"], true,
+        "userAgent is a prototype getter: {v}"
+    );
+    assert_eq!(
+        v["uaGetterNative"], true,
+        "the userAgent getter reports native: {v}"
+    );
+    assert_eq!(
+        v["hasScheduling"], true,
+        "navigator.scheduling.isInputPending present (React): {v}"
+    );
+}
+
+// Anti-tamper native-fn SHAPE: a real native function reports "[native code]" from toString AND
+// has NO own `prototype` property (a `function`-expression shim does — a stealth-detection tell,
+// e.g. `'prototype' in HTMLCanvasElement.prototype.toDataURL` is false in Chrome). The toString
+// trap itself, and our canvas/event shims, must match: native toString + no own prototype +
+// ownKeys == [length,name]. Guards the concise-method/nativize fix.
+#[tokio::test]
+async fn masked_native_functions_have_no_prototype() {
+    let script = r#"
+        var FPT = Function.prototype.toString;
+        var nat = function(f){ try { return FPT.call(f).indexOf('[native code]') >= 0; } catch(e){ return false; } };
+        var proto = function(f){ return Object.prototype.hasOwnProperty.call(f, 'prototype'); };
+        var out = {};
+        // The toString trap must look native + shapeless.
+        out.fptNative = nat(FPT);
+        out.fptNoProto = !proto(FPT);
+        out.fptKeys = Object.getOwnPropertyNames(FPT).sort().join(',');
+        // Canvas + WebGL + event shims.
+        var c = document.createElement('canvas');
+        out.toDataURLNative = nat(c.toDataURL); out.toDataURLNoProto = !proto(c.toDataURL);
+        out.getContextNative = nat(c.getContext); out.getContextNoProto = !proto(c.getContext);
+        var gl = c.getContext('webgl');
+        out.getParameterNative = nat(gl.getParameter); out.getParameterNoProto = !proto(gl.getParameter);
+        out.addELNative = nat(document.addEventListener); out.addELNoProto = !proto(document.addEventListener);
+        document.body.setAttribute('data-nf', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-nf=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    for k in [
+        "fptNative",
+        "fptNoProto",
+        "toDataURLNative",
+        "toDataURLNoProto",
+        "getContextNative",
+        "getContextNoProto",
+        "getParameterNative",
+        "getParameterNoProto",
+        "addELNative",
+        "addELNoProto",
+    ] {
+        assert_eq!(v[k], true, "{k} must hold (native + no own prototype): {v}");
+    }
+    assert_eq!(
+        v["fptKeys"], "length,name",
+        "toString trap ownKeys match native: {v}"
+    );
+}
+
+// Window/screen geometry must be physically coherent like a real browser window: the viewport
+// is SHORTER than the window (tab strip + omnibox chrome), so outerHeight > innerHeight; widths
+// are equal (no side chrome); availHeight < screen height (menubar); and a Mac profile reports
+// 30-bit color. Equal inner/outer height (the old default) is impossible for a real window.
+#[tokio::test]
+async fn window_and_screen_geometry_is_coherent() {
+    let script = r#"
+        var o = {
+            iw: window.innerWidth, ih: window.innerHeight,
+            ow: window.outerWidth, oh: window.outerHeight,
+            sw: screen.width, sh: screen.height,
+            aw: screen.availWidth, ah: screen.availHeight,
+            vw: visualViewport.width, vh: visualViewport.height,
+            cd: screen.colorDepth, pd: screen.pixelDepth,
+        };
+        document.body.setAttribute('data-geo', JSON.stringify(o));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-geo=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let g: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    let n = |k: &str| g[k].as_i64().unwrap();
+    // Height containment chain: screen.height >= availHeight >= outerHeight > innerHeight
+    // (window fits ON the screen; viewport fits IN the window under the tab strip + omnibox).
+    assert!(
+        n("sh") >= n("ah") && n("ah") >= n("oh") && n("oh") > n("ih"),
+        "height chain screen>=avail>=outer>inner (window fits on screen, chrome above viewport): {g}"
+    );
+    // Width containment: outerWidth == innerWidth (no side chrome), both <= screen width.
+    assert_eq!(
+        n("ow"),
+        n("iw"),
+        "outerWidth equals innerWidth (no side chrome): {g}"
+    );
+    assert!(n("aw") <= n("sw"), "availWidth <= screen width: {g}");
+    assert!(
+        n("ow") <= n("aw"),
+        "window width fits the available screen: {g}"
+    );
+    assert!(
+        n("ah") < n("sh"),
+        "availHeight < screen height (menubar reserved): {g}"
+    );
+    // visualViewport (unpinched) must equal the layout viewport — a mismatch is an incoherence tell.
+    assert_eq!(n("vw"), n("iw"), "visualViewport.width == innerWidth: {g}");
+    assert_eq!(
+        n("vh"),
+        n("ih"),
+        "visualViewport.height == innerHeight: {g}"
+    );
+    // macOS profile → 30-bit wide-gamut color, and pixelDepth mirrors colorDepth.
+    assert_eq!(n("cd"), 30, "macOS default colorDepth is 30-bit: {g}");
+    assert_eq!(n("pd"), n("cd"), "pixelDepth mirrors colorDepth: {g}");
+}
+
+// disconnect() before the async initial entry fires must cancel it — Chrome delivers the entry
+// on a later task, and a page that observes-then-disconnects synchronously sees no callback.
+// (A stale callback firing after disconnect is both wrong and a behavioural tell.)
+#[tokio::test]
+async fn intersection_observer_disconnect_cancels_initial_entry() {
+    let script = r#"
+        var fired = false;
+        var el = document.createElement('div'); document.body.appendChild(el);
+        var io = new IntersectionObserver(function(){ fired = true; });
+        io.observe(el);
+        io.disconnect(); // synchronous, before the scheduled initial entry
+        // Give the scheduled timer a chance, then record whether the callback (wrongly) ran.
+        setTimeout(function(){ document.body.setAttribute('data-io-fired', String(fired)); }, 5);
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    assert!(
+        out.contains("data-io-fired=\"false\""),
+        "disconnect() before the initial entry must cancel the callback: {out}"
+    );
+}
+
+// Page-load lifecycle: the main document/window must fire the real sequence — readyState
+// loading → interactive (+readystatechange, DOMContentLoaded) → complete (+readystatechange,
+// window load, pageshow) — in order, with DOMContentLoaded BEFORE load. A collector that gates
+// init on these otherwise never runs (the vendored readyState was a frozen 'complete', no events).
+#[tokio::test]
+async fn page_load_lifecycle_fires_in_order() {
+    let script = r#"
+        var log = [];
+        document.body.setAttribute('data-rs0', document.readyState); // during scripts: "loading"
+        document.addEventListener('readystatechange', function(){ log.push('rsc:' + document.readyState); });
+        document.addEventListener('DOMContentLoaded', function(){ log.push('DCL:' + document.readyState); });
+        window.addEventListener('DOMContentLoaded', function(){ log.push('winDCL'); });
+        window.addEventListener('load', function(){
+            log.push('load:' + document.readyState);
+            document.body.setAttribute('data-seq', log.join('|'));
+        });
+        window.addEventListener('pageshow', function(){ log.push('pageshow'); });
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    assert!(
+        out.contains(r#"data-rs0="loading""#),
+        "readyState is 'loading' during scripts: {out}"
+    );
+    let i = out
+        .find(r#"data-seq=""#)
+        .expect("load fired + wrote the sequence")
+        + 10;
+    let j = out[i..].find('"').unwrap() + i;
+    let seq = &out[i..j];
+    let dcl = seq
+        .find("DCL:interactive")
+        .unwrap_or_else(|| panic!("DOMContentLoaded at interactive: {seq}"));
+    let load = seq
+        .find("load:complete")
+        .unwrap_or_else(|| panic!("window load at complete: {seq}"));
+    assert!(
+        dcl < load,
+        "DOMContentLoaded must fire BEFORE window load: {seq}"
+    );
+    assert!(
+        seq.contains("rsc:interactive") && seq.contains("rsc:complete"),
+        "readystatechange transitions: {seq}"
+    );
+    assert!(
+        seq.contains("winDCL"),
+        "DOMContentLoaded reaches window listeners: {seq}"
+    );
+}
+
+// Human-input synthesizer edge cases: empty typing, delay bounds, and a degenerate A==B path
+// must all behave sanely (no empty/NaN/non-monotonic output, no throw).
+#[test]
+fn human_input_edge_cases() {
+    let script = format!(
+        "{hi}\n;JSON.stringify({{\
+          emptyType: __hi.typePlan('', 100),\
+          delayFixed: __hi.delay(100, 0),\
+          delayInRange: (function(){{ for (var i=0;i<80;i++){{ var d=__hi.delay(10,40); if(d<10||d>50) return false; }} return true; }})(),\
+          ab: (function(){{ var p=__hi.path(5,5,5,5,'human'); var mono=true; for(var i=1;i<p.length;i++) if(p[i].t<=p[i-1].t) mono=false; return {{ len:p.length, mono:mono, lastx:p[p.length-1].x, lasty:p[p.length-1].y }}; }})(),\
+        }})",
+        hi = turbo_surf_render::HUMAN_INPUT_JS
+    );
+    let out = turbo_surf_render::run_with_dom("<body></body>", &script).unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("json {e}: {out}"));
+    assert_eq!(
+        v["emptyType"]["events"].as_array().map(|a| a.len()),
+        Some(0),
+        "empty text → no key events"
+    );
+    assert_eq!(
+        v["emptyType"]["end"], 100.0,
+        "empty typing keeps the base clock"
+    );
+    assert_eq!(v["delayFixed"], 100.0, "delay(base,0) == base (no jitter)");
+    assert_eq!(
+        v["delayInRange"], true,
+        "delay stays within [base, base+jitter]"
+    );
+    assert!(
+        v["ab"]["len"].as_u64().unwrap_or(0) >= 1,
+        "degenerate A==B path still yields samples"
+    );
+    assert_eq!(
+        v["ab"]["mono"], true,
+        "A==B path timestamps still strictly increase"
+    );
+    assert_eq!(v["ab"]["lastx"], 5.0, "A==B path ends at the target x");
+    assert_eq!(v["ab"]["lasty"], 5.0, "A==B path ends at the target y");
+}
+
+// WebGL bridge with NO host executor installed: readPixels must fall back to the synthetic
+// vendored readback without throwing (the executor is optional; only present under gpu-metal).
+#[test]
+fn webgl_readpixels_falls_back_without_host_fn() {
+    let _g = WEBGL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    turbo_surf_render::set_webgl_fn(Box::new(|_w, _h, _calls| None)); // executor declines
+    let script = r#"
+        var c=document.createElement('canvas'); c.width=2; c.height=2;
+        var gl=c.getContext('webgl');
+        var px=new Uint8Array(2*2*4);
+        var threw=false; try { gl.readPixels(0,0,2,2,0x1908,0x1401,px); } catch(e){ threw=true; }
+        document.body.setAttribute('data-fb', threw ? 'threw' : 'ok');
+    "#;
+    let out = turbo_surf_render::render_html("<body></body>", script).unwrap();
+    assert!(
+        out.contains(r#"data-fb="ok""#),
+        "readPixels must not throw when no executor is installed: {out}"
+    );
+}
+
+// WebGL→GPU bridge plumbing (no real GPU): with a stub executor installed, the isolate's WebGL
+// context must RECORD a page's gl.* calls and, on readPixels, fill the destination from the
+// executor's returned framebuffer. Proves the recorder + op boundary + readPixels flip/slice
+// end to end; the real GPU executor is exercised separately under `gpu-metal`.
+#[test]
+fn webgl_readpixels_uses_the_host_executor() {
+    let _g = WEBGL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // Stub: return a solid-red RGBA framebuffer of the requested size.
+    turbo_surf_render::set_webgl_fn(Box::new(|w, h, _calls| {
+        let mut px = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..(w * h) {
+            px.extend_from_slice(&[255u8, 0, 0, 255]);
+        }
+        Some(px)
+    }));
+    let script = r#"
+        var c = document.createElement('canvas'); c.width = 4; c.height = 4;
+        var gl = c.getContext('webgl');
+        var b = gl.createBuffer(); gl.bindBuffer(0x8892, b);
+        gl.bufferData(0x8892, new Float32Array([0,0, 1,0, 0,1]), 0x88E4);
+        var vs = gl.createShader(0x8B31); gl.shaderSource(vs, 'void main(){}'); gl.compileShader(vs);
+        gl.viewport(0,0,4,4); gl.clearColor(0,0,0,1); gl.clear(0x4000);
+        gl.drawArrays(0x0004, 0, 3);
+        var px = new Uint8Array(4*4*4);
+        gl.readPixels(0,0,4,4,0x1908,0x1401,px);
+        document.body.setAttribute('data-px', px[0]+','+px[1]+','+px[2]+','+px[3]);
+    "#;
+    let out = turbo_surf_render::render_html("<body></body>", script).unwrap();
+    assert!(
+        out.contains(r#"data-px="255,0,0,255""#),
+        "readPixels must be filled from the host executor's framebuffer: {out}"
+    );
+}
+
+// STEP 1 — trusted-event capability. A synthesized human-input event must read isTrusted:true to
+// a real listener (window/document/node), an ordinary script event must stay false, and isTrusted
+// must live as a prototype ACCESSOR (Chrome's descriptor shape), not an own instance prop.
+#[test]
+fn synthesized_events_are_trusted() {
+    let script = format!(
+        "{hi}\n;(() => {{\
+          const seen = {{}};\
+          const el = document.createElement('div'); document.body.appendChild(el);\
+          window.addEventListener('mousemove', e => {{ seen.win = e.isTrusted; }});\
+          window.dispatchEvent(__hi.ev('MouseEvent','mousemove',{{clientX:3,clientY:4}}));\
+          document.addEventListener('mousemove', e => {{ seen.doc = e.isTrusted; }});\
+          document.dispatchEvent(__hi.ev('MouseEvent','mousemove',{{clientX:3,clientY:4}}));\
+          el.addEventListener('click', e => {{ seen.node = e.isTrusted; }});\
+          el.dispatchEvent(__hi.ev('MouseEvent','click',{{}}));\
+          seen.plain = new MouseEvent('mousemove',{{}}).isTrusted;\
+          const d = Object.getOwnPropertyDescriptor(Event.prototype,'isTrusted');\
+          seen.protoAccessor = !!(d && typeof d.get === 'function');\
+          seen.ts = __hi.ev('MouseEvent','mousemove',{{}}).timeStamp;\
+          return JSON.stringify(seen);\
+        }})()",
+        hi = turbo_surf_render::HUMAN_INPUT_JS
+    );
+    let out =
+        turbo_surf_render::run_with_dom("<body id=\"ts-trusted-evt\"></body>", &script).unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("json {e}: {out}"));
+    assert_eq!(
+        v["win"], true,
+        "window listener must see isTrusted:true: {out}"
+    );
+    assert_eq!(
+        v["doc"], true,
+        "document listener must see isTrusted:true: {out}"
+    );
+    assert_eq!(
+        v["node"], true,
+        "node listener must see isTrusted:true: {out}"
+    );
+    assert_eq!(
+        v["plain"], false,
+        "an ordinary script event must be isTrusted:false: {out}"
+    );
+    assert_eq!(
+        v["protoAccessor"], true,
+        "isTrusted must be a prototype accessor (Chrome shape): {out}"
+    );
+    // The synthesized event's timeStamp must ride the hi-res clock (performance.now, origin-relative)
+    // — NOT the vendored `new Event()` default of Date.now() (a ~1.7e12 epoch). Assert it's an
+    // origin-relative magnitude (0 < ts < 1e6 ms ≈ under 16 min since timeOrigin), which cleanly
+    // separates performance.now() from the epoch. (Fractionality is not asserted: on Chrome's 0.1ms
+    // grid a hi-res stamp can legitimately land on an integer, so that would be a flaky proxy.)
+    let ts = v["ts"].as_f64().unwrap();
+    assert!(
+        ts > 0.0 && ts < 1_000_000.0,
+        "timeStamp is origin-relative (performance.now), not the Date.now epoch: {out}"
+    );
+}
+
+fn synth_path(mode: &str, ax: f64, ay: f64, bx: f64, by: f64) -> Vec<(f64, f64, f64)> {
+    let script = format!(
+        "{hi}\n;JSON.stringify(__hi.path({ax},{ay},{bx},{by},'{mode}'))",
+        hi = turbo_surf_render::HUMAN_INPUT_JS
+    );
+    let out = turbo_surf_render::run_with_dom("<body></body>", &script).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["x"].as_f64().unwrap(),
+                p["y"].as_f64().unwrap(),
+                p["t"].as_f64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+// Perpendicular distance of (px,py) from the infinite line through A→B.
+fn perp_dist(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    ((p.0 - a.0) * dy - (p.1 - a.1) * dx).abs() / len
+}
+
+// STEP 2 — a straight-line A→B pointer sequence: collinear, monotonic, correct endpoints.
+#[test]
+fn straight_path_is_linear_a_to_b() {
+    let pts = synth_path("straight", 0.0, 0.0, 300.0, 0.0);
+    assert!(pts.len() >= 7, "enough steps: {}", pts.len());
+    assert_eq!(pts.first().unwrap().0.round(), 0.0);
+    assert_eq!(pts.last().unwrap().0.round(), 300.0);
+    // All on the y=0 line, x monotonic non-decreasing, time strictly increasing.
+    let a = (0.0, 0.0);
+    let b = (300.0, 0.0);
+    for w in pts.windows(2) {
+        assert!(w[1].0 >= w[0].0 - 0.5, "x monotonic: {:?}", w);
+        assert!(w[1].2 > w[0].2, "time increasing: {:?}", w);
+    }
+    let max_dev = pts
+        .iter()
+        .map(|&(x, y, _)| perp_dist(a, b, (x, y)))
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_dev < 1.5,
+        "straight path must not curve, max dev = {max_dev}"
+    );
+}
+
+// STEP 3 — a HUMAN path A→B must look real: it curves (bows off the straight line), carries
+// coordinate noise, and its velocity varies (non-uniform time deltas) — the input-entropy a
+// BotGuard-class scorer looks for. Statistical, tolerant of the RNG (run a few seeds).
+#[test]
+fn human_path_curves_with_noise_and_varying_velocity() {
+    let a = (0.0, 0.0);
+    let b = (300.0, 120.0);
+    // Aggregate a few generations so a single unlucky RNG draw can't flake the assertions.
+    let mut curved = 0;
+    let mut varied_velocity = 0;
+    let mut noisy = 0;
+    let runs = 6;
+    for _ in 0..runs {
+        let pts = synth_path("human", a.0, a.1, b.0, b.1);
+        assert!(pts.len() >= 7, "enough steps");
+        assert_eq!(pts.first().unwrap().0.round(), 0.0, "starts at A.x");
+        assert_eq!(pts.first().unwrap().1.round(), 0.0, "starts at A.y");
+        assert_eq!(pts.last().unwrap().0.round(), 300.0, "ends at B.x");
+        assert_eq!(pts.last().unwrap().1.round(), 120.0, "ends at B.y");
+
+        // Curvature: max perpendicular deviation from the A→B chord.
+        let max_dev = pts
+            .iter()
+            .map(|&(x, y, _)| perp_dist(a, b, (x, y)))
+            .fold(0.0_f64, f64::max);
+        if max_dev > 8.0 {
+            curved += 1;
+        }
+
+        // Sampling model: inter-event Δt clusters near a browser's ~10–15ms pointer-sampling
+        // rate (NOT a per-ms firehose) — mean Δt in a sane band.
+        let dts: Vec<f64> = pts.windows(2).map(|w| w[1].2 - w[0].2).collect();
+        let dt_mean = dts.iter().sum::<f64>() / dts.len() as f64;
+        assert!(
+            dt_mean > 8.0 && dt_mean < 22.0,
+            "Δt must be ~sampling rate, got {dt_mean}"
+        );
+        // Velocity variation now lives in SPACE (uniform sampling time, varying distance): the
+        // ease profile makes mid-flight steps far longer than the slow ends.
+        let dists: Vec<f64> = pts
+            .windows(2)
+            .map(|w| ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt())
+            .collect();
+        let dmean = dists.iter().sum::<f64>() / dists.len() as f64;
+        let dvar = dists.iter().map(|d| (d - dmean).powi(2)).sum::<f64>() / dists.len() as f64;
+        if dmean > 0.0 && dvar.sqrt() / dmean > 0.25 {
+            varied_velocity += 1;
+        }
+
+        // Noise: interior points must not lie exactly on a smooth monotone-in-x line — check that
+        // some steps deviate from the local linear interpolation of their neighbours.
+        let mut wobble = 0.0_f64;
+        for w in pts.windows(3) {
+            let midx = (w[0].0 + w[2].0) / 2.0;
+            let midy = (w[0].1 + w[2].1) / 2.0;
+            wobble = wobble.max(((w[1].0 - midx).powi(2) + (w[1].1 - midy).powi(2)).sqrt());
+        }
+        if wobble > 0.7 {
+            noisy += 1;
+        }
+        // Time strictly increasing always.
+        for win in pts.windows(2) {
+            assert!(win[1].2 > win[0].2, "time strictly increasing");
+        }
+    }
+    assert!(
+        curved >= runs - 1,
+        "human path must curve off the chord ({curved}/{runs})"
+    );
+    assert!(
+        varied_velocity >= runs - 1,
+        "human path velocity must vary ({varied_velocity}/{runs})"
+    );
+    assert!(
+        noisy >= runs - 1,
+        "human path must carry coordinate noise ({noisy}/{runs})"
+    );
+}
+
+// Full composable interaction — the real-user Google flow: move to the search box, click it
+// (mousedown→dwell→mouseup→click), focus, type a query, move to the Search button, click it.
+// Every gesture must fire its real event family (move stream + enter/over, down/up/click, focus/
+// focusin, key down/press/input/up, blur/focusout on the focus change) in the right order.
+#[tokio::test]
+async fn sequence_plays_full_google_like_flow() {
+    let html = "<body><input id='q' type='text'><button id='btn'>Search</button></body>";
+    let script = format!(
+        "{hi}\n;(() => {{\
+          const rec = [];\
+          const R = () => (e) => rec.push(e.type);\
+          const doc = ['mousemove','mousedown','mouseup','click','mouseover','mouseout',\
+            'pointerdown','pointerup','pointermove','keydown','keypress','keyup','input','focusin','focusout'];\
+          for (const t of doc) document.addEventListener(t, R(), true);\
+          const q = document.getElementById('q'), btn = document.getElementById('btn');\
+          for (const el of [q, btn]) for (const t of ['mouseenter','mouseleave','focus','blur']) el.addEventListener(t, R());\
+          __hi.sequence(document, [\
+            {{ move: {{ toX: 100, toY: 30, el: q }} }}, {{ click: q }}, {{ focus: q }},\
+            {{ type: 'weather' }}, {{ move: {{ toX: 260, toY: 31, el: btn }} }}, {{ click: btn }}\
+          ], {{ startDelay: 40, startJitter: 40 }}).then(() => {{ document.body.setAttribute('data-seq', JSON.stringify(rec)); }});\
+        }})()",
+        hi = turbo_surf_render::HUMAN_INPUT_JS
+    );
+    let out = turbo_surf_render::render_page(html, "https://x.test/", &script)
+        .await
+        .unwrap();
+    let start = out
+        .find("data-seq=\"")
+        .expect("sequence completed + recorded")
+        + 10;
+    let end = out[start..].find('"').unwrap() + start;
+    let raw = out[start..end].replace("&quot;", "\"");
+    let rec: Vec<String> =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("seq json {e}: {raw}"));
+
+    let has = |t: &str| rec.iter().any(|e| e == t);
+    let first = |t: &str| rec.iter().position(|e| e == t);
+    let last = |t: &str| rec.iter().rposition(|e| e == t);
+    // Every family fired.
+    for t in [
+        "mousemove",
+        "mousedown",
+        "mouseup",
+        "click",
+        "keydown",
+        "keyup",
+        "input",
+    ] {
+        assert!(has(t), "missing {t} in sequence: {rec:?}");
+    }
+    assert!(
+        has("mouseover") || has("mouseenter"),
+        "no hover-enter: {rec:?}"
+    );
+    assert!(has("focus") || has("focusin"), "no focus: {rec:?}");
+    assert!(
+        has("blur") || has("focusout"),
+        "no blur (button click must blur the input): {rec:?}"
+    );
+    // Realistic counts + ordering.
+    assert_eq!(
+        rec.iter().filter(|e| *e == "keydown").count(),
+        7,
+        "one keydown per char of 'weather': {rec:?}"
+    );
+    assert!(
+        first("mousemove") < first("mousedown"),
+        "move precedes the first press: {rec:?}"
+    );
+    let focus_at = first("focus").or_else(|| first("focusin")).unwrap();
+    assert!(
+        focus_at < first("keydown").unwrap(),
+        "focus precedes typing: {rec:?}"
+    );
+    let blur_at = first("blur").or_else(|| first("focusout")).unwrap();
+    assert!(
+        blur_at > last("keydown").unwrap(),
+        "blur happens after typing (on the button click): {rec:?}"
+    );
+    assert!(
+        blur_at < last("click").unwrap(),
+        "blur precedes the final button click: {rec:?}"
+    );
+}
+
+// Timing fidelity: a BotGuard-class collector reads performance.now ×100+ and checks Chrome's
+// clock shape — origin-relative (now() ≈ Date.now()-timeOrigin, NOT epoch), fractional, monotonic,
+// 100µs-grid resolution, with a fractional timeOrigin. The old shim returned integer epoch ms.
+#[test]
+fn perf_clock_matches_chrome_shape() {
+    let probe = r#"
+        var a = performance.now(), b = performance.now();
+        var deltas = [], prev = performance.now();
+        for (var i=0;i<3000;i++){ var n=performance.now(); if(n>prev) deltas.push(n-prev); prev=n; }
+        var minD = deltas.length ? Math.min.apply(null, deltas) : -1;
+        JSON.stringify({
+          origin_relative: performance.now() < 1e9,                 // ~seconds since nav, not epoch
+          origin_fractional: (performance.timeOrigin % 1) !== 0,
+          monotonic: b >= a,
+          min_delta_grid: Math.abs(minD - 0.1) < 1e-6,              // 100µs quantum
+          scale_ok: Math.abs((Date.now() - performance.timeOrigin) - performance.now()) < 50,
+        })
+    "#;
+    let out = turbo_surf_render::run_with_dom("<body></body>", probe).unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("clock json: {e}: {out}"));
+    assert_eq!(
+        v["origin_relative"], true,
+        "now() must be origin-relative, not epoch: {out}"
+    );
+    assert_eq!(
+        v["origin_fractional"], true,
+        "timeOrigin must be fractional: {out}"
+    );
+    assert_eq!(v["monotonic"], true, "now() must be monotonic: {out}");
+    assert_eq!(
+        v["min_delta_grid"], true,
+        "min non-zero delta must be the 0.1ms grid: {out}"
+    );
+    assert_eq!(
+        v["scale_ok"], true,
+        "now() must ≈ Date.now()-timeOrigin: {out}"
+    );
+}
+
+// rAF must deliver a fractional, origin-relative DOMHighResTimeStamp on the perf.now scale (the
+// old shim passed no argument). Async: the virtual event loop fires the frame timer.
+#[tokio::test]
+async fn raf_passes_highres_timestamp() {
+    let html = "<body></body>";
+    let script = "requestAnimationFrame(function(ts){ \
+        document.body.setAttribute('data-raf', JSON.stringify({ num: typeof ts === 'number', \
+        origin: ts < 1e9, near: Math.abs(ts - performance.now()) < 60 })); });";
+    let out = turbo_surf_render::render_page(html, "https://x.test/", script)
+        .await
+        .unwrap();
+    assert!(out.contains(r#"data-raf="#), "rAF callback ran: {out}");
+    assert!(
+        out.contains("&quot;num&quot;:true") || out.contains("\"num\":true"),
+        "rAF arg is a number: {out}"
+    );
+    assert!(
+        out.contains("&quot;origin&quot;:true") || out.contains("\"origin\":true"),
+        "rAF arg origin-relative: {out}"
+    );
+}
+
+// rAF batching: real Chrome gives every rAF callback scheduled for one frame the SAME timestamp,
+// and a callback that re-schedules runs on the NEXT frame (a later timestamp). A per-callback
+// incrementing clock is a tell.
+#[tokio::test]
+async fn raf_batches_one_frame_timestamp_and_reschedules_next() {
+    let script = r#"
+        var log = [];
+        function f(t){ log.push(t); }
+        requestAnimationFrame(f);
+        requestAnimationFrame(f);
+        requestAnimationFrame(function(t){ log.push(t); requestAnimationFrame(function(t2){ log.push('R'+t2); }); });
+        setTimeout(function(){ document.body.setAttribute('data-raf', JSON.stringify(log)); }, 120);
+    "#;
+    let out = turbo_surf_render::render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let i = out.find(r#"data-raf=""#).expect("rAF frames ran") + 10;
+    let j = out[i..].find('"').unwrap() + i;
+    let raw = out[i..j].replace("&quot;", "\"");
+    let log: Vec<serde_json::Value> =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("raf json {e}: {raw}"));
+    assert!(log.len() >= 4, "3 same-frame + 1 rescheduled: {raw}");
+    let t0 = log[0].as_f64().unwrap();
+    assert_eq!(
+        log[1].as_f64(),
+        Some(t0),
+        "same-frame rAFs share one timestamp"
+    );
+    assert_eq!(
+        log[2].as_f64(),
+        Some(t0),
+        "same-frame rAFs share one timestamp"
+    );
+    let resched = log[3].as_str().unwrap();
+    let t2: f64 = resched.strip_prefix('R').unwrap().parse().unwrap();
+    assert!(
+        t2 > t0,
+        "a re-scheduled rAF fires on a LATER frame ({t2} > {t0})"
+    );
+}
+
+// Anti-bot fingerprint fidelity vs real Chrome (measured diffs it must close): (1) canvas/WebGL
+// context methods must report native `.toString()`, not JS source (anti-tamper); (2) the WebGL
+// identity must be the real GPU (ANGLE Metal / Apple), not SwiftShader, with real limits +
+// extension count; (3) the greased UA-CH brand must be `Not_A Brand;v=8` in the middle slot,
+// matching the on-wire sec-ch-ua; (4) pdfViewerEnabled/mimeTypes/Notification coherence.
+#[test]
+fn chrome_fingerprint_identity_is_coherent() {
+    let probe = r#"
+        var c1 = document.createElement('canvas');
+        var gl = c1.getContext('webgl');
+        var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+        var ts = Function.prototype.toString;
+        var out = {
+          renderer: gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL),
+          vendor: gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL),
+          maxTex: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+          extCount: gl.getSupportedExtensions().length,
+          getParamNative: ts.call(gl.getParameter).indexOf('[native code]') >= 0,
+          toDataURLNative: ts.call(document.createElement('canvas').toDataURL).indexOf('[native code]') >= 0,
+          getContextNative: ts.call(document.createElement('canvas').getContext).indexOf('[native code]') >= 0,
+          brands: navigator.userAgentData.brands.map(function(b){return b.brand+' '+b.version;}).join(','),
+          pdf: navigator.pdfViewerEnabled,
+          mimeLen: navigator.mimeTypes.length,
+          notif: (typeof Notification !== 'undefined') ? Notification.permission : 'absent',
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        };
+        document.body.setAttribute('data-fp', JSON.stringify(out));
+    "#;
+    let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
+    let start = out.find("data-fp=\"").expect("data-fp present") + 9;
+    let end = out[start..].find('"').unwrap() + start;
+    let raw = out[start..end]
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&");
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("fp json: {e}: {raw}"));
+
+    let renderer = v["renderer"].as_str().unwrap_or("");
+    assert!(
+        renderer.contains("Apple") && renderer.contains("Metal"),
+        "WebGL must be ANGLE Metal/Apple, not SwiftShader: {renderer}"
+    );
+    assert!(
+        !renderer.contains("SwiftShader"),
+        "SwiftShader leak: {renderer}"
+    );
+    assert_eq!(v["vendor"], "Google Inc. (Apple)");
+    assert_eq!(v["maxTex"], 16384);
+    assert_eq!(v["extCount"], 39);
+    assert_eq!(
+        v["getParamNative"], true,
+        "getParameter.toString must be native"
+    );
+    assert_eq!(
+        v["toDataURLNative"], true,
+        "toDataURL.toString must be native"
+    );
+    assert_eq!(
+        v["getContextNative"], true,
+        "getContext.toString must be native"
+    );
+    // Grease + order validated against a live real-Chrome capture (greased brand LAST,
+    // token `Not A(Brand` v99); must match the on-wire sec-ch-ua in fingerprint.rs.
+    assert_eq!(v["brands"], "Chromium 153,Google Chrome 153,Not A(Brand 99");
+    assert_eq!(v["pdf"], true);
+    assert_eq!(v["mimeLen"], 2);
+    assert_eq!(v["notif"], "default");
+    assert!(
+        v["tz"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+        "timezone present"
     );
 }
 
@@ -2024,13 +3244,14 @@ async fn esm_src_chunk_with_module_body_loads_and_resolves_imports() {
     );
 }
 
-// The render tier exposes a coherent SwiftShader WebGL context (vendored from turbo-test):
-// the GPU identity a fingerprinter reads (UNMASKED_VENDOR/RENDERER via WEBGL_debug_renderer_info,
-// VENDOR/RENDERER/VERSION, MAX_TEXTURE_SIZE) plus deterministic, content-dependent readback.
-// A null WebGL context is itself a strong headless tell; SwiftShader is the real GPU-less
-// Chrome signature. This raises the score fidelity of any client-collected token.
+// The render tier exposes a coherent WebGL context whose identity is spoofed (in ENV_BOOTSTRAP)
+// to this host's real Chrome/ANGLE-Metal profile — the GPU identity a fingerprinter reads
+// (UNMASKED_VENDOR/RENDERER via WEBGL_debug_renderer_info, VENDOR/RENDERER, MAX_TEXTURE_SIZE)
+// plus deterministic, content-dependent readback. A null context is a headless tell, and the
+// vendored default was SwiftShader ("ANGLE (Google, … SwiftShader)") — itself a headless/VM
+// signal; we present the coherent Apple-Metal signature instead (see fix #3).
 #[test]
-fn webgl_swiftshader_signature_in_render_isolate() {
+fn webgl_apple_metal_signature_in_render_isolate() {
     let out = run_with_dom(
         "<body></body>",
         r#"(() => {
@@ -2038,9 +3259,6 @@ fn webgl_swiftshader_signature_in_render_isolate() {
           const gl = c.getContext('webgl');
           if (!gl) return 'NULL';
           const d = gl.getExtension('WEBGL_debug_renderer_info');
-          const px1 = new Uint8Array(16); gl.readPixels(0,0,2,2,0x1908,0x1401,px1);
-          gl.clearColor(0.2,0.4,0.6,1); gl.clear(0x4000); gl.drawArrays(0x0004,0,3);
-          const px2 = new Uint8Array(16); gl.readPixels(0,0,2,2,0x1908,0x1401,px2);
           return [
             gl.getParameter(gl.VENDOR),
             gl.getParameter(gl.RENDERER),
@@ -2048,22 +3266,27 @@ fn webgl_swiftshader_signature_in_render_isolate() {
             gl.getParameter(d.UNMASKED_RENDERER_WEBGL),
             gl.getParameter(gl.MAX_TEXTURE_SIZE),
             gl.getSupportedExtensions().indexOf('WEBGL_debug_renderer_info') >= 0,
-            Array.from(px1).join(',') !== Array.from(px2).join(','),
           ].join('||');
         })()"#,
     )
     .unwrap();
     assert!(
-        out.contains("WebKit||WebKit WebGL||Google Inc. (Google)"),
-        "SwiftShader identity: {out}"
+        out.contains("WebKit||WebKit WebGL||Google Inc. (Apple)"),
+        "Apple-Metal masked identity: {out}"
     );
     assert!(
-        out.contains("ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"),
-        "SwiftShader unmasked renderer: {out}"
+        out.contains("ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"),
+        "Apple-Metal unmasked renderer: {out}"
     );
     assert!(
-        out.contains("||8192||true||true"),
-        "max-texture + debug ext + content-dependent readback: {out}"
+        !out.contains("SwiftShader"),
+        "SwiftShader signature must be gone: {out}"
+    );
+    // Readback content-dependence is now owned by the WebGL→GPU bridge (see
+    // `webgl_readpixels_uses_the_host_executor` + the gpu-metal e2e), not this identity check.
+    assert!(
+        out.contains("||16384||true"),
+        "max-texture (16384) + debug ext present: {out}"
     );
 }
 
@@ -2128,6 +3351,173 @@ async fn recaptcha_bframe_handshake_resolves_with_a_client_token() {
             && !html.contains("frame-vm")
             && !html.contains("<script"),
         "the child realm DOM must stay out of the parent's serialized tree: {html}"
+    );
+}
+
+// A generic iframe (here via `srcdoc`, so it stays offline) must instantiate a REAL child
+// realm: its contentWindow/contentDocument are DISTINCT from the top window/document — not the
+// old top-pointing stub (whose `contentWindow === window` is a hard bot-tell).
+#[tokio::test]
+async fn iframe_realm_has_distinct_window_and_document() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        f.srcdoc = "<div>child</div>";
+        const root = document.getElementById('root');
+        root.setAttribute('data-win', String(f.contentWindow !== window));
+        root.setAttribute('data-doc', String(f.contentDocument !== document));
+        root.setAttribute('data-wobj', String(!!f.contentWindow && f.contentWindow.document === f.contentDocument));
+        "#,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains(r#"data-win="true""#)
+            && html.contains(r#"data-doc="true""#)
+            && html.contains(r#"data-wobj="true""#),
+        "iframe realm must expose a DISTINCT window/document: {html}"
+    );
+}
+
+// A `srcdoc` iframe runs its OWN inline script inside the child realm: the script mutates the
+// CHILD document (title + an appended node), and the child's contentDocument reflects that
+// while the TOP document does not.
+#[tokio::test]
+async fn iframe_srcdoc_inline_script_mutates_child_document_only() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        f.srcdoc = "<scr" + "ipt>"
+          + "document.title='child-was-here';"
+          + "var e=document.createElement('span');e.id='made';document.body.appendChild(e);"
+          + "var r=top.document.getElementById('root');"
+          + "r.setAttribute('data-child-doc-title', document.title);"
+          + "r.setAttribute('data-distinct-doc', String(document !== top.document));"
+          + "r.setAttribute('data-top-title-differs', String(top.document.title !== document.title));"
+          + "r.setAttribute('data-child-has-made', String(!!document.getElementById('made')));"
+          + "</scr" + "ipt>";
+        // keep a reference so the created iframe isn't a churn candidate
+        globalThis.__f = f;
+        "#,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains(r#"data-child-doc-title="child-was-here""#),
+        "the child's inline script must run in the CHILD document: {html}"
+    );
+    assert!(
+        html.contains(r#"data-distinct-doc="true""#)
+            && html.contains(r#"data-top-title-differs="true""#),
+        "the child document must be distinct from the top document (mutation stays child-local): {html}"
+    );
+    assert!(
+        html.contains(r#"data-child-has-made="true""#),
+        "the node the child script appended must be visible in the child document: {html}"
+    );
+    // The child realm's own (detached) DOM must not leak into the parent's serialized tree.
+    assert!(
+        !html.contains("id=\"made\"") && !html.contains("<span"),
+        "the child realm DOM must stay out of the parent's serialized tree: {html}"
+    );
+}
+
+// The frame tree: window.length equals the child-frame count, window/frames are indexable, and
+// a child's `parent` is the (real) parent window — so `frames[0].parent === window`.
+#[tokio::test]
+async fn iframe_frame_tree_length_and_parent_link() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f1 = document.createElement('iframe'); f1.srcdoc = "<div>a</div>";
+        const f2 = document.createElement('iframe'); f2.srcdoc = "<div>b</div>";
+        const root = document.getElementById('root');
+        root.setAttribute('data-len', String(window.length));
+        root.setAttribute('data-frames-len', String(frames.length));
+        root.setAttribute('data-f0-is-win', String(frames[0] === f1.contentWindow));
+        root.setAttribute('data-f0-parent', String(!!frames[0] && frames[0].parent === window));
+        root.setAttribute('data-f1-idx', String(window[1] === f2.contentWindow));
+        "#,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains(r#"data-len="2""#) && html.contains(r#"data-frames-len="2""#),
+        "window.length / frames.length must equal the child-frame count: {html}"
+    );
+    assert!(
+        html.contains(r#"data-f0-is-win="true""#)
+            && html.contains(r#"data-f1-idx="true""#)
+            && html.contains(r#"data-f0-parent="true""#),
+        "frames[i]/window[i] must index child windows and frames[0].parent === window: {html}"
+    );
+}
+
+// A grandchild iframe (an iframe created inside another iframe's srcdoc script) gets its OWN
+// realm: its `parent` is the immediate child window, and its `top` walks to the REAL top window.
+#[tokio::test]
+async fn grandchild_iframe_realm_tops_out_at_the_real_top_window() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        f.srcdoc = "<scr" + "ipt>"
+          + "var g=document.createElement('iframe');"
+          + "g.srcdoc='<div>gc</div>';"
+          + "var gw=g.contentWindow;"
+          + "var r=top.document.getElementById('root');"
+          + "r.setAttribute('data-gc-top-is-top', String(gw.top === top));"
+          + "r.setAttribute('data-gc-parent-is-child', String(gw.parent === window));"
+          + "r.setAttribute('data-gc-distinct', String(gw !== window && gw !== top));"
+          + "</scr" + "ipt>";
+        globalThis.__f = f;
+        "#,
+    )
+    .await
+    .unwrap();
+    assert!(
+        html.contains(r#"data-gc-top-is-top="true""#),
+        "the grandchild's top must be the real top window: {html}"
+    );
+    assert!(
+        html.contains(r#"data-gc-parent-is-child="true""#)
+            && html.contains(r#"data-gc-distinct="true""#),
+        "the grandchild's parent must be the immediate child window, distinct from top: {html}"
+    );
+}
+
+// A self-replicating frame bomb (each frame's srcdoc creates another with the same srcdoc) must
+// be bounded by the depth cap: beyond ~12 levels the loader hands back an inert stub instead of
+// recursing forever, so the render completes and the observed depth is capped.
+#[tokio::test]
+async fn nested_iframe_depth_cap_stops_the_recursion() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        window.__BOMB = "<scr" + "ipt>"
+          + "var t=top;t.__depthReached=(t.__depthReached||0)+1;"
+          + "try{t.document.getElementById('root').setAttribute('data-depth', String(t.__depthReached));}catch(e){}"
+          + "var f=document.createElement('iframe');f.srcdoc=t.__BOMB;"
+          + "</scr" + "ipt>";
+        const f0 = document.createElement('iframe');
+        f0.srcdoc = window.__BOMB;
+        "#,
+    )
+    .await
+    .unwrap();
+    // The cap is 12: the depth-12 frame's script runs (and creates a depth-13 host), but the
+    // depth-13 frame is an inert stub whose script never runs — so the deepest recorded depth
+    // is exactly 12 and the recursion terminated (render returned Ok).
+    assert!(
+        html.contains(r#"data-depth="12""#),
+        "the nested-frame depth must be capped at 12 (no runaway recursion): {html}"
     );
 }
 

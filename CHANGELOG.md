@@ -3,6 +3,333 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [0.5.0] — 2026-09-29 — client-side fingerprint fidelity + browserless anti-bot recon
+
+Closes every **client-side** divergence from real Chrome that a BotGuard-class collector
+reads, verified **same-machine/same-IP** against a real headed-Chrome capture. Honest scope:
+a **trusted** google `__Secure-ENID` remains out of reach browserless — BotGuard is
+**interaction-gated**, VM-interpreted + introspection-heavy (Error-stack + descriptor probes),
+and **server-scored**, with real-input / real-GPU / real-audio / live-DOM blockers a headless
+V8 isolate cannot satisfy (measured: even real headed Chrome on this exit IP minted no ENID
+this run — google appears to have changed the gate). The trusted-token path stays the
+real-browser sidecar, now interaction-driven. These land the achievable client parity; they
+harden the engine broadly against presence/string/timing/interaction-gated walls.
+
+### Added
+- **`probe_mint {url}` MCP tool** + **`probe_page_async`** (render): execution-complete
+  in-isolate anti-bot recon — runs a page's own integrity JS to completion (dynamic
+  `<script>` injection + `op_fetch` + timers) under instrumented fingerprint globals and
+  reports `{shim_needed, accesses, earned_cookies, minted_enid}` (what env the VM demands +
+  whether an in-isolate run mints anything, no browser).
+- **`TURBO_SURF_TRACE`** — env-gated `serp:` diagnostics across the native-google path
+  (cache-vs-mint decision + ENID age, native status/final_url/body_len, the enablejs-shell
+  verdict, the one-shot re-mint retry, and `/sorry` detection).
+- **`human_interact` MCP tool** — a **generic** page-interaction driver: string together
+  `move` / `click` / `focus` / `type` / `blur` / `wait` steps (targeting CSS selectors or
+  coords) and play them as realistic, **trusted** input on the current page, then keep the
+  hydrated result. Takes inline `steps` or a saved **`routine`** (with `{param}` substitution).
+  Ships the **`google-serp`** routine (move→click search box→focus→type query→click Search) — a
+  real-user flow to *attempt* the interaction-gated SERP; the driver is general, google is one
+  caller.
+  - **Follows the resulting navigation.** A fill-a-form-then-submit interaction now records the
+    triggered navigation — the page's JS `location` change and, as a fallback, the enclosing
+    form's serialized GET target (action + every named field's value, so tokens the page baked
+    into the form ride along) — and, when it's a real navigation away from the page, LOADS it
+    natively through the session (jar/cookies carried, a `Referer` of the originating page + a
+    coherent `sec-fetch-site`), then rehydrates. So "type a query, click Search" actually loads
+    the result page instead of stalling on the form. Returns `{navigated, navigated_to}`. General.
+  - **Typing now mutates the field value.** The synthesizer sets the focused element's `.value`
+    as each character's `input` event fires (real-browser order), so a submitted form carries the
+    typed text (previously typing dispatched events only — the field stayed empty).
+  - **Full, realistic key-event sequence.** Each typed character now fires
+    keydown→keypress→**beforeinput**→input→keyup, and every keyboard event carries the real
+    identifiers (`key`/`code`/`keyCode`/`which`, e.g. `KeyR`/`72`) instead of `{key}` only — a
+    `{key}`-only event is a tell BotGuard-class collectors read. A new **`press`** step fires a
+    named key (e.g. `Enter`) with the correct identifiers (Enter → keyCode 13, code `Enter`); the
+    `google-serp` routine now presses Enter to search (how users actually do it) rather than
+    clicking the button, so the page's own Enter handler runs and the nav-follow loads the result.
+- **Human-input synthesizer** (`turbo_surf_render::HUMAN_INPUT_JS`) backing the tool:
+  `__hi.{path,move,type,typePlan,delay,moveAndClick,play,sequence,ev}`. Generates a pointer
+  **path A→B sampled the way a browser samples a gesture** — a coordinate every ~12ms (±stddev),
+  NOT per-pixel/ms, so speed shows as distance-per-sample. Modes `"straight"` and `"human"`
+  (cubic-Bézier curvature + Gaussian coordinate noise + slow→fast→slow velocity + overshoot).
+  `sequence()` chains gestures over the virtual event loop, firing the full real-event families:
+  pointer/mouse **move** stream, **mouseenter/leave + mouseover/out** on hover changes, a real
+  **mousedown → dwell → mouseup → click**, **focus/blur (+focusin/out)** on focus changes, and
+  **human-paced keyboard** (keydown→keypress→input→keyup with per-key rhythm, extra gaps after
+  space/punctuation, occasional hesitation). A jittered **start delay** (events begin after N±rand
+  ms — humans don't fire at t=0). `Event.isTrusted` is now a Chrome-shaped **prototype accessor**;
+  synthesized events read `isTrusted:true` (ordinary script events stay `false`) and carry
+  `timeStamp` on the hi-res clock. Addresses the interaction-gate + input-entropy signal
+  in-isolate (not GPU/audio/server scoring).
+- **Raster-backed canvas `toDataURL`** — `turbo-surf-raster::canvas_ops_png` replays the 2D
+  display list (`ctx._ops`) into a real PNG (was a ~94-byte synthetic stub — an impossible
+  size for rendered content); wired as a host hook (`set_raster_fn`) from mcp + napi.
+- **Canvas-2D surface fidelity** (diffed vs real Chrome):
+  - **`getImageData` reads the real rendered pixels** (a new raw-RGBA rasterizer path,
+    `canvas_ops_rgba` + `op_raster_rgba`), not the vendored synthetic bytes — `fillRect(red);
+    getImageData` returned non-red before, a broken/fake-canvas tell. Raw pixels have no PNG
+    encoder in the loop, so solids/shapes read back **byte-identical to a real browser**.
+  - **`measureText` width** routes through the host system-font measurer (`op_measure_text`, the
+    same CoreText face Chrome uses) — matches Chrome **exactly** (`82.3984375` for `16px Arial`,
+    was a synthetic ~66; a font-detection tell).
+  - Context **class tag** → `[object CanvasRenderingContext2D]` (was `[object DOMImplementation]`),
+    and **`getContextAttributes`** added (`{alpha, colorSpace, colorType, desynchronized,
+    toneMapping, willReadFrequently}`).
+  - Residual: `toDataURL` hash still differs (needs Chrome's Skia+CoreText rasterization AND its
+    exact libpng encoder — no shared final layer, unlike WebGL's raw GPU pixels), and glyph
+    rasterization pixels differ. `getImageData` (the raw-pixel path fingerprinters use to verify a
+    fill) is the one that now matches.
+
+### Changed — page-load lifecycle
+- **Real document/window load sequence.** The render tier now drives `document.readyState`
+  through `loading → interactive → complete` and fires the matching events **in order** on the
+  main document + window: `readystatechange`, `DOMContentLoaded` (at interactive, reaching window
+  listeners), then window `load` + `pageshow` (at complete, after DCL). Previously `readyState`
+  was a frozen `'complete'` and `DOMContentLoaded`/`load` fired only in child (iframe) realms — so
+  a page (or a collector) that gates init on them never ran. Events are trusted + hi-res stamped.
+- **Realistic `performance.timing` spread.** The navigation phases are now laid out with plausible
+  ordered gaps (`navigationStart < dns < connect < request < response < domInteractive < DCL <
+  domComplete < loadEventEnd`) instead of all sharing one timestamp (an all-equal timing was a
+  synthetic tell).
+
+### Changed — render fingerprint fidelity (ENV_BOOTSTRAP)
+- **WebGL identity → real Chrome/ANGLE-Metal (Apple).** `UNMASKED_VENDOR/RENDERER`, numeric
+  limits (`MAX_TEXTURE_SIZE` 16384, …) and the exact `getSupportedExtensions` lists (39 webgl
+  / 36 webgl2) — was SwiftShader ("ANGLE (Google, … SwiftShader)"), a headless/VM signal.
+- **Native-code masking** for canvas/WebGL context methods — `toDataURL`/`getParameter`/… now
+  report `[native code]` (were JS source, an instant anti-tamper flag).
+- **Timezone pinning (opt-in)** — set **`TURBO_SURF_TZ`** (e.g. `America/New_York`) for a coherent
+  zone; the isolate then reports it via `Intl`/`Date` (ICU `TZ` + per-isolate
+  `date_time_configuration_change_notification`). Not set by default: mutating the process `TZ` env
+  would race other threads + silently change the host process's timezone when embedded in the napi
+  addon / PyO3 wheel. Without the opt-in the isolate uses the host zone.
+- **High-resolution clock** — `performance.now()` is origin-relative + fractional + monotonic
+  on Chrome's 100µs grid, `timeOrigin` is a fractional epoch anchor, and `requestAnimationFrame`
+  is **batched** like Chrome — all callbacks scheduled for one frame fire with the SAME fractional
+  origin-relative `DOMHighResTimeStamp` (~16.6ms cadence + jitter, ≤ `now()`), a re-scheduled
+  callback runs on the next frame, and it returns an integer id with a correct `cancelAnimationFrame`
+  (was: per-callback incrementing timestamp, no arg, `clearTimeout` alias — a tell).
+- **Coherent clock — observable time is REAL, timer delays stay virtual.** `performance.now()` and
+  `Date.now()` now derive from `page_age + real_monotonic_hrtime + virtual_timer_advance` via a new
+  `op_now_perf` op (a real monotonic `Instant`, sub-ms). So wall-clock reads advance like a real
+  machine's — `setTimeout(fn, 100)` observes ~100ms elapsed (was **0ms**, a chronometric-trap tell),
+  and a busy loop shows real µs drift (the maxIdenticalRun over repeated `performance.now()` fell
+  13989 → 1110). `Date.now` is overridden so `timeOrigin + performance.now() == Date.now()` (coherent
+  residual 0), passing BotGuard's `perf.now()`-vs-`Date.now()` chronometric cross-check. Timer *delays*
+  stay on the virtual clock so the crawler never blocks on a real `setTimeout`. The `Date`
+  **constructor** is wrapped too, so `new Date()` / `+new Date()` / `Date()` read the same coherent
+  clock (they otherwise diverged from `Date.now()` by the accumulated virtual time — a coherence
+  tell); the wrapper preserves statics, `instanceof`, `Date.length===7`, `prototype.constructor`,
+  subclassing (`class X extends Date {}` via `Reflect.construct`), and native fn shape (`Date` /
+  `Date.now` report `[native code]`, not the JS override source). Covered by
+  `clock_reflects_virtual_time_and_is_coherent`.
+- **`Object.prototype.toString` brand pollution fixed.** A node-branding pass was tagging
+  `document.implementation`'s prototype — which *is* `Object.prototype` — so `Symbol.toStringTag`
+  landed on `Object.prototype` and `Object.prototype.toString.call({})` / `[]` / `new Date()` all
+  read **`"[object DOMImplementation]"`**, a trivial, high-severity bot tell on *every* un-branded
+  object (and it had clobbered `Object.prototype.constructor` too). Branding now targets the instance,
+  never a shared root proto: `{}` → `[object Object]`, `[]` → `[object Array]`, `new Date()` →
+  `[object Date]` again, with `document.implementation` still correctly branded.
+- **UA-CH greased brand** → `"Not_A Brand";v="8"` in the middle slot, matching the on-wire
+  `sec-ch-ua`; coherent `getHighEntropyValues.fullVersionList` (was a stale `Not)A;Brand;v=24`).
+- **Coherence surfaces** real Chrome exposes that deno_core omits: `navigator.pdfViewerEnabled`,
+  a populated `mimeTypes` (PDF types linked to the plugins), `Notification.permission`,
+  `performance.memory`, `document.scrollingElement`, `window.sessionStorage`, legacy
+  `performance.timing`/`navigation`, and `window.scheduler`.
+- **Four structural tells closed, found by a Chrome-vs-turbo-surf snapshot diff** (a shared
+  collector run in real headed Chrome on a live google page vs. the render isolate; after the
+  fixes the diff is 0 structural fields — the remaining diffs are host display/RAM/CPU config,
+  the canvas render-engine hash, and Chrome version drift, none of them tells). A repeatable
+  turbo-surf-side runner ships as `turbo-surf-mcp`'s `fp_snapshot` example. The four:
+  - **`navigator.permissions` was absent** (`permissions.query` threw `TypeError`). Now a
+    spec-shaped Permissions API — `query()` resolves a `PermissionStatus` with realistic default
+    states (`notifications` coupled to `Notification.permission`), the method native-masked.
+  - **`document.characterSet`** (+ `charset`/`inputEncoding`) returned `undefined` (a vendored
+    own-property); forced to `"UTF-8"`.
+  - **`window.location` class-tagged as `"[object DOMImplementation]"`** instead of
+    `"[object Location]"` — a trivial `Object.prototype.toString.call(location)` bot tell.
+  - **A WebGL context was not `instanceof WebGLRenderingContext`** and the constructor prototype
+    was a bare stub (`getParameter` threw off the prototype). Each context now gets a dedicated,
+    native-marked prototype wired to its named global ctor — *without* reusing the shared vendored
+    fallback proto (which would make `location instanceof WebGLRenderingContext` true and collapse
+    the webgl/webgl2 prototypes onto one, both worse tells). Regression-tested against Chrome's
+    captured values (`fingerprint_parity_permissions_location_charset_webgl`).
+- **Physically coherent window/screen geometry.** The viewport is now shorter than the window
+  (`outerHeight = innerHeight + browser chrome`, ~88px) — equal inner/outer height was impossible
+  for a real window and a tell; widths stay equal (no side chrome); `availHeight < screen height`
+  (menubar). Covered by `window_and_screen_geometry_is_coherent`.
+- **macOS-coherent color depth.** `screen.colorDepth`/`pixelDepth` default to **30** on a Mac
+  profile (wide-gamut/HDR displays) and 24 elsewhere — was a flat 24 while claiming an Apple GPU.
+- **All viewport/display fields are param-driven** (`__pick`) with platform-aware sensible
+  defaults: `innerWidth`/`innerHeight`/`outerWidth`/`outerHeight`, `screen` dims,
+  `availWidth`/`availHeight`, `colorDepth`/`pixelDepth`, `deviceMemory`, `hardwareConcurrency`,
+  `languages` — a caller passes a machine profile; nothing is hardcoded to one host.
+- **Real-Chrome UA-CH GREASE brand.** `navigator.userAgentData.brands` and the on-wire
+  `sec-ch-ua` now both emit `"Chromium";v="M", "Google Chrome";v="M", "Not A(Brand";v="99"`
+  (greased brand LAST, token `Not A(Brand` v99), validated against a live capture and unified
+  across the two layers. Previously the wire (`Not_A Brand`/`8`) and render tiers disagreed and
+  neither matched real Chrome — a cross-layer mismatch is a hard tell. (The UA *string* itself was
+  already a correct reduced Chrome UA — verified character-identical to real Chrome bar the major.)
+
+### Changed — BotGuard/SearchGuard anti-tamper hardening
+Driven by a committed **integrity-trap probe** (`scripts/browser-sidecar/probes/botguard-probe.js`,
+run in real Chrome via `run-probe.mjs` and in the isolate via the `fp_snapshot` example, then
+diffed) against the checks the research surfaced (native-fn shape, toString anti-hook, chronometric
+trap, env surface). Closes the tractable traps (and, with the `gpu-metal` WebGL bridge, the WebGL
+render-hash — now pixel-identical to Chrome, see the GPU section); the residual (the Canvas-2D
+render hash + the BotGuard VM's live execution-integrity checks) needs a real browser and is out of
+reach for a synthetic DOM — documented.
+- **Native-fn SHAPE.** A real native function reports `[native code]` AND has **no own
+  `prototype`** (a stealth-detection tell: `'prototype' in HTMLCanvasElement.prototype.toDataURL`
+  is `false` in Chrome). Our `function`-expression shims carried an own, non-deletable prototype.
+  The toString trap is now a concise method (no prototype); a `nativize` forwarder (prototype-less,
+  name/length pinned) backs the canvas/WebGL/event shims; `addEventListener`/`removeEventListener`/
+  `dispatchEvent` are native-shaped on their own object. A final sweep native-marks every remaining
+  window data-property function, so no window global leaks JS source via toString.
+- **`navigator` is a real `Navigator` instance.** Was a plain object literal (26 own props + a thin
+  15-member prototype); now `window.Navigator` + an **84-member `Navigator.prototype`** (the exact
+  member list captured from live Chrome — 56 getters + 27 methods + constructor) with
+  `navigator = Object.create(navProto)` → **zero own properties**, `instanceof Navigator`,
+  `[object Navigator]`, and native-marked prototype getters (incl. a `webdriver` getter, no own
+  prop). Real values where we have them; plausible object stubs otherwise (e.g. `scheduling.
+  isInputPending` for React). Removed the old `hostInterface` re-parenting that produced a 13-getter
+  stub prototype.
+- **Full window surface breadth.** A window own-prop diff vs real Chrome found ~740 missing globals;
+  added them — 554 interface constructors (stub fns), 115 `on*` handler slots (null, like Chrome),
+  and ~70 misc methods/props/bar objects — taking the own-prop count from **527 → ~1263** (Chrome
+  1235), so `X in window` / `typeof window.X` / `window.onX === null` presence checks pass.
+- **Coverage:** `masked_native_functions_have_no_prototype`, `navigator_is_a_prototype_backed_instance`,
+  `window_surface_matches_chrome_breadth` (render-tier regression tests).
+
+### Added — GPU (opt-in)
+- **`gpu-metal` cargo feature** (off by default; macOS/Metal) — real Apple-GPU rendering via
+  `wgpu`→Metal for the render tier's fingerprint surface, fixing the coherence tell of claiming
+  an Apple-Metal renderer while producing device-invariant/software pixels. Two paths:
+  - **Canvas 2D** — `toDataURL` rasterizes on the GPU instead of tiny-skia (falls back on any
+    GPU error, so it never regresses).
+  - **WebGL** — a **live WebGL→wgpu bridge**: the render tier overrides the isolate's WebGL
+    methods to record a page's `gl.*` calls *at the live call site* (real buffer bytes + shader
+    source — nothing lossy), then executes the batch on the real GPU (`naga` translates the
+    page's GLSL-ES → WGSL) and returns genuine framebuffer pixels for `readPixels`. Synthetic
+    fallback when no GPU backend is installed.
+  A broad fidelity win for **any** wall that hashes canvas/WebGL (DataDome, Kasada, reCAPTCHA,
+  Akamai, Cloudflare, Incapsula), not just google. Zero cost to the default build / PyPI wheels
+  (0 wgpu/naga crates unless the feature is on); enabled via `turbo-surf-mcp`/`napi`/`py`'s own
+  `gpu-metal` pass-through. **Live-measured: the WebGL fingerprint now matches real Chrome
+  pixel-for-pixel** — a standard gradient-triangle draw + `readPixels` produces a byte-identical
+  buffer and the SAME pixel hash as Chrome on the same Apple GPU (wgpu→Metal lands on the same
+  result as ANGLE→Metal for these scenes). Two bugs fixed to get there: WebGL contexts were missing
+  the ~298 enum constants (so `gl.VERTEX_SHADER` etc. were undefined → real draws got `undefined`
+  args → clear-only), and the GLSL rewrite was line-based so a minified single-line shader (all
+  declarations + `main` on one line, as real fingerprint shaders are) was corrupted → translation
+  failed → synthetic fallback. Now: full constant set on the context prototype + a brace-aware
+  statement splitter. So this beats device-invariance/SwiftShader **and** exact-hash comparison for
+  the common WebGL fingerprint scenes. (Live-measured: even the full kitchen-sink — GPU + interaction
+  + parity — does not earn a trusted google `__Secure-ENID`; that residual is server-side attestation.)
+- **`coretext` cargo feature** (off by default; macOS only) — canvas **text** glyphs raster through
+  CoreText/CoreGraphics (the same system glyph stack Chrome's Skia uses on macOS) instead of the
+  ttf-parser + tiny-skia vector glyph trace, so `getImageData` over rendered text reads back like a
+  real Mac Chrome. OS-guarded twice: `#[cfg(all(target_os = "macos", feature = "coretext"))]` on the
+  code path AND macOS-only optional `core-graphics`/`core-text`/`core-foundation` Cargo deps — the
+  frameworks don't exist elsewhere, so nothing to build off-macOS. Only text is swapped (shapes stay
+  on tiny-skia, no regression); handles an identity/translate CTM and falls back to the vector trace
+  for a scaled/rotated text matrix. **Live-measured vs real Chrome**: `getImageData` over "Hello"
+  20px Arial → bbox `[3,13,46,28]` + avgAlpha 163, matching Chrome's bbox `[3,13,46,28]` + avgAlpha
+  163 (pixel count within 2%). Enabled via `turbo-surf-mcp`/`napi`/`py`'s `coretext` pass-through;
+  zero cost to the default build. Attribute ranges are counted in UTF-16 code units (not scalars),
+  so an astral char (emoji, CJK-ext) styles its whole glyph run; `set_should_smooth_fonts(true)` is
+  the measured Chrome-parity choice (avgAlpha 163.3 vs Chrome 163; grayscale/`false` drifts to
+  147.3). (Canvas-2D `toDataURL` byte-parity remains intentionally out of scope — PNG-container/
+  encoder differences, not a glyph-shape tell.) Covered by `coretext_rasterizes_text_into_pixmap`
+  + `coretext_declines_non_translate_ctm`.
+
+### Added — per-strategy config (data-driven, not google-hardcoded)
+- The `structural` result extractor's engine-internal host filter is now a per-strategy
+  **`internal_hosts`** list (`.`-prefixed = substring, else host suffix; empty = no filtering)
+  instead of a google-hardcoded blocklist baked into the shared extractor — so `structural` is a
+  general format, not secretly google-only. The google list moved to `search-strategies.json`.
+- Search strategies (`search-strategies.json`) gain an optional **`headers`** map, applied to the
+  SERP fetch and merged over the impersonate/rustls defaults — a general, config-driven knob (not
+  google-hardcoded). The google strategy uses it to send `Referer: https://www.google.com/` +
+  `sec-fetch-site: same-origin` (overriding the emulation's cold-nav `sec-fetch-site: none` / no
+  referer) so the `/search` fetch looks like a real in-site navigation, and its `query_url` carries
+  `&source=hp`. Measured vs a real incognito Chrome `/search` (which returns the real SERP on this
+  same IP — the IP is not the wall), a missing `Referer` + `sec-fetch-site: none` + a bare `?q=`
+  were the top "direct/scripted fetch" tells. Honest note: these close real tells but aren't a
+  standalone SERP unlock. The residual is a single upstream gate — **trusted homepage delivery**.
+  An untrusted request is served the `enablejs` shell; a *trusted* one (valid `__Secure-ENID`,
+  real-browser mint) gets the full homepage with the session params `ei`/`iflsig`/`sxsrf` already
+  baked into the HTML. Those params are **server-minted, not client-computed** — not a second,
+  independent blocker but a symptom of the same gate: solve trusted delivery and they come along
+  for free (just parse them out of the trusted HTML).
+- **Browserless SERP diagnostic** (`browserless_google_serp`) + a reusable real-Chrome **network
+  tracer** (`scripts/browser-sidecar/net-trace.mjs`) narrowed the wall. A net-trace of real Chrome
+  shows the cookie set is built by the **consent Accept-all handshake** (`consent.google.com/save`
+  → `NID`/`SOCS`/`__Secure-BUCKET`) + the homepage response (`AEC`/`__Secure-ENID`) — never by a
+  bare GET. `browserless_google_serp` now does the REAL consent handshake browserlessly and earns
+  the **same cookie set as real Chrome** (`AEC`, `NID`, `__Secure-BUCKET`, `__Secure-ENID`,
+  `SEARCH_SAMESITE`) — yet `/search` **still returns the `enablejs` shell**. So the trust is **not
+  in the cookies** (identical set, still untrusted): it's the `__Secure-ENID` *value*, which a real
+  browser's homepage load earns and a browserless mint does not. NB: the `/gen_204` beacons are
+  **client telemetry, not attestation** — their params are all CSI/latency/interaction metrics
+  (`atyp=csi`, `rt=…`, `mem=…`, `net=…`, `fid=…`), no token blob (verified with the tracer's
+  POST-body/query dump). The exact server-side mechanism that blesses a real browser's ENID is
+  still open — the headed-sidecar mint remains the only path to a trusted token.
+- **Param-driven `SOCS` consent seeding.** The synthetic `SOCS` cookie that dismisses google's
+  "before you continue" interstitial was a single hardcoded value; it is now caller-driven via
+  `FetchOptions.consent_socs` (core) + the `set_consent_socs` MCP tool / `Session.consent_socs`.
+  `None` keeps the built-in default (`consent::DEFAULT_SOCS`); a value seeds a caller-chosen consent
+  state; **`""` seeds NO `SOCS`**, so even with bypass on the raw consent-gated response is served
+  and the *real* `consent.google.com/save` Accept-all handshake runs instead of the shortcut. Used
+  to test whether skipping the consent guard was the trust blocker: measured live both ways
+  (default synthetic SOCS vs. `""` → real handshake) — **both return the `enablejs` shell**, so the
+  consent shortcut is NOT the gate; the block stays the server-scored `__Secure-ENID` value.
+
+### Changed — general iframes (render)
+- **Any** iframe (created, parsed from HTML, or `srcdoc`) now instantiates a real bridged child
+  realm that runs its own inline + `<script src>` scripts, with a **distinct** `contentWindow`/
+  `contentDocument` (was `=== window`/`=== document`, a hard bot-tell), a wired frame tree
+  (`window.frames`/`window.length`/`frames[i]`, child `top` = real top, `parent` = immediate
+  parent), and a **depth cap (12)** against frame-bombs. Was: only reCAPTCHA bframe/anchor URLs
+  got a realm; every other iframe was an inert stub whose scripts never ran. The reCAPTCHA
+  handshake still works (now via the same generic loader). Honest limit: still one V8 isolate, so
+  frames share prototypes (no true origin isolation).
+
+### Changed — messaging APIs (render)
+- `MessagePort`/`MessageChannel` are now real classes (ports are `MessagePort` instances with a
+  working `addEventListener('message')` + `start()`, not object-literal stubs), `MessageEvent` is
+  a real constructor (`new MessageEvent('message',{data}).data` was `undefined`), and
+  `window.postMessage`/port/`BroadcastChannel` dispatch real `MessageEvent` instances. All four
+  message constructors are native-marked (`.toString()` was leaking JS source). The React/google
+  `new MessageChannel; port1.onmessage=…; port2.postMessage(0)` scheduler idiom still fires.
+
+### Changed — observers (render)
+- `IntersectionObserver` / `ResizeObserver` / `MutationObserver` are now three **distinct**
+  constructors (were one shared object — `IntersectionObserver === ResizeObserver` was a trivial
+  `===` / `.name` fingerprint tell), `PerformanceObserver.supportedEntryTypes` returns a populated
+  Chrome list (was `[]`), and `IntersectionObserver` fires one initial async entry per observed
+  element (`isIntersecting:false`, like Chrome for an off-screen node) so visibility-gated init runs.
+
+### Changed — sidecar + deps
+- **Browser sidecar mint** (`fetch-serp.mjs`): BotGuard is interaction-gated, so `mintEnid`
+  now performs a genuine human-paced search-box interaction to trigger the VM before harvesting
+  cookies (the old idle homepage dwell earned no trusted `__Secure-ENID`).
+- **deps:** turbo-dom `0.4.0` → `0.5.1` across all six consumer crates.
+
+### Fixed — hardening (3 rounds of adversarial review)
+Three review passes over the new render/mcp/raster surface, all findings fixed + covered:
+- **`toDataURL` honours a non-PNG MIME** (the `image/webp`/`image/jpeg` support probe) instead of
+  relabelling a raster PNG — returning PNG bytes for a webp request was both wrong and a tell.
+- **`getContext` is idempotent** — a repeat call no longer re-wraps the WebGL
+  `getParameter`/`readPixels` overrides (double-recording / recursion).
+- **`IntersectionObserver.disconnect()` before the async initial entry cancels it** (a stale
+  callback after disconnect was wrong + a behavioural tell).
+- **Canvas `rgba()` accepts percentage alpha + the CSS4 `rgb(r g b / a)` slash form**; the `font`
+  shorthand parser tolerates whitespace runs (a double space no longer desyncs the family list).
+- **Interaction routines error on an unresolved `{param}` placeholder** instead of typing a literal
+  `"{query}"` into a search box.
+
 ## [0.4.4] — client-hint parity + in-isolate reCAPTCHA execution
 
 Fingerprint-parity + browserless reCAPTCHA/BotGuard execution work. Note: this does

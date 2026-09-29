@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.4.4 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.5.0 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -109,7 +109,8 @@ npx turbo-surf-mcp          # stdio MCP server (76 tools), e.g.:
 # screenshot:  screenshot (PNG/SVG of the page or a dom_history snapshot),
 #              set_viewport
 # interaction: click, fill, submit, click_selector, fill_selector, select_option,
-#              check, uncheck, fill_many, find_text, extract_links, set_bypass_consent
+#              check, uncheck, fill_many, find_text, extract_links,
+#              set_bypass_consent, set_consent_socs
 # accessors:   get_attribute, text_content, inner_html, input_value, count,
 #              is_visible, is_checked, is_enabled, is_editable, is_focused,
 #              is_empty, aria_role, accessible_name, accessible_description
@@ -118,8 +119,8 @@ npx turbo-surf-mcp          # stdio MCP server (76 tools), e.g.:
 #              web_search_strategies, web_search_load_strategy, web_search_reset_strategy
 # fetch:       fetch_markdown, fetch_markdown_batch, fetch_json, fetch_raw
 # render/JS:   render, set_mode, eval_js, inject_js, latest_dom, dom_history,
-#              evaluate, detect, detect_js, run_playwright, probe
-# stealth:     stealth_status, set_fingerprint, analyze_akamai
+#              evaluate, detect, detect_js, run_playwright, probe, human_interact
+# stealth:     stealth_status, set_fingerprint, analyze_akamai, probe_mint
 # session:     get_cookies, set_cookie, set_extra_headers, robots_check
 ```
 
@@ -258,10 +259,83 @@ Add **`--features trust-anchors`** (implies `impersonate`) to also emit Chrome 1
 vendored `wreq` fork (`rust/vendor/wreq`), so it works in this binary but not for
 crates.io library consumers — see [`PUBLISHING.md`](./PUBLISHING.md).
 
+Build feature (not env): **`--features gpu-metal`** (macOS/Metal, off by default) runs the
+render tier's **WebGL on the real Apple GPU** — a live WebGL→wgpu→Metal bridge records the
+page's `gl.*` calls and executes them on the GPU, so `readPixels` returns genuine framebuffer
+pixels. Measured: a standard WebGL fingerprint draw is now **byte-identical to real Chrome**
+(same per-pixel RGBA and the same pixel hash — wgpu→Metal lands on the same result as Chrome's
+ANGLE→Metal on the same GPU). Canvas 2D `toDataURL` also rasterizes on the GPU (falls back to
+tiny-skia on any GPU error, so enabling it never regresses). Zero cost to the default build +
+the PyPI wheels (no `wgpu` unless enabled). Beats device-invariance/SwiftShader detection —
+for WebGL, exact-hash comparison too.
+
+A second build feature **`--features coretext`** (macOS only, off by default) rasterizes canvas
+**text** through CoreText/CoreGraphics — the same system glyph stack Chrome's Skia uses on macOS —
+so `getImageData` over rendered text reads back like a real Mac Chrome (measured: `getImageData` on
+"Hello" 20px Arial matches Chrome's bounding box + average alpha exactly). Double OS-guarded
+(`cfg(macos)` + macOS-only Cargo deps); only text is swapped (shapes stay on tiny-skia), and it
+falls back to the vector glyph trace for a scaled/rotated text matrix. (Canvas-2D `toDataURL` still
+differs from Chrome's *hash*: that also needs Chrome's exact PNG-container/encoder, no shared final
+layer — but `getImageData` reads back the real rendered pixels, byte-identical for solids/shapes and
+now CoreText-matched for text.)
+
 MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
-what a page's anti-bot JS reads), **`analyze_akamai`** (experimental: rebuild +
-test Akamai sensors). Detailed below.
+what a page's anti-bot JS reads), **`probe_mint`** (browserless recon: run a page's
+integrity JS in-isolate → the env surface it demands + any cookies earned),
+**`human_interact`** (play realistic **trusted** input — curved browser-sampled mouse
+motion, real mousedown→dwell→mouseup→click, human typing, hover + focus/blur — as a
+generic `move`/`click`/`focus`/`type` step sequence or a saved `routine`), and
+**`analyze_akamai`** (experimental: rebuild + test Akamai sensors). Detailed below.
+
+**Human interaction (`human_interact`).** Some walls (e.g. google's BotGuard) are
+*interaction-gated* — their integrity VM only runs, and only scores you, once a real
+person engages the page. `human_interact` strings together trusted input gestures on
+the current page so the page's own listeners (and the collector) see genuine,
+entropy-bearing mouse/keyboard activity: `goto` a page, then drive a `steps` array or a
+named `routine`. The bundled **`google-serp`** routine composes the real-user search
+flow (move → click the box → focus → type `{query}` → click Search). Honest scope: this
+supplies the interaction-gate + input-entropy signal in-isolate; a *trusted* google
+`__Secure-ENID` also needs real-GPU pixels + server-side scoring (see `probe_mint` and
+the CHANGELOG), so it is not by itself a SERP unlock.
+
+**Render-tier realism.** The isolate is shaped to match real Chrome structurally, verified by
+diffing a shared collector against real headed Chrome (the reusable probes under
+[`scripts/browser-sidecar/probes/`](./scripts/browser-sidecar/), run in Chrome via `run-probe.mjs`
+and in-isolate via the `fp_snapshot` example). Highlights:
+
+- **`navigator` is a real `Navigator` instance** — zero own properties, all ~84 members on
+  `Navigator.prototype` (native-marked getters/methods), `instanceof Navigator`, `webdriver`
+  a prototype getter (not an own prop).
+- **Window surface breadth** matches Chrome (~1235 own props): the full set of interface
+  constructors, `on*` handler slots (null), and bar/API objects — so `X in window` /
+  `typeof window.X` presence checks pass.
+- **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
+  real native functions); the `toString` anti-hook trap is itself shapeless.
+- **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for
+  solids/shapes), `measureText` width matches Chrome exactly (real system-font measurer), context
+  class-tags as `CanvasRenderingContext2D` + `getContextAttributes`.
+- **WebGL**: full enum-constant set on the context prototype; under `--features gpu-metal`,
+  `readPixels` is byte-identical to Chrome (see above).
+- Real **page-load lifecycle** (`readyState` loading→interactive→complete with `DOMContentLoaded`
+  → window `load` → `pageshow`, in order), a Chrome-shaped **coherent high-resolution clock**
+  (fractional `performance.now`/`timeOrigin`, batched rAF) with spread `performance.timing`. Observable
+  time is **real**: `performance.now()`/`Date.now()` derive from real monotonic hrtime + virtual timer
+  advance, so `setTimeout(fn, 100)` observes ~100ms elapsed (was 0ms — a chronometric-trap tell) and
+  `timeOrigin + performance.now() == Date.now()` holds (passes BotGuard's perf-vs-Date cross-check);
+  timer *delays* stay virtual so the crawler never blocks. Plus **distinct**
+  `Intersection`/`Resize`/`MutationObserver` constructors, real `MessagePort`/`MessageChannel`/
+  `MessageEvent` instances, spec-shaped `navigator.permissions`, and general **nested-iframe realms**
+  (any iframe/`srcdoc` runs its own scripts with a distinct `contentWindow` + wired frame tree + depth cap).
+
+Search strategies also take optional **`headers`** + **`internal_hosts`** maps (e.g. `Referer` +
+`sec-fetch-site` for a real in-site-navigation shape). Opt into a coherent timezone with
+**`TURBO_SURF_TZ`**. The synthetic google/youtube consent (`SOCS`) cookie is param-driven —
+**`set_consent_socs`** overrides the value, and `""` seeds none so the *real*
+`consent.google.com/save` Accept-all handshake runs instead of the shortcut (measured: both paths
+still yield the JS-gated shell, so the consent guard is not the trust gate). Honest scope: these
+close the client-side/structural tells; google's trusted `__Secure-ENID` remains **server-scored**
+(see the CHANGELOG's BotGuard notes).
 
 ---
 

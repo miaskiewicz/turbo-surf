@@ -79,9 +79,16 @@ async function launchContext(proxy, headless) {
 }
 
 // MINT: load the google homepage in real headed Chrome and return the earned
-// cookies (at least __Secure-ENID, plus AEC/SOCS/NID when present). The engine
-// caches + replays __Secure-ENID on native /search fetches. A brief human-ish
-// pause after load lets google set its full cookie set.
+// cookies (the trusted __Secure-ENID, plus AEC/SOCS/NID when present). The engine
+// caches + replays __Secure-ENID on native /search fetches.
+//
+// CRITICAL: google's BotGuard integrity VM is INTERACTION-GATED — it does NOT fire on
+// an idle homepage dwell; it loads + runs (and the trusted-ENID grant follows) only
+// after the search box is engaged. An idle load earns AEC/NID/SOCS but often no trusted
+// __Secure-ENID. So we perform a genuine, human-paced search-box interaction (focus +
+// per-character typing with jitter) to trigger BotGuard, then let it settle before
+// harvesting cookies. We do NOT submit (avoids a needless /sorry exposure); focus+type
+// is what drives the VM.
 async function mintEnid(context) {
   await context.addCookies([{ name: "SOCS", value: "CAI", domain: ".google.com", path: "/" }]);
   const page = context.pages()[0] || (await context.newPage());
@@ -89,7 +96,21 @@ async function mintEnid(context) {
     waitUntil: "domcontentloaded",
     timeout: 30000,
   });
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(600);
+  // Engage the search box to trigger BotGuard (real Chrome 153 uses a <textarea name=q>;
+  // older layouts use <input name=q>). Best-effort — a layout miss must not fail the mint.
+  try {
+    const box = page.locator('textarea[name="q"], input[name="q"]').first();
+    await box.click({ timeout: 5000 });
+    for (const ch of "weather today") {
+      await page.keyboard.type(ch, { delay: 60 + Math.floor(Math.random() * 90) });
+    }
+    // Let the interaction-gated VM load /js/bg/…, run, and the ENID grant land.
+    await page.waitForTimeout(2500);
+  } catch (e) {
+    process.stderr.write("mint: search-box interaction skipped (" + (e && e.message) + ")\n");
+    await page.waitForTimeout(1500);
+  }
   // Only google.com cookies are relevant; map to the engine's cookie record.
   const cookies = (await context.cookies("https://www.google.com/")).map((c) => ({
     name: c.name,

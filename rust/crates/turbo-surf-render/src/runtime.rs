@@ -181,6 +181,122 @@ fn op_measure_text(#[string] text: &str, #[string] family: &str, size: f64) -> S
     }
 }
 
+// Real monotonic high-resolution clock (sub-millisecond), for `performance.now()`. deno_core
+// gives no wall-independent monotonic time to the isolate, so the JS clock fell back to
+// `Date.now()` (1ms grid) + a synthetic creep — which flatlines under a tight read loop (a timing
+// tell: a real browser's performance.now advances on a ~sub-µs hardware clock). This returns ms
+// since a process-fixed `Instant`, so consecutive reads show real sub-ms deltas like Chrome.
+#[op2(fast)]
+fn op_now_perf() -> f64 {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
+}
+
+// Host canvas rasterizer: replay a 2D draw list into real PNG bytes. Same injection
+// pattern as `set_measure_fn` — the crate that owns the raster/paint engine installs it,
+// so the render crate keeps no tiny-skia/font dep (matters for the PyO3 wheel build). Until
+// set, `toDataURL` keeps the vendored synthetic behavior.
+type RasterFn = Box<dyn Fn(u32, u32, &str) -> Option<Vec<u8>> + Send + Sync>;
+static RASTER_PNG: std::sync::RwLock<Option<RasterFn>> = std::sync::RwLock::new(None);
+
+/// Install the host's canvas rasterizer: `(width, height, ops_json) -> PNG bytes`.
+/// `ops_json` is the recorded 2D display list (the vendored `ctx._ops`). Injected once at
+/// startup by the crate that owns the raster engine (raster). Until set, `toDataURL` returns
+/// the vendored synthetic blob.
+pub fn set_raster_fn(f: RasterFn) {
+    if let Ok(mut g) = RASTER_PNG.write() {
+        *g = Some(f);
+    }
+}
+
+// Rasterize a canvas draw list to a base64 PNG (no `data:` prefix), or "" when no host
+// rasterizer is installed (the JS override then falls back to the vendored blob). Never
+// throws across the boundary.
+#[op2]
+#[string]
+fn op_raster_png(width: u32, height: u32, #[string] ops_json: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    match RASTER_PNG
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|f| f(width, height, ops_json)))
+    {
+        Some(bytes) => STANDARD.encode(bytes),
+        None => String::new(),
+    }
+}
+
+// Same rasterizer, RAW straight-alpha RGBA output (not PNG) — for getImageData, which returns
+// pixels with no encoder in the loop. So `fillRect(red); getImageData(...)` reads back the actual
+// rendered red (the vendored synthetic getImageData returned unrelated bytes — a broken-canvas
+// tell). Raw pixels also mean solids/shapes match a real browser exactly (no PNG-encoder variance).
+static RASTER_RGBA: std::sync::RwLock<Option<RasterFn>> = std::sync::RwLock::new(None);
+
+/// Install the host's raw-RGBA canvas rasterizer: `(width, height, ops_json) -> RGBA8 bytes`
+/// (straight alpha, top-left origin, tightly packed). Until set, getImageData keeps the vendored
+/// behavior.
+pub fn set_raster_rgba_fn(f: RasterFn) {
+    if let Ok(mut g) = RASTER_RGBA.write() {
+        *g = Some(f);
+    }
+}
+
+#[op2]
+#[string]
+fn op_raster_rgba(width: u32, height: u32, #[string] ops_json: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    match RASTER_RGBA
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|f| f(width, height, ops_json)))
+    {
+        Some(bytes) => STANDARD.encode(bytes),
+        None => String::new(),
+    }
+}
+
+// Host WebGL executor: run a recorded WebGL call batch on the real GPU and return the
+// framebuffer RGBA. Same injection pattern as the rasterizer; installed by the crate that owns
+// the wgpu backend (raster, `gpu-metal`). Until set, WebGL readback keeps the synthetic stub.
+type WebglFn = Box<dyn Fn(u32, u32, &str) -> Option<Vec<u8>> + Send + Sync>;
+static WEBGL_EXEC: std::sync::RwLock<Option<WebglFn>> = std::sync::RwLock::new(None);
+
+/// Install the host's WebGL→GPU executor: `(width, height, calls_json) -> RGBA8 bytes`.
+/// `calls_json` is the batch the render tier records live off a page's `gl.*` calls (with real
+/// buffer bytes + shader source). Until set, the isolate's WebGL `readPixels` stays synthetic.
+pub fn set_webgl_fn(f: WebglFn) {
+    if let Ok(mut g) = WEBGL_EXEC.write() {
+        *g = Some(f);
+    }
+}
+
+// Execute a recorded WebGL batch → base64 RGBA8 (full framebuffer, top-left origin), or "" when
+// no host executor is installed (the JS override then keeps its synthetic readback). The JS side
+// slices the caller's requested rect out of the returned framebuffer. Never throws.
+#[op2]
+#[string]
+fn op_webgl_readback(width: u32, height: u32, #[string] calls_json: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    match WEBGL_EXEC
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|f| f(width, height, calls_json)))
+    {
+        Some(bytes) => STANDARD.encode(bytes),
+        None => String::new(),
+    }
+}
+
+// Whether a host WebGL executor is installed. The op itself is always registered, so the JS
+// recorder can't infer presence from `typeof op`; it checks this so it only overrides the WebGL
+// context when a GPU backend exists (else the vendored synthetic context is left untouched).
+#[op2(fast)]
+fn op_webgl_available() -> bool {
+    WEBGL_EXEC.read().map(|g| g.is_some()).unwrap_or(false)
+}
+
 // `document.cookie` setter: ingest a `name=value; attrs` line against the base.
 #[op2(fast)]
 fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
@@ -293,7 +409,12 @@ deno_core::extension!(
         op_fetch,
         op_user_agent,
         op_fingerprint,
-        op_measure_text
+        op_now_perf,
+        op_measure_text,
+        op_raster_png,
+        op_raster_rgba,
+        op_webgl_readback,
+        op_webgl_available
     ],
 );
 
@@ -334,10 +455,27 @@ const __major = String(__pick("chromeMajor", 153));
 // viewer; `navigator.plugins.length === 0` is a classic headless giveaway.
 const __plugin = (name) => ({ name, filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 });
 const __plugins = ["PDF Viewer", "Chrome PDF Viewer", "Chromium PDF Viewer", "Microsoft Edge PDF Viewer", "WebKit built-in PDF"].map(__plugin);
+// Chrome's two PDF MIME types, both bound to the internal viewer. `navigator.mimeTypes`
+// empty while `plugins` is populated is an INCOHERENCE tell (real Chrome: plugins imply
+// their mimeTypes) — google's homepage reads mimeTypes.length. enabledPlugin cross-links
+// back to a plugin, as in a real MimeType.
+const __mimeTypes = [
+  { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format", enabledPlugin: __plugins[0] },
+  { type: "text/pdf", suffixes: "pdf", description: "Portable Document Format", enabledPlugin: __plugins[0] },
+];
 const __langs = __pick("languages", ["en-US", "en"]);
 const __platform = __pick("platform", "MacIntel");
 const __uaPlatform = __pick("uaPlatform", "macOS");
-globalThis.navigator = {
+// Mac wide-gamut/HDR displays report 30-bit color; other platforms 24. Param-driven with a
+// platform-aware default so a caller can override, and a Windows/Linux profile stays honest.
+const __isMac = __uaPlatform === "macOS" || /mac/i.test(String(__platform));
+const __colorDepth = __pick("colorDepth", __isMac ? 30 : 24);
+const __pixelDepth = __pick("pixelDepth", __colorDepth);
+// The navigator's data + method IMPLEMENTATIONS. Assembled here, then hung off a real
+// `Navigator.prototype` (below) so `navigator` is a prototype-backed instance with ZERO own
+// properties — exactly like Chrome (a plain object literal had 26 own props + a 15-member proto,
+// vs Chrome's 0 own + 84-member Navigator.prototype: a structural tell).
+const __navData = {
   userAgent: __ua,
   appVersion: __ua.replace(/^Mozilla\//, ""),
   appName: "Netscape", appCodeName: "Mozilla", product: "Gecko", productSub: "20030107",
@@ -393,35 +531,165 @@ globalThis.navigator = {
       return true;
     } catch (_e) { return true; }
   },
-  plugins: __plugins, mimeTypes: [],
+  plugins: __plugins, mimeTypes: __mimeTypes,
+  // Real Chrome exposes navigator.pdfViewerEnabled === true (it ships the internal PDF
+  // viewer); its absence is a headless tell google's homepage reads.
+  pdfViewerEnabled: __pick("pdfViewerEnabled", true),
   // NetworkInformation — real Chrome exposes it; anti-bot scripts (found via the
   // `probe` example on a real Akamai sensor) read it, and its absence is a tell.
   connection: __pick("connection", { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false }),
   // UA-Client-Hints high-entropy surface, consistent with the UA above.
   userAgentData: __pick("userAgentData", {
+    // Order + greased token MUST match the on-wire sec-ch-ua (fingerprint.rs) — a wire/JS
+    // mismatch is a hard tell. Both are validated against a live real-Chrome capture:
+    // `"Chromium";v="M", "Google Chrome";v="M", "Not A(Brand";v="99"` (greased brand LAST,
+    // token `Not A(Brand` v99). The old `Not_A Brand v8` greased-middle matched nothing real.
     brands: [
-      { brand: "Google Chrome", version: __major },
       { brand: "Chromium", version: __major },
-      { brand: "Not)A;Brand", version: "24" },
+      { brand: "Google Chrome", version: __major },
+      { brand: "Not A(Brand", version: "99" },
     ],
     mobile: false,
     platform: __uaPlatform,
     getHighEntropyValues: async () => ({
-      architecture: "arm", bitness: "64", model: "",
+      architecture: "arm", bitness: "64", model: "", wow64: false,
       platform: __uaPlatform, platformVersion: "15.0.0", uaFullVersion: __major + ".0.0.0",
+      mobile: false,
+      brands: [
+        { brand: "Chromium", version: __major },
+        { brand: "Google Chrome", version: __major },
+        { brand: "Not A(Brand", version: "99" },
+      ],
+      fullVersionList: [
+        { brand: "Chromium", version: __major + ".0.0.0" },
+        { brand: "Google Chrome", version: __major + ".0.0.0" },
+        { brand: "Not A(Brand", version: "99.0.0.0" },
+      ],
     }),
   }),
   // In-memory clipboard: an app that writeText()s a value (e.g. a copy-link button)
   // and reads it back round-trips, with no OS clipboard.
   clipboard: (() => { let v = ""; return { writeText: async (t) => { v = String(t == null ? "" : t); }, readText: async () => v }; })(),
+  // Permissions API — real Chrome always exposes `navigator.permissions.query`; its
+  // absence (a thrown TypeError on `navigator.permissions.query`) is a headless tell
+  // BotGuard/reCAPTCHA-class collectors read directly. Return a spec-shaped
+  // PermissionStatus (an EventTarget-ish with `state`/`name`/`onchange`) with the
+  // default states a fresh Chrome profile reports: most permissions 'prompt', and the
+  // headless-detector special case `notifications` → 'denied' iff Notification.permission
+  // is 'denied' (real Chrome couples them; a mismatch is itself a tell).
+  permissions: (() => {
+    const status = (name, state) => ({
+      name, state, onchange: null,
+      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+    });
+    const DEFAULTS = { geolocation: "prompt", notifications: "prompt", push: "prompt",
+      "persistent-storage": "prompt", "background-sync": "granted", midi: "granted",
+      camera: "prompt", microphone: "prompt", "clipboard-read": "prompt", "clipboard-write": "granted" };
+    return {
+      query: (desc) => {
+        const name = desc && desc.name ? String(desc.name) : "";
+        let state = Object.prototype.hasOwnProperty.call(DEFAULTS, name) ? DEFAULTS[name] : "prompt";
+        // Couple notifications to Notification.permission the way Chrome does.
+        try {
+          if (name === "notifications" && globalThis.Notification && globalThis.Notification.permission) {
+            state = globalThis.Notification.permission === "denied" ? "denied"
+              : globalThis.Notification.permission === "granted" ? "granted" : "prompt";
+          }
+        } catch (e) {}
+        return Promise.resolve(status(name, state));
+      },
+    };
+  })(),
 };
+// Build a real `Navigator` interface: `window.Navigator` + a prototype holding all 84 members
+// Chrome exposes (getters for data props, functions for methods), then a zero-own-property
+// instance. Members we implement use __navData; the rest get plausible stubs so presence/`in`/
+// typeof checks + the member count match Chrome. Getters/methods are arrows (no own `prototype`)
+// and get native-masked in the toString IIFE. The exact 84-name list is from a live Chrome 154.
+(() => {
+  const GET = ("appCodeName appName appVersion bluetooth clipboard connection cookieEnabled cpuPerformance " +
+    "credentials deprecatedRunAdAuctionEnforcesKAnonymity deviceMemory devicePosture doNotTrack geolocation gpu " +
+    "hardwareConcurrency hid ink keyboard language languages locks login managed maxTouchPoints mediaCapabilities " +
+    "mediaDevices mediaSession mimeTypes onLine pdfViewerEnabled permissions platform plugins presentation product " +
+    "productSub protectedAudience scheduling serial serviceWorker storage storageBuckets usb userActivation " +
+    "userAgent userAgentData vendor vendorSub virtualKeyboard wakeLock webdriver webkitPersistentStorage " +
+    "webkitTemporaryStorage windowControlsOverlay xr").split(/\s+/);
+  const FN = ("adAuctionComponents canLoadAdAuctionFencedFrame canShare clearAppBadge clearOriginJoinedAdInterestGroups " +
+    "createAuctionNonce deprecatedReplaceInURN deprecatedURNToURL getBattery getGamepads getInstalledRelatedApps " +
+    "getInterestGroupAdAuctionData getUserMedia javaEnabled joinAdInterestGroup leaveAdInterestGroup " +
+    "registerProtocolHandler requestMIDIAccess requestMediaKeySystemAccess runAdAuction sendBeacon setAppBadge share " +
+    "unregisterProtocolHandler updateAdInterestGroups vibrate webkitGetUserMedia").split(/\s+/);
+  // Plausible stubs for members we don't back with real data (presence/shape checks pass).
+  const P = () => Promise.resolve();
+  const REJ = () => Promise.reject(new DOMException("Not supported", "NotSupportedError"));
+  const GET_STUB = {
+    geolocation: { getCurrentPosition() {}, watchPosition() { return 0; }, clearWatch() {} },
+    mediaDevices: { enumerateDevices: () => Promise.resolve([]), getUserMedia: REJ, getSupportedConstraints: () => ({}), addEventListener() {}, removeEventListener() {} },
+    serviceWorker: { register: REJ, getRegistration: () => Promise.resolve(undefined), getRegistrations: () => Promise.resolve([]), ready: new Promise(() => {}), controller: null, addEventListener() {}, removeEventListener() {} },
+    storage: { estimate: () => Promise.resolve({ quota: 0, usage: 0 }), persisted: () => Promise.resolve(false), persist: () => Promise.resolve(false) },
+    credentials: { get: () => Promise.resolve(null), create: () => Promise.resolve(null), store: P, preventSilentAccess: P },
+    userActivation: { hasBeenActive: true, isActive: false },
+    wakeLock: { request: REJ },
+    keyboard: { getLayoutMap: () => Promise.resolve(new Map()), lock: P, unlock() {} },
+    locks: { request: P, query: () => Promise.resolve({ held: [], pending: [] }) },
+    mediaCapabilities: { decodingInfo: () => Promise.resolve({ supported: true, smooth: true, powerEfficient: true }), encodingInfo: () => Promise.resolve({ supported: true, smooth: true, powerEfficient: true }) },
+    mediaSession: { metadata: null, playbackState: "none", setActionHandler() {}, setPositionState() {} },
+    // React's scheduler probes navigator.scheduling.isInputPending — must be an object with the fn.
+    scheduling: { isInputPending: () => false },
+    presentation: { defaultRequest: null, receiver: null },
+    webkitTemporaryStorage: { queryUsageAndQuota() {}, requestQuota() {} },
+    webkitPersistentStorage: { queryUsageAndQuota() {}, requestQuota() {} },
+  };
+  const navProto = {};
+  const def = (name, desc) => { try { Object.defineProperty(navProto, name, desc); } catch (e) {} };
+  for (const name of GET) {
+    const has = Object.prototype.hasOwnProperty.call(__navData, name);
+    // Default an unlisted interface getter to a fresh {} (not null): real Chrome returns an object
+    // for these, and `navigator.X.foo` must read `undefined` rather than throw on null. A fresh
+    // object per property (not one shared ref) so `navigator.a !== navigator.b`.
+    const val = has ? __navData[name] : (Object.prototype.hasOwnProperty.call(GET_STUB, name) ? GET_STUB[name] : {});
+    def(name, { get: () => val, enumerable: true, configurable: true });
+  }
+  const FN_IMPL = {
+    javaEnabled: () => false,
+    vibrate: () => true,
+    canShare: () => false,
+    share: REJ,
+    getBattery: () => Promise.resolve({ charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1, addEventListener() {}, removeEventListener() {} }),
+    getGamepads: () => [null, null, null, null],
+    getInstalledRelatedApps: () => Promise.resolve([]),
+    requestMIDIAccess: REJ,
+    requestMediaKeySystemAccess: REJ,
+    getUserMedia: (_c, _ok, err) => { try { if (err) err(new DOMException("Permission denied", "NotAllowedError")); } catch (e) {} },
+    webkitGetUserMedia: (_c, _ok, err) => { try { if (err) err(new DOMException("Permission denied", "NotAllowedError")); } catch (e) {} },
+    setAppBadge: P, clearAppBadge: P,
+    registerProtocolHandler: () => {}, unregisterProtocolHandler: () => {},
+  };
+  for (const name of FN) {
+    const impl = Object.prototype.hasOwnProperty.call(__navData, name) && typeof __navData[name] === "function"
+      ? __navData[name]
+      : (FN_IMPL[name] || (() => undefined));
+    def(name, { value: impl, writable: true, enumerable: true, configurable: true });
+  }
+  function Navigator() { throw new TypeError("Illegal constructor"); }
+  Navigator.prototype = navProto;
+  def("constructor", { value: Navigator, writable: true, configurable: true });
+  Object.defineProperty(navProto, Symbol.toStringTag, { value: "Navigator", configurable: true });
+  globalThis.Navigator = Navigator;
+  const navigator = Object.create(navProto); // zero own properties, like Chrome
+  globalThis.navigator = navigator;
+})();
 // `screen` — overridable as a unit; defaults to a common 1080p desktop.
 {
   const __scr = __pick("screen", { width: 1920, height: 1080 });
   const __w = __scr.width || 1920, __h = __scr.height || 1080;
+  // availWidth/Height default to the screen minus OS chrome (macOS menubar ≈ 25px tall, no
+  // side reservation); each is independently overridable via the `screen` object or __pick.
+  const __availW = __pick("availWidth", __scr.availWidth || __w);
+  const __availH = __pick("availHeight", __scr.availHeight || (__h - (__isMac ? 25 : 0)));
   globalThis.screen = {
-    width: __w, height: __h, availWidth: __w, availHeight: __h,
-    colorDepth: 24, pixelDepth: 24,
+    width: __w, height: __h, availWidth: __availW, availHeight: __availH,
+    colorDepth: __colorDepth, pixelDepth: __pixelDepth,
     // ScreenOrientation is an EventTarget — apps listen for orientation changes;
     // a missing `addEventListener` throws and can trip a component during hydration.
     orientation: {
@@ -458,15 +726,21 @@ globalThis.chrome = globalThis.chrome || {
   csi: function () { return {}; },
 };
 globalThis.location = globalThis.location || { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
-globalThis.localStorage = (() => {
+const __mkStorage = () => {
   const m = new Map();
   return {
     getItem: (k) => (m.has(k) ? m.get(k) : null),
     setItem: (k, v) => m.set(k, String(v)),
     removeItem: (k) => m.delete(k),
     clear: () => m.clear(),
+    key: (i) => (Array.from(m.keys())[i] ?? null),
+    get length() { return m.size; },
   };
-})();
+};
+globalThis.localStorage = __mkStorage();
+// sessionStorage: a real Chrome global (per-tab web storage). deno_core ships neither;
+// google's homepage reads window.sessionStorage, so its absence is a consistency tell.
+globalThis.sessionStorage = __mkStorage();
 const __log = (...a) => Deno.core.print(a.map(String).join(" ") + "\n");
 globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: () => {} };
 const __timers = [];
@@ -502,8 +776,98 @@ globalThis.clearTimeout = (id) => {
   if (i >= 0) __timers.splice(i, 1);
 };
 globalThis.clearInterval = globalThis.clearTimeout;
-globalThis.requestAnimationFrame = (fn) => globalThis.setTimeout(fn, 16);
-globalThis.cancelAnimationFrame = globalThis.clearTimeout;
+// High-resolution monotonic clock matching Chrome (origin-relative, fractional, 100µs grid).
+// A BotGuard-class collector reads performance.now ×100+ and rAF ×20: it checks the resolution
+// (Chrome quantizes to 0.1ms), fractionality, monotonicity, that now() ≈ Date.now()-timeOrigin,
+// and that rAF/event timestamps ride the SAME origin-relative scale. The old fallback returned
+// integer epoch ms (wrong scale, 1ms grid, no fraction) — a timing tell. timeOrigin is a
+// fractional epoch anchor ~0.8–2.5s in the past (a just-navigated page); now() quantizes wall
+// elapsed to the 100µs grid, monotonic with a bounded creep so a tight loop shows 0.1ms deltas.
+// The observable clock is a single coherent quantity: REAL monotonic elapsed (op_now_perf, sub-ms)
+// + VIRTUAL elapsed (`__now`, advanced by the timer drain). This makes `setTimeout(100)`/rAF appear
+// to consume ~100ms/16.7ms even though the drain compresses them to ~0 real time (a real browser
+// observes the delay; the old clock, pure wall-clock, showed 0 — a hard tell), while a sync busy
+// loop still consumes real time (real hrtime advances). `Date.now()` is redefined from the SAME
+// quantity so `timeOrigin + performance.now() == Date.now()` holds (BotGuard's chronometric check).
+const __origDateNow = Date.now.bind(Date);
+const __hrNow = () => { try { return Deno.core.ops.op_now_perf(); } catch (e) { return 0; } };
+const __hr0 = __hrNow();               // monotonic anchor at bootstrap
+const __epoch0 = __origDateNow();      // wall epoch at bootstrap
+const __pageAge = Math.random() * 1700 + 800 + Math.random(); // a page open ~0.8–2.5s (perf.now start)
+const __perfTimeOrigin = __epoch0 - __pageAge;
+// Total observed elapsed since timeOrigin: page age + real monotonic since boot + virtual timer time.
+const __observed = () => __pageAge + (__hrNow() - __hr0) + __now;
+let __perfLast = 0;
+const __perfNow = () => {
+  let t = Math.floor(__observed() * 10) / 10; // Chrome 100µs grid
+  if (t < __perfLast) t = __perfLast;          // strictly monotonic
+  __perfLast = t;
+  return t;
+};
+// Redefine Date.now() coherently with performance.now (real epoch + real monotonic + virtual).
+// The native epoch stays available to the host (cookies/TLS live in Rust, not this isolate).
+const __coherentEpoch = () => Math.floor(__perfTimeOrigin + __observed());
+try {
+  Object.defineProperty(Date, "now", {
+    value: () => __coherentEpoch(),
+    configurable: true, writable: true,
+  });
+} catch (e) {}
+// Coherence of the CONSTRUCTOR too: `new Date()` / `+new Date()` / `Date()` must read the SAME
+// coherent clock as `Date.now()`, else they diverge by the accumulated virtual time after a timer
+// drain (real Chrome keeps them equal — the delta is a tell). Only the zero-arg path is retimed;
+// every other form (`new Date(ms)`, `new Date(y,m,d,…)`, `new Date(str)`) delegates unchanged.
+// Wrap the real constructor, preserving statics, prototype identity, `instanceof`, the
+// prototype.constructor back-link, and native fn shape (name/length/toString marked below).
+try {
+  const __RealDate = Date;
+  function DateShim(...a) {
+    if (!new.target) return new __RealDate(__coherentEpoch()).toString();
+    // Reflect.construct with new.target so `class X extends Date {}` keeps its prototype chain
+    // (`new X() instanceof X`); a plain `new __RealDate(...)` would hand back a bare Date instance
+    // and break subclassing — itself a builtin-integrity tell. Zero-arg → the coherent epoch.
+    return Reflect.construct(__RealDate, a.length ? a : [__coherentEpoch()], new.target);
+  }
+  // Real Date.prototype is non-writable; match that attribute (writable:true→false is allowed
+  // even on the function's non-configurable `prototype` slot).
+  Object.defineProperty(DateShim, "prototype", { value: __RealDate.prototype, writable: false });
+  Object.defineProperty(__RealDate.prototype, "constructor", {
+    value: DateShim, configurable: true, writable: true,
+  });
+  DateShim.now = __RealDate.now; // the coherent Date.now defined just above
+  DateShim.parse = __RealDate.parse;
+  DateShim.UTC = __RealDate.UTC;
+  Object.defineProperty(DateShim, "name", { value: "Date", configurable: true });
+  Object.defineProperty(DateShim, "length", { value: 7, configurable: true }); // real Date.length === 7
+  globalThis.Date = DateShim;
+} catch (e) {}
+// rAF: BATCH like a real browser (measured against Chrome). All callbacks scheduled for a frame
+// fire together with the SAME fractional, origin-relative DOMHighResTimeStamp (~16.6ms cadence +
+// sub-ms jitter, never before __perfNow()); a callback that re-schedules runs on the NEXT frame.
+// A per-callback-incrementing clock (the naive shim) is a tell — Chrome gives every rAF in one
+// frame an identical timestamp. requestAnimationFrame returns an integer id; cancelAnimationFrame
+// removes only that pending callback (not clearTimeout — rAF ids are their own namespace).
+let __rafClock = null, __rafId = 0, __rafScheduled = false;
+let __rafQueue = [];
+globalThis.requestAnimationFrame = (fn) => {
+  const id = ++__rafId;
+  __rafQueue.push({ id, fn });
+  if (!__rafScheduled) {
+    __rafScheduled = true;
+    globalThis.setTimeout(() => {
+      const floor = __perfNow();
+      __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
+      if (__rafClock < floor) __rafClock = floor;
+      const ts = Math.round(__rafClock * 10) / 10; // one timestamp for the whole frame
+      const batch = __rafQueue;
+      __rafQueue = [];
+      __rafScheduled = false;
+      for (const cb of batch) { try { cb.fn(ts); } catch (e) {} }
+    }, 16);
+  }
+  return id;
+};
+globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };
 // Route queueMicrotask through the virtual timer queue (NOT a real V8 microtask).
 // The "correct" Promise.resolve().then is unbounded — a reactivity lib that
 // re-schedules a flush each microtask spins V8's microtask queue forever, which the
@@ -777,17 +1141,35 @@ globalThis.XMLHttpRequest = class {
 // real code branches on `XMLHttpRequest.DONE` / `this.HEADERS_RECEIVED`.
 Object.assign(globalThis.XMLHttpRequest, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
 Object.assign(globalThis.XMLHttpRequest.prototype, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
-// Observers: no live mutation notifications over the static tree → no-op stubs.
-class __NoopObserver {
-  constructor(cb) { this._cb = cb; }
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-  takeRecords() { return []; }
+// Observers: no live mutation notifications over the static tree → no-op stubs. Each must be a
+// DISTINCT constructor: real Chrome has three separate classes, so `IntersectionObserver ===
+// ResizeObserver` is false and each `.name` is its own — collapsing them onto one object is a
+// trivial `===` / `.name` fingerprint tell. IntersectionObserver additionally fires ONE initial
+// async entry per observed element (Chrome does this even for an off-screen/zero-size node, with
+// isIntersecting:false), so visibility-gated init isn't silently dead.
+function __mkObserver(name, withEntries) {
+  const C = { [name]: class { constructor(cb) { this._cb = cb; this._dead = false; } unobserve() {} takeRecords() { return []; }
+    disconnect() { this._dead = true; }
+    observe(el) {
+      if (!withEntries || typeof this._cb !== "function") return;
+      const cb = this._cb, self = this;
+      setTimeout(() => {
+        // Chrome delivers the initial entry asynchronously; disconnect() before it fires
+        // cancels it. Honour that so a page that observes-then-disconnects sees no callback.
+        if (self._dead) return;
+        try {
+        let box = { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
+        try { if (el && el.getBoundingClientRect) box = el.getBoundingClientRect(); } catch (e) {}
+        cb([{ target: el, isIntersecting: false, intersectionRatio: 0, boundingClientRect: box,
+          intersectionRect: { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 },
+          rootBounds: null, time: (globalThis.performance && performance.now) ? performance.now() : 0 }], self);
+      } catch (e) {} }, 0);
+    } } }[name];
+  return C;
 }
-globalThis.MutationObserver = __NoopObserver;
-globalThis.IntersectionObserver = __NoopObserver;
-globalThis.ResizeObserver = __NoopObserver;
+globalThis.MutationObserver = __mkObserver("MutationObserver", false);
+globalThis.IntersectionObserver = __mkObserver("IntersectionObserver", true);
+globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
 // structuredClone — apps/SDKs use it (and probe `globalThis.structuredClone.prototype`);
 // absent, that probe throws. deno_core doesn't ship it. Structured-ish deep clone with a
 // few common types; falls back to JSON for the rest.
@@ -963,21 +1345,75 @@ if (typeof globalThis.customElements === "undefined") {
 }
 // (CSSStyleSheet, document.adoptedStyleSheets, and the HTML*Element constructor
 // family are all provided by the vendored browser_env binding.)
-// MessageChannel — React 18's scheduler drains its work queue by posting to a
-// MessagePort and running the handler on the other port's onmessage. Route the
-// message through the timer queue (setTimeout 0) so the hydration pump drains it;
-// without this, React's scheduled mount/hydration never runs.
+// MessagePort / MessageChannel — real classes (not object-literal stubs), so `port instanceof
+// MessagePort` holds and `port.addEventListener('message', fn)` works, not just `onmessage=`
+// (Chrome shape; the object-literal stub was a brand/instanceof tell). React 18's scheduler
+// drains its queue by posting to a MessagePort and running the peer's onmessage; google's SERP/
+// homepage use the same `new MessageChannel; port1.onmessage=…; port2.postMessage(0)` next-tick
+// idiom — delivery routes through the virtual timer queue (setTimeout 0) so the hydration/
+// interaction pump drains it. Setting `onmessage` implies `start()` (Chrome); the addEventListener
+// path queues until start().
+// MessageEvent — a REAL constructor (the vendored binding ships only a hollow `function(){}`
+// stub, so `new MessageEvent('message',{data}).data` was undefined). Our postMessage / port /
+// BroadcastChannel dispatch build events via this so `ev instanceof MessageEvent` holds and the
+// event carries data/origin/source/ports like Chrome. Defined before the ports that use it.
+globalThis.MessageEvent = class MessageEvent {
+  constructor(type, init) {
+    init = init || {};
+    this.type = String(type);
+    this.data = init.data !== undefined ? init.data : null;
+    this.origin = init.origin || "";
+    this.lastEventId = init.lastEventId || "";
+    this.source = init.source || null;
+    this.ports = init.ports || [];
+    this.bubbles = !!init.bubbles;
+    this.cancelable = !!init.cancelable;
+    this.composed = !!init.composed;
+    this.isTrusted = false;
+    this.timeStamp = Date.now();
+    this.target = null;
+    this.currentTarget = null;
+    this.defaultPrevented = false;
+  }
+  preventDefault() { this.defaultPrevented = true; }
+  stopPropagation() {}
+  stopImmediatePropagation() {}
+};
+globalThis.MessagePort = class MessagePort {
+  constructor() {
+    this._onmessage = null; this._peer = null; this._l = []; this._started = false; this._q = [];
+    // Setting `onmessage` implies start() (Chrome), which must FLUSH anything queued before a
+    // listener existed — an assignment-only receiver otherwise strands early messages in _q.
+    Object.defineProperty(this, "onmessage", {
+      configurable: true, enumerable: true,
+      get() { return this._onmessage; },
+      set(fn) { this._onmessage = fn; if (typeof fn === "function") this.start(); },
+    });
+  }
+  _fire(data) {
+    const ev = new globalThis.MessageEvent("message", { data });
+    ev.target = this;
+    if (typeof this._onmessage === "function") { try { this._onmessage(ev); } catch (e) {} }
+    for (const fn of this._l.slice()) { try { fn.call(this, ev); } catch (e) {} }
+  }
+  postMessage(data) {
+    const p = this._peer; if (!p) return;
+    globalThis.setTimeout(() => { if (p._started) p._fire(data); else p._q.push(data); }, 0);
+  }
+  start() { if (this._started) return; this._started = true; const q = this._q; this._q = []; for (const d of q) this._fire(d); }
+  close() { this._peer = null; }
+  addEventListener(t, fn) { if (t === "message" && typeof fn === "function") this._l.push(fn); }
+  removeEventListener(t, fn) { if (t === "message") { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); } }
+  dispatchEvent() { return true; }
+};
 globalThis.MessageChannel = class MessageChannel {
   constructor() {
-    const p1 = { onmessage: null, close() {}, start() {}, addEventListener() {}, removeEventListener() {} };
-    const p2 = { onmessage: null, close() {}, start() {}, addEventListener() {}, removeEventListener() {} };
-    p1.postMessage = (data) => globalThis.setTimeout(() => { if (typeof p2.onmessage === "function") p2.onmessage({ data, target: p2 }); }, 0);
-    p2.postMessage = (data) => globalThis.setTimeout(() => { if (typeof p1.onmessage === "function") p1.onmessage({ data, target: p1 }); }, 0);
-    this.port1 = p1;
-    this.port2 = p2;
+    this.port1 = new globalThis.MessagePort();
+    this.port2 = new globalThis.MessagePort();
+    this.port1._peer = this.port2;
+    this.port2._peer = this.port1;
   }
 };
-globalThis.MessagePort = function MessagePort() {};
 // window.postMessage — deliver a `message` event to THIS realm's window listeners
 // (async, via the timer queue so the hydration/interaction drain processes it). Real
 // same-window `postMessage(msg)` fires `message` handlers with `{data, origin, source}`
@@ -993,12 +1429,9 @@ globalThis.postMessage = function postMessage(message, targetOrigin, transfer) {
   const origin = (globalThis.location && globalThis.location.origin) || "";
   const ports = Array.isArray(transfer) ? transfer : (transfer && transfer.length ? Array.prototype.slice.call(transfer) : []);
   globalThis.setTimeout(() => {
-    const ev = {
-      type: "message", data: message, origin, lastEventId: "", source: globalThis, ports,
-      bubbles: false, cancelable: false, composed: false, defaultPrevented: false,
-      target: globalThis, currentTarget: globalThis, eventPhase: 0, isTrusted: false, timeStamp: Date.now(),
-      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
-    };
+    const ev = new globalThis.MessageEvent("message", { data: message, origin, source: globalThis, ports });
+    ev.target = globalThis;
+    ev.currentTarget = globalThis;
     try { if (typeof globalThis.onmessage === "function") globalThis.onmessage(ev); } catch (_e) {}
     try { if (typeof globalThis.dispatchEvent === "function") globalThis.dispatchEvent(ev); } catch (_e) {}
   }, 0);
@@ -1039,19 +1472,105 @@ if (typeof globalThis.trustedTypes === "undefined") {
 // `const {startTime} = performance.mark(name)` (and reads `.duration`/`.entryType` off the
 // measure), so returning undefined crashed with "Cannot destructure property 'startTime' …"
 // (seen on nike.com's Boomerang beacon).
-globalThis.performance = globalThis.performance || {
-  now: () => Date.now(),
-  timeOrigin: 0,
-  mark(name, opts) {
-    return { name: String(name == null ? "" : name), entryType: "mark",
-      startTime: (opts && +opts.startTime) || Date.now(), duration: 0, detail: (opts && opts.detail) || null };
-  },
-  measure(name) {
-    return { name: String(name == null ? "" : name), entryType: "measure", startTime: 0, duration: 0, detail: null };
-  },
-  clearMarks() {}, clearMeasures() {},
-  getEntries: () => [], getEntriesByName: () => [], getEntriesByType: () => [],
-};
+// Install the hi-res clock onto `performance` (defineProperty, not the `||` guard, so it wins
+// whether or not deno_core preinstalled a coarse one). mark()/measure() ride the same clock.
+{
+  const P = globalThis.performance || (globalThis.performance = {});
+  try { Object.defineProperty(P, "now", { value: __perfNow, configurable: true, writable: true }); }
+  catch (e) { P.now = __perfNow; }
+  try { Object.defineProperty(P, "timeOrigin", { value: __perfTimeOrigin, configurable: true, enumerable: true }); }
+  catch (e) { P.timeOrigin = __perfTimeOrigin; }
+  if (typeof P.mark !== "function") P.mark = (name, opts) => ({ name: String(name == null ? "" : name), entryType: "mark",
+    startTime: (opts && +opts.startTime) || __perfNow(), duration: 0, detail: (opts && opts.detail) || null });
+  if (typeof P.measure !== "function") P.measure = (name) => ({ name: String(name == null ? "" : name), entryType: "measure", startTime: 0, duration: 0, detail: null });
+  if (typeof P.clearMarks !== "function") P.clearMarks = () => {};
+  if (typeof P.clearMeasures !== "function") P.clearMeasures = () => {};
+  if (typeof P.getEntries !== "function") P.getEntries = () => [];
+  if (typeof P.getEntriesByName !== "function") P.getEntriesByName = () => [];
+  if (typeof P.getEntriesByType !== "function") P.getEntriesByType = () => [];
+}
+// Legacy navigation timing: performance.timing (PerformanceTiming) + performance.navigation
+// (PerformanceNavigation). Deprecated but Chrome still exposes both, and deno_core's
+// `performance` ships neither — google's homepage reads them, so an anti-bot consistency
+// check sees `undefined` where real Chrome has objects. Coherent, monotonic values off
+// timeOrigin; the redirect/unload marks are 0 (a fresh top-level navigation).
+try {
+  const P = globalThis.performance;
+  if (P && !P.timing) {
+    // Realistic SPREAD of navigation phases (real Chrome: navigationStart < dns < connect <
+    // request < response < domInteractive < DCL < domComplete < loadEventEnd). All-equal
+    // timestamps are an obvious synthetic tell, so lay them out with plausible ordered gaps.
+    const t = Math.floor(P.timeOrigin || Date.now());
+    const r = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo));
+    const fetchStart = t + r(1, 4), dlS = fetchStart + r(1, 5), dlE = dlS + r(1, 6);
+    const cS = dlE + r(0, 3), sc = cS + r(4, 14), cE = sc + r(8, 26), reqS = cE + r(1, 4);
+    const resS = reqS + r(30, 120), resE = resS + r(15, 90), domL = resE + r(1, 6);
+    const domI = domL + r(60, 220), dclS = domI + r(2, 18), dclE = dclS + r(1, 6);
+    const domC = dclE + r(80, 400), lES = domC + r(1, 5), lEE = lES + r(1, 8);
+    const timing = {
+      navigationStart: t, unloadEventStart: 0, unloadEventEnd: 0, redirectStart: 0, redirectEnd: 0,
+      fetchStart, domainLookupStart: dlS, domainLookupEnd: dlE, connectStart: cS,
+      secureConnectionStart: sc, connectEnd: cE, requestStart: reqS, responseStart: resS,
+      responseEnd: resE, domLoading: domL, domInteractive: domI,
+      domContentLoadedEventStart: dclS, domContentLoadedEventEnd: dclE, domComplete: domC,
+      loadEventStart: lES, loadEventEnd: lEE,
+    };
+    timing.toJSON = function () { return timing; };
+    try { Object.defineProperty(P, "timing", { value: timing, configurable: true, enumerable: true }); }
+    catch (e) { P.timing = timing; }
+  }
+  if (P && !P.navigation) {
+    const nav = { type: 0, redirectCount: 0 };
+    Object.defineProperties(nav, {
+      TYPE_NAVIGATE: { value: 0 }, TYPE_RELOAD: { value: 1 },
+      TYPE_BACK_FORWARD: { value: 2 }, TYPE_RESERVED: { value: 255 },
+    });
+    try { Object.defineProperty(P, "navigation", { value: nav, configurable: true, enumerable: true }); }
+    catch (e) { P.navigation = nav; }
+  }
+  // performance.memory — Chrome-only non-standard heap gauge; real Chrome exposes it, and
+  // fingerprinters read it. Static, coherent values (a fresh page's small heap).
+  if (P && !P.memory) {
+    const mem = { jsHeapSizeLimit: 2190000000, totalJSHeapSize: 12000000, usedJSHeapSize: 10000000 };
+    try { Object.defineProperty(P, "memory", { value: mem, configurable: true, enumerable: true }); }
+    catch (e) { P.memory = mem; }
+  }
+} catch (e) {}
+// document.scrollingElement — real Chrome returns the root <html> in standards mode. rtdom's
+// document has no layout, so point it at documentElement (google's homepage reads it).
+try {
+  const D = globalThis.document;
+  if (D && !D.scrollingElement) {
+    Object.defineProperty(D, "scrollingElement", {
+      get() { return D.documentElement || null; }, configurable: true,
+    });
+  }
+} catch (e) {}
+// window.scheduler — the Prioritized Task Scheduling API (Chrome). google's homepage reads
+// window.scheduler; deno_core doesn't ship it. postTask runs the callback through the virtual
+// timer queue (honoring `delay`) and resolves with its result; yield() defers to a macrotask.
+if (typeof globalThis.scheduler === "undefined") {
+  globalThis.scheduler = {
+    postTask(cb, opts) {
+      return new Promise((resolve, reject) => {
+        const delay = (opts && +opts.delay) || 0;
+        setTimeout(() => { try { resolve(typeof cb === "function" ? cb() : undefined); } catch (e) { reject(e); } }, delay);
+      });
+    },
+    yield() { return new Promise((r) => setTimeout(r, 0)); },
+  };
+}
+// Notification API: real Chrome exposes `Notification` with a `permission` static ("default"
+// until granted). Missing `Notification`/`permission` is a headless tell google's homepage reads.
+if (typeof globalThis.Notification === "undefined") {
+  const N = function Notification() {};
+  N.permission = "default";
+  N.maxActions = 2;
+  N.requestPermission = function (cb) { if (typeof cb === "function") cb("default"); return Promise.resolve("default"); };
+  globalThis.Notification = N;
+} else if (globalThis.Notification.permission === undefined) {
+  try { globalThis.Notification.permission = "default"; } catch (e) {}
+}
 // The CSS interface (window.CSS): CSS.supports (feature detection) + CSS.escape (identifier
 // escaping). Bundles reference it at load — Google's deferred `xjs` bundle aborted with
 // "CSS is not defined". No layout/CSS engine headless, so supports() validates the query
@@ -1224,7 +1743,7 @@ if (typeof globalThis.BroadcastChannel === "undefined") {
     }
     postMessage(data) {
       for (const c of __chans[this.name] || []) {
-        if (c !== this && !c._closed) globalThis.setTimeout(() => { if (typeof c.onmessage === "function") c.onmessage({ data, target: c }); }, 0);
+        if (c !== this && !c._closed) globalThis.setTimeout(() => { if (typeof c.onmessage === "function") { const ev = new globalThis.MessageEvent("message", { data }); ev.target = c; c.onmessage(ev); } }, 0);
       }
     }
     close() { this._closed = true; const a = __chans[this.name]; if (a) { const i = a.indexOf(this); if (i >= 0) a.splice(i, 1); } }
@@ -1368,7 +1887,12 @@ globalThis.history = {
   replaceState(s, _t, u) { this.state = s; if (u != null) globalThis.location.href = String(u); },
   back() {}, forward() {}, go() {},
 };
-globalThis.requestIdleCallback = (fn) => globalThis.setTimeout(fn, 0);
+// requestIdleCallback must invoke the callback with an IdleDeadline ({didTimeout, timeRemaining()});
+// the bare shim passed nothing, so `deadline.timeRemaining()` threw — a correctness bug + tell.
+globalThis.requestIdleCallback = (fn) => globalThis.setTimeout(() => {
+  const start = __perfNow();
+  fn({ didTimeout: false, timeRemaining: () => Math.max(0, 50 - (__perfNow() - start)) });
+}, 1);
 globalThis.cancelIdleCallback = (id) => globalThis.clearTimeout(id);
 
 // WHATWG URL + URLSearchParams — deno_core ships neither, but app bundles (Next.js,
@@ -1667,10 +2191,26 @@ if (typeof globalThis.URL === "undefined") {
       try { globalThis[k] = v; } catch (_e) {}
     }
   };
-  set("innerWidth", 1280);
-  set("innerHeight", 800);
-  set("outerWidth", 1280);
-  set("outerHeight", 800);
+  // Window/viewport geometry, kept physically coherent with the screen:
+  //   screen.height >= availHeight >= outerHeight >= innerHeight   (the window fits ON the
+  // screen; the viewport fits IN the window under the tab strip + omnibox). Widths are equal
+  // (Chrome has no left/right window chrome; the scrollbar lives inside inner). A window taller
+  // than its screen — or equal inner/outer height — is impossible and a tell. `screen` was set
+  // earlier in this bootstrap, so derive the defaults from it and clamp to fit.
+  const __chromeH = 88; // ~40px tab strip + ~48px toolbar (no bookmarks bar)
+  const __scr = globalThis.screen || {};
+  const __availW = typeof __scr.availWidth === "number" ? __scr.availWidth : 1920;
+  const __availH = typeof __scr.availHeight === "number" ? __scr.availHeight : 1055;
+  // Outer window: default to the available screen area (a maximized-ish window), never larger.
+  const __ow = Math.min(__pick("outerWidth", Math.min(1280, __availW)), __availW);
+  const __oh = Math.min(__pick("outerHeight", Math.min(800 + __chromeH, __availH)), __availH);
+  // Inner viewport: window minus chrome (height) and equal width; never larger than the window.
+  const __iw = Math.min(__pick("innerWidth", __ow), __ow);
+  const __ih = Math.min(__pick("innerHeight", Math.max(__oh - __chromeH, 0)), __oh);
+  set("innerWidth", __iw);
+  set("innerHeight", __ih);
+  set("outerWidth", __ow);
+  set("outerHeight", __oh);
   set("devicePixelRatio", 1);
   set("screenX", 0);
   set("screenY", 0);
@@ -1683,11 +2223,14 @@ if (typeof globalThis.URL === "undefined") {
   set("scrollBy", () => {});
   set("screen", {
     width: 1280, height: 800, availWidth: 1280, availHeight: 800,
-    colorDepth: 24, pixelDepth: 24,
+    colorDepth: __colorDepth, pixelDepth: __pixelDepth,
     orientation: { type: "landscape-primary", angle: 0, addEventListener() {}, removeEventListener() {} },
   });
+  // visualViewport tracks the layout viewport (unpinched) — must equal innerWidth/innerHeight,
+  // else `visualViewport.width !== innerWidth` is an incoherence tell. Derive from the values
+  // set just above rather than repeating a stale 1280x800.
   set("visualViewport", {
-    width: 1280, height: 800, scale: 1, offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0,
+    width: __iw, height: __ih, scale: 1, offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0,
     addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
   });
   // PerformanceObserver — analytics / experiment code (e.g. Wikipedia's header
@@ -1697,7 +2240,13 @@ if (typeof globalThis.URL === "undefined") {
     constructor(cb) { this._cb = cb; }
     observe() {} disconnect() {} takeRecords() { return []; }
   });
-  try { globalThis.PerformanceObserver.supportedEntryTypes = []; } catch (_e) {}
+  // Real Chrome exposes a populated static list here; an empty array is a tell.
+  try {
+    globalThis.PerformanceObserver.supportedEntryTypes = [
+      "element", "event", "first-input", "largest-contentful-paint", "layout-shift",
+      "longtask", "mark", "measure", "navigation", "paint", "resource", "visibility-state",
+    ];
+  } catch (_e) {}
 })();
 
 // `Node.prototype.replaceChild(new, old)` — jQuery's `replaceWith`/`domManip` call
@@ -2279,28 +2828,87 @@ globalThis.__domSig = () => {
   const fireIframeLoad = (el) => {
     if (el.__tcLoadFired) return;
     el.__tcLoadFired = true;
+    el.__loaded = true;
     globalThis.setTimeout(() => {
       const ev = { type: "load", target: el, currentTarget: el };
       try { if (typeof el.onload === "function") el.onload(ev); } catch (_e) {}
+      try { (el.__loadCbs || []).forEach((f) => { try { f(ev); } catch (_e) {} }); } catch (_e) {}
       try { if (typeof el.dispatchEvent === "function") el.dispatchEvent(ev); } catch (_e) {}
     }, 0);
   };
-  // ── reCAPTCHA bframe handshake (network + second realm) ─────────────────────────
-  // reCAPTCHA's main VM (recaptcha__en.js) FULLY executes here; execute() then loads the
-  // cross-origin **bframe** iframe and drives the challenge over postMessage to its
-  // contentWindow, awaiting a token reply. Offline/in-isolate that iframe never loads, so
-  // execute() hangs. This upgrades a bframe (or anchor) iframe from the lightweight stub to
-  // a REAL bridged second realm (browser_env's __makeFrameRealm), FETCHES the frame + its
-  // own VM over op_fetch (shared cookie jar), runs that VM INSIDE the child realm, and lets
-  // the realm's directional postMessage carry the parent↔bframe handshake — so execute()
-  // can progress past "awaiting bframe" toward a client-side token.
-  const BFRAME_RE = /\/recaptcha\/.*(bframe|anchor)/i;
+  // ── <iframe> realms (generic, depth-capped) ──────────────────────────────────────
+  // Every iframe — created via createElement, present in the parsed HTML, or carrying
+  // `srcdoc` — instantiates a REAL bridged child realm (browser_env's __makeFrameRealm)
+  // that runs the frame's OWN inline + `<script src>` scripts, with a DISTINCT
+  // contentWindow/contentDocument, a wired frame tree (parent/top/frames/length), and a
+  // depth cap that guards frame-bombs. reCAPTCHA's bframe/anchor handshake is now just the
+  // special case this generalizes: it flows through the same loader. A hidden / src-less /
+  // blocklisted iframe stays an inert stub (the analytics/auth churn fix) so it costs nothing.
+  //
+  // Fidelity tradeoff (unchanged): a single V8 isolate, so realms SHARE prototypes/globals —
+  // no true origin isolation or separate realm IDENTITY; the child document is a lightweight
+  // facade over native element construction, not a second live-rendered tree. Faithful enough
+  // for the frame-tree + cross-frame message-channel semantics apps actually rely on.
+  const FRAME_DEPTH_CAP = 12; // beyond this a nested iframe is an inert stub (frame-bomb guard)
+  // Hosts whose iframes are analytics/auth CHURN (created + torn down hundreds of times during
+  // hydration): keep them inert so the churn stays nearly free and the budget goes to the real
+  // DOM. Config-driven so the list can grow without touching the loader.
+  const FRAME_STUB_HOST_RE = /posthog|propelauth/i;
+
+  const frameSrcOf = (el) =>
+    String((el && (el.__src != null ? el.__src : el.src)) || (el && el.getAttribute && el.getAttribute("src")) || "");
+  const frameSrcdocOf = (el) => {
+    let s = el && (el.__srcdoc != null ? el.__srcdoc : el.srcdoc);
+    if ((s == null || s === "") && el && el.getAttribute) s = el.getAttribute("srcdoc");
+    return s == null ? null : String(s);
+  };
+  // A meaningful frame earns a realm; a hidden / src-less / blocklisted one stays inert.
+  const frameWantsRealm = (el) => {
+    const sd = frameSrcdocOf(el);
+    if (sd != null && sd.length) return true;
+    const s = frameSrcOf(el);
+    if (!s || s === "about:blank") return false;
+    if (FRAME_STUB_HOST_RE.test(s)) return false;
+    return true;
+  };
+  const resolveFrameUrl = (el) => {
+    const s = frameSrcOf(el);
+    if (!s) return "";
+    // Resolve a relative src against the OWNING frame's URL (not always the top window), so a
+    // relative src in a nested/grandchild frame resolves correctly.
+    const owner = el.__ownerWin || globalThis;
+    const base = (owner.location && owner.location.href) || (globalThis.location && globalThis.location.href) || "http://localhost/";
+    try { return new URL(s, base).href; }
+    catch (_e) { return s; }
+  };
+  // Walk `parent` links to the real top window (self-aliased at the top, so it terminates).
+  const realTopOf = (win) => {
+    let w = win, guard = 0;
+    while (w && w.parent && w.parent !== w && guard++ < 64) w = w.parent;
+    return w || globalThis;
+  };
+  // Frame tree on `parentWin`: window.length = child count, window[i]/frames[i] = child
+  // windows, and frames === window (as in a real browser).
+  const registerChildFrame = (parentWin, childWin) => {
+    const n = parentWin.__frameCount || 0;
+    try { parentWin[n] = childWin; } catch (_e) {}
+    parentWin.__frameCount = n + 1;
+    try { parentWin.length = n + 1; } catch (_e) {}
+    if (parentWin.frames == null || parentWin.frames === parentWin) {
+      try { parentWin.frames = parentWin; } catch (_e) {}
+    } else {
+      try { parentWin.frames[n] = childWin; parentWin.frames.length = n + 1; } catch (_e) {}
+    }
+  };
+
   // Run a sub-VM's source inside the child realm: shadow the realm-scoped identifiers
-  // (window/self/globalThis/document/parent/top/location/postMessage/…) as function params so
-  // the VM's `window`/`parent`/bare `postMessage` resolve to the child window + parent view,
-  // not the host globals. Builtins (fetch, JSON, crypto, Math, typed arrays) intentionally
-  // fall through to the real globals. This is the same-isolate realm trick — the documented
-  // fidelity tradeoff (no separate V8 context; shared prototypes).
+  // (window/self/globalThis/document/parent/top/…) as function params so the VM's
+  // `window`/`parent`/bare `postMessage` resolve to the child window + parent VIEW, not the
+  // host globals. `parent` is the source-tagging parent VIEW (so `parent.postMessage` fires
+  // the parent's listeners with source === this frame's contentWindow — the cross-frame
+  // handshake relies on it); `top` is the REAL top window (so `top.foo` property reads work).
+  // Builtins (fetch, JSON, crypto, Math) intentionally fall through to the real globals — the
+  // documented shared-isolate tradeoff (no separate V8 context; shared prototypes).
   const runVmInRealm = (cw, code) => {
     const cd = cw.document;
     const fn = new Function(
@@ -2309,13 +2917,14 @@ globalThis.__domSig = () => {
       "dispatchEvent",
       code
     );
-    return fn.call(cw, cw, cw, cw, cd, cw.parent, cw.top, cw.frames, cw.frameElement,
+    return fn.call(cw, cw, cw, cw, cd, cw.__parentView || cw.parent, cw.top, cw.frames, cw.frameElement,
       cw.location, cw.navigator, cw.screen,
       cw.postMessage.bind(cw), cw.addEventListener.bind(cw), cw.removeEventListener.bind(cw),
       cw.dispatchEvent.bind(cw));
   };
   // Extract + run the frame document's scripts in the realm, in document order: inline
-  // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL).
+  // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL,
+  // shared cookie jar).
   const loadFrameScripts = async (cw, html, frameUrl) => {
     const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
     let m;
@@ -2344,74 +2953,165 @@ globalThis.__domSig = () => {
       try { cw.dispatchEvent(load); } catch (_e) {}
     }, 0);
   };
-  // The full handshake: build the realm, fetch the frame + its VM, run it, fire load.
-  // Counted in __pendingFetches so the hydration/interaction drain stays awake until it
-  // settles. Idempotent per element.
-  globalThis.__recaptchaBframeHandshake = async (el, url) => {
-    if (typeof globalThis.__makeFrameRealm !== "function") return;
-    if (el.__bframeStarted) return; el.__bframeStarted = true;
+
+  // Augment browser_env's child realm FROM RUNTIME (without editing the vendored binding):
+  // give it the REAL parent + top window objects (identity: frames[0].parent === window),
+  // keep the source-tagging parent VIEW as __parentView for the message bridge, expose its
+  // own frame tree, and wire its document.createElement so a grandchild iframe builds a
+  // grandchild realm at depth+1.
+  const augmentRealm = (cw, parentWin, hostEl, depth) => {
+    if (!cw || cw.__augmented) return cw;
+    cw.__augmented = true;
+    cw.__depth = depth;
+    cw.__parentWin = parentWin;
+    cw.__parentView = cw.parent;              // browser_env's source-tagging view (parent.postMessage)
+    cw.parent = parentWin;                    // real immediate parent (identity check)
+    cw.top = realTopOf(parentWin);            // real top window (top.foo reads work)
+    cw.frameElement = hostEl || null;
+    cw.frames = cw;                           // window.frames === window
+    cw.length = 0; cw.__frameCount = 0;
+    installFrameFactory(cw, cw.document, depth + 1);
+    return cw;
+  };
+
+  // Build (sync, idempotent) the child realm for `el` and wire its frame tree. Script loading
+  // is separate (async, see __loadFrame) so contentWindow is available immediately.
+  globalThis.__frameRealm = (el, depth) => {
+    if (el.__realm) return el.__realm;
+    if (typeof globalThis.__makeFrameRealm !== "function") return globalThis;
+    const parentWin = el.__ownerWin || globalThis;
+    const cw = globalThis.__makeFrameRealm(el, parentWin);
+    augmentRealm(cw, parentWin, el, depth == null ? (el.__depth || 0) : depth);
+    registerChildFrame(parentWin, cw);
+    return cw;
+  };
+
+  // The full frame load: ensure the realm, fetch the frame HTML (op_fetch for `src`, or the
+  // `srcdoc` attribute directly), run its scripts in the realm, fire load. Counted in
+  // __pendingFetches so the hydration drain waits for it. Idempotent per element.
+  globalThis.__loadFrame = async (el, depth) => {
+    if (el.__frameStarted) return el.__realm;
+    el.__frameStarted = true;
+    const cw = globalThis.__frameRealm(el, depth);
+    if (!cw || cw === globalThis) { fireIframeLoad(el); return cw; }
     globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+    let frameUrl = (globalThis.location && globalThis.location.href) || "http://localhost/";
     try {
-      const cw = globalThis.__makeFrameRealm(el, globalThis);
-      const r = await ops.op_fetch(url, "{}");
-      const html = (r && r.body) || "";
-      await loadFrameScripts(cw, html, url);
+      let html = "";
+      const sd = frameSrcdocOf(el);
+      if (sd != null && sd.length) {
+        html = sd;
+      } else {
+        const url = resolveFrameUrl(el);
+        if (url) { frameUrl = url; const r = await ops.op_fetch(url, "{}"); html = (r && r.body) || ""; }
+      }
+      await loadFrameScripts(cw, html, frameUrl);
       fireRealmLoad(cw);
     } catch (_e) {
     } finally {
       globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
+      fireIframeLoad(el);
     }
+    return cw;
   };
-  // Route a bframe/anchor src to the handshake; every other iframe keeps the lightweight
-  // load-once stub (the PostHog/PropelAuth churn fix). Returns true when it routed.
-  const routeIframeSrc = (el, v) => {
-    const url = String(v);
-    if (BFRAME_RE.test(url)) { try { globalThis.__recaptchaBframeHandshake(el, url); } catch (_e) {} return true; }
-    return false;
+  // Back-compat shim: the reCAPTCHA bframe/anchor path is now just a frame load through the
+  // generic loader. `url` is the bframe src; set it so the loader fetches + runs the bframe VM.
+  globalThis.__recaptchaBframeHandshake = (el, url) => {
+    try { if (url != null) el.__src = String(url); } catch (_e) {}
+    return globalThis.__loadFrame(el, el.__depth || 1);
   };
-  // Analytics SDKs (PostHog) churn HUNDREDS of hidden <iframe>s during hydration. With
-  // no real navigation each one never loads, so the SDK keeps recreating them — and the
-  // tree append/remove + serialize cost of that churn starves the render budget so the
-  // real page never finishes. Hand these a LIGHTWEIGHT detached stub (never enters the
-  // rtdom tree; append/remove/measure are no-ops; load fires once; contentWindow/Document
-  // are present) so the churn is nearly free and the budget goes to the real DOM.
-  const makeIframeStub = () => {
+
+  // A realm-capable iframe host: a plain object (it does NOT enter the rtdom tree, matching the
+  // pre-existing created-iframe behavior). `depth` is this frame's depth; `ownerWin` is the
+  // realm whose document created it (its parent). The src/srcdoc setters trigger a real realm
+  // load unless the frame is inert (churn / no meaningful src) or past the depth cap. Its lazy
+  // contentWindow/contentDocument mean an unused iframe still costs nothing.
+  const buildIframe = (depth, ownerWin) => {
     const noop = () => {};
-    // contentWindow IS globalThis: analytics SDKs (PostHog) create a throwaway iframe
-    // purely to read the *native* prototype of a builtin off `iframe.contentWindow[name]`
-    // (to defeat page monkey-patching). If contentWindow is missing they bail WITHOUT
-    // caching and recreate an iframe on EVERY call → 700+ iframe churn that starves the
-    // render budget. Pointing contentWindow at our realm makes `contentWindow[name].prototype`
-    // resolve, so the SDK caches and the loop stops after one lookup per builtin.
-    const win = globalThis;
-    const stub = {
-      nodeType: 1, nodeName: "IFRAME", tagName: "IFRAME", __iframeStub: true,
-      style: {}, dataset: {}, contentWindow: win, contentDocument: globalThis.document,
-      onload: null, onerror: null,
-      // Route 'src' through the accessor below (single source of truth: bframe → handshake,
-      // else load-once); other attributes are plain data props.
-      setAttribute(n, v) { if (n === "src") { this.src = v; return; } this[n] = v; },
-      getAttribute(n) { return this[n] != null ? String(this[n]) : null; },
+    const el = {
+      nodeType: 1, nodeName: "IFRAME", tagName: "IFRAME", __iframeEl: true,
+      __depth: depth, __ownerWin: ownerWin || globalThis,
+      style: {}, dataset: {}, onload: null, onerror: null,
+      setAttribute(n, v) { if (n === "src") { this.src = v; return; } if (n === "srcdoc") { this.srcdoc = v; return; } this[n] = v; },
+      getAttribute(n) {
+        if (n === "src") return this.__src || null;
+        if (n === "srcdoc") return this.__srcdoc != null ? this.__srcdoc : null;
+        return this[n] != null ? String(this[n]) : null;
+      },
       removeAttribute(n) { delete this[n]; },
       appendChild(c) { return c; }, removeChild(c) { return c; },
       insertBefore(c) { return c; }, remove: noop,
-      addEventListener(t, f) { if (t === "load") { this.onload = f; fireIframeLoad(this); } },
+      addEventListener(t, f) { if (t === "load") { (this.__loadCbs = this.__loadCbs || []).push(f); if (this.__loaded) fireIframeLoad(this); } },
       removeEventListener: noop, dispatchEvent: noop,
       getBoundingClientRect: () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }),
       focus: noop, blur: noop, contains: () => false,
     };
-    Object.defineProperty(stub, "src", {
-      configurable: true,
-      get() { return stub.__src || ""; },
-      set(v) { stub.__src = String(v); if (stub.__src && !routeIframeSrc(stub, stub.__src)) fireIframeLoad(stub); },
-    });
-    return stub;
+    // Decide realm vs inert, then (for a realm) kick the async load. Idempotent.
+    const maybeLoad = () => {
+      if (el.__frameStarted) return;
+      if (depth > FRAME_DEPTH_CAP || !frameWantsRealm(el)) { fireIframeLoad(el); return; }
+      try { globalThis.__loadFrame(el, depth); } catch (_e) { fireIframeLoad(el); }
+    };
+    Object.defineProperty(el, "src", { configurable: true,
+      get() { return el.__src || ""; },
+      set(v) { el.__src = String(v); maybeLoad(); } });
+    Object.defineProperty(el, "srcdoc", { configurable: true,
+      get() { return el.__srcdoc || ""; },
+      set(v) { el.__srcdoc = String(v); maybeLoad(); } });
+    // contentWindow/contentDocument are the child realm's DISTINCT window/document once the
+    // frame wants a realm; otherwise (inert/churn or past the cap) they point at the TOP
+    // window/doc so an analytics SDK's builtin-prototype probe still resolves + caches.
+    Object.defineProperty(el, "contentWindow", { configurable: true,
+      get() {
+        if (el.__realm) return el.__realm;
+        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return globalThis.__frameRealm(el, depth);
+        return globalThis;
+      } });
+    Object.defineProperty(el, "contentDocument", { configurable: true,
+      get() {
+        if (el.__realm) return el.__realm.document;
+        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return globalThis.__frameRealm(el, depth).document;
+        return globalThis.document;
+      } });
+    return el;
   };
-  const origCreate = document.createElement.bind(document);
-  document.createElement = (tag) => {
-    if (String(tag).toLowerCase() === "iframe") return makeIframeStub();
-    return addShadow(origCreate(tag));
+
+  // Wire a document's createElement so `iframe` → a realm-capable host at `nextDepth`, owned by
+  // `win`. Non-iframe tags fall through to the original createElement (with the top document's
+  // shadow-DOM shim preserved for the top realm only).
+  const installFrameFactory = (win, doc, nextDepth) => {
+    if (!doc || doc.__frameFactory) return;
+    doc.__frameFactory = true;
+    const orig = typeof doc.createElement === "function" ? doc.createElement.bind(doc) : null;
+    const isTop = win === globalThis;
+    doc.createElement = (tag) => {
+      if (String(tag).toLowerCase() === "iframe") return buildIframe(nextDepth, win);
+      if (!orig) return null;
+      return isTop ? addShadow(orig(tag)) : orig(tag);
+    };
   };
+  // Wire the TOP document: the iframes it creates are depth 1.
+  installFrameFactory(globalThis, document, 1);
+
+  // Pre-existing <iframe> elements in the parsed HTML get a realm too (created ones go through
+  // the factory above). They are REAL rtdom nodes, so wire lazy contentWindow/contentDocument
+  // accessors and load their content at depth 1.
+  const wireExistingIframe = (el) => {
+    if (!el || el.__frameStarted || el.__iframeWiredRT) return;
+    el.__iframeWiredRT = true;
+    el.__ownerWin = globalThis;
+    el.__depth = 1;
+    try {
+      Object.defineProperty(el, "contentWindow", { configurable: true, get() { return el.__realm || globalThis; } });
+      Object.defineProperty(el, "contentDocument", { configurable: true, get() { return el.__realm ? el.__realm.document : globalThis.document; } });
+    } catch (_e) {}
+    if (frameWantsRealm(el)) { try { globalThis.__loadFrame(el, 1); } catch (_e) {} }
+  };
+  try {
+    const pre = document.querySelectorAll ? document.querySelectorAll("iframe") : [];
+    for (let i = 0; i < pre.length; i++) wireExistingIframe(pre[i]);
+  } catch (_e) {}
+
   if (document.body) addShadow(document.body);
   if (document.documentElement) addShadow(document.documentElement);
 })();
@@ -2422,13 +3122,32 @@ globalThis.__domSig = () => {
 (() => {
   const orig = Function.prototype.toString;
   const native = new WeakSet();
-  const ts = function toString() {
+  // Define the trap as a CONCISE METHOD (via an object literal), not a `function` expression: a
+  // native function has NO own `prototype` property, but a `function` expression always does (and
+  // it's non-configurable, so it can't be deleted). Concise methods — like real native methods —
+  // have no `prototype`. A probe reading `'prototype' in Function.prototype.toString` would
+  // otherwise flag the trap (and every `function`-expression shim) as non-native despite the
+  // "[native code]" string. length must be 0 (native toString.length === 0), which a concise
+  // method already gives.
+  const ts = ({ toString() {
     if (native.has(this)) return "function " + (this.name || "") + "() { [native code] }";
     return orig.call(this);
-  };
-  Object.defineProperty(ts, "name", { value: "toString", configurable: true });
+  } }).toString;
   Function.prototype.toString = ts;
   native.add(ts); // the trap must report itself native too
+  // Wrap a shim as a prototype-less, native-marked forwarder (concise-method form), preserving
+  // `this`/args and pinning name + length to match the real built-in. Use where a `function`
+  // shim's own `prototype` would be a native-shape tell.
+  const nativize = (orig2, name, len) => {
+    if (typeof orig2 !== "function") return orig2;
+    const holder = { [name](...args) { return orig2.apply(this, args); } };
+    const f = holder[name];
+    try { Object.defineProperty(f, "length", { value: len == null ? orig2.length : len, configurable: true }); } catch (e) {}
+    native.add(f);
+    return f;
+  };
+  // NB: `nativize` stays a closure-local — exposing it as a global (window.__nativize) would itself
+  // be a tamper tell. Every shim site that needs it is inside this same IIFE.
   const mark = (fn, name) => {
     if (typeof fn !== "function") return;
     // Don't rename an already-marked function: setInterval/clearInterval/
@@ -2444,17 +3163,58 @@ globalThis.__domSig = () => {
   mark(requestAnimationFrame, "requestAnimationFrame");
   mark(queueMicrotask, "queueMicrotask");
   mark(fetch, "fetch");
-  mark(setInterval); mark(clearInterval); mark(cancelAnimationFrame);
+  mark(setInterval); mark(clearInterval);
+  mark(cancelAnimationFrame, "cancelAnimationFrame"); // now its own fn, not a clearTimeout alias
+  // Event API: the vendored addEventListener/removeEventListener/dispatchEvent are `function`
+  // shims — their `.toString()` leaks source AND they carry an own `prototype` (native methods
+  // don't), both tamper tells BotGuard reads. Replace with prototype-less native-shaped forwarders
+  // on their OWN object (window/document may hold their own copies; EventTarget.prototype the
+  // shared one — reassign wherever it's an own prop so we don't add a new own prop that itself is
+  // a tell).
+  for (const name of ["addEventListener", "removeEventListener", "dispatchEvent"]) {
+    const owners = [globalThis, globalThis.document, globalThis.EventTarget && globalThis.EventTarget.prototype];
+    for (const o of owners) {
+      try {
+        if (o && Object.prototype.hasOwnProperty.call(o, name) && typeof o[name] === "function") {
+          o[name] = nativize(o[name], name, name === "dispatchEvent" ? 1 : 2);
+        }
+      } catch (e) {}
+    }
+  }
   if (globalThis.Headers) mark(globalThis.Headers, "Headers");
   const nav = globalThis.navigator;
   if (nav && nav.clipboard) { mark(nav.clipboard.writeText, "writeText"); mark(nav.clipboard.readText, "readText"); }
-  // navigator.sendBeacon is a JS closure (it POSTs the collected token over op_fetch); a
-  // collector that reads its `.toString()` would see source and flag a tampered/polyfilled
-  // beacon. Report native, like every other shim.
-  if (nav && typeof nav.sendBeacon === "function") mark(nav.sendBeacon, "sendBeacon");
+  // Navigator.prototype now holds all 84 members (getters + methods). Native-mask every one so a
+  // collector reading `Object.getOwnPropertyDescriptor(Navigator.prototype, k).get.toString()` or
+  // a method's `.toString()` sees "[native code]", not JS source. (The getters/methods are arrows,
+  // so they already have no own `prototype` — matching native shape.)
+  try {
+    const np = globalThis.Navigator && globalThis.Navigator.prototype;
+    if (np) {
+      mark(globalThis.Navigator, "Navigator");
+      for (const k of Object.getOwnPropertyNames(np)) {
+        const d = Object.getOwnPropertyDescriptor(np, k);
+        if (!d) continue;
+        if (typeof d.get === "function") mark(d.get, "get " + k);
+        if (typeof d.set === "function") mark(d.set, "set " + k);
+        if (typeof d.value === "function") mark(d.value, k);
+      }
+    }
+  } catch (e) {}
   // window.postMessage + trustedTypes are JS shims (see their defs); a collector reading
   // their `.toString()` must see native source, like every other shim.
   if (typeof globalThis.postMessage === "function") mark(globalThis.postMessage, "postMessage");
+  // Native-mark the message constructors — they're defined (not created by the NAMES loop), so
+  // their `.toString()` would otherwise leak JS source (a tamper tell). Also mark MessagePort's
+  // prototype methods so `port.postMessage.toString()` reads native.
+  for (const __c of [globalThis.MessageChannel, globalThis.MessagePort, globalThis.BroadcastChannel, globalThis.MessageEvent]) {
+    if (typeof __c === "function") mark(__c, __c.name);
+  }
+  if (globalThis.MessagePort && globalThis.MessagePort.prototype) {
+    for (const __m of ["postMessage", "start", "close", "addEventListener", "removeEventListener"]) {
+      mark(globalThis.MessagePort.prototype[__m], __m);
+    }
+  }
   if (globalThis.trustedTypes && typeof globalThis.trustedTypes.createPolicy === "function") mark(globalThis.trustedTypes.createPolicy, "createPolicy");
 
   // ── Structural browser-surface fidelity ──────────────────────────────────────
@@ -2470,6 +3230,32 @@ globalThis.__domSig = () => {
   const G = globalThis;
   const guard = (fn) => { try { fn(); } catch (e) {} };
   const tag = (obj, name) => { if (obj) Object.defineProperty(obj, Symbol.toStringTag, { value: name, configurable: true }); };
+  // Event.isTrusted as a real Chrome-shaped PROTOTYPE ACCESSOR (Chrome exposes it on
+  // Event.prototype, read-only, not as an own instance prop). The vendored Event ctor sets an
+  // own `isTrusted=false`; we install a proto getter reading a hidden `__trusted` flag so a
+  // synthesized human-input event marked trusted reads `true`, while ordinary script events stay
+  // false. A trusted-dispatch helper (see the human-input synthesizer) deletes the own prop and
+  // sets `__trusted`, leaving isTrusted only on the prototype — matching Chrome's descriptor
+  // shape (an anti-bot check reads Object.getOwnPropertyDescriptor(Event.prototype,'isTrusted')).
+  guard(() => {
+    if (typeof G.Event === "function" && G.Event.prototype) {
+      const get = function isTrusted() { return this.__trusted === true; };
+      mark(get, "get isTrusted");
+      Object.defineProperty(G.Event.prototype, "isTrusted", { get, enumerable: true, configurable: true });
+    }
+  });
+  // document.readyState as a MUTABLE accessor backed by a hidden Symbol slot, so the render loop
+  // can drive the real page-load sequence (loading → interactive → complete) and fire the matching
+  // events. The vendored binding hard-codes 'complete'; a collector that watches readyState
+  // transitions + gates init on DOMContentLoaded/load (google's homepage does) saw a frozen
+  // 'complete' and no lifecycle events on the main document/window — init never ran. Default
+  // (slot unset, e.g. the sync run_with_dom path) still reads 'complete', preserving old behavior.
+  guard(() => {
+    const SLOT = Symbol.for("__ts_rs");
+    const get = function readyState() { const v = G.document[SLOT]; return v === undefined ? "complete" : v; };
+    mark(get, "get readyState");
+    Object.defineProperty(G.document, "readyState", { get, configurable: true, enumerable: true });
+  });
   // A native-reporting getter (its source reads "[native code]" via the trap above).
   const nativeGetter = (val) => { const g = function () { return val; }; mark(g); return g; };
   // Insert a correctly-named host prototype between `obj` and its current prototype, carrying
@@ -2494,15 +3280,11 @@ globalThis.__domSig = () => {
     Object.setPrototypeOf(obj, proto);
   };
 
-  // navigator → Navigator.prototype (13 native getters). webdriver moves to a native getter
-  // returning false with NO own property (defeats webdriver-getter-tampered + the alt/contradiction
-  // cross-reads, which call the prototype getter).
-  guard(() => hostInterface(nav, "Navigator",
-    ["userAgent", "platform", "language", "languages", "hardwareConcurrency", "vendor",
-     "onLine", "appVersion", "appName", "product", "cookieEnabled", "appCodeName",
-     "maxTouchPoints", "webdriver"], ["webdriver"]));
-  guard(() => { Object.defineProperty(Object.getPrototypeOf(nav), "webdriver", { get: nativeGetter(false), enumerable: true, configurable: true }); });
-  guard(() => { if (nav && typeof nav.javaEnabled !== "function") { nav.javaEnabled = function javaEnabled() { return false; }; mark(nav.javaEnabled, "javaEnabled"); } });
+  // NB: navigator is now a full `Navigator` instance built earlier — zero own props, all 84
+  // members (incl. userAgent/platform/webdriver) as native-marked getters on `Navigator.prototype`
+  // (marked in the loop above). So the old `hostInterface(nav, "Navigator", …)` re-parenting is
+  // GONE — it replaced the real 84-member prototype with a thin 13-getter one (a structural tell).
+  // `webdriver` is already a native getter returning false with no own property.
 
   // screen → Screen.prototype (6 native getters); reserve OS chrome so avail<full (screen-no-os-chrome).
   guard(() => {
@@ -2511,6 +3293,483 @@ globalThis.__domSig = () => {
       if (scr.availHeight === scr.height) { try { scr.availHeight = scr.height - 25; } catch (e) {} }
       hostInterface(scr, "Screen", ["width", "height", "availWidth", "availHeight", "colorDepth", "pixelDepth"]);
     }
+  });
+
+  // canvas / WebGL fidelity. Two tells the vendored (synthetic) canvas leaks: (a) its 2D +
+  // WebGL context methods are JS closures whose `.toString()` reveals source (anti-tamper
+  // flag), and (b) the WebGL identity is SwiftShader ("ANGLE (Google, Vulkan… SwiftShader)")
+  // — the classic headless/VM signal — with lower limits + fewer extensions than a real GPU.
+  // Wrap getContext to (1) spoof the WebGL surface to this host's real Chrome/ANGLE-Metal
+  // profile (measured live: Apple M4 Pro via ANGLE Metal) and (2) native-mark every own
+  // method on the returned context (they're per-instance own funcs, so the WeakSet mark must
+  // run per context). Canvas prototype readback methods (toDataURL/toBlob/getContext) are
+  // marked once. Pixel VALUES stay honest — this fixes the identity + toString tells, not the
+  // render hash (see the raster-backed toDataURL below for the byte-size fix).
+  guard(() => {
+    const canvasProto = Object.getPrototypeOf(G.document.createElement("canvas"));
+    if (!canvasProto || typeof canvasProto.getContext !== "function" || native.has(canvasProto.getContext)) return;
+    // Real-Chrome WebGL extension lists for this host (webgl vs webgl2 differ).
+    const EXT1 = ["ANGLE_instanced_arrays","EXT_blend_minmax","EXT_clip_control","EXT_color_buffer_half_float","EXT_depth_clamp","EXT_disjoint_timer_query","EXT_float_blend","EXT_frag_depth","EXT_polygon_offset_clamp","EXT_sRGB","EXT_shader_texture_lod","EXT_texture_compression_bptc","EXT_texture_compression_rgtc","EXT_texture_filter_anisotropic","EXT_texture_mirror_clamp_to_edge","KHR_parallel_shader_compile","OES_element_index_uint","OES_fbo_render_mipmap","OES_standard_derivatives","OES_texture_float","OES_texture_float_linear","OES_texture_half_float","OES_texture_half_float_linear","OES_vertex_array_object","WEBGL_blend_func_extended","WEBGL_color_buffer_float","WEBGL_compressed_texture_astc","WEBGL_compressed_texture_etc","WEBGL_compressed_texture_etc1","WEBGL_compressed_texture_pvrtc","WEBGL_compressed_texture_s3tc","WEBGL_compressed_texture_s3tc_srgb","WEBGL_debug_renderer_info","WEBGL_debug_shaders","WEBGL_depth_texture","WEBGL_draw_buffers","WEBGL_lose_context","WEBGL_multi_draw","WEBGL_polygon_mode"];
+    const EXT2 = ["EXT_clip_control","EXT_color_buffer_float","EXT_color_buffer_half_float","EXT_conservative_depth","EXT_depth_clamp","EXT_disjoint_timer_query_webgl2","EXT_float_blend","EXT_polygon_offset_clamp","EXT_render_snorm","EXT_texture_compression_bptc","EXT_texture_compression_rgtc","EXT_texture_filter_anisotropic","EXT_texture_mirror_clamp_to_edge","EXT_texture_norm16","KHR_parallel_shader_compile","NV_shader_noperspective_interpolation","OES_draw_buffers_indexed","OES_sample_variables","OES_shader_multisample_interpolation","OES_texture_float_linear","WEBGL_blend_func_extended","WEBGL_clip_cull_distance","WEBGL_compressed_texture_astc","WEBGL_compressed_texture_etc","WEBGL_compressed_texture_etc1","WEBGL_compressed_texture_pvrtc","WEBGL_compressed_texture_s3tc","WEBGL_compressed_texture_s3tc_srgb","WEBGL_debug_renderer_info","WEBGL_debug_shaders","WEBGL_lose_context","WEBGL_multi_draw","WEBGL_polygon_mode","WEBGL_provoking_vertex","WEBGL_render_shared_exponent","WEBGL_stencil_texturing"];
+    // Full WebGL enum constants (captured from live Chrome: 298 for WebGL1, +255 for WebGL2).
+    // A real gl context exposes ALL of these on its prototype; ours had only the handful patchGl
+    // set for getParameter — so `gl.VERTEX_SHADER` etc. were undefined, both a fingerprint tell
+    // AND a functional break (real WebGL code + the GPU bridge get `undefined` enum args → the
+    // draw fails and readPixels returns the clear color). Applied to the context prototype below.
+    const GL_CONST1 = {ACTIVE_ATTRIBUTES:35721,ACTIVE_TEXTURE:34016,ACTIVE_UNIFORMS:35718,ALIASED_LINE_WIDTH_RANGE:33902,
+      ALIASED_POINT_SIZE_RANGE:33901,ALPHA:6406,ALPHA_BITS:3413,ALWAYS:519,ARRAY_BUFFER:34962,
+      ARRAY_BUFFER_BINDING:34964,ATTACHED_SHADERS:35717,BACK:1029,BLEND:3042,BLEND_COLOR:32773,
+      BLEND_DST_ALPHA:32970,BLEND_DST_RGB:32968,BLEND_EQUATION:32777,BLEND_EQUATION_ALPHA:34877,
+      BLEND_EQUATION_RGB:32777,BLEND_SRC_ALPHA:32971,BLEND_SRC_RGB:32969,BLUE_BITS:3412,BOOL:35670,BOOL_VEC2:35671,
+      BOOL_VEC3:35672,BOOL_VEC4:35673,BROWSER_DEFAULT_WEBGL:37444,BUFFER_SIZE:34660,BUFFER_USAGE:34661,BYTE:5120,
+      CCW:2305,CLAMP_TO_EDGE:33071,COLOR_ATTACHMENT0:36064,COLOR_BUFFER_BIT:16384,COLOR_CLEAR_VALUE:3106,
+      COLOR_WRITEMASK:3107,COMPILE_STATUS:35713,COMPRESSED_TEXTURE_FORMATS:34467,CONSTANT_ALPHA:32771,
+      CONSTANT_COLOR:32769,CONTEXT_LOST_WEBGL:37442,CULL_FACE:2884,CULL_FACE_MODE:2885,CURRENT_PROGRAM:35725,
+      CURRENT_VERTEX_ATTRIB:34342,CW:2304,DECR:7683,DECR_WRAP:34056,DELETE_STATUS:35712,DEPTH_ATTACHMENT:36096,
+      DEPTH_BITS:3414,DEPTH_BUFFER_BIT:256,DEPTH_CLEAR_VALUE:2931,DEPTH_COMPONENT:6402,DEPTH_COMPONENT16:33189,
+      DEPTH_FUNC:2932,DEPTH_RANGE:2928,DEPTH_STENCIL:34041,DEPTH_STENCIL_ATTACHMENT:33306,DEPTH_TEST:2929,
+      DEPTH_WRITEMASK:2930,DITHER:3024,DONT_CARE:4352,DST_ALPHA:772,DST_COLOR:774,DYNAMIC_DRAW:35048,
+      ELEMENT_ARRAY_BUFFER:34963,ELEMENT_ARRAY_BUFFER_BINDING:34965,EQUAL:514,FASTEST:4353,FLOAT:5126,
+      FLOAT_MAT2:35674,FLOAT_MAT3:35675,FLOAT_MAT4:35676,FLOAT_VEC2:35664,FLOAT_VEC3:35665,FLOAT_VEC4:35666,
+      FRAGMENT_SHADER:35632,FRAMEBUFFER:36160,FRAMEBUFFER_ATTACHMENT_OBJECT_NAME:36049,
+      FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:36048,FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:36051,
+      FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:36050,FRAMEBUFFER_BINDING:36006,FRAMEBUFFER_COMPLETE:36053,
+      FRAMEBUFFER_INCOMPLETE_ATTACHMENT:36054,FRAMEBUFFER_INCOMPLETE_DIMENSIONS:36057,
+      FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:36055,FRAMEBUFFER_UNSUPPORTED:36061,FRONT:1028,FRONT_AND_BACK:1032,
+      FRONT_FACE:2886,FUNC_ADD:32774,FUNC_REVERSE_SUBTRACT:32779,FUNC_SUBTRACT:32778,GENERATE_MIPMAP_HINT:33170,
+      GEQUAL:518,GREATER:516,GREEN_BITS:3411,HIGH_FLOAT:36338,HIGH_INT:36341,
+      IMPLEMENTATION_COLOR_READ_FORMAT:35739,IMPLEMENTATION_COLOR_READ_TYPE:35738,INCR:7682,INCR_WRAP:34055,
+      INT:5124,INT_VEC2:35667,INT_VEC3:35668,INT_VEC4:35669,INVALID_ENUM:1280,INVALID_FRAMEBUFFER_OPERATION:1286,
+      INVALID_OPERATION:1282,INVALID_VALUE:1281,INVERT:5386,KEEP:7680,LEQUAL:515,LESS:513,LINEAR:9729,
+      LINEAR_MIPMAP_LINEAR:9987,LINEAR_MIPMAP_NEAREST:9985,LINES:1,LINE_LOOP:2,LINE_STRIP:3,LINE_WIDTH:2849,
+      LINK_STATUS:35714,LOW_FLOAT:36336,LOW_INT:36339,LUMINANCE:6409,LUMINANCE_ALPHA:6410,
+      MAX_COMBINED_TEXTURE_IMAGE_UNITS:35661,MAX_CUBE_MAP_TEXTURE_SIZE:34076,MAX_FRAGMENT_UNIFORM_VECTORS:36349,
+      MAX_RENDERBUFFER_SIZE:34024,MAX_TEXTURE_IMAGE_UNITS:34930,MAX_TEXTURE_SIZE:3379,MAX_VARYING_VECTORS:36348,
+      MAX_VERTEX_ATTRIBS:34921,MAX_VERTEX_TEXTURE_IMAGE_UNITS:35660,MAX_VERTEX_UNIFORM_VECTORS:36347,
+      MAX_VIEWPORT_DIMS:3386,MEDIUM_FLOAT:36337,MEDIUM_INT:36340,MIRRORED_REPEAT:33648,NEAREST:9728,
+      NEAREST_MIPMAP_LINEAR:9986,NEAREST_MIPMAP_NEAREST:9984,NEVER:512,NICEST:4354,NONE:0,NOTEQUAL:517,NO_ERROR:0,
+      ONE:1,ONE_MINUS_CONSTANT_ALPHA:32772,ONE_MINUS_CONSTANT_COLOR:32770,ONE_MINUS_DST_ALPHA:773,
+      ONE_MINUS_DST_COLOR:775,ONE_MINUS_SRC_ALPHA:771,ONE_MINUS_SRC_COLOR:769,OUT_OF_MEMORY:1285,
+      PACK_ALIGNMENT:3333,POINTS:0,POLYGON_OFFSET_FACTOR:32824,POLYGON_OFFSET_FILL:32823,
+      POLYGON_OFFSET_UNITS:10752,RED_BITS:3410,RENDERBUFFER:36161,RENDERBUFFER_ALPHA_SIZE:36179,
+      RENDERBUFFER_BINDING:36007,RENDERBUFFER_BLUE_SIZE:36178,RENDERBUFFER_DEPTH_SIZE:36180,
+      RENDERBUFFER_GREEN_SIZE:36177,RENDERBUFFER_HEIGHT:36163,RENDERBUFFER_INTERNAL_FORMAT:36164,
+      RENDERBUFFER_RED_SIZE:36176,RENDERBUFFER_STENCIL_SIZE:36181,RENDERBUFFER_WIDTH:36162,RENDERER:7937,
+      REPEAT:10497,REPLACE:7681,RGB:6407,RGB565:36194,RGB5_A1:32855,RGB8:32849,RGBA:6408,RGBA4:32854,RGBA8:32856,
+      SAMPLER_2D:35678,SAMPLER_CUBE:35680,SAMPLES:32937,SAMPLE_ALPHA_TO_COVERAGE:32926,SAMPLE_BUFFERS:32936,
+      SAMPLE_COVERAGE:32928,SAMPLE_COVERAGE_INVERT:32939,SAMPLE_COVERAGE_VALUE:32938,SCISSOR_BOX:3088,
+      SCISSOR_TEST:3089,SHADER_TYPE:35663,SHADING_LANGUAGE_VERSION:35724,SHORT:5122,SRC_ALPHA:770,
+      SRC_ALPHA_SATURATE:776,SRC_COLOR:768,STATIC_DRAW:35044,STENCIL_ATTACHMENT:36128,STENCIL_BACK_FAIL:34817,
+      STENCIL_BACK_FUNC:34816,STENCIL_BACK_PASS_DEPTH_FAIL:34818,STENCIL_BACK_PASS_DEPTH_PASS:34819,
+      STENCIL_BACK_REF:36003,STENCIL_BACK_VALUE_MASK:36004,STENCIL_BACK_WRITEMASK:36005,STENCIL_BITS:3415,
+      STENCIL_BUFFER_BIT:1024,STENCIL_CLEAR_VALUE:2961,STENCIL_FAIL:2964,STENCIL_FUNC:2962,STENCIL_INDEX8:36168,
+      STENCIL_PASS_DEPTH_FAIL:2965,STENCIL_PASS_DEPTH_PASS:2966,STENCIL_REF:2967,STENCIL_TEST:2960,
+      STENCIL_VALUE_MASK:2963,STENCIL_WRITEMASK:2968,STREAM_DRAW:35040,SUBPIXEL_BITS:3408,TEXTURE:5890,
+      TEXTURE0:33984,TEXTURE1:33985,TEXTURE10:33994,TEXTURE11:33995,TEXTURE12:33996,TEXTURE13:33997,
+      TEXTURE14:33998,TEXTURE15:33999,TEXTURE16:34000,TEXTURE17:34001,TEXTURE18:34002,TEXTURE19:34003,
+      TEXTURE2:33986,TEXTURE20:34004,TEXTURE21:34005,TEXTURE22:34006,TEXTURE23:34007,TEXTURE24:34008,
+      TEXTURE25:34009,TEXTURE26:34010,TEXTURE27:34011,TEXTURE28:34012,TEXTURE29:34013,TEXTURE3:33987,
+      TEXTURE30:34014,TEXTURE31:34015,TEXTURE4:33988,TEXTURE5:33989,TEXTURE6:33990,TEXTURE7:33991,TEXTURE8:33992,
+      TEXTURE9:33993,TEXTURE_2D:3553,TEXTURE_BINDING_2D:32873,TEXTURE_BINDING_CUBE_MAP:34068,
+      TEXTURE_CUBE_MAP:34067,TEXTURE_CUBE_MAP_NEGATIVE_X:34070,TEXTURE_CUBE_MAP_NEGATIVE_Y:34072,
+      TEXTURE_CUBE_MAP_NEGATIVE_Z:34074,TEXTURE_CUBE_MAP_POSITIVE_X:34069,TEXTURE_CUBE_MAP_POSITIVE_Y:34071,
+      TEXTURE_CUBE_MAP_POSITIVE_Z:34073,TEXTURE_MAG_FILTER:10240,TEXTURE_MIN_FILTER:10241,TEXTURE_WRAP_S:10242,
+      TEXTURE_WRAP_T:10243,TRIANGLES:4,TRIANGLE_FAN:6,TRIANGLE_STRIP:5,UNPACK_ALIGNMENT:3317,
+      UNPACK_COLORSPACE_CONVERSION_WEBGL:37443,UNPACK_FLIP_Y_WEBGL:37440,UNPACK_PREMULTIPLY_ALPHA_WEBGL:37441,
+      UNSIGNED_BYTE:5121,UNSIGNED_INT:5125,UNSIGNED_SHORT:5123,UNSIGNED_SHORT_4_4_4_4:32819,
+      UNSIGNED_SHORT_5_5_5_1:32820,UNSIGNED_SHORT_5_6_5:33635,VALIDATE_STATUS:35715,VENDOR:7936,VERSION:7938,
+      VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:34975,VERTEX_ATTRIB_ARRAY_ENABLED:34338,
+      VERTEX_ATTRIB_ARRAY_NORMALIZED:34922,VERTEX_ATTRIB_ARRAY_POINTER:34373,VERTEX_ATTRIB_ARRAY_SIZE:34339,
+      VERTEX_ATTRIB_ARRAY_STRIDE:34340,VERTEX_ATTRIB_ARRAY_TYPE:34341,VERTEX_SHADER:35633,VIEWPORT:2978,ZERO:0};
+    const GL_CONST2 = {ACTIVE_UNIFORM_BLOCKS:35382,ALREADY_SIGNALED:37146,ANY_SAMPLES_PASSED:35887,
+      ANY_SAMPLES_PASSED_CONSERVATIVE:36202,COLOR:6144,COLOR_ATTACHMENT1:36065,COLOR_ATTACHMENT10:36074,
+      COLOR_ATTACHMENT11:36075,COLOR_ATTACHMENT12:36076,COLOR_ATTACHMENT13:36077,COLOR_ATTACHMENT14:36078,
+      COLOR_ATTACHMENT15:36079,COLOR_ATTACHMENT2:36066,COLOR_ATTACHMENT3:36067,COLOR_ATTACHMENT4:36068,
+      COLOR_ATTACHMENT5:36069,COLOR_ATTACHMENT6:36070,COLOR_ATTACHMENT7:36071,COLOR_ATTACHMENT8:36072,
+      COLOR_ATTACHMENT9:36073,COMPARE_REF_TO_TEXTURE:34894,CONDITION_SATISFIED:37148,COPY_READ_BUFFER:36662,
+      COPY_READ_BUFFER_BINDING:36662,COPY_WRITE_BUFFER:36663,COPY_WRITE_BUFFER_BINDING:36663,CURRENT_QUERY:34917,
+      DEPTH:6145,DEPTH24_STENCIL8:35056,DEPTH32F_STENCIL8:36013,DEPTH_COMPONENT24:33190,DEPTH_COMPONENT32F:36012,
+      DRAW_BUFFER0:34853,DRAW_BUFFER1:34854,DRAW_BUFFER10:34863,DRAW_BUFFER11:34864,DRAW_BUFFER12:34865,
+      DRAW_BUFFER13:34866,DRAW_BUFFER14:34867,DRAW_BUFFER15:34868,DRAW_BUFFER2:34855,DRAW_BUFFER3:34856,
+      DRAW_BUFFER4:34857,DRAW_BUFFER5:34858,DRAW_BUFFER6:34859,DRAW_BUFFER7:34860,DRAW_BUFFER8:34861,
+      DRAW_BUFFER9:34862,DRAW_FRAMEBUFFER:36009,DRAW_FRAMEBUFFER_BINDING:36006,DYNAMIC_COPY:35050,
+      DYNAMIC_READ:35049,FLOAT_32_UNSIGNED_INT_24_8_REV:36269,FRAGMENT_SHADER_DERIVATIVE_HINT:35723,
+      FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE:33301,FRAMEBUFFER_ATTACHMENT_BLUE_SIZE:33300,
+      FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING:33296,FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE:33297,
+      FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE:33302,FRAMEBUFFER_ATTACHMENT_GREEN_SIZE:33299,
+      FRAMEBUFFER_ATTACHMENT_RED_SIZE:33298,FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE:33303,
+      FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER:36052,FRAMEBUFFER_DEFAULT:33304,
+      FRAMEBUFFER_INCOMPLETE_MULTISAMPLE:36182,HALF_FLOAT:5131,INTERLEAVED_ATTRIBS:35980,INT_2_10_10_10_REV:36255,
+      INT_SAMPLER_2D:36298,INT_SAMPLER_2D_ARRAY:36303,INT_SAMPLER_3D:36299,INT_SAMPLER_CUBE:36300,
+      INVALID_INDEX:4294967295,MAX:32776,MAX_3D_TEXTURE_SIZE:32883,MAX_ARRAY_TEXTURE_LAYERS:35071,
+      MAX_CLIENT_WAIT_TIMEOUT_WEBGL:37447,MAX_COLOR_ATTACHMENTS:36063,
+      MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:35379,MAX_COMBINED_UNIFORM_BLOCKS:35374,
+      MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:35377,MAX_DRAW_BUFFERS:34852,MAX_ELEMENTS_INDICES:33001,
+      MAX_ELEMENTS_VERTICES:33000,MAX_ELEMENT_INDEX:36203,MAX_FRAGMENT_INPUT_COMPONENTS:37157,
+      MAX_FRAGMENT_UNIFORM_BLOCKS:35373,MAX_FRAGMENT_UNIFORM_COMPONENTS:35657,MAX_PROGRAM_TEXEL_OFFSET:35077,
+      MAX_SAMPLES:36183,MAX_SERVER_WAIT_TIMEOUT:37137,MAX_TEXTURE_LOD_BIAS:34045,
+      MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS:35978,MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:35979,
+      MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS:35968,MAX_UNIFORM_BLOCK_SIZE:35376,
+      MAX_UNIFORM_BUFFER_BINDINGS:35375,MAX_VARYING_COMPONENTS:35659,MAX_VERTEX_OUTPUT_COMPONENTS:37154,
+      MAX_VERTEX_UNIFORM_BLOCKS:35371,MAX_VERTEX_UNIFORM_COMPONENTS:35658,MIN:32775,MIN_PROGRAM_TEXEL_OFFSET:35076,
+      OBJECT_TYPE:37138,PACK_ROW_LENGTH:3330,PACK_SKIP_PIXELS:3332,PACK_SKIP_ROWS:3331,PIXEL_PACK_BUFFER:35051,
+      PIXEL_PACK_BUFFER_BINDING:35053,PIXEL_UNPACK_BUFFER:35052,PIXEL_UNPACK_BUFFER_BINDING:35055,
+      QUERY_RESULT:34918,QUERY_RESULT_AVAILABLE:34919,R11F_G11F_B10F:35898,R16F:33325,R16I:33331,R16UI:33332,
+      R32F:33326,R32I:33333,R32UI:33334,R8:33321,R8I:33329,R8UI:33330,R8_SNORM:36756,RASTERIZER_DISCARD:35977,
+      READ_BUFFER:3074,READ_FRAMEBUFFER:36008,READ_FRAMEBUFFER_BINDING:36010,RED:6403,RED_INTEGER:36244,
+      RENDERBUFFER_SAMPLES:36011,RG:33319,RG16F:33327,RG16I:33337,RG16UI:33338,RG32F:33328,RG32I:33339,
+      RG32UI:33340,RG8:33323,RG8I:33335,RG8UI:33336,RG8_SNORM:36757,RGB10_A2:32857,RGB10_A2UI:36975,RGB16F:34843,
+      RGB16I:36233,RGB16UI:36215,RGB32F:34837,RGB32I:36227,RGB32UI:36209,RGB8I:36239,RGB8UI:36221,RGB8_SNORM:36758,
+      RGB9_E5:35901,RGBA16F:34842,RGBA16I:36232,RGBA16UI:36214,RGBA32F:34836,RGBA32I:36226,RGBA32UI:36208,
+      RGBA8I:36238,RGBA8UI:36220,RGBA8_SNORM:36759,RGBA_INTEGER:36249,RGB_INTEGER:36248,RG_INTEGER:33320,
+      SAMPLER_2D_ARRAY:36289,SAMPLER_2D_ARRAY_SHADOW:36292,SAMPLER_2D_SHADOW:35682,SAMPLER_3D:35679,
+      SAMPLER_BINDING:35097,SAMPLER_CUBE_SHADOW:36293,SEPARATE_ATTRIBS:35981,SIGNALED:37145,
+      SIGNED_NORMALIZED:36764,SRGB:35904,SRGB8:35905,SRGB8_ALPHA8:35907,STATIC_COPY:35046,STATIC_READ:35045,
+      STENCIL:6146,STREAM_COPY:35042,STREAM_READ:35041,SYNC_CONDITION:37139,SYNC_FENCE:37142,SYNC_FLAGS:37141,
+      SYNC_FLUSH_COMMANDS_BIT:1,SYNC_GPU_COMMANDS_COMPLETE:37143,SYNC_STATUS:37140,TEXTURE_2D_ARRAY:35866,
+      TEXTURE_3D:32879,TEXTURE_BASE_LEVEL:33084,TEXTURE_BINDING_2D_ARRAY:35869,TEXTURE_BINDING_3D:32874,
+      TEXTURE_COMPARE_FUNC:34893,TEXTURE_COMPARE_MODE:34892,TEXTURE_IMMUTABLE_FORMAT:37167,
+      TEXTURE_IMMUTABLE_LEVELS:33503,TEXTURE_MAX_LEVEL:33085,TEXTURE_MAX_LOD:33083,TEXTURE_MIN_LOD:33082,
+      TEXTURE_WRAP_R:32882,TIMEOUT_EXPIRED:37147,TIMEOUT_IGNORED:-1,TRANSFORM_FEEDBACK:36386,
+      TRANSFORM_FEEDBACK_ACTIVE:36388,TRANSFORM_FEEDBACK_BINDING:36389,TRANSFORM_FEEDBACK_BUFFER:35982,
+      TRANSFORM_FEEDBACK_BUFFER_BINDING:35983,TRANSFORM_FEEDBACK_BUFFER_MODE:35967,
+      TRANSFORM_FEEDBACK_BUFFER_SIZE:35973,TRANSFORM_FEEDBACK_BUFFER_START:35972,TRANSFORM_FEEDBACK_PAUSED:36387,
+      TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN:35976,TRANSFORM_FEEDBACK_VARYINGS:35971,UNIFORM_ARRAY_STRIDE:35388,
+      UNIFORM_BLOCK_ACTIVE_UNIFORMS:35394,UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES:35395,UNIFORM_BLOCK_BINDING:35391,
+      UNIFORM_BLOCK_DATA_SIZE:35392,UNIFORM_BLOCK_INDEX:35386,UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER:35398,
+      UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER:35396,UNIFORM_BUFFER:35345,UNIFORM_BUFFER_BINDING:35368,
+      UNIFORM_BUFFER_OFFSET_ALIGNMENT:35380,UNIFORM_BUFFER_SIZE:35370,UNIFORM_BUFFER_START:35369,
+      UNIFORM_IS_ROW_MAJOR:35390,UNIFORM_MATRIX_STRIDE:35389,UNIFORM_OFFSET:35387,UNIFORM_SIZE:35384,
+      UNIFORM_TYPE:35383,UNPACK_IMAGE_HEIGHT:32878,UNPACK_ROW_LENGTH:3314,UNPACK_SKIP_IMAGES:32877,
+      UNPACK_SKIP_PIXELS:3316,UNPACK_SKIP_ROWS:3315,UNSIGNALED:37144,UNSIGNED_INT_10F_11F_11F_REV:35899,
+      UNSIGNED_INT_24_8:34042,UNSIGNED_INT_2_10_10_10_REV:33640,UNSIGNED_INT_5_9_9_9_REV:35902,
+      UNSIGNED_INT_SAMPLER_2D:36306,UNSIGNED_INT_SAMPLER_2D_ARRAY:36311,UNSIGNED_INT_SAMPLER_3D:36307,
+      UNSIGNED_INT_SAMPLER_CUBE:36308,UNSIGNED_INT_VEC2:36294,UNSIGNED_INT_VEC3:36295,UNSIGNED_INT_VEC4:36296,
+      UNSIGNED_NORMALIZED:35863,VERTEX_ARRAY_BINDING:34229,VERTEX_ATTRIB_ARRAY_DIVISOR:35070,
+      VERTEX_ATTRIB_ARRAY_INTEGER:35069,WAIT_FAILED:37149};
+    const UNMASKED_VENDOR = 0x9245, UNMASKED_RENDERER = 0x9246, ANISO = 0x84ff;
+    const patchGl = (gl, is2) => {
+      const M = new Map();
+      const set = (name, lit, val) => { const k = (gl[name] !== undefined ? gl[name] : lit); M.set(k, val); };
+      set("VENDOR", 0x1f00, "WebKit");
+      set("RENDERER", 0x1f01, "WebKit WebGL");
+      set("VERSION", 0x1f02, is2 ? "WebGL 2.0 (OpenGL ES 3.0 Chromium)" : "WebGL 1.0 (OpenGL ES 2.0 Chromium)");
+      set("SHADING_LANGUAGE_VERSION", 0x8b8c, is2 ? "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)" : "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)");
+      M.set(UNMASKED_VENDOR, "Google Inc. (Apple)");
+      M.set(UNMASKED_RENDERER, "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)");
+      set("MAX_TEXTURE_SIZE", 0x0d33, 16384);
+      set("MAX_CUBE_MAP_TEXTURE_SIZE", 0x851c, 16384);
+      set("MAX_RENDERBUFFER_SIZE", 0x84e8, 16384);
+      set("MAX_VIEWPORT_DIMS", 0x0d3a, new Int32Array([16384, 16384]));
+      set("MAX_VERTEX_ATTRIBS", 0x8869, 16);
+      set("MAX_VERTEX_UNIFORM_VECTORS", 0x8dfb, 1024);
+      set("MAX_FRAGMENT_UNIFORM_VECTORS", 0x8dfd, 1024);
+      set("MAX_VARYING_VECTORS", 0x8dfc, 30);
+      set("MAX_VERTEX_TEXTURE_IMAGE_UNITS", 0x8b4c, 16);
+      set("MAX_TEXTURE_IMAGE_UNITS", 0x8872, 16);
+      set("MAX_COMBINED_TEXTURE_IMAGE_UNITS", 0x8b4d, 32);
+      set("ALIASED_LINE_WIDTH_RANGE", 0x846e, new Float32Array([1, 1]));
+      set("ALIASED_POINT_SIZE_RANGE", 0x846d, new Float32Array([1, 511]));
+      set("RED_BITS", 0x0d52, 8); set("GREEN_BITS", 0x0d53, 8); set("BLUE_BITS", 0x0d54, 8);
+      set("ALPHA_BITS", 0x0d55, 8); set("DEPTH_BITS", 0x0d56, 24); set("STENCIL_BITS", 0x0d57, 0);
+      M.set(ANISO, 16);
+      if (is2) {
+        set("MAX_3D_TEXTURE_SIZE", 0x8073, 2048);
+        set("MAX_ARRAY_TEXTURE_LAYERS", 0x88ff, 2048);
+        set("MAX_DRAW_BUFFERS", 0x8824, 8);
+        set("MAX_COLOR_ATTACHMENTS", 0x8cdf, 8);
+        set("MAX_SAMPLES", 0x8d57, 4);
+        set("MAX_UNIFORM_BUFFER_BINDINGS", 0x8a2f, 32);
+      }
+      const origGetParam = gl.getParameter ? gl.getParameter.bind(gl) : () => null;
+      gl.getParameter = function (p) { return M.has(p) ? M.get(p) : origGetParam(p); };
+      gl.getSupportedExtensions = function () { return (is2 ? EXT2 : EXT1).slice(); };
+      const origGetExt = gl.getExtension ? gl.getExtension.bind(gl) : () => null;
+      gl.getExtension = function (name) {
+        if (name === "WEBGL_debug_renderer_info") return { UNMASKED_VENDOR_WEBGL: UNMASKED_VENDOR, UNMASKED_RENDERER_WEBGL: UNMASKED_RENDERER };
+        if (name === "EXT_texture_filter_anisotropic") return { MAX_TEXTURE_MAX_ANISOTROPY_EXT: ANISO, TEXTURE_MAX_ANISOTROPY_EXT: 0x84fe };
+        const known = (is2 ? EXT2 : EXT1).indexOf(name) >= 0;
+        const r = origGetExt(name);
+        return r || (known ? {} : null);
+      };
+    };
+    // Native-mark every own function on a context instance (they're per-instance own funcs).
+    const markOwn = (obj) => {
+      if (!obj) return obj;
+      for (const k of Object.getOwnPropertyNames(obj)) {
+        let d; try { d = Object.getOwnPropertyDescriptor(obj, k); } catch (e) { continue; }
+        if (d && typeof d.value === "function") mark(d.value, k);
+      }
+      return obj;
+    };
+    // Live WebGL→GPU bridge: override the drawing/state methods to RECORD each call with its
+    // REAL args (buffer bytes + shader source — captured at the live call site, so nothing is
+    // lossy) into a batch, and on readPixels flush the batch to the host GPU executor
+    // (op_webgl_readback) and fill the destination from genuine GPU pixels. Only installed when a
+    // host executor is present; otherwise the vendored synthetic context is left as-is. getShader/
+    // Program*Parameter report success so a page's compile/link checks pass. Returns real GPU
+    // pixels for the common fingerprint draw (shaders + a vertex buffer + drawArrays + readPixels).
+    const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const enc64 = (u8) => {
+      let o = "";
+      for (let i = 0; i < u8.length; i += 3) {
+        const a = u8[i], b = i + 1 < u8.length ? u8[i + 1] : 0, c = i + 2 < u8.length ? u8[i + 2] : 0;
+        o += B64[a >> 2] + B64[((a & 3) << 4) | (b >> 4)];
+        o += i + 1 < u8.length ? B64[((b & 15) << 2) | (c >> 6)] : "=";
+        o += i + 2 < u8.length ? B64[c & 63] : "=";
+      }
+      return o;
+    };
+    const dec64 = (s) => {
+      const L = {}; for (let i = 0; i < 64; i++) L[B64[i]] = i;
+      const out = []; let buf = 0, bits = 0;
+      for (let i = 0; i < s.length; i++) {
+        const v = L[s[i]]; if (v === undefined) continue;
+        buf = (buf << 6) | v; bits += 6;
+        if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 0xff); }
+      }
+      return out;
+    };
+    const installWebglRecorder = (gl) => {
+      const op = (Deno.core.ops && Deno.core.ops.op_webgl_readback) || null;
+      // op_webgl_readback is ALWAYS registered, so `typeof op` can't tell whether a GPU executor
+      // is installed. Only override the (vendored synthetic) WebGL context when one actually is —
+      // otherwise the default build would replace the context with recording stubs for nothing.
+      const avail = Deno.core.ops && Deno.core.ops.op_webgl_available;
+      if (!op || !avail || !avail()) return;
+      const rec = [];
+      let hid = 0, lid = 0;
+      const H = () => ({ __h: ++hid });
+      const bytesOf = (view) => {
+        try {
+          if (view instanceof ArrayBuffer) return new Uint8Array(view);
+          if (view && view.buffer) return new Uint8Array(view.buffer, view.byteOffset || 0, view.byteLength);
+        } catch (e) {}
+        return new Uint8Array(0);
+      };
+      const bufType = (v) => (v instanceof Float32Array ? "f32" : v instanceof Uint16Array ? "u16" : "u8");
+      const put = (m, a, id) => { const o = { m, a }; if (id != null) o.id = id; rec.push(o); };
+      const origReadPixels = gl.readPixels;
+      gl.createShader = function (type) { const h = H(); put("createShader", [type], h.__h); return h; };
+      gl.shaderSource = function (sh, src) { put("shaderSource", [sh && sh.__h, String(src)]); };
+      gl.compileShader = function (sh) { put("compileShader", [sh && sh.__h]); };
+      gl.getShaderParameter = function () { return true; };
+      gl.getProgramParameter = function () { return true; };
+      gl.getShaderInfoLog = function () { return ""; };
+      gl.getProgramInfoLog = function () { return ""; };
+      gl.createProgram = function () { const h = H(); put("createProgram", [], h.__h); return h; };
+      gl.attachShader = function (p, s) { put("attachShader", [p && p.__h, s && s.__h]); };
+      gl.linkProgram = function (p) { put("linkProgram", [p && p.__h]); };
+      gl.useProgram = function (p) { put("useProgram", [p && p.__h]); };
+      gl.createBuffer = function () { const h = H(); put("createBuffer", [], h.__h); return h; };
+      gl.bindBuffer = function (t, b) { put("bindBuffer", [t, b ? b.__h : 0]); };
+      gl.bufferData = function (t, data, usage) {
+        if (typeof data === "number") put("bufferData", [t, { b64: "", t: "u8" }, usage]);
+        else put("bufferData", [t, { b64: enc64(bytesOf(data)), t: bufType(data) }, usage]);
+      };
+      gl.getAttribLocation = function (p, name) { const loc = lid++; put("attribLocation", [p && p.__h, loc, String(name)]); return loc; };
+      gl.enableVertexAttribArray = function (loc) { put("enableVertexAttribArray", [loc]); };
+      gl.vertexAttribPointer = function (loc, size, type, norm, stride, offset) { put("vertexAttribPointer", [loc, size, type, !!norm, stride | 0, offset | 0]); };
+      gl.getUniformLocation = function (p, name) { return { __p: p && p.__h, __u: String(name) }; };
+      const uni = (kind) => function (loc) { const vals = Array.prototype.slice.call(arguments, 1); if (loc) put("uniform", [loc.__p, loc.__u, kind, vals]); };
+      gl.uniform1f = uni("1f"); gl.uniform2f = uni("2f"); gl.uniform3f = uni("3f"); gl.uniform4f = uni("4f"); gl.uniform1i = uni("1i");
+      gl.uniformMatrix4fv = function (loc, transpose, val) { if (loc) put("uniform", [loc.__p, loc.__u, "Matrix4fv", Array.prototype.slice.call(val || [])]); };
+      gl.viewport = function (x, y, w, h) { put("viewport", [x, y, w, h]); };
+      gl.clearColor = function (r, g, b, a) { put("clearColor", [r, g, b, a]); };
+      gl.clear = function (mask) { put("clear", [mask]); };
+      gl.drawArrays = function (mode, first, count) { put("drawArrays", [mode, first, count]); };
+      gl.drawElements = function (mode, count, type, offset) { put("drawElements", [mode, count, type, offset | 0]); };
+      gl.readPixels = function (x, y, w, h, format, type, dst) {
+        try {
+          const W = gl.drawingBufferWidth || (gl.canvas && gl.canvas.width) || 300;
+          const Hh = gl.drawingBufferHeight || (gl.canvas && gl.canvas.height) || 150;
+          const out = op(W, Hh, JSON.stringify(rec));
+          if (out && dst && dst.length) {
+            const bin = dec64(out); // framebuffer RGBA8, top-left origin, W×Hh
+            for (let row = 0; row < h; row++) {
+              const srcRow = Hh - 1 - (y + row); // readPixels is bottom-left origin → flip
+              for (let col = 0; col < w; col++) {
+                const si = (srcRow * W + (x + col)) * 4, di = (row * w + col) * 4;
+                for (let c = 0; c < 4; c++) dst[di + c] = si + c < bin.length ? bin[si + c] : 0;
+              }
+            }
+            return;
+          }
+        } catch (e) {}
+        if (typeof origReadPixels === "function") { try { return origReadPixels.call(gl, x, y, w, h, format, type, dst); } catch (e) {} }
+      };
+    };
+    const origGetContext = canvasProto.getContext;
+    // getContext returns the SAME context object on every call for a given (canvas, kind),
+    // so a page that calls it twice would otherwise re-wrap getParameter/readPixels over our
+    // own overrides — double-recording draws and eventually stack-overflowing the bind chain.
+    // Track patched contexts so each is spoofed + instrumented exactly once.
+    const glPatched = new WeakSet();
+    const wrapped = function getContext(kind, opts) {
+      const ctx = origGetContext.call(this, kind, opts);
+      if (ctx) {
+        const k = String(kind || "");
+        if ((k === "webgl" || k === "experimental-webgl" || k === "webgl2") && !glPatched.has(ctx)) {
+          glPatched.add(ctx);
+          try { patchGl(ctx, k === "webgl2"); } catch (e) {}
+          try { installWebglRecorder(ctx); } catch (e) {}
+          // Give the context its OWN dedicated prototype carrying its methods, then wire it to
+          // the named global constructor, so `gl instanceof WebGLRenderingContext` holds and
+          // `WebGLRenderingContext.prototype.getParameter` resolves natively. We must NOT reuse
+          // the vendored context's shared fallback prototype (a generic object also backing
+          // `location` etc.) as the constructor prototype — that would make `location instanceof
+          // WebGLRenderingContext` true and collapse the webgl/webgl2 protos onto one, both worse
+          // tells. The context methods are per-instance bound closures (they don't read `this`),
+          // so moving them onto a private per-context prototype is behaviour-preserving.
+          try {
+            const ctorName = k === "webgl2" ? "WebGL2RenderingContext" : "WebGLRenderingContext";
+            const C = globalThis[ctorName];
+            if (C) {
+              const proto = {};
+              for (const nm of Object.getOwnPropertyNames(ctx)) {
+                const dsc = Object.getOwnPropertyDescriptor(ctx, nm);
+                if (dsc && typeof dsc.value === "function") {
+                  // Prototype-less native shape (no own `prototype`), prototype-resident + marked.
+                  const nf = nativize(dsc.value, nm);
+                  Object.defineProperty(proto, nm, { value: nf, configurable: true, writable: true });
+                  try { delete ctx[nm]; } catch (e) {}
+                }
+              }
+              // The full WebGL enum constants live on the prototype (like Chrome), so `gl.X`
+              // resolves for real WebGL code + the recorder captures real enum args (not undefined).
+              const consts = k === "webgl2" ? Object.assign({}, GL_CONST1, GL_CONST2) : GL_CONST1;
+              for (const cn in consts) {
+                if (!(cn in proto)) {
+                  Object.defineProperty(proto, cn, { value: consts[cn], enumerable: false, configurable: true, writable: false });
+                }
+              }
+              Object.setPrototypeOf(proto, Object.getPrototypeOf(ctx));
+              Object.defineProperty(proto, Symbol.toStringTag, { value: ctorName, configurable: true });
+              Object.defineProperty(proto, "constructor", { value: C, configurable: true, writable: true });
+              C.prototype = proto;
+              Object.setPrototypeOf(ctx, proto);
+            }
+          } catch (e) {}
+        }
+        // 2D context: replace the vendored getImageData (an OWN instance method returning synthetic
+        // bytes — `fillRect(red); getImageData` read back NON-red, a broken-canvas tell) with one
+        // that reads the ACTUAL rendered pixels back through the raw-RGBA rasterizer. Raw pixels
+        // have no PNG encoder in the loop, so shapes/solids read back exactly like a real browser.
+        if (k === "2d") {
+          // Class tag: real Chrome is "[object CanvasRenderingContext2D]"; the vendored ctx tagged
+          // as "[object DOMImplementation]" (its shared fallback proto) — a tell. Brand the instance
+          // (not the shared proto — that would mistag every other object backed by it, incl.
+          // `location`, like the WebGL-proto lesson).
+          try {
+            Object.defineProperty(ctx, Symbol.toStringTag, { value: "CanvasRenderingContext2D", configurable: true });
+          } catch (e) {}
+          // getContextAttributes: real Chrome exposes it; its absence is a tell. Return the default
+          // 2D context attributes (native-masked), matching a fresh getContext('2d').
+          if (typeof ctx.getContextAttributes !== "function") {
+            ctx.getContextAttributes = nativize(({ getContextAttributes() {
+              return { alpha: true, colorSpace: "srgb", colorType: "unorm8", desynchronized: false, toneMapping: { mode: "standard" }, willReadFrequently: false };
+            } }).getContextAttributes, "getContextAttributes", 0);
+          }
+          // measureText: the vendored width was a synthetic approximation (a font-metrics tell —
+          // font-detection fingerprints compare measureText width across families). Route the WIDTH
+          // through the host's real system-font measurer (op_measure_text), which measures the same
+          // CoreText face Chrome does → width matches Chrome exactly. The bounding-box fields are
+          // derived from the size with Arial-typical ratios (the measurer returns width+height only;
+          // real per-glyph boxes would need a richer measurer — width is the load-bearing metric).
+          const measureOp = Deno.core.ops && Deno.core.ops.op_measure_text;
+          if (typeof ctx.measureText === "function" && measureOp) {
+            const origMT = ctx.measureText;
+            ctx.measureText = nativize(({ measureText(text) {
+              try {
+                const font = String(this.font || "10px sans-serif");
+                const m = /(\d+(?:\.\d+)?)px\s+(.+)$/.exec(font);
+                const size = m ? parseFloat(m[1]) : 10;
+                const fam = m ? m[2].replace(/^['"]|['"]$/g, "").split(",")[0].trim() : "sans-serif";
+                const r = JSON.parse(measureOp(String(text == null ? "" : text), fam, size));
+                if (r && r.length === 2) {
+                  const w = r[0];
+                  const round2 = (n) => Math.round(n * 100) / 100;
+                  const asc = round2(size * 0.875), desc = round2(size * 0.212);
+                  return {
+                    width: w,
+                    actualBoundingBoxLeft: 0, actualBoundingBoxRight: w,
+                    actualBoundingBoxAscent: round2(size * 0.72), actualBoundingBoxDescent: round2(size * 0.16),
+                    fontBoundingBoxAscent: asc, fontBoundingBoxDescent: desc,
+                    emHeightAscent: asc, emHeightDescent: desc,
+                    hangingBaseline: round2(asc * 0.8), alphabeticBaseline: 0, ideographicBaseline: -desc,
+                  };
+                }
+              } catch (e) {}
+              return origMT.call(this, text);
+            } }).measureText, "measureText", 1);
+          }
+        }
+        if (k === "2d" && Object.prototype.hasOwnProperty.call(ctx, "getImageData")) {
+          const origGID = ctx.getImageData;
+          const rgbaOp2 = Deno.core.ops && Deno.core.ops.op_raster_rgba;
+          const b64ToBytes = (b64) => { try { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; } catch (e) { return null; } };
+          ctx.getImageData = nativize(({ getImageData(sx, sy, sw, sh) {
+            try {
+              const cv = this.canvas, ops = this._ops;
+              const W = (cv && cv.width) || 300, H = (cv && cv.height) || 150;
+              if (rgbaOp2 && cv && ops && sw > 0 && sh > 0) {
+                const full = b64ToBytes(rgbaOp2(W, H, JSON.stringify(ops)));
+                if (full && full.length >= W * H * 4) {
+                  sx = sx | 0; sy = sy | 0; sw = sw | 0; sh = sh | 0;
+                  const out = new Uint8ClampedArray(sw * sh * 4);
+                  for (let row = 0; row < sh; row++) {
+                    for (let col = 0; col < sw; col++) {
+                      const yy = sy + row, xx = sx + col, di = (row * sw + col) * 4;
+                      if (yy >= 0 && yy < H && xx >= 0 && xx < W) {
+                        const si = (yy * W + xx) * 4;
+                        out[di] = full[si]; out[di + 1] = full[si + 1]; out[di + 2] = full[si + 2]; out[di + 3] = full[si + 3];
+                      }
+                    }
+                  }
+                  // The stub `ImageData` ctor ignores its args (no `.data`), so build the object
+                  // directly and brand it so `Object.prototype.toString.call(img)` reads ImageData.
+                  const img = { data: out, width: sw, height: sh, colorSpace: "srgb" };
+                  try { Object.defineProperty(img, Symbol.toStringTag, { value: "ImageData", configurable: true }); } catch (e) {}
+                  return img;
+                }
+              }
+            } catch (e) {}
+            return origGID ? origGID.call(this, sx, sy, sw, sh) : { data: new Uint8ClampedArray(Math.max(0, sw | 0) * Math.max(0, sh | 0) * 4), width: sw | 0, height: sh | 0 };
+          } }).getImageData, "getImageData", 4);
+        }
+        markOwn(ctx);
+      }
+      return ctx;
+    };
+    // Prototype-less native shape (native methods have no own `prototype`); getContext.length === 1.
+    canvasProto.getContext = nativize(wrapped, "getContext", 1);
+    // Raster-backed toDataURL: replay the vendored 2D display list (ctx._ops) through the
+    // host rasterizer (op_raster_png) into a REAL PNG. The vendored stub returns a ~94-byte
+    // synthetic blob — an impossible size for rendered content, a canvas-fingerprint tell.
+    // Falls back to the vendored blob when no rasterizer is installed or on any error.
+    const rasterOp = (Deno.core.ops && Deno.core.ops.op_raster_png) || null;
+    const origToDataURL = canvasProto.toDataURL;
+    if (typeof origToDataURL === "function") {
+      // Concise-method form (no own `prototype`, native shape); toDataURL.length === 0.
+      canvasProto.toDataURL = nativize(({ toDataURL(type) {
+        // The raster op only encodes PNG. For a non-PNG request (e.g. the webp-support probe
+        // toDataURL('image/webp') or an explicit image/jpeg) defer to the vendored path, which
+        // labels the data URL with the requested MIME — returning PNG for a webp request would be
+        // both wrong bytes and a tell.
+        const mime = typeof type === "string" && type ? type.toLowerCase() : "image/png";
+        try {
+          const ctx = this.__ctx2d;
+          if (mime === "image/png" && rasterOp && ctx && ctx._ops) {
+            const b64 = rasterOp(this.width || 300, this.height || 150, JSON.stringify(ctx._ops));
+            if (b64) return "data:image/png;base64," + b64;
+          }
+        } catch (e) {}
+        return origToDataURL.call(this, type);
+      } }).toDataURL, "toDataURL", 0);
+    }
+    if (typeof canvasProto.toBlob === "function") canvasProto.toBlob = nativize(canvasProto.toBlob, "toBlob", 1);
+    if (typeof canvasProto.getBoundingClientRect === "function") canvasProto.getBoundingClientRect = nativize(canvasProto.getBoundingClientRect, "getBoundingClientRect", 0);
+
   });
 
   // document → HTMLDocument brand + 5 native getters (best-effort: the native DOM object may
@@ -2527,6 +3786,11 @@ globalThis.__domSig = () => {
   });
   guard(() => { if (G.console) { tag(G.console, "console"); ["log", "info", "warn", "error", "debug"].forEach((m) => mark(G.console[m], m)); } });
   guard(() => { if (G.performance && G.performance.now) mark(G.performance.now, "now"); });
+  // The coherent-clock override replaced Date.now with a plain arrow and wrapped the Date
+  // constructor with a JS shim — both leak JS source via toString (an anti-hook tell) unless
+  // native-masked. Mark the constructor + its static.
+  guard(() => { if (G.Date) mark(G.Date, "Date"); });
+  guard(() => { if (G.Date && G.Date.now) mark(G.Date.now, "now"); });
 
   // createElement was re-wrapped as a JS closure above; re-mark it native (create-element-not-native).
   guard(() => { if (G.document && G.document.createElement) mark(G.document.createElement, "createElement"); });
@@ -2580,7 +3844,19 @@ globalThis.__domSig = () => {
   guard(() => {
     const brandNode = (obj, name, method) => {
       if (!obj) return;
-      const proto = Object.getPrototypeOf(obj);
+      let proto = Object.getPrototypeOf(obj);
+      // NEVER brand a shared root proto: some rtdom singletons (e.g. document.implementation) have
+      // Object.prototype as their direct proto, so tagging the proto would set Symbol.toStringTag on
+      // Object.prototype — making Object.prototype.toString.call({}) / [] / new Date() all read the
+      // wrong brand (a trivial, high-severity bot tell). Brand the INSTANCE itself in that case.
+      if (proto === Object.prototype || proto === null) {
+        tag(obj, name);
+        // Brand the instance's OWN constructor too (a singleton like document.implementation has
+        // Object.prototype as its proto, so it would otherwise report `.constructor === Object`).
+        const ctor = ({ [name]: function () {} })[name];
+        try { Object.defineProperty(obj, "constructor", { value: ctor, configurable: true }); mark(ctor, name); } catch (e) {}
+        proto = null;
+      }
       if (proto) {
         tag(proto, name);
         const ctor = ({ [name]: function () {} })[name];
@@ -2638,6 +3914,48 @@ globalThis.__domSig = () => {
    "IntersectionObserver", "ResizeObserver", "AbortController", "URL", "PerformanceObserver",
    "MutationObserver", "Worker"].forEach(ensureCtor);
   guard(() => { ["fetch", "requestAnimationFrame", "queueMicrotask", "matchMedia"].forEach((n) => { if (typeof G[n] === "function") mark(G[n], n); }); });
+
+  // Document encoding accessors — a real Chrome document reports characterSet/charset/
+  // inputEncoding = "UTF-8"; the vendored no-layout document leaves them undefined, a tell
+  // an anti-bot collector reads (`document.characterSet`). Define on the document's own
+  // prototype so all documents (incl. child realms) inherit; skip if already present.
+  guard(() => {
+    const d = G.document; if (!d) return;
+    // The vendored document already has an OWN `characterSet` that returns undefined, so an
+    // `in`/existence check would skip it — force-define the encoding accessors to "UTF-8".
+    for (const k of ["characterSet", "charset", "inputEncoding"]) {
+      try { Object.defineProperty(d, k, { configurable: true, get() { return "UTF-8"; } }); } catch (e) {}
+    }
+    // Document event-handler slots (real Chrome exposes them as writable, default null). Framework
+    // code reads/sets document.onreadystatechange etc.; absence reads as undefined (a minor tell).
+    for (const k of ["onreadystatechange", "onvisibilitychange", "onfullscreenchange", "onfullscreenerror", "onpointerlockchange", "onpointerlockerror", "onsecuritypolicyviolation", "onbeforecopy", "onbeforecut", "onbeforepaste", "onfreeze", "onresume", "onsearch"]) {
+      // Force-define (the vendored document may already have it as an undefined-returning slot, so
+      // an `in` check would skip it — same as characterSet). A settable null handler, like Chrome.
+      try {
+        let cur = null;
+        Object.defineProperty(d, k, { enumerable: true, configurable: true, get() { return cur; }, set(v) { cur = v; } });
+      } catch (e) {}
+    }
+  });
+
+  // Native-mask the Permissions API method: real `navigator.permissions.query.toString()`
+  // reports "[native code]"; our JS closure would leak source (an anti-tamper tell).
+  guard(() => {
+    const q = G.navigator && G.navigator.permissions && G.navigator.permissions.query;
+    if (typeof q === "function") mark(q, "query");
+  });
+
+  // window.location must class-tag as "[object Location]". The vendored location is a plain
+  // object (Object.prototype.toString → the wrong tag, e.g. "[object DOMImplementation]" or
+  // "[object Object]"), a trivial `Object.prototype.toString.call(location)` bot tell. Tag it
+  // (and its prototype, so a page that reads the tag off the proto also sees Location).
+  guard(() => {
+    const loc = G.location; if (!loc || typeof loc !== "object") return;
+    const tagLocation = (o) => { try { Object.defineProperty(o, Symbol.toStringTag, { value: "Location", configurable: true }); } catch (e) {} };
+    tagLocation(loc);
+    const p = Object.getPrototypeOf(loc);
+    if (p && p !== Object.prototype) tagLocation(p);
+  });
 
   // OfflineAudioContext with a non-silent DSP buffer (audio-silent needs energy > 0). A deterministic
   // synthetic waveform — device-invariant, indistinguishable from a real offline render to a hash+energy
@@ -2760,6 +4078,181 @@ globalThis.__domSig = () => {
       "CanvasGradient CanvasPattern CanvasRenderingContext2D OffscreenCanvasRenderingContext2D Path2D TextMetrics").split(/\s+/);
     for (const n of NAMES) { if (n && typeof G[n] === "undefined") { const c = function () {}; try { Object.defineProperty(c, "name", { value: n, configurable: true }); } catch (e) {} G[n] = c; mark(c, n); } }
   });
+
+  // Extend the window surface to real Chrome's full breadth (measured live: 1235 own props vs our
+  // ~527) so `X in window` / `typeof window.X` presence checks pass for the ~740 globals we lacked.
+  // Three groups from a Chrome-vs-turbo-surf diff: interface constructors (stub fns), on* event-
+  // handler slots (null, like Chrome until assigned), and misc methods/props/bar objects. Weak
+  // corroborating surface (BotGuard reads presence), not load-bearing.
+  guard(() => {
+    const IFACES = ("AbsoluteOrientationSensor Accelerometer AnimationTrigger AudioBufferSourceNode AudioDecoder " +
+      "AudioDestinationNode AudioEncoder AudioListener AudioParam AudioParamMap AudioPlaybackStats " +
+      "AudioProcessingEvent AudioScheduledSourceNode AudioSinkInfo AuthenticatorAssertionResponse " +
+      "AuthenticatorAttestationResponse AuthenticatorResponse BackgroundFetchManager BackgroundFetchRecord " +
+      "BackgroundFetchRegistration BarcodeDetector BaseAudioContext BatteryManager BeforeInstallPromptEvent " +
+      "BlobEvent Bluetooth BluetoothCharacteristicProperties BluetoothDevice " +
+      "BluetoothRemoteGATTCharacteristic BluetoothRemoteGATTDescriptor BluetoothRemoteGATTServer " +
+      "BluetoothRemoteGATTService BluetoothUUID BrowserCaptureMediaStreamTrack ByteLengthQueuingStrategy " +
+      "CSPViolationReportBody CSSContainerRule CSSFontPaletteValuesRule CSSFunctionDeclarations " +
+      "CSSFunctionDescriptors CSSFunctionRule CSSImageValue CSSMarginRule CSSMathClamp CSSMathInvert " +
+      "CSSMathMax CSSMathMin CSSMathNegate CSSMathProduct CSSMathValue CSSMatrixComponent CSSNumericArray " +
+      "CSSPerspective CSSPositionTryDescriptors CSSPositionValue CSSPseudoElement CSSRotate CSSRuleList " +
+      "CSSScale CSSScopeRule CSSSkew CSSSkewX CSSSkewY CSSStartingStyleRule CSSStyleValue " +
+      "CSSTransformComponent CSSTranslate CSSViewTransitionRule CanvasCaptureMediaStreamTrack " +
+      "CaptureController CaretPosition ChannelMergerNode ChannelSplitterNode ChapterInformation " +
+      "CharacterBoundsUpdateEvent Clipboard ClipboardChangeEvent ClipboardItem CloseWatcher CommandEvent " +
+      "ConstantSourceNode ContentVisibilityAutoStateChangeEvent ConvolverNode CookieStoreManager " +
+      "CountQueuingStrategy CrashReportContext CreateMonitor Credential CredentialsContainer CropTarget " +
+      "CustomElementRegistry CustomStateSet DOMError DOMMatrixReadOnly DOMPointReadOnly DataTransfer " +
+      "DataTransferItem DataTransferItemList DelayNode DelegatedInkTrailPresenter DeviceMotionEvent " +
+      "DeviceMotionEventAcceleration DeviceMotionEventRotationRate DeviceOrientationEvent DevicePosture " +
+      "DigitalCredential DocumentPictureInPicture DocumentPictureInPictureEvent EditContext " +
+      "ElementInternals EventCounts EventSource External FeaturePolicy FederatedCredential Fence " +
+      "FencedFrameConfig FetchLaterResult FileSystemObserver FontData FontFace FontFaceSet " +
+      "FontFaceSetLoadEvent GPU GPUAdapterInfo GPUBindGroup GPUBindGroupLayout GPUBufferUsage GPUColorWrite " +
+      "GPUCommandBuffer GPUCommandEncoder GPUCompilationInfo GPUCompilationMessage GPUComputePassEncoder " +
+      "GPUComputePipeline GPUDeviceLostInfo GPUError GPUExternalTexture GPUInternalError GPUMapMode " +
+      "GPUOutOfMemoryError GPUPipelineError GPUPipelineLayout GPUQuerySet GPUQueue GPURenderBundle " +
+      "GPURenderBundleEncoder GPURenderPassEncoder GPURenderPipeline GPUSampler GPUShaderModule " +
+      "GPUShaderStage GPUSupportedFeatures GPUSupportedLimits GPUTextureUsage GPUTextureView " +
+      "GPUUncapturedErrorEvent GPUValidationError Gamepad GamepadButton GamepadHapticActuator " +
+      "GeolocationCoordinates GeolocationPosition GeolocationPositionError GravitySensor Gyroscope HID " +
+      "HIDConnectionEvent HIDDevice HIDInputReportEvent HTMLAllCollection HTMLCameraElement " +
+      "HTMLDirectoryElement HTMLFencedFrameElement HTMLFormControlsCollection HTMLFrameElement " +
+      "HTMLFrameSetElement HTMLGeolocationElement HTMLMicrophoneElement HTMLOptionsCollection " +
+      "HTMLSelectedContentElement HTMLUserMediaElement IDBCursorWithValue IDBOpenDBRequest IDBRecord " +
+      "IDBVersionChangeEvent IIRFilterNode IdentityCredential IdentityCredentialError IdentityProvider " +
+      "IdleDeadline IdleDetector ImageBitmapRenderingContext ImageCapture ImageTrackList Ink " +
+      "InputDeviceCapabilities InputDeviceInfo IntegrityViolationReportBody InteractionContentfulPaint " +
+      "InterestEvent Keyboard KeyboardLayoutMap LanguageDetector LanguageModel LargestContentfulPaint " +
+      "LaunchParams LaunchQueue LayoutShift LayoutShiftAttribution LinearAccelerationSensor Lock " +
+      "LockManager MIDIAccess MIDIConnectionEvent MIDIInput MIDIInputMap MIDIMessageEvent MIDIOutput " +
+      "MIDIOutputMap MIDIPort MathMLElement MediaCapabilities MediaDeviceInfo MediaDevices " +
+      "MediaElementAudioSourceNode MediaKeyMessageEvent MediaKeySession MediaKeyStatusMap " +
+      "MediaKeySystemAccess MediaKeys MediaMetadata MediaRecorder MediaSession MediaSourceHandle " +
+      "MediaStreamAudioDestinationNode MediaStreamAudioSourceNode MediaStreamEvent " +
+      "MediaStreamTrackAudioStats MediaStreamTrackEvent MediaStreamTrackGenerator MediaStreamTrackProcessor " +
+      "MediaStreamTrackVideoStats MimeType MimeTypeArray NavigationActivation " +
+      "NavigationCurrentEntryChangeEvent NavigationDestination NavigationPrecommitController " +
+      "NavigationPreloadManager NavigatorLogin NavigatorManagedData NetworkInformation NodeRange " +
+      "NotRestoredReasonDetails NotRestoredReasons OTPCredential Observable OfflineAudioCompletionEvent " +
+      "OpaqueRange OrientationSensor Origin OverconstrainedError PageRevealEvent PageSwapEvent PannerNode " +
+      "PasswordCredential PaymentAddress PaymentManager PaymentMethodChangeEvent PaymentRequest " +
+      "PaymentRequestUpdateEvent PaymentResponse Performance PerformanceElementTiming " +
+      "PerformanceEventTiming PerformanceLongAnimationFrameTiming PerformanceLongTaskTiming " +
+      "PerformanceNavigation PerformanceScriptTiming PerformanceServerTiming PerformanceSoftNavigation " +
+      "PerformanceTiming PerformanceTimingConfidence PeriodicSyncManager PeriodicWave PermissionsPolicy " +
+      "Plugin PluginArray Presentation PresentationAvailability PresentationConnection " +
+      "PresentationConnectionAvailableEvent PresentationConnectionCloseEvent PresentationConnectionList " +
+      "PresentationReceiver PresentationRequest PressureRecord Profiler PromiseRejectionEvent " +
+      "ProtectedAudience PublicKeyCredential PushSubscription PushSubscriptionOptions QuotaExceededError " +
+      "RTCCertificate RTCDTMFSender RTCDTMFToneChangeEvent RTCDataChannelEvent RTCDtlsTransport " +
+      "RTCEncodedAudioFrame RTCEncodedVideoFrame RTCError RTCErrorEvent RTCIceCandidate RTCIceTransport " +
+      "RTCPeerConnectionIceErrorEvent RTCPeerConnectionIceEvent RTCRtpReceiver RTCRtpScriptTransform " +
+      "RTCRtpSender RTCRtpTransceiver RTCSctpTransport RTCSessionDescription RTCStatsReport RTCTrackEvent " +
+      "RadioNodeList ReadableByteStreamController ReadableStreamBYOBReader ReadableStreamBYOBRequest " +
+      "ReadableStreamDefaultController ReadableStreamDefaultReader RelativeOrientationSensor ReportBody " +
+      "ResizeObserverSize RestrictionTarget SVGAElement SVGAngle SVGAnimateMotionElement " +
+      "SVGAnimateTransformElement SVGAnimatedAngle SVGAnimatedBoolean SVGAnimatedEnumeration " +
+      "SVGAnimatedInteger SVGAnimatedLength SVGAnimatedLengthList SVGAnimatedNumber SVGAnimatedNumberList " +
+      "SVGAnimatedPreserveAspectRatio SVGAnimatedRect SVGAnimatedString SVGAnimatedTransformList " +
+      "SVGAnimationElement SVGComponentTransferFunctionElement SVGFEBlendElement SVGFEColorMatrixElement " +
+      "SVGFEComponentTransferElement SVGFECompositeElement SVGFEConvolveMatrixElement " +
+      "SVGFEDiffuseLightingElement SVGFEDisplacementMapElement SVGFEDistantLightElement " +
+      "SVGFEDropShadowElement SVGFEFloodElement SVGFEFuncAElement SVGFEFuncBElement SVGFEFuncGElement " +
+      "SVGFEFuncRElement SVGFEGaussianBlurElement SVGFEImageElement SVGFEMergeElement SVGFEMergeNodeElement " +
+      "SVGFEMorphologyElement SVGFEOffsetElement SVGFEPointLightElement SVGFESpecularLightingElement " +
+      "SVGFESpotLightElement SVGFETileElement SVGFETurbulenceElement SVGGeometryElement SVGGradientElement " +
+      "SVGGraphicsElement SVGLength SVGLengthList SVGMPathElement SVGMatrix SVGMetadataElement SVGNumber " +
+      "SVGNumberList SVGPoint SVGPointList SVGPreserveAspectRatio SVGRect SVGScriptElement SVGSetElement " +
+      "SVGStringList SVGStyleElement SVGTextContentElement SVGTextPositioningElement SVGTransform " +
+      "SVGTransformList SVGUnitTypes Scheduler Scheduling ScreenOrientation ScriptProcessorNode " +
+      "ScrollTimeline SecurityPolicyViolationEvent Sensor SensorErrorEvent Serial SerialPort SnapEvent " +
+      "SourceBufferList SpeechGrammar SpeechGrammarList SpeechRecognition SpeechRecognitionErrorEvent " +
+      "SpeechRecognitionEvent SpeechRecognitionPhrase SpeechSynthesis SpeechSynthesisErrorEvent " +
+      "SpeechSynthesisEvent SpeechSynthesisUtterance SpeechSynthesisVoice StereoPannerNode Storage " +
+      "StorageBucket StorageBucketManager StylePropertyMap StylePropertyMapReadOnly StyleSheetList " +
+      "Subscriber Summarizer SyncManager TaskAttributionTiming TaskController TaskPriorityChangeEvent " +
+      "TaskSignal TextEvent TextFormat TextFormatUpdateEvent TextTrackCueList TextUpdateEvent " +
+      "TimelineTrigger TimelineTriggerRange TimelineTriggerRangeList ToggleEvent Touch TouchList TrackEvent " +
+      "TransformStreamDefaultController Translator URLPattern USB USBAlternateInterface USBConfiguration " +
+      "USBConnectionEvent USBDevice USBEndpoint USBInTransferResult USBInterface " +
+      "USBIsochronousInTransferPacket USBIsochronousInTransferResult USBIsochronousOutTransferPacket " +
+      "USBIsochronousOutTransferResult USBOutTransferResult UserActivation ValidityState VideoColorSpace " +
+      "VideoDecoder VideoEncoder VideoPlaybackQuality ViewTimeline ViewTransition ViewTransitionTypeSet " +
+      "Viewport VirtualKeyboard VirtualKeyboardGeometryChangeEvent VisibilityStateEntry " +
+      "WGSLLanguageFeatures WaveShaperNode WebGLObject WebGLQuery WebGLSampler WebGLShaderPrecisionFormat " +
+      "WebGLSync WebGLTransformFeedback WebKitCSSMatrix WebKitMutationObserver WebSocketError " +
+      "WebSocketStream WebTransport WebTransportBidirectionalStream WebTransportDatagramDuplexStream " +
+      "WebTransportError WindowControlsOverlay WindowControlsOverlayGeometryChangeEvent " +
+      "WritableStreamDefaultController WritableStreamDefaultWriter XMLDocument XMLHttpRequestEventTarget " +
+      "XPathExpression XRAnchor XRAnchorSet XRBoundedReferenceSpace XRCPUDepthInformation XRCamera " +
+      "XRCompositionLayer XRCubeLayer XRCylinderLayer XRDOMOverlayState XRDepthInformation XREquirectLayer " +
+      "XRFrame XRHand XRHitTestResult XRHitTestSource XRInputSource XRInputSourceArray XRInputSourceEvent " +
+      "XRInputSourcesChangeEvent XRJointPose XRJointSpace XRLayer XRLayerEvent XRLightEstimate XRLightProbe " +
+      "XRPlane XRPlaneSet XRPose XRProjectionLayer XRQuadLayer XRRay XRReferenceSpace XRReferenceSpaceEvent " +
+      "XRRenderState XRRigidTransform XRSession XRSessionEvent XRSpace XRSubImage XRSystem " +
+      "XRTransientInputHitTestResult XRTransientInputHitTestSource XRView XRViewerPose XRViewport " +
+      "XRVisibilityMaskChangeEvent XRWebGLBinding XRWebGLDepthInformation XRWebGLLayer XRWebGLSubImage " +
+      "XSLTProcessor").split(/\s+/);
+    for (const n of IFACES) { if (n && typeof G[n] === "undefined") { const c = function () {}; try { Object.defineProperty(c, "name", { value: n, configurable: true }); } catch (e) {} G[n] = c; mark(c, n); } }
+    const ON = ("onabort onafterprint onanimationcancel onanimationend onanimationiteration onanimationstart " +
+      "onappinstalled onauxclick onbeforeinput onbeforeinstallprompt onbeforematch onbeforeprint " +
+      "onbeforetoggle onbeforexrselect onblur oncancel oncanplay oncanplaythrough onchange onclick onclose " +
+      "oncommand oncontentvisibilityautostatechange oncontextlost oncontextmenu oncontextrestored " +
+      "oncuechange ondblclick ondevicemotion ondeviceorientation ondeviceorientationabsolute ondrag " +
+      "ondragend ondragenter ondragleave ondragover ondragstart ondrop ondurationchange onemptied onended " +
+      "onfocus onformdata ongamepadconnected ongamepaddisconnected ongotpointercapture oninput oninvalid " +
+      "onkeydown onkeypress onkeyup onlanguagechange onloadeddata onloadedmetadata onloadstart " +
+      "onlostpointercapture onmousedown onmouseenter onmouseleave onmousemove onmouseout onmouseover " +
+      "onmouseup onmousewheel onpagehide onpagereveal onpageshow onpageswap onpause onplay onplaying " +
+      "onpointercancel onpointerdown onpointerenter onpointerleave onpointermove onpointerout onpointerover " +
+      "onpointerrawupdate onpointerup onprogress onratechange onrejectionhandled onreset onresize onscroll " +
+      "onscrollend onscrollsnapchange onscrollsnapchanging onsearch onsecuritypolicyviolation onseeked " +
+      "onseeking onselect onselectionchange onselectstart onslotchange onstalled onstorage onsubmit " +
+      "onsuspend ontimeupdate ontoggle ontransitioncancel ontransitionend ontransitionrun ontransitionstart " +
+      "onunhandledrejection onvolumechange onwaiting onwebkitanimationend onwebkitanimationiteration " +
+      "onwebkitanimationstart onwebkittransitionend onwheel").split(/\s+/);
+    for (const n of ON) { if (n && !(n in G)) { try { Object.defineProperty(G, n, { value: null, writable: true, enumerable: true, configurable: true }); } catch (e) {} } }
+    const bar = () => ({ visible: true });
+    const misc = {
+      closed: false, length: 0, name: "", opener: null, status: "", crossOriginIsolated: false,
+      isSecureContext: true, originAgentCluster: true, offscreenBuffering: true, credentialless: false,
+      origin: (G.location && G.location.origin) || "https://www.google.com", clientInformation: G.navigator,
+      locationbar: bar(), menubar: bar(), personalbar: bar(), scrollbars: bar(), statusbar: bar(), toolbar: bar(),
+      // These real Web APIs are FEATURE-DETECTED by page code (`if (window.X)`) which then calls
+      // their methods — a bare {} is truthy but methodless, so e.g. `navigation.entries()` throws
+      // (before, an undefined `navigation` was skipped). Give each its commonly-called methods.
+      caches: { open: () => Promise.resolve({ match: () => Promise.resolve(undefined), put: () => Promise.resolve(), keys: () => Promise.resolve([]) }), has: () => Promise.resolve(false), keys: () => Promise.resolve([]), match: () => Promise.resolve(undefined), delete: () => Promise.resolve(false) },
+      cookieStore: { get: () => Promise.resolve(null), getAll: () => Promise.resolve([]), set: () => Promise.resolve(), delete: () => Promise.resolve(), addEventListener() {}, removeEventListener() {} },
+      navigation: { entries: () => [], currentEntry: null, canGoBack: false, canGoForward: false, navigate() {}, reload() {}, traverseTo() {}, back() {}, forward() {}, updateCurrentEntry() {}, addEventListener() {}, removeEventListener() {} },
+      speechSynthesis: { getVoices: () => [], speak() {}, cancel() {}, pause() {}, resume() {}, pending: false, speaking: false, paused: false, addEventListener() {}, removeEventListener() {} },
+      viewport: {}, launchQueue: { setConsumer() {} },
+      external: {}, fence: null, crashReport: {}, documentPictureInPicture: {}, event: undefined,
+      styleMedia: { type: "screen", matchMedium: nativize(() => false, "matchMedium") }, screenLeft: 0, screenTop: 0,
+      webkitURL: G.URL, webkitMediaStream: G.MediaStream, webkitRTCPeerConnection: G.RTCPeerConnection,
+    };
+    for (const k in misc) { if (!(k in G)) { try { G[k] = misc[k]; } catch (e) {} } }
+    const METHODS = ("alert blur captureEvents close confirm createImageBitmap fetchLater find focus " +
+      "getScreenDetails moveBy moveTo open print prompt queryLocalFonts releaseEvents reportError requestResize " +
+      "resizeBy resizeTo showDirectoryPicker showOpenFilePicker showSaveFilePicker stop webkitCancelAnimationFrame " +
+      "webkitRequestAnimationFrame webkitRequestFileSystem webkitResolveLocalFileSystemURL " +
+      "webkitSpeechGrammar webkitSpeechGrammarList webkitSpeechRecognition").split(/\s+/);
+    for (const n of METHODS) { if (typeof G[n] !== "function") { try { G[n] = nativize(() => undefined, n); } catch (e) {} } }
+  });
+
+  // Final safety net: in a real browser EVERY window-global function reports "[native code]".
+  // Native-mark any DATA-property function on window still unmarked (a shim/vendored fn that
+  // slipped through) so its toString can't leak JS source. Descriptor-based (never triggers a
+  // getter → no side effects); functions behind getters are covered where they're defined.
+  guard(() => {
+    for (const k of Object.getOwnPropertyNames(G)) {
+      try {
+        const d = Object.getOwnPropertyDescriptor(G, k);
+        if (d && typeof d.value === "function" && !native.has(d.value)) mark(d.value, k);
+      } catch (e) {}
+    }
+  });
 })();
 })();"##;
 
@@ -2784,6 +4277,7 @@ pub fn ensure_platform() {
     use std::sync::OnceLock;
     static KEEPER: OnceLock<()> = OnceLock::new();
     KEEPER.get_or_init(|| {
+        pin_timezone();
         let (ready_tx, ready_rx) = channel::<()>();
         std::thread::Builder::new()
             .name("v8-platform".into())
@@ -2800,7 +4294,29 @@ pub fn ensure_platform() {
     });
 }
 
+// Pin a coherent timezone for the synthetic browser — OPT-IN via `TURBO_SURF_TZ`. An isolate that
+// reports the host machine's zone (leaked via `Intl.DateTimeFormat().resolvedOptions().timeZone` +
+// `Date.getTimezoneOffset`, incoherent with the en-US identity) is a fingerprint tell, but ICU
+// reads the timezone from the `TZ` env, and mutating a process-global env var is a data race with
+// other threads + would silently change the HOST process's timezone when this crate is embedded in
+// the napi addon / PyO3 wheel. So we set `TZ` ONLY when the operator explicitly opts in with
+// `TURBO_SURF_TZ` (e.g. `America/New_York`), once, before the platform initializes; we never touch
+// it by default. The per-isolate `date_time_configuration_change_notification(Redetect)` (see
+// make_runtime) then re-reads it. Without the opt-in, the isolate uses the host zone.
+fn pin_timezone() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        if let Ok(tz) = std::env::var("TURBO_SURF_TZ") {
+            if !tz.is_empty() {
+                std::env::set_var("TZ", tz);
+            }
+        }
+    });
+}
+
 fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
+    pin_timezone();
     // Build the shared cookie jar first so it backs BOTH page `fetch` (op_state) and the
     // ES-module loader (`<script type=module>` import graphs) — same session, one jar.
     let jar: Jar = Rc::new(RefCell::new(if cookies.is_empty() {
@@ -2808,7 +4324,7 @@ fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
     } else {
         CookieJar::from_storage_state(cookies)
     }));
-    let rt = JsRuntime::new(RuntimeOptions {
+    let mut rt = JsRuntime::new(RuntimeOptions {
         extensions: vec![turbo_dom::init()],
         module_loader: Some(Rc::new(NetModuleLoader {
             base: base.to_string(),
@@ -2817,6 +4333,10 @@ fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
         })),
         ..Default::default()
     });
+    // Force ICU to re-detect the timezone from the (now-pinned) TZ env for THIS isolate, so
+    // Date/Intl report the coherent zone rather than a cached host default.
+    rt.v8_isolate()
+        .date_time_configuration_change_notification(v8::TimeZoneDetection::Redetect);
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put::<Base>(Base(base.to_string()));
@@ -2993,6 +4513,55 @@ pub async fn render_page_with_budget(
     out
 }
 
+/// Full async render that ALSO returns the isolate's earned cookies (the shared jar
+/// as a storage_state JSON string). Seeds the jar from `cookies` (storage_state or
+/// "") and the navigator UA from `ua`, runs the page's own scripts to completion
+/// (dynamic `<script>` injection + `op_fetch` + timers), then reads the jar back —
+/// the in-isolate anti-bot recon path (did the page's integrity JS set a session
+/// cookie, e.g. google's `__Secure-ENID`, with no browser?). Cookie read-back
+/// happens even on a budget kill so a partial run's cookies aren't lost.
+pub async fn render_capture_cookies(
+    html: &str,
+    base: &str,
+    ua: &str,
+    cookies: &str,
+    script: &str,
+    budget_ms: u64,
+) -> Result<(String, String), String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let mut rt = make_runtime(base, cookies, ua);
+    let handle = rt.v8_isolate().thread_safe_handle();
+    let done = Arc::new(AtomicBool::new(false));
+    let watch = done.clone();
+    let watchdog = std::thread::spawn(move || {
+        let start = std::time::Instant::now();
+        while !watch.load(Ordering::Relaxed) {
+            if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
+                handle.terminate_execution();
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    });
+
+    let result = run_async(&mut rt, html, base, script).await;
+    done.store(true, Ordering::Relaxed);
+    let _ = watchdog.join();
+    // Read the earned cookies out of the shared jar regardless of run outcome.
+    let storage = {
+        let state = rt.op_state();
+        let st = state.borrow();
+        let jar = st.borrow::<Jar>();
+        let out = jar.borrow().storage_state();
+        out
+    };
+    let doc = result.map_err(|e| budget_msg(&e, budget_ms));
+    crate::browser_env::reset();
+    Ok((doc?, storage))
+}
+
 thread_local! {
     /// Persistent render runtime, reused across `render_page_pooled` calls on a thread
     /// so the V8-isolate boot + extension wiring is paid ONCE per worker thread instead
@@ -3093,6 +4662,338 @@ pub async fn render_page_pooled(
 /// boundary is a single script (arbitrary callers) and runs whole, as before.
 pub const SCRIPT_BOUNDARY: &str = "\n/*__ts_script_boundary_9f3a__*/\n";
 
+/// Human-input synthesizer (installer). Evaluating this defines `globalThis.__hi`, a small
+/// API that generates a realistic pointer path A→B and dispatches a coherent, **trusted**
+/// pointer/mouse/keyboard sequence into the DOM the page's own listeners (and a BotGuard-class
+/// collector) observe. It exists to satisfy the interaction-gate + input-entropy blocker in the
+/// render isolate — the one place we control the whole event pipeline (unlike a real automated
+/// browser, where injected events are trusted-but-CDP-detectable). Two path modes:
+/// `"straight"` is a linear A→B at uniform cadence (a baseline / sanity path). `"human"` is a
+/// cubic-Bézier arc bowed off the A→B line (curvature) with per-step Gaussian coordinate noise, a
+/// slow→fast→slow velocity profile (non-uniform time deltas), and an occasional overshoot+settle
+/// near the target.
+/// Dispatched events carry `isTrusted:true` (via the `__trusted` flag the Event.prototype getter
+/// reads) and `timeStamp = performance.now()` (origin-relative, fractional), on the hi-res clock.
+///
+/// Callers that need to leave no enumerable global should `delete globalThis.__hi` after use;
+/// tests read `__hi.path(...)` directly. This is generation + dispatch only — it does NOT defeat
+/// GPU/audio/server-side scoring; it addresses the input-entropy + interaction-gate signal.
+pub const HUMAN_INPUT_JS: &str = r#"(() => {
+  const rand = Math.random;
+  // Gaussian noise (Box–Muller) — real cursor coordinates jitter, they don't lie on an ideal curve.
+  const gauss = (sd) => { let u = 0, v = 0; while (!u) u = rand(); while (!v) v = rand(); return sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const bez = (p0, p1, p2, p3, t) => { const m = 1 - t; return m*m*m*p0 + 3*m*m*t*p1 + 3*m*t*t*p2 + t*t*t*p3; };
+  const ease = (u) => (u < 0.5 ? 2*u*u : 1 - Math.pow(-2*u + 2, 2) / 2); // ease-in-out (velocity)
+
+  // Generate an ordered [{x,y,t}] path from A to B. Sampled the way a real browser samples a
+  // pointer GESTURE: NOT one event per pixel/ms, but a coordinate read every ~12ms (± a few ms
+  // stddev) along the trajectory — so inter-event Δt clusters near the ~10–15ms sampling rate and
+  // SPEED shows up as distance-per-sample (small near the ends, large mid-flight), not as Δt.
+  // `t` is an origin-relative ms offset from gesture start. mode: "straight" | "human".
+  function path(ax, ay, bx, by, mode) {
+    const dist = Math.hypot(bx - ax, by - ay) || 1;
+    // Gesture duration scales with distance (a longer throw takes longer), human range.
+    const dur = mode === "human" ? 120 + dist * (0.7 + rand() * 0.6) : Math.max(50, dist * 0.5);
+    let c1x, c1y, c2x, c2y;
+    if (mode === "human") {
+      const nx = -(by - ay) / dist, ny = (bx - ax) / dist;          // unit normal to A→B
+      const bow = (rand() * 0.5 + 0.15) * dist * (rand() < 0.5 ? -1 : 1); // arc height, either side
+      c1x = ax + (bx - ax) / 3 + nx * bow * 0.7; c1y = ay + (by - ay) / 3 + ny * bow * 0.7;
+      c2x = ax + 2 * (bx - ax) / 3 + nx * bow;   c2y = ay + 2 * (by - ay) / 3 + ny * bow;
+    } else {
+      c1x = ax + (bx - ax) / 3; c1y = ay + (by - ay) / 3;
+      c2x = ax + 2 * (bx - ax) / 3; c2y = ay + 2 * (by - ay) / 3;
+    }
+    const pts = [];
+    let t = 0;
+    while (t < dur) {
+      const u = t / dur;
+      const e = mode === "human" ? ease(u) : u;                     // ease → varying speed
+      let x = bez(ax, c1x, c2x, bx, e), y = bez(ay, c1y, c2y, by, e);
+      if (mode === "human" && t > 0) { x += gauss(1.2); y += gauss(1.2); }
+      pts.push({ x: Math.round(x), y: Math.round(y), t: Math.round(t * 10) / 10 });
+      // Browser pointer sampling interval: ~12ms with a few ms of stddev, floored so it never
+      // degenerates to a per-ms firehose.
+      t += Math.max(6, 12 + gauss(2.5));
+    }
+    pts.push({ x: bx, y: by, t: Math.round(dur * 10) / 10 });       // final sample lands on B
+    if (mode === "human" && rand() < 0.6) {                         // overshoot + settle
+      let tt = dur + Math.max(6, 12 + gauss(2.5));
+      pts.push({ x: Math.round(bx + gauss(3)), y: Math.round(by + gauss(3)), t: Math.round(tt * 10) / 10 });
+      tt += 16 + rand() * 12; pts.push({ x: bx, y: by, t: Math.round(tt * 10) / 10 });
+    }
+    return pts;
+  }
+
+  // A jittered programmatic delay: base ms plus a random offset in [0, jitter]. Humans don't
+  // react instantly (bots fire at t=0) — used as the START delay before an interaction, and as
+  // the reaction gap between move-end and click.
+  const delay = (base, jitter) => Math.max(0, (base || 0) + rand() * (jitter || 0));
+
+  // Human keyboard timeline: for each character emit keydown → keypress → input → keyup, spaced
+  // by a realistic inter-key gap (dwell + flight). Gap ~90–170ms, +extra after space/punctuation,
+  // with an occasional "think" pause; each key is held ~40–90ms (keydown→keyup). `base` is the
+  // origin-relative ms at which typing starts. Returns { events:[{name,type,props,ts}], end }.
+  // Realistic KeyboardEvent init for a character or named key. Real Chrome events carry
+  // key/code/keyCode/which (plus location) — a `{key}`-only event is a tell (BotGuard reads
+  // keyCode/code). `code` is the physical key ("KeyR"/"Digit1"/"Enter"/"Space"); keyCode/which
+  // are the legacy numeric codes (kept equal, as Chrome does).
+  function keyInfo(ch) {
+    const NAMED = {
+      Enter: { code: "Enter", keyCode: 13 }, Tab: { code: "Tab", keyCode: 9 },
+      Backspace: { code: "Backspace", keyCode: 8 }, Escape: { code: "Escape", keyCode: 27 },
+      " ": { code: "Space", keyCode: 32 },
+    };
+    if (NAMED[ch]) return { key: ch === " " ? " " : ch, code: NAMED[ch].code, keyCode: NAMED[ch].keyCode, which: NAMED[ch].keyCode };
+    let code;
+    if (/[a-z]/i.test(ch)) code = "Key" + ch.toUpperCase();
+    else if (/[0-9]/.test(ch)) code = "Digit" + ch;
+    else code = "";
+    const kc = ch.length === 1 ? ch.toUpperCase().charCodeAt(0) : 0;
+    return { key: ch, code, keyCode: kc, which: kc };
+  }
+
+  function typePlan(text, base) {
+    const events = [];
+    let t = base || 0;
+    const s = String(text);
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      let gap = 90 + rand() * 80;                          // base inter-key flight
+      if (i > 0 && (s[i - 1] === " " || /[.,!?;:]/.test(s[i - 1]))) gap += 60 + rand() * 90;
+      if (rand() < 0.06) gap += 250 + rand() * 450;        // occasional hesitation
+      t += gap;
+      const hold = 40 + rand() * 50;                       // key dwell time
+      const k = keyInfo(ch);
+      // Full per-character sequence a browser fires for a printable key: keydown → keypress →
+      // beforeinput → input → keyup, each with the real key identifiers.
+      events.push({ name: "KeyboardEvent", type: "keydown", props: k, ts: Math.round(t * 10) / 10 });
+      events.push({ name: "KeyboardEvent", type: "keypress", props: { key: k.key, code: k.code, keyCode: k.which, which: k.which, charCode: k.which }, ts: Math.round((t + 1) * 10) / 10 });
+      events.push({ name: "InputEvent", type: "beforeinput", props: { data: ch, inputType: "insertText" }, ts: Math.round((t + 1.5) * 10) / 10 });
+      events.push({ name: "InputEvent", type: "input", props: { data: ch, inputType: "insertText" }, ts: Math.round((t + 2) * 10) / 10 });
+      events.push({ name: "KeyboardEvent", type: "keyup", props: k, ts: Math.round((t + hold) * 10) / 10 });
+    }
+    return { events, end: t };
+  }
+
+  // A single named-key press (e.g. "Enter") — keydown → keypress (for keys that produce one) →
+  // keyup, with the real key identifiers. Returns { events, end } like typePlan.
+  function pressPlan(keyName, base) {
+    let t = (base || 0) + 30 + rand() * 40;                 // reaction before the press
+    const k = keyInfo(keyName);
+    const hold = 40 + rand() * 50;
+    const events = [
+      { name: "KeyboardEvent", type: "keydown", props: k, ts: Math.round(t * 10) / 10 },
+    ];
+    // keypress fires for Enter + printable keys (not for Tab/Escape/arrows).
+    if (keyName === "Enter" || k.key.length === 1) {
+      events.push({ name: "KeyboardEvent", type: "keypress", props: { key: k.key, code: k.code, keyCode: k.which, which: k.which, charCode: keyName === "Enter" ? 13 : k.which }, ts: Math.round((t + 1) * 10) / 10 });
+    }
+    events.push({ name: "KeyboardEvent", type: "keyup", props: k, ts: Math.round((t + hold) * 10) / 10 });
+    return { events, end: t + hold };
+  }
+
+  // Build a trusted event (isTrusted:true via the __trusted flag + Event.prototype getter),
+  // stamped with an EXPLICIT origin-relative `ts` (the human timeline) — not live performance.now,
+  // so the cadence shows in event.timeStamp deltas regardless of the isolate's virtual clock.
+  function ev(name, type, props, ts) {
+    const C = globalThis[name] || globalThis.Event;
+    const e = new C(type, Object.assign({ bubbles: true, cancelable: true }, props || {}));
+    try { delete e.isTrusted; } catch (_) {}   // drop the ctor's own false → proto getter wins
+    e.__trusted = true;
+    try { e.timeStamp = ts == null ? performance.now() : ts; } catch (_) {}
+    return e;
+  }
+  const fire = (target, e) => { try { (target || document).dispatchEvent(e); } catch (_) {} };
+
+  // Dispatch a pointer/mouse move stream along `pts`, each stamped base + p.t (human timeline).
+  function move(target, pts, buttons, base) {
+    const b = base || 0;
+    for (const p of pts) {
+      const props = { clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y, buttons: buttons || 0 };
+      fire(target, ev("PointerEvent", "pointermove", props, b + p.t));
+      fire(target, ev("MouseEvent", "mousemove", props, b + p.t));
+    }
+    return pts.length ? b + pts[pts.length - 1].t : b;
+  }
+
+  // Type `text` into `target` on the human keyboard timeline starting at `base`. Returns end ts.
+  function type(target, text, base) {
+    const plan = typePlan(text, base);
+    for (const k of plan.events) fire(target, ev(k.name, k.type, k.props, k.ts));
+    return plan.end;
+  }
+
+  // Full human interaction (synchronous dispatch, human-timeline timestamps): optional start
+  // delay → curved move to (bx,by) → reaction gap → press/focus → type → release/click.
+  function moveAndClick(target, ax, ay, bx, by, text, opts) {
+    opts = opts || {};
+    const base = (performance.now ? performance.now() : 0) + delay(opts.startDelay || 0, opts.startJitter || 0);
+    const pts = path(ax, ay, bx, by, "human");
+    let t = move(target, pts, 0, base);
+    t += delay(40, 120);                                    // reaction before the click
+    const at = { clientX: bx, clientY: by, pageX: bx, pageY: by };
+    fire(target, ev("PointerEvent", "pointerdown", Object.assign({ buttons: 1 }, at), t));
+    fire(target, ev("MouseEvent", "mousedown", Object.assign({ buttons: 1 }, at), t + 1));
+    fire(target, ev("FocusEvent", "focus", {}, t + 2));
+    if (text) t = type(target, text, t + delay(120, 180));
+    fire(target, ev("PointerEvent", "pointerup", at, t + 30));
+    fire(target, ev("MouseEvent", "mouseup", at, t + 31));
+    fire(target, ev("MouseEvent", "click", at, t + 32));
+    return { points: pts, start: base, end: t + 32 };
+  }
+
+  // Async variant: schedule the same interaction over the VIRTUAL event loop via setTimeout, so
+  // events are genuinely SPACED in (virtual) time — the collector sees them arrive over ~seconds,
+  // not all in one drain — while still stamped on the human timeline. Resolves when done.
+  function play(target, o) {
+    o = o || {};
+    return new Promise((resolve) => {
+      const start = delay(o.startDelay == null ? 300 : o.startDelay, o.startJitter == null ? 500 : o.startJitter);
+      const perfBase = (performance.now ? performance.now() : 0) + start;
+      const pts = path(o.startX || 0, o.startY || 0, o.toX || 0, o.toY || 0, "human");
+      const clickAt = pts.length ? pts[pts.length - 1].t : 0;
+      const at = { clientX: o.toX || 0, clientY: o.toY || 0, pageX: o.toX || 0, pageY: o.toY || 0 };
+      const typeStart = clickAt + delay(150, 200);
+      const plan = o.text ? typePlan(o.text, typeStart) : { events: [], end: typeStart };
+      const sched = (wait, name, type, props, ts) =>
+        setTimeout(() => fire(target, ev(name, type, props, perfBase + ts)), Math.max(0, Math.round(start + wait)));
+      for (const p of pts) {
+        sched(p.t, "PointerEvent", "pointermove", { clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y }, p.t);
+        sched(p.t, "MouseEvent", "mousemove", { clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y }, p.t);
+      }
+      sched(clickAt, "PointerEvent", "pointerdown", Object.assign({ buttons: 1 }, at), clickAt);
+      sched(clickAt, "MouseEvent", "mousedown", Object.assign({ buttons: 1 }, at), clickAt);
+      sched(clickAt, "FocusEvent", "focus", {}, clickAt);
+      for (const k of plan.events) sched(k.ts, k.name, k.type, k.props, k.ts);
+      sched(plan.end + 30, "MouseEvent", "click", at, plan.end + 30);
+      setTimeout(() => resolve({ start: perfBase, end: perfBase + plan.end + 30 }), Math.max(0, Math.round(start + plan.end + 40)));
+    });
+  }
+
+  // Composable interaction SEQUENCE — the general API. Plays an ordered list of steps over the
+  // virtual event loop, threading the cursor position and a running clock so every event is both
+  // temporally spaced (setTimeout) and stamped on one continuous human timeline. Steps:
+  //   { move:{toX,toY} }  curved human move from the current cursor to the target
+  //   { click:true }      pointerdown+mousedown → a real press DWELL (~60–140ms) → up → click
+  //   { focus:true }      a focus event
+  //   { type:"text" }     human keyboard typing (per-key rhythm) at the current focus
+  //   { wait:ms }         an explicit pause
+  // e.g. move → click (search box) → focus → type("query") → move → click (button):
+  //   __hi.sequence(document, [ {move:{toX:400,toY:60}}, {click:true}, {focus:true},
+  //     {type:"weather"}, {move:{toX:520,toY:62}}, {click:true} ], { startDelay:400, startJitter:600 });
+  function sequence(target, steps, o) {
+    o = o || {};
+    return new Promise((resolve) => {
+      let cx = o.startX || 0, cy = o.startY || 0, t = 0;
+      let focused = null;                                   // the element currently holding focus
+      let hovered = null;                                   // the element currently under the cursor
+      const startDelay = delay(o.startDelay == null ? 300 : o.startDelay, o.startJitter == null ? 500 : o.startJitter);
+      const perfBase = (performance.now ? performance.now() : 0) + startDelay;
+      const jobs = [];
+      const at = () => ({ clientX: cx, clientY: cy, pageX: cx, pageY: cy });
+      // Events fire at the element when one is given (focus/blur/click target it, and bubble to
+      // document/window); otherwise at `target` (document) at the cursor.
+      const job = (tgt, name, type, props, ts) => jobs.push({ tgt: tgt || target, name, type, props, ts });
+      // Blur fires both blur (non-bubbling) and focusout (bubbling), like real Chrome.
+      const blurIfFocused = (ts) => {
+        if (focused) {
+          job(focused, "FocusEvent", "blur", {}, ts);
+          job(focused, "FocusEvent", "focusout", { bubbles: true }, ts + 0.1);
+          focused = null;
+        }
+      };
+      for (const step of steps || []) {
+        if (step.move) {
+          const el = step.move.el || null;
+          // Leaving the previously-hovered element: mouseout/pointerout bubble; mouseleave/
+          // pointerleave don't (fire on the element), at the OLD cursor position.
+          if (hovered && hovered !== el) {
+            job(target, "MouseEvent", "mouseout", at(), t);
+            job(hovered, "MouseEvent", "mouseleave", at(), t);
+            job(hovered, "PointerEvent", "pointerout", at(), t);
+            job(hovered, "PointerEvent", "pointerleave", at(), t);
+          }
+          const pts = path(cx, cy, step.move.toX, step.move.toY, "human");
+          for (const p of pts) {
+            const mp = { clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y };
+            job(target, "PointerEvent", "pointermove", mp, t + p.t);
+            job(target, "MouseEvent", "mousemove", mp, t + p.t);
+          }
+          t += pts.length ? pts[pts.length - 1].t : 0;
+          cx = step.move.toX; cy = step.move.toY;
+          // Arriving over a target element: mouseover/pointerover bubble; mouseenter/pointerenter
+          // don't (fire on the element), at the NEW cursor position.
+          if (el && hovered !== el) {
+            job(target, "MouseEvent", "mouseover", at(), t);
+            job(el, "MouseEvent", "mouseenter", at(), t);
+            job(target, "PointerEvent", "pointerover", at(), t);
+            job(el, "PointerEvent", "pointerenter", at(), t);
+            hovered = el;
+          }
+        } else if (step.click) {
+          t += delay(60, 120);                              // reaction before press
+          // A mousedown elsewhere steals focus — a real user clicking the search button blurs
+          // the input first. Blur any prior focus at press time (unless clicking that same el).
+          if (focused && focused !== step.click) blurIfFocused(t);
+          job(target, "PointerEvent", "pointerdown", Object.assign({ buttons: 1 }, at()), t);
+          job(step.click === true ? target : step.click, "MouseEvent", "mousedown", Object.assign({ buttons: 1 }, at()), t + 1);
+          t += 60 + rand() * 80;                            // real DWELL between down and up
+          job(target, "PointerEvent", "pointerup", at(), t);
+          job(step.click === true ? target : step.click, "MouseEvent", "mouseup", at(), t + 1);
+          job(step.click === true ? target : step.click, "MouseEvent", "click", at(), t + 2);
+          t += 2;
+        } else if (step.focus) {
+          if (focused && focused !== step.focus) blurIfFocused(t);   // focus change blurs the old
+          const el = step.focus === true ? target : step.focus;
+          job(el, "FocusEvent", "focus", {}, t);                     // non-bubbling
+          job(el, "FocusEvent", "focusin", { bubbles: true }, t + 0.1); // bubbling
+          focused = el; t += delay(20, 60);
+        } else if (step.blur) {
+          blurIfFocused(t); t += delay(10, 40);
+        } else if (step.type != null) {
+          t += delay(120, 180);
+          const el = focused || target;
+          const plan = typePlan(step.type, t);
+          // Update the focused field's value as each character's `input` event fires — a real
+          // browser mutates .value on keystroke (the value the `input` handler and a later form
+          // submit read). Without this, typing is cosmetic (events only) and a submitted form
+          // carries an empty field.
+          const chars = String(step.type);
+          let acc = "";
+          try { if (el && el !== target && el.value != null) acc = String(el.value); } catch (e) {}
+          let ci = 0;
+          for (const k of plan.events) {
+            const j = { tgt: el, name: k.name, type: k.type, props: k.props, ts: k.ts };
+            if (k.type === "input") { acc += chars[ci++] || ""; j.setValue = acc; }
+            jobs.push(j);
+          }
+          t = plan.end;
+        } else if (step.press != null) {
+          // A named-key press (e.g. Enter to submit a search) at the focused field — fires the
+          // real keydown/keypress/keyup so the page's key handler runs (google's Enter handler
+          // builds the /search URL); the nav-follow then loads it.
+          const plan = pressPlan(String(step.press), t);
+          for (const k of plan.events) job(focused || target, k.name, k.type, k.props, k.ts);
+          t = plan.end;
+        } else if (step.wait != null) {
+          t += step.wait;
+        }
+      }
+      blurIfFocused(t);                                     // leave nothing focused at the end
+      for (const j of jobs) setTimeout(() => {
+        // Apply the typed value just before its `input` event, so the handler + a later
+        // form submit see the updated field value (real-browser order).
+        if (j.setValue != null) { try { j.tgt.value = j.setValue; } catch (e) {} }
+        fire(j.tgt, ev(j.name, j.type, j.props, perfBase + j.ts));
+      }, Math.max(0, Math.round(startDelay + j.ts)));
+      setTimeout(() => resolve({ start: perfBase, end: perfBase + t }), Math.max(0, Math.round(startDelay + t + 20)));
+    });
+  }
+
+  globalThis.__hi = { path, typePlan, pressPlan, keyInfo, delay, move, type, moveAndClick, play, sequence, ev };
+})()"#;
+
 /// Run a page-script bundle the browser way: each boundary-delimited part as its own
 /// top-level `execute_script`, so a throwing script is isolated from the others
 /// (logged + skipped) instead of aborting every later script. Only a real isolate
@@ -3114,6 +5015,32 @@ fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Page-load lifecycle phases, driven by the async render loop so the main document/window fire
+// the real sequence a browser does — a collector that gates init on these (google's homepage
+// registers on DOMContentLoaded/load) otherwise never runs. `document.readyState` reads a hidden
+// Symbol slot (installed in ENV_BOOTSTRAP); each phase sets it + dispatches the matching TRUSTED
+// events. All fully guarded so a lifecycle hiccup can't break a render.
+const LIFECYCLE_LOADING: &str =
+    r#"try { document[Symbol.for("__ts_rs")] = "loading"; } catch (e) {}"#;
+const LIFECYCLE_INTERACTIVE: &str = r#"(() => { try {
+  document[Symbol.for("__ts_rs")] = "interactive";
+  const mk = (t, b) => { let e; try { e = new Event(t, { bubbles: !!b }); } catch (_) { e = { type: t }; } try { delete e.isTrusted; } catch (_) {} e.__trusted = true; try { e.timeStamp = performance.now(); } catch (_) {} return e; };
+  try { document.dispatchEvent(mk("readystatechange", false)); } catch (_) {}
+  try { if (typeof document.onreadystatechange === "function") document.onreadystatechange(mk("readystatechange", false)); } catch (_) {}
+  try { document.dispatchEvent(mk("DOMContentLoaded", true)); } catch (_) {}
+  try { globalThis.dispatchEvent(mk("DOMContentLoaded", true)); } catch (_) {} // window listeners (DCL bubbles to window)
+} catch (e) {} })()"#;
+const LIFECYCLE_COMPLETE: &str = r#"(() => { try {
+  document[Symbol.for("__ts_rs")] = "complete";
+  const mk = (t, b) => { let e; try { e = new Event(t, { bubbles: !!b }); } catch (_) { e = { type: t }; } try { delete e.isTrusted; } catch (_) {} e.__trusted = true; try { e.timeStamp = performance.now(); } catch (_) {} return e; };
+  try { document.dispatchEvent(mk("readystatechange", false)); } catch (_) {}
+  try { if (typeof document.onreadystatechange === "function") document.onreadystatechange(mk("readystatechange", false)); } catch (_) {}
+  const load = mk("load", false);
+  try { globalThis.dispatchEvent(load); } catch (_) {}
+  try { if (typeof globalThis.onload === "function") globalThis.onload(load); } catch (_) {}
+  try { globalThis.dispatchEvent(mk("pageshow", false)); } catch (_) {}
+} catch (e) {} })()"#;
+
 async fn run_async(
     rt: &mut JsRuntime,
     html: &str,
@@ -3121,11 +5048,15 @@ async fn run_async(
     script: &str,
 ) -> Result<String, String> {
     install_dom(rt, html, base)?;
+    let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING); // readyState "loading" while scripts run
     exec_page_scripts(rt, script)?;
-    drain_event_loop(rt).await?; // promises/microtasks + fetch from the page
+    let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // interactive + DOMContentLoaded
+    drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
     rt.execute_script("<timers>", "__runTimers()")
         .map_err(|e| e.to_string())?;
     drain_event_loop(rt).await?; // promises queued by timer callbacks
+    let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // complete + window load + pageshow
+    drain_event_loop(rt).await?; // load handlers' async work
     Ok(crate::browser_env::document_html())
 }
 
@@ -3162,10 +5093,14 @@ async fn run_async_pooled(
     install_dom(rt, html, base)?;
     rt.execute_script("<scrub>", SCRUB_GLOBALS)
         .map_err(|e| e.to_string())?;
+    let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING);
     exec_page_scripts(rt, script)?;
+    let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // DOMContentLoaded (before load)
     drain_event_loop(rt).await?;
     rt.execute_script("<timers>", "__runTimers()")
         .map_err(|e| e.to_string())?;
+    drain_event_loop(rt).await?;
+    let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // window load + pageshow (after DCL)
     drain_event_loop(rt).await?;
     Ok(crate::browser_env::document_html())
 }

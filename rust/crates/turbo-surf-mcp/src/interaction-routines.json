@@ -1,0 +1,15 @@
+{
+  "google-serp": {
+    "description": "Real-user Google search: move to the search box, click it, focus, type the query, pause, then press Enter (how users actually search — google's Enter handler builds the /search URL with session params, which the nav-follow then loads). `{query}` is substituted from params.query.",
+    "startDelay": 400,
+    "startJitter": 800,
+    "steps": [
+      { "move": { "selector": "textarea[name=q], input[name=q]" } },
+      { "click": "textarea[name=q], input[name=q]" },
+      { "focus": "textarea[name=q], input[name=q]" },
+      { "type": "{query}" },
+      { "wait": 350 },
+      { "press": "Enter" }
+    ]
+  }
+}

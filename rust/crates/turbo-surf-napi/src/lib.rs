@@ -34,6 +34,15 @@ pub(crate) fn ensure_render_init() {
             let (w, h) = raster::measure_text(text, family, size as f32, true);
             (w as f64, h as f64)
         }));
+        // Raster-backed canvas toDataURL (real PNG bytes vs the vendored ~94-byte stub).
+        turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {
+            raster::canvas_ops_png(w, h, ops_json).ok()
+        }));
+        // WebGL→GPU bridge (only under `gpu-metal`; else the synthetic stub stands).
+        #[cfg(feature = "gpu-metal")]
+        turbo_surf_render::set_webgl_fn(Box::new(|w, h, calls| {
+            raster::webgl_readback(w, h, calls)
+        }));
     });
     turbo_surf_render::ensure_platform();
 }
@@ -41,7 +50,7 @@ use view::{Field, FieldType, QueryType, TextMode};
 
 #[napi]
 pub fn version() -> String {
-    "0.4.4".to_string()
+    "0.5.0".to_string()
 }
 
 fn to_json_string<T: serde::Serialize>(v: &T) -> String {

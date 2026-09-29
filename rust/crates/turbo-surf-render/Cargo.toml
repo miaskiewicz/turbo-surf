@@ -15,14 +15,16 @@ deno_error = "=0.7.1"
 # the `v8` crate by its bare name) compiles. Pinned to the exact version deno_core
 # resolves so both share one v8 — the binding installs into deno_core's own context.
 v8 = "=149.4.0"
-turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.1" }
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
 # fetch backend, so downstream non-binary consumers (the PyO3 wheel) don't drag it in
 # and need a C toolchain. The shipped mcp binary still gets impersonate — it requests
 # `turbo-surf-core/impersonate` explicitly (its own default).
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.4.4", default-features = false }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# base64-encode raster PNG bytes for the toDataURL op boundary (op returns a base64 string).
+base64 = "0.22"
 # For the async `RecaptchaEngine` trait impl (same trait style as turbo-surf-core).
 async-trait = "0.1"
 # The reCAPTCHA engine drives the (`!Send`) deno_core render on a dedicated thread with

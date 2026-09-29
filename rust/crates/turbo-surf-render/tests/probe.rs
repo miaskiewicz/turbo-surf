@@ -4,7 +4,7 @@
 //! A separate integration-test binary = a separate process = its own one-time
 //! V8 init, so the two never collide (same split as `tests/render.rs`).
 
-use turbo_surf_render::probe_globals;
+use turbo_surf_render::{probe_globals, probe_page_async};
 
 #[test]
 fn reports_touched_props_and_shim_gaps() {
@@ -142,4 +142,41 @@ fn host_protocol_shims_are_present_not_gaps() {
     // onmessage defaults to null (defined), never undefined.
     assert!(!r.shim_needed.iter().any(|s| s == "window.onmessage"));
     assert!(!r.shim_needed.iter().any(|s| s == "window.trustedTypes"));
+}
+
+// The execution-complete async probe: runs page scripts to completion (event loop +
+// timers), reports the same shim-gap surface as the sync probe, AND reads back the
+// cookies the isolate earned — so a page's integrity JS setting a session cookie
+// (google's __Secure-ENID mint) is observable with no browser.
+#[tokio::test]
+async fn async_probe_reports_gaps_and_captures_cookies() {
+    let script = r#"
+        const _ = [navigator.userAgent, navigator.bogusProbeProp];
+        try { document.cookie = "probe_test=1"; } catch (e) {}
+        ''
+    "#;
+    let (report, storage) = probe_page_async(
+        "<body></body>",
+        "https://www.google.com/",
+        "Mozilla/5.0",
+        "",
+        script,
+        4000,
+    )
+    .await
+    .unwrap();
+    // Real Chrome prop present (recorded, not a gap); bogus prop flagged as a gap.
+    assert!(report
+        .accesses
+        .iter()
+        .any(|a| a.target == "navigator" && a.prop == "userAgent" && a.kind == "get"));
+    assert!(report
+        .shim_needed
+        .iter()
+        .any(|s| s == "navigator.bogusProbeProp"));
+    // A cookie the script set in-isolate lands in the captured jar storage_state.
+    assert!(
+        storage.contains("probe_test"),
+        "in-isolate cookie should be captured: {storage}"
+    );
 }

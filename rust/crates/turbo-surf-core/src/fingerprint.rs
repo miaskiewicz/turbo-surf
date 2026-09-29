@@ -172,8 +172,11 @@ pub fn profile_at(index: usize) -> Profile {
             "Mozilla/5.0 ({}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{}.0.0.0 Safari/537.36",
             os.ua_token, major
         ),
+        // GREASE brand + order validated against a live real-Chrome capture:
+        // `"Chromium";v="M", "Google Chrome";v="M", "Not A(Brand";v="99"`. Must stay identical
+        // to the render tier's navigator.userAgentData.brands (a wire/JS mismatch is a hard tell).
         sec_ch_ua: format!(
-            "\"Google Chrome\";v=\"{m}\", \"Chromium\";v=\"{m}\", \"Not)A;Brand\";v=\"24\"",
+            "\"Chromium\";v=\"{m}\", \"Google Chrome\";v=\"{m}\", \"Not A(Brand\";v=\"99\"",
             m = major
         ),
         sec_ch_ua_platform: os.sec_ch_platform,
@@ -199,7 +202,7 @@ pub fn default_profile() -> Profile {
         user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
                      (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
             .to_string(),
-        sec_ch_ua: "\"Google Chrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\""
+        sec_ch_ua: "\"Chromium\";v=\"153\", \"Google Chrome\";v=\"153\", \"Not A(Brand\";v=\"99\""
             .to_string(),
         sec_ch_ua_platform: "\"macOS\"",
         nav_platform: "MacIntel",

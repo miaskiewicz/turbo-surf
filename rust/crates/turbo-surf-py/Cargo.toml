@@ -13,12 +13,19 @@ repository.workspace = true
 name = "turbo_surf_py"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Real Apple-GPU (wgpu→Metal) canvas rasterization — OFF by default so the published wheels
+# never pull wgpu / a C-Metal toolchain. See turbo-surf-raster's `gpu-metal`.
+gpu-metal = ["turbo-surf-raster/gpu-metal"]
+# CoreText/CoreGraphics canvas-text raster (macOS only). See turbo-surf-raster's `coretext`.
+coretext = ["turbo-surf-raster/coretext"]
+
 [dependencies]
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.4.4" }
-turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.4.4" }
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.4.4" }
-turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.4.4" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.4.0" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.0" }
+turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.5.0" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.0" }
+turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.5.0" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.1" }
 serde = "1"
 serde_json = "1"
 # A current-thread tokio runtime drives the async render tier from a sync Python

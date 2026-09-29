@@ -217,9 +217,12 @@ pub fn probe_globals(html: &str, script: &str) -> Result<ProbeReport, String> {
     let json = crate::runtime::run_with_dom(html, &wrapped)?;
     let raw: Vec<RawAccess> =
         serde_json::from_str(&json).map_err(|e| format!("probe log parse: {e}"))?;
+    Ok(aggregate(raw))
+}
 
-    // Aggregate by (target, prop, kind); a prop is a shim gap if every read of it
-    // came back undefined.
+// Aggregate raw accesses by (target, prop, kind) into a report; a prop is a shim gap
+// if every `get` of it came back undefined. Shared by the sync + async probes.
+fn aggregate(raw: Vec<RawAccess>) -> ProbeReport {
     let mut agg: BTreeMap<(String, String, String), (bool, u32)> = BTreeMap::new();
     for a in raw {
         let entry = agg.entry((a.target, a.prop, a.kind)).or_insert((false, 0));
@@ -247,10 +250,92 @@ pub fn probe_globals(html: &str, script: &str) -> Result<ProbeReport, String> {
     shim_needed.sort();
     shim_needed.dedup();
 
-    Ok(ProbeReport {
+    ProbeReport {
         accesses,
         shim_needed,
-    })
+    }
+}
+
+// A hidden node the async probe writes its `__probe` log JSON into: an async run
+// returns the serialized document, not a trailing expression, so we read the log
+// back out of the DOM (same trick as the reCAPTCHA token sink).
+const PROBE_SINK: &str = "__ts_probe_log";
+
+/// Execution-complete anti-bot recon: run `script` (a page's own scripts, external
+/// bodies already inlined) to completion in a full **async** isolate — dynamic
+/// `<script>` injection + `op_fetch` + timers finish, so a BotGuard/reCAPTCHA-class
+/// VM that bootstraps its heavy VM at runtime actually runs — under the instrumented
+/// fingerprint globals, and report BOTH what env surface it read (`shim_needed` =
+/// the reads we still return `undefined`) AND the cookies the isolate earned
+/// (`storage_state` JSON). `cookies` seeds the jar (storage_state or ""); `ua` the
+/// navigator UA; `budget_ms` bounds the VM. This is the native-mint probe: point it
+/// at google's homepage and see what BotGuard demands + whether it set a session
+/// cookie (e.g. a trusted `__Secure-ENID`) with no browser.
+pub async fn probe_page_async(
+    html: &str,
+    base: &str,
+    ua: &str,
+    cookies: &str,
+    script: &str,
+    budget_ms: u64,
+) -> Result<(ProbeReport, String), String> {
+    // Assemble three programs joined by the render tier's SCRIPT_BOUNDARY so each runs as its own
+    // top-level script (like a browser): (1) PROBE_INSTALL wraps the globals first; (2) the page's
+    // own scripts — themselves boundary-delimited, each tolerated by `exec_page_scripts`; (3) a
+    // writer that snapshots the accumulated log into the sink node, RE-writing (last wins) on both
+    // an early timer AND the window `load` event. The window-`load` write is critical: `run_async`
+    // fires DOMContentLoaded/load AFTER the first `__runTimers` pass, and a BotGuard/reCAPTCHA-class
+    // collector commonly does its heavy env reads in a `load` handler — capturing only at
+    // setTimeout(0) would miss them and under-report `shim_needed`. NB: no `try {}` may span a
+    // SCRIPT_BOUNDARY — the wrapper would fragment across the split.
+    let sink_writer = format!(
+        "(function(){{ var __w = function(){{ try {{\n\
+           var __el = document.getElementById({sink:?}) || document.createElement('div');\n\
+           __el.id = {sink:?};\n\
+           __el.textContent = JSON.stringify(globalThis.__probe || []);\n\
+           if (!__el.parentNode) (document.body || document.documentElement).appendChild(__el);\n\
+         }} catch (e) {{}} }};\n\
+         try {{ globalThis.addEventListener('load', __w); }} catch (e) {{}}\n\
+         setTimeout(__w, 0);\n\
+       }})();",
+        sink = PROBE_SINK,
+    );
+    let boundary = crate::runtime::SCRIPT_BOUNDARY;
+    let wrapped = format!("{PROBE_INSTALL}{boundary}{script}{boundary}{sink_writer}");
+    let (doc, storage) =
+        crate::runtime::render_capture_cookies(html, base, ua, cookies, &wrapped, budget_ms)
+            .await?;
+    let raw: Vec<RawAccess> =
+        serde_json::from_str(&extract_sink(&doc, PROBE_SINK)).unwrap_or_default();
+    Ok((aggregate(raw), storage))
+}
+
+// Read the text content of the sink node out of the serialized document (the id is unique + ASCII,
+// so a plain substring scan is enough). The JSON was written as textContent, so serialization
+// HTML-escapes `<`/`>`/`&`/`"` — un-escape them before the caller parses, or a recorded prop/arg
+// containing any of those would make the parse fail and silently drop the whole recon log.
+fn html_unescape(s: &str) -> String {
+    // Order matters: resolve `&amp;` LAST so `&amp;lt;` doesn't become `<`.
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&#x27;", "'")
+        .replace("&amp;", "&")
+}
+fn extract_sink(html: &str, sink_id: &str) -> String {
+    let needle = format!("id=\"{sink_id}\"");
+    let Some(i) = html.find(&needle) else {
+        return "[]".to_string();
+    };
+    let Some(gt) = html[i..].find('>') else {
+        return "[]".to_string();
+    };
+    let start = i + gt + 1;
+    match html[start..].find('<') {
+        Some(lt) => html_unescape(html[start..start + lt].trim()),
+        None => "[]".to_string(),
+    }
 }
 
 // Tests for `probe_globals` live in `tests/probe.rs`, a separate test process:

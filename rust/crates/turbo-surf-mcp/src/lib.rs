@@ -30,7 +30,206 @@ use view::{Field, FieldType, QueryType, TextMode};
 mod enid;
 use enid::{EnidCache, EnidCookie};
 
-pub const VERSION: &str = "0.4.4";
+pub const VERSION: &str = "0.5.0";
+
+// --- native-google SERP diagnostics (env-gated) ------------------------------
+// `TURBO_SURF_TRACE` (any non-empty, non-"0" value) turns on single-line `serp:`
+// diagnostics on stderr for the native google path: the cache-vs-mint decision, the
+// native response shape (status / final_url / body_len), the enablejs-shell verdict
+// (which marker was/wasn't found + a body prefix), the re-mint retry, and the /sorry
+// outcome — all otherwise observable only through the final `Err` string. Off by
+// default; one cached env read when off, zero formatting cost.
+fn serp_trace_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("TURBO_SURF_TRACE")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false)
+    })
+}
+
+macro_rules! strace {
+    ($($arg:tt)*) => {
+        if $crate::serp_trace_on() {
+            eprintln!("serp: {}", format_args!($($arg)*));
+        }
+    };
+}
+
+/// Comma-joined cookie names (diagnostics; values are secrets, never logged).
+fn cookie_names(cookies: &[EnidCookie]) -> String {
+    cookies
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// A one-line, newline-flattened prefix of a page body (diagnostics only).
+fn body_prefix(html: &str) -> String {
+    html.chars()
+        .take(160)
+        .collect::<String>()
+        .replace(['\n', '\r'], " ")
+}
+
+/// Which SERP marker `is_enablejs_shell` matched on (diagnostics for a real SERP).
+fn serp_marker(html: &str) -> &'static str {
+    if html.contains("id=\"rso\"") {
+        "id=rso"
+    } else {
+        "<h3>"
+    }
+}
+
+// --- generic human-interaction driver (the `human_interact` MCP tool) ----------
+
+// In-page driver: resolves each step's CSS `selector` to an element + its box center (or uses
+// explicit coords), maps to the render-tier `__hi.sequence` step shape, plays it, and marks the
+// DOM done. `__STEPS__` / `__OPTS__` are substituted with JSON. (No real layout → a selector's
+// box center is best-effort; events still target the resolved element, which is what matters.)
+const HUMAN_DRIVER_TMPL: &str = r#"((raw, __opts) => {
+  const q = (s) => { try { return s ? document.querySelector(s) : null; } catch (e) { return null; } };
+  const center = (el) => { try { const r = el.getBoundingClientRect(); return { x: Math.round((r.left || 0) + (r.width || 0) / 2), y: Math.round((r.top || 0) + (r.height || 0) / 2) }; } catch (e) { return { x: 0, y: 0 }; } };
+  const steps = (raw || []).map((st) => {
+    if (st.move) { const el = q(st.move.selector); const c = el ? center(el) : { x: 0, y: 0 }; return { move: { toX: st.move.toX != null ? st.move.toX : c.x, toY: st.move.toY != null ? st.move.toY : c.y, el } }; }
+    if (st.click !== undefined) return { click: (typeof st.click === "string") ? (q(st.click) || true) : true };
+    if (st.focus !== undefined) return { focus: (typeof st.focus === "string") ? (q(st.focus) || true) : true };
+    if (st.type != null) return { type: String(st.type) };
+    if (st.press != null) return { press: String(st.press) };
+    if (st.blur) return { blur: true };
+    if (st.wait != null) return { wait: st.wait };
+    return {};
+  });
+  // After the gesture sequence resolves, capture any resulting navigation so the caller can
+  // FOLLOW it (fill-a-form-then-submit only produces a SERP if someone loads the target). Two
+  // sources, general (not page-specific): (1) a JS navigation — location.href the page set on
+  // submit; (2) the enclosing form's serialized GET target — action + every named field's value
+  // (so hidden tokens the page baked into the form, e.g. a search form's session params, ride
+  // along exactly as a browser submit would carry them). A trailing macrotask lets an async
+  // submit handler settle before we read location.
+  const captureNav = () => {
+    try {
+      let jsNav = "";
+      try { jsNav = String(location.href || ""); } catch (e) {}
+      document.body.setAttribute("data-hi-location", jsNav);
+      // Form target: the form holding the last-focused text field, else the first form.
+      let formUrl = "";
+      try {
+        const field = document.querySelector("textarea[name],input[name]");
+        const form = (field && field.form) || document.querySelector("form");
+        if (form) {
+          const method = String(form.getAttribute("method") || "get").toLowerCase();
+          const action = form.getAttribute("action") || location.pathname || "/";
+          const params = new URLSearchParams();
+          const fields = form.querySelectorAll("input[name],textarea[name],select[name]");
+          for (let i = 0; i < fields.length; i++) {
+            const el = fields[i];
+            const name = el.getAttribute("name");
+            if (!name || el.disabled) continue;
+            const type = String(el.getAttribute("type") || "").toLowerCase();
+            if ((type === "checkbox" || type === "radio") && !el.checked) continue;
+            const val = el.value != null ? String(el.value) : "";
+            if (val === "") continue;
+            params.append(name, val);
+          }
+          if (method === "get") {
+            const sep = action.indexOf("?") >= 0 ? "&" : "?";
+            const qs = params.toString();
+            formUrl = new URL(action + (qs ? sep + qs : ""), location.href).href;
+          } else {
+            formUrl = new URL(action, location.href).href;
+          }
+        }
+      } catch (e) {}
+      document.body.setAttribute("data-hi-form-nav", formUrl);
+    } catch (e) {}
+    try { document.body.setAttribute("data-hi-done", "1"); } catch (e) {}
+  };
+  __hi.sequence(document, steps, __opts).then(() => { captureNav(); });
+})"#;
+
+/// Serialize a JSON value for embedding as a JS expression: standard JSON plus escaping U+2028 /
+/// U+2029, which are valid in JSON strings but are JS line terminators (unescaped they break the
+/// surrounding program).
+fn js_safe_json(v: &Value) -> Result<String, String> {
+    Ok(serde_json::to_string(v)
+        .map_err(|e| e.to_string())?
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029"))
+}
+
+/// Saved interaction routines (named step-lists with `{param}` placeholders), e.g. `google-serp`.
+fn interaction_routines() -> &'static Value {
+    static R: OnceLock<Value> = OnceLock::new();
+    R.get_or_init(|| {
+        serde_json::from_str(include_str!("interaction-routines.json")).unwrap_or(Value::Null)
+    })
+}
+
+/// Recursively replace whole-string `{param}` values from `params` (a JSON object).
+fn substitute_params(v: &mut Value, params: &Value) {
+    match v {
+        Value::String(s) => {
+            if let Some(inner) = s.strip_prefix('{').and_then(|x| x.strip_suffix('}')) {
+                if let Some(rep) = params.get(inner).and_then(Value::as_str) {
+                    *s = rep.to_string();
+                }
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| substitute_params(x, params)),
+        Value::Object(o) => o.values_mut().for_each(|x| substitute_params(x, params)),
+        _ => {}
+    }
+}
+
+/// First whole-string `{param}` value that survived substitution (an omitted/misspelled param).
+/// Typing a literal `{query}` into a search box would be a silent, absurd failure, so callers
+/// treat any survivor as an error.
+fn unresolved_placeholder(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => s
+            .strip_prefix('{')
+            .and_then(|x| x.strip_suffix('}'))
+            .filter(|inner| !inner.is_empty() && !inner.contains('{') && !inner.contains('}'))
+            .map(|_| s.clone()),
+        Value::Array(a) => a.iter().find_map(unresolved_placeholder),
+        Value::Object(o) => o.values().find_map(unresolved_placeholder),
+        _ => None,
+    }
+}
+
+/// Resolve the step list + routine-level opts from `human_interact` args: either an inline
+/// `steps` array, or a named `routine` (with `params` substituted).
+fn resolve_interaction_steps(args: &Value) -> Result<(Value, Value), String> {
+    if let Some(name) = args.get("routine").and_then(Value::as_str) {
+        let r = interaction_routines()
+            .get(name)
+            .ok_or_else(|| format!("unknown interaction routine '{name}'"))?;
+        let mut steps = r.get("steps").cloned().ok_or("routine has no 'steps'")?;
+        substitute_params(&mut steps, args.get("params").unwrap_or(&Value::Null));
+        if let Some(ph) = unresolved_placeholder(&steps) {
+            return Err(format!(
+                "routine '{name}' has unresolved placeholder {ph} — pass it in 'params'"
+            ));
+        }
+        let mut opts = serde_json::Map::new();
+        for k in ["startDelay", "startJitter"] {
+            if let Some(v) = r.get(k) {
+                opts.insert(k.to_string(), v.clone());
+            }
+        }
+        return Ok((steps, Value::Object(opts)));
+    }
+    let steps = args
+        .get("steps")
+        .cloned()
+        .ok_or("human_interact needs 'steps' (array) or 'routine' (name)")?;
+    if !steps.is_array() {
+        return Err("'steps' must be an array".into());
+    }
+    Ok((steps, Value::Null))
+}
 
 /// One agent session: the current page URL + parsed tree + nav history, plus the
 /// browser-ish state agents expect (UA / extra headers / cookie jar / JS mode) and
@@ -63,6 +262,10 @@ pub struct Session {
     /// real page is served instead of a JS-gated interstitial. `None` = the
     /// default (on); set `Some(false)` to send the raw consent-gated response.
     bypass_consent: Option<bool>,
+    /// Override the seeded `SOCS` consent value (param-driven). `None` = the built-in
+    /// [`consent::DEFAULT_SOCS`]; `Some("")` seeds no `SOCS` (raw consent-gated
+    /// response even with bypass on); `Some(v)` seeds a caller-chosen consent state.
+    consent_socs: Option<String>,
     /// Session-scoped `web_search` parse-strategy overrides, keyed by engine id — the
     /// highest-precedence registry layer (see `resolve_strategy`). Populated by
     /// `web_search_load_strategy`; empty by default (falls through to user-dir/built-in).
@@ -81,6 +284,23 @@ fn ensure_render_hooks() {
         turbo_surf_render::set_measure_fn(Box::new(|text, family, size| {
             let (w, h) = raster::measure_text(text, family, size as f32, true);
             (w as f64, h as f64)
+        }));
+        // Raster-backed canvas toDataURL: replay the isolate's 2D display list into a real PNG
+        // so canvas readback isn't an implausible ~94-byte stub (a fingerprint tell).
+        turbo_surf_render::set_raster_fn(Box::new(|w, h, ops_json| {
+            raster::canvas_ops_png(w, h, ops_json).ok()
+        }));
+        // Raw-RGBA rasterizer for getImageData: read back the ACTUAL rendered pixels (the vendored
+        // synthetic getImageData returned unrelated bytes — `fillRect(red); getImageData` ≠ red, a
+        // broken-canvas tell). Raw pixels (no encoder) → shapes/solids match a real browser exactly.
+        turbo_surf_render::set_raster_rgba_fn(Box::new(|w, h, ops_json| {
+            raster::canvas_ops_rgba(w, h, ops_json).ok()
+        }));
+        // WebGL→GPU bridge: execute a recorded WebGL draw batch on the real GPU so readPixels
+        // returns genuine Apple-GPU pixels (only under `gpu-metal`; else the synthetic stub stands).
+        #[cfg(feature = "gpu-metal")]
+        turbo_surf_render::set_webgl_fn(Box::new(|w, h, calls| {
+            raster::webgl_readback(w, h, calls)
         }));
     });
 }
@@ -163,6 +383,7 @@ impl Session {
             jar: Some(&mut self.jar),
             profile: Some(&profile),
             bypass_consent: self.bypass_consent.unwrap_or(true),
+            consent_socs: self.consent_socs.clone(),
             ..Default::default()
         };
         let res = fetch_html_with(url, opts).await?;
@@ -229,6 +450,7 @@ impl Session {
             jar: Some(&mut self.jar),
             profile: Some(&profile),
             bypass_consent: true,
+            consent_socs: self.consent_socs.clone(),
             ..Default::default()
         };
         let res = fetch_html_with(&target, opts).await?;
@@ -479,6 +701,104 @@ impl Session {
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
         Ok(json!({ "ok": true }))
+    }
+
+    // Generic human-interaction driver: play an ordered sequence of realistic, TRUSTED input
+    // gestures on the CURRENT page — move (curved, browser-sampled ~12ms), click (down→dwell→up→
+    // click), focus/blur (+focusin/out), human typing, hover (enter/leave/over/out), wait — then
+    // reload the session from the hydrated result. Steps target CSS selectors (resolved in-page
+    // to elements + their box centers) or explicit coords. `steps` is inline, or a saved `routine`
+    // (e.g. "google-serp") with `params` substituted. This is the general "string interactions
+    // together on a loaded page" capability; the google flow is just one saved routine.
+    // The navigation an interaction triggered, if any: the driver records both the page's JS
+    // navigation (`data-hi-location`) and the enclosing form's serialized GET target
+    // (`data-hi-form-nav`). Return a target only when it's a REAL navigation away from `base`
+    // (different resolved URL, http(s)). JS navigation wins; the serialized form is the fallback
+    // (a plain submit that our isolate doesn't auto-follow). General — not page-specific.
+    fn interaction_nav_target(&self, base: &str) -> Option<String> {
+        let tree = self.tree.as_ref()?;
+        let body = *tree.query_selector_all("body").first()?;
+        let attr = |k: &str| {
+            tree.get_attribute(body, k)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
+        };
+        let norm = |u: &str| {
+            u.trim_end_matches('/')
+                .split('#')
+                .next()
+                .unwrap_or("")
+                .to_string()
+        };
+        let base_n = norm(base);
+        let is_nav =
+            |u: &str| (u.starts_with("http://") || u.starts_with("https://")) && norm(u) != base_n;
+        if let Some(loc) = attr("data-hi-location") {
+            if is_nav(&loc) {
+                return Some(loc);
+            }
+        }
+        attr("data-hi-form-nav").filter(|u| is_nav(u))
+    }
+
+    async fn human_interact(&mut self, args: &Value) -> Result<Value, String> {
+        let (steps, routine_opts) = resolve_interaction_steps(args)?;
+        // Opts: explicit args win over the routine's defaults.
+        let pick = |k: &str| args.get(k).or_else(|| routine_opts.get(k)).cloned();
+        let mut opts = serde_json::Map::new();
+        for k in ["startDelay", "startJitter", "startX", "startY"] {
+            if let Some(v) = pick(k) {
+                if !v.is_null() {
+                    opts.insert(k.to_string(), v);
+                }
+            }
+        }
+        // Inject as function arguments (not string-replace) + escape JS line terminators, so a
+        // step/query value can't break or clobber the driver program.
+        let steps_json = js_safe_json(&steps)?;
+        let opts_json = js_safe_json(&Value::Object(opts))?;
+        let driver = format!("({HUMAN_DRIVER_TMPL})({steps_json}, {opts_json})");
+        // Run the page's OWN scripts first (so its listeners — the interaction-gated JS this tool
+        // exists to trigger — are installed), then the synthesizer, then the driver. install_dom
+        // doesn't auto-run inline <script>, so page_script() supplies them (as render_current does).
+        let page = self.page_script().await;
+        let html = serialize_doc(self.tree()?);
+        let base = self.url.clone();
+        let b = turbo_surf_render::SCRIPT_BOUNDARY;
+        let script = format!("{page}{b}{}{b}{driver}", turbo_surf_render::HUMAN_INPUT_JS);
+        let hydrated = turbo_surf_render::render_page(&html, &base, &script).await?;
+        let completed = hydrated.contains("data-hi-done=");
+        self.dom_history.push(hydrated.clone());
+        self.tree = Some(Tree::parse(&hydrated));
+        let n_steps = steps.as_array().map(|a| a.len()).unwrap_or(0);
+        // FOLLOW a navigation the interaction triggered (fill-a-form-then-submit only yields a
+        // result page if someone actually loads the target). Fetch it natively THROUGH the session
+        // — the jar carries the cookies the page just set (e.g. a freshly-minted session cookie),
+        // with a Referer of the originating page and a coherent sec-fetch-site, exactly as a real
+        // in-page submit would. `fetch_into` handles consent/challenge + re-renders per the mode.
+        if let Some(target) = self.interaction_nav_target(&base) {
+            let same_site =
+                turbo_surf_core::url::host_of(&base) == turbo_surf_core::url::host_of(&target);
+            let restore = self.headers.clone();
+            self.headers.insert("referer".to_string(), base.clone());
+            self.headers.insert(
+                "sec-fetch-site".to_string(),
+                if same_site {
+                    "same-origin"
+                } else {
+                    "cross-site"
+                }
+                .to_string(),
+            );
+            let followed = self.fetch_into(&target, None, None).await;
+            self.headers = restore;
+            followed?;
+            return Ok(json!({
+                "ok": true, "completed": completed, "steps": n_steps,
+                "navigated": true, "navigated_to": self.url.clone(),
+            }));
+        }
+        Ok(json!({ "ok": true, "completed": completed, "steps": n_steps, "navigated": false }))
     }
 
     // Debug/probe mode: run the current page's own scripts with the fingerprint
@@ -1108,6 +1428,17 @@ struct Strategy {
     /// the SERP's own JS on a throwaway session before parsing.
     #[serde(default)]
     mode: String,
+    /// Extra request headers applied to the SERP fetch (per-strategy, data-driven — e.g. a
+    /// `Referer` + `sec-fetch-site` that make the request look like a real in-site navigation).
+    /// Merged over the impersonate/rustls defaults. Empty for most engines.
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    /// Hosts to treat as engine-internal (nav/asset/account links) in the `structural` extractor,
+    /// so they're never emitted as organic results. A pattern starting with `.` matches as a
+    /// substring (e.g. `.google.`), otherwise as a host suffix (e.g. `gstatic.com`). Data-driven
+    /// per engine — empty means no filtering (the `structural` format is not google-only).
+    #[serde(default)]
+    internal_hosts: Vec<String>,
     // --- html strategies: selectors, `title`/`link`/`snippet` scoped to `result_container` ---
     #[serde(default)]
     result_container: String,
@@ -1240,30 +1571,32 @@ fn build_query_url(
 fn parse_serp(strategy: &Strategy, body: &str, limit: usize) -> Vec<SearchResult> {
     match strategy.format.as_str() {
         "json" => parse_json_serp(strategy, body, limit),
-        "structural" => parse_structural_serp(body, limit),
+        "structural" => parse_structural_serp(strategy, body, limit),
         _ => parse_html_serp(strategy, body, limit),
     }
 }
 
-/// True when `url`'s host is a search-engine-internal / asset host (google's own
-/// nav, gstatic, googleusercontent, google account/policy links) — never an organic
-/// result, so it's filtered out of the structural pass.
-fn is_serp_internal_host(url: &str) -> bool {
+/// True when `url`'s host matches one of the strategy's engine-internal host patterns
+/// (nav/asset/account links) — never an organic result, so it's filtered out of the structural
+/// pass. A pattern starting with `.` is a substring match (e.g. `.google.`), otherwise a host
+/// suffix (e.g. `gstatic.com`). An empty list means no filtering.
+fn is_serp_internal_host(url: &str, internal_hosts: &[String]) -> bool {
     let host = turbo_surf_core::url::host_of(url).unwrap_or_default();
-    host.ends_with("google.com")
-        || host.ends_with("gstatic.com")
-        || host.ends_with("googleusercontent.com")
-        || host.ends_with("google.co")
-        || host.contains(".google.")
+    internal_hosts.iter().any(|p| {
+        if p.starts_with('.') {
+            host.contains(p.as_str()) // e.g. ".google." matches policies.google.de
+        } else {
+            host == *p || host.ends_with(&format!(".{p}"))
+        }
+    })
 }
 
-/// Classname-free organic-result extraction — for engines (google) whose result
-/// container/title classes are obfuscated and rotate frequently, making a selector
-/// strategy brittle. The stable STRUCTURE doesn't change: an organic result is an
-/// `<a href="http…">` that CONTAINS an `<h3>` (its title) and points off-site. We
-/// walk those anchors, take the h3 text as the title and the anchor href as the URL,
-/// skip engine-internal hosts, and dedup by URL.
-fn parse_structural_serp(html: &str, limit: usize) -> Vec<SearchResult> {
+/// Classname-free organic-result extraction — for engines whose result container/title classes
+/// are obfuscated and rotate frequently (google), making a selector strategy brittle. The stable
+/// STRUCTURE doesn't change: an organic result is an `<a href="http…">` that CONTAINS an `<h3>`
+/// (its title) and points off-site. We walk those anchors, take the h3 text as the title and the
+/// anchor href as the URL, skip the strategy's engine-internal hosts, and dedup by URL.
+fn parse_structural_serp(strategy: &Strategy, html: &str, limit: usize) -> Vec<SearchResult> {
     let tree = Tree::parse(html);
     let mut out: Vec<SearchResult> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1273,7 +1606,7 @@ fn parse_structural_serp(html: &str, limit: usize) -> Vec<SearchResult> {
         }
         let href = tree.get_attribute(a, "href").unwrap_or_default();
         let url = href.trim();
-        if !url.starts_with("http") || is_serp_internal_host(url) {
+        if !url.starts_with("http") || is_serp_internal_host(url, &strategy.internal_hosts) {
             continue;
         }
         // The title-carrying <h3> must be INSIDE this anchor (the organic-result shape).
@@ -1549,7 +1882,7 @@ async fn fetch_serp(
     // routing every SERP through the browser. A stale/missing token (the response
     // is the `enablejs` shell) triggers exactly one re-mint + native retry.
     if strategy.mode == "enid" {
-        return google_enid_fetch(url, headless, remint).await;
+        return google_enid_fetch(url, headless, remint, &strategy.headers).await;
     }
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
     // A throwaway jar so a google /sorry clearance's exemption cookie can be captured
@@ -1560,6 +1893,7 @@ async fn fetch_serp(
         allow_non_html: true, // json engines return non-HTML bodies
         profile: Some(&profile),
         bypass_consent: true,
+        headers: strategy.headers.clone(), // per-strategy request headers (data-driven)
         jar: Some(&mut jar),
         ..Default::default()
     };
@@ -1595,6 +1929,7 @@ async fn google_enid_fetch(
     url: &str,
     headless: Option<bool>,
     remint: bool,
+    headers: &BTreeMap<String, String>,
 ) -> Result<String, String> {
     let cmd = std::env::var("TURBO_SURF_BROWSER_FETCH_CMD").map_err(|_| {
         "google web_search needs the TURBO_SURF_BROWSER_FETCH_CMD env var (the headed \
@@ -1603,7 +1938,7 @@ async fn google_enid_fetch(
             .to_string()
     })?;
     let cache = EnidCache::default_for(&sidecar_dir());
-    google_enid_flow(url, &cache, &cmd, headless, remint).await
+    google_enid_flow(url, &cache, &cmd, headless, remint, headers).await
 }
 
 /// The testable core of the native-google path (no env reads):
@@ -1621,19 +1956,50 @@ async fn google_enid_flow(
     mint_cmd: &str,
     headless: Option<bool>,
     remint: bool,
+    headers: &BTreeMap<String, String>,
 ) -> Result<String, String> {
+    strace!("enid: cache path {}", cache.path_str());
     let cookies = match (remint, cache.get_valid(enid::now_secs())) {
-        (false, Some(c)) => c,
-        _ => mint_and_cache(cache, mint_cmd, headless).await?,
+        (false, Some(c)) => {
+            let age = cache
+                .minted_at()
+                .map(|m| format!("{:.0}s ago", (enid::now_secs() - m).max(0.0)))
+                .unwrap_or_else(|| "age unknown".to_string());
+            strace!(
+                "enid: cache hit — {} cookie(s) [{}], minted {age}",
+                c.len(),
+                cookie_names(&c)
+            );
+            c
+        }
+        (true, _) => {
+            strace!("enid: remint forced (remint:true) → sidecar mint");
+            mint_and_cache(cache, mint_cmd, headless).await?
+        }
+        (false, None) => {
+            strace!("enid: cache miss (no live __Secure-ENID) → sidecar mint");
+            mint_and_cache(cache, mint_cmd, headless).await?
+        }
     };
-    let html = native_google_fetch(url, &cookies).await?;
+    let html = native_google_fetch(url, &cookies, headers).await?;
     if !is_enablejs_shell(&html) {
+        strace!("verdict: real SERP (matched {})", serp_marker(&html));
         return Ok(html);
     }
     // Stale/untrusted token → re-mint once and retry natively.
+    strace!(
+        "verdict: enablejs shell (no id=rso / <h3>); body_len={} prefix={:?}",
+        html.len(),
+        body_prefix(&html)
+    );
+    strace!("remint: stale/untrusted token → one re-mint + native retry");
     let fresh = mint_and_cache(cache, mint_cmd, headless).await?;
-    let retry = native_google_fetch(url, &fresh).await?;
+    let retry = native_google_fetch(url, &fresh, headers).await?;
     if is_enablejs_shell(&retry) {
+        strace!(
+            "verdict: still enablejs shell after fresh mint (body_len={}) → IP likely flagged",
+            retry.len()
+        );
         return Err(
             "google served the enablejs shell even after a fresh __Secure-ENID mint — the \
              exit IP is likely flagged (a /sorry'd IP won't serve the SERP to any token) or \
@@ -1662,20 +2028,39 @@ async fn mint_and_cache(
 /// One native `/search` fetch with the minted cookies injected into a throwaway jar
 /// (the caller's session jar is never touched). Google's `/sorry` clearance loop
 /// still applies (IP-reputation is orthogonal to the ENID token).
-async fn native_google_fetch(url: &str, cookies: &[EnidCookie]) -> Result<String, String> {
+async fn native_google_fetch(
+    url: &str,
+    cookies: &[EnidCookie],
+    headers: &BTreeMap<String, String>,
+) -> Result<String, String> {
     let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
     let mut jar = CookieJar::new();
     for c in cookies {
         jar.add(&c.name, &c.value, &c.domain, &c.path, c.expires);
     }
+    strace!(
+        "native fetch {url} with cookies [{}] headers {:?}",
+        cookie_names(cookies),
+        headers.keys().collect::<Vec<_>>()
+    );
+    // Extra request headers come from the strategy config (data-driven, not hardcoded) — e.g. the
+    // google strategy sets a `Referer` + `sec-fetch-site: same-origin` so the SERP fetch looks
+    // like a real in-site navigation. Merged over the impersonate/rustls defaults.
     let opts = FetchOptions {
         allow_non_html: true,
         profile: Some(&profile),
         bypass_consent: true,
+        headers: headers.clone(),
         jar: Some(&mut jar),
         ..Default::default()
     };
     let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
+    strace!(
+        "native response status={} final_url={} body_len={}",
+        res.status,
+        res.final_url,
+        res.html.len()
+    );
     let (_final_url, html) = maybe_clear_sorry(&mut jar, res.final_url, res.html).await?;
     Ok(html)
 }
@@ -1705,6 +2090,7 @@ async fn maybe_clear_sorry(
     if !sorry::is_sorry_wall(&final_url, &html) {
         return Ok((final_url, html));
     }
+    strace!("sorry: unusual-traffic wall at {final_url} → in-isolate reCAPTCHA clearance");
     let ctx = SolveContext {
         user_agent: fingerprint::default_profile().user_agent,
         proxy: std::env::var("TURBO_SURF_PROXY")
@@ -1748,6 +2134,201 @@ async fn maybe_clear_sorry(
         }
         Err(e) => Err(format!("google /sorry clearance failed: {e}")),
     }
+}
+
+/// Cookie NAMES from a jar storage_state JSON array (values are secrets — never
+/// surfaced). `[]`/malformed → empty.
+fn earned_cookie_names(storage: &str) -> Vec<String> {
+    serde_json::from_str::<Value>(storage)
+        .ok()
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| c.get("name").and_then(Value::as_str).map(String::from))
+        .collect()
+}
+
+/// BROWSERLESS anti-bot recon for the native-mint goal: fetch `url` natively (the
+/// impersonate stack), then run its OWN scripts to completion in the V8 render
+/// isolate under the instrumented fingerprint globals, and report (a) `shim_needed`
+/// — the env surface the page's integrity JS (BotGuard/reCAPTCHA-class) read that we
+/// still return `undefined`, i.e. the exact shims to add to satisfy it in-isolate —
+/// and (b) the cookies the isolate earned, flagging whether a trusted `__Secure-ENID`
+/// was set with no browser. This answers "what do we need in our env to execute
+/// [BotGuard], and did executing it mint anything?" — it does NOT itself defeat
+/// server-side scoring (a completed run can still be IP/score-rejected).
+async fn probe_mint(url: &str) -> Result<Value, String> {
+    let profile = fingerprint::select(&turbo_surf_core::url::host_of(url).unwrap_or_default());
+    let mut jar = CookieJar::new();
+    let res = fetch_html(
+        url,
+        FetchOptions {
+            allow_non_html: true,
+            profile: Some(&profile),
+            bypass_consent: true,
+            jar: Some(&mut jar),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    // Reuse the session's script collector (inline + external <script src>, fetched).
+    let mut tmp = Session::new();
+    tmp.load(&res.final_url, &res.html);
+    let script = tmp.page_script().await;
+    let ua = profile.user_agent.clone();
+    let (report, storage) =
+        turbo_surf_render::probe_page_async(&res.html, &res.final_url, &ua, "", &script, 8000)
+            .await?;
+    let earned = earned_cookie_names(&storage);
+    let minted_enid = earned.iter().any(|n| n == enid::ENID_NAME);
+    strace!(
+        "probe_mint {} status={} scripts_len={} shim_gaps={} earned=[{}] enid={}",
+        res.final_url,
+        res.status,
+        script.len(),
+        report.shim_needed.len(),
+        earned.join(","),
+        minted_enid
+    );
+    Ok(json!({
+        "url": res.final_url,
+        "status": res.status,
+        "scripts_bytes": script.len(),
+        "shim_needed": report.shim_needed,
+        "accesses": report.accesses,
+        "earned_cookies": earned,
+        "minted_enid": minted_enid,
+    }))
+}
+
+/// FULLY BROWSERLESS google SERP attempt — no sidecar, no Chromium, at all. Does the REAL
+/// consent Accept-all handshake (a net-trace of real Chrome shows the trusted `__Secure-ENID`
+/// is minted by `consent.google.com/save` + `/gen_204`, alongside `NID`/`AEC` — NOT by a bare
+/// homepage GET, and a synthetic `SOCS` suppresses it). Flow: GET homepage → if it's the consent
+/// interstitial, POST its Accept-all form (mints `NID`/`SOCS`/`__Secure-BUCKET`/trusted ENID into
+/// the jar) → load the real homepage → run its integrity JS to completion in-isolate under the
+/// fidelity globals (refresh cookies) → replay the FULL earned jar on a native `/search`, and
+/// report the earned cookie set + whether the ENID is trusted (real SERP vs `enablejs` shell).
+pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
+    let session = Session::new();
+    let (strategy, _src) = resolve_strategy(&session, "google")?;
+    let home = "https://www.google.com/";
+    let profile = fingerprint::select("www.google.com");
+    let ua = profile.user_agent.clone();
+    let now = enid::now_secs();
+    let mut jar = CookieJar::new();
+
+    // 1) Homepage WITHOUT a synthetic SOCS, so google serves the real consent interstitial
+    //    (a bare GET sets only AEC + ENID, never NID; a fake SOCS suppresses even that).
+    let res = fetch_html(
+        home,
+        FetchOptions {
+            allow_non_html: true,
+            profile: Some(&profile),
+            max_redirects: Some(5),
+            jar: Some(&mut jar),
+            now,
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // 2) Real Accept-all consent handshake → mints NID/SOCS/__Secure-BUCKET + trusted ENID.
+    let consent = turbo_surf_core::consent::handshake_if_consent(
+        &mut jar,
+        &res.final_url,
+        &res.html,
+        &ua,
+        now,
+    )
+    .await?;
+
+    // 3) Load the real homepage (the consent `continue` target, or the bare page if no wall).
+    let home_html = match &consent {
+        Some(c) => {
+            let cont = c.continue_url.clone().unwrap_or_else(|| home.to_string());
+            fetch_html(
+                &cont,
+                FetchOptions {
+                    allow_non_html: true,
+                    profile: Some(&profile),
+                    max_redirects: Some(5),
+                    jar: Some(&mut jar),
+                    now,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .html
+        }
+        None => res.html.clone(),
+    };
+
+    // 4) Run the homepage's own integrity JS to completion in-isolate (seeded with the earned
+    //    jar), so any in-isolate cookie refresh happens on top of the trusted session.
+    let mut tmp = Session::new();
+    tmp.load(home, &home_html);
+    let script = tmp.page_script().await;
+    let (_report, storage_out) = turbo_surf_render::probe_page_async(
+        &home_html,
+        home,
+        &ua,
+        &jar.storage_state(),
+        &script,
+        8000,
+    )
+    .await?;
+    for c in serde_json::from_str::<Vec<enid::EnidCookie>>(&storage_out).unwrap_or_default() {
+        jar.add(&c.name, &c.value, &c.domain, &c.path, c.expires);
+    }
+
+    // 5) Replay the FULL earned jar on a native /search — no sidecar.
+    let earned: Vec<String> = jar
+        .cookies_for(home, now)
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    let url = build_query_url(&strategy, query, 10, None)?;
+    let sres = fetch_html(
+        &url,
+        FetchOptions {
+            allow_non_html: true,
+            profile: Some(&profile),
+            headers: strategy.headers.clone(),
+            max_redirects: Some(5),
+            jar: Some(&mut jar),
+            now,
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let (_fu, html) = maybe_clear_sorry(&mut jar, sres.final_url, sres.html).await?;
+    let shell = is_enablejs_shell(&html);
+    let results = if shell {
+        vec![]
+    } else {
+        parse_serp(&strategy, &html, 10)
+    };
+    Ok(json!({
+        "consent_handshake": consent.is_some(),
+        "earned_cookies": earned,
+        "has_aec": jar.cookies_for(home, now).iter().any(|c| c.name == "AEC"),
+        "has_nid": jar.cookies_for(home, now).iter().any(|c| c.name == "NID"),
+        "minted_enid": jar.cookies_for(home, now).iter().any(|c| c.name == enid::ENID_NAME),
+        "enid_trusted": !shell,
+        "verdict": if shell {
+            "enablejs shell — the browserless __Secure-ENID is NOT trusted"
+        } else {
+            "real SERP — the browserless __Secure-ENID IS trusted"
+        },
+        "marker": if shell { "" } else { serp_marker(&html) },
+        "body_len": html.len(),
+        "results": results.iter().map(SearchResult::to_json).collect::<Vec<_>>(),
+    }))
 }
 
 /// Fetch a SERP through the opt-in browser sidecar named by the
@@ -2007,9 +2588,12 @@ pub fn tools() -> Value {
             "web_search_load_strategy",
             "Register/override a search parse-strategy (session-scoped) for its \
              engine id. Arg: strategy (the JSON object: engine, version, query_url \
-             with {query}/{limit}/{base}, format html|json, selectors or json_path). \
-             Enables new engines or hotfixes a stale built-in with no release → \
-             {engine,version,ok}",
+             with {query}/{limit}/{base}, format html|json|structural, mode \
+             no-js|fast|secure|enid|browser, selectors or json_path, and an optional \
+             `headers` map of extra request headers applied to the SERP fetch — e.g. \
+             {\"referer\":\"https://www.google.com/\",\"sec-fetch-site\":\"same-origin\"} \
+             to shape the request as a real in-site navigation). Enables new engines or \
+             hotfixes a stale built-in with no release → {engine,version,ok}",
         ),
         (
             "web_search_reset_strategy",
@@ -2113,6 +2697,28 @@ pub fn tools() -> Value {
              in-isolate → clear error (route to an external solver).",
         ),
         (
+            "probe_mint",
+            "BROWSERLESS anti-bot recon: fetch {url} natively, run its own integrity \
+             JS (BotGuard/reCAPTCHA-class) to completion in the V8 isolate under \
+             instrumented globals → {shim_needed (env surface still returning \
+             undefined — the shims to add), accesses, earned_cookies, minted_enid}. \
+             Point at https://www.google.com/ to see what BotGuard demands + whether \
+             an in-isolate homepage run mints a trusted __Secure-ENID (no browser). \
+             Recon only — a completed run can still be server-side/IP-score-rejected.",
+        ),
+        (
+            "human_interact",
+            "Play a sequence of realistic, TRUSTED human input gestures on the CURRENT page \
+             (goto first), then keep the hydrated result. Generic page-interaction driver: \
+             string together move / click / focus / type / blur / wait steps — curved \
+             browser-sampled (~12ms) mouse motion, a real mousedown→dwell→mouseup→click, \
+             human-paced typing, hover (enter/leave) + focus/blur (+focusin/out), all \
+             isTrusted:true on the hi-res clock. Args: `steps` (array; each {move:{selector|\
+             toX,toY}} | {click:selector|true} | {focus:selector} | {type:'…'} | {blur:true} | \
+             {wait:ms}) OR `routine` (saved preset, e.g. 'google-serp') + `params` ({query:'…'}); \
+             plus startDelay?/startJitter?. Events are dispatched in-isolate (no browser).",
+        ),
+        (
             "set_fingerprint",
             "Override render-tier navigator fields (JSON: userAgent, platform, \
              vendor, languages, hardwareConcurrency, deviceMemory, chromeMajor, \
@@ -2156,6 +2762,12 @@ pub fn tools() -> Value {
             "Toggle consent-wall bypass (google/youtube 'before you continue' \
              interstitial). On by default: seeds the consent cookie so the real \
              page is served. Arg: enabled? (default true)",
+        ),
+        (
+            "set_consent_socs",
+            "Override the seeded SOCS consent value (param-driven). Arg: socs? \
+             (string; omit/null = built-in default; \"\" = seed no SOCS, i.e. send \
+             the raw consent-gated response so the real Accept-all handshake runs)",
         ),
         (
             "run_playwright",
@@ -2264,6 +2876,12 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             session.bypass_consent = Some(on);
             Ok(json!({ "bypassConsent": on }))
         }
+        "set_consent_socs" => {
+            // Param-driven SOCS override. Omitted/null → built-in default; a string
+            // (incl. "") is used verbatim ("" = seed no SOCS, raw consent-gated page).
+            session.consent_socs = arg_str(args, "socs").map(str::to_string);
+            Ok(json!({ "consentSocs": session.consent_socs }))
+        }
         "eval_js" | "evaluate" => session.eval_js(script()?),
         "inject_js" => session.inject_js(script()?).await,
         "render" => match arg_str(args, "script") {
@@ -2289,6 +2907,11 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
                 )
                 .await
         }
+        "probe_mint" => {
+            let url = arg_str(args, "url").ok_or("probe_mint: missing 'url'")?;
+            probe_mint(url).await
+        }
+        "human_interact" => session.human_interact(args).await,
         "stealth_status" => Ok(session.stealth_status()),
         "set_fingerprint" => session.set_fingerprint(args.get("overrides").unwrap_or(args)),
         "latest_dom" => Ok(json!(session.dom_history.last())),
@@ -2672,6 +3295,360 @@ mod tests {
         call_tool(s, name, &args).await.unwrap()
     }
 
+    // The generic human_interact tool plays a step sequence on the current page to completion
+    // (the driver sets data-hi-done once __hi.sequence resolves), and rehydrates the session.
+    #[tokio::test]
+    async fn human_interact_plays_a_step_sequence() {
+        let mut s = Session::new();
+        s.load(
+            "https://x.test/",
+            "<body><input id='q' type='text'><button id='btn'>Search</button></body>",
+        );
+        let args = json!({
+            "steps": [
+                { "move": { "selector": "#q" } }, { "click": "#q" }, { "focus": "#q" },
+                { "type": "weather" }, { "move": { "selector": "#btn" } }, { "click": "#btn" }
+            ],
+            "startDelay": 10, "startJitter": 10
+        });
+        let res = call_tool(&mut s, "human_interact", &args).await.unwrap();
+        assert_eq!(res["completed"], true, "sequence ran to completion: {res}");
+        assert_eq!(res["steps"], 6);
+        let dom = serialize_doc(s.tree().unwrap());
+        assert!(
+            dom.contains("data-hi-done"),
+            "done flag written to the page: {dom}"
+        );
+    }
+
+    // The google-serp routine is a saved step-list; {query} is substituted from params.
+    #[test]
+    fn google_serp_routine_substitutes_query() {
+        let args = json!({ "routine": "google-serp", "params": { "query": "rust lang" } });
+        let (steps, opts) = super::resolve_interaction_steps(&args).unwrap();
+        let arr = steps.as_array().unwrap();
+        assert!(
+            arr.iter()
+                .any(|s| s.get("type").and_then(|t| t.as_str()) == Some("rust lang")),
+            "query substituted into the type step: {steps}"
+        );
+        assert!(
+            arr.iter().any(|s| s
+                .get("click")
+                .and_then(|c| c.as_str())
+                .map(|c| c.contains("name=q"))
+                .unwrap_or(false)),
+            "clicks the search box: {steps}"
+        );
+        assert!(
+            opts.get("startDelay").is_some(),
+            "routine carries startDelay: {opts}"
+        );
+    }
+
+    // Edge cases in interaction step resolution: unknown routine, missing steps, and a non-array
+    // `steps` all error clearly rather than panicking or silently running nothing.
+    #[test]
+    fn resolve_interaction_steps_rejects_bad_input() {
+        assert!(
+            super::resolve_interaction_steps(&json!({ "routine": "no-such-routine" })).is_err(),
+            "unknown routine → Err"
+        );
+        assert!(
+            super::resolve_interaction_steps(&json!({})).is_err(),
+            "neither steps nor routine → Err"
+        );
+        assert!(
+            super::resolve_interaction_steps(&json!({ "steps": "not-an-array" })).is_err(),
+            "non-array steps → Err"
+        );
+        // Inline steps pass through.
+        let (steps, _opts) =
+            super::resolve_interaction_steps(&json!({ "steps": [{ "click": true }] })).unwrap();
+        assert_eq!(steps.as_array().map(|a| a.len()), Some(1));
+        // A routine placeholder with no matching param must error, not type a literal "{query}".
+        let miss = super::resolve_interaction_steps(&json!({ "routine": "google-serp" }));
+        assert!(
+            miss.is_err(),
+            "omitted routine param → Err, not a literal {{query}}"
+        );
+        assert!(
+            miss.unwrap_err().contains("{query}"),
+            "error names the unresolved placeholder"
+        );
+    }
+
+    // human_interact FOLLOWS the navigation a form-submit interaction triggers: filling the
+    // search box + clicking submit serializes the form's GET target and loads it natively
+    // through the session (jar/cookies carried), so the result page is what ends up loaded —
+    // the typed query rides along on the URL. This is the fill-then-submit → SERP loop.
+    #[tokio::test]
+    async fn human_interact_follows_form_navigation() {
+        let port = spawn_form_nav_server().await;
+        let mut s = Session::new();
+        s.goto(&format!("http://127.0.0.1:{port}/")).await.unwrap();
+        let res = call_tool(
+            &mut s,
+            "human_interact",
+            &json!({
+                "steps": [
+                    { "move": { "selector": "input[name=q]" } },
+                    { "click": "input[name=q]" },
+                    { "focus": "input[name=q]" },
+                    { "type": "weather" },
+                    { "move": { "selector": "button[type=submit]" } },
+                    { "click": "button[type=submit]" }
+                ],
+                "startDelay": 10, "startJitter": 10
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res["navigated"], true, "followed the form submit: {res}");
+        let to = res["navigated_to"].as_str().unwrap_or("");
+        assert!(to.contains("/results"), "landed on the results path: {res}");
+        assert!(
+            to.contains("q=weather"),
+            "typed query rode along on the GET: {res}"
+        );
+        let dom = serialize_doc(s.tree().unwrap());
+        assert!(
+            dom.contains("Results for weather"),
+            "loaded the results page for the typed query: {dom}"
+        );
+    }
+
+    // The synthesizer fires the FULL, realistic key-event sequence: per typed char
+    // keydown→keypress→beforeinput→input→keyup, and a `press` step for a named key (Enter) with
+    // the real identifiers (key/code/keyCode). BotGuard-class collectors read keyCode/code, so a
+    // {key}-only event is a tell. Uses a form-less input so no navigation is triggered.
+    #[tokio::test]
+    async fn human_interact_fires_full_key_sequence() {
+        let mut s = Session::new();
+        // Listeners accumulate a compact log into a body attribute so it survives serialization.
+        s.load(
+            "https://x.test/",
+            "<body><input id='q'>\
+             <script>\
+             var push=function(v){document.body.setAttribute('data-k',(document.body.getAttribute('data-k')||'')+'|'+v);};\
+             document.addEventListener('keydown',function(e){push('d:'+e.key+':'+e.keyCode+':'+e.code);});\
+             document.addEventListener('keypress',function(e){push('p:'+e.key);});\
+             document.addEventListener('beforeinput',function(e){push('bi:'+e.data);});\
+             document.addEventListener('input',function(e){push('i:'+e.data);});\
+             document.addEventListener('keyup',function(e){push('u:'+e.key);});\
+             </script></body>",
+        );
+        let res = call_tool(
+            &mut s,
+            "human_interact",
+            &json!({
+                "steps": [
+                    { "click": "#q" }, { "focus": "#q" },
+                    { "type": "hi" }, { "press": "Enter" }
+                ],
+                "startDelay": 10, "startJitter": 10
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            res["navigated"], false,
+            "form-less input triggers no navigation: {res}"
+        );
+        let dom = serialize_doc(s.tree().unwrap());
+        let log = dom
+            .split("data-k=\"")
+            .nth(1)
+            .unwrap_or("")
+            .split('"')
+            .next()
+            .unwrap_or("");
+        // Per-char full sequence for the first typed char 'h'.
+        for frag in ["d:h:72:KeyH", "p:h", "bi:h", "i:h", "u:h"] {
+            assert!(log.contains(frag), "expected key frag {frag:?} in: {log}");
+        }
+        // Enter press with the real named-key identifiers.
+        assert!(
+            log.contains("d:Enter:13:Enter"),
+            "Enter keydown (keyCode 13, code Enter): {log}"
+        );
+        assert!(log.contains("u:Enter"), "Enter keyup: {log}");
+    }
+
+    // human_interact with an unknown routine surfaces the error through the tool dispatch.
+    #[tokio::test]
+    async fn human_interact_unknown_routine_errors() {
+        let mut s = Session::new();
+        s.load("https://x.test/", "<body></body>");
+        let res = call_tool(&mut s, "human_interact", &json!({ "routine": "nope" })).await;
+        assert!(
+            res.is_err(),
+            "unknown routine must error through the tool: {res:?}"
+        );
+    }
+
+    // Canvas fingerprint fidelity: with the raster hook installed (Session::new), the render
+    // isolate's toDataURL must return a REAL, sizeable PNG (the vendored stub was ~94 bytes —
+    // an impossible size for rendered content, a canvas-fingerprint tell).
+    #[tokio::test]
+    async fn canvas_todataurl_is_a_real_png() {
+        let _s = Session::new(); // installs set_raster_fn (+ set_measure_fn)
+        let draw = "var c=document.createElement('canvas');c.width=200;c.height=60;\
+            var x=c.getContext('2d');x.fillStyle='#f60';x.fillRect(0,0,120,30);\
+            x.fillStyle='#069';x.font='14px Arial';x.fillText('turbo-surf',5,20);\
+            document.body.setAttribute('data-u', c.toDataURL())";
+        // render_html returns the serialized DOM (run_with_dom returns the trailing value).
+        let out = turbo_surf_render::render_html("<body></body>", draw).unwrap();
+        let i = out.find("data-u=\"").expect("data-u present") + 8;
+        let j = out[i..].find('"').unwrap() + i;
+        let url = &out[i..j];
+        assert!(
+            url.starts_with("data:image/png;base64,"),
+            "expected a PNG data URL: {}",
+            &url[..url.len().min(40)]
+        );
+        let b64 = &url["data:image/png;base64,".len()..];
+        assert!(
+            b64.len() > 1000,
+            "a real rasterized PNG should be sizeable (was the ~94-byte stub); got {} base64 chars",
+            b64.len()
+        );
+    }
+
+    // getImageData must read back the ACTUAL rendered pixels (via the raw-RGBA rasterizer), not
+    // the vendored synthetic bytes — `fillRect(red); getImageData` returning non-red is a
+    // broken/fake-canvas tell. Raw pixels (no PNG encoder) match a real browser for solids/shapes.
+    #[tokio::test]
+    async fn canvas_getimagedata_reads_rendered_pixels() {
+        let _s = Session::new(); // installs set_raster_rgba_fn
+        let draw = "var c=document.createElement('canvas');c.width=16;c.height=16;\
+            var x=c.getContext('2d');x.fillStyle='#ff0000';x.fillRect(0,0,16,16);\
+            var d=x.getImageData(8,8,1,1).data;\
+            document.body.setAttribute('data-px', d[0]+','+d[1]+','+d[2]+','+d[3]);";
+        let out = turbo_surf_render::render_html("<body></body>", draw).unwrap();
+        assert!(
+            out.contains(r#"data-px="255,0,0,255""#),
+            "getImageData must return the filled red pixel (raw), not synthetic bytes: {out}"
+        );
+    }
+
+    // Canvas 2D surface fidelity: the context class-tags as CanvasRenderingContext2D (was
+    // "[object DOMImplementation]"), exposes getContextAttributes, and measureText routes width
+    // through the real system-font measurer (matches a real browser; the vendored width was a
+    // synthetic approximation — a font-detection tell).
+    #[tokio::test]
+    async fn canvas2d_surface_matches_browser() {
+        let _s = Session::new(); // installs set_measure_fn
+        let draw = "var x=document.createElement('canvas').getContext('2d');\
+            x.font='16px Arial';\
+            var w=x.measureText('Hello World').width;\
+            var a=x.getContextAttributes();\
+            document.body.setAttribute('data-c', JSON.stringify({\
+              tag: Object.prototype.toString.call(x),\
+              w: w, alpha: a.alpha, cs: a.colorSpace, wrf: a.willReadFrequently\
+            }));";
+        let out = turbo_surf_render::render_html("<body></body>", draw).unwrap();
+        let s = out
+            .split("data-c=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let v: Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+        assert_eq!(
+            v["tag"], "[object CanvasRenderingContext2D]",
+            "ctx class tag: {v}"
+        );
+        assert_eq!(v["alpha"], true, "getContextAttributes.alpha: {v}");
+        assert_eq!(v["cs"], "srgb", "getContextAttributes.colorSpace: {v}");
+        assert_eq!(
+            v["wrf"], false,
+            "getContextAttributes.willReadFrequently: {v}"
+        );
+        // Real system-font width (not the ~66 synthetic approximation). The exact value is
+        // font-substitution dependent — ~82 for macOS Arial, ~87.5 where Arial maps to Liberation
+        // Sans / DejaVu (Linux CI) — so assert a real metric clearly above the synthetic stub rather
+        // than pinning one platform's number.
+        let w = v["w"].as_f64().unwrap();
+        assert!(
+            w > 75.0 && w < 100.0,
+            "measureText width from the real measurer (real font, not the ~66 synthetic): {v}"
+        );
+    }
+
+    // toDataURL with a non-PNG MIME (the webp/jpeg support probe) must NOT be answered with a
+    // raster PNG relabelled — it delegates to the vendored path so the data-URL prefix matches
+    // the requested type. Returning image/png for a toDataURL('image/webp') is a tell.
+    #[tokio::test]
+    async fn canvas_todataurl_honours_non_png_mime() {
+        let _s = Session::new(); // raster hook installed
+        let draw = "var c=document.createElement('canvas');c.width=40;c.height=20;\
+            var x=c.getContext('2d');x.fillStyle='#111';x.fillRect(0,0,40,20);\
+            document.body.setAttribute('data-png', c.toDataURL('image/png').slice(0,22));\
+            document.body.setAttribute('data-webp', c.toDataURL('image/webp').slice(0,23));";
+        let out = turbo_surf_render::render_html("<body></body>", draw).unwrap();
+        assert!(
+            out.contains(r#"data-png="data:image/png;base64,""#),
+            "png request → png raster URL: {out}"
+        );
+        // The vendored fallback labels the URL with the requested MIME; it must not be png.
+        assert!(
+            !out.contains(r#"data-webp="data:image/png"#),
+            "webp request must not be answered with a png data URL: {out}"
+        );
+    }
+
+    // getContext returns the same context object per (canvas, kind); calling it twice must not
+    // re-wrap our getParameter/readPixels overrides (the second wrap would double-record draws /
+    // recurse). The spoofed WebGL identity must still be correct after a repeat getContext.
+    #[tokio::test]
+    async fn getcontext_is_idempotent_on_repeat_calls() {
+        let _s = Session::new();
+        let script = "var c=document.createElement('canvas');\
+            var a=c.getContext('webgl'); var b=c.getContext('webgl');\
+            var same=(a===b);\
+            var dbg=a.getExtension('WEBGL_debug_renderer_info');\
+            var rend=a.getParameter(dbg.UNMASKED_RENDERER_WEBGL);\
+            document.body.setAttribute('data-same', String(same));\
+            document.body.setAttribute('data-rend', rend);";
+        let out = turbo_surf_render::render_html("<body></body>", script).unwrap();
+        assert!(
+            out.contains(r#"data-same="true""#),
+            "repeat getContext returns the same object: {out}"
+        );
+        assert!(
+            out.contains("ANGLE (Apple, ANGLE Metal Renderer"),
+            "spoofed renderer intact after repeat getContext: {out}"
+        );
+    }
+
+    // Real-GPU WebGL bridge end to end (only under `gpu-metal`): Session::new injects the
+    // wgpu-backed executor, a page's WebGL fingerprint draw runs on the real Apple GPU, and
+    // readPixels returns genuine, content-dependent pixels (a gradient here — non-zero + varied).
+    #[cfg(feature = "gpu-metal")]
+    #[tokio::test]
+    async fn webgl_readpixels_real_gpu_renders_gradient() {
+        let _s = Session::new(); // injects set_webgl_fn(raster::webgl_readback)
+        let script = "\
+            var c=document.createElement('canvas'); c.width=8; c.height=8;\
+            var gl=c.getContext('webgl');\
+            var vs=gl.createShader(0x8B31); gl.shaderSource(vs,'attribute vec2 p;varying vec2 v;void main(){v=p;gl_Position=vec4(p,0.0,1.0);}'); gl.compileShader(vs);\
+            var fs=gl.createShader(0x8B30); gl.shaderSource(fs,'precision mediump float;varying vec2 v;void main(){gl_FragColor=vec4(v.x*0.5+0.5,v.y*0.5+0.5,0.5,1.0);}'); gl.compileShader(fs);\
+            var pr=gl.createProgram(); gl.attachShader(pr,vs); gl.attachShader(pr,fs); gl.linkProgram(pr); gl.useProgram(pr);\
+            var b=gl.createBuffer(); gl.bindBuffer(0x8892,b); gl.bufferData(0x8892,new Float32Array([-1,-1, 3,-1, -1,3]),0x88E4);\
+            var loc=gl.getAttribLocation(pr,'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,0x1406,false,0,0);\
+            gl.viewport(0,0,8,8); gl.clearColor(0,0,0,1); gl.clear(0x4000); gl.drawArrays(0x0004,0,3);\
+            var px=new Uint8Array(8*8*4); gl.readPixels(0,0,8,8,0x1908,0x1401,px);\
+            var allZero=true, varied=false; for(var i=0;i<px.length;i++){ if(px[i]!==0)allZero=false; if(px[i]!==px[i%4])varied=true; }\
+            document.body.setAttribute('data-gl',(allZero?'zero':'nonzero')+'|'+(varied?'varied':'uniform'));";
+        let out = turbo_surf_render::render_html("<body></body>", script).unwrap();
+        assert!(
+            out.contains(r#"data-gl="nonzero|varied""#),
+            "real GPU must render a content-dependent gradient (not blank/uniform): {out}"
+        );
+    }
+
     // The `solve_recaptcha` MCP tool, end to end and offline: a localhost fixture stands
     // in for google (page + api.js main VM + bframe doc + bframe VM), the tool drives the
     // in-isolate flow and returns the client token. A v2 image-grid checkbox fixture is
@@ -2865,6 +3842,47 @@ mod tests {
         port
     }
 
+    // Fixture for the human_interact navigation-follow: `/` serves a search form
+    // (GET action=/results, field name=q); `/results?q=…` serves a results page that
+    // echoes the query. Lets a test prove fill-a-form-then-submit actually LOADS the
+    // target page (and that the typed value rides along on the GET).
+    async fn spawn_form_nav_server() -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut b = [0u8; 4096];
+                    let n = sock.read(&mut b).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&b[..n]);
+                    let line = req.lines().next().unwrap_or("");
+                    let path = line.split_whitespace().nth(1).unwrap_or("/");
+                    let body = if path.starts_with("/results") {
+                        let q = path
+                            .split_once("q=")
+                            .map(|(_, r)| r.split(['&', ' ']).next().unwrap_or(""))
+                            .unwrap_or("");
+                        format!("<html><body><div id=\"serp\"><h3>Results for {q}</h3></div></body></html>")
+                    } else {
+                        "<html><body><form action=\"/results\" method=\"get\">\
+                         <input name=\"q\" type=\"text\">\
+                         <button id=\"btn\" type=\"submit\">Go</button></form></body></html>"
+                            .to_string()
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.flush().await;
+                });
+            }
+        });
+        port
+    }
+
     // A whitespace-free path to a bash mint stub that (a) bumps a counter file so a
     // test can assert the mint count and (b) prints a cookie set with a TRUSTED ENID.
     // Returns `(mint_cmd, counter_path)`.
@@ -2904,7 +3922,7 @@ mod tests {
         let (cmd, counter) = write_mint_stub("miss");
         let cache = tmp_enid_cache("miss"); // no file → cache miss
 
-        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+        let html = google_enid_flow(&url, &cache, &cmd, None, false, &BTreeMap::new())
             .await
             .unwrap();
         assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
@@ -2934,7 +3952,7 @@ mod tests {
             }])
             .unwrap();
 
-        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+        let html = google_enid_flow(&url, &cache, &cmd, None, false, &BTreeMap::new())
             .await
             .unwrap();
         assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
@@ -2959,7 +3977,7 @@ mod tests {
             }])
             .unwrap();
 
-        let html = google_enid_flow(&url, &cache, &cmd, None, false)
+        let html = google_enid_flow(&url, &cache, &cmd, None, false, &BTreeMap::new())
             .await
             .unwrap();
         assert!(
@@ -2990,7 +4008,7 @@ mod tests {
             .unwrap();
 
         // remint:true → mint despite a valid cache.
-        let html = google_enid_flow(&url, &cache, &cmd, None, true)
+        let html = google_enid_flow(&url, &cache, &cmd, None, true, &BTreeMap::new())
             .await
             .unwrap();
         assert!(html.contains("id=\"rso\""), "want SERP, got: {html}");
@@ -3731,7 +4749,7 @@ mod tests {
           <a href="https://ex.com/2"><h3>Real Two</h3></a>
         </body></html>"#;
         let google = strat(
-            r#"{"engine":"google","query_url":"https://g/?q={query}","format":"structural"}"#,
+            r#"{"engine":"google","query_url":"https://g/?q={query}","format":"structural","internal_hosts":["google.com","gstatic.com",".google."]}"#,
         );
         let r = parse_serp(&google, html, 10);
         assert_eq!(r.len(), 2, "internal/no-h3/dup filtered: {r:?}");
@@ -3760,6 +4778,56 @@ mod tests {
         );
     }
 
+    // The strategy `headers` field parses + is exposed on the built-in google strategy (the
+    // data-driven nav-header knob, applied to the SERP fetch).
+    #[test]
+    fn google_strategy_exposes_nav_headers() {
+        let reg = built_in();
+        let g = reg.get("google").unwrap();
+        assert_eq!(
+            g.headers.get("referer").map(String::as_str),
+            Some("https://www.google.com/")
+        );
+        assert_eq!(
+            g.headers.get("sec-fetch-site").map(String::as_str),
+            Some("same-origin")
+        );
+        // Other engines carry no extra headers by default.
+        assert!(reg.get("bing").unwrap().headers.is_empty());
+        // The structural internal-host filter is also config-driven on the google strategy.
+        assert!(reg
+            .get("google")
+            .unwrap()
+            .internal_hosts
+            .iter()
+            .any(|h| h == "gstatic.com"));
+    }
+
+    // The structural extractor's internal-host filter is data-driven (not google-hardcoded):
+    // suffix patterns match a host or subdomain; a `.`-prefixed pattern is a substring; an empty
+    // list disables filtering (so `structural` isn't secretly google-only).
+    #[test]
+    fn structural_internal_host_filter_is_config_driven() {
+        let hosts = [
+            "google.com".to_string(),
+            ".google.".to_string(),
+            "gstatic.com".to_string(),
+        ];
+        assert!(is_serp_internal_host("https://www.google.com/foo", &hosts));
+        assert!(is_serp_internal_host("https://ssl.gstatic.com/x", &hosts));
+        assert!(
+            is_serp_internal_host("https://policies.google.de/", &hosts),
+            ".google. substring"
+        );
+        assert!(!is_serp_internal_host("https://example.com/", &hosts));
+        assert!(
+            !is_serp_internal_host("https://notgoogle.com/", &hosts),
+            "suffix, not substring"
+        );
+        // Empty list → nothing filtered (structural is a general format).
+        assert!(!is_serp_internal_host("https://www.google.com/", &[]));
+    }
+
     #[test]
     fn build_query_url_interpolates_and_searxng_requires_base() {
         let reg = built_in();
@@ -3769,7 +4837,7 @@ mod tests {
         );
         assert_eq!(
             build_query_url(reg.get("google").unwrap(), "rust", 5, None).unwrap(),
-            "https://www.google.com/search?q=rust"
+            "https://www.google.com/search?q=rust&source=hp"
         );
         assert_eq!(
             build_query_url(

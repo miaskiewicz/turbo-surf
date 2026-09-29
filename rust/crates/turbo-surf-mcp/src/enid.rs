@@ -116,6 +116,19 @@ impl EnidCache {
         }
     }
 
+    /// Epoch seconds when the cached set was last minted, if the cache file exists
+    /// and parses (diagnostics only — `get_valid` gates reuse, not this).
+    pub fn minted_at(&self) -> Option<f64> {
+        let raw = std::fs::read_to_string(&self.path).ok()?;
+        let file: CacheFile = serde_json::from_str(&raw).ok()?;
+        Some(file.minted_at)
+    }
+
+    /// The resolved cache path (diagnostics).
+    pub fn path_str(&self) -> String {
+        self.path.display().to_string()
+    }
+
     /// Persist a freshly minted cookie set (atomic-ish: write to a temp then rename).
     pub fn set(&self, cookies: &[EnidCookie]) -> Result<(), String> {
         if let Some(parent) = self.path.parent() {

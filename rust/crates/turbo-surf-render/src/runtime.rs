@@ -3757,6 +3757,9 @@ globalThis.__domSig = () => {
   });
   guard(() => { if (G.console) { tag(G.console, "console"); ["log", "info", "warn", "error", "debug"].forEach((m) => mark(G.console[m], m)); } });
   guard(() => { if (G.performance && G.performance.now) mark(G.performance.now, "now"); });
+  // The coherent-clock override replaced Date.now with a plain arrow (leaks JS source via
+  // toString + empty .name) — native-mask it too, else Date.now.toString() is an anti-hook tell.
+  guard(() => { if (G.Date && G.Date.now) mark(G.Date.now, "now"); });
 
   // createElement was re-wrapped as a JS closure above; re-mark it native (create-element-not-native).
   guard(() => { if (G.document && G.document.createElement) mark(G.document.createElement, "createElement"); });

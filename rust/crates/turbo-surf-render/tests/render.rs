@@ -425,6 +425,9 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
                 perfDelta: Math.round((p1 - p0) * 10) / 10,
                 coherent: Math.round(performance.timeOrigin + performance.now() - Date.now()),
                 originFractional: (performance.timeOrigin % 1) !== 0,
+                dateNowNative: Date.now.toString().includes('[native code]'),
+                dateNowName: Date.now.name,
+                dateNowHasProto: ('prototype' in Date.now),
             }));
         }, 100);
     "#;
@@ -458,6 +461,17 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
     assert_eq!(
         v["originFractional"], true,
         "timeOrigin is a fractional epoch: {v}"
+    );
+    // The coherent-clock override must not leak the arrow's JS source — Date.now has to look
+    // native (toString + name + no own prototype), like real Chrome, else it's an anti-hook tell.
+    assert_eq!(
+        v["dateNowNative"], true,
+        "Date.now.toString() reports [native code]: {v}"
+    );
+    assert_eq!(v["dateNowName"], "now", "Date.now.name is 'now': {v}");
+    assert_eq!(
+        v["dateNowHasProto"], false,
+        "Date.now has no own prototype (native-fn shape): {v}"
     );
 }
 

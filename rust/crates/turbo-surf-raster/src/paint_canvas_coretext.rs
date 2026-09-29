@@ -77,7 +77,10 @@ pub(crate) fn render_text(
     let cfs = CFString::new(text);
     let mut att = CFMutableAttributedString::new();
     att.replace_str(&cfs, CFRange::init(0, 0));
-    let n = text.chars().count() as isize;
+    // CFAttributedString ranges are in UTF-16 code units, not Unicode scalars — an
+    // astral char (emoji, CJK-ext) is one `char` but two UTF-16 units, so counting
+    // scalars would leave the trailing units unstyled. Count UTF-16 units.
+    let n = text.encode_utf16().count() as isize;
     let full = CFRange::init(0, n);
     unsafe {
         att.set_attribute(

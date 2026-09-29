@@ -410,6 +410,62 @@ async fn fingerprint_parity_permissions_location_charset_webgl() {
     );
 }
 
+// Anti-tamper native-fn SHAPE: a real native function reports "[native code]" from toString AND
+// has NO own `prototype` property (a `function`-expression shim does — a stealth-detection tell,
+// e.g. `'prototype' in HTMLCanvasElement.prototype.toDataURL` is false in Chrome). The toString
+// trap itself, and our canvas/event shims, must match: native toString + no own prototype +
+// ownKeys == [length,name]. Guards the concise-method/nativize fix.
+#[tokio::test]
+async fn masked_native_functions_have_no_prototype() {
+    let script = r#"
+        var FPT = Function.prototype.toString;
+        var nat = function(f){ try { return FPT.call(f).indexOf('[native code]') >= 0; } catch(e){ return false; } };
+        var proto = function(f){ return Object.prototype.hasOwnProperty.call(f, 'prototype'); };
+        var out = {};
+        // The toString trap must look native + shapeless.
+        out.fptNative = nat(FPT);
+        out.fptNoProto = !proto(FPT);
+        out.fptKeys = Object.getOwnPropertyNames(FPT).sort().join(',');
+        // Canvas + WebGL + event shims.
+        var c = document.createElement('canvas');
+        out.toDataURLNative = nat(c.toDataURL); out.toDataURLNoProto = !proto(c.toDataURL);
+        out.getContextNative = nat(c.getContext); out.getContextNoProto = !proto(c.getContext);
+        var gl = c.getContext('webgl');
+        out.getParameterNative = nat(gl.getParameter); out.getParameterNoProto = !proto(gl.getParameter);
+        out.addELNative = nat(document.addEventListener); out.addELNoProto = !proto(document.addEventListener);
+        document.body.setAttribute('data-nf', JSON.stringify(out));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-nf=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    for k in [
+        "fptNative",
+        "fptNoProto",
+        "toDataURLNative",
+        "toDataURLNoProto",
+        "getContextNative",
+        "getContextNoProto",
+        "getParameterNative",
+        "getParameterNoProto",
+        "addELNative",
+        "addELNoProto",
+    ] {
+        assert_eq!(v[k], true, "{k} must hold (native + no own prototype): {v}");
+    }
+    assert_eq!(
+        v["fptKeys"], "length,name",
+        "toString trap ownKeys match native: {v}"
+    );
+}
+
 // Window/screen geometry must be physically coherent like a real browser window: the viewport
 // is SHORTER than the window (tab strip + omnibox chrome), so outerHeight > innerHeight; widths
 // are equal (no side chrome); availHeight < screen height (menubar); and a Mac profile reports

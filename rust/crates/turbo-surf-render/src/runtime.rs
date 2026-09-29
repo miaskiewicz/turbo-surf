@@ -2942,13 +2942,32 @@ globalThis.__domSig = () => {
 (() => {
   const orig = Function.prototype.toString;
   const native = new WeakSet();
-  const ts = function toString() {
+  // Define the trap as a CONCISE METHOD (via an object literal), not a `function` expression: a
+  // native function has NO own `prototype` property, but a `function` expression always does (and
+  // it's non-configurable, so it can't be deleted). Concise methods — like real native methods —
+  // have no `prototype`. A probe reading `'prototype' in Function.prototype.toString` would
+  // otherwise flag the trap (and every `function`-expression shim) as non-native despite the
+  // "[native code]" string. length must be 0 (native toString.length === 0), which a concise
+  // method already gives.
+  const ts = ({ toString() {
     if (native.has(this)) return "function " + (this.name || "") + "() { [native code] }";
     return orig.call(this);
-  };
-  Object.defineProperty(ts, "name", { value: "toString", configurable: true });
+  } }).toString;
   Function.prototype.toString = ts;
   native.add(ts); // the trap must report itself native too
+  // Wrap a shim as a prototype-less, native-marked forwarder (concise-method form), preserving
+  // `this`/args and pinning name + length to match the real built-in. Use where a `function`
+  // shim's own `prototype` would be a native-shape tell.
+  const nativize = (orig2, name, len) => {
+    if (typeof orig2 !== "function") return orig2;
+    const holder = { [name](...args) { return orig2.apply(this, args); } };
+    const f = holder[name];
+    try { Object.defineProperty(f, "length", { value: len == null ? orig2.length : len, configurable: true }); } catch (e) {}
+    native.add(f);
+    return f;
+  };
+  // NB: `nativize` stays a closure-local — exposing it as a global (window.__nativize) would itself
+  // be a tamper tell. Every shim site that needs it is inside this same IIFE.
   const mark = (fn, name) => {
     if (typeof fn !== "function") return;
     // Don't rename an already-marked function: setInterval/clearInterval/
@@ -2966,6 +2985,22 @@ globalThis.__domSig = () => {
   mark(fetch, "fetch");
   mark(setInterval); mark(clearInterval);
   mark(cancelAnimationFrame, "cancelAnimationFrame"); // now its own fn, not a clearTimeout alias
+  // Event API: the vendored addEventListener/removeEventListener/dispatchEvent are `function`
+  // shims — their `.toString()` leaks source AND they carry an own `prototype` (native methods
+  // don't), both tamper tells BotGuard reads. Replace with prototype-less native-shaped forwarders
+  // on their OWN object (window/document may hold their own copies; EventTarget.prototype the
+  // shared one — reassign wherever it's an own prop so we don't add a new own prop that itself is
+  // a tell).
+  for (const name of ["addEventListener", "removeEventListener", "dispatchEvent"]) {
+    const owners = [globalThis, globalThis.document, globalThis.EventTarget && globalThis.EventTarget.prototype];
+    for (const o of owners) {
+      try {
+        if (o && Object.prototype.hasOwnProperty.call(o, name) && typeof o[name] === "function") {
+          o[name] = nativize(o[name], name, name === "dispatchEvent" ? 1 : 2);
+        }
+      } catch (e) {}
+    }
+  }
   if (globalThis.Headers) mark(globalThis.Headers, "Headers");
   const nav = globalThis.navigator;
   if (nav && nav.clipboard) { mark(nav.clipboard.writeText, "writeText"); mark(nav.clipboard.readText, "readText"); }
@@ -3269,8 +3304,9 @@ globalThis.__domSig = () => {
               for (const nm of Object.getOwnPropertyNames(ctx)) {
                 const dsc = Object.getOwnPropertyDescriptor(ctx, nm);
                 if (dsc && typeof dsc.value === "function") {
-                  mark(dsc.value, nm); // native-mask the method (now prototype-resident)
-                  Object.defineProperty(proto, nm, { value: dsc.value, configurable: true, writable: true });
+                  // Prototype-less native shape (no own `prototype`), prototype-resident + marked.
+                  const nf = nativize(dsc.value, nm);
+                  Object.defineProperty(proto, nm, { value: nf, configurable: true, writable: true });
                   try { delete ctx[nm]; } catch (e) {}
                 }
               }
@@ -3286,8 +3322,8 @@ globalThis.__domSig = () => {
       }
       return ctx;
     };
-    mark(wrapped, "getContext");
-    canvasProto.getContext = wrapped;
+    // Prototype-less native shape (native methods have no own `prototype`); getContext.length === 1.
+    canvasProto.getContext = nativize(wrapped, "getContext", 1);
     // Raster-backed toDataURL: replay the vendored 2D display list (ctx._ops) through the
     // host rasterizer (op_raster_png) into a REAL PNG. The vendored stub returns a ~94-byte
     // synthetic blob — an impossible size for rendered content, a canvas-fingerprint tell.
@@ -3295,7 +3331,8 @@ globalThis.__domSig = () => {
     const rasterOp = (Deno.core.ops && Deno.core.ops.op_raster_png) || null;
     const origToDataURL = canvasProto.toDataURL;
     if (typeof origToDataURL === "function") {
-      canvasProto.toDataURL = function toDataURL(type) {
+      // Concise-method form (no own `prototype`, native shape); toDataURL.length === 0.
+      canvasProto.toDataURL = nativize(({ toDataURL(type) {
         // The raster op only encodes PNG. For a non-PNG request (e.g. the webp-support probe
         // toDataURL('image/webp') or an explicit image/jpeg) defer to the vendored path, which
         // labels the data URL with the requested MIME — returning PNG for a webp request would be
@@ -3309,11 +3346,10 @@ globalThis.__domSig = () => {
           }
         } catch (e) {}
         return origToDataURL.call(this, type);
-      };
-      mark(canvasProto.toDataURL, "toDataURL");
+      } }).toDataURL, "toDataURL", 0);
     }
-    if (typeof canvasProto.toBlob === "function") mark(canvasProto.toBlob, "toBlob");
-    if (typeof canvasProto.getBoundingClientRect === "function") mark(canvasProto.getBoundingClientRect, "getBoundingClientRect");
+    if (typeof canvasProto.toBlob === "function") canvasProto.toBlob = nativize(canvasProto.toBlob, "toBlob", 1);
+    if (typeof canvasProto.getBoundingClientRect === "function") canvasProto.getBoundingClientRect = nativize(canvasProto.getBoundingClientRect, "getBoundingClientRect", 0);
   });
 
   // document → HTMLDocument brand + 5 native getters (best-effort: the native DOM object may

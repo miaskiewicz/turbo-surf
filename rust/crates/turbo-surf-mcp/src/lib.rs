@@ -3566,11 +3566,14 @@ mod tests {
             v["wrf"], false,
             "getContextAttributes.willReadFrequently: {v}"
         );
-        // Real system-font Arial width (not the ~66 synthetic approximation); ~82 for this string.
+        // Real system-font width (not the ~66 synthetic approximation). The exact value is
+        // font-substitution dependent — ~82 for macOS Arial, ~87.5 where Arial maps to Liberation
+        // Sans / DejaVu (Linux CI) — so assert a real metric clearly above the synthetic stub rather
+        // than pinning one platform's number.
         let w = v["w"].as_f64().unwrap();
         assert!(
-            w > 78.0 && w < 86.0,
-            "measureText width from the real measurer (~82): {v}"
+            w > 75.0 && w < 100.0,
+            "measureText width from the real measurer (real font, not the ~66 synthetic): {v}"
         );
     }
 

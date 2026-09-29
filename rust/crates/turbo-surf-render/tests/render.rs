@@ -410,6 +410,57 @@ async fn fingerprint_parity_permissions_location_charset_webgl() {
     );
 }
 
+// Timing coherence: the observable clock (performance.now / Date.now) must reflect the virtual
+// timer clock, so a `setTimeout(100)` callback observes ~100ms elapsed (a real browser does; the
+// old pure-wall-clock showed ~0 — a hard tell), while staying coherent (`timeOrigin + now ==
+// Date.now`). performance.now is real sub-ms monotonic (no flatline under a tight loop).
+#[tokio::test]
+async fn clock_reflects_virtual_time_and_is_coherent() {
+    let script = r#"
+        var d0 = Date.now(), p0 = performance.now();
+        setTimeout(function(){
+            var d1 = Date.now(), p1 = performance.now();
+            document.body.setAttribute('data-t', JSON.stringify({
+                dateDelta: d1 - d0,
+                perfDelta: Math.round((p1 - p0) * 10) / 10,
+                coherent: Math.round(performance.timeOrigin + performance.now() - Date.now()),
+                originFractional: (performance.timeOrigin % 1) !== 0,
+            }));
+        }, 100);
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-t=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    let dd = v["dateDelta"].as_f64().unwrap();
+    let pd = v["perfDelta"].as_f64().unwrap();
+    assert!(
+        (100.0..200.0).contains(&dd),
+        "setTimeout(100) observes ~100ms on Date.now: {v}"
+    );
+    assert!(
+        (100.0..200.0).contains(&pd),
+        "setTimeout(100) observes ~100ms on performance.now: {v}"
+    );
+    // The two clock reads are microseconds apart (real hrtime advances between them) + Date.now
+    // floors, so the coherence residual is 0 or ±1 — same as a real browser, not a hard 0.
+    assert!(
+        v["coherent"].as_f64().unwrap().abs() <= 1.0,
+        "timeOrigin + performance.now() ≈ Date.now() (±1): {v}"
+    );
+    assert_eq!(
+        v["originFractional"], true,
+        "timeOrigin is a fractional epoch: {v}"
+    );
+}
+
 // A real WebGL context exposes the full set of ~298 enum constants (VERTEX_SHADER, TRIANGLES, …)
 // on its prototype. Ours had only the handful patchGl set — so `gl.VERTEX_SHADER` was undefined,
 // a fingerprint tell AND a functional break (real WebGL code / the GPU bridge get `undefined` enum

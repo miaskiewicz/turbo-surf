@@ -181,6 +181,19 @@ fn op_measure_text(#[string] text: &str, #[string] family: &str, size: f64) -> S
     }
 }
 
+// Real monotonic high-resolution clock (sub-millisecond), for `performance.now()`. deno_core
+// gives no wall-independent monotonic time to the isolate, so the JS clock fell back to
+// `Date.now()` (1ms grid) + a synthetic creep — which flatlines under a tight read loop (a timing
+// tell: a real browser's performance.now advances on a ~sub-µs hardware clock). This returns ms
+// since a process-fixed `Instant`, so consecutive reads show real sub-ms deltas like Chrome.
+#[op2(fast)]
+fn op_now_perf() -> f64 {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
+}
+
 // Host canvas rasterizer: replay a 2D draw list into real PNG bytes. Same injection
 // pattern as `set_measure_fn` — the crate that owns the raster/paint engine installs it,
 // so the render crate keeps no tiny-skia/font dep (matters for the PyO3 wheel build). Until
@@ -396,6 +409,7 @@ deno_core::extension!(
         op_fetch,
         op_user_agent,
         op_fingerprint,
+        op_now_perf,
         op_measure_text,
         op_raster_png,
         op_raster_rgba,
@@ -769,15 +783,35 @@ globalThis.clearInterval = globalThis.clearTimeout;
 // integer epoch ms (wrong scale, 1ms grid, no fraction) — a timing tell. timeOrigin is a
 // fractional epoch anchor ~0.8–2.5s in the past (a just-navigated page); now() quantizes wall
 // elapsed to the 100µs grid, monotonic with a bounded creep so a tight loop shows 0.1ms deltas.
-const __perfTimeOrigin = Date.now() - (Math.random() * 1700 + 800) - Math.random();
+// The observable clock is a single coherent quantity: REAL monotonic elapsed (op_now_perf, sub-ms)
+// + VIRTUAL elapsed (`__now`, advanced by the timer drain). This makes `setTimeout(100)`/rAF appear
+// to consume ~100ms/16.7ms even though the drain compresses them to ~0 real time (a real browser
+// observes the delay; the old clock, pure wall-clock, showed 0 — a hard tell), while a sync busy
+// loop still consumes real time (real hrtime advances). `Date.now()` is redefined from the SAME
+// quantity so `timeOrigin + performance.now() == Date.now()` holds (BotGuard's chronometric check).
+const __origDateNow = Date.now.bind(Date);
+const __hrNow = () => { try { return Deno.core.ops.op_now_perf(); } catch (e) { return 0; } };
+const __hr0 = __hrNow();               // monotonic anchor at bootstrap
+const __epoch0 = __origDateNow();      // wall epoch at bootstrap
+const __pageAge = Math.random() * 1700 + 800 + Math.random(); // a page open ~0.8–2.5s (perf.now start)
+const __perfTimeOrigin = __epoch0 - __pageAge;
+// Total observed elapsed since timeOrigin: page age + real monotonic since boot + virtual timer time.
+const __observed = () => __pageAge + (__hrNow() - __hr0) + __now;
 let __perfLast = 0;
 const __perfNow = () => {
-  let t = Math.floor((Date.now() - __perfTimeOrigin) * 10) / 10;
-  const wall = Date.now() - __perfTimeOrigin;
-  if (t <= __perfLast) t = __perfLast - wall < 2 ? __perfLast + 0.1 : __perfLast;
+  let t = Math.floor(__observed() * 10) / 10; // Chrome 100µs grid
+  if (t < __perfLast) t = __perfLast;          // strictly monotonic
   __perfLast = t;
   return t;
 };
+// Redefine Date.now() coherently with performance.now (real epoch + real monotonic + virtual).
+// The native epoch stays available to the host (cookies/TLS live in Rust, not this isolate).
+try {
+  Object.defineProperty(Date, "now", {
+    value: () => Math.floor(__perfTimeOrigin + __observed()),
+    configurable: true, writable: true,
+  });
+} catch (e) {}
 // rAF: BATCH like a real browser (measured against Chrome). All callbacks scheduled for a frame
 // fire together with the SAME fractional, origin-relative DOMHighResTimeStamp (~16.6ms cadence +
 // sub-ms jitter, never before __perfNow()); a callback that re-schedules runs on the NEXT frame.
@@ -1824,7 +1858,12 @@ globalThis.history = {
   replaceState(s, _t, u) { this.state = s; if (u != null) globalThis.location.href = String(u); },
   back() {}, forward() {}, go() {},
 };
-globalThis.requestIdleCallback = (fn) => globalThis.setTimeout(fn, 0);
+// requestIdleCallback must invoke the callback with an IdleDeadline ({didTimeout, timeRemaining()});
+// the bare shim passed nothing, so `deadline.timeRemaining()` threw — a correctness bug + tell.
+globalThis.requestIdleCallback = (fn) => globalThis.setTimeout(() => {
+  const start = __perfNow();
+  fn({ didTimeout: false, timeRemaining: () => Math.max(0, 50 - (__perfNow() - start)) });
+}, 1);
 globalThis.cancelIdleCallback = (id) => globalThis.clearTimeout(id);
 
 // WHATWG URL + URLSearchParams — deno_core ships neither, but app bundles (Next.js,

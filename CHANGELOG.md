@@ -167,6 +167,17 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   baked into the HTML. Those params are **server-minted, not client-computed** — not a second,
   independent blocker but a symptom of the same gate: solve trusted delivery and they come along
   for free (just parse them out of the trusted HTML).
+- **Browserless SERP diagnostic** (`browserless_google_serp`) + a reusable real-Chrome **network
+  tracer** (`scripts/browser-sidecar/net-trace.mjs`) pinned the wall precisely. A net-trace of real
+  Chrome shows the trusted `__Secure-ENID` is minted by the **consent Accept-all handshake**
+  (`consent.google.com/save` → `NID`/`SOCS`/`__Secure-BUCKET`) + the homepage response (`AEC`) +
+  `/gen_204` BotGuard beacons — never by a bare GET. `browserless_google_serp` now does the REAL
+  consent handshake browserlessly and earns the **same cookie set as real Chrome** (`AEC`, `NID`,
+  `__Secure-BUCKET`, `__Secure-ENID`, `SEARCH_SAMESITE`) — yet `/search` **still returns the
+  `enablejs` shell**. So the trust is **not in the cookies**: it's the ENID *value*, blessed
+  server-side by the BotGuard `/gen_204` attestation beacons a real browser fires (with valid
+  interpreter-computed tokens). That attestation — not fingerprint fidelity, not the cookie set,
+  not the request shape — is the residual wall, and it's what the headed-sidecar mint provides.
 
 ### Changed — general iframes (render)
 - **Any** iframe (created, parsed from HTML, or `srcdoc`) now instantiates a real bridged child

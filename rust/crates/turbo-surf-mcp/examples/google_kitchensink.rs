@@ -130,12 +130,19 @@ async fn main() {
         Err(e) => println!("    goto ERR: {e}"),
     }
 
-    // 3) THE definitive fully-browserless test: mint an __Secure-ENID in-isolate and replay it
-    //    on a native /search — no sidecar, no Chromium. Reports whether that ENID is TRUSTED.
-    println!("\n[3] browserless_google_serp (in-isolate ENID → native /search, NO sidecar)");
+    // 3) THE definitive fully-browserless test: real consent Accept-all handshake → in-isolate
+    //    BotGuard → native /search — no sidecar, no Chromium. Reports whether the ENID is TRUSTED.
+    println!("\n[3] browserless_google_serp (consent handshake + in-isolate → native /search, NO sidecar)");
     match browserless_google_serp(&query).await {
         Ok(v) => {
             let g = |k: &str| v.get(k).cloned().unwrap_or(json!("?"));
+            println!("    consent_hshk : {}", g("consent_handshake"));
+            println!("    earned       : {}", g("earned_cookies"));
+            println!(
+                "    has_aec      : {}  has_nid: {}",
+                g("has_aec"),
+                g("has_nid")
+            );
             println!("    minted_enid  : {}", g("minted_enid"));
             println!("    enid_trusted : {}", g("enid_trusted"));
             println!(

@@ -2189,51 +2189,111 @@ async fn probe_mint(url: &str) -> Result<Value, String> {
     }))
 }
 
-/// FULLY BROWSERLESS google SERP attempt — no sidecar, no Chromium, at all. Mints an
-/// `__Secure-ENID` IN-ISOLATE (runs the homepage's own scripts to completion via
-/// `probe_page_async` under the fidelity globals), then replays exactly those in-isolate-earned
-/// cookies on a NATIVE `/search` fetch, and reports whether that browserless ENID is TRUSTED
-/// (real SERP) or not (the `enablejs` shell). This is the definitive test of "can the browserless
-/// mint alone unlock the SERP" — the one path the sidecar-gated `web_search` never exercises.
+/// FULLY BROWSERLESS google SERP attempt — no sidecar, no Chromium, at all. Does the REAL
+/// consent Accept-all handshake (a net-trace of real Chrome shows the trusted `__Secure-ENID`
+/// is minted by `consent.google.com/save` + `/gen_204`, alongside `NID`/`AEC` — NOT by a bare
+/// homepage GET, and a synthetic `SOCS` suppresses it). Flow: GET homepage → if it's the consent
+/// interstitial, POST its Accept-all form (mints `NID`/`SOCS`/`__Secure-BUCKET`/trusted ENID into
+/// the jar) → load the real homepage → run its integrity JS to completion in-isolate under the
+/// fidelity globals (refresh cookies) → replay the FULL earned jar on a native `/search`, and
+/// report the earned cookie set + whether the ENID is trusted (real SERP vs `enablejs` shell).
 pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
     let session = Session::new();
     let (strategy, _src) = resolve_strategy(&session, "google")?;
-    // 1) in-isolate mint: fetch the homepage natively, then run its scripts to completion.
     let home = "https://www.google.com/";
     let profile = fingerprint::select("www.google.com");
+    let ua = profile.user_agent.clone();
+    let now = enid::now_secs();
     let mut jar = CookieJar::new();
+
+    // 1) Homepage WITHOUT a synthetic SOCS, so google serves the real consent interstitial
+    //    (a bare GET sets only AEC + ENID, never NID; a fake SOCS suppresses even that).
     let res = fetch_html(
         home,
         FetchOptions {
             allow_non_html: true,
             profile: Some(&profile),
-            bypass_consent: true,
+            max_redirects: Some(5),
             jar: Some(&mut jar),
+            now,
             ..Default::default()
         },
     )
     .await
     .map_err(|e| e.to_string())?;
+
+    // 2) Real Accept-all consent handshake → mints NID/SOCS/__Secure-BUCKET + trusted ENID.
+    let consent = turbo_surf_core::consent::handshake_if_consent(
+        &mut jar,
+        &res.final_url,
+        &res.html,
+        &ua,
+        now,
+    )
+    .await?;
+
+    // 3) Load the real homepage (the consent `continue` target, or the bare page if no wall).
+    let home_html = match &consent {
+        Some(c) => {
+            let cont = c.continue_url.clone().unwrap_or_else(|| home.to_string());
+            fetch_html(
+                &cont,
+                FetchOptions {
+                    allow_non_html: true,
+                    profile: Some(&profile),
+                    max_redirects: Some(5),
+                    jar: Some(&mut jar),
+                    now,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .html
+        }
+        None => res.html.clone(),
+    };
+
+    // 4) Run the homepage's own integrity JS to completion in-isolate (seeded with the earned
+    //    jar), so any in-isolate cookie refresh happens on top of the trusted session.
     let mut tmp = Session::new();
-    tmp.load(&res.final_url, &res.html);
+    tmp.load(home, &home_html);
     let script = tmp.page_script().await;
-    let ua = profile.user_agent.clone();
-    let (_report, storage) =
-        turbo_surf_render::probe_page_async(&res.html, &res.final_url, &ua, "", &script, 8000)
-            .await?;
-    // 2) the storage_state array is exactly EnidCookie's shape — parse the earned cookies.
-    let cookies: Vec<enid::EnidCookie> = serde_json::from_str(&storage).unwrap_or_default();
-    let minted_enid = cookies.iter().any(|c| c.name == enid::ENID_NAME);
-    if !minted_enid {
-        return Ok(json!({
-            "minted_enid": false,
-            "enid_trusted": false,
-            "verdict": "no __Secure-ENID earned in-isolate (nothing to replay)",
-        }));
+    let (_report, storage_out) = turbo_surf_render::probe_page_async(
+        &home_html,
+        home,
+        &ua,
+        &jar.storage_state(),
+        &script,
+        8000,
+    )
+    .await?;
+    for c in serde_json::from_str::<Vec<enid::EnidCookie>>(&storage_out).unwrap_or_default() {
+        jar.add(&c.name, &c.value, &c.domain, &c.path, c.expires);
     }
-    // 3) replay the BROWSERLESS-minted cookies on a native /search — no sidecar involved.
+
+    // 5) Replay the FULL earned jar on a native /search — no sidecar.
+    let earned: Vec<String> = jar
+        .cookies_for(home, now)
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
     let url = build_query_url(&strategy, query, 10, None)?;
-    let html = native_google_fetch(&url, &cookies, &strategy.headers).await?;
+    let sres = fetch_html(
+        &url,
+        FetchOptions {
+            allow_non_html: true,
+            profile: Some(&profile),
+            headers: strategy.headers.clone(),
+            max_redirects: Some(5),
+            jar: Some(&mut jar),
+            now,
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let (_fu, html) = maybe_clear_sorry(&mut jar, sres.final_url, sres.html).await?;
     let shell = is_enablejs_shell(&html);
     let results = if shell {
         vec![]
@@ -2241,12 +2301,16 @@ pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
         parse_serp(&strategy, &html, 10)
     };
     Ok(json!({
-        "minted_enid": true,
+        "consent_handshake": consent.is_some(),
+        "earned_cookies": earned,
+        "has_aec": jar.cookies_for(home, now).iter().any(|c| c.name == "AEC"),
+        "has_nid": jar.cookies_for(home, now).iter().any(|c| c.name == "NID"),
+        "minted_enid": jar.cookies_for(home, now).iter().any(|c| c.name == enid::ENID_NAME),
         "enid_trusted": !shell,
         "verdict": if shell {
-            "enablejs shell — the in-isolate __Secure-ENID is NOT trusted"
+            "enablejs shell — the browserless __Secure-ENID is NOT trusted"
         } else {
-            "real SERP — the in-isolate __Secure-ENID IS trusted"
+            "real SERP — the browserless __Secure-ENID IS trusted"
         },
         "marker": if shell { "" } else { serp_marker(&html) },
         "body_len": html.len(),

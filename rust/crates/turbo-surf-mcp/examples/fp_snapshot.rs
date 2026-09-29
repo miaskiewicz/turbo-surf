@@ -15,6 +15,7 @@ use std::fs;
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let render = args.iter().any(|a| a == "--render");
+    let sync_render = args.iter().any(|a| a == "--sync");
     let path = args
         .iter()
         .skip(1)
@@ -23,7 +24,27 @@ async fn main() {
     let collector = fs::read_to_string(path).expect("read collector");
     // Side effect: installs set_measure_fn / set_raster_fn (+ set_webgl_fn under gpu-metal).
     let _s = turbo_surf_mcp::Session::new();
-    if render {
+    if sync_render {
+        // Sync render path (render_html) — the one the passing GPU-bridge unit test uses.
+        let script =
+            format!("document.body.setAttribute('data-fp', String((function(){{ return ({collector}); }})()));");
+        match turbo_surf_render::render_html("<body></body>", &script) {
+            Ok(dom) => {
+                let val = dom
+                    .split("data-fp=\"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next())
+                    .unwrap_or("")
+                    .replace("&quot;", "\"")
+                    .replace("&amp;", "&");
+                println!("{val}");
+            }
+            Err(e) => {
+                eprintln!("render error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else if render {
         // Stash the collector's JSON result in a body attribute, render (drives the event loop +
         // GPU bridge), then extract it from the serialized DOM.
         let script =

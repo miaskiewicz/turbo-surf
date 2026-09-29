@@ -67,8 +67,7 @@
     gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
     // FNV-ish hash + stats.
     let h = 2166136261 >>> 0,
-      nonZero = 0,
-      distinct = {};
+      nonZero = 0;
     for (let i = 0; i < px.length; i++) {
       h = (h ^ px[i]) >>> 0;
       h = (h * 16777619) >>> 0;

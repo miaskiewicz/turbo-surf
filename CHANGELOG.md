@@ -140,8 +140,10 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
 Driven by a committed **integrity-trap probe** (`scripts/browser-sidecar/probes/botguard-probe.js`,
 run in real Chrome via `run-probe.mjs` and in the isolate via the `fp_snapshot` example, then
 diffed) against the checks the research surfaced (native-fn shape, toString anti-hook, chronometric
-trap, env surface). Closes the tractable traps; the residual (Canvas/WebGL render-hash + VM
-execution integrity) needs a real browser and is out of reach for a synthetic DOM — documented.
+trap, env surface). Closes the tractable traps (and, with the `gpu-metal` WebGL bridge, the WebGL
+render-hash — now pixel-identical to Chrome, see the GPU section); the residual (the Canvas-2D
+render hash + the BotGuard VM's live execution-integrity checks) needs a real browser and is out of
+reach for a synthetic DOM — documented.
 - **Native-fn SHAPE.** A real native function reports `[native code]` AND has **no own
   `prototype`** (a stealth-detection tell: `'prototype' in HTMLCanvasElement.prototype.toDataURL`
   is `false` in Chrome). Our `function`-expression shims carried an own, non-deletable prototype.
@@ -178,10 +180,17 @@ execution integrity) needs a real browser and is out of reach for a synthetic DO
   A broad fidelity win for **any** wall that hashes canvas/WebGL (DataDome, Kasada, reCAPTCHA,
   Akamai, Cloudflare, Incapsula), not just google. Zero cost to the default build / PyPI wheels
   (0 wgpu/naga crates unless the feature is on); enabled via `turbo-surf-mcp`/`napi`/`py`'s own
-  `gpu-metal` pass-through. Real Apple-GPU pixels ≠ Chrome's *exact* ANGLE hash — beats
-  device-invariance/SwiftShader detection, not exact-corpus matching. (Live-measured: even the
-  full kitchen-sink — GPU + interaction + parity — does not earn a trusted google
-  `__Secure-ENID`; that residual is server-side IP-reputation + attestation scoring.)
+  `gpu-metal` pass-through. **Live-measured: the WebGL fingerprint now matches real Chrome
+  pixel-for-pixel** — a standard gradient-triangle draw + `readPixels` produces a byte-identical
+  buffer and the SAME pixel hash as Chrome on the same Apple GPU (wgpu→Metal lands on the same
+  result as ANGLE→Metal for these scenes). Two bugs fixed to get there: WebGL contexts were missing
+  the ~298 enum constants (so `gl.VERTEX_SHADER` etc. were undefined → real draws got `undefined`
+  args → clear-only), and the GLSL rewrite was line-based so a minified single-line shader (all
+  declarations + `main` on one line, as real fingerprint shaders are) was corrupted → translation
+  failed → synthetic fallback. Now: full constant set on the context prototype + a brace-aware
+  statement splitter. So this beats device-invariance/SwiftShader **and** exact-hash comparison for
+  the common WebGL fingerprint scenes. (Live-measured: even the full kitchen-sink — GPU + interaction
+  + parity — does not earn a trusted google `__Secure-ENID`; that residual is server-side attestation.)
 
 ### Added — per-strategy config (data-driven, not google-hardcoded)
 - The `structural` result extractor's engine-internal host filter is now a per-strategy

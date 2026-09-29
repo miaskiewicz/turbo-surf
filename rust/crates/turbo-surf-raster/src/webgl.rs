@@ -46,9 +46,17 @@ pub fn webgl_readback(width: u32, height: u32, calls_json: &str) -> Option<Vec<u
         return None;
     }
     // A guard against any panic in naga/lyon/wgpu escaping the API boundary.
-    std::panic::catch_unwind(|| run(width, height, calls_json).ok())
-        .ok()
-        .flatten()
+    std::panic::catch_unwind(|| match run(width, height, calls_json) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            if std::env::var("TURBO_SURF_WEBGL_DEBUG").is_ok() {
+                eprintln!("webgl_readback error: {e}");
+            }
+            None
+        }
+    })
+    .ok()
+    .flatten()
 }
 
 /// Fallible core: parse the batch, build the GPU state, render, read back.
@@ -593,7 +601,13 @@ fn rewrite(
 ) -> String {
     let mut body = String::new();
     let mut next_attrib_loc = 0u32;
-    for raw in src.lines() {
+    // GLSL declarations (attribute/varying/uniform/precision) are matched per LINE, but a real
+    // shader often puts several on one line separated by `;` (e.g. minified fingerprint shaders:
+    // `attribute vec2 p; void main(){...}`). Pre-split so each top-level (`;`-terminated, OUTSIDE
+    // any `{}` body) statement is its own line; semicolons inside the function body (brace depth
+    // > 0) are left intact so the body stays verbatim.
+    let normalized = split_top_level_statements(src);
+    for raw in normalized.lines() {
         let line = raw.trim();
         if line.starts_with("#version") || line.starts_with("precision ") {
             continue;
@@ -696,16 +710,62 @@ fn replace_ident(src: &str, from: &str, to: &str) -> String {
     out
 }
 
+/// Put each top-level (brace-depth-0) `;`-terminated statement — and each `{`/`}` — on its own
+/// line, so the line-based declaration rewrite sees one declaration per line even when the source
+/// is minified onto a single line. Semicolons inside a `{}` body (depth > 0) are preserved so the
+/// function body is emitted verbatim.
+fn split_top_level_statements(src: &str) -> String {
+    let mut out = String::with_capacity(src.len() + 16);
+    let mut depth: i32 = 0;
+    for ch in src.chars() {
+        match ch {
+            '{' => {
+                depth += 1;
+                out.push(ch);
+            }
+            '}' => {
+                depth -= 1;
+                out.push(ch);
+            }
+            ';' if depth <= 0 => {
+                out.push(';');
+                out.push('\n');
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// GLSL (desktop 450) → naga IR → validate → WGSL string.
 fn glsl_to_wgsl(src: &str, stage: naga::ShaderStage) -> Option<String> {
+    let dbg = std::env::var("TURBO_SURF_WEBGL_DEBUG").is_ok();
     let mut frontend = naga::front::glsl::Frontend::default();
     let options = naga::front::glsl::Options::from(stage);
-    let module = frontend.parse(&options, src).ok()?;
+    let module = match frontend.parse(&options, src) {
+        Ok(m) => m,
+        Err(e) => {
+            if dbg {
+                eprintln!(
+                    "naga glsl parse error ({stage:?}): {e:?}\n--- rewritten glsl ---\n{src}\n---"
+                );
+            }
+            return None;
+        }
+    };
     let mut validator = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
     );
-    let info = validator.validate(&module).ok()?;
+    let info = match validator.validate(&module) {
+        Ok(i) => i,
+        Err(e) => {
+            if dbg {
+                eprintln!("naga validate error ({stage:?}): {e:?}");
+            }
+            return None;
+        }
+    };
     naga::back::wgsl::write_string(&module, &info, naga::back::wgsl::WriterFlags::empty()).ok()
 }
 
@@ -1279,6 +1339,9 @@ fn readback<'e>(
             .map_err(|e| format!("buffer map: {e}"))?;
         let mapped = buffer.slice(..).get_mapped_range();
         let mut rgba = Vec::with_capacity((unpadded * height) as usize);
+        // Emit TOP-LEFT origin rows (wgpu's native order). The caller (the render-tier readPixels
+        // shim) does the GL bottom-left flip when copying into the destination, so flipping here
+        // too would double-flip.
         for row in 0..height {
             let start = (row * padded) as usize;
             rgba.extend_from_slice(&mapped[start..start + unpadded as usize]);
@@ -1320,6 +1383,24 @@ fn f32x4(a: &serde_json::Value) -> Option<[f32; 4]> {
 mod tests {
     use super::*;
     use base64::Engine;
+
+    // A minified single-line shader (declarations + main on one line, `;`-separated) must split so
+    // each top-level declaration is isolated for the line-based rewrite — while the `{}` body's
+    // inner semicolons stay intact. This was the bug that made real fingerprint shaders (all on one
+    // line) fail to translate → clear-only render.
+    #[test]
+    fn split_top_level_statements_isolates_declarations_keeps_body() {
+        let src = "attribute vec2 p; varying vec2 v; void main(){ v=p; gl_Position=vec4(p,0.0,1.0); }";
+        let out = split_top_level_statements(src);
+        let lines: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines[0], "attribute vec2 p;", "first decl isolated: {lines:?}");
+        assert_eq!(lines[1], "varying vec2 v;", "second decl isolated: {lines:?}");
+        // The main() body stays on one piece (its inner `;` at brace depth > 0 not split).
+        assert!(
+            lines[2].starts_with("void main(){") && lines[2].contains("gl_Position=vec4(p,0.0,1.0);"),
+            "body kept verbatim: {lines:?}"
+        );
+    }
 
     fn b64_f32(v: &[f32]) -> String {
         let mut bytes = Vec::with_capacity(v.len() * 4);

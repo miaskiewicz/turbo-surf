@@ -30,7 +30,7 @@ use view::{Field, FieldType, QueryType, TextMode};
 mod enid;
 use enid::{EnidCache, EnidCookie};
 
-pub const VERSION: &str = "0.4.4";
+pub const VERSION: &str = "0.5.0";
 
 // --- native-google SERP diagnostics (env-gated) ------------------------------
 // `TURBO_SURF_TRACE` (any non-empty, non-"0" value) turns on single-line `serp:`

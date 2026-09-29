@@ -3,7 +3,7 @@
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
-## [Unreleased] — client-side fingerprint fidelity + browserless anti-bot recon
+## [0.5.0] — 2026-09-29 — client-side fingerprint fidelity + browserless anti-bot recon
 
 Closes every **client-side** divergence from real Chrome that a BotGuard-class collector
 reads, verified **same-machine/same-IP** against a real headed-Chrome capture. Honest scope:
@@ -84,6 +84,40 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   a populated `mimeTypes` (PDF types linked to the plugins), `Notification.permission`,
   `performance.memory`, `document.scrollingElement`, `window.sessionStorage`, legacy
   `performance.timing`/`navigation`, and `window.scheduler`.
+- **Four structural tells closed, found by a Chrome-vs-turbo-surf snapshot diff** (a shared
+  collector run in real headed Chrome on a live google page vs. the render isolate; after the
+  fixes the diff is 0 structural fields — the remaining diffs are host display/RAM/CPU config,
+  the canvas render-engine hash, and Chrome version drift, none of them tells). A repeatable
+  turbo-surf-side runner ships as `turbo-surf-mcp`'s `fp_snapshot` example. The four:
+  - **`navigator.permissions` was absent** (`permissions.query` threw `TypeError`). Now a
+    spec-shaped Permissions API — `query()` resolves a `PermissionStatus` with realistic default
+    states (`notifications` coupled to `Notification.permission`), the method native-masked.
+  - **`document.characterSet`** (+ `charset`/`inputEncoding`) returned `undefined` (a vendored
+    own-property); forced to `"UTF-8"`.
+  - **`window.location` class-tagged as `"[object DOMImplementation]"`** instead of
+    `"[object Location]"` — a trivial `Object.prototype.toString.call(location)` bot tell.
+  - **A WebGL context was not `instanceof WebGLRenderingContext`** and the constructor prototype
+    was a bare stub (`getParameter` threw off the prototype). Each context now gets a dedicated,
+    native-marked prototype wired to its named global ctor — *without* reusing the shared vendored
+    fallback proto (which would make `location instanceof WebGLRenderingContext` true and collapse
+    the webgl/webgl2 prototypes onto one, both worse tells). Regression-tested against Chrome's
+    captured values (`fingerprint_parity_permissions_location_charset_webgl`).
+- **Physically coherent window/screen geometry.** The viewport is now shorter than the window
+  (`outerHeight = innerHeight + browser chrome`, ~88px) — equal inner/outer height was impossible
+  for a real window and a tell; widths stay equal (no side chrome); `availHeight < screen height`
+  (menubar). Covered by `window_and_screen_geometry_is_coherent`.
+- **macOS-coherent color depth.** `screen.colorDepth`/`pixelDepth` default to **30** on a Mac
+  profile (wide-gamut/HDR displays) and 24 elsewhere — was a flat 24 while claiming an Apple GPU.
+- **All viewport/display fields are param-driven** (`__pick`) with platform-aware sensible
+  defaults: `innerWidth`/`innerHeight`/`outerWidth`/`outerHeight`, `screen` dims,
+  `availWidth`/`availHeight`, `colorDepth`/`pixelDepth`, `deviceMemory`, `hardwareConcurrency`,
+  `languages` — a caller passes a machine profile; nothing is hardcoded to one host.
+- **Real-Chrome UA-CH GREASE brand.** `navigator.userAgentData.brands` and the on-wire
+  `sec-ch-ua` now both emit `"Chromium";v="M", "Google Chrome";v="M", "Not A(Brand";v="99"`
+  (greased brand LAST, token `Not A(Brand` v99), validated against a live capture and unified
+  across the two layers. Previously the wire (`Not_A Brand`/`8`) and render tiers disagreed and
+  neither matched real Chrome — a cross-layer mismatch is a hard tell. (The UA *string* itself was
+  already a correct reduced Chrome UA — verified character-identical to real Chrome bar the major.)
 
 ### Added — GPU (opt-in)
 - **`gpu-metal` cargo feature** (off by default; macOS/Metal) — real Apple-GPU rendering via
@@ -117,8 +151,12 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   `&source=hp`. Measured vs a real incognito Chrome `/search` (which returns the real SERP on this
   same IP — the IP is not the wall), a missing `Referer` + `sec-fetch-site: none` + a bare `?q=`
   were the top "direct/scripted fetch" tells. Honest note: these close real tells but aren't a
-  standalone SERP unlock — the residual is the session params `ei`/`iflsig`/`sxsrf` (minted into
-  the homepage HTML, not synthesizable browserlessly) + a *trusted* ENID (real-browser mint).
+  standalone SERP unlock. The residual is a single upstream gate — **trusted homepage delivery**.
+  An untrusted request is served the `enablejs` shell; a *trusted* one (valid `__Secure-ENID`,
+  real-browser mint) gets the full homepage with the session params `ei`/`iflsig`/`sxsrf` already
+  baked into the HTML. Those params are **server-minted, not client-computed** — not a second,
+  independent blocker but a symptom of the same gate: solve trusted delivery and they come along
+  for free (just parse them out of the trusted HTML).
 
 ### Changed — general iframes (render)
 - **Any** iframe (created, parsed from HTML, or `srcdoc`) now instantiates a real bridged child
@@ -150,6 +188,19 @@ harden the engine broadly against presence/string/timing/interaction-gated walls
   now performs a genuine human-paced search-box interaction to trigger the VM before harvesting
   cookies (the old idle homepage dwell earned no trusted `__Secure-ENID`).
 - **deps:** turbo-dom `0.4.0` → `0.5.1` across all six consumer crates.
+
+### Fixed — hardening (3 rounds of adversarial review)
+Three review passes over the new render/mcp/raster surface, all findings fixed + covered:
+- **`toDataURL` honours a non-PNG MIME** (the `image/webp`/`image/jpeg` support probe) instead of
+  relabelling a raster PNG — returning PNG bytes for a webp request was both wrong and a tell.
+- **`getContext` is idempotent** — a repeat call no longer re-wraps the WebGL
+  `getParameter`/`readPixels` overrides (double-recording / recursion).
+- **`IntersectionObserver.disconnect()` before the async initial entry cancels it** (a stale
+  callback after disconnect was wrong + a behavioural tell).
+- **Canvas `rgba()` accepts percentage alpha + the CSS4 `rgb(r g b / a)` slash form**; the `font`
+  shorthand parser tolerates whitespace runs (a double space no longer desyncs the family list).
+- **Interaction routines error on an unresolved `{param}` placeholder** instead of typing a literal
+  `"{query}"` into a search box.
 
 ## [0.4.4] — client-hint parity + in-isolate reCAPTCHA execution
 

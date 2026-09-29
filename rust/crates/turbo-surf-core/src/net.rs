@@ -81,6 +81,12 @@ pub struct FetchOptions<'a> {
     /// [`crate::consent`]) so JS-gated "before you continue" interstitials are
     /// dismissed and the real, server-rendered page is returned. Off by default.
     pub bypass_consent: bool,
+    /// Override the seeded `SOCS` consent value when `bypass_consent` is on
+    /// (param-driven; `None` = [`crate::consent::DEFAULT_SOCS`]). An empty string
+    /// seeds NO `SOCS`, so the raw consent-gated response is returned even with
+    /// `bypass_consent` on — useful when a caller wants the real interstitial to run
+    /// its own Accept-all handshake rather than shortcut it with a synthetic value.
+    pub consent_socs: Option<String>,
     pub now: f64,
 }
 
@@ -180,7 +186,7 @@ fn build_headers(url: &str, opts: &FetchOptions) -> BTreeMap<String, String> {
         }
     }
     if opts.bypass_consent {
-        seed_consent_cookies(&mut h, url);
+        seed_consent_cookies(&mut h, url, opts.consent_socs.as_deref());
     }
     if let Some(cache) = &opts.cache {
         for (k, v) in cache.validators(url) {
@@ -193,14 +199,14 @@ fn build_headers(url: &str, opts: &FetchOptions) -> BTreeMap<String, String> {
 /// Merge the host's consent-bypass cookies (see [`crate::consent`]) into the
 /// `cookie` header, skipping any name a jar/caller cookie already set so an
 /// explicit cookie always wins.
-fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str) {
+fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str, socs: Option<&str>) {
     let host = crate::url::host_of(url).unwrap_or_default();
-    let extra = crate::consent::cookies_for_host(&host);
+    let extra = crate::consent::cookies_for_host_with(&host, socs);
     if extra.is_empty() {
         return;
     }
     let mut cookie = h.get("cookie").cloned().unwrap_or_default();
-    for (name, value) in extra {
+    for (name, value) in &extra {
         // Don't override a cookie the caller/jar already carries for this name.
         let has = cookie
             .split(';')

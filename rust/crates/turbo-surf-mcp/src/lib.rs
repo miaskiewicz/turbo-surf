@@ -262,6 +262,10 @@ pub struct Session {
     /// real page is served instead of a JS-gated interstitial. `None` = the
     /// default (on); set `Some(false)` to send the raw consent-gated response.
     bypass_consent: Option<bool>,
+    /// Override the seeded `SOCS` consent value (param-driven). `None` = the built-in
+    /// [`consent::DEFAULT_SOCS`]; `Some("")` seeds no `SOCS` (raw consent-gated
+    /// response even with bypass on); `Some(v)` seeds a caller-chosen consent state.
+    consent_socs: Option<String>,
     /// Session-scoped `web_search` parse-strategy overrides, keyed by engine id — the
     /// highest-precedence registry layer (see `resolve_strategy`). Populated by
     /// `web_search_load_strategy`; empty by default (falls through to user-dir/built-in).
@@ -379,6 +383,7 @@ impl Session {
             jar: Some(&mut self.jar),
             profile: Some(&profile),
             bypass_consent: self.bypass_consent.unwrap_or(true),
+            consent_socs: self.consent_socs.clone(),
             ..Default::default()
         };
         let res = fetch_html_with(url, opts).await?;
@@ -445,6 +450,7 @@ impl Session {
             jar: Some(&mut self.jar),
             profile: Some(&profile),
             bypass_consent: true,
+            consent_socs: self.consent_socs.clone(),
             ..Default::default()
         };
         let res = fetch_html_with(&target, opts).await?;
@@ -2758,6 +2764,12 @@ pub fn tools() -> Value {
              page is served. Arg: enabled? (default true)",
         ),
         (
+            "set_consent_socs",
+            "Override the seeded SOCS consent value (param-driven). Arg: socs? \
+             (string; omit/null = built-in default; \"\" = seed no SOCS, i.e. send \
+             the raw consent-gated response so the real Accept-all handshake runs)",
+        ),
+        (
             "run_playwright",
             "Execute a Playwright-style script (page/locator/getBy*/expect, test() blocks) with config (script, url?, testIdAttribute?) over the engine — no browser",
         ),
@@ -2863,6 +2875,12 @@ pub async fn call_tool(session: &mut Session, name: &str, args: &Value) -> Resul
             let on = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
             session.bypass_consent = Some(on);
             Ok(json!({ "bypassConsent": on }))
+        }
+        "set_consent_socs" => {
+            // Param-driven SOCS override. Omitted/null → built-in default; a string
+            // (incl. "") is used verbatim ("" = seed no SOCS, raw consent-gated page).
+            session.consent_socs = arg_str(args, "socs").map(str::to_string);
+            Ok(json!({ "consentSocs": session.consent_socs }))
         }
         "eval_js" | "evaluate" => session.eval_js(script()?),
         "inject_js" => session.inject_js(script()?).await,

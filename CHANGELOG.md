@@ -261,6 +261,15 @@ reach for a synthetic DOM — documented.
   (`atyp=csi`, `rt=…`, `mem=…`, `net=…`, `fid=…`), no token blob (verified with the tracer's
   POST-body/query dump). The exact server-side mechanism that blesses a real browser's ENID is
   still open — the headed-sidecar mint remains the only path to a trusted token.
+- **Param-driven `SOCS` consent seeding.** The synthetic `SOCS` cookie that dismisses google's
+  "before you continue" interstitial was a single hardcoded value; it is now caller-driven via
+  `FetchOptions.consent_socs` (core) + the `set_consent_socs` MCP tool / `Session.consent_socs`.
+  `None` keeps the built-in default (`consent::DEFAULT_SOCS`); a value seeds a caller-chosen consent
+  state; **`""` seeds NO `SOCS`**, so even with bypass on the raw consent-gated response is served
+  and the *real* `consent.google.com/save` Accept-all handshake runs instead of the shortcut. Used
+  to test whether skipping the consent guard was the trust blocker: measured live both ways
+  (default synthetic SOCS vs. `""` → real handshake) — **both return the `enablejs` shell**, so the
+  consent shortcut is NOT the gate; the block stays the server-scored `__Secure-ENID` value.
 
 ### Changed — general iframes (render)
 - **Any** iframe (created, parsed from HTML, or `srcdoc`) now instantiates a real bridged child

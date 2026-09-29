@@ -50,17 +50,42 @@ use crate::sorry::{attr_value, html_unescape};
 /// mints and that a JS-free `/search` needs to return a real SERP.
 pub const NID_COOKIE: &str = "NID";
 
-/// Consent cookies (`name`, `value`) to send for `host`, or empty if the host has
-/// no known consent wall. Matched on a host substring so country TLDs
-/// (`google.co.uk`, `google.de`) and subdomains are covered.
-pub fn cookies_for_host(host: &str) -> &'static [(&'static str, &'static str)] {
+/// Google's consent-state cookie. Seeding one dismisses the "Before you continue"
+/// interstitial so the real page is served. See [`DEFAULT_SOCS`].
+pub const SOCS_COOKIE: &str = "SOCS";
+
+/// The default synthetic `SOCS` value used when consent-bypass is on and the caller
+/// gives no override — a minimal "consent handled" marker that un-hides the page.
+/// It is NOT a real accept-handshake value (that is session-bound); callers wanting a
+/// specific consent state pass their own via the `socs` override (param-driven).
+pub const DEFAULT_SOCS: &str = "CAESHAgBEhIaAB";
+
+/// True when `host` is a google/youtube property that shows the consent wall.
+/// Substring-matched so country TLDs (`google.co.uk`, `google.de`) + subdomains count.
+pub fn host_has_consent_wall(host: &str) -> bool {
     let h = host.to_ascii_lowercase();
-    // `SOCS` dismisses google's "Before you continue to Google" interstitial so the
-    // real homepage / SERP (search box, results, footer) is served un-hidden.
-    if h.contains("google.") || h.contains("youtube.") {
-        return &[("SOCS", "CAESHAgBEhIaAB")];
+    h.contains("google.") || h.contains("youtube.")
+}
+
+/// Consent cookies (`name`, `value`) to send for `host`, or empty if the host has no
+/// known consent wall. `socs` overrides the seeded `SOCS` value (`None` =
+/// [`DEFAULT_SOCS`]); an empty override string means "seed no `SOCS`" (send the raw
+/// consent-gated response). The value is owned so it can be caller-driven.
+pub fn cookies_for_host_with(host: &str, socs: Option<&str>) -> Vec<(&'static str, String)> {
+    if !host_has_consent_wall(host) {
+        return Vec::new();
     }
-    &[]
+    let value = socs.unwrap_or(DEFAULT_SOCS);
+    if value.is_empty() {
+        return Vec::new();
+    }
+    vec![(SOCS_COOKIE, value.to_string())]
+}
+
+/// Back-compat convenience: the default synthetic consent cookie set for `host`
+/// (equivalent to [`cookies_for_host_with`]`(host, None)`).
+pub fn cookies_for_host(host: &str) -> Vec<(&'static str, String)> {
+    cookies_for_host_with(host, None)
 }
 
 // --- the real consent handshake --------------------------------------------
@@ -404,24 +429,29 @@ mod tests {
 
     #[test]
     fn google_hosts_get_socs() {
-        assert_eq!(
-            cookies_for_host("www.google.com"),
-            &[("SOCS", "CAESHAgBEhIaAB")]
-        );
-        assert_eq!(
-            cookies_for_host("google.co.uk"),
-            &[("SOCS", "CAESHAgBEhIaAB")]
-        );
-        assert_eq!(
-            cookies_for_host("www.youtube.com"),
-            &[("SOCS", "CAESHAgBEhIaAB")]
-        );
+        let expect = vec![("SOCS", DEFAULT_SOCS.to_string())];
+        assert_eq!(cookies_for_host("www.google.com"), expect);
+        assert_eq!(cookies_for_host("google.co.uk"), expect);
+        assert_eq!(cookies_for_host("www.youtube.com"), expect);
     }
 
     #[test]
     fn unknown_hosts_get_nothing() {
         assert!(cookies_for_host("example.com").is_empty());
         assert!(cookies_for_host("nike.com").is_empty());
+    }
+
+    #[test]
+    fn socs_value_is_param_driven() {
+        // A caller-supplied SOCS value is seeded instead of the default.
+        assert_eq!(
+            cookies_for_host_with("www.google.com", Some("CUSTOM_STATE")),
+            vec![("SOCS", "CUSTOM_STATE".to_string())]
+        );
+        // An empty override means "seed no SOCS" — send the raw consent-gated response.
+        assert!(cookies_for_host_with("www.google.com", Some("")).is_empty());
+        // A non-google host never gets a consent cookie regardless of the override.
+        assert!(cookies_for_host_with("example.com", Some("X")).is_empty());
     }
 
     // A faithful shape of google's consent interstitial: a Reject-all form and an

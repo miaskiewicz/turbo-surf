@@ -422,6 +422,11 @@ const __mimeTypes = [
 const __langs = __pick("languages", ["en-US", "en"]);
 const __platform = __pick("platform", "MacIntel");
 const __uaPlatform = __pick("uaPlatform", "macOS");
+// Mac wide-gamut/HDR displays report 30-bit color; other platforms 24. Param-driven with a
+// platform-aware default so a caller can override, and a Windows/Linux profile stays honest.
+const __isMac = __uaPlatform === "macOS" || /mac/i.test(String(__platform));
+const __colorDepth = __pick("colorDepth", __isMac ? 30 : 24);
+const __pixelDepth = __pick("pixelDepth", __colorDepth);
 globalThis.navigator = {
   userAgent: __ua,
   appVersion: __ua.replace(/^Mozilla\//, ""),
@@ -487,14 +492,14 @@ globalThis.navigator = {
   connection: __pick("connection", { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false }),
   // UA-Client-Hints high-entropy surface, consistent with the UA above.
   userAgentData: __pick("userAgentData", {
-    // Order + greased token must match the on-wire sec-ch-ua (net.rs): real Chrome 153 emits
-    // `"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"` with the greased brand
-    // in the MIDDLE. The old render-tier value (`Not)A;Brand v24`, greased last) was a stale
-    // cross-layer mismatch vs the 0.4.4 wire fix — itself a tell.
+    // Order + greased token MUST match the on-wire sec-ch-ua (fingerprint.rs) — a wire/JS
+    // mismatch is a hard tell. Both are validated against a live real-Chrome capture:
+    // `"Chromium";v="M", "Google Chrome";v="M", "Not A(Brand";v="99"` (greased brand LAST,
+    // token `Not A(Brand` v99). The old `Not_A Brand v8` greased-middle matched nothing real.
     brands: [
-      { brand: "Google Chrome", version: __major },
-      { brand: "Not_A Brand", version: "8" },
       { brand: "Chromium", version: __major },
+      { brand: "Google Chrome", version: __major },
+      { brand: "Not A(Brand", version: "99" },
     ],
     mobile: false,
     platform: __uaPlatform,
@@ -503,14 +508,14 @@ globalThis.navigator = {
       platform: __uaPlatform, platformVersion: "15.0.0", uaFullVersion: __major + ".0.0.0",
       mobile: false,
       brands: [
-        { brand: "Google Chrome", version: __major },
-        { brand: "Not_A Brand", version: "8" },
         { brand: "Chromium", version: __major },
+        { brand: "Google Chrome", version: __major },
+        { brand: "Not A(Brand", version: "99" },
       ],
       fullVersionList: [
-        { brand: "Google Chrome", version: __major + ".0.0.0" },
-        { brand: "Not_A Brand", version: "8.0.0.0" },
         { brand: "Chromium", version: __major + ".0.0.0" },
+        { brand: "Google Chrome", version: __major + ".0.0.0" },
+        { brand: "Not A(Brand", version: "99.0.0.0" },
       ],
     }),
   }),
@@ -552,9 +557,13 @@ globalThis.navigator = {
 {
   const __scr = __pick("screen", { width: 1920, height: 1080 });
   const __w = __scr.width || 1920, __h = __scr.height || 1080;
+  // availWidth/Height default to the screen minus OS chrome (macOS menubar ≈ 25px tall, no
+  // side reservation); each is independently overridable via the `screen` object or __pick.
+  const __availW = __pick("availWidth", __scr.availWidth || __w);
+  const __availH = __pick("availHeight", __scr.availHeight || (__h - (__isMac ? 25 : 0)));
   globalThis.screen = {
-    width: __w, height: __h, availWidth: __w, availHeight: __h,
-    colorDepth: 24, pixelDepth: 24,
+    width: __w, height: __h, availWidth: __availW, availHeight: __availH,
+    colorDepth: __colorDepth, pixelDepth: __pixelDepth,
     // ScreenOrientation is an EventTarget — apps listen for orientation changes;
     // a missing `addEventListener` throws and can trip a component during hydration.
     orientation: {
@@ -2002,10 +2011,18 @@ if (typeof globalThis.URL === "undefined") {
       try { globalThis[k] = v; } catch (_e) {}
     }
   };
-  set("innerWidth", 1280);
-  set("innerHeight", 800);
-  set("outerWidth", 1280);
-  set("outerHeight", 800);
+  // A real browser window is TALLER than its viewport: the tab strip + omnibox (+ any
+  // bookmarks bar) sit above the content, so `outerHeight > innerHeight` always. Width is
+  // normally equal (Chrome has no left/right window chrome; the scrollbar is inside inner).
+  // Equal inner/outer height (the old 800==800) is impossible for a real window — a tell.
+  const __iw = __pick("innerWidth", 1280);
+  const __ih = __pick("innerHeight", 800);
+  // ~40px tab strip + ~48px toolbar (no bookmarks bar) — a plausible desktop-Chrome chrome height.
+  const __chromeH = 88;
+  set("innerWidth", __iw);
+  set("innerHeight", __ih);
+  set("outerWidth", __pick("outerWidth", __iw));
+  set("outerHeight", __pick("outerHeight", __ih + __chromeH));
   set("devicePixelRatio", 1);
   set("screenX", 0);
   set("screenY", 0);
@@ -2018,7 +2035,7 @@ if (typeof globalThis.URL === "undefined") {
   set("scrollBy", () => {});
   set("screen", {
     width: 1280, height: 800, availWidth: 1280, availHeight: 800,
-    colorDepth: 24, pixelDepth: 24,
+    colorDepth: __colorDepth, pixelDepth: __pixelDepth,
     orientation: { type: "landscape-primary", angle: 0, addEventListener() {}, removeEventListener() {} },
   });
   set("visualViewport", {

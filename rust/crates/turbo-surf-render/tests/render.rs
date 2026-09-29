@@ -379,15 +379,27 @@ async fn fingerprint_parity_permissions_location_charset_webgl() {
     // The snapshot lands in an HTML attribute, so `"` serializes as `&quot;`.
     let q = |s: &str| s.replace('"', "&quot;");
     let want = [
-        (r#""permType":"function""#, "permissions.query is a function"),
+        (
+            r#""permType":"function""#,
+            "permissions.query is a function",
+        ),
         (r#""permNative":true"#, "permissions.query is native-masked"),
         (r#""charset":"UTF-8""#, "document.characterSet is UTF-8"),
-        (r#""locTag":"[object Location]""#, "location class-tags as Location"),
+        (
+            r#""locTag":"[object Location]""#,
+            "location class-tags as Location",
+        ),
         (r#""instOf":true"#, "gl instanceof WebGLRenderingContext"),
-        (r#""protoGetParam":true"#, "getParameter is prototype-resident"),
+        (
+            r#""protoGetParam":true"#,
+            "getParameter is prototype-resident",
+        ),
         (r#""getParamNative":true"#, "getParameter is native"),
         (r#""protosDiffer":true"#, "webgl/webgl2 protos are distinct"),
-        (r#""locationNotGl":true"#, "location is not instanceof the GL ctor"),
+        (
+            r#""locationNotGl":true"#,
+            "location is not instanceof the GL ctor",
+        ),
     ];
     for (needle, why) in want {
         assert!(out.contains(&q(needle)), "{why}: {out}");
@@ -396,6 +408,50 @@ async fn fingerprint_parity_permissions_location_charset_webgl() {
         out.contains(r#"data-perm-state="prompt:notifications""#),
         "permissions.query resolves to a spec-shaped PermissionStatus: {out}"
     );
+}
+
+// Window/screen geometry must be physically coherent like a real browser window: the viewport
+// is SHORTER than the window (tab strip + omnibox chrome), so outerHeight > innerHeight; widths
+// are equal (no side chrome); availHeight < screen height (menubar); and a Mac profile reports
+// 30-bit color. Equal inner/outer height (the old default) is impossible for a real window.
+#[tokio::test]
+async fn window_and_screen_geometry_is_coherent() {
+    let script = r#"
+        var o = {
+            iw: window.innerWidth, ih: window.innerHeight,
+            ow: window.outerWidth, oh: window.outerHeight,
+            sh: screen.height, ah: screen.availHeight,
+            cd: screen.colorDepth, pd: screen.pixelDepth,
+        };
+        document.body.setAttribute('data-geo', JSON.stringify(o));
+    "#;
+    let out = render_page("<body></body>", "https://x.test/", script)
+        .await
+        .unwrap();
+    let s = out
+        .split("data-geo=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let g: serde_json::Value = serde_json::from_str(&s.replace("&quot;", "\"")).unwrap();
+    let n = |k: &str| g[k].as_i64().unwrap();
+    assert!(
+        n("oh") > n("ih"),
+        "outerHeight must exceed innerHeight (browser chrome): {g}"
+    );
+    assert_eq!(
+        n("ow"),
+        n("iw"),
+        "outerWidth equals innerWidth (no side chrome): {g}"
+    );
+    assert!(
+        n("ah") < n("sh"),
+        "availHeight must be less than screen height (menubar): {g}"
+    );
+    assert_eq!(n("cd"), 30, "macOS default colorDepth is 30-bit: {g}");
+    assert_eq!(n("pd"), 30, "macOS default pixelDepth is 30-bit: {g}");
 }
 
 // disconnect() before the async initial entry fires must cancel it — Chrome delivers the entry
@@ -1000,7 +1056,9 @@ fn chrome_fingerprint_identity_is_coherent() {
         v["getContextNative"], true,
         "getContext.toString must be native"
     );
-    assert_eq!(v["brands"], "Google Chrome 153,Not_A Brand 8,Chromium 153");
+    // Grease + order validated against a live real-Chrome capture (greased brand LAST,
+    // token `Not A(Brand` v99); must match the on-wire sec-ch-ua in fingerprint.rs.
+    assert_eq!(v["brands"], "Chromium 153,Google Chrome 153,Not A(Brand 99");
     assert_eq!(v["pdf"], true);
     assert_eq!(v["mimeLen"], 2);
     assert_eq!(v["notif"], "default");

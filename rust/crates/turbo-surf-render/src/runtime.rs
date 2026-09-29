@@ -3216,20 +3216,51 @@ globalThis.__domSig = () => {
   mark(cancelAnimationFrame, "cancelAnimationFrame"); // now its own fn, not a clearTimeout alias
   // Event API: the vendored addEventListener/removeEventListener/dispatchEvent are `function`
   // shims — their `.toString()` leaks source AND they carry an own `prototype` (native methods
-  // don't), both tamper tells BotGuard reads. Replace with prototype-less native-shaped forwarders
-  // on their OWN object (window/document may hold their own copies; EventTarget.prototype the
-  // shared one — reassign wherever it's an own prop so we don't add a new own prop that itself is
-  // a tell).
-  for (const name of ["addEventListener", "removeEventListener", "dispatchEvent"]) {
-    const owners = [globalThis, globalThis.document, globalThis.EventTarget && globalThis.EventTarget.prototype];
-    for (const o of owners) {
+  // don't). WORSE, they sit as WINDOW OWN-PROPS: real Chrome inherits them from
+  // EventTarget.prototype, so `window.hasOwnProperty('addEventListener')` is FALSE in Chrome but
+  // was TRUE for us — a checkable tell. Fix: native-shape the methods on EventTarget.prototype,
+  // wire window's prototype chain window -> Window.prototype -> EventTarget.prototype (as Chrome
+  // does), and DELETE the window (and document) own copies so they're inherited, not own.
+  const __evNames = ["addEventListener", "removeEventListener", "dispatchEvent"];
+  (() => { try {
+    const ET = globalThis.EventTarget;
+    if (!ET || !ET.prototype) return;
+    for (const name of __evNames) {
+      // Prefer a working impl (window's own, else the proto's) and native-shape it on the proto.
+      const impl = (Object.prototype.hasOwnProperty.call(globalThis, name) && globalThis[name])
+        || ET.prototype[name]
+        || (globalThis.document && globalThis.document[name]);
+      if (typeof impl === "function") {
+        try { ET.prototype[name] = nativize(impl, name, name === "dispatchEvent" ? 1 : 2); } catch (e) {}
+      }
+    }
+    // window -> Window.prototype -> EventTarget.prototype (Chrome's chain). If Window is absent,
+    // fall back to inheriting EventTarget.prototype directly so the methods still resolve.
+    const W = globalThis.Window;
+    try {
+      if (W && W.prototype) {
+        if (Object.getPrototypeOf(W.prototype) !== ET.prototype) Object.setPrototypeOf(W.prototype, ET.prototype);
+        if (Object.getPrototypeOf(globalThis) !== W.prototype) Object.setPrototypeOf(globalThis, W.prototype);
+      } else if (Object.getPrototypeOf(globalThis) !== ET.prototype) {
+        Object.setPrototypeOf(globalThis, ET.prototype);
+      }
+    } catch (e) {}
+    // Remove the WINDOW own copies so they're inherited via the chain (Chrome: hasOwnProperty
+    // false on window). Document keeps native-shaped OWN copies (rtdom's document has no
+    // EventTarget proto chain to inherit through; a prototype-less native-marked own method still
+    // matches the native-fn SHAPE a collector reads on document.addEventListener).
+    for (const name of __evNames) {
       try {
-        if (o && Object.prototype.hasOwnProperty.call(o, name) && typeof o[name] === "function") {
-          o[name] = nativize(o[name], name, name === "dispatchEvent" ? 1 : 2);
+        if (Object.prototype.hasOwnProperty.call(globalThis, name)) delete globalThis[name];
+      } catch (e) {}
+      try {
+        const d = globalThis.document;
+        if (d && Object.prototype.hasOwnProperty.call(d, name) && typeof d[name] === "function") {
+          d[name] = nativize(d[name], name, name === "dispatchEvent" ? 1 : 2);
         }
       } catch (e) {}
     }
-  }
+  } catch (e) {} })();
   if (globalThis.Headers) mark(globalThis.Headers, "Headers");
   const nav = globalThis.navigator;
   if (nav && nav.clipboard) { mark(nav.clipboard.writeText, "writeText"); mark(nav.clipboard.readText, "readText"); }

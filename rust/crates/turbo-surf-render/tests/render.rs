@@ -42,6 +42,59 @@ fn deno_global_is_deleted_from_page_scope() {
     }
 }
 
+// window.addEventListener/removeEventListener/dispatchEvent must be INHERITED (from
+// EventTarget.prototype via Window.prototype), NOT window own-props — real Chrome:
+// window.hasOwnProperty('addEventListener') === false. They must still work + be native-shaped.
+#[test]
+fn window_event_methods_are_inherited_not_own() {
+    let out = run_with_dom(
+        "<body></body>",
+        "(() => { let fired = false; const h = () => { fired = true; }; \
+           globalThis.addEventListener('x', h); globalThis.dispatchEvent(Object.assign(new Event('x'))); \
+           return JSON.stringify({ \
+             ownAEL: Object.prototype.hasOwnProperty.call(globalThis, 'addEventListener'), \
+             ownRM: Object.prototype.hasOwnProperty.call(globalThis, 'removeEventListener'), \
+             ownDE: Object.prototype.hasOwnProperty.call(globalThis, 'dispatchEvent'), \
+             inherited: (typeof globalThis.addEventListener === 'function'), \
+             etOwns: Object.prototype.hasOwnProperty.call(globalThis.EventTarget.prototype, 'addEventListener'), \
+             noProto: !('prototype' in globalThis.addEventListener), \
+             native: Function.prototype.toString.call(globalThis.addEventListener).includes('[native code]'), \
+             fired, \
+           }); })()",
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        v["ownAEL"], false,
+        "window must NOT own addEventListener: {v}"
+    );
+    assert_eq!(
+        v["ownRM"], false,
+        "window must NOT own removeEventListener: {v}"
+    );
+    assert_eq!(v["ownDE"], false, "window must NOT own dispatchEvent: {v}");
+    assert_eq!(
+        v["inherited"], true,
+        "window.addEventListener still resolves (inherited): {v}"
+    );
+    assert_eq!(
+        v["etOwns"], true,
+        "EventTarget.prototype owns addEventListener: {v}"
+    );
+    assert_eq!(
+        v["noProto"], true,
+        "inherited addEventListener has no own prototype: {v}"
+    );
+    assert_eq!(
+        v["native"], true,
+        "inherited addEventListener is native-shaped: {v}"
+    );
+    assert_eq!(
+        v["fired"], true,
+        "addEventListener/dispatchEvent still function end-to-end: {v}"
+    );
+}
+
 // Error.stack must NOT name page scripts "<page>" — a real Chrome inline script shows the
 // document URL (here about:blank), and "<page>" is a turbo-surf tell BotGuard parses from stacks.
 #[test]

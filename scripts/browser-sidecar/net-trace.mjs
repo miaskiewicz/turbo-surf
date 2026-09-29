@@ -18,12 +18,9 @@
 // --json prints the raw {requests, cookieSetters, posts} for machine diffing; default is a
 // grouped human report. Needs `patchright` (already a dep here) + a local Chrome channel.
 import { chromium } from "patchright";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
   const out = {
@@ -75,7 +72,7 @@ async function acceptConsent(page) {
           return label;
         }
       }
-    } catch (e) {}
+    } catch {}
   }
   return null;
 }
@@ -107,7 +104,7 @@ if (args.cookies.length) {
   const host = (() => {
     try {
       return new URL(args.url).hostname;
-    } catch (e) {
+    } catch {
       return "";
     }
   })();
@@ -146,7 +143,7 @@ page.on("response", async (r) => {
       const names = h["set-cookie"].split("\n").map((l) => l.split("=")[0].trim());
       cookieSetters.push({ url: r.url(), status: r.status(), cookies: names });
     }
-  } catch (e) {}
+  } catch {}
 });
 
 try {
@@ -163,7 +160,7 @@ if (args.accept) {
     // sets the real cookies) — don't clear; the consent-flow requests are minor noise.
     try {
       await page.waitForLoadState("networkidle", { timeout: 15000 });
-    } catch (e) {}
+    } catch {}
   }
 }
 for (const f of args.fills) {
@@ -185,7 +182,7 @@ const norm = (u) => {
   try {
     const x = new URL(u);
     return x.origin + x.pathname;
-  } catch (e) {
+  } catch {
     return u;
   }
 };

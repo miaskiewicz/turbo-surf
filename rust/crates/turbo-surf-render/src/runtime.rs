@@ -4125,7 +4125,14 @@ globalThis.__domSig = () => {
       isSecureContext: true, originAgentCluster: true, offscreenBuffering: true, credentialless: false,
       origin: (G.location && G.location.origin) || "https://www.google.com", clientInformation: G.navigator,
       locationbar: bar(), menubar: bar(), personalbar: bar(), scrollbars: bar(), statusbar: bar(), toolbar: bar(),
-      caches: {}, cookieStore: {}, navigation: {}, speechSynthesis: {}, viewport: {}, launchQueue: {},
+      // These real Web APIs are FEATURE-DETECTED by page code (`if (window.X)`) which then calls
+      // their methods — a bare {} is truthy but methodless, so e.g. `navigation.entries()` throws
+      // (before, an undefined `navigation` was skipped). Give each its commonly-called methods.
+      caches: { open: () => Promise.resolve({ match: () => Promise.resolve(undefined), put: () => Promise.resolve(), keys: () => Promise.resolve([]) }), has: () => Promise.resolve(false), keys: () => Promise.resolve([]), match: () => Promise.resolve(undefined), delete: () => Promise.resolve(false) },
+      cookieStore: { get: () => Promise.resolve(null), getAll: () => Promise.resolve([]), set: () => Promise.resolve(), delete: () => Promise.resolve(), addEventListener() {}, removeEventListener() {} },
+      navigation: { entries: () => [], currentEntry: null, canGoBack: false, canGoForward: false, navigate() {}, reload() {}, traverseTo() {}, back() {}, forward() {}, updateCurrentEntry() {}, addEventListener() {}, removeEventListener() {} },
+      speechSynthesis: { getVoices: () => [], speak() {}, cancel() {}, pause() {}, resume() {}, pending: false, speaking: false, paused: false, addEventListener() {}, removeEventListener() {} },
+      viewport: {}, launchQueue: { setConsumer() {} },
       external: {}, fence: null, crashReport: {}, documentPictureInPicture: {}, event: undefined,
       styleMedia: { type: "screen", matchMedium: nativize(() => false, "matchMedium") }, screenLeft: 0, screenTop: 0,
       webkitURL: G.URL, webkitMediaStream: G.MediaStream, webkitRTCPeerConnection: G.RTCPeerConnection,

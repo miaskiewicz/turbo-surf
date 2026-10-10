@@ -6,16 +6,15 @@
 //! sees one consistent browser, and at scale sees many distinct ones.
 //!
 //! It does **not** defeat active canvas/WebGL/audio draw-and-hash or PoW
-//! challenges (those need a real raster backend / a token solver — out of scope;
-//! see the tier-3 notes). The seed pool is the highest-value piece you can build
-//! in-house with no Chromium.
+//! challenges by itself. The optional raster/GPU bridges and render-tier solvers
+//! handle separate parts of those workloads; acceptance must still be measured.
 //!
 //! Coherence is the whole point: every [`Profile`] field agrees with the others
 //! (UA OS ↔ `sec-ch-ua-platform` ↔ `navigator.platform`; Chrome major ↔
 //! `sec-ch-ua`; `deviceMemory` within Chrome's privacy cap). A single `Profile`
-//! drives BOTH the HTTP headers ([`crate::net`]) and the render-tier navigator —
-//! **rotate both layers with the same profile**, or a page that fetches over HTTP
-//! and then reads `navigator` sees a mismatch (itself a bot signal).
+//! should drive both HTTP and JS identity. Per-call rotation currently applies
+//! only to rustls headers: wreq emulation pins default_profile(). Pin that same
+//! identity in the render tier on the wreq path to avoid a cross-layer mismatch.
 
 /// `Accept` header value — stable across Chrome versions and OSes, so it is not
 /// part of the per-profile axes.
@@ -31,7 +30,7 @@ pub struct Profile {
     pub chrome_major: u16,
     /// Full build version for high-entropy UA-CH (`fullVersionList` /
     /// `uaFullVersion`), from the per-version [`crate::browser`] registry, e.g.
-    /// `"154.0.7258.66"`. The UA string stays reduced to `<major>.0.0.0`.
+    /// `"154.0.8037.98"`. The UA string stays reduced to `<major>.0.0.0`.
     pub full_version: &'static str,
     /// Top-level navigation header ORDER for this Chrome version (a fingerprint),
     /// from the [`crate::browser`] registry — Chrome reorders it across releases.
@@ -55,6 +54,29 @@ pub struct Profile {
 }
 
 impl Profile {
+    /// UA-CH architecture for the selected desktop platform.
+    pub fn architecture(&self) -> &'static str {
+        if self.nav_platform == "MacIntel" {
+            if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
+                "x86"
+            } else {
+                "arm"
+            }
+        } else {
+            "x86"
+        }
+    }
+
+    /// A native macOS session uses its actual product version. Foreign-platform
+    /// profiles retain their configured defaults; the frozen UA OS token is separate.
+    pub fn platform_version(&self) -> String {
+        match self.nav_platform {
+            "MacIntel" => macos_product_version().to_string(),
+            "Win32" => "10.0.0".to_string(),
+            _ => String::new(),
+        }
+    }
+
     /// Chrome's top-level navigation headers for this identity, minus the ones the
     /// HTTP client owns (`accept-encoding`, `host`, `cookie`). The returned order
     /// is Chrome's; callers that store into a `BTreeMap` lose it (a known
@@ -74,6 +96,43 @@ impl Profile {
             ("upgrade-insecure-requests", "1".to_string()),
         ]
     }
+}
+
+fn macos_product_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        if let Ok(plist) =
+            std::fs::read_to_string("/System/Library/CoreServices/SystemVersion.plist")
+        {
+            if let Some(rest) = plist.split("<key>ProductVersion</key>").nth(1) {
+                if let Some(value) = rest
+                    .split("<string>")
+                    .nth(1)
+                    .and_then(|s| s.split("</string>").next())
+                {
+                    if let Some(version) = normalize_product_version(value) {
+                        return version;
+                    }
+                }
+            }
+        }
+        "15.0.0".to_string()
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn normalize_product_version(value: &str) -> Option<String> {
+    let mut parts: Vec<&str> = value.trim().split('.').collect();
+    if parts.len() > 3
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    parts.resize(3, "0");
+    Some(parts.join("."))
 }
 
 struct Os {
@@ -239,6 +298,15 @@ pub fn default_profile() -> Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn product_versions_are_normalized_without_accepting_markup() {
+        assert_eq!(normalize_product_version("27.2"), Some("27.2.0".into()));
+        assert_eq!(normalize_product_version(" 15.0.1 "), Some("15.0.1".into()));
+        for value in ["", "27..2", "27.2.extra", "27.2.0.1", "<string>"] {
+            assert_eq!(normalize_product_version(value), None);
+        }
+    }
 
     #[test]
     fn pool_is_large() {

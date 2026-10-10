@@ -67,8 +67,9 @@ can't be reused) — only cut a tag when a release is intended.
   `rust/target/release/turbo-surf-mcp` build.
 - crates publish in dependency order so each dependent resolves its just-published
   dep; path deps carry an explicit `version` so crates.io accepts them.
-- Browser/crawler packages used only by the harness (`playwright`, `crawlee`, …) are
-  not committed deps — install ad-hoc to run the benchmarks.
+- `playwright` is a committed root dev dependency for the shim/tests; `patchright`
+  is declared in `scripts/browser-sidecar/package.json`. Other comparison crawlers
+  are installed ad-hoc. None is an engine runtime dependency.
 
 ## Caveat: the `trust-anchors` feature + vendored wreq
 

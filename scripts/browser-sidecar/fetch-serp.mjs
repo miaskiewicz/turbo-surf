@@ -8,34 +8,17 @@
 //   MINT (the native-google ENID path — mint a trusted __Secure-ENID rarely):
 //     stdin  : {"mint":true,"headless"?:bool,"proxy"?:"…"}
 //     stdout : {"cookies":[{"name","value","domain","path","expires"}, …]}
-//     Loads the google homepage in REAL headed Chrome so google issues a TRUSTED
-//     __Secure-ENID; the engine then reuses that cookie in fast native (no-browser)
-//     /search fetches. A native/raw homepage GET earns only an UNtrusted ENID, so
-//     minting MUST go through the real browser here.
+//     Visits the homepage and interacts with its box, then requires ENID in the
+//     returned cookies. Presence does not attest trust; current Chrome can search
+//     without ENID. See harness/detection/FINDINGS.md for measured outcomes.
 //   headless defaults to false (headed) — see launchContext.
 //   nonzero exit + stderr on failure.
 //
 // Wire it (opt-in):
 //   TURBO_SURF_BROWSER_FETCH_CMD="node .sidecar/fetch-serp.mjs" turbo-surf-mcp
 //
-// DESIGN (informed by ../botto, our own headless/automation detector):
-//   botto flags naive stealth as MORE detectable, not less —
-//   `webdriver-getter-tampered` catches `Object.defineProperty(navigator,'webdriver',…)`,
-//   and the surface/deep-probe scan flags any non-native (JS-getter) override of
-//   plugins/WebGL/Notification/etc. via Function.prototype.toString + descriptor checks.
-//   So we do the OPPOSITE of patching: launch REAL Chrome (channel:'chrome', not
-//   chromium — genuine plugins/WebGL/audio/fonts/toString), HEADED (headless zeroes
-//   plugins + breaks Notification↔Permissions coherence), and hide the one remaining
-//   tell (navigator.webdriver) NATIVELY via --disable-blink-features=AutomationControlled
-//   rather than a tamperable JS getter. Minimal cookies only; no surface tampering.
-//   Lives in the gitignored .sidecar/ (its node_modules + any browser are never committed).
-
-// patchright: a drop-in patched playwright that suppresses the CDP tells a real
-// playwright leaks — chiefly the `Runtime.enable` console-serialization side-channel
-// that lets google (and our own botto's `cdp-inspector-attached`) flag a CDP-driven
-// browser even with navigator.webdriver spoofed and real Chrome + human input. This
-// is THE fix for "real headed Chrome still gets /sorry": it's the automation
-// CONNECTION being detected, not the IP/profile/mouse.
+// patchright reduces known CDP automation signals. Headed Chrome + a persistent
+// profile is the chosen oracle configuration, not a guarantee of Google clearance.
 import { chromium } from "patchright";
 
 function readStdin() {
@@ -61,12 +44,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // Browser) — the caller uses it directly.
 async function launchContext(proxy, headless) {
   const userDataDir = join(HERE, ".chrome-profile"); // gitignored, persists between runs
-  // HEADED by default. Measured: headless real Chrome trips google's /sorry "unusual
-  // traffic" wall (headless zeroes plugins + breaks Notification↔Permissions coherence
-  // — an automation tell) while HEADED Chrome on the same IP returns the real SERP.
-  // `headless` is caller-controlled (see main): per-call `headless` on stdin, else the
-  // TURBO_SURF_SIDECAR_HEADLESS env, else headed. Run headless only where there's no
-  // display (CI/servers — wrap in xvfb) and accept the /sorry risk.
+  // Headed by default; callers can override it. Google acceptance depends on the
+  // current challenge/profile/network, so measure either mode rather than assume.
   const opts = {
     channel: "chrome",
     headless,
@@ -82,13 +61,8 @@ async function launchContext(proxy, headless) {
 // cookies (the trusted __Secure-ENID, plus AEC/SOCS/NID when present). The engine
 // caches + replays __Secure-ENID on native /search fetches.
 //
-// CRITICAL: google's BotGuard integrity VM is INTERACTION-GATED — it does NOT fire on
-// an idle homepage dwell; it loads + runs (and the trusted-ENID grant follows) only
-// after the search box is engaged. An idle load earns AEC/NID/SOCS but often no trusted
-// __Secure-ENID. So we perform a genuine, human-paced search-box interaction (focus +
-// per-character typing with jitter) to trigger BotGuard, then let it settle before
-// harvesting cookies. We do NOT submit (avoids a needless /sorry exposure); focus+type
-// is what drives the VM.
+// This mint flow engages the box but does not submit. It was designed around an
+// earlier interaction-gated ENID grant; modern responses may not issue ENID at all.
 async function mintEnid(context) {
   await context.addCookies([{ name: "SOCS", value: "CAI", domain: ".google.com", path: "/" }]);
   const page = context.pages()[0] || (await context.newPage());

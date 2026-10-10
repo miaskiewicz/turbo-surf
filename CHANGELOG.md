@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased — reusable detection differential
+
+- Fresh-cookie Chrome/native harness with baseline and instrumented controls, JS-interface
+  argument/result samples and stacks, request payloads, response bodies, optional Chrome
+  debugger script inventory, process failure artifacts, comparison output and build hashes.
+  Native runs use wreq, trust-anchors, the Metal WebGL bridge and CoreText when compiled.
+- Optional shared capability, BotGuard-integrity and WebGL probes run after the recorded
+  verdict. Added explicit addon selection to the botto harness to avoid stale release builds.
+- Corrected `document.cookie`: HttpOnly cookies remain available to HTTP requests but
+  are hidden from page JS and protected from script overwrite/creation.
+- Parsed style text into live CSSOM rules with correct selectors/classes; parser-created
+  hidden controls now expose their populated `.value` properties (upstream turbo-test
+  binding fix, mechanically re-vendored).
+- Iframes allocate real V8 contexts with independent ECMAScript intrinsics, shared
+  HttpOnly-safe session cookies, and preserved parent/message identities. DOM wrappers
+  and cross-origin enforcement remain incomplete.
+- Classic page/frame scripts run from the host pump rather than indirect eval, retain
+  document source locations/lexical bindings and avoid dispatcher frames in error stacks.
+- Added session-scoped Accept-CH negotiation and request-specific navigation/resource
+  headers, referrer/Origin rules and credentials handling, including repeated Accept-CH
+  response fields. Metal identity now comes from
+  the adapter used for pixel readback instead of a fixed M4 Pro string.
+- Corrected current tool/crate counts, feature defaults, profile scope and Google status docs.
+
+**Correction to historical Google conclusions (2026-10-09):** the entries below record
+what was observed/assumed at the time, not universal Google requirements. A fresh Chrome
+154 control now gets results without ENID by executing an initial search shell and then
+retrying with `sei`. The fully equipped native runtime executes the shell, writes `SG_SS`
+and retries, but was rejected in the initial audit. That audit identified a Google `lc`
+CSSOM error and multiple interface/context gaps, repaired in the unreleased changes above.
+Post-repair fresh-session reruns confirm those probe contracts and accepted client hints,
+but native still receives HTTP 429 while the clean Chrome control returns results.
+Neither complete client parity nor browserless impossibility has been established.
+See [the dated evidence](./harness/detection/FINDINGS.md). Native SERP clearance is unresolved.
+
+
 All notable changes to turbo-surf are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 

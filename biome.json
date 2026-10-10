@@ -28,7 +28,8 @@
       "**/package-lock.json",
       "**/browser_env.js",
       ".sidecar/**",
-      "**/.chrome-profile/**"
+      "**/.chrome-profile/**",
+      "harness/detection/artifacts/**"
     ]
   }
 }

@@ -6,7 +6,7 @@ so the browserless crawler is Rust too. The only piece that *must* stay JS is th
 process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed from **crates.io** as the `turbo-dom-parser` crate
-(`{ package = "turbo-dom", version = "0.3.1" }`) — its pure-Rust `rtdom::Tree`
+(`{ package = "turbo-dom", version = "0.5.1" }`) — its pure-Rust `rtdom::Tree`
 (handle-based `u32` DOM, no napi/wasm boundary).
 
 ## Crates
@@ -17,9 +17,11 @@ turbo-dom is consumed from **crates.io** as the `turbo-dom-parser` crate
 | `turbo-surf-page` | Tier 2 — `TurboNavigator` (fetch+parse over `rtdom::Tree`) |
 | `turbo-surf-view` | extraction & views — extract / visible / aria / ax / locator / markdown / text / schema / query / xpath / hydration / dom-ops / actions |
 | `turbo-surf-render` | Tier 3 — `deno_core` isolate + the rtdom↔V8 DOM binding (JS execution / hydration) |
+| `turbo-surf-raster` | native layout/paint, canvas rasterization and system text measurement; optional Metal WebGL and CoreText |
+| `turbo-surf-py` | PyO3 binding and PyPI wheels |
 | `turbo-surf-transform` | swc TS/JSX → classic JS for the render tier |
 | `turbo-surf-napi` | the `.node` addon — in-process bridge from the core to Node (+ stateful `Session`) |
-| `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 60-tool surface (parity with the JS server) over a stateful session |
+| `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 80-tool surface over a stateful session |
 
 `cargo test` runs the full offline suite across the workspace (200+ tests);
 `cargo clippy --workspace --all-targets` and `cargo fmt` are clean.
@@ -36,11 +38,15 @@ Direct ports of the JS modules, same behavior and edge cases:
   `RobotsFetcher` → offline-testable.
 - `cookies` — RFC 6265 subset `CookieJar` (domain/path scope, Secure, HttpOnly,
   Expires/Max-Age, SameSite; `storageState` round-trip). Times are `f64` ms (session
-  cookie = `f64::INFINITY`). Self-contained HTTP-date parser (no chrono).
-- `net` — `fetch_html` over reqwest (gzip/br, rustls, HTTP/2). Charset sniff, byte
+  cookie = `f64::INFINITY`). Script-visible cookie access excludes HttpOnly cookies
+  and rejects script overwrites of them. Self-contained HTTP-date parser (no chrono).
+- `net` — `fetch_html` over wreq/BoringSSL by default (`impersonate`), or reqwest/rustls
+  with that feature disabled. Charset sniff, byte
   cap, content-type gate, CookieJar round-trip, manual per-hop redirect follow, and a
   **shared pooled `build_client()`** passed via `FetchOptions::client` so connections
-  + TLS sessions are reused across pages.
+  + TLS sessions are reused across pages. `request_context` derives destination/mode,
+  referrer/Origin and credentials policy, with PSL site classification and session-scoped
+  Accept-CH opt-ins. `FetchOptions::client_hints` shares this state with page execution.
 - `crawl` — frontier-driven scheduling: global + per-host concurrency, per-host
   politeness, retry/backoff, depth/page caps, robots gate. Fetch+parse seam is the
   `Navigator` trait (tier-2 `Page` implements it).
@@ -113,3 +119,13 @@ cargo clippy --workspace --all-targets
 cargo fmt
 cargo build --release -p turbo-surf-napi   # build the .node addon (then node addon tests / harness)
 ```
+
+## Detection diagnostics
+
+See [`../harness/detection/README.md`](../harness/detection/README.md) for a fresh-jar
+Chrome/native comparison with all native fingerprint/raster features enabled.
+`PageSession::open_with_init_script` installs opt-in diagnostics before page scripts;
+`TURBO_SURF_HTTP_TRACE` records native application HTTP requests, responses and decoded
+bodies. These are raw local diagnostics, not a TLS packet capture. Current Google
+observations and unresolved gaps are in
+[`../harness/detection/FINDINGS.md`](../harness/detection/FINDINGS.md).

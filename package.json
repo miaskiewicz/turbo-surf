@@ -24,6 +24,8 @@
     "check": "npm run lint && npm run format:check && npm test",
     "prepare": "git config core.hooksPath .githooks || true",
     "harness": "node harness/competitive/run.mjs",
+    "harness:detection": "node harness/detection/run.mjs",
+    "test:detection": "node --test harness/detection/*.test.mjs",
     "harness:js": "node harness/competitive/run.mjs js-quotes",
     "hotpath": "node harness/hotpath/rust-hotpath.mjs",
     "hotpath:render": "node harness/hotpath/render-bench.mjs",

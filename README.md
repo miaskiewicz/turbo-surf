@@ -12,7 +12,7 @@ demand — see below):
   elements, a link/form graph, an accessibility tree, markdown and plain-text views,
   rendered-HTML capture, CSS/XPath node queries, and schema-driven structured
   extraction.
-- **An agent tool** — a 76-tool **MCP** server agents drive directly over stdio
+- **An agent tool** — a 80-tool **MCP** server agents drive directly over stdio
   (`crawl`, `batch`, navigate, click/fill/submit, query, extract, accessibility
   tree, markdown, `render`/`eval_js`/`inject_js`, `screenshot`, cookies/headers,
   `snapshot`).
@@ -29,7 +29,7 @@ library, and they get their DOM from a real browser (Playwright/Puppeteer/
 Selenium) or an in-process fake DOM with no security isolation (jsdom,
 happy-dom). turbo-surf is unusual on four axes at once:
 
-1. **AI-agent-ready out of the box.** It ships a full **MCP server** (76 tools:
+1. **AI-agent-ready out of the box.** It ships a full **MCP server** (80 tools:
    navigate, click/fill/submit, query, extract, accessibility tree, markdown,
    `crawl` a whole site, `batch` a URL list, `render`/`set_mode` to run page JS,
    `eval_js`/`inject_js` against the live render heap with a DOM-history trail,
@@ -66,7 +66,7 @@ canonical dedupe, depth/page caps), structured extraction, CSS+XPath query, a
 no-Chromium JS render tier (a true V8 isolate over the native DOM) with re-enterable
 live-heap `eval_js`/`inject_js` + a DOM-history trail, **synthetic screenshots**
 (PNG/SVG from a native layout+paint of any HTML snapshot — still no browser), and a
-76-tool MCP server (native binary). Benchmarked against real browsers + other
+80-tool MCP server (native binary). Benchmarked against real browsers + other
 crawlers (below).
 
 ## Install
@@ -101,7 +101,7 @@ shim (`rust/playwright-shim/`) is a dev/in-repo tool, not an npm artifact.
 ## MCP server (agents)
 
 ```sh
-npx turbo-surf-mcp          # stdio MCP server (76 tools), e.g.:
+npx turbo-surf-mcp          # stdio MCP server (80 tools), e.g.:
 # navigation:  goto, go_back, go_forward, reload, set_user_agent
 # content:     interactive_elements, accessibility_tree, aria_snapshot, markdown,
 #              text, html, links, requests, snapshot, query, get_by,
@@ -170,7 +170,7 @@ claude mcp list
 ```
 
 Now start (or restart) Claude Code and ask it to, e.g., *"use turbo-surf to fetch
-the markdown of example.com"* — the 76 tools above are available. Remove it later
+the markdown of example.com"* — the 80 tools above are available. Remove it later
 with `claude mcp remove turbo-surf`.
 
 **Scope (where the server is registered).** By default it's registered for your
@@ -204,17 +204,18 @@ platform there's no prebuilt binary (build from a checkout as above).
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
-By default every request carries a real **Chrome 154** identity — full UA + client
-hints (`sec-ch-ua`, `sec-fetch-*`, …) **in Chrome's exact per-version header order**
-on the wire, and a matching Chrome `navigator` (`platform`, `vendor`,
+The default profile reports **Chrome 154** through its UA and client hints
+(`sec-ch-ua`, `sec-fetch-*`, …), with a configured per-version header order
+and a corresponding `navigator` (`platform`, `vendor`,
 `webdriver: false`, plugins, `window.chrome`, native-`toString`, coherent
-`userAgentData` brands + `fullVersionList`) inside the JS render tier. **Nothing to
-configure for the common case** — it just looks like Chrome.
+`userAgentData` brands + `fullVersionList`) inside the JS render tier. This is an
+emulated browser surface; successful identity probes do not establish complete
+Chrome parity or acceptance by a site's anti-bot system.
 
 Version-specific fingerprint data (reported major, full build for high-entropy
 UA-CH, and the navigation **header order** — which Chrome reorders across releases)
 lives in a declarative per-version registry (`turbo-surf-core`'s `browser` module):
-one coherent config per Chrome version, defaulting to the current stable. Both the
+one coherent config per supported Chrome version, defaulting to the pinned Chrome 154 profile. Both the
 wire headers and the render-tier navigator read from it, so the two layers stay in
 lockstep, and supporting a new Chrome (e.g. 155) is a one-line config drop-in.
 
@@ -244,11 +245,11 @@ All optional. Set in `.env` (auto-loaded) or the process env.
 
 | Variable | Values | What it does |
 |---|---|---|
-| `TURBO_SURF_SOLVER` | `cloudflare` · `awswaf` · `akamai` · `hyper` · `scrapfly` · `browser` | Pick the challenge solver. Unset = no solving (fingerprint only). `cloudflare`/`awswaf`/`akamai` are in-house (no key). |
+| `TURBO_SURF_SOLVER` | `cloudflare` · `awswaf` · `akamai` · `recaptcha` · `hyper` · `scrapfly` · `browser` | Pick the challenge solver. Unset = no solving (fingerprint only). `cloudflare`/`awswaf`/`akamai` are in-house (no key). |
 | `HYPER_API_KEY` | key | Hyper Solutions token API (Akamai/DataDome/Kasada). Used when solver=`hyper`. |
 | `SCRAPFLY_API_KEY` | key | Scrapfly ASP API (Cloudflare + fallback). Used when solver=`scrapfly`. |
 | `TURBO_SURF_BROWSER_CMD` | shell command | The hardened-headless sidecar to run for solver=`browser` (e.g. `node harness/browser-solver/solve.mjs`). When solver=`akamai`, also enables the browser fallback (see below). |
-| `TURBO_SURF_PROXY` | `http://user:pass@host:port` | Egress proxy. **Required for real solves** — tokens bind to the IP/JA3 that minted them; replay must use the same egress. |
+| `TURBO_SURF_PROXY` | `http://user:pass@host:port` | Egress proxy. Optional egress proxy. Where a token is IP-bound, minting and replay must use the same egress. |
 | `TURBO_SURF_SENSOR_DIR` | path (default `akamai-sensors`) | Where `analyze_akamai`'s `retry` saves a working sensor (keyed by script hash + version). |
 
 **Solver maturity** — `cloudflare` (managed/Iuam) and `awswaf` (common + targeted
@@ -260,7 +261,7 @@ failed self-solve still clears the wall. `hyper`/`scrapfly`/`browser` are the ro
 paths. CAPTCHA tiers (AWS `captcha`, CF Turnstile-interactive) aren't self-solvable
 and route straight to the sidecar.
 
-Build feature (not env): **`--features impersonate`** swaps rustls → BoringSSL
+Build feature (not env): **`impersonate`** is enabled by default for the MCP binary and swaps rustls → BoringSSL
 (`wreq`) for a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint. Needs `cmake`+`nasm`.
 Add **`--features trust-anchors`** (implies `impersonate`) to also emit Chrome 152+'s
 `trust_anchors` TLS extension (JA4 `t13d1516h2` → `t13d1517h2`); it's built on a
@@ -275,7 +276,7 @@ pixels. Measured: a standard WebGL fingerprint draw is now **byte-identical to r
 ANGLE→Metal on the same GPU). Canvas 2D `toDataURL` also rasterizes on the GPU (falls back to
 tiny-skia on any GPU error, so enabling it never regresses). Zero cost to the default build +
 the PyPI wheels (no `wgpu` unless enabled). Beats device-invariance/SwiftShader detection —
-for WebGL, exact-hash comparison too.
+the shared WebGL scene matched an exact hash. This does not establish arbitrary scene parity.
 
 A second build feature **`--features coretext`** (macOS only, off by default) rasterizes canvas
 **text** through CoreText/CoreGraphics — the same system glyph stack Chrome's Skia uses on macOS —
@@ -302,10 +303,13 @@ person engages the page. `human_interact` strings together trusted input gesture
 the current page so the page's own listeners (and the collector) see genuine,
 entropy-bearing mouse/keyboard activity: `goto` a page, then drive a `steps` array or a
 named `routine`. The bundled **`google-serp`** routine composes the real-user search
-flow (move → click the box → focus → type `{query}` → click Search). Honest scope: this
-supplies the interaction-gate + input-entropy signal in-isolate; a *trusted* google
-`__Secure-ENID` also needs real-GPU pixels + server-side scoring (see `probe_mint` and
-the CHANGELOG), so it is not by itself a SERP unlock.
+flow (move → click the box → focus → type `{query}` → press Enter). Input is generated
+by the native event shim; server acceptance must be measured separately. Current
+Google diagnostics execute the search challenge and follow its retry without importing
+Chrome cookies, but that native retry still fails. ENID is not a universal requirement:
+a fresh Chrome control reached results without it. See the
+[reusable differential harness](./harness/detection/README.md) and its
+[dated observations](./harness/detection/FINDINGS.md).
 
 **Render-tier realism.** The isolate is shaped to match real Chrome structurally, verified by
 diffing a shared collector against real headed Chrome (the reusable probes under
@@ -315,60 +319,73 @@ and in-isolate via the `fp_snapshot` example). Highlights:
 - **`navigator` is a real `Navigator` instance** — zero own properties, all ~84 members on
   `Navigator.prototype` (native-marked getters/methods), `instanceof Navigator`, `webdriver`
   a prototype getter (not an own prop).
-- **Window surface breadth** matches Chrome (~1235 own props): the full set of interface
-  constructors, `on*` handler slots (null), and bar/API objects — so `X in window` /
-  `typeof window.X` presence checks pass.
-- **No `__*` internal globals leak.** turbo-surf's own render helpers (timers, hydration, the
-  module/frame loader, …) live on a `globalThis[Symbol.for('ts')]` namespace — a Symbol key, so
-  `Object.getOwnPropertyNames(window)` shows none of them (real Chrome has no such `__*` globals),
-  while they stay reachable across the isolate, child realms, and the Rust host.
+- **Window surface breadth** includes many Chrome interface constructors, `on*`
+  slots and API objects. Exact property counts differ by document/version, and
+  presence does not establish implementation parity.
+- **Namespaced helpers.** Most render helpers live on `globalThis[Symbol.for('ts')]`,
+  reducing named globals. Symbol properties remain discoverable and some helpers
+  are transiently exposed during evaluation/interaction; this is not invisible storage.
 - **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
   real native functions); the `toString` anti-hook trap is itself shapeless.
 - **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for
-  solids/shapes), `measureText` width matches Chrome exactly (real system-font measurer), context
+  selected solids/shapes), `measureText` uses the system-font measurer, context
   class-tags as `CanvasRenderingContext2D` + `getContextAttributes`.
 - **WebGL**: full enum-constant set on the context prototype; under `--features gpu-metal`,
-  `readPixels` is byte-identical to Chrome (see above).
+  `readPixels` matched Chrome for the shared gradient scene when Metal was accessible.
+  Unsupported draws/device failures can fall back to synthetic readback.
 - Real **page-load lifecycle** (`readyState` loading→interactive→complete with `DOMContentLoaded`
   → window `load` → `pageshow`, in order), a Chrome-shaped **coherent high-resolution clock**
   (fractional `performance.now`/`timeOrigin`, batched rAF) with spread `performance.timing`. Observable
   time is **real**: `performance.now()`/`Date.now()` derive from real monotonic hrtime + virtual timer
   advance, so `setTimeout(fn, 100)` observes ~100ms elapsed (was 0ms — a chronometric-trap tell) and
-  `timeOrigin + performance.now() == Date.now()` holds (passes BotGuard's perf-vs-Date cross-check);
+  `timeOrigin + performance.now() == Date.now()` holds (verified by the shared clock probe, not a Google clearance result);
   timer *delays* stay virtual so the crawler never blocks. Plus **distinct**
   `Intersection`/`Resize`/`MutationObserver` constructors, real `MessagePort`/`MessageChannel`/
   `MessageEvent` instances, spec-shaped `navigator.permissions`, and general **nested-iframe realms**
-  (any iframe/`srcdoc` runs its own scripts with a distinct `contentWindow` + wired frame tree + depth cap).
+  (loaded iframe/`srcdoc` scripts have their own V8 contexts and ECMAScript intrinsics,
+  share the isolate and session cookies, and have a depth cap. DOM API wrappers and
+  cross-origin enforcement still have limits).
 
 Search strategies also take optional **`headers`** + **`internal_hosts`** maps (e.g. `Referer` +
 `sec-fetch-site` for a real in-site-navigation shape). Opt into a coherent timezone with
 **`TURBO_SURF_TZ`**. The synthetic google/youtube consent (`SOCS`) cookie is param-driven —
 **`set_consent_socs`** overrides the value, and `""` seeds none so the *real*
 `consent.google.com/save` Accept-all handshake runs instead of the shortcut (measured: both paths
-still yield the JS-gated shell, so the consent guard is not the trust gate). Honest scope: these
-close the client-side/structural tells; google's trusted `__Secure-ENID` remains **server-scored**
-(see the CHANGELOG's BotGuard notes).
+still yielded the JS-gated shell in those historical runs). The probes cover selected
+interfaces; they do not establish complete Chrome parity. Current fixes parse stylesheet
+rules, expose parsed hidden-control values, allocate independent frame intrinsics and
+execute classic scripts on the host pump with document source locations. Session-scoped
+Accept-CH and resource metadata now distinguish navigation, scripts and fetches. GPU
+renderer identity comes from the real adapter. See the [dated comparison](./harness/detection/FINDINGS.md)
+for acceptance results and remaining limits.
+A shell must be executed before classifying the final outcome; `/sorry` alone does not
+prove IP reputation is the cause.
 
 ---
 
 **TLS/HTTP-2 fingerprint (`impersonate`).** rustls can't forge Chrome's
-JA3/JA4 + Akamai HTTP-2 fingerprint. Build with the opt-in feature to swap in a
-BoringSSL client (`wreq`) that does — it presents a real Chrome 149 TLS + HTTP-2
-fingerprint:
+JA3/JA4 + Akamai HTTP-2 fingerprint. The default MCP build uses BoringSSL
+(`wreq`) with wreq-util's Chrome 149 TLS/HTTP-2 template, plus the current pinned
+Chrome 154 navigation header identity. This configuration is an emulation; use the
+TLS echo tests to validate the deployed build rather than assuming complete wire parity:
 
 ```bash
 # needs a C toolchain (cmake + nasm) for BoringSSL
 cargo build --release -p turbo-surf-mcp --features impersonate
 ```
 
-Off by default (keeps the pure-rustls build dependency-free). Verified against a
-live TLS/HTTP-2 echo in the test suite.
+Enabled by default in `turbo-surf-core` and the MCP binary. Use
+`--no-default-features` for the rustls backend. `trust-anchors`, `gpu-metal` and
+`coretext` remain optional; the differential harness documents a build with all three.
 
 **Fingerprint seed pool.** `turbo-surf-core::fingerprint` holds ~4000 internally
 coherent real-Chrome identities (UA ↔ client hints ↔ `navigator` all agree),
 selected deterministically by a client key — the same host always gets the same
 profile, while the fleet spreads across the pool. The MCP session and the crawl
-navigator rotate per host automatically; in code:
+navigator select profiles per host, but `FetchOptions.profile` only controls default
+headers on the rustls backend. The wreq backend currently pins `default_profile()`;
+rotating the render profile there can produce a mismatch. The differential harness
+pins the native default in both layers. For rustls, use:
 
 ```rust
 use turbo_surf_core::{fingerprint, net::{fetch_html, FetchOptions}};

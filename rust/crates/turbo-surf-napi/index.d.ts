@@ -8,7 +8,15 @@ export function version(): string;
 export function fetchHtml(url: string): Promise<string>;
 /** Fetch a URL as raw bytes → a Buffer (no charset decode). For binary
  * resources — images to pass to `screenshotWithAssets`. */
-export function fetchBytes(url: string): Promise<Buffer>;
+export function fetchBytes(
+  url: string,
+  requestStateId?: number,
+  sourceUrl?: string,
+  cookies?: string,
+): Promise<Buffer>;
+/** Create/close origin-scoped client-hint state shared by a browsing context. */
+export function requestStateNew(): number;
+export function requestStateClose(id: number): void;
 
 /** Crawl from a JSON options string → JSON array of page records. */
 export function crawl(optsJson: string): Promise<string>;
@@ -28,6 +36,7 @@ export function hydrate(
   baseUrl: string,
   cookies?: string,
   userAgent?: string,
+  requestStateId?: number,
 ): Promise<string>;
 
 /** Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
@@ -37,6 +46,7 @@ export function liveOpen(
   baseUrl: string,
   cookies?: string,
   userAgent?: string,
+  requestStateId?: number,
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;
@@ -69,6 +79,9 @@ export function fetchWithCookies(
   method?: string,
   body?: string,
   headers?: string,
+  bypassConsent?: boolean,
+  requestStateId?: number,
+  contextJson?: string,
 ): Promise<string>;
 
 // Actions by selector — mutate the DOM and return the new HTML.

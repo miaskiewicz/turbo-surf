@@ -23,6 +23,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::net::{fetch_html, FetchOptions};
+use turbo_surf_core::request_context::{
+    ClientHints, Credentials, Destination, RequestContext, RequestMode,
+};
 use turbo_surf_core::url::resolve;
 
 /// Loads ES modules (a `<script type="module">`'s `import` graph) over the host net
@@ -33,6 +36,7 @@ struct NetModuleLoader {
     base: String,
     jar: Jar,
     ua: String,
+    client_hints: ClientHints,
 }
 
 impl ModuleLoader for NetModuleLoader {
@@ -60,6 +64,8 @@ impl ModuleLoader for NetModuleLoader {
         let url = module_specifier.clone();
         let jar = self.jar.clone();
         let ua = self.ua.clone();
+        let base = self.base.clone();
+        let client_hints = self.client_hints.clone();
         ModuleLoadResponse::Async(Box::pin(async move {
             let mut local = CookieJar::from_storage_state(&jar.borrow().storage_state());
             let mut headers = std::collections::BTreeMap::new();
@@ -68,6 +74,12 @@ impl ModuleLoader for NetModuleLoader {
             }
             let opts = FetchOptions {
                 headers,
+                context: Some(RequestContext::resource(
+                    &base,
+                    Destination::Script,
+                    RequestMode::Cors,
+                )),
+                client_hints: Some(&client_hints),
                 allow_non_html: true, // JS modules aren't HTML
                 jar: Some(&mut local),
                 ..Default::default()
@@ -107,12 +119,68 @@ struct FetchOut {
     content_type: String,
 }
 
+// Classic scripts are scheduled onto the host pump. Executing inside a JS eval
+// or a synchronous op retains the dispatcher's frames in page Error stacks.
+#[derive(Default)]
+struct ClassicScripts {
+    next_id: u32,
+    html: String,
+    used_inline_offsets: std::collections::BTreeSet<usize>,
+    jobs: std::collections::VecDeque<(u32, String, String, Option<v8::Global<v8::Context>>)>,
+}
+
+#[op2(fast)]
+fn op_queue_classic_script(
+    state: &mut OpState,
+    #[string] code: String,
+    #[string] source: String,
+    inline: bool,
+) -> u32 {
+    let queue = state.borrow_mut::<ClassicScripts>();
+    queue.next_id += 1;
+    let id = queue.next_id;
+    let located = if inline && !code.is_empty() {
+        if let Some((start, _)) = queue
+            .html
+            .match_indices(&code)
+            .find(|(offset, _)| !queue.used_inline_offsets.contains(offset))
+        {
+            queue.used_inline_offsets.insert(start);
+            let prefix = &queue.html[..start];
+            let lines = prefix.bytes().filter(|b| *b == b'\n').count();
+            let column = prefix
+                .rsplit('\n')
+                .next()
+                .unwrap_or("")
+                .encode_utf16()
+                .count();
+            format!("{}{}{}", "\n".repeat(lines), " ".repeat(column), code)
+        } else {
+            code
+        }
+    } else {
+        code
+    };
+    queue.jobs.push_back((id, source, located, None));
+    id
+}
+
+fn cookie_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
+}
+
 // `document.cookie` getter: cookies applicable to the page's base URL.
 #[op2]
 #[string]
 fn op_cookie_get(state: &mut OpState) -> String {
     let base = state.borrow::<Base>().0.clone();
-    state.borrow::<Jar>().borrow().cookie_header(&base, 0.0)
+    state
+        .borrow::<Jar>()
+        .borrow()
+        .document_cookie(&base, cookie_now())
 }
 
 // The custom User-Agent (empty if none) — `navigator.userAgent` reads this.
@@ -142,12 +210,20 @@ pub fn set_fingerprint(overrides_json: &str) {
 #[op2]
 #[string]
 fn op_fingerprint() -> String {
-    FINGERPRINT_OVERRIDES
+    let profile = turbo_surf_core::fingerprint::default_profile();
+    let mut defaults = serde_json::json!({
+        "fullVersion": profile.full_version,
+        "architecture": profile.architecture(),
+        "platformVersion": profile.platform_version(),
+    });
+    if let Some(serde_json::Value::Object(overrides)) = FINGERPRINT_OVERRIDES
         .read()
         .ok()
-        .map(|g| g.clone())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "{}".to_string())
+        .and_then(|g| serde_json::from_str::<serde_json::Value>(&g).ok())
+    {
+        defaults.as_object_mut().unwrap().extend(overrides);
+    }
+    defaults.to_string()
 }
 
 // Process-global text-measurement hook. The render crate has no font/layout stack, so the host
@@ -272,6 +348,27 @@ pub fn set_webgl_fn(f: WebglFn) {
     }
 }
 
+type WebglMetadataFn = Box<dyn Fn() -> Option<String> + Send + Sync>;
+static WEBGL_METADATA: std::sync::RwLock<Option<WebglMetadataFn>> = std::sync::RwLock::new(None);
+
+/// Install metadata from the same adapter that executes WebGL batches.
+/// The callback is lazy, so a process without a render request need not open a GPU.
+pub fn set_webgl_metadata_fn(f: WebglMetadataFn) {
+    if let Ok(mut metadata) = WEBGL_METADATA.write() {
+        *metadata = Some(f);
+    }
+}
+
+#[op2]
+#[string]
+fn op_webgl_metadata() -> String {
+    WEBGL_METADATA
+        .read()
+        .ok()
+        .and_then(|m| m.as_ref().and_then(|f| f()))
+        .unwrap_or_else(|| "{}".to_string())
+}
+
 // Execute a recorded WebGL batch → base64 RGBA8 (full framebuffer, top-left origin), or "" when
 // no host executor is installed (the JS override then keeps its synthetic readback). The JS side
 // slices the caller's requested rect out of the returned framebuffer. Never throws.
@@ -304,7 +401,7 @@ fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
     state
         .borrow::<Jar>()
         .borrow_mut()
-        .set_from_response(&base, &[line.to_string()], 0.0);
+        .set_from_document(&base, line, cookie_now());
 }
 
 // `fetch(url)` over the tier-1 net stack. Relative URLs resolve against the
@@ -317,12 +414,13 @@ async fn op_fetch(
     #[string] url: String,
     #[string] init_json: String,
 ) -> FetchOut {
-    let (base, jar_rc, ua) = {
+    let (base, jar_rc, ua, client_hints) = {
         let s = state.borrow();
         (
             s.borrow::<Base>().0.clone(),
             s.borrow::<Jar>().clone(),
             s.borrow::<Ua>().0.clone(),
+            s.borrow::<ClientHints>().clone(),
         )
     };
     let target = resolve(&base, &url).unwrap_or(url);
@@ -342,14 +440,54 @@ async fn op_fetch(
         .get("headers")
         .and_then(|h| deno_core::serde_json::from_value(h.clone()).ok())
         .unwrap_or_default();
-    // Browser-set request headers a fetch carries automatically (an auth backend gates
-    // on Origin; a cross-origin POST without it is rejected). Derive from the page base
-    // (scheme://host[:port], i.e. base up to the third '/').
-    if let Some(origin) = page_origin(&base) {
-        headers.entry("Origin".to_string()).or_insert(origin);
-        headers
-            .entry("Referer".to_string())
-            .or_insert_with(|| base.clone());
+    // These headers are browser-controlled; guest fetch cannot override their
+    // context, inject another origin's cookies, or supply a custom identity.
+    headers.retain(|name, _| {
+        let name = name.to_ascii_lowercase();
+        !name.starts_with("sec-")
+            && !matches!(
+                name.as_str(),
+                "cookie"
+                    | "origin"
+                    | "referer"
+                    | "host"
+                    | "user-agent"
+                    | "upgrade-insecure-requests"
+            )
+    });
+    let source = init.get("source").and_then(|s| s.as_str()).unwrap_or(&base);
+    let destination = match init.get("destination").and_then(|s| s.as_str()) {
+        Some("script") => Destination::Script,
+        Some("iframe") => Destination::Iframe,
+        Some("style") => Destination::Style,
+        Some("image") => Destination::Image,
+        _ => Destination::Empty,
+    };
+    let mode = match init.get("mode").and_then(|s| s.as_str()) {
+        Some("no-cors") => RequestMode::NoCors,
+        Some("same-origin") => RequestMode::SameOrigin,
+        Some("navigate") => RequestMode::Navigate,
+        _ if destination == Destination::Iframe => RequestMode::Navigate,
+        _ if destination == Destination::Script => RequestMode::NoCors,
+        _ => RequestMode::Cors,
+    };
+    let mut context = RequestContext::resource(source, destination, mode);
+    if let Some(credentials) = init.get("credentials").and_then(|s| s.as_str()) {
+        context.credentials = match credentials {
+            "omit" => Credentials::Omit,
+            "include" => Credentials::Include,
+            _ => Credentials::SameOrigin,
+        };
+    }
+    if mode == RequestMode::SameOrigin
+        && !turbo_surf_core::request_context::same_origin(source, &target)
+    {
+        return FetchOut {
+            status: 0,
+            ok: false,
+            body: String::new(),
+            content_type: String::new(),
+        };
     }
     // Custom User-Agent (if set) overrides the net default for page fetches.
     if !ua.is_empty() {
@@ -364,6 +502,8 @@ async fn op_fetch(
         method,
         body,
         headers,
+        context: Some(context),
+        client_hints: Some(&client_hints),
         allow_non_html: true, // fetch pulls JSON/text too
         // Follow redirects MANUALLY so `Set-Cookie` on an intermediate 3xx hop is
         // ingested (the browser-equivalent per-hop cookie round-trip). Auto-follow
@@ -391,19 +531,84 @@ async fn op_fetch(
     out
 }
 
-// `scheme://host[:port]` of an absolute http(s) URL — the part before the path. Used to
-// synthesize the `Origin` header a browser fetch would send.
-fn page_origin(base: &str) -> Option<String> {
-    let scheme_end = base.find("://")?;
-    let after = scheme_end + 3;
-    let host_len = base[after..].find('/').unwrap_or(base.len() - after);
-    let origin = &base[..after + host_len];
-    (base.starts_with("http://") || base.starts_with("https://")).then(|| origin.to_string())
+// A frame shares the page isolate and budget, but V8 creates its own global and
+// intrinsic prototypes. The detached DOM bridge is installed by the JS factory.
+#[op2]
+fn op_create_frame<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Object> {
+    let parent = scope.get_current_context();
+    let token = parent.get_security_token(scope);
+    let context = v8::Context::new(scope, Default::default());
+    context.set_security_token(token);
+    // deno_core's isolate-wide Promise and import callbacks read these public
+    // embedder slots in the current context. Borrow the runtime-owned state;
+    // these allocations remain valid whenever child JS executes. Runtime shutdown
+    // stops ops before destroying the main realm. Children have no owning deno_core
+    // realm destructor, so they never decrement the borrowed slot pointers.
+    for slot in [
+        deno_core::CONTEXT_STATE_SLOT_INDEX,
+        deno_core::MODULE_MAP_SLOT_INDEX,
+    ] {
+        let pointer = parent.get_aligned_pointer_from_embedder_data(slot);
+        // SAFETY: these aligned pointers are initialized by deno_core for the
+        // parent runtime and retain their allocation until the isolate drops.
+        unsafe {
+            context.set_aligned_pointer_in_embedder_data(slot, pointer);
+        }
+    }
+    context.global(scope)
+}
+
+#[op2(fast)]
+fn op_queue_frame_script(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    window: v8::Local<v8::Object>,
+    #[string] code: String,
+    #[string] source_url: String,
+) -> Result<u32, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    let context = v8::Global::new(scope, context);
+    let queue = state.borrow_mut::<ClassicScripts>();
+    queue.next_id += 1;
+    let id = queue.next_id;
+    queue.jobs.push_back((id, source_url, code, Some(context)));
+    Ok(id)
+}
+
+#[op2]
+#[string]
+fn op_frame_cookie_get(state: &mut OpState, #[string] url: &str) -> String {
+    state
+        .borrow::<Jar>()
+        .borrow()
+        .document_cookie(url, cookie_now())
+}
+
+#[op2(fast)]
+fn op_frame_cookie_set(state: &mut OpState, #[string] url: &str, #[string] line: &str) {
+    state
+        .borrow::<Jar>()
+        .borrow_mut()
+        .set_from_document(url, line, cookie_now());
+}
+
+#[op2]
+fn op_message_source<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Object> {
+    let context = scope.get_entered_or_microtask_context();
+    context.global(scope)
 }
 
 deno_core::extension!(
     turbo_dom,
     ops = [
+        op_create_frame,
+        op_queue_frame_script,
+        op_message_source,
+        op_frame_cookie_get,
+        op_frame_cookie_set,
+        op_queue_classic_script,
         op_cookie_get,
         op_cookie_set,
         op_fetch,
@@ -413,6 +618,7 @@ deno_core::extension!(
         op_measure_text,
         op_raster_png,
         op_raster_rgba,
+        op_webgl_metadata,
         op_webgl_readback,
         op_webgl_available
     ],
@@ -469,11 +675,11 @@ const __ua = __pick("userAgent",
 // __ua, falling back to the current-stable default.
 const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || [])[1]) || 154));
 // Full build for high-entropy UA-CH (fullVersionList / uaFullVersion) — real Chrome
-// reports the FULL version here (e.g. 154.0.7258.66), NOT the reduced <major>.0.0.0
+// reports the FULL version here (e.g. 154.0.8037.98), NOT the reduced <major>.0.0.0
 // the UA string carries. Default matches turbo-surf-core's browser registry default
 // release; a caller rotating to a non-default major should pass fullVersion too (the
 // session pushes it from the wire profile so both layers stay coherent).
-const __fullVersion = String(__pick("fullVersion", "154.0.8037.58"));
+const __fullVersion = String(__pick("fullVersion", "154.0.8037.98"));
 // Chrome ships exactly these five PDF-viewer plugins, all aliased to the internal
 // viewer; `navigator.plugins.length === 0` is a classic headless giveaway.
 const __plugin = (name) => ({ name, filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 });
@@ -550,7 +756,7 @@ const __navData = {
       // Direct (not deferred) call so `fetch` bumps `__pendingFetches` synchronously and
       // the drain can't quiesce before the beacon completes. `keepalive` mirrors the real
       // beacon flag (informational here).
-      try { globalThis.fetch(String(url), { method: "POST", body, headers, keepalive: true }); } catch (_e) {}
+      try { globalThis.fetch(String(url), { method: "POST", body, headers, keepalive: true, mode: "no-cors", credentials: "include" }); } catch (_e) {}
       return true;
     } catch (_e) { return true; }
   },
@@ -574,9 +780,10 @@ const __navData = {
     ],
     mobile: false,
     platform: __uaPlatform,
-    getHighEntropyValues: async () => ({
-      architecture: "arm", bitness: "64", model: "", wow64: false,
-      platform: __uaPlatform, platformVersion: "15.0.0", uaFullVersion: __fullVersion,
+    getHighEntropyValues: async (hints) => {
+      const values = {
+      architecture: __pick("architecture", "arm"), bitness: "64", model: "", wow64: false,
+      platform: __uaPlatform, platformVersion: __pick("platformVersion", "15.0.0"), uaFullVersion: __fullVersion,
       mobile: false,
       brands: [
         { brand: "Chromium", version: __major },
@@ -588,7 +795,12 @@ const __navData = {
         { brand: "Google Chrome", version: __fullVersion },
         { brand: "Not A(Brand", version: "99.0.0.0" },
       ],
-    }),
+      formFactors: ["Desktop"],
+      };
+      const result = {brands:values.brands, mobile:values.mobile, platform:values.platform};
+      for (const key of hints) if (Object.prototype.hasOwnProperty.call(values, key)) result[key] = values[key];
+      return result;
+    },
   }),
   // In-memory clipboard: an app that writeText()s a value (e.g. a copy-link button)
   // and reads it back round-trips, with no OS clipboard.
@@ -1022,7 +1234,9 @@ if (typeof globalThis.Request === "undefined") {
       this.referrer = init.referrer || "about:client";
       this.signal = init.signal || (globalThis.AbortController ? new globalThis.AbortController().signal : null);
     }
-    clone() { return new globalThis.Request(this.url, { method: this.method, headers: this.headers, body: this._body }); }
+    clone() { return new globalThis.Request(this.url, { method: this.method, headers: this.headers, body: this._body,
+      credentials: this.credentials, mode: this.mode, cache: this.cache, redirect: this.redirect,
+      referrer: this.referrer, signal: this.signal }); }
     async text() { this.bodyUsed = true; return this._body == null ? "" : String(this._body); }
     async json() { this.bodyUsed = true; return JSON.parse(this._body || "null"); }
     async arrayBuffer() { this.bodyUsed = true; return new TextEncoder().encode(this._body == null ? "" : String(this._body)).buffer; }
@@ -1030,19 +1244,19 @@ if (typeof globalThis.Request === "undefined") {
 }
 // fetch over the tier-1 net stack → a real Response (with real headers, so RSC
 // client navigation that reads `res.headers.get('content-type')` works).
-globalThis.fetch = async (url, init) => {
+__G.fetchFromSource = async (url, init, source) => {
   // Marshal the request (method/headers/body) to the op — a Request object carries them
   // on itself; an init object carries them as fields. Headers may be a Headers instance,
   // an array of pairs, or a plain object.
   const req = (url && typeof url === "object") ? url : null;
-  const o = init || req || {};
+  const o = { ...(req || {}), ...(init || {}) };
   let hdrs = o.headers;
   if (hdrs && typeof hdrs.forEach === "function" && !Array.isArray(hdrs)) {
     const obj = {}; hdrs.forEach((v, k) => { obj[k] = v; }); hdrs = obj;
   } else if (Array.isArray(hdrs)) {
     const obj = {}; for (const [k, v] of hdrs) obj[k] = v; hdrs = obj;
   }
-  let body = o.body;
+  let body = o.body == null ? o._body : o.body;
   if (body != null && typeof body !== "string") {
     try { body = String(body); } catch (_e) { body = ""; }
   }
@@ -1067,7 +1281,8 @@ globalThis.fetch = async (url, init) => {
       }
     }
   } catch (_e) {}
-  const initJson = JSON.stringify({ method: o.method, headers: hdrs || undefined, body });
+  const initJson = JSON.stringify({ method: o.method, headers: hdrs || undefined, body,
+    mode: o.mode, credentials: o.credentials, destination: o.destination, source });
   // Count in-flight fetches so the hydration/interaction drain doesn't quiesce while a
   // request is outstanding — otherwise a save POST resolves AFTER the drain gives up
   // (the DOM looks "stable" while waiting) and its success re-render (modal close,
@@ -1098,13 +1313,16 @@ globalThis.fetch = async (url, init) => {
     url: String((url && url.url) || url),
   });
 };
+globalThis.fetch = (url, init) => __G.fetchFromSource(url, init, globalThis.location.href);
 // XMLHttpRequest over fetch (async; resolves in the event loop). Exposes the
 // EventTarget surface (`addEventListener`/`removeEventListener`/`dispatchEvent`) as well
 // as the `on*` props: real code wires the request via `req.addEventListener('load'/
 // 'readystatechange', …)` (Google's home-page bundle does), and a stub with only `on*`
 // crashed with "req.addEventListener is not a function", aborting the module.
+const __xhrContexts = new WeakMap();
 globalThis.XMLHttpRequest = class {
   constructor() {
+    __xhrContexts.set(this, {source: () => globalThis.location.href, base: () => globalThis.document.baseURI || globalThis.location.href});
     this.readyState = 0; this.status = 0; this.statusText = ""; this.responseText = ""; this.response = "";
     this.responseType = ""; this.responseURL = ""; this.withCredentials = false; this.timeout = 0;
     // Real XHR exposes an XMLHttpRequestUpload EventTarget; collectors sometimes wire
@@ -1117,7 +1335,7 @@ globalThis.XMLHttpRequest = class {
     this._ct = "";      // response content-type
     this._aborted = false;
   }
-  open(method, url) { this._m = method || "GET"; this._u = url; this._aborted = false; this._setState(1); }
+  open(method, url) { this._m = method || "GET"; this._u = new globalThis.URL(String(url), __xhrContexts.get(this).base()).href; this._aborted = false; this._setState(1); }
   setRequestHeader(k, v) { this._h[String(k)] = String(v); }
   // Anti-bot/analytics code inspects response headers (e.g. a token-echo or a
   // cache/CSP header); expose both accessors over the one header op_fetch returns.
@@ -1158,8 +1376,8 @@ globalThis.XMLHttpRequest = class {
   send(body) {
     const self = this;
     self._emit("loadstart");
-    globalThis
-      .fetch(this._u, { method: this._m, body, headers: self._h })
+    __G.fetchFromSource(this._u, { method: this._m, body, headers: self._h,
+      credentials: this.withCredentials ? "include" : "same-origin" }, __xhrContexts.get(this).source())
       .then(async (r) => {
         if (self._aborted) return;
         self.status = r.status;
@@ -1476,10 +1694,11 @@ globalThis.MessageChannel = class MessageChannel {
 // poster. MessageEvent is a bare stub here, so build a plain event carrying the fields
 // collectors read (data/origin/source/ports).
 globalThis.postMessage = function postMessage(message, targetOrigin, transfer) {
-  const origin = (globalThis.location && globalThis.location.origin) || "";
+  const source = __G.messageSource || ops.op_message_source();
+  const origin = (source.location && source.location.origin) || "";
   const ports = Array.isArray(transfer) ? transfer : (transfer && transfer.length ? Array.prototype.slice.call(transfer) : []);
   globalThis.setTimeout(() => {
-    const ev = new globalThis.MessageEvent("message", { data: message, origin, source: globalThis, ports });
+    const ev = new globalThis.MessageEvent("message", { data: message, origin, source, ports });
     ev.target = globalThis;
     ev.currentTarget = globalThis;
     try { if (typeof globalThis.onmessage === "function") globalThis.onmessage(ev); } catch (_e) {}
@@ -2361,9 +2580,9 @@ if (typeof globalThis.URL === "undefined") {
 
 // Next.js's webpack runtime reads `document.currentScript` to resolve chunk paths
 // (getPathFromScript → `currentScript.getAttribute('src').replace(...)`). The tier
-// runs the page's scripts as one concatenated bundle, so there's no "current" script
-// element — expose a detached one whose `src` is the page URL (a string, so the
-// `.replace` is safe) to keep that read working.
+// legacy bundle entry points have no current script element, so expose a detached
+// one whose src is the page URL for those callers. PageSession clears this shim
+// and the hydration pump supplies the actual executing script element.
 try {
   if (globalThis.document && !globalThis.document.currentScript) {
     const __cs = globalThis.document.createElement("script");
@@ -2375,8 +2594,8 @@ try {
 } catch (_e) {}
 
 // `import.meta` shim. A turbopack/webpack DEV runtime injects scripts that read
-// `import.meta.url` (and friends), but we run every <script> as a CLASSIC script via
-// `(0, eval)` — and classic V8 rejects `import.meta` with a SyntaxError ("Cannot use
+// `import.meta.url` (and friends), but the pump first compiles ordinary scripts as
+// classic V8 scripts, which reject `import.meta` with a SyntaxError ("Cannot use
 // 'import.meta' outside a module"), which aborted the whole chunk. There's no module
 // record to attach a real `import.meta` to, so expose a stand-in global the script
 // rewrite below maps `import.meta` onto. `url` is the page URL; `env` is empty (no
@@ -2403,7 +2622,7 @@ if (typeof globalThis.__name === "undefined") {
 // chunk's `onload` before continuing (webpack's `__webpack_require__.e`). A node
 // DOM that merely *appends* the <script> node never runs it, so the loader
 // promise hangs and the app never mounts. So: execute each <script> element once
-// (inline → eval in global scope; external → fetch its src then eval), and fire
+// (inline → host compilation; external → fetch then host compilation), and fire
 // load/error so the loader resolves. `__G.hydrate()` drives this to quiescence.
 const __EXECUTABLE_TYPES = new Set(["", "text/javascript", "application/javascript", "module"]);
 function __fireScriptEvent(el, kind, err) {
@@ -2418,7 +2637,7 @@ function __fireScriptEvent(el, kind, err) {
 // CLASSIC turbopack chunk through the deno_core module pump and load it in a SEPARATE
 // module graph → a DUPLICATE module instance (a second react-dom, whose event-system keys
 // don't match the DOM's → portal/delegated onClick never fires). Instead `__G.execScriptEl`
-// just classic-evals; only a genuine module-syntax SyntaxError (thrown at PARSE, before any
+// first queues classic compilation; only a genuine module-syntax SyntaxError (thrown at PARSE, before any
 // code runs) routes the chunk to the module pump. Let V8 be the parser, not a regex.
 __G.rewriteEsmForClassic = function (code) {
   if (typeof code !== "string" || !code) return code;
@@ -2427,6 +2646,19 @@ __G.rewriteEsmForClassic = function (code) {
   }
   return code;
 }
+const __classicWaiters = new Map();
+__G.completeClassicScript = function(id, failure) {
+  const waiter = __classicWaiters.get(id);
+  if (!waiter) return;
+  __classicWaiters.delete(id);
+  if (failure) {
+    const ctor = ({Error, SyntaxError, TypeError, RangeError, ReferenceError, URIError, EvalError})[failure.name] || Error;
+    const e = new ctor(failure.message);
+    e.name = failure.name;
+    e.stack = failure.stack;
+    waiter.reject(e);
+  } else waiter.resolve();
+};
 __G.execScriptEl = async function (el) {
   if (!el || el.__tcDone) return;
   el.__tcDone = true; // mark before await so a re-entrant pump round can't double-run
@@ -2446,7 +2678,7 @@ __G.execScriptEl = async function (el) {
     let code;
     if (src) {
       const abs = new URL(src, globalThis.location.href).href;
-      const res = await fetch(abs);
+      const res = await fetch(abs, { destination: "script" });
       if (!res.ok) { __fireScriptEvent(el, "error"); return; }
       code = await res.text();
     } else {
@@ -2470,7 +2702,11 @@ __G.execScriptEl = async function (el) {
     let __prevCs;
     try { __prevCs = globalThis.document.currentScript; globalThis.document.currentScript = el; } catch (_e) {}
     try {
-      (0, eval)(code); // classic-script semantics: run in global scope
+      await new Promise((resolve, reject) => {
+        const source = src ? new URL(src, globalThis.location.href).href : globalThis.location.href;
+        const id = ops.op_queue_classic_script(code, source, !src);
+        __classicWaiters.set(id, {resolve, reject});
+      });
     } catch (e) {
       try { globalThis.document.currentScript = __prevCs; } catch (_e) {}
       // A genuine ES module? Classic V8 throws a module-syntax SyntaxError at PARSE time —
@@ -2870,12 +3106,8 @@ __G.domSig = () => {
     }
     return el;
   };
-  // <iframe> never "loads" here (no real navigation). Auth SDKs (PropelAuth) mount a
-  // hidden refresh iframe and RETRY indefinitely when its `load` never fires — an
-  // unbounded create/remove churn (700+ iframes on an authed page) that starves the
-  // render budget so the real page never finishes committing. Fire a one-shot `load`
-  // when the iframe's `src` is set (or on append) so the SDK's load-wait resolves and
-  // the retry loop stops. We don't navigate the iframe; this only unblocks the waiter.
+  // Queue a one-shot load event after frame scripts finish. Stubbed churn hosts
+  // also receive it so auth widgets do not retry until the render budget expires.
   const fireIframeLoad = (el) => {
     if (el.__tcLoadFired) return;
     el.__tcLoadFired = true;
@@ -2896,10 +3128,9 @@ __G.domSig = () => {
   // special case this generalizes: it flows through the same loader. A hidden / src-less /
   // blocklisted iframe stays an inert stub (the analytics/auth churn fix) so it costs nothing.
   //
-  // Fidelity tradeoff (unchanged): a single V8 isolate, so realms SHARE prototypes/globals —
-  // no true origin isolation or separate realm IDENTITY; the child document is a lightweight
-  // facade over native element construction, not a second live-rendered tree. Faithful enough
-  // for the frame-tree + cross-frame message-channel semantics apps actually rely on.
+  // Each child has a separate V8 context and native ECMAScript intrinsics. DOM nodes
+  // still use the detached bridge over the page's native binding; cross-origin access
+  // control and separate DOM constructor prototypes remain unsupported.
   const FRAME_DEPTH_CAP = 12; // beyond this a nested iframe is an inert stub (frame-bomb guard)
   // Hosts whose iframes are analytics/auth CHURN (created + torn down hundreds of times during
   // hydration): keep them inert so the churn stays nearly free and the budget goes to the real
@@ -2913,12 +3144,12 @@ __G.domSig = () => {
     if ((s == null || s === "") && el && el.getAttribute) s = el.getAttribute("srcdoc");
     return s == null ? null : String(s);
   };
-  // A meaningful frame earns a realm; a hidden / src-less / blocklisted one stays inert.
+  // Blank frames need their own realm too; churn hosts keep the inexpensive stub.
   const frameWantsRealm = (el) => {
     const sd = frameSrcdocOf(el);
     if (sd != null && sd.length) return true;
     const s = frameSrcOf(el);
-    if (!s || s === "about:blank") return false;
+    if (!s || s === "about:blank") return true;
     if (FRAME_STUB_HOST_RE.test(s)) return false;
     return true;
   };
@@ -2928,7 +3159,7 @@ __G.domSig = () => {
     // Resolve a relative src against the OWNING frame's URL (not always the top window), so a
     // relative src in a nested/grandchild frame resolves correctly.
     const owner = el.__ownerWin || globalThis;
-    const base = (owner.location && owner.location.href) || (globalThis.location && globalThis.location.href) || "http://localhost/";
+    const base = (owner.document && owner.document.baseURI) || (owner.location && owner.location.href) || (globalThis.location && globalThis.location.href) || "http://localhost/";
     try { return new URL(s, base).href; }
     catch (_e) { return s; }
   };
@@ -2952,27 +3183,12 @@ __G.domSig = () => {
     }
   };
 
-  // Run a sub-VM's source inside the child realm: shadow the realm-scoped identifiers
-  // (window/self/globalThis/document/parent/top/…) as function params so the VM's
-  // `window`/`parent`/bare `postMessage` resolve to the child window + parent VIEW, not the
-  // host globals. `parent` is the source-tagging parent VIEW (so `parent.postMessage` fires
-  // the parent's listeners with source === this frame's contentWindow — the cross-frame
-  // handshake relies on it); `top` is the REAL top window (so `top.foo` property reads work).
-  // Builtins (fetch, JSON, crypto, Math) intentionally fall through to the real globals — the
-  // documented shared-isolate tradeoff (no separate V8 context; shared prototypes).
-  const runVmInRealm = (cw, code) => {
-    const cd = cw.document;
-    const fn = new Function(
-      "window", "self", "globalThis", "document", "parent", "top", "frames", "frameElement",
-      "location", "navigator", "screen", "postMessage", "addEventListener", "removeEventListener",
-      "dispatchEvent",
-      code
-    );
-    return fn.call(cw, cw, cw, cw, cd, cw.__parentView || cw.parent, cw.top, cw.frames, cw.frameElement,
-      cw.location, cw.navigator, cw.screen,
-      cw.postMessage.bind(cw), cw.addEventListener.bind(cw), cw.removeEventListener.bind(cw),
-      cw.dispatchEvent.bind(cw));
-  };
+  // Compile in the child's V8 context, preserving its global lexical bindings and
+  // native intrinsics. Function wrappers would leak the parent realm and stacks.
+  const runVmInRealm = (cw, code, sourceUrl) => new Promise((resolve, reject) => {
+    const id = ops.op_queue_frame_script(cw, code, sourceUrl || cw.location.href || "about:blank");
+    __classicWaiters.set(id, {resolve, reject});
+  });
   // Extract + run the frame document's scripts in the realm, in document order: inline
   // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL,
   // shared cookie jar).
@@ -2985,10 +3201,14 @@ __G.domSig = () => {
       if (srcM) {
         let u = srcM[1];
         try { u = new URL(u, frameUrl).href; } catch (_e) {}
-        const r = await ops.op_fetch(u, "{}");
-        if (r && r.body) { try { runVmInRealm(cw, r.body); } catch (_e) {} }
+        const r = await ops.op_fetch(u, JSON.stringify({ destination: "script", source: frameUrl }));
+        if (r && r.body) { try { await runVmInRealm(cw, r.body, u); } catch (_e) {} }
       } else if (m[2] && m[2].trim()) {
-        try { runVmInRealm(cw, m[2]); } catch (_e) {}
+        const prefix = html.slice(0, m.index + m[0].indexOf(">") + 1);
+        const line = prefix.split("\n").length - 1;
+        const column = prefix.length - prefix.lastIndexOf("\n") - 1;
+        const located = "\n".repeat(line) + " ".repeat(column) + m[2];
+        try { await runVmInRealm(cw, located, frameUrl); } catch (_e) {}
       }
     }
   };
@@ -3000,7 +3220,10 @@ __G.domSig = () => {
       const dcl = { type: "DOMContentLoaded", target: cd, currentTarget: cd };
       try { cd.dispatchEvent(dcl); } catch (_e) {}
       const load = { type: "load", target: cw, currentTarget: cw };
+      const previousSender = __G.messageSource;
+      __G.messageSource = cw;
       try { if (typeof cw.onload === "function") cw.onload(load); } catch (_e) {}
+      finally { __G.messageSource = previousSender; }
       try { cw.dispatchEvent(load); } catch (_e) {}
     }, 0);
   };
@@ -3013,12 +3236,78 @@ __G.domSig = () => {
   const augmentRealm = (cw, parentWin, hostEl, depth) => {
     if (!cw || cw.__augmented) return cw;
     cw.__augmented = true;
+    for (const name of ["console", "fetch", "XMLHttpRequest", "URL", "URLSearchParams", "TextEncoder", "TextDecoder", "Event", "CustomEvent", "MessageEvent", "MessageChannel", "MessagePort", "Element", "HTMLElement", "HTMLIFrameElement", "Node", "Document", "DOMParser"]) {
+      if (cw[name] === undefined && parentWin[name] !== undefined) cw[name] = parentWin[name];
+    }
+    const withSender = (fn) => function(...args) {
+      const previous = __G.messageSource;
+      __G.messageSource = cw;
+      try { return fn.apply(this, args); }
+      finally { __G.messageSource = previous; }
+    };
+    const listeners = new WeakMap();
+    const addListener = cw.addEventListener.bind(cw);
+    const removeListener = cw.removeEventListener.bind(cw);
+    cw.addEventListener = (type, fn) => {
+      if (typeof fn !== "function") return;
+      const wrapped = listeners.get(fn) || withSender(fn);
+      listeners.set(fn, wrapped);
+      addListener(type, wrapped);
+    };
+    cw.removeEventListener = (type, fn) => removeListener(type, listeners.get(fn) || fn);
+    for (const name of ["setTimeout", "setInterval", "requestAnimationFrame"]) {
+      const schedule = cw[name];
+      if (typeof schedule === "function") cw[name] = (fn, ...args) => schedule(typeof fn === "function" ? withSender(fn) : fn, ...args);
+    }
+    cw.postMessage = (message, targetOrigin, transfer) => {
+      const source = __G.messageSource || ops.op_message_source();
+      const origin = (source.location && source.location.origin) || "";
+      const ports = Array.isArray(transfer) ? transfer : [];
+      globalThis.setTimeout(() => {
+        const ev = new globalThis.MessageEvent("message", {data: message, source, origin, ports});
+        if (typeof cw.onmessage === "function") withSender(cw.onmessage).call(cw, ev);
+        cw.dispatchEvent(ev);
+      }, 0);
+    };
     cw.__depth = depth;
     cw.__parentWin = parentWin;
     cw.__parentView = cw.parent;              // browser_env's source-tagging view (parent.postMessage)
     cw.parent = parentWin;                    // real immediate parent (identity check)
+    if (!frameSrcOf(hostEl) || frameSrcOf(hostEl) === "about:blank" || frameSrcdocOf(hostEl)) {
+      cw.origin = (parentWin.location && parentWin.location.origin) || "null";
+      cw.location.origin = cw.origin;
+      if (frameSrcdocOf(hostEl)) cw.location.href = "about:srcdoc";
+    }
     cw.top = realTopOf(parentWin);            // real top window (top.foo reads work)
     cw.frameElement = hostEl || null;
+    const ownerUrl = (parentWin.document && parentWin.document.URL) || parentWin.location.href;
+    const documentUrl = (!frameSrcOf(hostEl) || frameSrcOf(hostEl) === "about:blank" || frameSrcdocOf(hostEl))
+      ? ownerUrl : resolveFrameUrl(hostEl);
+    cw.document.URL = documentUrl;
+    cw.document.documentURI = cw.location.href;
+    cw.document.baseURI = documentUrl;
+    cw.fetch = (input, init) => {
+      const request = input && typeof input === "object" ? input : null;
+      const url = new globalThis.URL(String(request ? request.url : input), cw.document.baseURI).href;
+      return __G.fetchFromSource(url, { ...(request || {}), ...(init || {}) }, cw.document.URL);
+    };
+    cw.XMLHttpRequest = class XMLHttpRequest extends globalThis.XMLHttpRequest {
+      constructor() {
+        super();
+        __xhrContexts.set(this, {source: () => cw.document.URL, base: () => cw.document.baseURI});
+      }
+      _emit(type, ev) {
+        const previous = __G.messageSource;
+        __G.messageSource = cw;
+        try { return super._emit(type, ev); }
+        finally { __G.messageSource = previous; }
+      }
+    };
+    Object.defineProperty(cw.document, "cookie", {
+      configurable: true,
+      get() { return ops.op_frame_cookie_get(documentUrl); },
+      set(line) { ops.op_frame_cookie_set(documentUrl, String(line)); },
+    });
     cw.frames = cw;                           // window.frames === window
     cw.length = 0; cw.__frameCount = 0;
     installFrameFactory(cw, cw.document, depth + 1);
@@ -3029,9 +3318,10 @@ __G.domSig = () => {
   // is separate (async, see __G.loadFrame) so contentWindow is available immediately.
   __G.frameRealm = (el, depth) => {
     if (el.__realm) return el.__realm;
-    if (typeof __G.makeFrameRealm !== "function") return globalThis;
+    const makeFrameRealm = __G.makeFrameRealm || globalThis.__makeFrameRealm;
+    if (typeof makeFrameRealm !== "function") throw new Error("iframe realm factory unavailable");
     const parentWin = el.__ownerWin || globalThis;
-    const cw = __G.makeFrameRealm(el, parentWin);
+    const cw = makeFrameRealm(el, parentWin, () => ops.op_create_frame());
     augmentRealm(cw, parentWin, el, depth == null ? (el.__depth || 0) : depth);
     registerChildFrame(parentWin, cw);
     return cw;
@@ -3046,7 +3336,7 @@ __G.domSig = () => {
     const cw = __G.frameRealm(el, depth);
     if (!cw || cw === globalThis) { fireIframeLoad(el); return cw; }
     globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
-    let frameUrl = (globalThis.location && globalThis.location.href) || "http://localhost/";
+    let frameUrl = cw.document.baseURI || (globalThis.location && globalThis.location.href) || "http://localhost/";
     try {
       let html = "";
       const sd = frameSrcdocOf(el);
@@ -3054,8 +3344,10 @@ __G.domSig = () => {
         html = sd;
       } else {
         const url = resolveFrameUrl(el);
-        if (url) { frameUrl = url; const r = await ops.op_fetch(url, "{}"); html = (r && r.body) || ""; }
+        if (url) { frameUrl = url; const r = await ops.op_fetch(url, JSON.stringify({ destination: "iframe", source: (el.__ownerWin && el.__ownerWin.document && el.__ownerWin.document.URL) || globalThis.location.href })); html = (r && r.body) || ""; }
       }
+      if (!sd && frameSrcOf(el) && frameSrcOf(el) !== "about:blank") cw.location.href = frameUrl;
+      if (html && cw.document.body) cw.document.body.innerHTML = html;
       await loadFrameScripts(cw, html, frameUrl);
       fireRealmLoad(cw);
     } catch (_e) {
@@ -3110,19 +3402,19 @@ __G.domSig = () => {
       get() { return el.__srcdoc || ""; },
       set(v) { el.__srcdoc = String(v); maybeLoad(); } });
     // contentWindow/contentDocument are the child realm's DISTINCT window/document once the
-    // frame wants a realm; otherwise (inert/churn or past the cap) they point at the TOP
-    // window/doc so an analytics SDK's builtin-prototype probe still resolves + caches.
+    // frame wants a realm. Frames beyond the safety cap expose no child window;
+    // sharing the parent's globals would violate realm identity.
     Object.defineProperty(el, "contentWindow", { configurable: true,
       get() {
         if (el.__realm) return el.__realm;
         if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return __G.frameRealm(el, depth);
-        return globalThis;
+        return null;
       } });
     Object.defineProperty(el, "contentDocument", { configurable: true,
       get() {
         if (el.__realm) return el.__realm.document;
         if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return __G.frameRealm(el, depth).document;
-        return globalThis.document;
+        return null;
       } });
     return el;
   };
@@ -3153,8 +3445,8 @@ __G.domSig = () => {
     el.__ownerWin = globalThis;
     el.__depth = 1;
     try {
-      Object.defineProperty(el, "contentWindow", { configurable: true, get() { return el.__realm || globalThis; } });
-      Object.defineProperty(el, "contentDocument", { configurable: true, get() { return el.__realm ? el.__realm.document : globalThis.document; } });
+      Object.defineProperty(el, "contentWindow", { configurable: true, get() { return el.__realm || __G.frameRealm(el, 1); } });
+      Object.defineProperty(el, "contentDocument", { configurable: true, get() { return (el.__realm || __G.frameRealm(el, 1)).document; } });
     } catch (_e) {}
     if (frameWantsRealm(el)) { try { __G.loadFrame(el, 1); } catch (_e) {} }
   };
@@ -3377,20 +3669,13 @@ __G.domSig = () => {
     }
   });
 
-  // canvas / WebGL fidelity. Two tells the vendored (synthetic) canvas leaks: (a) its 2D +
-  // WebGL context methods are JS closures whose `.toString()` reveals source (anti-tamper
-  // flag), and (b) the WebGL identity is SwiftShader ("ANGLE (Google, Vulkan… SwiftShader)")
-  // — the classic headless/VM signal — with lower limits + fewer extensions than a real GPU.
-  // Wrap getContext to (1) spoof the WebGL surface to this host's real Chrome/ANGLE-Metal
-  // profile (measured live: Apple M4 Pro via ANGLE Metal) and (2) native-mark every own
-  // method on the returned context (they're per-instance own funcs, so the WeakSet mark must
-  // run per context). Canvas prototype readback methods (toDataURL/toBlob/getContext) are
-  // marked once. Pixel VALUES stay honest — this fixes the identity + toString tells, not the
-  // render hash (see the raster-backed toDataURL below for the byte-size fix).
+  // WebGL identity uses the host adapter, alongside its pixel executor. Extension
+  // and limit compatibility still belongs to the emulated WebGL layer below.
   guard(() => {
     const canvasProto = Object.getPrototypeOf(G.document.createElement("canvas"));
     if (!canvasProto || typeof canvasProto.getContext !== "function" || native.has(canvasProto.getContext)) return;
-    // Real-Chrome WebGL extension lists for this host (webgl vs webgl2 differ).
+    const adapter = JSON.parse(ops.op_webgl_metadata());
+    // WebGL extension lists for this backend (webgl vs webgl2 differ).
     const EXT1 = ["ANGLE_instanced_arrays","EXT_blend_minmax","EXT_clip_control","EXT_color_buffer_half_float","EXT_depth_clamp","EXT_disjoint_timer_query","EXT_float_blend","EXT_frag_depth","EXT_polygon_offset_clamp","EXT_sRGB","EXT_shader_texture_lod","EXT_texture_compression_bptc","EXT_texture_compression_rgtc","EXT_texture_filter_anisotropic","EXT_texture_mirror_clamp_to_edge","KHR_parallel_shader_compile","OES_element_index_uint","OES_fbo_render_mipmap","OES_standard_derivatives","OES_texture_float","OES_texture_float_linear","OES_texture_half_float","OES_texture_half_float_linear","OES_vertex_array_object","WEBGL_blend_func_extended","WEBGL_color_buffer_float","WEBGL_compressed_texture_astc","WEBGL_compressed_texture_etc","WEBGL_compressed_texture_etc1","WEBGL_compressed_texture_pvrtc","WEBGL_compressed_texture_s3tc","WEBGL_compressed_texture_s3tc_srgb","WEBGL_debug_renderer_info","WEBGL_debug_shaders","WEBGL_depth_texture","WEBGL_draw_buffers","WEBGL_lose_context","WEBGL_multi_draw","WEBGL_polygon_mode"];
     const EXT2 = ["EXT_clip_control","EXT_color_buffer_float","EXT_color_buffer_half_float","EXT_conservative_depth","EXT_depth_clamp","EXT_disjoint_timer_query_webgl2","EXT_float_blend","EXT_polygon_offset_clamp","EXT_render_snorm","EXT_texture_compression_bptc","EXT_texture_compression_rgtc","EXT_texture_filter_anisotropic","EXT_texture_mirror_clamp_to_edge","EXT_texture_norm16","KHR_parallel_shader_compile","NV_shader_noperspective_interpolation","OES_draw_buffers_indexed","OES_sample_variables","OES_shader_multisample_interpolation","OES_texture_float_linear","WEBGL_blend_func_extended","WEBGL_clip_cull_distance","WEBGL_compressed_texture_astc","WEBGL_compressed_texture_etc","WEBGL_compressed_texture_etc1","WEBGL_compressed_texture_pvrtc","WEBGL_compressed_texture_s3tc","WEBGL_compressed_texture_s3tc_srgb","WEBGL_debug_renderer_info","WEBGL_debug_shaders","WEBGL_lose_context","WEBGL_multi_draw","WEBGL_polygon_mode","WEBGL_provoking_vertex","WEBGL_render_shared_exponent","WEBGL_stencil_texturing"];
     // Full WebGL enum constants (captured from live Chrome: 298 for WebGL1, +255 for WebGL2).
@@ -3537,8 +3822,8 @@ __G.domSig = () => {
       set("RENDERER", 0x1f01, "WebKit WebGL");
       set("VERSION", 0x1f02, is2 ? "WebGL 2.0 (OpenGL ES 3.0 Chromium)" : "WebGL 1.0 (OpenGL ES 2.0 Chromium)");
       set("SHADING_LANGUAGE_VERSION", 0x8b8c, is2 ? "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)" : "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)");
-      M.set(UNMASKED_VENDOR, "Google Inc. (Apple)");
-      M.set(UNMASKED_RENDERER, "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)");
+      M.set(UNMASKED_VENDOR, adapter.vendor || "turbo-surf");
+      M.set(UNMASKED_RENDERER, adapter.renderer || "turbo-surf (GPU unavailable)");
       set("MAX_TEXTURE_SIZE", 0x0d33, 16384);
       set("MAX_CUBE_MAP_TEXTURE_SIZE", 0x851c, 16384);
       set("MAX_RENDERBUFFER_SIZE", 0x84e8, 16384);
@@ -4403,6 +4688,15 @@ fn pin_timezone() {
 }
 
 fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
+    make_runtime_with_hints(base, cookies, ua, ClientHints::default())
+}
+
+fn make_runtime_with_hints(
+    base: &str,
+    cookies: &str,
+    ua: &str,
+    client_hints: ClientHints,
+) -> JsRuntime {
     pin_timezone();
     // Build the shared cookie jar first so it backs BOTH page `fetch` (op_state) and the
     // ES-module loader (`<script type=module>` import graphs) — same session, one jar.
@@ -4417,6 +4711,7 @@ fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
             base: base.to_string(),
             jar: jar.clone(),
             ua: ua.to_string(),
+            client_hints: client_hints.clone(),
         })),
         ..Default::default()
     });
@@ -4426,9 +4721,11 @@ fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
         .date_time_configuration_change_notification(v8::TimeZoneDetection::Redetect);
     let state = rt.op_state();
     let mut state = state.borrow_mut();
+    state.put(ClassicScripts::default());
     state.put::<Base>(Base(base.to_string()));
     state.put::<Jar>(jar);
     state.put::<Ua>(Ua(ua.to_string()));
+    state.put::<ClientHints>(client_hints);
     drop(state);
     rt
 }
@@ -4437,6 +4734,14 @@ fn make_runtime(base: &str, cookies: &str, ua: &str) -> JsRuntime {
 /// tree), then layer the non-DOM env globals over the ops. After this the page
 /// script runs against a real `document`.
 fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String> {
+    {
+        let state = rt.op_state();
+        let mut state = state.borrow_mut();
+        let queue = state.borrow_mut::<ClassicScripts>();
+        queue.html = html.to_string();
+        queue.used_inline_offsets.clear();
+        queue.jobs.clear();
+    }
     let context = rt.main_context();
     {
         let scope = v8::HandleScope::new(rt.v8_isolate());
@@ -4523,23 +4828,124 @@ fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, Stri
     Ok(crate::browser_env::document_html())
 }
 
+fn execute_frame_script(
+    rt: &mut JsRuntime,
+    context: v8::Global<v8::Context>,
+    source_url: &str,
+    code: &str,
+) -> Result<(), String> {
+    let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+    let mut scope = scope.init();
+    let context = v8::Local::new(&scope, context);
+    let mut scope = v8::ContextScope::new(&mut scope, context);
+    let scope = std::pin::pin!(v8::TryCatch::new(&mut scope));
+    let scope = &mut scope.init();
+    let source = v8::String::new(scope, code).ok_or("iframe source allocation failed")?;
+    let resource = v8::String::new(scope, source_url).ok_or("iframe URL allocation failed")?;
+    let origin = v8::ScriptOrigin::new(
+        scope,
+        resource.into(),
+        0,
+        0,
+        false,
+        0,
+        None,
+        false,
+        false,
+        false,
+        None,
+    );
+    if let Some(script) = v8::Script::compile(scope, source, Some(&origin)) {
+        if script.run(scope).is_some() {
+            return Ok(());
+        }
+    }
+    let error = scope.exception().ok_or("iframe script execution failed")?;
+    if let Ok(object) = v8::Local::<v8::Object>::try_from(error) {
+        let key = v8::String::new(scope, "stack").unwrap();
+        if let Some(stack) = object.get(scope, key.into()) {
+            if stack.is_string() {
+                return Err(stack.to_rust_string_lossy(scope));
+            }
+        }
+    }
+    Err(error.to_rust_string_lossy(scope))
+}
+
 async fn drain_event_loop(rt: &mut JsRuntime) -> Result<(), String> {
-    match rt
-        .run_event_loop(deno_core::PollEventLoopOptions::default())
-        .await
-    {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            // Browser-tolerant: a page's UNHANDLED promise rejection logs in a real
-            // browser, it doesn't abort the page. deno_core surfaces it as a fatal event-
-            // loop error ("Uncaught (in promise) …"); swallow it so hydration keeps going
-            // (the pump re-polls). Real execution errors (terminated budget, op failures)
-            // still propagate.
-            let s = e.to_string();
-            if s.contains("Uncaught (in promise)") || s.contains("Unhandled") {
-                Ok(())
+    loop {
+        let job = {
+            let state = rt.op_state();
+            let mut state = state.borrow_mut();
+            state.borrow_mut::<ClassicScripts>().jobs.pop_front()
+        };
+        if let Some((id, source, code, context)) = job {
+            let result = if let Some(context) = context {
+                execute_frame_script(rt, context, &source, &code)
             } else {
-                Err(s)
+                rt.execute_script(source, code)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            };
+            let failure = match result {
+                Ok(_) => serde_json::Value::Null,
+                Err(e) => {
+                    if rt.v8_isolate().is_execution_terminating() {
+                        return Err(e.to_string());
+                    }
+                    // The original V8 stack is retained for reporting; the completion
+                    // callback runs only after the page script has left the stack.
+                    let name = e
+                        .trim_start_matches("Uncaught ")
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .split(':')
+                        .next()
+                        .unwrap_or("Error");
+                    let message = e
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .split_once(": ")
+                        .map(|(_, msg)| msg)
+                        .unwrap_or(&e);
+                    serde_json::json!({ "name": name, "message": message, "stack": e })
+                }
+            };
+            rt.execute_script(
+                "<script-completion>",
+                format!("globalThis[Symbol.for('ts')].completeClassicScript({id}, {failure})"),
+            )
+            .map_err(|e| e.to_string())?;
+            continue;
+        }
+        let result = std::future::poll_fn(|cx| {
+            let result = rt.poll_event_loop(cx, deno_core::PollEventLoopOptions::default());
+            // Polling may resume an async fetch and enqueue its script. Yield to
+            // Rust immediately rather than waiting on the script's JS promise.
+            if !rt
+                .op_state()
+                .borrow()
+                .borrow::<ClassicScripts>()
+                .jobs
+                .is_empty()
+            {
+                return std::task::Poll::Ready(None);
+            }
+            result.map(Some)
+        })
+        .await;
+        match result {
+            None => continue,
+            Some(Ok(())) => return Ok(()),
+            Some(Err(e)) => {
+                let text = e.to_string();
+                if text.contains("Uncaught (in promise)") || text.contains("Unhandled") {
+                    eprintln!("[render] nonfatal promise rejection: {text}");
+                    return Ok(());
+                }
+                return Err(text);
             }
         }
     }
@@ -4615,10 +5021,32 @@ pub async fn render_capture_cookies(
     script: &str,
     budget_ms: u64,
 ) -> Result<(String, String), String> {
+    render_capture_cookies_with_request_state(
+        html,
+        base,
+        ua,
+        cookies,
+        script,
+        budget_ms,
+        ClientHints::default(),
+    )
+    .await
+}
+
+/// Like [`render_capture_cookies`], sharing the browsing session's Accept-CH state.
+pub async fn render_capture_cookies_with_request_state(
+    html: &str,
+    base: &str,
+    ua: &str,
+    cookies: &str,
+    script: &str,
+    budget_ms: u64,
+    client_hints: ClientHints,
+) -> Result<(String, String), String> {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    let mut rt = make_runtime(base, cookies, ua);
+    let mut rt = make_runtime_with_hints(base, cookies, ua, client_hints);
     let handle = rt.v8_isolate().thread_safe_handle();
     let done = Arc::new(AtomicBool::new(false));
     let watch = done.clone();
@@ -5336,7 +5764,22 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
 }
 
 async fn run_hydrate(rt: &mut JsRuntime, html: &str, base: &str) -> Result<String, String> {
+    run_hydrate_with_init(rt, html, base, "").await
+}
+
+async fn run_hydrate_with_init(
+    rt: &mut JsRuntime,
+    html: &str,
+    base: &str,
+    init_script: &str,
+) -> Result<String, String> {
     install_dom(rt, html, base)?;
+    rt.execute_script("<current-script>", "document.currentScript = null;")
+        .map_err(|e| e.to_string())?;
+    if !init_script.is_empty() {
+        rt.execute_script("<init-script>", init_script.to_string())
+            .map_err(|e| e.to_string())?;
+    }
     // Unified event-loop pump. A single "run scripts+timers, then drain" pass isn't
     // enough for a real SPA: React kicks a fetch, yields, the fetch resolves, React
     // schedules MORE work (a timer via its MessageChannel), which schedules another
@@ -5572,10 +6015,47 @@ impl PageSession {
         ua: &str,
         budget_ms: u64,
     ) -> Result<Self, String> {
-        let mut rt = make_runtime(base, cookies, ua);
+        Self::open_with_init_script(html, base, cookies, ua, budget_ms, "").await
+    }
+
+    /// Like [`Self::open`], with a script run after environment installation and before
+    /// any page script. Intended for diagnostic instrumentation; no hook runs by default.
+    pub async fn open_with_init_script(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+    ) -> Result<Self, String> {
+        Self::open_with_request_state(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            ClientHints::default(),
+        )
+        .await
+    }
+
+    /// Open with the session's shared HTTP client-hint negotiation state. This must
+    /// be supplied before hydration, because initial page scripts can fetch resources.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_request_state(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+    ) -> Result<Self, String> {
+        let mut rt = make_runtime_with_hints(base, cookies, ua, client_hints);
         let result = {
             let _wd = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
-            run_hydrate(&mut rt, html, base).await
+            run_hydrate_with_init(&mut rt, html, base, init_script).await
         };
         match result {
             Ok(_) => Ok(PageSession {

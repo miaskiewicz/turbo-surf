@@ -241,6 +241,32 @@ fn wrap<'s>(scope: &mut v8::PinScope<'s, '_>, handle: Handle) -> v8::Local<'s, v
     let obj = tmpl.new_instance(scope).unwrap();
     let h = v8::Integer::new_from_unsigned(scope, handle.raw());
     obj.set_internal_field(0, h.into());
+    // Parser-created controls bypass createElement's JS wrapper. Select their live
+    // interface prototype here too, so IDL getters work for query/innerHTML results.
+    let tag = with_tree(|t| t.tag_name(handle)).flatten().unwrap_or_default();
+    let interface = match tag.to_ascii_lowercase().as_str() {
+        "input" => Some("HTMLInputElement"),
+        "textarea" => Some("HTMLTextAreaElement"),
+        "select" => Some("HTMLSelectElement"),
+        "option" => Some("HTMLOptionElement"),
+        "button" => Some("HTMLButtonElement"),
+        "label" => Some("HTMLLabelElement"),
+        "canvas" => Some("HTMLCanvasElement"),
+        "a" => Some("HTMLAnchorElement"),
+        _ => None,
+    };
+    if let Some(interface) = interface {
+        let global = scope.get_current_context().global(scope);
+        let key = v8::String::new(scope, interface).unwrap();
+        if let Some(ctor) = global.get(scope, key.into()).and_then(|v| v.to_object(scope)) {
+            let key = v8::String::new(scope, "prototype").unwrap();
+            if let Some(proto) = ctor.get(scope, key.into()) {
+                if proto.is_object() {
+                    obj.set_prototype(scope, proto);
+                }
+            }
+        }
+    }
     let g = v8::Global::new(scope, obj);
     DOM.with(|d| {
         if let Some(s) = d.borrow_mut().as_mut() {
@@ -2896,6 +2922,40 @@ mod tests {
         );
         assert_eq!(v["getAttr"], "x", "{out}");
         assert_eq!(v["inBody"], true, "{out}");
+        reset();
+    }
+
+    #[test]
+    fn cssom_parses_style_text_and_parser_created_controls_have_idl_values() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install(scope);
+        let source = v8::String::new(scope, r#"
+            document.body.innerHTML='<input id="token" type="hidden" value="abc&amp;def"><textarea id="q">search</textarea><style>body { color: red; } sentinel {}</style>';
+            const input=document.querySelector('#token'), textarea=document.querySelector('#q');
+            const style=document.querySelector('style'), sheet=style.sheet;
+            const parsed=sheet.cssRules.length===2 && sheet.cssRules[1].selectorText==='sentinel' && sheet.cssRules[1] instanceof CSSStyleRule;
+            const value=input.value==='abc&def' && input instanceof HTMLInputElement && textarea.value==='search';
+            const text=style.textContent;
+            sheet.insertRule('a { color: blue; }',1);
+            const inserted=sheet.cssRules.length===3 && sheet.cssRules[1].selectorText==='a' && style.textContent===text;
+            style.textContent='/*comment*/ h1 { content: "}"; } @media screen { p { color: red; } }';
+            const replacement=style.sheet;
+            const updated=replacement!==sheet && sheet.cssRules.length===3 && sheet.ownerNode===null && replacement.cssRules.length===2 && replacement.cssRules[0].style.getPropertyValue('content')==='"}"' && replacement.cssRules[1].cssRules[0].selectorText==='p';
+            const registered=document.styleSheets.length===1 && document.styleSheets[0]===replacement;
+            style.remove();
+            const removed=document.styleSheets.length===0 && style.sheet===null;
+            JSON.stringify({parsed,value,inserted,updated,registered,removed});
+        "#).unwrap();
+        let script = v8::Script::compile(scope, source, None).unwrap();
+        let result = script.run(scope).unwrap().to_rust_string_lossy(scope);
+        let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+        for field in ["parsed", "value", "inserted", "updated", "registered", "removed"] {
+            assert_eq!(result[field], true, "{field}: {result}");
+        }
         reset();
     }
 

@@ -1,8 +1,6 @@
 (function(){
   var g = globalThis;
-  // turbo-surf shares this binding; its internal cross-context state lives on a Symbol-keyed
-  // namespace (absent from getOwnPropertyNames(window) — real Chrome has no such __* globals),
-  // not as `__*` string globals. Reachable from every realm via globalThis[Symbol.for('ts')].
+  // The renderer shares the binding; keep cross-context host state off string globals.
   var __ns = g[Symbol.for('ts')] || (Object.defineProperty(g, Symbol.for('ts'), { value: {}, configurable: true, enumerable: false }), g[Symbol.for('ts')]);
   if (typeof g.navigator === 'undefined') g.navigator = { userAgent: 'turbo-test', platform: 'rust', language: 'en-US', languages: ['en-US'], clipboard: {}, maxTouchPoints: 0 };
   // Top-level window self-references (browsers + jsdom + vitest): a non-framed window is its own
@@ -320,21 +318,67 @@
   // document extras (pure-JS shims over the native tree).
   var d = g.document;
   d.defaultView = g;
-  // Constructable stylesheets — emotion/MUI do `new CSSStyleSheet()` then
-  // `document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]`. There is
-  // no layout engine here, so the rule list is an inert store that satisfies the API;
-  // a missing `CSSStyleSheet` reference aborts the chunk mid-hydration, blanking the tree.
-  if (typeof g.CSSStyleSheet === 'undefined') {
-    g.CSSStyleSheet = function CSSStyleSheet(){ this.cssRules = []; this.rules = this.cssRules; };
-    g.CSSStyleSheet.prototype.insertRule = function(rule, index){
-      var i = (index == null) ? this.cssRules.length : index;
-      this.cssRules.splice(i, 0, { cssText: String(rule) });
-      return i;
-    };
-    g.CSSStyleSheet.prototype.deleteRule = function(index){ this.cssRules.splice(index, 1); };
-    g.CSSStyleSheet.prototype.replace = function(text){ this.cssRules = [{ cssText: String(text) }]; return Promise.resolve(this); };
-    g.CSSStyleSheet.prototype.replaceSync = function(text){ this.cssRules = [{ cssText: String(text) }]; };
-  }
+  // Parse text once per mutation, retaining rule identity until its source changes.
+  // The scanner respects strings/comments and nested blocks (regex splitting does not).
+  var cssList = function(){ var a=[]; a.item=function(i){ return this[i] || null; }; return a; };
+  var cssParts = function(text, separator){
+    var out=[], start=0, depth=0, quote='', escaped=false, comment=false;
+    for (var i=0;i<text.length;i++) {
+      var c=text[i], next=text[i+1];
+      if (comment) { if(c==='*'&&next==='/'){comment=false;i++;} continue; }
+      if (quote) { if(escaped) escaped=false; else if(c==='\\') escaped=true; else if(c===quote) quote=''; continue; }
+      if(c==='/'&&next==='*'){comment=true;i++;continue;} if(c==='"'||c==="'"){quote=c;continue;}
+      if(c==='('||c==='[') depth++; else if(c===')'||c===']') depth--;
+      if(c===separator&&depth===0){out.push(text.slice(start,i));start=i+1;}
+    }
+    out.push(text.slice(start)); return out;
+  };
+  var cssDeclaration = function(text){
+    var st=Object.create(g.CSSStyleDeclaration.prototype), values={}, names=[];
+    st.getPropertyValue=function(n){return (values[String(n)] || '').replace(/\s*!important$/,'');};
+    st.getPropertyPriority=function(n){return /!important$/.test(values[String(n)]||'')?'important':'';};
+    st.setProperty=function(n,v,priority){n=String(n);if(!(n in values))names.push(n);values[n]=String(v)+(priority==='important'?' !important':'');st[n]=String(v);};
+    st.removeProperty=function(n){var v=st.getPropertyValue(n);delete values[n];delete st[n];var i=names.indexOf(n);if(i>=0)names.splice(i,1);return v;};
+    st.item=function(i){return names[i]||'';};
+    Object.defineProperty(st,'length',{get:function(){return names.length;}});
+    Object.defineProperty(st,'cssText',{get:function(){return names.map(function(n){return n+': '+values[n]+';';}).join(' ');},set:function(t){names.slice().forEach(function(n){st.removeProperty(n);});parse(t);}});
+    var parse=function(t){cssParts(String(t),';').forEach(function(part){var i=part.indexOf(':');if(i>0){var n=part.slice(0,i).trim(),v=part.slice(i+1).trim();if(n&&v)st.setProperty(n,v);}});};
+    parse(text); return st;
+  };
+  if (typeof g.CSSStyleRule !== 'function') g.CSSStyleRule=function CSSStyleRule(){};
+  g.CSSRule.STYLE_RULE=1;
+  g.CSSStyleRule.prototype=Object.create(g.CSSRule.prototype);
+  g.CSSStyleRule.prototype.constructor=g.CSSStyleRule;
+  var parseCssRules = function(text, sheet, parent){
+    text=String(text); var out=cssList(), start=0, depth=0, quote='', escaped=false, comment=false, open=-1;
+    for(var i=0;i<text.length;i++){
+      var c=text[i],next=text[i+1];
+      if(comment){if(c==='*'&&next==='/'){comment=false;i++;}continue;}
+      if(quote){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue;}
+      if(c==='/'&&next==='*'){comment=true;i++;continue;} if(c==='"'||c==="'"){quote=c;continue;}
+      if(c==='{' ){if(depth++===0)open=i;}
+      else if(c==='}'&&depth>0&&--depth===0){
+        var head=text.slice(start,open).replace(/\/\*[\s\S]*?\*\//g,'').trim(),body=text.slice(open+1,i);
+        if(head){
+          var isAt=head[0]==='@',rule=Object.create(isAt?g.CSSRule.prototype:g.CSSStyleRule.prototype);
+          rule.parentStyleSheet=sheet;rule.parentRule=parent||null;
+          if(isAt){rule.type=/^@media\b/i.test(head)?4:/^@supports\b/i.test(head)?12:/^@font-face\b/i.test(head)?5:0;rule.cssRules=parseCssRules(body,sheet,rule);rule.cssText=head+' { '+body.trim()+' }';}
+          else {rule.type=1;rule.selectorText=head.replace(/\s*,\s*/g,', ');rule.style=cssDeclaration(body);Object.defineProperty(rule,'cssText',{get:function(){var t=this.style.cssText;return this.selectorText+' {'+(t?' '+t+' ':' ')+'}';}});}
+          out.push(rule);
+        }
+        start=i+1;
+      } else if(c===';'&&depth===0){start=i+1;}
+    }
+    return out;
+  };
+  var cssError=function(name){var e=new Error(name);e.name=name;return e;};
+  g.CSSStyleSheet=function CSSStyleSheet(){this.ownerNode=null;this.__rules=cssList();this.__constructed=true;};
+  Object.defineProperty(g.CSSStyleSheet.prototype,'cssRules',{configurable:true,get:function(){return this.__rules;}});
+  Object.defineProperty(g.CSSStyleSheet.prototype,'rules',{get:function(){return this.cssRules;}});
+  g.CSSStyleSheet.prototype.insertRule=function(text,index){var list=this.cssRules,i=index==null?0:Number(index);if(!Number.isInteger(i)||i<0||i>list.length)throw cssError('IndexSizeError');var parsed=parseCssRules(text,this,null);if(parsed.length!==1)throw cssError('SyntaxError');list.splice(i,0,parsed[0]);return i;};
+  g.CSSStyleSheet.prototype.deleteRule=function(index){var list=this.cssRules,i=Number(index);if(!Number.isInteger(i)||i<0||i>=list.length)throw cssError('IndexSizeError');list.splice(i,1);};
+  g.CSSStyleSheet.prototype.replaceSync=function(text){if(!this.__constructed)throw cssError('NotAllowedError');this.__rules=parseCssRules(text,this,null);};
+  g.CSSStyleSheet.prototype.replace=function(text){try{this.replaceSync(text);return Promise.resolve(this);}catch(e){return Promise.reject(e);}};
   // adoptedStyleSheets — must be a real, settable ARRAY (a non-iterable getter or
   // absent prop both break the read-modify-write spread above).
   if (!Array.isArray(d.adoptedStyleSheets)) {
@@ -391,15 +435,7 @@
   // getOwnPropertyDescriptor(element)) AND on the interface .prototype (React's value-tracker reads
   // node.constructor.prototype). No setPrototypeOf — avoids touching the native proto chain.
   (function(){
-    var sheets = [];
-    var mkSheet = function(el){ var rules = []; return { ownerNode: el, cssRules: rules, get rules(){ return rules; },
-      insertRule: function(rule, index){ var i = index == null ? rules.length : index; rules.splice(i, 0, { cssText: String(rule), selectorText: '' });
-        // Also reflect into the <style> element's text so code reading style.textContent (emotion's
-        // non-speedy form, which some tests assume) sees the inserted CSS.
-        try { el.textContent = (el.textContent || '') + String(rule); } catch(e){}
-        return i; },
-      deleteRule: function(i){ rules.splice(i, 1); try { el.textContent = rules.map(function(r){ return r.cssText; }).join(''); } catch(e){} },
-      replaceSync: function(){}, replace: function(){ return Promise.resolve(); } }; };
+    var mkSheet = function(el){var sheet=new g.CSSStyleSheet();sheet.ownerNode=el;sheet.__constructed=false;sheet.__rules=parseCssRules(el.textContent||'',sheet,null);return sheet;};
     var orig = d.createElement.bind(d);
     // value/checked live ONLY on the interface .prototype (NOT own — React's value-tracker bails on
     // node.hasOwnProperty('value')). Each control's actual proto is set to that interface prototype
@@ -422,7 +458,7 @@
     // The `value` IDL accessor, backed by the `value` content attribute (defaultValue==value here,
     // which suffices for getByDisplayValue/[value]); the value-change tracker (attachValueTracker)
     // layers the dirty-since-last-seen signal on top for framework change detection.
-    var valDesc = { configurable: true, get: function(){ var v = this.getAttribute('value'); return v == null ? '' : v; }, set: function(v){ this.setAttribute('value', validForType(this, v == null ? '' : String(v))); } };
+    var valDesc = { configurable: true, get: function(){ var v = this.getAttribute('value'); return v == null ? (String(this.tagName).toLowerCase()==='textarea' ? this.textContent || '' : '') : v; }, set: function(v){ this.setAttribute('value', validForType(this, v == null ? '' : String(v))); } };
     // Reflect the live `checked` property to the `checked` content attribute so rtdom's `:checked`
     // pseudo (which matches on the attribute) finds controlled checkboxes/radios React toggles.
     var checkedDesc = { configurable: true, get: function(){ return this.__checked === undefined ? this.hasAttribute('checked') : !!this.__checked; }, set: function(v){ v = !!v; this.__checked = v; try { if (v) this.setAttribute('checked', ''); else this.removeAttribute('checked'); } catch(e){} } };
@@ -904,9 +940,6 @@
     })();
     d.createElement = function(tag){
       var el = orig(tag); var t = String(tag).toLowerCase();
-      try {
-        if (t === 'style' && !el.sheet) { var s = mkSheet(el); Object.defineProperty(el, 'sheet', { configurable: true, get: function(){ return s; } }); sheets.push(s); }
-      } catch(e){}
       applyControlProto(el);
       // canvas: drop the own native getBoundingClientRect so it resolves to the (mockable)
       // HTMLCanvasElement.prototype version; getContext/toDataURL/toBlob are on the proto too.
@@ -917,7 +950,7 @@
     // prototype to the clone), so a cloned <input>/<select> keeps its type/value/checked accessors
     // (userEvent's isValidDateOrTimeValue clones a date input, assigns, and checks the value stuck).
     void applyControlProto;
-    if (!d.styleSheets) { try { Object.defineProperty(d, 'styleSheets', { configurable: true, get: function(){ return sheets; } }); } catch(e){} }
+    try { Object.defineProperty(d, 'styleSheets', { configurable: true, get: function(){ var list=cssList();var els=d.querySelectorAll('style');for(var i=0;i<els.length;i++){var sheet=els[i].sheet;if(sheet)list.push(sheet);}return list; } }); } catch(e){}
 
     // Alias the shim interface-constructor `.prototype`s onto the REAL element/document prototypes,
     // so a test patching HTMLElement.prototype.requestFullscreen / Document.prototype.exitFullscreen
@@ -932,8 +965,8 @@
       // parse / innerHTML) never pass through `createElement`, yet emotion /
       // styled-components hydrate by calling `styleEl.sheet.insertRule(...)` on them.
       // Without a `.sheet` that throws and aborts the chunk, blanking the styling.
-      // `mkSheet`'s insertRule reflects into `el.textContent`, so the serialized HTML
-      // then carries the injected CSS. Defined on the shared element prototype and
+      // CSSOM mutations stay separate from the DOM text, just as in browsers.
+      // Defined on the shared element prototype and
       // WITHOUT a descriptor guard (the NON_MASKING interceptor makes every lookup
       // report a descriptor, so a guard would wrongly skip). Caches per element.
       Object.defineProperty(baseProto, 'sheet', {
@@ -941,8 +974,11 @@
         get: function(){
           var tag = this.tagName;
           if (!tag || String(tag).toUpperCase() !== 'STYLE') return null;
-          if (!this.__tcSheet) {
-            try { this.__tcSheet = mkSheet(this); sheets.push(this.__tcSheet); }
+          if (!this.isConnected) {if(this.__tcSheet)this.__tcSheet.ownerNode=null;this.__tcSheet=null;return null;}
+          var text=String(this.textContent||'');
+          if (!this.__tcSheet || this.__tcSheetText!==text) {
+            if(this.__tcSheet)this.__tcSheet.ownerNode=null;
+            try { this.__tcSheet = mkSheet(this); this.__tcSheetText=text; }
             catch (e) { return mkSheet(this); }
           }
           return this.__tcSheet;
@@ -1184,7 +1220,7 @@
     // Build (once) a bridged child realm for the <iframe> `hostEl`. `parentWin` defaults
     // to the top window `g`. Returns the child window; also sets hostEl.contentWindow /
     // contentDocument. Reused by turbo-surf's render tier for the reCAPTCHA bframe.
-    __ns.makeFrameRealm = function(hostEl, parentWin){
+    __ns.makeFrameRealm = function(hostEl, parentWin, createWindow){
       parentWin = parentWin || g;
       if (hostEl && hostEl.__realm) return hostEl.__realm;
       var childDoc = makeChildDocument();
@@ -1193,7 +1229,8 @@
       var parentOrigin = (parentWin.location && parentWin.location.origin) || originOf(parentWin.location && parentWin.location.href) || '';
       var wl = {}; // the child window's own event listeners
       var childWin, parentView;
-      childWin = {
+      childWin = typeof createWindow === 'function' ? createWindow() : {};
+      Object.assign(childWin, {
         document: childDoc, closed: false, name: (hostEl && hostEl.name) || '',
         origin: childOrigin, length: 0, frames: [], devicePixelRatio: 1,
         innerWidth: 0, innerHeight: 0, outerWidth: 0, outerHeight: 0, screenX: 0, screenY: 0,
@@ -1219,7 +1256,7 @@
           var ports = Array.isArray(transfer)?transfer:(transfer&&transfer.length?Array.prototype.slice.call(transfer):[]);
           deliver(childWin, mkMsgEvent(msg, parentOrigin, parentView, ports));
         },
-      };
+      });
       childWin.window = childWin; childWin.self = childWin; childWin.globalThis = childWin;
       childDoc.defaultView = childWin;
       // parentView: what the child holds to reach the parent (child.parent / child.top /

@@ -15,6 +15,7 @@ use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
 use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::net::{fetch_html, FetchOptions};
+use turbo_surf_core::request_context::{ClientHints, RequestContext};
 use turbo_surf_view as view;
 
 struct Job {
@@ -28,6 +29,7 @@ struct State {
     tree: Option<Tree>,
     url: String,
     jar: CookieJar,
+    client_hints: ClientHints,
 }
 
 /// A retained-DOM browsing session. Methods block on the worker thread.
@@ -96,6 +98,11 @@ async fn goto(st: &mut State, url: &str) -> std::result::Result<String, String> 
     let opts = FetchOptions {
         allow_non_html: true,
         jar: Some(&mut st.jar),
+        client_hints: Some(&st.client_hints),
+        context: Some(RequestContext::navigation(
+            (!st.url.is_empty()).then(|| st.url.clone()),
+            true,
+        )),
         ..Default::default()
     };
     let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
@@ -135,6 +142,8 @@ async fn action(st: &mut State, tool: &str, args: &Value) -> std::result::Result
                     body: s.body,
                     allow_non_html: true,
                     jar: Some(&mut st.jar),
+                    client_hints: Some(&st.client_hints),
+                    context: Some(RequestContext::navigation(Some(st.url.clone()), true)),
                     ..Default::default()
                 };
                 let res = fetch_html(&s.url, opts).await.map_err(|e| e.to_string())?;
@@ -237,6 +246,7 @@ pub struct LiveOpenTask {
     base_url: String,
     cookies: String,
     user_agent: String,
+    client_hints: ClientHints,
 }
 
 #[napi]
@@ -251,6 +261,7 @@ impl Task for LiveOpenTask {
         let base = std::mem::take(&mut self.base_url);
         let cookies = std::mem::take(&mut self.cookies);
         let ua = std::mem::take(&mut self.user_agent);
+        let client_hints = self.client_hints.clone();
         thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -262,12 +273,14 @@ impl Task for LiveOpenTask {
                     return;
                 }
             };
-            let mut session = match rt.block_on(PageSession::open(
+            let mut session = match rt.block_on(PageSession::open_with_request_state(
                 &html,
                 &base,
                 &cookies,
                 &ua,
                 DEFAULT_RENDER_BUDGET_MS,
+                "",
+                client_hints,
             )) {
                 Ok(s) => {
                     let _ = open_tx.send(Ok(()));
@@ -321,16 +334,18 @@ pub fn live_open(
     base_url: String,
     cookies: Option<String>,
     user_agent: Option<String>,
-) -> AsyncTask<LiveOpenTask> {
+    request_state_id: Option<u32>,
+) -> Result<AsyncTask<LiveOpenTask>> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
     crate::ensure_render_init();
-    AsyncTask::new(LiveOpenTask {
+    Ok(AsyncTask::new(LiveOpenTask {
         html,
         base_url,
         cookies: cookies.unwrap_or_default(),
         user_agent: user_agent.unwrap_or_default(),
-    })
+        client_hints: crate::request_state(request_state_id)?,
+    }))
 }
 
 /// Run `script` in the live isolate, drain to quiescence, return `String(__RESULT||'')`.

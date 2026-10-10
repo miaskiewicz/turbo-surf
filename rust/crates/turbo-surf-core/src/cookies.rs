@@ -236,6 +236,44 @@ impl CookieJar {
             .join("; ")
     }
 
+    /// Script-visible cookie string. HttpOnly cookies remain available to HTTP
+    /// requests and storage_state but must never be exposed through document.cookie.
+    pub fn document_cookie(&self, url: &str, now: f64) -> String {
+        self.cookies_for(url, now)
+            .into_iter()
+            .filter(|c| !c.http_only)
+            .map(|c| format!("{}={}", c.name, c.value))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    /// Non-HTTP cookie writes cannot create or overwrite an HttpOnly cookie.
+    pub fn set_from_document(&mut self, url: &str, line: &str, now: f64) {
+        let Ok(u) = Url::parse(url) else {
+            return;
+        };
+        let host = u.host_str().unwrap_or("").to_ascii_lowercase();
+        let Some((raw, _, _)) = parse_with_raw(line) else {
+            return;
+        };
+        if raw.http_only {
+            return;
+        }
+        let domain = if raw.domain.is_empty() {
+            host.clone()
+        } else {
+            raw.domain.clone()
+        };
+        if self
+            .store
+            .get(&key(&domain, &raw.path, &raw.name))
+            .is_some_and(|c| c.http_only && c.expires_at > now)
+        {
+            return;
+        }
+        self.ingest_one(line, &host, now);
+    }
+
     /// Add a cookie record directly (Playwright `addCookies` / storageState seed).
     /// `expires` is epoch SECONDS; `-1`/`None` → session cookie.
     pub fn add(&mut self, name: &str, value: &str, domain: &str, path: &str, expires: Option<f64>) {

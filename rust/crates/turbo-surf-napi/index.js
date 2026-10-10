@@ -60,6 +60,8 @@ function requireDev(dev) {
 }
 
 function load() {
+  // Explicit dev/harness selection avoids silently loading an older release dylib.
+  if (process.env.TURBO_SURF_NAPI_PATH) return require(process.env.TURBO_SURF_NAPI_PATH);
   const packaged = join(__dirname, `turbo-surf.${suffix()}.node`);
   if (existsSync(packaged)) return require(packaged);
   for (const dev of devCandidates()) {

@@ -25,7 +25,7 @@ pub struct ChromeRelease {
     /// Reported major (UA `Chrome/<major>.0.0.0`, `sec-ch-ua` `v="<major>"`).
     pub major: u16,
     /// Full build version for high-entropy UA-CH (`getHighEntropyValues`
-    /// `fullVersionList` / `uaFullVersion`), e.g. `"154.0.7258.66"`. The UA STRING
+    /// `fullVersionList` / `uaFullVersion`), e.g. `"154.0.8037.98"`. The UA STRING
     /// itself stays reduced to `<major>.0.0.0` (Chrome's UA-Reduction); this full
     /// version only surfaces through the client-hints high-entropy API.
     pub full_version: &'static str,
@@ -79,7 +79,7 @@ const HEADER_ORDER_153: &[&str] = &[
 pub const RELEASES: &[ChromeRelease] = &[
     ChromeRelease {
         major: 154,
-        full_version: "154.0.8037.58", // real Chrome 154 stable build
+        full_version: "154.0.8037.98", // installed Chrome oracle, captured 2026-10-09
         header_order: HEADER_ORDER_154,
     },
     ChromeRelease {

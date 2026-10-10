@@ -1585,14 +1585,14 @@ fn chrome_fingerprint_identity_is_coherent() {
 
     let renderer = v["renderer"].as_str().unwrap_or("");
     assert!(
-        renderer.contains("Apple") && renderer.contains("Metal"),
-        "WebGL must be ANGLE Metal/Apple, not SwiftShader: {renderer}"
+        renderer == "turbo-surf (GPU unavailable)",
+        "standalone render cannot invent a hardware identity: {renderer}"
     );
     assert!(
         !renderer.contains("SwiftShader"),
         "SwiftShader leak: {renderer}"
     );
-    assert_eq!(v["vendor"], "Google Inc. (Apple)");
+    assert_eq!(v["vendor"], "turbo-surf");
     assert_eq!(v["maxTex"], 16384);
     assert_eq!(v["extCount"], 39);
     assert_eq!(
@@ -3416,7 +3416,7 @@ async fn esm_src_chunk_with_module_body_loads_and_resolves_imports() {
 // vendored default was SwiftShader ("ANGLE (Google, … SwiftShader)") — itself a headless/VM
 // signal; we present the coherent Apple-Metal signature instead (see fix #3).
 #[test]
-fn webgl_apple_metal_signature_in_render_isolate() {
+fn webgl_does_not_invent_adapter_identity_without_host_metadata() {
     let out = run_with_dom(
         "<body></body>",
         r#"(() => {
@@ -3436,12 +3436,12 @@ fn webgl_apple_metal_signature_in_render_isolate() {
     )
     .unwrap();
     assert!(
-        out.contains("WebKit||WebKit WebGL||Google Inc. (Apple)"),
-        "Apple-Metal masked identity: {out}"
+        out.contains("WebKit||WebKit WebGL||turbo-surf"),
+        "standalone metadata: {out}"
     );
     assert!(
-        out.contains("ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"),
-        "Apple-Metal unmasked renderer: {out}"
+        out.contains("turbo-surf (GPU unavailable)"),
+        "absent adapter must be explicit: {out}"
     );
     assert!(
         !out.contains("SwiftShader"),
@@ -4089,4 +4089,234 @@ async fn render_tier_fetch_set_cookie_on_redirect_reaches_jar() {
         "Set-Cookie on the fetch's 302 hop must reach the session jar, got: {jar}"
     );
     session.close();
+}
+
+#[tokio::test]
+async fn blank_iframes_have_native_independent_intrinsics_and_global_bindings() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const first = document.createElement('iframe');
+        const second = document.createElement('iframe');
+        document.body.appendChild(first);
+        document.body.appendChild(second);
+        const cw = first.contentWindow;
+        const root = document.getElementById('root');
+        root.setAttribute('data-array', String(cw.Array !== Array && cw.Array !== second.contentWindow.Array));
+        root.setAttribute('data-function', String(cw.Function !== Function));
+        root.setAttribute('data-literal', String(cw.eval('[]') instanceof cw.Array && !(cw.eval('[]') instanceof Array)));
+        root.setAttribute('data-global', String(new cw.Function('return globalThis')() === cw));
+        cw.Array.prototype.childOnly = 42;
+        root.setAttribute('data-prototype', String(Array.prototype.childOnly === undefined));
+        cw.eval('var frameGlobal = 7;');
+        root.setAttribute('data-persistent', String(cw.eval('frameGlobal') === 7 && globalThis.frameGlobal === undefined));
+        root.setAttribute('data-parent', String(cw.parent === window && cw.top === window && cw.frameElement === first && cw.document.defaultView === cw));
+        "#,
+    ).await.unwrap();
+    for name in [
+        "array",
+        "function",
+        "literal",
+        "global",
+        "prototype",
+        "persistent",
+        "parent",
+    ] {
+        assert!(
+            html.contains(&format!("data-{name}=\"true\"")),
+            "{name}: {html}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn srcdoc_scripts_use_child_intrinsics_and_persist_global_lexicals() {
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        f.srcdoc = '<scr' + 'ipt>let frameLexical = 11; var frameVar = 13; Array.prototype.iframeOnly=1;</scr' + 'ipt>'
+          + '<scr' + 'ipt>top.document.getElementById("root").setAttribute("data-realm", String(Array !== top.Array && [] instanceof Array && globalThis === window && frameLexical + frameVar === 24 && top.Array.prototype.iframeOnly === undefined)); top.document.getElementById("root").setAttribute("data-stack", new Error("child-source").stack);</scr' + 'ipt>';
+        "#,
+    ).await.unwrap();
+    assert!(html.contains("data-realm=\"true\""), "{html}");
+    assert!(
+        html.contains("http://localhost/"),
+        "child stack needs document URL: {html}"
+    );
+    assert!(
+        !html.contains("&lt;env&gt;")
+            && !html.contains("runVmInRealm")
+            && !html.contains("eval at"),
+        "child stack must omit runtime wrappers: {html}"
+    );
+}
+
+#[tokio::test]
+async fn frame_messages_preserve_sender_identity_in_both_directions() {
+    let html = render_page(
+        "<body><div id='root'></div></body>", "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        addEventListener('message', e => {
+          if (e.data === 'child-ready') {
+            document.getElementById('root').setAttribute('data-child-source', String(e.source === f.contentWindow && e.origin === location.origin));
+            e.source.postMessage('parent-reply', '*');
+          }
+        });
+        f.srcdoc = '<scr' + 'ipt>addEventListener("message", e => {if(e.data === "parent-reply") top.document.getElementById("root").setAttribute("data-parent-source", String(e.source === parent));}); parent.postMessage("child-ready", "*");</scr' + 'ipt>';
+        "#,
+    ).await.unwrap();
+    assert!(html.contains("data-child-source=\"true\""), "{html}");
+    assert!(html.contains("data-parent-source=\"true\""), "{html}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn inherited_frame_cookies_share_the_jar_and_protect_http_only_values() {
+    let mut jar = turbo_surf_core::cookies::CookieJar::new();
+    jar.set_from_response(
+        "https://example.test/path",
+        &[
+            "visible=parent; Path=/".into(),
+            "secret=server; Path=/; HttpOnly".into(),
+        ],
+        0.0,
+    );
+    let mut page = turbo_surf_render::PageSession::open(
+        "<body></body>",
+        "https://example.test/path",
+        &jar.storage_state(),
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let raw = page
+        .eval(
+            r#"
+        const f = document.createElement('iframe');
+        const d = f.contentDocument;
+        const before = d.cookie;
+        d.cookie = 'secret=guest; Path=/';
+        d.cookie = 'visible=child; Path=/';
+        globalThis.__RESULT = JSON.stringify({before, after:d.cookie, parent:document.cookie});
+    "#,
+        )
+        .await
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(result["before"], "visible=parent");
+    assert_eq!(result["after"], "visible=child");
+    assert_eq!(result["parent"], "visible=child");
+    let jar = turbo_surf_core::cookies::CookieJar::from_storage_state(&page.cookies());
+    assert!(jar
+        .cookie_header("https://example.test/path", 0.0)
+        .contains("secret=server"));
+    page.close();
+}
+
+#[tokio::test]
+async fn child_native_promises_can_reject_catch_and_resume_without_host_crashes() {
+    let html = render_page(
+        "<body><div id='root'></div></body>", "http://localhost/",
+        r#"
+        const f = document.createElement('iframe');
+        f.srcdoc = '<scr' + 'ipt>Promise.reject(new Error("child-rejection")).catch(e => top.document.getElementById("root").setAttribute("data-rejected",e.message)); Promise.resolve(17).then(v=>top.document.getElementById("root").setAttribute("data-resolved",String(v)));</scr' + 'ipt>';
+        "#,
+    ).await.unwrap();
+    assert!(html.contains("data-rejected=\"child-rejection\""), "{html}");
+    assert!(html.contains("data-resolved=\"17\""), "{html}");
+}
+
+#[tokio::test]
+async fn child_unhandled_rejection_does_not_crash_and_next_runtime_remains_usable() {
+    let result = render_page(
+        "<body></body>", "http://localhost/",
+        r#"const f=document.createElement('iframe'); f.srcdoc='<scr'+'ipt>Promise.reject(new Error("uncaught-child-rejection"));</scr'+'ipt>';"#,
+    ).await;
+    if let Err(error) = result {
+        assert!(error.contains("uncaught-child-rejection"), "{error}");
+    }
+    let html = render_page(
+        "<body></body>",
+        "http://localhost/",
+        "document.body.setAttribute('data-fresh','true');",
+    )
+    .await
+    .unwrap();
+    assert!(html.contains("data-fresh=\"true\""));
+}
+
+#[tokio::test]
+async fn child_fetch_uses_frame_url_and_async_callbacks_survive() {
+    let port = spawn_paths_js_server(&[
+        ("/child/frame", "<script>setTimeout(()=>Promise.resolve().then(()=>top.document.getElementById('root').setAttribute('data-timer','true')),0); fetch('./api').then(r=>r.text()).then(t=>top.document.getElementById('root').setAttribute('data-fetch',t));</script>"),
+        ("/child/api", "frame-api"),
+        ("/api", "wrong-parent-api"),
+    ]).await;
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        &format!("http://127.0.0.1:{port}/parent"),
+        "const f=document.createElement('iframe'); f.src='/child/frame';",
+    )
+    .await
+    .unwrap();
+    assert!(html.contains("data-fetch=\"frame-api\""), "{html}");
+    assert!(html.contains("data-timer=\"true\""), "{html}");
+}
+
+#[tokio::test]
+async fn child_xhr_uses_relative_frame_url_and_request_source_metadata() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let source = format!("http://127.0.0.1:{port}/child/frame");
+    let task = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = vec![0; 8192];
+            let length = stream.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..length]).to_string();
+            let path = request.split_whitespace().nth(1).unwrap();
+            let (content_type, body) = if path == "/child/frame" {
+                ("text/html", "<script>const xhr=new XMLHttpRequest();xhr.open('GET','./api');xhr.onload=()=>top.document.getElementById('root').setAttribute('data-xhr',xhr.responseText);xhr.send();</script>".to_string())
+            } else {
+                assert_eq!(path, "/child/api");
+                let headers: std::collections::BTreeMap<_, _> = request
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string()))
+                    .collect();
+                assert_eq!(headers.get("referer"), Some(&source));
+                assert_eq!(
+                    headers.get("sec-fetch-dest").map(String::as_str),
+                    Some("empty")
+                );
+                assert_eq!(
+                    headers.get("sec-fetch-mode").map(String::as_str),
+                    Some("cors")
+                );
+                assert_eq!(
+                    headers.get("sec-fetch-site").map(String::as_str),
+                    Some("same-origin")
+                );
+                assert!(!headers.contains_key("sec-fetch-user"));
+                ("text/plain", "frame-xhr".to_string())
+            };
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    let html = render_page(
+        "<body><div id='root'></div></body>",
+        &format!("http://127.0.0.1:{port}/parent"),
+        "const f=document.createElement('iframe');f.src='/child/frame';",
+    )
+    .await
+    .unwrap();
+    task.await.unwrap();
+    assert!(html.contains("data-xhr=\"frame-xhr\""), "{html}");
 }

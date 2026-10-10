@@ -732,3 +732,74 @@ test("goto('about:blank') yields a blank document with no network fetch", async 
   await p.reload();
   assert.equal(p.url(), "about:blank");
 });
+
+test("request metadata and client hints survive hydration and stay context scoped", async () => {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({ path: req.url, headers: req.headers });
+    if (req.url === "/start") {
+      res.writeHead(200, {
+        "content-type": "text/html",
+        "accept-ch": "Sec-CH-UA-Arch",
+        "set-cookie": "sid=context; Path=/",
+      });
+      return res.end(
+        '<html><head><link rel="stylesheet" href="/site.css"></head><body><img src="/image.png"><script src="/bundle.js"></script></body></html>',
+      );
+    }
+    if (req.url === "/bundle.js") {
+      res.writeHead(200, { "content-type": "application/javascript" });
+      return res.end(
+        'fetch("/api").then(r=>r.text()).then(t=>document.body.setAttribute("data-api",t));',
+      );
+    }
+    res.writeHead(200, { "content-type": req.url === "/site.css" ? "text/css" : "text/html" });
+    res.end(
+      req.url === "/api"
+        ? "hydrated"
+        : req.url === "/site.css"
+          ? "body{color:red}"
+          : "<body>next</body>",
+    );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const context = new BrowserContext();
+  const isolated = new BrowserContext();
+  try {
+    assert.ok(context._requestState != null, "build the current addon with request-state support");
+    const page = await context.newPage();
+    await page.goto(`${base}/start`, { waitUntil: "networkidle" });
+    assert.equal(await page.locator("body").getAttribute("data-api"), "hydrated");
+    await page._fetchLinkedCss();
+    await page._fetchImages();
+    await page.goto(`${base}/next`, { waitUntil: "commit" });
+    const other = await isolated.newPage();
+    await other.goto(`${base}/isolated`, { waitUntil: "commit" });
+    for (const [path, dest, mode] of [
+      ["/bundle.js", "script", "no-cors"],
+      ["/api", "empty", "cors"],
+      ["/site.css", "style", "no-cors"],
+      ["/image.png", "image", "no-cors"],
+      ["/next", "document", "navigate"],
+    ]) {
+      const headers = seen.find((entry) => entry.path === path)?.headers;
+      assert.ok(headers, `missing ${path}`);
+      assert.equal(headers["sec-fetch-dest"], dest, path);
+      assert.equal(headers["sec-fetch-mode"], mode, path);
+      assert.equal(headers["sec-fetch-site"], "same-origin", path);
+      assert.equal(headers["sec-ch-ua-arch"], '"arm"', path);
+      assert.equal(headers.cookie, "sid=context", path);
+      if (mode !== "navigate") assert.equal(headers["sec-fetch-user"], undefined, path);
+    }
+    assert.equal(seen.find((entry) => entry.path === "/start").headers["sec-fetch-site"], "none");
+    assert.equal(
+      seen.find((entry) => entry.path === "/isolated").headers["sec-ch-ua-arch"],
+      undefined,
+    );
+  } finally {
+    await context.close();
+    await isolated.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

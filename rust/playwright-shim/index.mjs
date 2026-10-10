@@ -796,6 +796,7 @@ class Page {
       this._url,
       this._cookies,
       this._context._userAgent ?? undefined,
+      this._context._requestState,
     );
     this._hydrated = true;
     this._loadedPath = pathOf(this._url);
@@ -969,6 +970,12 @@ class Page {
         method ?? null,
         body ?? null,
         this._context._headersJson(),
+        false,
+        this._context._requestState,
+        JSON.stringify({
+          source: /^https?:/.test(this._url) ? this._url : null,
+          destination: "document",
+        }),
       ),
     );
     this._html = r.html;
@@ -1107,6 +1114,7 @@ class Page {
       this._url,
       this._cookies,
       this._context._userAgent ?? undefined,
+      this._context._requestState,
     );
     this._hydrated = true;
     return this._html;
@@ -1178,6 +1186,12 @@ class Page {
         method,
         intent.body ?? null,
         this._context._headersJson(),
+        false,
+        this._context._requestState,
+        JSON.stringify({
+          source: /^https?:/.test(this._url) ? this._url : null,
+          destination: "document",
+        }),
       ),
     );
     this._html = r.html;
@@ -1530,7 +1544,12 @@ class Page {
     for (const ref of native.imageUrls(this._html).slice(0, 60)) {
       try {
         const abs = new URL(ref, this._url).href;
-        const buf = await native.fetchBytes(abs);
+        const buf = await native.fetchBytes(
+          abs,
+          this._context._requestState,
+          this._url,
+          this._cookies,
+        );
         if (buf && buf.length) images[ref] = buf;
       } catch {
         /* skip an image that won't resolve/fetch */
@@ -1548,7 +1567,18 @@ class Page {
     for (const href of native.stylesheetHrefs(this._html).slice(0, 40)) {
       try {
         const abs = new URL(href, this._url).href;
-        const r = JSON.parse(await native.fetchHtml(abs));
+        const r = JSON.parse(
+          await native.fetchWithCookies(
+            abs,
+            this._cookies,
+            null,
+            null,
+            this._context._headersJson(),
+            false,
+            this._context._requestState,
+            JSON.stringify({ source: this._url, destination: "style", mode: "no-cors" }),
+          ),
+        );
         if (r.status >= 200 && r.status < 300 && r.html) css += `${r.html}\n`;
       } catch {
         /* skip a sheet that won't resolve/fetch */
@@ -1739,6 +1769,7 @@ class BrowserContext {
       });
     }
     this._cookies = JSON.stringify(cookies);
+    this._requestState = native.requestStateNew?.();
     // Custom User-Agent → page-JS navigator.userAgent + page fetches (newContext({userAgent})).
     this._userAgent = opts.userAgent ?? process.env.TURBO_SHIM_USER_AGENT ?? null;
     this._headers = opts.extraHTTPHeaders ?? {};
@@ -1806,7 +1837,11 @@ class BrowserContext {
   browser() {
     return browserStub;
   }
-  async close() {}
+  async close() {
+    for (const page of this._pages) await page.close();
+    if (this._requestState != null) native.requestStateClose(this._requestState);
+    this._requestState = undefined;
+  }
   route = UNSUPPORTED("context.route", NETIO);
   routeFromHAR = UNSUPPORTED("context.routeFromHAR", NETIO);
   unroute = UNSUPPORTED("context.unroute", NETIO);

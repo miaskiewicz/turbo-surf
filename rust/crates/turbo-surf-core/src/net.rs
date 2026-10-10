@@ -7,6 +7,7 @@
 use crate::cache::ResponseCache;
 use crate::cookies::CookieJar;
 use crate::http_backend as http; // reqwest (rustls) or wreq (BoringSSL); see lib.rs
+use crate::request_context::{ClientHints, RequestContext};
 use bytes::BytesMut;
 use futures_util::StreamExt;
 use std::collections::BTreeMap;
@@ -60,6 +61,11 @@ pub struct FetchResult {
 #[derive(Default)]
 pub struct FetchOptions<'a> {
     pub headers: BTreeMap<String, String>,
+    /// Browser metadata for this request. Unspecified requests are top-level
+    /// navigations; script/fetch/image callers should identify their context.
+    pub context: Option<RequestContext>,
+    /// Origin-scoped Accept-CH opt-ins shared by this browsing session.
+    pub client_hints: Option<&'a ClientHints>,
     pub method: Option<String>,
     pub body: Option<String>,
     pub max_bytes: Option<usize>,
@@ -155,34 +161,33 @@ fn is_redirect(status: u16) -> bool {
     REDIRECT_STATUS.contains(&status)
 }
 
-fn build_headers(url: &str, opts: &FetchOptions) -> BTreeMap<String, String> {
+fn build_headers(url: &str, method: &str, opts: &FetchOptions) -> BTreeMap<String, String> {
     let mut h = BTreeMap::new();
-    // Default (rustls) path: forge Chrome's identity by hand — headers are the
-    // only lever, since rustls can't match the TLS fingerprint. Impersonate path:
-    // wreq's emulation already installs a coherent Chrome UA + nav-header set that
-    // matches its TLS/HTTP-2 fingerprint, so we add nothing here and let it own
-    // them (caller overrides + cookies/cache below still apply on both paths).
+    let default_profile = crate::fingerprint::default_profile();
+    #[cfg(feature = "impersonate")]
+    let profile = &default_profile;
     #[cfg(not(feature = "impersonate"))]
-    {
-        let owned;
-        let profile = match opts.profile {
-            Some(p) => p,
-            None => {
-                owned = crate::fingerprint::default_profile();
-                &owned
-            }
-        };
-        for (k, v) in profile.nav_headers() {
-            h.insert(k.to_string(), v);
-        }
-    }
+    let profile = opts.profile.unwrap_or(&default_profile);
+    let default_context = RequestContext::default();
+    let context = opts.context.as_ref().unwrap_or(&default_context);
+    h.insert("user-agent".into(), profile.user_agent.clone());
+    h.insert("accept-language".into(), profile.accept_language.into());
+    h.extend(context.headers(url, method));
+    let no_opt_ins = ClientHints::default();
+    h.extend(
+        opts.client_hints
+            .unwrap_or(&no_opt_ins)
+            .headers(url, context, profile),
+    );
     for (k, v) in &opts.headers {
         h.insert(k.to_ascii_lowercase(), v.clone());
     }
-    if let Some(jar) = &opts.jar {
-        let cookie = jar.cookie_header(url, opts.now);
-        if !cookie.is_empty() {
-            h.insert("cookie".into(), cookie);
+    if context.sends_credentials(url) {
+        if let Some(jar) = &opts.jar {
+            let cookie = jar.cookie_header(url, opts.now);
+            if !cookie.is_empty() {
+                h.insert("cookie".into(), cookie);
+            }
         }
     }
     if opts.bypass_consent {
@@ -230,16 +235,11 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str, socs: Optio
 // `impersonate` feature; a pass-through on the default (rustls) backend, which
 // can't forge a fingerprint. One seam so both client constructors stay in sync.
 //
-// wreq-util's newest bundled emulation is Chrome 149, so the TLS ClientHello +
-// HTTP-2 (Akamai) fingerprint are Chrome 149's — and Chrome's TLS hello is stable
-// across minor versions, so that hello is byte-for-byte what current Chrome still
-// sends. The *reported* version (UA + `sec-ch-ua`), however, is what anti-bot walls
-// read as "stale", so we override just those two header VALUES to the same current
-// identity that `fingerprint::default_profile` (the rustls path) and the render-tier
-// navigator report — and set wreq's header ORDER from the profile's per-version
-// `crate::browser` config (order is itself a fingerprint). Single source of truth:
-// both backends present the exact same HTTP identity, only the (version-stable) TLS
-// hello lags at 149.
+// wreq-util supplies the Chrome 149 TLS/HTTP-2 template; the reported identity
+// and navigation header order are pinned to fingerprint::default_profile(). This
+// is an emulation, not proof of current Chrome wire parity. Validate the deployed
+// build with the fingerprint tests, especially after a Chrome/backend upgrade.
+// Per-call profile overrides are not applied on this backend.
 fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     #[cfg(feature = "impersonate")]
     let builder = {
@@ -254,29 +254,15 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
             .build()
             .into_emulation();
 
-        // Freshen the low-entropy `sec-ch-ua` from wreq-util's 149 to the current
-        // pinned identity (`default_profile`, kept in lockstep with the UA override
-        // below and the rustls path), and add the two request headers a real
-        // Chrome navigation sends that wreq-util's profile omits:
-        // `upgrade-insecure-requests: 1` and `sec-fetch-user: ?1`.
-        //
-        // Deliberately NO high-entropy client hints. Real Chrome sends only the
-        // low-entropy trio (`sec-ch-ua`/`-mobile`/`-platform`) plus
-        // `upgrade-insecure-requests` on a cold request; the
-        // arch/bitness/wow64/model/form-factors/platform-version/full-version(-list)
-        // family is emitted only AFTER a server answers with `Accept-CH`
-        // (request #2+). Emitting them unconditionally is itself a tell — a real
-        // cold Chrome hit never carries them. (google's /search *does* receive them,
-        // but only because google returns `Accept-CH`; that is a later request, not
-        // the request-#1 fingerprint gate mirrored here.)
+        // Request metadata comes from build_headers, including the negotiated
+        // hint set. Client defaults must not leak navigation headers onto script
+        // and fetch requests; keep only transport-owned defaults here.
+        emulation.headers.clear();
         let mut put = |k: &'static str, v: &str| {
             if let Ok(val) = v.parse() {
                 emulation.headers.insert(k, val);
             }
         };
-        put("sec-ch-ua", &profile.sec_ch_ua);
-        put("upgrade-insecure-requests", "1");
-        put("sec-fetch-user", "?1");
         // Chrome's Accept-Encoding spelling + order (`gzip, deflate, br, zstd`).
         // Left unset, wreq lets tower-http synthesize `zstd,gzip,deflate,br` (its
         // own order, no spaces) — a value tell. Setting it here wins because
@@ -347,6 +333,16 @@ pub fn build_client() -> http::Client {
     .expect("HTTP client build (TLS backend init)")
 }
 
+pub(crate) fn build_browser_client() -> http::Client {
+    emulate(
+        http::Client::builder()
+            .redirect(http::redirect::Policy::none())
+            .pool_idle_timeout(std::time::Duration::from_secs(90)),
+    )
+    .build()
+    .expect("browser HTTP client build (TLS backend init)")
+}
+
 // Final URL of a settled response, across backends: reqwest exposes `url() -> &Url`,
 // wreq `uri() -> &Uri`. Both reflect the post-redirect URL on the auto-follow path.
 fn final_url(res: &http::Response) -> String {
@@ -390,9 +386,33 @@ async fn send(
     }
     // Include the URL in transport errors — reqwest's "builder error" (e.g. a
     // relative/schemeless URL) is otherwise undebuggable.
-    req.send()
-        .await
-        .map_err(|e| err(format!("{e} (url: {url})"), ErrorCode::Network))
+    let trace_id = crate::http_trace::next_id();
+    crate::http_trace::record(|| {
+        serde_json::json!({
+            "event": "request", "id":trace_id.0, "url": url, "method": method,
+            "explicit_headers": headers, "body": body,
+            "headerScope": "application headers including context and hints; transport-added headers absent",
+        })
+    });
+    let mut result = req.send().await;
+    if trace_id.0 != 0 {
+        if let Ok(res) = &mut result {
+            res.extensions_mut().insert(trace_id);
+        }
+    }
+    crate::http_trace::record(|| match &result {
+        Ok(res) => serde_json::json!({
+            "event": "response", "id":trace_id.0, "url": url, "final_url": final_url(res),
+            "status": res.status().as_u16(),
+            "protocol":format!("{:?}",res.version()),
+            "headers": res.headers().iter().map(|(k, v)|
+                (k.as_str(), v.to_str().unwrap_or("<binary>"))).collect::<Vec<_>>(),
+        }),
+        Err(e) => {
+            serde_json::json!({ "event": "error", "id":trace_id.0, "url": url, "error": e.to_string() })
+        }
+    });
+    result.map_err(|e| err(format!("{e} (url: {url})"), ErrorCode::Network))
 }
 
 fn apply_headers(
@@ -443,6 +463,21 @@ fn header_value(res: &http::Response, name: &str) -> String {
 }
 
 fn ingest_set_cookie(opts: &mut FetchOptions, res: &http::Response, final_url: &str) {
+    if let Some(hints) = opts.client_hints {
+        let accept_ch = list_header(res, "accept-ch");
+        let clear = list_header(res, "clear-site-data")
+            .unwrap_or_default()
+            .split(',')
+            .any(|item| matches!(item.trim(), "\"clientHints\"" | "\"*\""));
+        hints.observe(final_url, accept_ch.as_deref(), clear);
+    }
+    if opts
+        .context
+        .as_ref()
+        .is_some_and(|ctx| !ctx.sends_credentials(final_url))
+    {
+        return;
+    }
     let now = opts.now;
     let Some(jar) = opts.jar.as_mut() else { return };
     let lines: Vec<String> = res
@@ -477,6 +512,11 @@ async fn finish(
     max_bytes: usize,
 ) -> Result<FetchResult, HttpError> {
     let status = res.status().as_u16();
+    let trace_id = res
+        .extensions()
+        .get::<crate::http_trace::RequestId>()
+        .map(|id| id.0)
+        .unwrap_or(0);
     // 304 Not Modified → reuse the cached body (server sent none).
     if status == 304 {
         if let Some(cache) = &opts.cache {
@@ -496,6 +536,12 @@ async fn finish(
     let bytes = read_capped(res, max_bytes).await?;
     let charset = detect_charset(&ct, &bytes[..bytes.len().min(1024)]);
     let html = decode(&bytes, &charset);
+    crate::http_trace::record(|| {
+        serde_json::json!({
+            "event": "body", "id":trace_id, "url": final_url, "status": status,
+            "content_type": ct, "body": html,
+        })
+    });
     if let Some(cache) = opts.cache.as_mut() {
         cache.store(&final_url, etag, last_modified, &html);
     }
@@ -515,6 +561,18 @@ fn opt_header(res: &http::Response, name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+// List-valued headers can arrive as multiple field lines (HTTP/2 keeps them
+// separate). HeaderMap::get returns only the first, losing later hint opt-ins.
+fn list_header(res: &http::Response, name: &str) -> Option<String> {
+    let values: Vec<&str> = res
+        .headers()
+        .get_all(name)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect();
+    (!values.is_empty()).then(|| values.join(", "))
+}
+
 // State threaded through the manual-follow loop.
 struct Hop {
     url: String,
@@ -531,20 +589,32 @@ async fn follow_manually(
     max_redirects: usize,
     max_bytes: usize,
 ) -> Result<FetchResult, HttpError> {
-    let cl = client(http::redirect::Policy::none()).map_err(|e| err(e, ErrorCode::Network))?;
+    let (res, final_url, redirected) = follow_manually_response(opts, start, max_redirects).await?;
+    finish(opts, res, final_url, redirected, max_bytes).await
+}
+
+async fn follow_manually_response(
+    opts: &mut FetchOptions<'_>,
+    start: &str,
+    max_redirects: usize,
+) -> Result<(http::Response, String, bool), HttpError> {
+    let cl = match opts.client_hints {
+        Some(hints) => hints.manual_client(),
+        None => client(http::redirect::Policy::none()).map_err(|e| err(e, ErrorCode::Network))?,
+    };
     let mut hop = Hop {
         url: start.to_string(),
         method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
         body: opts.body.clone(),
     };
     for redirects in 0.. {
-        let headers = build_headers(&hop.url, opts);
+        let headers = build_headers(&hop.url, &hop.method, opts);
         let res = send(&cl, &hop.method, &hop.url, &headers, &hop.body).await?;
         let final_url = final_url(&res);
         ingest_set_cookie(opts, &res, &final_url);
         match redirect_location(&res) {
             Some(loc) if redirects < max_redirects => hop = advance(&hop, &res, &loc)?,
-            _ => return finish(opts, res, final_url, redirects > 0, max_bytes).await,
+            _ => return Ok((res, final_url, redirects > 0)),
         }
     }
     unreachable!("redirect loop always returns at the cap")
@@ -581,7 +651,7 @@ async fn follow_auto(
         }
     };
     let method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
-    let headers = build_headers(url, opts);
+    let headers = build_headers(url, &method, opts);
     let res = send(&cl, &method, url, &headers, &opts.body.clone()).await?;
     let final_url = final_url(&res);
     let redirected = final_url != *url;
@@ -597,6 +667,11 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     match opts.max_redirects {
         Some(n) => follow_manually(&mut opts, url, n, max_bytes).await,
+        // Negotiated hints and browser context must be re-derived for every
+        // redirect origin; a backend's automatic follow cannot do that.
+        None if opts.client_hints.is_some() || opts.context.is_some() => {
+            follow_manually(&mut opts, url, 20, max_bytes).await
+        }
         None => follow_auto(&mut opts, url, max_bytes).await,
     }
 }
@@ -612,6 +687,13 @@ pub async fn fetch_bytes(
     mut opts: FetchOptions<'_>,
 ) -> Result<(String, Vec<u8>, u16), HttpError> {
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
+    if opts.max_redirects.is_some() || opts.client_hints.is_some() || opts.context.is_some() {
+        let redirects = opts.max_redirects.unwrap_or(20);
+        let (res, final_url, _) = follow_manually_response(&mut opts, url, redirects).await?;
+        let status = res.status().as_u16();
+        let bytes = read_capped(res, max_bytes).await?;
+        return Ok((final_url, bytes, status));
+    }
     let cl = match opts.client {
         Some(c) => c.clone(),
         None => {
@@ -619,7 +701,7 @@ pub async fn fetch_bytes(
         }
     };
     let method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
-    let headers = build_headers(url, &opts);
+    let headers = build_headers(url, &method, &opts);
     let res = send(&cl, &method, url, &headers, &opts.body.clone()).await?;
     let final_url = final_url(&res);
     ingest_set_cookie(&mut opts, &res, &final_url);
@@ -691,7 +773,7 @@ mod tests {
     #[test]
     fn default_headers_look_like_chrome() {
         let opts = FetchOptions::default();
-        let h = build_headers("http://example.com/", &opts);
+        let h = build_headers("http://localhost/", "GET", &opts);
         assert!(h["user-agent"].contains("Chrome/"));
         assert!(h["accept"].contains("text/html"));
         assert_eq!(h["sec-fetch-mode"], "navigate");
@@ -705,7 +787,7 @@ mod tests {
         let mut opts = FetchOptions::default();
         opts.headers
             .insert("User-Agent".into(), "custom-bot/9".into());
-        let h = build_headers("http://example.com/", &opts);
+        let h = build_headers("http://example.com/", "GET", &opts);
         // case-folded to the canonical lowercase key, caller value wins.
         assert_eq!(h["user-agent"], "custom-bot/9");
         assert_eq!(h.get("User-Agent"), None);

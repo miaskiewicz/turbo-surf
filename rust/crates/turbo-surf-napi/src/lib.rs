@@ -20,6 +20,7 @@ use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
 use turbo_surf_core::crawl::{crawl as run_crawl, CrawlOptions, Record};
 use turbo_surf_core::net::{build_client, fetch_html as net_fetch, FetchOptions};
+use turbo_surf_core::request_context::{ClientHints, Destination, RequestContext, RequestMode};
 use turbo_surf_page::TurboNavigator;
 use turbo_surf_raster as raster;
 use turbo_surf_view as view;
@@ -43,6 +44,8 @@ pub(crate) fn ensure_render_init() {
         turbo_surf_render::set_webgl_fn(Box::new(|w, h, calls| {
             raster::webgl_readback(w, h, calls)
         }));
+        #[cfg(feature = "gpu-metal")]
+        turbo_surf_render::set_webgl_metadata_fn(Box::new(raster::webgl_metadata));
     });
     turbo_surf_render::ensure_platform();
 }
@@ -498,6 +501,7 @@ pub struct HydrateTask {
     base_url: String,
     cookies: String,
     user_agent: String,
+    client_hints: ClientHints,
 }
 
 #[napi]
@@ -510,13 +514,21 @@ impl Task for HydrateTask {
             .enable_all()
             .build()
             .map_err(|e| Error::from_reason(e.to_string()))?;
-        rt.block_on(turbo_surf_render::render_hydrate_with_budget(
-            &self.html,
-            &self.base_url,
-            &self.cookies,
-            &self.user_agent,
-            turbo_surf_render::DEFAULT_RENDER_BUDGET_MS,
-        ))
+        rt.block_on(async {
+            let page = turbo_surf_render::PageSession::open_with_request_state(
+                &self.html,
+                &self.base_url,
+                &self.cookies,
+                &self.user_agent,
+                turbo_surf_render::DEFAULT_RENDER_BUDGET_MS,
+                "",
+                self.client_hints.clone(),
+            )
+            .await?;
+            let html = page.serialize();
+            page.close();
+            Ok::<String, String>(html)
+        })
         .map_err(Error::from_reason)
     }
 
@@ -531,15 +543,17 @@ pub fn hydrate(
     base_url: String,
     cookies: Option<String>,
     user_agent: Option<String>,
-) -> AsyncTask<HydrateTask> {
+    request_state_id: Option<u32>,
+) -> Result<AsyncTask<HydrateTask>> {
     // Parent the V8 platform on the main thread before the libuv worker runs compute().
     ensure_render_init();
-    AsyncTask::new(HydrateTask {
+    Ok(AsyncTask::new(HydrateTask {
         html,
         base_url,
         cookies: cookies.unwrap_or_default(),
         user_agent: user_agent.unwrap_or_default(),
-    })
+        client_hints: request_state(request_state_id)?,
+    }))
 }
 
 /// Transform TS/JSX page source → classic JS (swc) so a bundle written in
@@ -769,17 +783,92 @@ fn shared_client() -> &'static turbo_surf_core::http_backend::Client {
     CLIENT.get_or_init(build_client)
 }
 
+// Hint negotiation belongs to a browser context, independently of its cookie
+// contents. Opaque handles let async fetch and V8 worker threads share that state.
+fn request_states() -> &'static std::sync::Mutex<std::collections::HashMap<u32, ClientHints>> {
+    static STATES: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<u32, ClientHints>>,
+    > = std::sync::OnceLock::new();
+    STATES.get_or_init(Default::default)
+}
+
+#[napi]
+pub fn request_state_new() -> Result<u32> {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    request_states()
+        .lock()
+        .map_err(|_| Error::from_reason("request state registry poisoned"))?
+        .insert(id, ClientHints::default());
+    Ok(id)
+}
+
+#[napi]
+pub fn request_state_close(id: u32) -> Result<()> {
+    request_states()
+        .lock()
+        .map_err(|_| Error::from_reason("request state registry poisoned"))?
+        .remove(&id);
+    Ok(())
+}
+
+pub(crate) fn request_state(id: Option<u32>) -> Result<ClientHints> {
+    match id {
+        None => Ok(ClientHints::default()),
+        Some(id) => request_states()
+            .lock()
+            .map_err(|_| Error::from_reason("request state registry poisoned"))?
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| Error::from_reason("no such request state")),
+    }
+}
+
+fn request_context(raw: Option<&str>) -> Result<RequestContext> {
+    let Some(raw) = raw else {
+        return Ok(RequestContext::default());
+    };
+    let value: Value = serde_json::from_str(raw).map_err(|e| Error::from_reason(e.to_string()))?;
+    let source = value["source"].as_str();
+    let destination = match value["destination"].as_str() {
+        None | Some("document") => Destination::Document,
+        Some("iframe") => Destination::Iframe,
+        Some("script") => Destination::Script,
+        Some("style") => Destination::Style,
+        Some("image") => Destination::Image,
+        Some("empty") => Destination::Empty,
+        _ => return Err(Error::from_reason("invalid request destination")),
+    };
+    if destination == Destination::Document {
+        return Ok(RequestContext::navigation(
+            source.map(str::to_owned),
+            value["userActivation"].as_bool().unwrap_or(true),
+        ));
+    }
+    let mode = match value["mode"].as_str() {
+        Some("cors") => RequestMode::Cors,
+        Some("same-origin") => RequestMode::SameOrigin,
+        Some("navigate") => RequestMode::Navigate,
+        None | Some("no-cors") => RequestMode::NoCors,
+        _ => return Err(Error::from_reason("invalid request mode")),
+    };
+    let mut context = RequestContext::resource(source.unwrap_or(""), destination, mode);
+    context.source = source.map(str::to_owned);
+    Ok(context)
+}
+
 async fn do_fetch(
     url: &str,
     method: Option<String>,
     body: Option<String>,
     cookies: Option<String>,
 ) -> Result<String> {
-    do_fetch_headers(url, method, body, cookies, None, false).await
+    do_fetch_headers(url, method, body, cookies, None, false, None, None).await
 }
 
 /// `do_fetch` plus extra request headers (JSON object) — backs the shim's
 /// `page.setExtraHTTPHeaders` / context `extraHTTPHeaders` (real, not a no-op).
+#[allow(clippy::too_many_arguments)]
 async fn do_fetch_headers(
     url: &str,
     method: Option<String>,
@@ -787,6 +876,8 @@ async fn do_fetch_headers(
     cookies: Option<String>,
     headers_json: Option<String>,
     bypass_consent: bool,
+    request_state_id: Option<u32>,
+    context_json: Option<String>,
 ) -> Result<String> {
     let mut jar = cookies
         .as_deref()
@@ -795,10 +886,13 @@ async fn do_fetch_headers(
         .as_deref()
         .and_then(|h| serde_json::from_str::<BTreeMap<String, String>>(h).ok())
         .unwrap_or_default();
+    let client_hints = request_state(request_state_id)?;
     let opts = FetchOptions {
         method,
         body,
         headers,
+        context: Some(request_context(context_json.as_deref())?),
+        client_hints: Some(&client_hints),
         allow_non_html: true,
         jar: jar.as_mut(),
         client: Some(shared_client()),
@@ -839,16 +933,34 @@ pub async fn fetch_html(url: String) -> Result<String> {
 /// AVIF decoder, so those images would silently drop. Omitting AVIF makes the CDN
 /// fall back to WebP, which turbo does decode.
 #[napi]
-pub async fn fetch_bytes(url: String) -> Result<Buffer> {
+pub async fn fetch_bytes(
+    url: String,
+    request_state_id: Option<u32>,
+    source_url: Option<String>,
+    cookies: Option<String>,
+) -> Result<Buffer> {
     let mut headers = std::collections::BTreeMap::new();
     headers.insert(
         "accept".to_string(),
         "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8".to_string(),
     );
+    let client_hints = request_state(request_state_id)?;
+    let mut jar = cookies
+        .as_deref()
+        .map(turbo_surf_core::cookies::CookieJar::from_storage_state);
+    let mut context = RequestContext::resource(
+        source_url.as_deref().unwrap_or(""),
+        Destination::Image,
+        RequestMode::NoCors,
+    );
+    context.source = source_url;
     let opts = FetchOptions {
         allow_non_html: true,
         client: Some(shared_client()),
         headers,
+        client_hints: Some(&client_hints),
+        context: Some(context),
+        jar: jar.as_mut(),
         ..Default::default()
     };
     let (_final_url, bytes, _status) = turbo_surf_core::net::fetch_bytes(&url, opts)
@@ -866,6 +978,7 @@ pub async fn request(url: String, method: String, body: Option<String>) -> Resul
 /// Fetch carrying a `storageState` cookie string in, and the updated state out
 /// (Set-Cookie ingested) — cookie persistence across navigations.
 #[napi]
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_with_cookies(
     url: String,
     cookies: String,
@@ -873,6 +986,8 @@ pub async fn fetch_with_cookies(
     body: Option<String>,
     headers: Option<String>,
     bypass_consent: Option<bool>,
+    request_state_id: Option<u32>,
+    context_json: Option<String>,
 ) -> Result<String> {
     do_fetch_headers(
         &url,
@@ -881,6 +996,8 @@ pub async fn fetch_with_cookies(
         Some(cookies),
         headers,
         bypass_consent.unwrap_or(false),
+        request_state_id,
+        context_json,
     )
     .await
 }

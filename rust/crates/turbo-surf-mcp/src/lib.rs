@@ -21,6 +21,7 @@ use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::crawl::{crawl as run_crawl, CrawlOptions};
 use turbo_surf_core::fingerprint;
 use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
+use turbo_surf_core::request_context::{ClientHints, Destination, RequestContext, RequestMode};
 use turbo_surf_core::robots::{RobotsCache, RobotsFetcher};
 use turbo_surf_page::{batch as batch_urls, TurboNavigator};
 use turbo_surf_raster as raster;
@@ -243,6 +244,7 @@ pub struct Session {
     ua: Option<String>,
     headers: BTreeMap<String, String>,
     jar: CookieJar,
+    client_hints: ClientHints,
     /// "" / "no-js" = Lane A; "fast" / "secure" / "js" = render page JS after fetch.
     mode: String,
     /// Hydrated-HTML trail (one entry per render/inject), newest last.
@@ -302,6 +304,8 @@ fn ensure_render_hooks() {
         turbo_surf_render::set_webgl_fn(Box::new(|w, h, calls| {
             raster::webgl_readback(w, h, calls)
         }));
+        #[cfg(feature = "gpu-metal")]
+        turbo_surf_render::set_webgl_metadata_fn(Box::new(raster::webgl_metadata));
     });
 }
 
@@ -334,8 +338,16 @@ impl Session {
     // profile (so any solver token stays consistent with the fingerprint),
     // distinct hosts spread across the pool.
     fn profile_for(&self, url: &str) -> fingerprint::Profile {
-        let key = turbo_surf_core::url::host_of(url).unwrap_or_else(|| url.to_string());
-        fingerprint::select(&key)
+        #[cfg(feature = "impersonate")]
+        {
+            let _ = url;
+            fingerprint::default_profile()
+        }
+        #[cfg(not(feature = "impersonate"))]
+        {
+            let key = turbo_surf_core::url::host_of(url).unwrap_or_else(|| url.to_string());
+            fingerprint::select(&key)
+        }
     }
 
     /// Inject a parsed tree (test seam, bypasses the network).
@@ -378,6 +390,11 @@ impl Session {
         let opts = FetchOptions {
             method,
             body,
+            context: Some(RequestContext::navigation(
+                (!self.url.is_empty() && self.url != "about:blank").then(|| self.url.clone()),
+                true,
+            )),
+            client_hints: Some(&self.client_hints),
             allow_non_html: true,
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
@@ -446,6 +463,8 @@ impl Session {
         let profile = self.profile_for(&target);
         let opts = FetchOptions {
             allow_non_html: true,
+            context: Some(RequestContext::navigation(Some(url.to_string()), false)),
+            client_hints: Some(&self.client_hints),
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
             profile: Some(&profile),
@@ -506,6 +525,8 @@ impl Session {
         let profile = self.profile_for(url);
         let opts = FetchOptions {
             allow_non_html: true,
+            context: Some(RequestContext::navigation(Some(url.to_string()), false)),
+            client_hints: Some(&self.client_hints),
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
             profile: Some(&profile),
@@ -557,36 +578,44 @@ impl Session {
 
     // Concatenated executable scripts of the current page (inline code + fetched
     // external `src`), in source order — what the render tier runs.
-    async fn page_script(&self) -> String {
-        let mut inline = Vec::new();
-        let mut external = Vec::new();
+    async fn page_script(&mut self) -> String {
+        let mut scripts = Vec::new();
         if let Some(tree) = &self.tree {
             for &h in tree.query_selector_all("script").iter() {
                 match tree.get_attribute(h, "src") {
                     Some(src) => {
                         if let Some(abs) = turbo_surf_core::url::resolve(&self.url, src) {
-                            external.push(abs);
+                            scripts.push((Some(abs), String::new()));
                         }
                     }
-                    None => inline.push((h, tree.text_content(h))),
+                    None => scripts.push((None, tree.text_content(h))),
                 }
             }
         }
         let mut parts = Vec::new();
-        for (_, code) in &inline {
-            parts.push(code.clone());
-        }
-        for url in external {
+        for (url, code) in scripts {
+            let Some(url) = url else {
+                parts.push(code);
+                continue;
+            };
             if let Ok(r) = fetch_html(
                 &url,
                 FetchOptions {
                     allow_non_html: true,
+                    headers: self.request_headers(),
+                    jar: Some(&mut self.jar),
+                    context: Some(RequestContext::resource(
+                        &self.url,
+                        Destination::Script,
+                        RequestMode::NoCors,
+                    )),
+                    client_hints: Some(&self.client_hints),
                     ..Default::default()
                 },
             )
             .await
             {
-                parts.push(r.html);
+                parts.push(format!("{}\n//# sourceURL={}", r.html, r.final_url));
             }
         }
         // Join with the render tier's script boundary (not a bare `;`) so each
@@ -600,10 +629,32 @@ impl Session {
     async fn render_current(&mut self) -> Result<(), String> {
         let html = self.tree.as_ref().map(serialize_doc).unwrap_or_default();
         let script = self.page_script().await;
-        let hydrated = turbo_surf_render::render_page(&html, &self.url, &script).await?;
+        let hydrated = self
+            .render_script(&html, &self.url.clone(), &script)
+            .await?;
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
         Ok(())
+    }
+
+    async fn render_script(
+        &mut self,
+        html: &str,
+        base: &str,
+        script: &str,
+    ) -> Result<String, String> {
+        let (html, cookies) = turbo_surf_render::render_capture_cookies_with_request_state(
+            html,
+            base,
+            self.ua.as_deref().unwrap_or(""),
+            &self.jar.storage_state(),
+            script,
+            turbo_surf_render::DEFAULT_RENDER_BUDGET_MS,
+            self.client_hints.clone(),
+        )
+        .await?;
+        self.jar = CookieJar::from_storage_state(&cookies);
+        Ok(html)
     }
 
     async fn goto(&mut self, url: &str) -> Result<Value, String> {
@@ -697,7 +748,7 @@ impl Session {
     async fn inject_js(&mut self, script: &str) -> Result<Value, String> {
         let html = serialize_doc(self.tree()?);
         let base = self.url.clone();
-        let hydrated = turbo_surf_render::render_page(&html, &base, script).await?;
+        let hydrated = self.render_script(&html, &base, script).await?;
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
         Ok(json!({ "ok": true }))
@@ -766,7 +817,7 @@ impl Session {
         let base = self.url.clone();
         let b = turbo_surf_render::SCRIPT_BOUNDARY;
         let script = format!("{page}{b}{}{b}{driver}", turbo_surf_render::HUMAN_INPUT_JS);
-        let hydrated = turbo_surf_render::render_page(&html, &base, &script).await?;
+        let hydrated = self.render_script(&html, &base, &script).await?;
         let completed = hydrated.contains("data-hi-done=");
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
@@ -777,21 +828,7 @@ impl Session {
         // with a Referer of the originating page and a coherent sec-fetch-site, exactly as a real
         // in-page submit would. `fetch_into` handles consent/challenge + re-renders per the mode.
         if let Some(target) = self.interaction_nav_target(&base) {
-            let same_site =
-                turbo_surf_core::url::host_of(&base) == turbo_surf_core::url::host_of(&target);
-            let restore = self.headers.clone();
-            self.headers.insert("referer".to_string(), base.clone());
-            self.headers.insert(
-                "sec-fetch-site".to_string(),
-                if same_site {
-                    "same-origin"
-                } else {
-                    "cross-site"
-                }
-                .to_string(),
-            );
             let followed = self.fetch_into(&target, None, None).await;
-            self.headers = restore;
             followed?;
             return Ok(json!({
                 "ok": true, "completed": completed, "steps": n_steps,
@@ -805,7 +842,7 @@ impl Session {
     // globals (navigator/screen/chrome/canvas) instrumented, and report what they
     // touched + which reads came back undefined — i.e. what an anti-bot check read
     // and what we still need to shim. Recon, not a render (the page isn't mutated).
-    async fn probe(&self) -> Result<Value, String> {
+    async fn probe(&mut self) -> Result<Value, String> {
         let html = serialize_doc(self.tree()?);
         let script = self.page_script().await;
         let report = turbo_surf_render::probe_globals(&html, &script)?;
@@ -1049,7 +1086,7 @@ impl Session {
             let Some(url) = turbo_surf_core::url::resolve(&base, &href) else {
                 continue;
             };
-            if let Ok(body) = self.fetch_body(&url).await {
+            if let Ok(body) = self.fetch_resource_body(&url, Destination::Style).await {
                 css.push_str(&body);
                 css.push('\n');
             }
@@ -1094,6 +1131,12 @@ impl Session {
         let profile = self.profile_for(url);
         let opts = FetchOptions {
             allow_non_html: true,
+            context: Some(RequestContext::resource(
+                &self.url,
+                Destination::Image,
+                RequestMode::NoCors,
+            )),
+            client_hints: Some(&self.client_hints),
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
             profile: Some(&profile),
@@ -1129,16 +1172,110 @@ impl Session {
     }
 
     async fn fetch_body(&mut self, url: &str) -> Result<String, String> {
+        self.fetch_resource_body(url, Destination::Empty).await
+    }
+
+    async fn fetch_resource_body(
+        &mut self,
+        url: &str,
+        destination: Destination,
+    ) -> Result<String, String> {
         self.requests.push(url.to_string());
         let profile = self.profile_for(url);
         let opts = FetchOptions {
             allow_non_html: true,
+            context: Some(RequestContext::resource(
+                &self.url,
+                destination,
+                if destination == Destination::Style {
+                    RequestMode::NoCors
+                } else {
+                    RequestMode::Cors
+                },
+            )),
+            client_hints: Some(&self.client_hints),
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
             profile: Some(&profile),
             ..Default::default()
         };
         Ok(fetch_html_with(url, opts).await?.1)
+    }
+}
+
+#[cfg(test)]
+mod request_context_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_hydration_retains_hints_cookies_and_script_source_order() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                loop {
+                    let mut chunk = [0; 1024];
+                    let n = socket.read(&mut chunk).await.unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    bytes.extend_from_slice(&chunk[..n]);
+                    if bytes.windows(4).any(|s| s == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request = String::from_utf8_lossy(&bytes);
+                let path = request.split_whitespace().nth(1).unwrap_or("/");
+                requests.push(
+                    request
+                        .lines()
+                        .skip(1)
+                        .filter_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            Some((name.to_ascii_lowercase(), value.trim().to_string()))
+                        })
+                        .collect::<BTreeMap<String, String>>(),
+                );
+                let (body, extra) = if path == "/external.js" {
+                    (
+                        "window.order.push(2);document.cookie='earned=yes; Path=/';",
+                        "",
+                    )
+                } else {
+                    ("<body><script>window.order=[1]</script><script src='/external.js'></script><script>window.order.push(3);document.body.setAttribute('data-order',window.order.join(''));document.body.setAttribute('data-cookie',document.cookie)</script></body>", "Accept-CH: Sec-CH-UA-Arch\r\nSet-Cookie: secret=server; HttpOnly; Path=/\r\n")
+                };
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}", body.len());
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let mut session = Session::new();
+        session.mode = "js".into();
+        session.bypass_consent = Some(false);
+        session.goto(&format!("{base}/")).await.unwrap();
+        let html = serialize_doc(session.tree().unwrap());
+        assert!(html.contains("data-order=\"123\""), "{html}");
+        assert!(html.contains("data-cookie=\"earned=yes\""), "{html}");
+        let cookie = session.jar.cookie_header(&base, 0.0);
+        assert!(cookie.contains("secret=server"), "{cookie}");
+        assert!(cookie.contains("earned=yes"), "{cookie}");
+        let requests = tokio::time::timeout(std::time::Duration::from_secs(2), server)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(requests[0]["sec-fetch-dest"], "document");
+        assert!(!requests[0].contains_key("sec-ch-ua-arch"));
+        let script = &requests[1];
+        assert_eq!(script["sec-fetch-dest"], "script");
+        assert_eq!(script["sec-fetch-mode"], "no-cors");
+        assert!(script.contains_key("sec-ch-ua-arch"));
+        assert_eq!(script["cookie"], "secret=server");
+        assert!(!script.contains_key("origin"));
+        assert!(!script.contains_key("upgrade-insecure-requests"));
     }
 }
 
@@ -1997,13 +2134,13 @@ async fn google_enid_flow(
     let retry = native_google_fetch(url, &fresh, headers).await?;
     if is_enablejs_shell(&retry) {
         strace!(
-            "verdict: still enablejs shell after fresh mint (body_len={}) → IP likely flagged",
+            "verdict: no SERP markers after fresh mint (body_len={}); rejection cause unknown",
             retry.len()
         );
         return Err(
             "google served the enablejs shell even after a fresh __Secure-ENID mint — the \
-             exit IP is likely flagged (a /sorry'd IP won't serve the SERP to any token) or \
-             google has changed the gate; try a clean exit IP or the browser:true sidecar"
+             rejection cause is unknown. This path does not execute the shell challenge; \
+             use the detection harness to diagnose it, or the browser:true sidecar"
                 .to_string(),
         );
     }
@@ -2325,11 +2462,13 @@ pub async fn browserless_google_serp(query: &str) -> Result<Value, String> {
         "has_aec": jar.cookies_for(home, now).iter().any(|c| c.name == "AEC"),
         "has_nid": jar.cookies_for(home, now).iter().any(|c| c.name == "NID"),
         "minted_enid": jar.cookies_for(home, now).iter().any(|c| c.name == enid::ENID_NAME),
-        "enid_trusted": !shell,
+        "enid_trusted": !shell, // Legacy field: marker heuristic, not token attestation.
+        "has_serp_markers": !shell,
+        "challenge_executed": false,
         "verdict": if shell {
-            "enablejs shell — the browserless __Secure-ENID is NOT trusted"
+            "no SERP markers — search challenge not executed; cookie trust unknown"
         } else {
-            "real SERP — the browserless __Secure-ENID IS trusted"
+            "SERP markers present — cookie trust not independently verified"
         },
         "marker": if shell { "" } else { serp_marker(&html) },
         "body_len": html.len(),
@@ -3607,7 +3746,7 @@ mod tests {
 
     // getContext returns the same context object per (canvas, kind); calling it twice must not
     // re-wrap our getParameter/readPixels overrides (the second wrap would double-record draws /
-    // recurse). The spoofed WebGL identity must still be correct after a repeat getContext.
+    // recurse). Adapter identity must remain intact after a repeat getContext.
     #[tokio::test]
     async fn getcontext_is_idempotent_on_repeat_calls() {
         let _s = Session::new();
@@ -3623,9 +3762,16 @@ mod tests {
             out.contains(r#"data-same="true""#),
             "repeat getContext returns the same object: {out}"
         );
+        #[cfg(feature = "gpu-metal")]
+        let expected = raster::webgl_metadata()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .and_then(|v| v["renderer"].as_str().map(str::to_string))
+            .unwrap_or_else(|| "turbo-surf (GPU unavailable)".into());
+        #[cfg(not(feature = "gpu-metal"))]
+        let expected = "turbo-surf (GPU unavailable)".to_string();
         assert!(
-            out.contains("ANGLE (Apple, ANGLE Metal Renderer"),
-            "spoofed renderer intact after repeat getContext: {out}"
+            out.contains(expected.as_str()),
+            "adapter renderer intact after repeat getContext: {out}"
         );
     }
 
@@ -3814,8 +3960,8 @@ mod tests {
     }
 
     // A localhost stand-in for google `/search`: returns the real SERP only when the
-    // request carries `__Secure-ENID=TRUSTED`, else the enablejs JS shell — the exact
-    // gate the trusted-ENID reuse targets. Returns the bound port.
+    // request carries `__Secure-ENID=TRUSTED`, else a JS shell. This is a test
+    // policy fixture, not evidence of Google's current gate. Returns the bound port.
     async fn spawn_enid_search_server() -> u16 {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;

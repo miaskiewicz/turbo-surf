@@ -33,13 +33,13 @@ Requirements and where each stands:
 | Requirement | Status |
 |---|---|
 | Real V8 isolate, host heap unreachable from guest (+ runaway budget) | ✅ deno_core + watchdog |
-| **Full** DOM bound to native `rtdom::Tree` (real `document`/Element — jQuery/React run) | ✅ `browser_env` (vendored from turbo-test) |
+| Native DOM bound to `rtdom::Tree` (`document`/Element — jQuery/React run) | ✅ `browser_env` (vendored from turbo-test); partial Web IDL coverage |
 | `window`/`navigator`/`location`/`localStorage`/`console` + Event classes | ✅ binding + env bootstrap |
 | Timers (`setTimeout`/`rAF`/`queueMicrotask`) | ✅ virtual (drained by delay) |
 | Promise / `async`-`await` / microtask resolution (event loop) | ✅ `render_html_async` |
 | `fetch` + `XMLHttpRequest` over the real net stack (relative-URL aware) | ✅ `op_fetch` → `turbo_surf_core::net` |
-| `document.cookie` ↔ `CookieJar` bridge | ✅ `op_cookie_get/set` |
-| `MutationObserver`/`IntersectionObserver`/`ResizeObserver`, history API | ✅ (observers are no-op stubs; history updates `location.href`) |
+| `document.cookie` ↔ `CookieJar` bridge | ✅ `op_cookie_get/set`; HttpOnly cookies hidden/protected from JS |
+| `MutationObserver`/`IntersectionObserver`/`ResizeObserver`, history API | Synthetic observer implementations; history updates `location.href` |
 | TS/JSX bundle support | ✅ `turbo-surf-transform` (swc) |
 | Entry point | ✅ `render_page(html, base_url, script)` → hydrated HTML |
 
@@ -47,11 +47,41 @@ Validated end to end: a mock SPA hydrates into `#root`, an XHR/`fetch`-driven pa
 fills from a localhost server, and **real jQuery** (`quotes.toscrape.com/js`) renders
 its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 
-**Known gaps / not-yet-required:**
+**Execution model and remaining gaps:**
 
-- Bundle/module loading: scripts run as classic scripts; ESM `import` graphs aren't
-  fetched/linked (the harness adapter concatenates a page's classic `<script>`s).
-- Observers are inert stubs (no live mutation callbacks over the static tree).
+- Module scripts now run through the deno_core module loader and ESM graph pump
+  (`NetModuleLoader` in `runtime.rs`); classic scripts are queued by the script-element
+  pump and compiled/executed by the Rust host pump with their document/source URL.
+  Global lexical bindings persist; classic execution no longer uses indirect eval.
+- Observer/layout behavior remains synthetic; inspect the runtime implementation
+  for the callbacks a particular observer supports rather than assuming browser layout.
+
+**Current interface corrections (2026-10-09):**
+
+- Iframes allocate distinct V8 contexts with independent ECMAScript intrinsics such as
+  `Array` and `Function`. Their DOM wrappers still bridge detached nodes over the parent
+  binding; separate DOM-constructor prototypes and browser cross-origin enforcement
+  are incomplete. Analytics/auth churn hosts can still use an inert frame stub.
+- Style text parses into style/group rules, including `CSSStyleRule` selectors. CSSOM
+  insertion/deletion changes the sheet without changing the DOM text; replacing style
+  text replaces the sheet. The parser is not a complete CSS parser, and linked-sheet
+  loading/complete CSSRuleList branding are not provided by this DOM binding.
+- Parsed hidden controls expose populated `.value` properties, including after insertion
+  and cloning; textarea defaults read their text. Ordinary input dirty-value/defaultValue
+  semantics, textarea `value` attributes, and default/unmatched select selection remain
+  incomplete. This is not complete form-control parity.
+- `ClientHints` holds negotiated `Accept-CH` state per origin and a scoped HTTP client.
+  Render sessions share that state with fetch/XHR and module requests; callers must pass
+  the same state through navigation and a replacement runtime to retain it. Request
+  contexts select navigation/resource headers, referrer/Origin and credentials behavior.
+  Complete CORS response enforcement, permissions-policy hint delegation, Critical-CH
+  retries and browser redirect policy are not implemented.
+
+The reusable [detection harness](../harness/detection/README.md) records baseline and
+instrumented Chrome/native runs separately. The corrected CSSOM sentinel, iframe
+intrinsics and shared GPU probe now match in the measured tests, but the fresh native
+Google baseline still reaches `/sorry` with HTTP 429. These checks do not establish
+complete Chrome parity or identify Google's decisive rejection signal.
 
 ## 3. Driving an authenticated SPA (live sessions)
 
@@ -184,7 +214,7 @@ actual Playwright/Chromium against the SAME servers showed the dominant cause wa
    the grid is empty only because `/employments` still 500s). The *real* fix is to
    sync flux-apis code↔DB (check out a June commit, or reset the DB to March).
 
-3. **turbo-surf has full auth + data parity.** Its cookie jar carries the
+3. **The measured auth flow has matching cookies and response data.** Its cookie jar carries the
    cross-domain `refresh_token` cookie (`*.propelauthtest.com`); it performs
    `GET …/api/v1/refresh_token` (×2) → `GET …/auth/me` — **all `200`**, and
    `auth/me` returns the **complete** user + organizations payload (len 2040),
@@ -205,8 +235,10 @@ actual Playwright/Chromium against the SAME servers showed the dominant cause wa
      prototype off a throwaway iframe's `contentWindow`; with none it bailed
      without caching and recreated an iframe on EVERY lookup — **776** iframe
      create/remove churn that also starved the budget. Fix: iframes get a
-     lightweight stub whose `contentWindow` IS our realm (lookup resolves + caches
-     → loop stops, 776→4) and which never enters the rtdom tree.
+     lightweight stub whose `contentWindow` was our realm (lookup resolved + cached
+     → loop stopped, 776→4) and which never entered the rtdom tree. Current unreleased
+     code replaces that shared-intrinsic stub with a distinct V8 context; frame DOM
+     wrappers and cross-origin enforcement still have limits.
 
    Result: `/people/active` 2 tags → **485 tags in ~2.2s**; `/home` (459) and
    company-settings (557) also drop to ~1.4–2.2s (were near/over budget). Verified
@@ -487,13 +519,17 @@ The render tier now runs ES modules (commit `feat(render): ES module support`):
 - `NetModuleLoader` resolves + fetches `import` graphs over the host net (shared
   cookie jar, same-origin), wired into `make_runtime`.
 - The hydration pump drains `<script type="module">` (and inline import/export
-  scripts) via `load_side_es_module[_from_code]` + `mod_evaluate`; `__execScriptEl`
+  scripts) via `load_side_es_module[_from_code]` + `mod_evaluate`; `__G.execScriptEl`
   leaves them for the module pump.
 - Tests: `esm_inline_module_script_evaluates`, `esm_module_import_graph_loads_over_net`.
 
-**Running the actual Next dev build for named diagnostics — still blocked, separately:**
+**Historical Next dev-build diagnosis:** the observations below predate the current
+script pump. It now routes classic sources with genuine module-syntax parse failures
+to the module loader; these older failures are not a claim that ESM source chunks
+are still universally skipped.
+
 - `next dev --turbopack` serves classic `<script src>` chunks whose CONTENT has
-  top-level `import`/`export` → `__execScriptEl` skips them (they're not
+  top-level `import`/`export` → the then-current `__execScriptEl` skipped them (they're not
   `type=module`, so the module pump doesn't claim them either). Routing src chunks
   with import/export to the module pump is the next step.
 - `next dev` (webpack, no turbopack) serves classic `webpackChunk.push` chunks (run
@@ -785,6 +821,10 @@ unrelated product features filed the same day.
 
 ## Public-site rendering triage (2026-07-08, Cycle 22) — wikipedia / google / nike
 
+Historical rendering log. Google blank-page hypotheses below were superseded by the
+`noscript` CSS isolation fix in v0.4.2 (CHANGELOG). They do not explain the current
+search challenge retry failure. See [current detection findings](../harness/detection/FINDINGS.md).
+
 Goal: render public homepages via the **raster** screenshot path (`hydrate()` → collect
 css/images → `screenshotWithAssets`), not the authenticated SPA path. Harness scripts are in
 the session scratchpad (`wikihydshot.cjs`, `hydshot.cjs`, `googconsent.cjs`) — fetch the DOM
@@ -869,6 +909,10 @@ engine bugs, all fixed:
    speedy-mode `styleEl.sheet.insertRule` on server-rendered `<style>` tags now works,
    so client-injected CSS is captured (Nike styleChars 483K → 894K through the pure
    hydrate path — no Chromium-CSSOM shortcut needed).
+   This was a historical serialized-style measurement. The current CSSOM correctly
+   keeps `insertRule` changes separate from `style.textContent`; those changes are
+   available through the live sheet but are not automatically included in serialized
+   HTML or a screenshot made from that HTML.
 
 **Nike still not a clean screenshot:** hydration now RUNS but hits a Next.js
 client-side exception → it navigates to `/_error` and the homepage re-renders blank

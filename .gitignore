@@ -71,3 +71,6 @@ scripts/browser-sidecar/.chrome-profile-*/
 
 # Raw detection traces contain cookies, headers, script sources, and collected payloads.
 harness/detection/artifacts/
+
+# Pinned native engine build/cache; keep source out of temporary-storage cleanup.
+.native-builds/

@@ -21,6 +21,11 @@
     "**/node_modules/**",
     "**/coverage/**",
     "test/fixtures/**",
-    "**/browser_env.js"
+    "**/browser_env.js",
+    "rust/crates/turbo-surf-render/src/element_tokens.js",
+    "rust/crates/turbo-surf-render/src/element_relations.js",
+    "rust/crates/turbo-surf-render/src/html_text.js",
+    "rust/crates/turbo-surf-render/src/html_popover.js",
+    ".native-builds/**"
   ]
 }

@@ -1,13 +1,16 @@
 # Changelog
 
-## Unreleased — reusable detection differential
+## [0.5.4] — unreleased — browser parity and reusable detection differential
 
 - Fresh-cookie Chrome/native harness with baseline and instrumented controls, JS-interface
-  argument/result samples and stacks, request payloads, response bodies, optional Chrome
+  argument/result samples and stacks, request payloads, response bodies, optional native/Chrome
   debugger script inventory, process failure artifacts, comparison output and build hashes.
   Native runs use wreq, trust-anchors, the Metal WebGL bridge and CoreText when compiled.
 - Optional shared capability, BotGuard-integrity and WebGL probes run after the recorded
-  verdict. Added explicit addon selection to the botto harness to avoid stale release builds.
+  verdict. The native collector awaits private, bounded expression results, including
+  asynchronous key operations, without reading a guest-controlled result slot.
+  Offline harness regressions now run in the standard npm/CI test gate.
+  Added explicit addon selection to the botto harness to avoid stale release builds.
 - Corrected `document.cookie`: HttpOnly cookies remain available to HTTP requests but
   are hidden from page JS and protected from script overwrite/creation.
 - Parsed style text into live CSSOM rules with correct selectors/classes; parser-created
@@ -15,7 +18,8 @@
   binding fix, mechanically re-vendored).
 - Iframes allocate real V8 contexts with independent ECMAScript intrinsics, shared
   HttpOnly-safe session cookies, and preserved parent/message identities. DOM wrappers
-  and cross-origin enforcement remain incomplete.
+  and access-check guarded stable WindowProxy navigation are implemented in the experimental
+  V8 154/155 profiles; published V8 150 fallback security/lifecycle coverage remains partial.
 - Classic page/frame scripts run from the host pump rather than indirect eval, retain
   document source locations/lexical bindings and avoid dispatcher frames in error stacks.
 - Added session-scoped Accept-CH negotiation and request-specific navigation/resource
@@ -23,6 +27,77 @@
   response fields. Metal identity now comes from
   the adapter used for pixel readback instead of a fixed M4 Pro string.
 - Corrected current tool/crate counts, feature defaults, profile scope and Google status docs.
+- Aligned npm/Rust/Python release metadata at 0.5.4; runtime version functions read Cargo metadata
+  so Python/NAPI/MCP reports cannot lag behind future manifest bumps. A saved Python
+  version check covers workspace/path dependencies, both lockfiles, NAPI/Python and
+  README/changelog metadata before the standard local/CI test gate.
+- **Dependency audit and migration (2026-10-10):** upgraded `deno_core` to 0.412.0
+  and its shared `deno_v8` facade to 0.4.0, resolving one `v8` 150.4.0 binding
+  library (native engine 15.0.245.2, corresponding to Chrome 150).
+  Synchronous isolates now enter a persistent Tokio scheduler for the engine's delayed
+  foreground tasks; the SDK aborts if those tasks have no runtime handle. These are the
+  [official SDK dependencies](https://docs.rs/crate/deno_core/0.412.0/source/Cargo.toml)
+  and [facade dependencies](https://docs.rs/crate/deno_v8/0.4.0/source/Cargo.toml),
+  not a Chrome 154 engine upgrade.
+- **Chrome 154 transport integration (2026-10-10):** pinned official upstream
+  [wreq c6fd8b1](https://github.com/0x676e67/wreq/tree/c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5),
+  [wreq-util 5715529](https://github.com/0x676e67/wreq-util/tree/5715529002738f46eea86a7271f918f9374d3582),
+  and [btls f5a8a48](https://github.com/0x676e67/btls/tree/f5a8a483eca2e0b3f539f944604da3f8e14a910e),
+  including BoringSSL f1f2556. The actual template is now Chrome 154, with ML-DSA
+  signature algorithms, signature-algorithm GREASE and real Chromium trust-anchor
+  IDs. The old vendored empty-anchor patch is removed; `trust-anchors` remains a
+  compatibility alias. A deterministic localhost ClientHello test compares these
+  wire fields with local Chrome 154.0.8037.98. Rust 1.98.0 is pinned for this stack.
+- The official release line uses wreq 0.16.1/wreq-util 0.2.0, despite Cargo's numeric
+  latest search ranking the older 6.0.0-rc/3.0.0-rc versions higher. Published
+  sources lack the new APIs: workspace Git patches do not propagate to crates.io
+  library consumers. Library publication remains blocked pending published APIs
+  or a reviewed distributable fork. This development change is not a release.
+- Native traces report actual V8 and transport versions independently. The default
+  SDK uses V8 15.0.245.2. The saved Chrome 154 source profile separately builds
+  actual V8 15.4.80.20-rusty, verifies the archive hash and exercises native
+  WindowProxy/context security and module evaluation seams. It is an experimental
+  development profile; no complete browser parity is claimed.
+
+- **October 13 follow-up:** native document collections, namespace-aware Attr/NamedNodeMap,
+  processing instructions, UTF-16 character-data operations, import/adoption, HTML reflection
+  and private same-origin interface brands have deterministic mutation/security coverage.
+  Private native Storage state persists within a browsing session across navigations.
+- Trusted environment/crypto setup finishes before the unchanged guest budget starts,
+  preventing usable sessions with missing private input drivers after startup timeouts.
+  Host input captures a private driver and cancels queued work when its budget expires.
+  Render isolates reset between unrelated pages. Private native fetch/resource records and
+  the host-only network-log accessor prevent guest response/prototype changes from exposing
+  CORS-opaque bodies or forging resource policy metadata.
+- Raw CDP traces attach to out-of-process frames and workers and retain session-qualified
+  requests, ExtraInfo and generated sources. Native V8 Inspector inventories genuine compiled
+  main/child sources; coverage limits and incomplete captures are retained in comparisons.
+- Fixed BroadcastChannel native-target dispatch, observer constructor/static projection and
+  writable stylesheet adoption. Structured cloning now uses V8 rather than a JavaScript
+  approximation; transfer lists remain explicitly unsupported.
+- **Chrome 155 profile (2026-10-13):** genuine V8 15.5.35.20-rusty builds from the
+  pinned official engine revision; the historical 154 helper remains reproducible.
+  Target 155 client hints use Chromium's major-seeded GREASE brands, navigation Accept
+  includes image/jxl, and language header order follows the measured 155 control.
+  The local desktop device-memory default is 16 GiB, matching Chrome 155; the old
+  universal 8-GiB-cap comment is corrected (155 desktop rounds within 2..32 GiB).
+  The upstream 154 transport recipe matches the bounded local 155 TLS/H2 controls;
+  target and base versions remain separately recorded.
+- Canonical cached DOMTokenList/part, scoped ARIA element relations, supported native
+  moveBefore and innerText/outerText mutations replace earlier compatibility gaps.
+  Rendered text uses native cascade rules, not a complete layout/line-wrapping engine.
+- Official Deno WebCrypto classes share the existing V8 facade and provide genuine
+  native keys, digests, AES/HMAC/Ed25519 and KEM operations. Browser-profile admission
+  and algorithm normalization follow measured Chrome 155 support, including rejecting
+  ML-KEM-512. Private key metadata and realm-specific Promise/error/result projection
+  preserve permissions and iframe isolation; host bootstrap objects stay hidden.
+- The DOM dependency now resolves published turbo-dom 0.5.2 without a workspace Git
+  patch; unpublished transport APIs still block clean crates.io consumers.
+- Consent dismissal is saved in the shared harness and both collectors. Partial native
+  captures checkpoint input/navigation state; isolated API probes share a localhost
+  fixture rather than comparing secure native pages with insecure Chrome about:blank.
+- Complete Chrome API/security/layout parity is not claimed. Final release gates and
+  fresh Google evidence are recorded in FINDINGS.
 
 **Correction to historical Google conclusions (2026-10-09):** the entries below record
 what was observed/assumed at the time, not universal Google requirements. A fresh Chrome
@@ -120,9 +195,11 @@ the navigation **header ORDER**, which Chrome reordered in 154.
   so both layers report the same version for any pooled profile.
 
 ### Notes
-- The BoringSSL TLS/HTTP-2 hello stays Chrome 149 (wreq-util), which is byte-stable across
-  Chrome minors — only the *reported* version (UA/`sec-ch-ua`/header order) tracks 154. The
-  browserless google `__Secure-ENID` remains server-scored (unchanged from 0.5.0).
+- The BoringSSL TLS/HTTP-2 template stayed Chrome 149 (wreq-util), while the
+  *reported* version (UA/`sec-ch-ua`/header order) tracked 154. **Corrected 2026-10-10:**
+  the former assertion that this template was byte-stable across Chrome releases was
+  unsupported; newer upstream profiles change TLS options and signature algorithms.
+  The browserless Google `__Secure-ENID` was still rejected in the recorded test.
 
 ## [0.5.0] — 2026-09-29 — client-side fingerprint fidelity + browserless anti-bot recon
 
@@ -561,9 +638,9 @@ version mismatch on the default impersonate path.
   kept advertising Chrome 149 on the wire even after the rest of the stack moved to
   153 — a cross-layer version mismatch that is itself a bot tell. `emulate()` now
   pins the on-wire UA + `sec-ch-ua` to the same Chrome 153 identity, while wreq still
-  owns the header order and the TLS/HTTP-2 ClientHello (Chrome's TLS hello is stable
-  across minor versions, so the 149 template is byte-for-byte what Chrome 153 sends).
-  Verified against a live TLS/HTTP-2 echo; the impersonate network e2e guards it.
+  owns the header order and the Chrome 149 TLS/HTTP-2 template. **Corrected 2026-10-10:**
+  the live echo checked specific header, priority and JA4 properties; it did not establish
+  byte-for-byte Chrome 153 parity. The newer upstream profiles have different TLS settings.
 
 ## [0.4.2] — screenshot render fidelity
 

@@ -7,13 +7,30 @@ use turbo_surf_core::{
     net::{fetch_html, FetchOptions},
     request_context::{ClientHints, RequestContext},
 };
-use turbo_surf_render::{PageSession, HUMAN_INPUT_JS};
+use turbo_surf_render::PageSession;
 
 const SNAPSHOT: &str = r#"globalThis.__RESULT = JSON.stringify({
   url: location.href,
   interfaces: globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot() || null,
   navigator: {userAgent:navigator.userAgent,platform:navigator.platform,
     brands:navigator.userAgentData?.brands,hardwareConcurrency:navigator.hardwareConcurrency},
+  environment: {
+    webdriver:navigator.webdriver,userAgent:navigator.userAgent,
+    languages:navigator.languages,language:navigator.language,
+    locale:Intl.DateTimeFormat().resolvedOptions().locale,
+    viewport:{width:innerWidth,height:innerHeight},
+    outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,
+    screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}
+  },
+  browserFixture:globalThis.__browserFixture||null,
+  inputState:(() => {
+    const control=document.querySelector('textarea[name=q],input[name=q]');
+    return {activeTag:document.activeElement?.tagName||null,
+      activeName:document.activeElement?.getAttribute('name')||null,
+      value:control?.value??null,disabled:control?.disabled??null,
+      readOnly:control?.readOnly??null,consentPresent:!!document.querySelector('#W0wltc')};
+  })(),
+  readyState:document.readyState,
   nav: (() => {
     const g=globalThis[Symbol.for('ts')];
     const v=g && (g.rscNav || g.nav);
@@ -40,6 +57,22 @@ fn save(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
     }
 }
 
+fn checkpoint(out: &Path, trace: &Value) -> Result<(), Box<dyn std::error::Error>> {
+    save(&out.join("trace.json"), serde_json::to_vec_pretty(trace)?)?;
+    Ok(())
+}
+
+fn page_budget(config: &Value) -> Result<u64, Box<dyn std::error::Error>> {
+    let budget = match config.get("pageBudgetMs") {
+        Some(value) => value.as_u64().ok_or("pageBudgetMs must be an integer")?,
+        None => 20_000,
+    };
+    if !(1..=120_000).contains(&budget) {
+        return Err("pageBudgetMs must be between 1 and 120000".into());
+    }
+    Ok(budget)
+}
+
 async fn snapshot(
     page: &mut PageSession,
     out: &Path,
@@ -56,23 +89,36 @@ async fn snapshot(
         .query_selector_all(selector)
         .len());
     row["cookies"] = serde_json::from_str::<Value>(&page.cookies()).unwrap_or(json!([]));
+    row["hydration"] = json!(page.hydration_diagnostics());
+    row["childFrames"] = json!(page.frame_interface_snapshots());
     Ok(row)
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+    let build_info = build_info();
+    if args.get(1).is_some_and(|arg| arg == "--build-info") {
+        println!("{build_info}");
+        return Ok(());
+    }
     let config: Value = serde_json::from_str(&fs::read_to_string(
         args.get(1).ok_or("config path required")?,
     )?)?;
     let out = Path::new(args.get(2).ok_or("output directory required")?);
     fs::create_dir_all(out)?;
     std::env::set_var("TURBO_SURF_HTTP_TRACE", out.join("network.jsonl"));
+    if config["debugger"].as_bool().unwrap_or(false) {
+        std::env::set_var("TURBO_SURF_JS_TRACE", out.join("native-js"));
+    } else {
+        std::env::remove_var("TURBO_SURF_JS_TRACE");
+    }
     let mut trace = json!({"runtime":"turbo-surf","version":turbo_surf_core::VERSION,
         "instrumented":config["interfaces"].as_bool().unwrap_or(false), "config":config,
-        "features":{"impersonate":cfg!(feature="impersonate"),"trustAnchors":cfg!(feature="trust-anchors"),
-            "gpuMetal":cfg!(feature="gpu-metal"),"coretext":cfg!(feature="coretext")},
-        "pages":[],"errors":[],"probes":[]});
+        "nativeDebugger":{"enabled":config["debugger"].as_bool().unwrap_or(false),"directory":"native-js","childContexts":turbo_surf_render::stable_window_proxy()},
+        "features":build_info["features"],"engine":build_info["engine"],
+        "pages":[],"errors":[],"probes":[],"captureComplete":false});
+    checkpoint(out, &trace)?;
     let status = capture(&config, out, &mut trace).await;
     if let Err(e) = &status {
         trace["errors"]
@@ -80,12 +126,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap()
             .push(json!(e.to_string()));
     }
-    save(&out.join("trace.json"), serde_json::to_vec_pretty(&trace)?)?;
+    trace["captureComplete"] = json!(status.is_ok());
+    checkpoint(out, &trace)?;
     println!(
         "{}",
         json!({"out":out,"features":trace["features"],"pages":trace["pages"].as_array().map(Vec::len),"errors":trace["errors"]})
     );
     status
+}
+
+fn build_info() -> Value {
+    let profile = fingerprint::default_profile();
+    json!({"version":turbo_surf_core::VERSION,
+        "features":{"impersonate":cfg!(feature="impersonate"),"trustAnchors":cfg!(feature="trust-anchors"),
+            "gpuMetal":cfg!(feature="gpu-metal"),"coretext":cfg!(feature="coretext")},
+        "engine":{"v8Version":turbo_surf_render::v8_version(),"stableWindowProxy":turbo_surf_render::stable_window_proxy(),
+            "transportChromeMajor":turbo_surf_core::net::transport_chrome_major(),
+            "transportBaseChromeMajor":turbo_surf_core::net::transport_base_chrome_major(),
+            "reportedChromeMajor":profile.chrome_major,"reportedFullVersion":profile.full_version}})
 }
 
 async fn capture(
@@ -97,11 +155,38 @@ async fn capture(
     let _session = turbo_surf_mcp::Session::new();
     let profile = fingerprint::default_profile();
     let hints = ClientHints::default();
+    let storage = turbo_surf_render::BrowserStorage::default();
+    let budget = page_budget(config)?;
+    let width = config["viewport"]["width"].as_u64().unwrap_or(1280);
+    let height = config["viewport"]["height"].as_u64().unwrap_or(800);
+    let screen_width = config["screen"]["width"].as_u64().unwrap_or(1920);
+    let screen_height = config["screen"]["height"].as_u64().unwrap_or(1080);
+    let outer_width = config["outerWindow"]["width"].as_u64().unwrap_or(width);
+    let outer_height = config["outerWindow"]["height"]
+        .as_u64()
+        .unwrap_or(height + 88);
+    if !config["languages"].is_null() && config["languages"] != json!(profile.languages) {
+        return Err(
+            "Harness languages must match the native HTTP profile's ordered languages".into(),
+        );
+    }
+    if width == 0
+        || height == 0
+        || width > outer_width
+        || height > outer_height
+        || outer_width > screen_width
+        || outer_height > screen_height
+    {
+        return Err("Invalid viewport/window/screen geometry".into());
+    }
     turbo_surf_render::set_fingerprint(
         &json!({
             "chromeMajor":profile.chrome_major,"fullVersion":profile.full_version,
             "platform":profile.nav_platform,"languages":profile.languages,
             "hardwareConcurrency":profile.hardware_concurrency,"deviceMemory":profile.device_memory,
+            "innerWidth":width,"innerHeight":height,"outerWidth":outer_width,"outerHeight":outer_height,
+            "screen":{"width":screen_width,"height":screen_height,"availWidth":screen_width,"availHeight":screen_height},
+            "devicePixelRatio":config["deviceScaleFactor"].as_f64().unwrap_or(2.0),
         })
         .to_string(),
     );
@@ -120,11 +205,13 @@ async fn capture(
     };
     if config["probeOnly"].as_bool().unwrap_or(false) {
         let mut page = PageSession::open_with_request_state(
-            "<html><head></head><body></body></html>",
-            "https://probe.test/",
+            config["fixtureHtml"]
+                .as_str()
+                .unwrap_or("<!doctype html><html><head></head><body></body></html>"),
+            url,
             "",
             &profile.user_agent,
-            20_000,
+            budget,
             &init,
             hints.clone(),
         )
@@ -133,6 +220,7 @@ async fn capture(
             .as_array_mut()
             .unwrap()
             .push(snapshot(&mut page, out, "probe", selector).await?);
+        checkpoint(out, trace)?;
         trace["probes"] = json!(collect_probes(&mut page, config).await?);
         page.close();
         return Ok(());
@@ -152,40 +240,66 @@ async fn capture(
     )
     .await?;
     save(&out.join("home-response.html"), &response.html)?;
-    let mut page = PageSession::open_with_request_state(
+    let mut page = PageSession::open_with_browsing_state(
         &response.html,
         &response.final_url,
         &jar.storage_state(),
         &profile.user_agent,
-        20_000,
+        budget,
         &init,
         hints.clone(),
+        &response.headers,
+        storage.clone(),
     )
     .await?;
-    let pages = trace["pages"].as_array_mut().unwrap();
-    pages.push(snapshot(&mut page, out, "home", selector).await?);
-    page.eval(HUMAN_INPUT_JS).await?;
+    trace["pages"]
+        .as_array_mut()
+        .unwrap()
+        .push(snapshot(&mut page, out, "home", selector).await?);
+    checkpoint(out, trace)?;
+    if let Some(dismiss) = config["dismissSelector"].as_str().filter(|s| !s.is_empty()) {
+        let script = format!(
+            "globalThis.__RESULT=JSON.stringify(!!document.querySelector({}));",
+            serde_json::to_string(dismiss)?
+        );
+        let present = serde_json::from_str::<bool>(&page.eval(&script).await?)?;
+        trace["dismissal"] = json!({"selector":dismiss,"present":present,"clicked":false});
+        checkpoint(out, trace)?;
+        if present {
+            let wait = config["waitMs"].as_u64().unwrap_or(2500);
+            match page
+                .input(&json!([{ "click":dismiss },{ "wait":wait }]))
+                .await
+            {
+                Ok(()) => trace["dismissal"]["clicked"] = json!(true),
+                Err(error) => {
+                    trace["dismissal"]["error"] = json!(error);
+                    checkpoint(out, trace)?;
+                    return Err("Consent dismissal input failed; search was not attempted".into());
+                }
+            }
+            trace["pages"]
+                .as_array_mut()
+                .unwrap()
+                .push(snapshot(&mut page, out, "dismiss", selector).await?);
+            checkpoint(out, trace)?;
+        }
+    }
     let steps = config["steps"].as_array().ok_or("steps array required")?;
     if !steps.is_empty() {
-        let steps = serde_json::to_string(steps)?;
-        let driver = format!(
-            r#"(() => {{
-          const q=s=>{{const el=document.querySelector(s);if(!el)throw new Error('Missing selector '+s);return el;}};
-          const steps={steps}.map(raw=>{{
-          let st=raw;
-          if(raw.click) st={{click:q(raw.click)}};
-          if(raw.focus) st={{focus:q(raw.focus)}};
-          if(raw.move) {{ const el=q(raw.move.selector),r=el.getBoundingClientRect();st={{move:{{el,toX:r.left+r.width/2,toY:r.top+r.height/2}}}}; }}
-          return st; }});
-          globalThis.__hi.sequence(document,steps,{{startDelay:400,startJitter:0}}).then(()=>{{
-            globalThis.__RESULT='done';
-          }});
-        }})();"#
-        );
-        if let Err(e) = page.eval(&driver).await {
-            pages.push(json!({"phase":"interaction-error","error":e,"cookies":[]}));
+        if let Err(error) = page.input(&config["steps"]).await {
+            trace["pages"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"phase":"interaction-error","error":error,"cookies":[]}));
+            checkpoint(out, trace)?;
+            return Err("Search input failed; navigation was not attempted".into());
         }
-        pages.push(snapshot(&mut page, out, "interaction", selector).await?);
+        trace["pages"]
+            .as_array_mut()
+            .unwrap()
+            .push(snapshot(&mut page, out, "interaction", selector).await?);
+        checkpoint(out, trace)?;
     }
     // Follow the actual JS navigation; if the DOM's Enter default is absent, record the
     // serialized GET form fallback separately rather than claiming the JS navigated.
@@ -205,8 +319,9 @@ async fn capture(
         )
         .await?;
     let fallback: Value = serde_json::from_str(&raw)?;
-    let mut target = pages
-        .last()
+    let mut target = trace["pages"]
+        .as_array()
+        .and_then(|pages| pages.last())
         .and_then(|p| p["nav"].as_str())
         .unwrap_or(&response.final_url)
         .to_string();
@@ -217,6 +332,10 @@ async fn capture(
             nav_source = "form-fallback";
         }
     }
+    trace["inputSource"] = json!("native-host");
+    trace["navigationSource"] = json!(nav_source);
+    trace["formFallback"] = fallback;
+    checkpoint(out, trace)?;
     if target == response.final_url {
         probes.extend(collect_probes(&mut page, config).await?);
     }
@@ -243,23 +362,26 @@ async fn capture(
             &out.join(format!("navigation-{hop}-response.html")),
             &search.html,
         )?;
-        let next = PageSession::open_with_request_state(
+        let next = PageSession::open_with_browsing_state(
             &search.html,
             &search.final_url,
             &jar.storage_state(),
             &profile.user_agent,
-            20_000,
+            budget,
             &init,
             hints.clone(),
+            &search.headers,
+            storage.clone(),
         )
         .await;
         let mut next = match next {
             Ok(p) => p,
             Err(e) => {
-                pages.push(json!({"phase":format!("navigation-{hop}-error"),"url":search.final_url,
+                trace["pages"].as_array_mut().unwrap().push(json!({"phase":format!("navigation-{hop}-error"),"url":search.final_url,
                     "status":search.status,"error":e,"bytes":search.html.len(),
                     "results":turbo_dom_parser::rtdom::Tree::parse(&search.html).query_selector_all(selector).len(),
                     "cookies":[]}));
+                checkpoint(out, trace)?;
                 break;
             }
         };
@@ -268,7 +390,8 @@ async fn capture(
         target = row["nav"].as_str().unwrap_or(&search.final_url).to_string();
         referer = search.final_url;
         jar = CookieJar::from_storage_state(&next.cookies());
-        pages.push(row);
+        trace["pages"].as_array_mut().unwrap().push(row);
+        checkpoint(out, trace)?;
         // Collectors run after the verdict snapshot, on the final page only. Their
         // observations are never mixed into the recorded page interface snapshot.
         if target == referer {
@@ -276,10 +399,31 @@ async fn capture(
         }
         next.close();
     }
-    trace["navigationSource"] = json!(nav_source);
-    trace["formFallback"] = fallback;
     trace["probes"] = json!(probes);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hydration_budget_has_bounded_explicit_configuration() {
+        assert_eq!(page_budget(&json!({})).unwrap(), 20_000);
+        assert_eq!(
+            page_budget(&json!({"pageBudgetMs":60_000})).unwrap(),
+            60_000
+        );
+        for value in [
+            json!(0),
+            json!(120_001),
+            json!(-1),
+            json!(1.5),
+            json!("20000"),
+        ] {
+            assert!(page_budget(&json!({"pageBudgetMs":value})).is_err());
+        }
+    }
 }
 
 async fn collect_probes(
@@ -290,11 +434,8 @@ async fn collect_probes(
     for path in config["probes"].as_array().into_iter().flatten() {
         let path = path.as_str().ok_or("probe path must be string")?;
         let source = fs::read_to_string(path)?;
-        let script = format!(
-            "globalThis.__RESULT=({});",
-            source.trim().trim_end_matches(';')
-        );
-        let probe = match page.eval(&script).await {
+        let script = format!("({})", source.trim().trim_end_matches(';'));
+        let probe = match page.eval_expression(&script).await {
             Ok(raw) => match serde_json::from_str::<Value>(&raw) {
                 Ok(result) => json!({"path":path,"result":result}),
                 Err(e) => json!({"path":path,"error":e.to_string()}),

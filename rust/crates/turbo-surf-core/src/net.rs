@@ -13,6 +13,25 @@ use futures_util::StreamExt;
 use std::collections::BTreeMap;
 
 const DEFAULT_MAX_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
+
+/// Chrome target of the measured TLS/H2/header profile. Chrome 155 uses the
+/// upstream154 TLS/H2 recipe with independently measured155 headers; the base
+/// recipe version is reported separately. Rustls has no Chrome transport profile.
+pub fn transport_chrome_major() -> Option<u16> {
+    #[cfg(feature = "impersonate")]
+    return Some(crate::browser::DEFAULT_MAJOR);
+    #[cfg(not(feature = "impersonate"))]
+    None
+}
+
+/// Underlying upstream recipe, distinct from the measured target profile.
+pub fn transport_base_chrome_major() -> Option<u16> {
+    #[cfg(feature = "impersonate")]
+    return Some(154);
+    #[cfg(not(feature = "impersonate"))]
+    None
+}
+
 const HTML_TYPES: &[&str] = &[
     "text/html",
     "application/xhtml+xml",
@@ -52,10 +71,31 @@ impl std::error::Error for HttpError {}
 #[derive(Debug, Clone)]
 pub struct FetchResult {
     pub html: String,
+    /// Response bytes before document charset decoding, for fetch Body consumers.
+    pub body_bytes: Vec<u8>,
+    pub headers: Vec<(String, String)>,
     pub final_url: String,
     pub status: u16,
     pub redirected: bool,
     pub content_type: String,
+}
+
+pub type RequestPolicy<'a> = dyn Fn(&str, bool) -> bool + Send + Sync + 'a;
+pub type ResponsePolicy<'a> =
+    dyn Fn(&RequestContext, &str, &[(String, String)]) -> bool + Send + Sync + 'a;
+
+pub type BeforeRequestFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), HttpError>> + Send>>;
+pub type BeforeRequest<'a> = dyn Fn(RequestContext, String, String, BTreeMap<String, String>) -> BeforeRequestFuture
+    + Send
+    + Sync
+    + 'a;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectMode {
+    Follow,
+    Error,
+    Manual,
 }
 
 #[derive(Default)]
@@ -64,6 +104,13 @@ pub struct FetchOptions<'a> {
     /// Browser metadata for this request. Unspecified requests are top-level
     /// navigations; script/fetch/image callers should identify their context.
     pub context: Option<RequestContext>,
+    /// A native embedder policy checked before contacting every redirect target.
+    pub request_policy: Option<&'a RequestPolicy<'a>>,
+    /// A native embedder response policy checked before following redirects.
+    pub response_policy: Option<&'a ResponsePolicy<'a>>,
+    /// Async native authorization before each request, using the rewritten hop's
+    /// context, URL, method and authored headers (for example CORS preflight).
+    pub before_request: Option<&'a BeforeRequest<'a>>,
     /// Origin-scoped Accept-CH opt-ins shared by this browsing session.
     pub client_hints: Option<&'a ClientHints>,
     pub method: Option<String>,
@@ -71,6 +118,8 @@ pub struct FetchOptions<'a> {
     pub max_bytes: Option<usize>,
     pub allow_non_html: bool,
     pub max_redirects: Option<usize>,
+    /// Explicit Fetch redirect semantics; None preserves legacy max_redirects behavior.
+    pub redirect: Option<RedirectMode>,
     pub jar: Option<&'a mut CookieJar>,
     pub cache: Option<&'a mut ResponseCache>,
     /// Shared client for connection reuse (see [`build_client`]); built per-call
@@ -184,7 +233,7 @@ fn build_headers(url: &str, method: &str, opts: &FetchOptions) -> BTreeMap<Strin
     }
     if context.sends_credentials(url) {
         if let Some(jar) = &opts.jar {
-            let cookie = jar.cookie_header(url, opts.now);
+            let cookie = jar.cookie_header_for_request(url, opts.now, context, method);
             if !cookie.is_empty() {
                 h.insert("cookie".into(), cookie);
             }
@@ -235,7 +284,7 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str, socs: Optio
 // `impersonate` feature; a pass-through on the default (rustls) backend, which
 // can't forge a fingerprint. One seam so both client constructors stay in sync.
 //
-// wreq-util supplies the Chrome 149 TLS/HTTP-2 template; the reported identity
+// The measured Chrome 155 TLS/H2 capabilities reuse upstream154; the identity
 // and navigation header order are pinned to fingerprint::default_profile(). This
 // is an emulation, not proof of current Chrome wire parity. Validate the deployed
 // build with the fingerprint tests, especially after a Chrome/backend upgrade.
@@ -245,11 +294,11 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     let builder = {
         use wreq::IntoEmulation;
         let profile = crate::fingerprint::default_profile();
-        // Resolve the wreq-util Chrome 149 profile to a concrete `Emulation` so its
+        // Resolve the wreq-util Chrome 154 profile to a concrete `Emulation` so its
         // header set, header ORDER and TLS options can be tuned to match a real
         // Chrome *cold* top-level navigation before it's applied.
         let mut emulation = wreq_util::Emulation::builder()
-            .profile(wreq_util::Profile::Chrome149)
+            .profile(wreq_util::Profile::Chrome154)
             .platform(wreq_util::Platform::MacOS)
             .build()
             .into_emulation();
@@ -283,33 +332,14 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
         }
         emulation.orig_headers = order;
 
-        // Real Chrome sends a HEADERS-frame priority weight of 256; wreq-util's
-        // Chrome149 profile bakes in 220 (the on-wire byte is weight-1, so
-        // `StreamDependency::new`'s `u8` takes 255). Overriding the resolved
-        // profile's stream dependency HERE — rather than editing a vendored
-        // wreq-util — keeps the fix in turbo-surf's own source: it survives a stock
-        // (unpatched) wreq-util and reaches crates.io consumers of this crate.
-        if let Some(h2) = emulation.http2_options.as_mut() {
-            use wreq::http2::{StreamDependency, StreamId};
-            h2.headers_stream_dependency = Some(StreamDependency::new(StreamId::zero(), 255, true));
-        }
-
-        // With the `trust-anchors` feature, additionally emit Chrome 152+'s
-        // `trust_anchors` extension (codepoint 0xCA34). wreq-util's Chrome149
-        // profile omits it, leaving JA4 at `t13d1516h2` vs real Chrome's
-        // `t13d1517h2`. An *empty* trust-anchors list still sends the extension
-        // (BoringSSL), so JA4 gains the extension without carrying real IDs; the
-        // ext lands at the ClientHello tail but JA4's ext hash is order-independent.
-        // Needs the vendored wreq fork (see workspace Cargo.toml `[patch.crates-io]`).
-        #[cfg(feature = "trust-anchors")]
-        if let Some(tls) = emulation.tls_options.as_mut() {
-            tls.trust_anchors = Some(bytes::Bytes::new());
-        }
+        // The upstream Chrome 154 profile owns signature-algorithm GREASE and
+        // real trust-anchor IDs. Do not replace its Chromium root list with the
+        // empty extension used by the former compatibility patch.
         builder
             .emulation(emulation)
             // Override AFTER emulation (wreq applies the profile immediately, so
-            // later fine-tuning wins) to freshen the reported version 149 -> current
-            // (`default_profile`'s major, from the browser registry).
+            // later fine-tuning wins) to use the configured full patch version
+            // from the browser registry.
             .user_agent(profile.user_agent.as_str())
     };
     builder
@@ -324,13 +354,20 @@ fn client(policy: http::redirect::Policy) -> http::Result<http::Client> {
 /// (and TLS sessions) are reused across hosts — the dispatcher (port of
 /// `src/dispatcher.mjs`). `Client` is cheap to clone (Arc-shared pool).
 pub fn build_client() -> http::Client {
+    client_builder()
+        .build()
+        .expect("HTTP client build (TLS backend init)")
+}
+
+/// Configured native transport builder for host-owned trust and pooling options.
+/// Use this seam when an embedder needs a private certificate store; normal
+/// browsing retains the configured backend's certificate verification.
+pub fn client_builder() -> http::ClientBuilder {
     emulate(
         http::Client::builder()
             .redirect(http::redirect::Policy::limited(20))
             .pool_idle_timeout(std::time::Duration::from_secs(90)),
     )
-    .build()
-    .expect("HTTP client build (TLS backend init)")
 }
 
 pub(crate) fn build_browser_client() -> http::Client {
@@ -512,6 +549,16 @@ async fn finish(
     max_bytes: usize,
 ) -> Result<FetchResult, HttpError> {
     let status = res.status().as_u16();
+    let headers = res
+        .headers()
+        .iter()
+        .filter_map(|(key, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (key.as_str().to_string(), value.to_string()))
+        })
+        .collect::<Vec<_>>();
     let trace_id = res
         .extensions()
         .get::<crate::http_trace::RequestId>()
@@ -520,8 +567,11 @@ async fn finish(
     // 304 Not Modified → reuse the cached body (server sent none).
     if status == 304 {
         if let Some(cache) = &opts.cache {
+            let html = cache.body(&final_url);
             return Ok(FetchResult {
-                html: cache.body(&final_url),
+                body_bytes: html.as_bytes().to_vec(),
+                headers,
+                html,
                 final_url,
                 status,
                 redirected,
@@ -546,6 +596,8 @@ async fn finish(
         cache.store(&final_url, etag, last_modified, &html);
     }
     Ok(FetchResult {
+        body_bytes: bytes.to_vec(),
+        headers,
         html,
         final_url,
         status,
@@ -608,12 +660,99 @@ async fn follow_manually_response(
         body: opts.body.clone(),
     };
     for redirects in 0.. {
+        if opts
+            .request_policy
+            .is_some_and(|allowed| !allowed(&hop.url, redirects > 0))
+        {
+            return Err(HttpError::new(
+                "Request blocked by native document policy",
+                ErrorCode::Network,
+            ));
+        }
+        if opts.context.as_ref().is_some_and(|context| {
+            context.mode == crate::request_context::RequestMode::SameOrigin
+                && (context.opaque_origin
+                    || context.origin_tainted
+                    || context.source.as_deref().is_none_or(|source| {
+                        !crate::request_context::same_origin(source, &hop.url)
+                    }))
+        }) {
+            return Err(HttpError::new(
+                "Request redirect violates same-origin mode",
+                ErrorCode::Network,
+            ));
+        }
+        if let Some(before) = opts.before_request {
+            before(
+                opts.context.clone().unwrap_or_default(),
+                hop.url.clone(),
+                hop.method.clone(),
+                opts.headers.clone(),
+            )
+            .await?;
+        }
         let headers = build_headers(&hop.url, &hop.method, opts);
         let res = send(&cl, &hop.method, &hop.url, &headers, &hop.body).await?;
         let final_url = final_url(&res);
         ingest_set_cookie(opts, &res, &final_url);
+        if let Some(allowed) = opts.response_policy {
+            let context = opts.context.clone().unwrap_or_default();
+            let headers = res
+                .headers()
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_string(), value.to_string()))
+                })
+                .collect::<Vec<_>>();
+            if !allowed(&context, &hop.url, &headers) {
+                return Err(HttpError::new(
+                    "Response blocked by native document policy",
+                    ErrorCode::Network,
+                ));
+            }
+        }
         match redirect_location(&res) {
-            Some(loc) if redirects < max_redirects => hop = advance(&hop, &res, &loc)?,
+            Some(_) if opts.redirect == Some(RedirectMode::Error) => {
+                return Err(HttpError::new(
+                    "Request redirect mode is error",
+                    ErrorCode::Network,
+                ))
+            }
+            Some(_) if opts.redirect == Some(RedirectMode::Manual) => {
+                return Ok((res, final_url, false))
+            }
+            Some(loc) if redirects < max_redirects => {
+                let next = advance(&hop, &res, &loc)?;
+                if !crate::request_context::same_origin(&hop.url, &next.url) {
+                    opts.headers
+                        .retain(|name, _| !name.eq_ignore_ascii_case("authorization"));
+                }
+                if hop.method != next.method {
+                    opts.headers.retain(|name, _| {
+                        !matches!(
+                            name.to_ascii_lowercase().as_str(),
+                            "content-encoding"
+                                | "content-language"
+                                | "content-location"
+                                | "content-type"
+                                | "content-length"
+                        )
+                    });
+                }
+                if let Some(context) = opts.context.as_mut() {
+                    context.follow_redirect(&hop.url, &next.url);
+                }
+                hop = next;
+            }
+            Some(_) if opts.redirect == Some(RedirectMode::Follow) => {
+                return Err(HttpError::new(
+                    "Request redirect limit exceeded",
+                    ErrorCode::Network,
+                ))
+            }
             _ => return Ok((res, final_url, redirects > 0)),
         }
     }
@@ -669,7 +808,13 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
         Some(n) => follow_manually(&mut opts, url, n, max_bytes).await,
         // Negotiated hints and browser context must be re-derived for every
         // redirect origin; a backend's automatic follow cannot do that.
-        None if opts.client_hints.is_some() || opts.context.is_some() => {
+        None if opts.redirect.is_some()
+            || opts.client_hints.is_some()
+            || opts.context.is_some()
+            || opts.request_policy.is_some()
+            || opts.response_policy.is_some()
+            || opts.before_request.is_some() =>
+        {
             follow_manually(&mut opts, url, 20, max_bytes).await
         }
         None => follow_auto(&mut opts, url, max_bytes).await,
@@ -687,7 +832,14 @@ pub async fn fetch_bytes(
     mut opts: FetchOptions<'_>,
 ) -> Result<(String, Vec<u8>, u16), HttpError> {
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
-    if opts.max_redirects.is_some() || opts.client_hints.is_some() || opts.context.is_some() {
+    if opts.redirect.is_some()
+        || opts.max_redirects.is_some()
+        || opts.client_hints.is_some()
+        || opts.context.is_some()
+        || opts.request_policy.is_some()
+        || opts.response_policy.is_some()
+        || opts.before_request.is_some()
+    {
         let redirects = opts.max_redirects.unwrap_or(20);
         let (res, final_url, _) = follow_manually_response(&mut opts, url, redirects).await?;
         let status = res.status().as_u16();
@@ -954,6 +1106,75 @@ mod io_tests {
         .await
         .unwrap();
         assert_eq!(ok.html, "{}");
+    }
+
+    #[tokio::test]
+    async fn native_response_policy_denies_a_redirect_before_following_it() {
+        let p = spawn().await;
+        let seen = std::sync::Mutex::new(Vec::new());
+        let request = |target: &str, _| {
+            seen.lock().unwrap().push(target.to_string());
+            true
+        };
+        let response = |_: &RequestContext, _: &str, headers: &[(String, String)]| {
+            !headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("location"))
+        };
+        let result = fetch_html(
+            &url(p, "/r"),
+            FetchOptions {
+                request_policy: Some(&request),
+                response_policy: Some(&response),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(
+            result.unwrap_err().message,
+            "Response blocked by native document policy"
+        );
+        assert_eq!(*seen.lock().unwrap(), vec![url(p, "/r")]);
+    }
+
+    #[tokio::test]
+    async fn native_policy_checks_each_redirect_target_for_text_and_binary() {
+        let p = spawn().await;
+        let seen = std::sync::Mutex::new(Vec::new());
+        let policy = |target: &str, redirected: bool| {
+            seen.lock().unwrap().push((target.to_string(), redirected));
+            !target.ends_with("/dest")
+        };
+        let result = fetch_html(
+            &url(p, "/r"),
+            FetchOptions {
+                request_policy: Some(&policy),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(
+            result.unwrap_err().message,
+            "Request blocked by native document policy"
+        );
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![(url(p, "/r"), false), (url(p, "/dest"), true)]
+        );
+        seen.lock().unwrap().clear();
+        let result = fetch_bytes(
+            &url(p, "/r"),
+            FetchOptions {
+                request_policy: Some(&policy),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![(url(p, "/r"), false), (url(p, "/dest"), true)]
+        );
     }
 
     #[tokio::test]

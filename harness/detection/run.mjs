@@ -1,21 +1,23 @@
 // Reusable Chrome/native differential. Live network is explicit; native never imports
 // the Chrome jar. All raw artifacts are local, mode 0600, and excluded from Git.
-import { spawn, execFileSync } from "node:child_process";
-import {
-  mkdirSync,
-  writeFileSync,
-  existsSync,
-  readFileSync,
-  openSync,
-  closeSync,
-  writeSync,
-  statSync,
-  copyFileSync,
-  chmodSync,
-} from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { resolve, join } from "node:path";
+import { createServer } from "node:http";
+import {
+  chmodSync,
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkoutProvenance } from "./checkout-provenance.mjs";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "../..");
 const argv = process.argv.slice(2);
@@ -35,16 +37,30 @@ if (!existsSync(binary))
   throw new Error(`Build current detection_trace with all features first: ${binary}`);
 const query = flag("--query", "rust lang");
 const selector = flag("--selector", "textarea[name=q],input[name=q]");
+const targetUrl = flag("--url", "https://www.google.com/");
 const config = {
-  url: flag("--url", "https://www.google.com/"),
+  url: targetUrl,
+  dismissSelector: flag(
+    "--dismiss-selector",
+    new URL(targetUrl).hostname === "www.google.com" ? "#W0wltc" : "",
+  ),
   locale: "en-US",
+  chromeBackend: flag("--chrome-backend", "cdp"),
+  chromePath: flag("--chrome-path", process.env.TURBO_SURF_CHROME_PATH),
+  languages: ["en-US", "en"],
+  viewport: { width: Number(flag("--width", "1280")), height: Number(flag("--height", "800")) },
+  screen: { width: 1920, height: 1080 },
+  deviceScaleFactor: 2,
   timezone: flag("--tz", "America/Los_Angeles"),
   waitMs: Number(flag("--wait", "2500")),
-  interfaceScript: join(here, "interface-trace.js"),
+  pageBudgetMs: Number(flag("--page-budget", "20000")),
+  interfaceScript: resolve(flag("--interface-script", join(here, "interface-trace.js"))),
   successSelector: flag("--success-selector", "#rso a h3, #search a h3"),
+  readySelector: flag("--ready-selector", ""),
   probes: argv.includes("--probes")
     ? [
         join(here, "capabilities.js"),
+        join(here, "api-shape.js"),
         join(root, "scripts/browser-sidecar/probes/botguard-probe.js"),
         join(root, "scripts/browser-sidecar/probes/webgl-fp.js"),
       ]
@@ -60,7 +76,31 @@ const config = {
         { press: "Enter" },
       ],
 };
+config.outerWindow = { width: config.viewport.width, height: config.viewport.height + 88 };
+for (const [index, argument] of argv.entries()) {
+  if (argument !== "--probe") continue;
+  const path = argv[index + 1];
+  if (!path || path.startsWith("--")) throw new Error("--probe requires a JavaScript file path");
+  config.probes.push(resolve(path));
+}
+for (const value of Object.values(config.viewport))
+  if (!Number.isInteger(value) || value < 1)
+    throw new Error("Viewport dimensions must be positive integers");
+if (
+  config.outerWindow.width > config.screen.width ||
+  config.outerWindow.height > config.screen.height
+)
+  throw new Error("Configured window must fit the shared screen");
 if (flag("--steps")) config.steps = JSON.parse(readFileSync(flag("--steps"), "utf8"));
+const captureTimeoutMs = Number(flag("--capture-timeout", "180000"));
+for (const [value, maximum] of [
+  [config.pageBudgetMs, 120000],
+  [captureTimeoutMs, 600000],
+])
+  if (!Number.isInteger(value) || value < 1 || value > maximum)
+    throw new Error(
+      `Page budget / capture timeout must be an integer in 1..${maximum} milliseconds`,
+    );
 if (
   !Array.isArray(config.steps) ||
   config.steps.some(
@@ -101,7 +141,7 @@ const run = (cmd, args, dest, env = {}) =>
       timedOut = true;
       kill("SIGTERM");
       forceTimer = setTimeout(() => kill("SIGKILL"), 5000);
-    }, 180_000);
+    }, captureTimeoutMs);
     child.on("error", (e) => {
       error = String(e);
     });
@@ -121,20 +161,26 @@ const manifest = {
   createdAt: new Date().toISOString(),
   commit: git("rev-parse", "HEAD"),
   branch: git("branch", "--show-current"),
-  dirtyDiffHash: sha(git("diff", "HEAD")),
+  ...(await checkoutProvenance(root)),
   binary,
+  captureTimeoutMs,
   binaryModifiedAt: statSync(binary).mtime.toISOString(),
   binaryHash: sha(readFileSync(binary)),
   harnessHashes: Object.fromEntries(
     [
       "run.mjs",
       "chrome-trace.mjs",
+      "chrome-cdp-trace.mjs",
+      "cdp-connection.mjs",
       "interface-trace.js",
       "capabilities.js",
+      "api-shape.js",
       "compare.mjs",
       "protocol-headers.mjs",
+      "checkout-provenance.mjs",
     ].map((f) => [f, sha(readFileSync(join(here, f)))]),
   ),
+  probeHashes: Object.fromEntries(config.probes.map((path) => [path, sha(readFileSync(path))])),
   note: "Binary hash/mtime records the executable; it does not prove that it matches checkout. Rebuild first.",
   runs: [],
 };
@@ -147,7 +193,18 @@ const frozenBinary = join(out, "native-executable");
 copyFileSync(binary, frozenBinary);
 chmodSync(frozenBinary, 0o700);
 manifest.frozenBinaryHash = sha(readFileSync(frozenBinary));
+// Check the frozen executable before either runtime reaches the target URL.
+manifest.nativeBuildInfo = JSON.parse(
+  execFileSync(frozenBinary, ["--build-info"], { encoding: "utf8" }),
+);
+const missingFeatures = ["impersonate", "trustAnchors", "gpuMetal", "coretext"].filter(
+  (feature) => !manifest.nativeBuildInfo.features?.[feature],
+);
 saveManifest();
+if (missingFeatures.length && !argv.includes("--allow-reduced"))
+  throw new Error(
+    `Native features missing: ${missingFeatures.join(", ")}; rebuild with all features`,
+  );
 const repeats = Number(flag("--repeat", "1"));
 if (!Number.isInteger(repeats) || repeats < 1 || repeats > 10)
   throw new Error("--repeat must be 1..10");
@@ -189,13 +246,28 @@ for (let repeat = 0; repeat < repeats; repeat++) {
     }
   }
   if (config.probes.length) {
+    // Fresh about:blank is insecure in Chrome. Use the same secure loopback
+    // origin for both collectors so secure-only API enumeration is comparable.
+    const fixtureHtml = "<!doctype html><html><head></head><body></body></html>";
+    const probeServer = createServer((_request, response) => {
+      response.setHeader("content-type", "text/html");
+      response.end(fixtureHtml);
+    });
+    await new Promise((done, fail) => {
+      probeServer.once("error", fail);
+      probeServer.listen(0, "127.0.0.1", done);
+    });
+    const probeUrl = `http://127.0.0.1:${probeServer.address().port}/`;
     const path = join(runOut, "probe-config.json");
     writeFileSync(
       path,
       JSON.stringify(
         {
           ...config,
-          url: "about:blank",
+          url: probeUrl,
+          fixtureHtml,
+          fixtureHash: sha(fixtureHtml),
+          dismissSelector: "",
           steps: [],
           interfaces: false,
           debugger: false,
@@ -206,15 +278,20 @@ for (let repeat = 0; repeat < repeats; repeat++) {
       ),
       { mode: 0o600 },
     );
-    for (const runtime of ["chrome", "native"]) {
-      const dest = join(runOut, `${runtime}-probes`);
-      mkdirSync(dest, { mode: 0o700 });
-      const status =
-        runtime === "chrome"
-          ? await run(process.execPath, [join(here, "chrome-trace.mjs"), path, dest], dest)
-          : await run(frozenBinary, [path, dest], dest, { TURBO_SURF_TZ: config.timezone });
-      manifest.runs.push({ repeat, runtime, pass: "probes", ...status });
-      saveManifest();
+    try {
+      for (const runtime of ["chrome", "native"]) {
+        const dest = join(runOut, `${runtime}-probes`);
+        mkdirSync(dest, { mode: 0o700 });
+        const status =
+          runtime === "chrome"
+            ? await run(process.execPath, [join(here, "chrome-trace.mjs"), path, dest], dest)
+            : await run(frozenBinary, [path, dest], dest, { TURBO_SURF_TZ: config.timezone });
+        manifest.runs.push({ repeat, runtime, pass: "probes", ...status });
+        saveManifest();
+      }
+    } finally {
+      probeServer.closeAllConnections();
+      await new Promise((done) => probeServer.close(done));
     }
   }
   const comparisonStatus = await run(process.execPath, [join(here, "compare.mjs"), runOut], runOut);

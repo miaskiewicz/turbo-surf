@@ -1,15 +1,19 @@
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 // Fresh Chrome oracle; no cookies leave this process or feed the native attempt.
 import { enrichProtocolHeaders } from "./protocol-headers.mjs";
-import { createRequire } from "node:module";
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
-import { resolve, join } from "node:path";
+const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
+if (config.chromeBackend !== "patchright") {
+  await import("./chrome-cdp-trace.mjs");
+  process.exit(process.exitCode || 0);
+}
 const require = createRequire(
   new URL("../../scripts/browser-sidecar/package.json", import.meta.url),
 );
 const { chromium } = require("patchright");
-const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const out = resolve(process.argv[3]);
 const instrumented = config.interfaces;
 mkdirSync(out, { recursive: true });
@@ -33,12 +37,27 @@ try {
   context = await chromium.launchPersistentContext(profile, {
     channel: "chrome",
     headless: false,
-    viewport: null,
-    locale: config.locale,
+    viewport: config.viewport || { width: 1280, height: 800 },
+    screen: config.screen || { width: 1920, height: 1080 },
+    deviceScaleFactor: config.deviceScaleFactor ?? 2,
+    // Playwright's locale override narrows navigator.languages to a single entry.
+    // Browser preferences retain the same ordered language list as the native profile.
+    args: [
+      `--lang=${config.locale || "en-US"}`,
+      `--accept-lang=${(config.languages || ["en-US", "en"]).join(",")}`,
+    ],
     timezoneId: config.timezone,
   });
   if (instrumented) await context.addInitScript({ path: config.interfaceScript });
   const page = context.pages()[0] || (await context.newPage());
+  const windowSession = await context.newCDPSession(page);
+  const { windowId } = await windowSession.send("Browser.getWindowForTarget");
+  const viewport = config.viewport || { width: 1280, height: 800 };
+  await windowSession.send("Browser.setWindowBounds", {
+    windowId,
+    bounds: config.outerWindow || { width: viewport.width, height: viewport.height + 88 },
+  });
+  await windowSession.detach();
   // Optional intrusive source inventory includes inline/eval/dynamic scripts. Keep the
   // debugger off in baseline runs; it can alter the detector's verdict on its own.
   if (instrumented || config.debugger) {
@@ -178,6 +197,33 @@ try {
     pages.push({
       phase,
       childFrames,
+      browserFixture: await page
+        .evaluate(
+          () => JSON.parse(JSON.stringify(globalThis.__browserFixture || null)),
+          undefined,
+          false,
+        )
+        .catch(() => null),
+      environment: await page
+        .evaluate(
+          () => ({
+            languages: navigator.languages,
+            language: navigator.language,
+            locale: Intl.DateTimeFormat().resolvedOptions().locale,
+            viewport: { width: innerWidth, height: innerHeight },
+            outerWindow: { width: outerWidth, height: outerHeight },
+            deviceScaleFactor: devicePixelRatio,
+            screen: {
+              width: screen.width,
+              height: screen.height,
+              availWidth: screen.availWidth,
+              availHeight: screen.availHeight,
+            },
+          }),
+          undefined,
+          false,
+        )
+        .catch((e) => ({ error: String(e) })),
       url: page.url(),
       bytes: Buffer.byteLength(html),
       results: await page
@@ -196,9 +242,19 @@ try {
         : null,
     });
   };
-  await page.goto(config.url, { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.goto(config.url, {
+    waitUntil: config.waitUntil || "domcontentloaded",
+    timeout: 30000,
+  });
+  if (config.readySelector)
+    await page.locator(config.readySelector).waitFor({ state: "attached", timeout: 5000 });
   await page.waitForTimeout(config.waitMs);
   await snapshot("home");
+  if (config.dismissSelector && (await page.locator(config.dismissSelector).count())) {
+    await page.locator(config.dismissSelector).first().click();
+    await page.waitForTimeout(config.waitMs);
+    await snapshot("dismiss");
+  }
   for (const [i, step] of config.steps.entries()) {
     if (step.move) await page.locator(step.move.selector).first().hover();
     if (step.click) await page.locator(step.click).first().click();

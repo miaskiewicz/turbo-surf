@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.5.3 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.5.4 — development** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -204,7 +204,7 @@ platform there's no prebuilt binary (build from a checkout as above).
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
-The default profile reports **Chrome 154** through its UA and client hints
+The default profile reports **Chrome 155** through its UA and client hints
 (`sec-ch-ua`, `sec-fetch-*`, …), with a configured per-version header order
 and a corresponding `navigator` (`platform`, `vendor`,
 `webdriver: false`, plugins, `window.chrome`, native-`toString`, coherent
@@ -215,9 +215,10 @@ Chrome parity or acceptance by a site's anti-bot system.
 Version-specific fingerprint data (reported major, full build for high-entropy
 UA-CH, and the navigation **header order** — which Chrome reorders across releases)
 lives in a declarative per-version registry (`turbo-surf-core`'s `browser` module):
-one coherent config per supported Chrome version, defaulting to the pinned Chrome 154 profile. Both the
-wire headers and the render-tier navigator read from it, so the two layers stay in
-lockstep, and supporting a new Chrome (e.g. 155) is a one-line config drop-in.
+one coherent config per supported Chrome version, defaulting to Chrome
+155.0.8059.40. Wire headers and the render-tier navigator read from it. Each new
+profile needs a measured header/client-hint configuration and separate engine
+and transport validation; a reported version change does not upgrade V8.
 
 ### Quick start (anti-bot)
 
@@ -263,10 +264,11 @@ and route straight to the sidecar.
 
 Build feature (not env): **`impersonate`** is enabled by default for the MCP binary and swaps rustls → BoringSSL
 (`wreq`) for a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint. Needs `cmake`+`nasm`.
-Add **`--features trust-anchors`** (implies `impersonate`) to also emit Chrome 152+'s
-`trust_anchors` TLS extension (JA4 `t13d1516h2` → `t13d1517h2`); it's built on a
-vendored `wreq` fork (`rust/vendor/wreq`), so it works in this binary but not for
-crates.io library consumers — see [`PUBLISHING.md`](./PUBLISHING.md).
+The Chrome 154 transport sends real `trust_anchors` IDs by default, backed by the
+same Chromium root store used for certificate verification. `trust-anchors` is a
+compatibility feature alias. This development build requires pinned upstream Git
+sources and Rust 1.98; crates.io library publishing remains blocked until those
+APIs ship — see [`PUBLISHING.md`](./PUBLISHING.md).
 
 Build feature (not env): **`--features gpu-metal`** (macOS/Metal, off by default) runs the
 render tier's **WebGL on the real Apple GPU** — a live WebGL→wgpu→Metal bridge records the
@@ -292,22 +294,19 @@ MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
 what a page's anti-bot JS reads), **`probe_mint`** (browserless recon: run a page's
 integrity JS in-isolate → the env surface it demands + any cookies earned),
-**`human_interact`** (play realistic **trusted** input — curved browser-sampled mouse
+**`human_interact`** (play scripted input — curved mouse
 motion, real mousedown→dwell→mouseup→click, human typing, hover + focus/blur — as a
 generic `move`/`click`/`focus`/`type` step sequence or a saved `routine`), and
 **`analyze_akamai`** (experimental: rebuild + test Akamai sensors). Detailed below.
 
-**Human interaction (`human_interact`).** Some walls (e.g. google's BotGuard) are
-*interaction-gated* — their integrity VM only runs, and only scores you, once a real
-person engages the page. `human_interact` strings together trusted input gestures on
-the current page so the page's own listeners (and the collector) see genuine,
-entropy-bearing mouse/keyboard activity: `goto` a page, then drive a `steps` array or a
-named `routine`. The bundled **`google-serp`** routine composes the real-user search
-flow (move → click the box → focus → type `{query}` → press Enter). Input is generated
-by the native event shim; server acceptance must be measured separately. Current
-Google diagnostics execute the search challenge and follow its retry without importing
-Chrome cookies, but that native retry still fails. ENID is not a universal requirement:
-a fresh Chrome control reached results without it. See the
+**Human interaction (`human_interact`).** This MCP tool plays a `steps` array or
+saved `routine` through page JavaScript. The `google-serp` routine moves to the
+search box, clicks, focuses, types `{query}` and presses Enter. Those script-dispatched
+events are untrusted. The differential harness uses a separate private native
+host-input capability to create trusted events, bound by a cancellable execution
+budget; guest scripts cannot access that capability. Neither path establishes
+server acceptance. The latest dated native Google control still failed its retry,
+while a fresh Chrome control reached results without ENID. See the
 [reusable differential harness](./harness/detection/README.md) and its
 [dated observations](./harness/detection/FINDINGS.md).
 
@@ -365,18 +364,41 @@ prove IP reputation is the cause.
 
 **TLS/HTTP-2 fingerprint (`impersonate`).** rustls can't forge Chrome's
 JA3/JA4 + Akamai HTTP-2 fingerprint. The default MCP build uses BoringSSL
-(`wreq`) with wreq-util's Chrome 149 TLS/HTTP-2 template, plus the current pinned
-Chrome 154 navigation header identity. This configuration is an emulation; use the
-TLS echo tests to validate the deployed build rather than assuming complete wire parity:
+(`wreq`) with the [upstream Chrome 154 profile](https://github.com/0x676e67/wreq-util/blob/5715529002738f46eea86a7271f918f9374d3582/src/emulate/profile/chrome/tls.rs)
+and the measured Chrome 155 navigation identity. The workspace pins wreq
+`c6fd8b1`, wreq-util `5715529`, and btls `f5a8a48`; btls-sys pins BoringSSL
+`f1f2556`. These APIs require Rust 1.98.0, pinned in `rust/rust-toolchain.toml`.
 
 ```bash
-# needs a C toolchain (cmake + nasm) for BoringSSL
+cd rust
 cargo build --release -p turbo-surf-mcp --features impersonate
+cargo test -p turbo-surf-core --test client_hello
 ```
 
+The offline ClientHello regression checks the cipher sequence, signature-algorithm
+GREASE, ML-DSA44/65/87, and exact public trust-anchor IDs against a local Chrome
+154.0.8037.98 capture. The former empty trust-anchor patch is superseded by upstream
+support. Workspace patches do not propagate to library consumers, so publishing
+remains blocked until these APIs are published or a distributable fork is reviewed.
+
+The default render tier uses `deno_core` 0.412.0 and `deno_v8` 0.4.0 with
+[the `v8` 150.4.0 binding](https://docs.rs/crate/deno_v8/0.4.0/source/Cargo.toml)
+(native engine 15.0.245.2, corresponding to Chrome 150). The harness records the
+actual engine/template versions separately from the Chrome 155 identity. The TLS
+upgrade does not upgrade the JavaScript engine. The reproducible
+[Chrome 155 source profile](harness/detection/engine-155/README.md) builds and
+validates actual V8 **15.5.35.20-rusty** and the corresponding SDK/context seams.
+The historical [Chrome 154 profile](harness/detection/engine-154/README.md) remains
+reproducible. [TRANSPORT-155.json](harness/detection/TRANSPORT-155.json) records zero
+normalized differences for the measured local ClientHello, HTTP/2 settings/window
+and navigation header-order controls against Chrome 155. The upstream transport
+recipe is still 154; these controls do not cover all HTTP/2 frames or HTTP/3.
+The differential harness records which engine was built; this experimental profile
+does not change the published default or establish complete browser parity.
+
 Enabled by default in `turbo-surf-core` and the MCP binary. Use
-`--no-default-features` for the rustls backend. `trust-anchors`, `gpu-metal` and
-`coretext` remain optional; the differential harness documents a build with all three.
+`--no-default-features` for the rustls backend. The differential harness enables the
+`trust-anchors` compatibility alias, `gpu-metal` and `coretext`.
 
 **Fingerprint seed pool.** `turbo-surf-core::fingerprint` holds ~4000 internally
 coherent real-Chrome identities (UA ↔ client hints ↔ `navigator` all agree),
@@ -443,7 +465,7 @@ Set `TURBO_SURF_PROXY` so the token's IP/JA3 matches your egress (and build with
 `--features impersonate` so the replay JA3 matches the Chrome that minted it).
 
 **Controllable render fingerprint.** Every render-tier `navigator` field has a
-Chrome 154 default and is overridable at runtime via the MCP `set_fingerprint`
+Chrome 155 default and is overridable at runtime via the MCP `set_fingerprint`
 tool (or `turbo_surf_render::set_fingerprint(json)`):
 
 ```jsonc
@@ -455,7 +477,7 @@ tool (or `turbo_surf_render::set_fingerprint(json)`):
     "devicePixelRatio": 2,
     "connection": { "effectiveType": "4g", "rtt": 50, "downlink": 10 },
     "userAgentData": { "platform": "Windows", "brands": [ /* … */ ] }
-} }   // {} resets to Chrome 154 macOS defaults
+} }   // {} resets to Chrome 155 macOS defaults
 ```
 
 `stealth_status` reports the active profile, the wired solver, the pool size, and
@@ -572,7 +594,7 @@ extracts — in **132 ms** (**~7× faster than Chromium**, 933), inside a true V
 isolate over a native rtdom DOM, **no Chromium process**. It stays network-bound
 via a **pooled HTTP client** (connection/TLS reuse across pages), a **persistent V8
 isolate** whose **DOM install is reused across same-page `page.evaluate`s** (parse
-once per page, ~0.5 ms/call after), an **external-script cache** (jQuery fetched
+once per page, ~0.5 ms/call after; a different page gets a fresh realm), an **external-script cache** (jQuery fetched
 once, not per page), a **per-page parse cache**, and a back-forward snapshot cache
 so `goBack` restores instead of re-fetching. Profilers: `cargo bench -p
 turbo-surf-view` (Rust microbench) + `harness/hotpath/rust-hotpath.mjs`.

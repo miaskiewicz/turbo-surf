@@ -27,9 +27,16 @@
       "**/storage/**",
       "**/package-lock.json",
       "**/browser_env.js",
+      "rust/crates/turbo-surf-render/src/document_basics.js",
+      "rust/crates/turbo-surf-render/src/element_tokens.js",
+      "rust/crates/turbo-surf-render/src/element_relations.js",
+      "rust/crates/turbo-surf-render/src/html_text.js",
+      "rust/crates/turbo-surf-render/src/html_popover.js",
+      "rust/crates/turbo-surf-render/src/browser_sanitizer_default.json",
       ".sidecar/**",
       "**/.chrome-profile/**",
-      "harness/detection/artifacts/**"
+      "harness/detection/artifacts/**",
+      ".native-builds/**"
     ]
   }
 }

@@ -14,7 +14,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.5.3"
+version = "0.5.4"
 license = "MIT"
 repository = "https://github.com/miaskiewicz/turbo-surf"
 
@@ -26,21 +26,13 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 opt-level = 3
 lto = "thin"
 
-# Vendored fork of wreq (6.0.0-rc.29): adds a `trust_anchors` field to `TlsOptions`
-# + a builder method, and applies it via BoringSSL's
-# `SSL_CTX_set1_requested_trust_anchors` in `tls/conn.rs`, so we can emit Chrome
-# 152+'s `trust_anchors` ClientHello extension (codepoint 0xCA34). Gated in
-# turbo-surf-core behind the (off-by-default) `trust-anchors` feature; the field is
-# inert (`None`) otherwise, so the default build behaves exactly as stock wreq. The
-# diff lives under vendor/wreq — see the "turbo-surf patch" comments in tls.rs and
-# tls/conn.rs.
-#
-# NOTE: the Chrome request-#1 network-fingerprint fixes (HEADERS priority weight
-# 220 -> 256, `upgrade-insecure-requests`, the Chrome header ORDER, and dropping
-# high-entropy client hints from a cold request) are NOT patched into wreq-util —
-# they all live in turbo-surf-core's net.rs `emulate()`, which tunes the resolved
-# `Emulation` (its public `headers`/`orig_headers`/`http2_options` fields). Keeping
-# them there (rather than a vendored wreq-util) means they survive a stock wreq-util
-# and reach crates.io consumers of turbo-surf-core.
+# Chrome 154 requires APIs newer than the published 0.16.1/0.2.0 crates.
+# Pin the coherent upstream stack, including BoringSSL via btls-sys's submodule.
+# Workspace patches do not propagate to crates.io consumers: library publishing
+# remains blocked until these APIs are published or a distributable fork is reviewed.
 [patch.crates-io]
-wreq = { path = "vendor/wreq" }
+wreq = { git = "https://github.com/0x676e67/wreq", rev = "c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5" }
+wreq-util = { git = "https://github.com/0x676e67/wreq-util", rev = "5715529002738f46eea86a7271f918f9374d3582" }
+btls = { git = "https://github.com/0x676e67/btls", rev = "f5a8a483eca2e0b3f539f944604da3f8e14a910e" }
+btls-sys = { git = "https://github.com/0x676e67/btls", rev = "f5a8a483eca2e0b3f539f944604da3f8e14a910e" }
+tokio-btls = { git = "https://github.com/0x676e67/btls", rev = "f5a8a483eca2e0b3f539f944604da3f8e14a910e" }

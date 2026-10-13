@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -19,10 +19,11 @@ const canonical = (name) =>
     .replace(/^Navigator\./, "navigator.")
     .replace(/^Screen\./, "screen.")
     .replace(/^Performance\./, "performance.");
-const observations = (pages) => {
+const observations = (pages, origin) => {
   const result = new Map();
   for (const page of pages || [])
     for (const row of page.interfaces?.accesses || []) {
+      if ((row.origin || "page") !== origin) continue;
       const key = `${canonical(row.name)}:${row.kind}`;
       const old = result.get(key) || { count: 0, values: new Map(), stacks: new Set() };
       // Chrome snapshots are cumulative within a document; maxima avoid counting
@@ -38,9 +39,9 @@ const observations = (pages) => {
     }
   return result;
 };
-export const interfaceDiff = (chromePages, nativePages) => {
-  const c = observations(chromePages),
-    n = observations(nativePages);
+export const interfaceDiff = (chromePages, nativePages, origin = "page") => {
+  const c = observations(chromePages, origin),
+    n = observations(nativePages, origin);
   return [...new Set([...c.keys(), ...n.keys()])].sort().map((name) => {
     const chrome = c.get(name),
       native = n.get(name);
@@ -88,6 +89,14 @@ export const requestSummary = (row) => {
         : "browser-reported headers"),
   };
 };
+export const captureSummary = (trace) => ({
+  complete: trace.captureComplete ?? (Array.isArray(trace.pages) && !(trace.errors || []).length),
+  hydrationBudgetExceeded: (trace.pages || []).some((page) => page.hydration?.budget_exceeded),
+  inputError: (trace.pages || []).find((page) => page.phase === "interaction-error")?.error || null,
+  inputState:
+    [...(trace.pages || [])].reverse().find((page) => page.inputState)?.inputState || null,
+  dismissal: trace.dismissal || null,
+});
 export const compare = (chrome, native, cRequests = [], nRequests = []) => {
   const counts = (rows) => {
     const result = new Map();
@@ -110,7 +119,17 @@ export const compare = (chrome, native, cRequests = [], nRequests = []) => {
       nativeRequests: n.get(key) || [],
     })),
     interfaces: interfaceDiff(chrome.pages, native.pages),
+    childInterfaces: interfaceDiff(
+      (chrome.pages || []).flatMap((page) => page.childFrames || []),
+      (native.pages || []).flatMap((page) => page.childFrames || []),
+    ),
+    workerInterfaces: interfaceDiff(
+      (chrome.pages || []).flatMap((page) => page.workers || []),
+      (native.pages || []).flatMap((page) => page.workers || []),
+    ),
+    runtimeInterfaces: interfaceDiff(chrome.pages, native.pages, "runtime"),
     features: native.features,
+    capture: { chrome: captureSummary(chrome), native: captureSummary(native) },
     probes: { chrome: chrome.probes, native: native.probes },
     errors: { chrome: chrome.errors || [], native: native.errors || [] },
     pages: Object.fromEntries(
@@ -121,10 +140,13 @@ export const compare = (chrome, native, cRequests = [], nRequests = []) => {
         runtime,
         (trace.pages || []).map((p) => ({
           phase: p.phase,
+          environment: p.environment,
           url: p.url,
           bytes: p.bytes,
           results: p.results,
           status: p.status,
+          hydration: p.hydration,
+          inputState: p.inputState,
           error: p.error,
           cookies: (p.cookies || []).map((c) => c.name),
         })),
@@ -132,9 +154,39 @@ export const compare = (chrome, native, cRequests = [], nRequests = []) => {
     ),
   };
 };
+export const nativeScriptInventory = (directory) => {
+  const root = join(directory, "native-js");
+  if (!existsSync(root))
+    return { enabled: false, isolates: [], scripts: 0, dropped: 0, pendingSources: 0, errors: [] };
+  const isolates = [],
+    errors = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^isolate-\d+$/.test(entry.name)) continue;
+    try {
+      const inventory = JSON.parse(readFileSync(join(root, entry.name, "inventory.json"), "utf8"));
+      isolates.push({ isolate: entry.name, ...inventory });
+    } catch (error) {
+      errors.push(`${entry.name}: ${error.message}`);
+    }
+  }
+  return {
+    enabled: true,
+    isolates,
+    scripts: isolates.reduce((sum, row) => sum + (row.scripts?.length || 0), 0),
+    dropped: isolates.reduce((sum, row) => sum + (row.dropped || 0), 0),
+    pendingSources: isolates.reduce((sum, row) => sum + (row.pendingSources || 0), 0),
+    errors: [...errors, ...isolates.flatMap((row) => row.errors || [])],
+  };
+};
 export const compareDirectory = (out) => {
-  const read = (path, fallback) =>
-    existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback;
+  const read = (path, fallback) => {
+    if (!existsSync(path)) return fallback;
+    try {
+      return JSON.parse(readFileSync(path, "utf8"));
+    } catch (error) {
+      return { ...fallback, errors: [`Incomplete trace.json: ${error.message}`] };
+    }
+  };
   const result = {};
   for (const pass of ["baseline", "interfaces"]) {
     const cdir = join(out, `chrome-${pass}`),
@@ -167,6 +219,8 @@ export const compareDirectory = (out) => {
     );
     result[pass].traceCoverage = {
       nativeNetworkRecords: rows.length,
+      nativeScriptInventory: nativeScriptInventory(ndir),
+      chromeCompiledScripts: chrome.scripts?.length || 0,
       incompleteNativeNetworkRecords: rows.filter((r) => r.event === "incomplete-record").length,
     };
   }
@@ -188,7 +242,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     for (const runtime of ["chrome", "native"]) {
       const final = diff.pages[runtime].at(-1);
       console.log(
-        `  ${runtime}: ${final?.results || 0} result markers; ${final?.error ? "runtime error" : new URL(final?.url || "about:blank").pathname}`,
+        `  ${runtime}: ${final?.results || 0} result markers; ${final?.error ? "runtime error" : new URL(final?.url || "about:blank").pathname}; capture ${diff.capture[runtime].complete ? "complete" : "incomplete"}${diff.capture[runtime].hydrationBudgetExceeded ? "; hydration budget exhausted" : ""}`,
       );
     }
   }

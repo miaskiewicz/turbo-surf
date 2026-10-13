@@ -11,7 +11,7 @@ async fn page_fetch_uses_negotiated_hints_and_browser_owned_headers() {
     let base = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
         let mut requests = Vec::new();
-        for _ in 0..3 {
+        for _ in 0..4 {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut bytes = Vec::new();
             loop {
@@ -35,7 +35,7 @@ async fn page_fetch_uses_negotiated_hints_and_browser_owned_headers() {
                 })
                 .collect();
             requests.push(headers);
-            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
         }
         requests
     });
@@ -59,6 +59,10 @@ async fn page_fetch_uses_negotiated_hints_and_browser_owned_headers() {
         .then(() => fetch('/post', { method:'POST', credentials:'omit',
             headers:{Origin:'https://spoof.test',Cookie:'secret=guest','Sec-Fetch-Mode':'navigate'} }))
         .then(() => fetch('/api'))
+        .then(() => new Promise((resolve,reject) => {
+            const script=document.createElement('script');script.src='/chunk.js';
+            script.onload=resolve;script.onerror=reject;document.head.appendChild(script);
+        }))
         .then(() => {globalThis.__RESULT='done'});
     "#).await.unwrap();
     page.close();
@@ -66,7 +70,10 @@ async fn page_fetch_uses_negotiated_hints_and_browser_owned_headers() {
         .await
         .unwrap()
         .unwrap();
-    let script = &requests[0];
+    let fetch = &requests[0];
+    assert_eq!(fetch["sec-fetch-dest"], "empty");
+    assert_eq!(fetch["sec-fetch-mode"], "cors");
+    let script = &requests[3];
     assert_eq!(script["sec-fetch-dest"], "script");
     assert_eq!(script["sec-fetch-mode"], "no-cors");
     assert_eq!(script["sec-ch-ua-arch"], "\"arm\"");
@@ -78,6 +85,9 @@ async fn page_fetch_uses_negotiated_hints_and_browser_owned_headers() {
             "unexpected {omitted}: {script:?}"
         );
     }
+    assert_eq!(fetch["cookie"], "secret=server");
+    assert_eq!(fetch["referer"], format!("{base}/page?q=1"));
+    assert!(!fetch.contains_key("origin"));
     let post = &requests[1];
     assert_eq!(post["origin"], base);
     assert_eq!(post["sec-fetch-mode"], "cors");

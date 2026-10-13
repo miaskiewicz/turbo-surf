@@ -78,6 +78,44 @@ async function fresh() {
   return page;
 }
 
+test("response events drain host records while opaque bodies stay hidden in page JS", async () => {
+  const target = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("host-only-response");
+  });
+  await new Promise((done) => target.listen(0, "127.0.0.1", done));
+  const endpoint = `http://127.0.0.1:${target.address().port}/private`;
+  const source = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(
+      `<body><script>fetch(${JSON.stringify(endpoint)},{mode:'no-cors'}).then(r=>r.text()).then(text=>document.body.setAttribute('data-body',text));</script></body>`,
+    );
+  });
+  await new Promise((done) => source.listen(0, "127.0.0.1", done));
+  const page = newPage();
+  const observed = [];
+  page.on("response", (response) => {
+    if (response.url() === endpoint) observed.push(response);
+  });
+  try {
+    await page.goto(`http://127.0.0.1:${source.address().port}/`, { waitUntil: "networkidle" });
+    assert.equal(await page.locator("body").getAttribute("data-body"), "");
+    assert.equal(
+      await page.evaluate(() => String(globalThis[Symbol.for("ts")].netLog !== undefined)),
+      "false",
+    );
+    assert.equal(observed.length, 1);
+    assert.equal(await observed[0].text(), "host-only-response");
+    await page._drainNetworkEvents();
+    assert.equal(observed.length, 1, "host records drain once");
+  } finally {
+    await page.close();
+    source.closeAllConnections();
+    target.closeAllConnections();
+    await Promise.all([source, target].map((server) => new Promise((done) => server.close(done))));
+  }
+});
+
 // --- Locator: composition (pure JS) ---------------------------------------
 test("Locator composition: count/first/last/nth/all", async () => {
   const p = await fresh();

@@ -6,17 +6,33 @@
 //! loop + hydration pump + execution budget.
 
 mod browser_env;
+mod crypto_backend;
+mod csp;
+mod fetch_cors;
 mod probe;
 mod runtime;
+mod script_fetch;
+mod script_inventory;
 
 pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};
 pub use runtime::{
-    ensure_platform, eval_async, render_capture_cookies_with_request_state, render_html,
-    render_html_async, render_hydrate, render_hydrate_with_budget, render_page, render_page_pooled,
-    render_page_with_budget, run_with_dom, set_fingerprint, set_measure_fn, set_raster_fn,
-    set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, PageSession, DEFAULT_RENDER_BUDGET_MS,
-    HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
+    ensure_platform, eval_async, render_capture_cookies_with_browsing_state,
+    render_capture_cookies_with_request_state, render_capture_cookies_with_response_headers,
+    render_html, render_html_async, render_hydrate, render_hydrate_with_budget, render_page,
+    render_page_pooled, render_page_with_budget, run_with_dom, set_fingerprint, set_measure_fn,
+    set_raster_fn, set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, BrowserStorage,
+    HydrationDiagnostics, PageSession, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
+
+/// Actual native engine version, independently of navigator's browser identity.
+pub fn v8_version() -> &'static str {
+    v8::V8::get_version()
+}
+
+/// Whether genuine native access checks and stable navigation proxies are compiled.
+pub const fn stable_window_proxy() -> bool {
+    cfg!(turbo_surf_native_proxy)
+}
 
 /// A [`turbo_surf_core::challenge::PowEngine`] backed by the V8 render tier — runs a
 /// challenge's own JS (against a real `document` + the controllable Chrome

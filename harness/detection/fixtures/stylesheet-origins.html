@@ -1,0 +1,18 @@
+<!doctype html><html><head><script>
+globalThis.styleEvents=[];for(const type of ['load','error'])document.addEventListener(type,event=>{if(event.target.tagName==='LINK')styleEvents.push([event.target.id,event.type,event.isTrusted]);},true);
+window.addEventListener('load',()=>{
+ const out={};for(const id of ['same','same-mime','opaque','cors','include','denied','mime','redirect']){const element=document.getElementById(id),sheet=element.sheet;let rules=null,insert=null;try{rules=sheet?sheet.cssRules.length:null;}catch(error){rules=error.name;}if(sheet)try{sheet.insertRule('sentinel {}');insert='allowed';}catch(error){insert=error.name;}out[id]={sheet:!!sheet,rules,insert};}
+ const imported=document.getElementById('import').sheet.cssRules[0];let importedRules;try{importedRules=imported.styleSheet.cssRules.length;}catch(error){importedRules=error.name;}out.imported={sheet:!!imported.styleSheet,rules:importedRules};
+ out.opaqueApplies=getComputedStyle(document.getElementById('opaque-target')).opacity==='0.25';out.corsApplies=getComputedStyle(document.getElementById('cors-target')).opacity==='0.5';out.importApplies=getComputedStyle(document.getElementById('import-target')).opacity==='0.75';out.events=styleEvents.sort((a,b)=>a[0].localeCompare(b[0]));globalThis.__browserFixture=out;document.body.setAttribute('data-browser-fixture','complete');
+});
+</script>
+<link id="same" rel="stylesheet" href="/same.css">
+<link id="same-mime" rel="stylesheet" href="/same-mime.css">
+<link id="opaque" rel="stylesheet" href="TARGET/opaque.css">
+<link id="cors" rel="stylesheet" crossorigin="anonymous" href="TARGET/cors.css">
+<link id="include" rel="stylesheet" crossorigin="use-credentials" href="TARGET/include.css">
+<link id="denied" rel="stylesheet" crossorigin="anonymous" href="TARGET/denied.css">
+<link id="mime" rel="stylesheet" href="TARGET/mime.css">
+<link id="redirect" rel="stylesheet" href="/redirect.css">
+<style id="import">@import 'TARGET/import.css';</style>
+</head><body><div id="opaque-target"></div><div id="cors-target"></div><div id="import-target"></div></body></html>

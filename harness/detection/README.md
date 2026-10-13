@@ -4,7 +4,8 @@ This diagnostic compares real Chrome with the native V8/rtdom engine using fresh
 independent cookies. Chrome is an oracle; its cookie values are never imported by
 the native run. The native example does not invoke a solver or sidecar, or read an
 ENID cache. The default flow visits the homepage, moves/clicks/focuses the search
-box, types a query and presses Enter. Both initial scripts and subsequent native
+box, types a query and presses Enter. For Google it first clicks the visible
+"Reject all" consent button when present. Both initial scripts and subsequent native
 JS navigation retries execute in persistent `PageSession`s.
 
 ## Build and run
@@ -20,7 +21,7 @@ cd ..
 npm run harness:detection -- --live --probes --debugger
 ```
 
-Chrome must be installed. Missing binaries/dependencies and launch failures are
+Chrome must be installed. The default oracle uses raw CDP and Node 22 or newer (its native WebSocket API); Playwright/Patchright are optional legacy collectors. Missing binaries/dependencies and launch failures are
 reported; live work is skipped unless `--live` is explicit. A sandbox that blocks
 Chrome launch, DNS, localhost binding or Metal access must allow those operations
 for the corresponding run. Compiled GPU support alone does not prove real GPU
@@ -34,7 +35,7 @@ Accept-CH negotiation is shared across each native session's navigations and pag
 fetches. Script, iframe, beacon and fetch requests use their own metadata instead
 of top-level navigation defaults. GPU renderer identity comes from the actual
 Metal adapter used for pixel execution.
-`trust-anchors` requires the workspace's vendored wreq. For intentionally reduced
+The Chrome 155 target profile reuses the pinned upstream154 TLS/H2 recipe and Chromium root store, with separately measured155 headers and seeded client hints. Both target and base recipe versions are recorded. For intentionally reduced
 builds/platforms use `--allow-reduced`, and retain that fact in comparisons.
 
 The default four passes are Chrome/native baseline, then Chrome/native interface
@@ -50,13 +51,149 @@ node harness/detection/run.mjs --live --steps /tmp/my-steps.json --tz America/Lo
 node harness/detection/compare.mjs /tmp/search-trace
 ```
 
-Other options: `--binary PATH`, `--query TEXT`, `--selector CSS`, `--wait MS`
+Two independent localhost Chrome oracles capture frame behavior without a Google
+request or cookie transfer:
+
+```bash
+node harness/detection/frame-location.mjs /tmp/frame-location-oracle
+node harness/detection/frame-policy.mjs /tmp/frame-policy-oracle
+```
+
+They record cross-origin Window/Location descriptors and navigation, iframe moves,
+retained documents/callbacks, sandbox script permissions, and opaque data frames.
+Each writes the actual Chrome version and structured results. Matching native
+regressions live in `turbo-surf-render/tests/render.rs`; they use native contexts
+and localhost fixtures rather than the Chrome process.
+
+Other options: `--binary PATH`, `--query TEXT`, `--selector CSS`, `--wait MS`,
+`--width PX`, `--height PX`, `--dismiss-selector CSS`, `--page-budget MS`,
+`--capture-timeout MS`
 (Chrome wall-time dwell; native drains its existing lifecycle/virtual-timer pump).
 `--steps` is a JSON array replacing default interactions. Supported steps are
 `{move:{selector}}`, `{click:selector}`, `{focus:selector}`, `{type:text}`,
 `{press:key}`, `{wait:ms}`. The Chrome input delay is 110ms; native uses its
-existing human-input driver. These gestures are comparable intent, not identical
-motion/clock samples. Consent actions can be supplied as explicit steps.
+private native host-input driver, captured in a context slot before page scripts.
+Input respects cancellation and its execution budget; timed-out queued edits are
+canceled, and the session remains usable. These gestures are comparable intent, not identical
+motion/clock samples. The default Google dismissal selector is `#W0wltc`;
+an empty `--dismiss-selector ''` disables it. Other sites default to no dismissal.
+The conditional click is recorded before typing; its presence alone does not
+prove that the consent dialog closed. Snapshots retain the query value, focus and
+consent state so an unsuccessful input flow is distinguishable from a rejected
+search. Native captures checkpoint partial `trace.json` after each phase and
+record `captureComplete=false` until successful completion. Comparison output
+retains hydration budget exhaustion and input errors. The page budget defaults
+to 20000 ms (maximum 120000); each subprocess timeout defaults to 180000 ms
+(maximum 600000). Increasing these limits is diagnostic, not proof of parity.
+`--probe PATH` appends a shared JavaScript collector (repeatable); its source hash
+is retained in the manifest. Collectors run after the verdict snapshot and also
+on a separate shared localhost document pair, so probe mutations cannot establish clearance.
+
+Both runtimes use the same configuration for the real inner viewport, browser outer
+window, screen and device scale. Chrome's window bounds are set through its browser
+API; the native runtime receives the corresponding fingerprint configuration. The
+default is 1280×800 inside a 1280×888 window, a 1920×1080 screen and scale 2. Browser
+preferences preserve `navigator.languages` as `['en-US','en']`; the native HTTP profile
+uses the same ordered list. Each snapshot records the resulting runtime values, so
+configuration mismatches remain visible. The frozen binary's `--build-info` preflight
+checks compiled features before any target requests and records the actual V8 version
+and transport Chrome template separately from the reported navigator identity.
+
+The reusable localhost lifecycle/resource control uses the same HTML and PNG fixture
+as `tests/lifecycle_resources.rs`:
+
+```bash
+node harness/detection/lifecycle.mjs --run --out /tmp/turbo-lifecycle
+```
+
+It compares ready-state events, deferred scripts, stylesheet imports, parsed controls,
+valid/invalid image decoding, dynamic image/link loads and the runtime environment.
+Host events record trust, targets, dispatch phase and state after dispatch.
+The interface tracer preserves native host-pump observations separately as
+`runtimeInterfaces`; `interfaces` compares page call sites. This attribution uses
+the immediate source location in the captured stack, and is a diagnostic hint rather
+than a security boundary. Older traces without attribution retain their original totals.
+It preserves both raw traces and exact difference paths in `comparison.json`. The
+control covers those contracts; it does not simulate incremental HTML parsing,
+every resource type or a complete browser loader.
+
+A separate server-gated async/defer fixture proves that a pending classic async
+script permits DOMContentLoaded and delays load. It records native script load
+events and catches duplicate property-handler delivery:
+
+```bash
+node harness/detection/script-lifecycle.mjs --binary /path/to/detection_trace --out /tmp/turbo-script-lifecycle
+```
+
+The same HTML is exercised by the Rust lifecycle regression. Explicit ES modules
+have separate shared localhost fixtures:
+
+```bash
+node harness/detection/modules.mjs --run --binary /path/to/detection_trace --out /tmp/turbo-modules
+node harness/detection/modules.mjs --run --evaluation --binary /path/to/detection_trace --out /tmp/turbo-module-evaluation
+node harness/detection/modules.mjs --run --frames --binary /path/to/detection_trace --out /tmp/turbo-frame-modules
+```
+
+The first checks real import graphs, source URLs, null module `currentScript`,
+async modules gated on DOMContentLoaded, HTTP/MIME failures and once-only trusted
+script events. `--evaluation` checks top-level await completing after document
+load, actual Window `ErrorEvent`s for parse/runtime exceptions and graph caching.
+`--frames` uses identical native/Chrome child sources and checks independent realms,
+per-context caches, child DOM ownership and module/DCL/load ordering. Each mode
+can run `--chrome-only`. Outputs retain raw traces, fixture/source hashes,
+binary/build identity and semantic failures. The exact native154 SDK supplies the
+actual evaluation-stage hook and independent child module maps; the published Deno
+fallback has partial TLA/error lifecycle support and rejects child modules.
+Incremental HTML parser races remain outside these controls.
+
+Two additional controls exercise actual script credentials and response policy:
+
+```bash
+node harness/detection/script-credentials.mjs --binary /path/to/detection_trace --out /tmp/turbo-script-credentials
+node harness/detection/csp.mjs --binary /path/to/detection_trace --out /tmp/turbo-csp
+node harness/detection/redirect-policy.mjs --binary /path/to/detection_trace --out /tmp/turbo-redirect-policy
+```
+
+The credentials control serves two localhost origins and records cookie presence,
+Origin headers, redirect hops, final module source/import identity, anonymous versus
+`use-credentials` graphs, and JavaScript MIME/nosniff failures. The CSP control serves
+an actual policy header, permitted nonce/hash scripts and a permitted module dependency,
+then verifies that denied scripts, fetch, stylesheet, image and iframe URLs never reach
+the server. Both freeze the executable, retain source/build hashes and raw traces, and
+support `--chrome-only` with the raw CDP browser backend. The redirect control checks
+same-origin Authorization preservation, permanent cross-origin stripping, manual
+opaqueredirect filtering, error-mode rejection and actual per-hop preflight for an
+unsafe A→B→A request. Denied preflight must prevent contact with the unsafe method.
+Their semantic checks do not certify every fetch option or CSP directive. Incremental parser races, strict-dynamic, reporting,
+Trusted Types, integrity and navigation/worker policy coverage remain separate gaps.
+
+CSS controls exercise inline policy separately from network stylesheet access:
+
+```bash
+node harness/detection/css-security.mjs --binary /path/to/detection_trace --out /tmp/turbo-css-policy
+node harness/detection/stylesheet-origins.mjs --binary /path/to/detection_trace --out /tmp/turbo-css-origins
+```
+
+The first checks native nonce authorization, blocked authored attributes versus effective
+CSS declarations, CSSOM mutation, Attr value changes, removal and dynamic styles. The second
+serves two origins and checks real CORS/credentials, opaque rules, inline imports, redirects
+and MIME/nosniff error events. Both freeze the supplied executable, report its actual engine
+and feature metadata, retain the installed Chrome version, and hash the shared fixture.
+`--chrome-only` and `--native-only` allow independent diagnostics. These finite controls do not
+claim complete CSS grammar, media-query, layout or CSP conformance.
+
+The parsed-document fixture compares native tree ownership, inert scripts, metadata,
+`importNode`, parser interface shapes, and default sanitization on identical HTML:
+
+```sh
+node harness/detection/document-parser.mjs --run --binary /path/to/detection_trace --out /tmp/turbo-document-parser
+```
+
+`--chrome-only` records an independent browser reference. Each run freezes the native
+executable and records its build information, source hash, traces, and a field comparison.
+HTML parsing is implemented; XML and custom sanitizer configurations throw explicit
+`NotSupportedError`s. Imports of template content and unsupported node kinds also
+fail explicitly. This fixture does not certify arbitrary HTML sanitization or XML support.
 
 Native follows up to five JS navigation hops and ten HTTP redirects per fetch.
 Where Enter does not perform browser default submission, it records a GET form
@@ -72,7 +209,7 @@ files use mode 0600 on Unix. Cookies, tokens, HTML, query strings and POST bodie
 can contain session secrets; keep raw artifacts local.
 
 - `manifest.json`: checkout commit/branch, dirty diff hash, executable hash/mtime,
-  harness hashes, per-process exit/timeout status. This records provenance; rebuild
+  harness hashes, complete streamed dirty-diff hash and untracked source hashes, actual native build diagnostics, per-process exit/timeout status. This records provenance; rebuild
   first because version numbers/mtime alone cannot establish source correspondence.
 - `<runtime>-baseline/` and `<runtime>-interfaces/trace.json`: page snapshots,
   cookie names (Chrome) / raw jar (native), errors, feature flags and observations.
@@ -83,22 +220,23 @@ can contain session secrets; keep raw artifacts local.
   exclude transport-inserted headers such as Accept-Encoding and wire order.
   Manual redirects expose intermediate headers/cookies; automatic client redirects
   elsewhere do not. Body reads retain the engine's normal caps and charset decode.
-- Chrome trace: context requests/headers/payloads, request/response correlation,
-  timings, failure records, decoded document/script/XHR/fetch response files,
-  page errors, frames and main-page websocket messages. The instrumented pass also
-  enables CDP Network and retains ExtraInfo headers/cookie blocking reasons; when
-  correlation is unambiguous those headers replace the automation header view,
-  with the original view retained. Baseline automation headers can omit browser
-  generated fields. A rapid navigation can
-  invalidate response-body retrieval; the failed body is explicitly marked.
-- `--debugger`: instrumented Chrome only; CDP `Debugger.scriptParsed` saves inline,
-  eval and dynamic sources by SHA256 for the attached page. The debugger itself
-  changes the environment; never use its verdict as the baseline control.
+- Chrome trace: raw CDP captures requests, headers, payloads, redirect chains,
+  timing, failures, decoded document/script/XHR/fetch response files, errors,
+  frames and websocket messages. Network ExtraInfo is enabled in baseline and
+  traced passes. Session-qualified correlation keeps worker/frame request IDs
+  separate. Attached out-of-process frames and dedicated/shared/service workers
+  are recorded separately; source/body retrieval failures remain visible.
+- `--debugger`: the instrumented passes enable the real V8 Inspector in both
+  engines. Chrome records compiled inline, eval, Function and module sources by
+  SHA256 per attached session. Native saves per-isolate `native-js/isolate-N/`
+  inventories and source files, including genuine child contexts on engine 154.
+  Inventories report source limits, dropped records, pending retrievals and
+  errors. Debugger attachment changes execution; use baseline as the control.
 - `comparison.json`: endpoint counts, query/payload field names/hashes, header
   scope, observed interface counts, differing argument/result samples and stacks,
-  pages/errors/features and shared-probe results. The raw files retain full payloads.
-  Truncated native JSONL records are counted explicitly in `traceCoverage` rather
-  than being treated as complete coverage.
+  separate main/child/worker observations, pages/errors/features and shared-probe
+  results. `traceCoverage` retains incomplete network records and native script
+  inventories. Raw files retain full payloads and sources.
 
 Interface tracing wraps configurable getters/functions and selected setters
 before page scripts, preserving native receivers. It records first stacks and
@@ -110,24 +248,36 @@ and source: this is an **intrusive diagnostic**, and our Chrome traced pass can 
 rejected even when baseline passes. Snapshot/driver calls also appear in these
 observations; use the recorded stack/source to distinguish harness queries.
 
-Coverage is intentionally explicit: data-property reads, nonconfigurable fields,
-worker execution and native child-realm accesses are not exhaustively
-trapped. Chrome child-frame snapshots are separate. Fast destroyed contexts may
-lose their final interface snapshot. Native serialized documents/network bodies
-preserve the received scripts, but arbitrary generated eval/Function sources are
-not inventoried by a native debugger. There is no TLS/HTTP2 packet capture here.
-Do not infer complete browser parity, complete collector coverage or the server's
-rejection reason from an absence of recorded calls.
+Coverage is explicit: data-property reads and nonconfigurable fields cannot all
+be trapped. Main, child and worker snapshots remain separate. Fast destroyed
+contexts can lose their final interface snapshot. Native worker execution is
+unsupported; the published V8 150 fallback does not register child debugger
+contexts. The native Inspector inventories generated sources without replacing
+`eval` or `Function`. Limits and errors are reported, so absence of a call is not
+proof of complete coverage or the server's rejection reason. This runner does
+not capture TLS/HTTP2 packets; the localhost ClientHello control is separate.
+
+The installed Chrome updated to 155.0.8059.40 on 2026-10-13. The genuine
+[155 source profile](./engine-155/README.md) builds V8 15.5.35.20-rusty. The
+HTTP profile targets 155 with measured seeded brands and header order; its upstream
+TLS/H2 recipe is still 154. Record the actual browser, V8, target and base transport
+versions for each run. An unchanged official Chrome-for-Testing 154.0.8037.92
+has V8 15.4.80.19 (native is 15.4.80.20-rusty), and its standard launch currently
+stalls network CDP operations on this Mac with sandbox-extension errors. It is
+not a usable network oracle here. `--chrome-path` selects another installed
+browser explicitly; it does not change engine or User-Agent versions.
 
 ## Existing detection tools
 
-`--probes` runs the shared capability, BotGuard-integrity and WebGL collectors after
+`--probes` runs the shared capability, API-shape, BotGuard-integrity and WebGL collectors after
 verdict snapshots where possible, plus a separate uninstrumented blank-page pair
 so rejection/trace wrappers do not prevent or contaminate capability measurement.
 These are our queries, distinct from observed site accesses. The capability
 collector checks parsed hidden/textarea/select values and form ownership, independent intrinsic prototypes and Function globals as well as
-CSS rule parsing; standalone blank iframe realms are real V8 contexts. Blank-page secure
-context/UA-data and viewport can differ; retain that context in interpretation.
+CSS rule parsing; standalone blank iframe realms are real V8 contexts. Both runtimes now use identical localhost HTML and URL for the isolated pair,
+so secure-context exposure is comparable. Old about:blank Chrome / HTTPS native
+pairs had different secure contexts; their enumeration differences need remeasurement. Both captures record
+the effective viewport/window/screen/language configuration.
 
 You can run them independently:
 
@@ -159,8 +309,97 @@ are not independent Google attestation. See [FINDINGS.md](./FINDINGS.md).
 
 Offline checks:
 
+The API contract audit uses a minimal localhost page and fresh, uninstrumented
+Chrome/native sessions. It captures method names/arities, descriptors, ownership
+chains, constructor behavior, prototype tags, and invalid-receiver errors. The
+constructibility check never invokes the tested constructor; network APIs are
+inspected without calling them. It makes no search-engine requests.
+
+```bash
+# Build detection_trace using the feature command above, then:
+node harness/detection/api-shape.mjs --run --out /tmp/turbo-api-shape
+# A specific executable is accepted with --binary /absolute/path/detection_trace.
+```
+
+`comparison.json` retains both complete measurements and sorted difference paths,
+the Chrome version, native engine/template metadata, and executable/collector
+hashes. The binary is frozen before collection. These are API contract differences,
+not evidence that a site queried them or used them to reject a request. A
+`[native code]` string is only the measured string; it does not prove native
+implementation. Raw localhost trace artifacts remain in the chosen output directory.
+
 ```bash
 npm run test:detection
 cd rust
 cargo test -p turbo-surf-render --test detection_trace -p turbo-surf-core --test http_trace
 ```
+
+### Localhost TLS oracle
+
+Capture the production native ClientHello and a fresh local Chrome ClientHello
+without HTTP traffic, cookies, certificate verification shortcuts, or Google requests:
+
+```bash
+cd rust
+cargo build -p turbo-surf-core --example transport_hello
+cd ..
+node harness/detection/transport-hello.mjs --run --out /tmp/turbo-transport-oracle
+```
+
+The runner freezes the native executable and records its SHA256 and Chrome version.
+`comparison.json` contains public cipher/extension metadata and root IDs; random,
+session, key-share and opaque ECH bytes are discarded. Comparisons normalize
+GREASE values, extension permutation, and randomized ECH payload length while
+retaining GREASE presence, algorithm order and exact trust-anchor IDs. This is
+ClientHello evidence, not proof of complete TLS/HTTP2/browser parity. The offline
+Rust regression `cargo test -p turbo-surf-core --test client_hello` checks the
+Chrome 154 cipher sequence, signature GREASE/ML-DSA and public trust-anchor fixture.
+[TRANSPORT-HELLO.json](./TRANSPORT-HELLO.json) records a production Chrome 154
+comparison with zero normalized ClientHello differences. It does not assert full
+HTTP2 or JavaScript engine parity.
+
+The shared native iframe fixture exercises detached nodes, fragment insertion,
+trusted load events, removal and reinsertion. It uses the same baseline/instrumented
+trace capture and executable provenance as the search diagnostic:
+
+```bash
+node harness/detection/iframe-lifecycle.mjs --out /tmp/surf-iframe-trace
+```
+
+For the normal-Chrome WindowProxy operation oracle (same/cross-origin navigation,
+retained Function compile/run, prototype/reflection permissions), run:
+
+```bash
+node harness/detection/window-operations.mjs /tmp/surf-window-operations
+```
+
+Both collectors serve only localhost fixtures. The WindowProxy collector writes
+measured Chrome behavior; it does not switch the native runtime or claim complete
+browser security conformance. The isolated exact-engine SDK primitive regressions
+are documented in [engine-154/README.md](engine-154/README.md).
+
+The reusable Document probe checks live/static collections, native indexed and named
+reflection, compatibility mode, doctype metadata, scalar reflection, handler order,
+node adoption identity/listeners and private nonce cloning against normal Chrome:
+
+```bash
+node harness/detection/api-shape.mjs --run --probe harness/detection/document-basics-probe.js --out /tmp/surf-document-basics
+node harness/detection/api-shape.mjs --run --probe harness/detection/html-reflections-probe.js --out /tmp/surf-html-reflections
+node harness/detection/api-shape.mjs --run --probe harness/detection/document-character-data-probe.js --out /tmp/surf-document-character-data
+```
+
+These probes use localhost fixtures and do not transfer browser cookies.
+The character-data probe covers native processing instructions, UTF-16 offsets,
+HTML CDATA rejection, clone/import/adoption, node-value conversions and the
+supported HTML XML-metadata defaults and setters.
+
+The itemized parity backlog is [PARITY-GAPS.md](./PARITY-GAPS.md). Native source
+profiles are revision pinned: [Chrome155](./engine-155/README.md) and the historical
+[Chrome154](./engine-154/README.md). Changing HTTP/navigator configuration does
+not change the actual V8 engine. Use the155 helper and its validated native build
+for a version-matched155 comparison.
+
+Isolated probes use identical HTML and a shared loopback origin for both runtimes.
+Fresh Chrome `about:blank` is insecure; comparing its secure-only API enumeration
+with native `https://probe.test/` inflated apparent gaps in older probe artifacts.
+The corrected probe configuration records its fixture bytes/hash and actual URL.

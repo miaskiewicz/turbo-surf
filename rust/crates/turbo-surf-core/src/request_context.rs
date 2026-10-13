@@ -43,8 +43,18 @@ pub struct RequestContext {
     pub destination: Destination,
     pub mode: RequestMode,
     pub source: Option<String>,
+    /// A stylesheet resource can supply a referrer distinct from its document origin.
+    pub referrer: Option<String>,
+    pub top_level_source: Option<String>,
+    /// Opaque or cross-site embedding ancestors make the cookie site opaque.
+    pub cookie_site_is_opaque: bool,
     pub user_activation: bool,
     pub credentials: Credentials,
+    /// Sandboxed/data documents can have an opaque origin despite a tuple URL.
+    pub opaque_origin: bool,
+    /// Redirect-tainted request Origin is distinct from the document's cookie site.
+    pub origin_tainted: bool,
+    pub redirect_site: Option<String>,
 }
 
 impl Default for RequestContext {
@@ -59,8 +69,14 @@ impl RequestContext {
             destination: Destination::Document,
             mode: RequestMode::Navigate,
             source,
+            referrer: None,
+            top_level_source: None,
+            cookie_site_is_opaque: false,
             user_activation,
             credentials: Credentials::Include,
+            opaque_origin: false,
+            origin_tainted: false,
+            redirect_site: None,
         }
     }
 
@@ -69,24 +85,92 @@ impl RequestContext {
             destination,
             mode,
             source: Some(source.to_string()),
+            referrer: None,
+            top_level_source: None,
+            cookie_site_is_opaque: false,
             user_activation: false,
             credentials: if mode == RequestMode::Cors {
                 Credentials::SameOrigin
             } else {
                 Credentials::Include
             },
+            opaque_origin: false,
+            origin_tainted: false,
+            redirect_site: None,
         }
     }
 
     pub fn sends_credentials(&self, target: &str) -> bool {
         match self.credentials {
             Credentials::Include => true,
-            Credentials::SameOrigin => self
-                .source
-                .as_deref()
-                .is_some_and(|source| same_origin(source, target)),
+            Credentials::SameOrigin => self.source.as_deref().is_some_and(|source| {
+                !self.opaque_origin && !self.origin_tainted && same_origin(source, target)
+            }),
             Credentials::Omit => false,
         }
+    }
+
+    pub fn allows_same_site_cookie(
+        &self,
+        same_site_value: &str,
+        target: &str,
+        method: &str,
+    ) -> bool {
+        if same_site_value.eq_ignore_ascii_case("none") {
+            return true;
+        }
+        let same_site_request = !self.opaque_origin
+            && self.redirect_site.as_deref() != Some("cross-site")
+            && !self.cookie_site_is_opaque
+            && self.source.as_deref().map_or(
+                self.mode == RequestMode::Navigate && self.destination == Destination::Document,
+                |source| same_site(source, target),
+            )
+            && self
+                .top_level_source
+                .as_deref()
+                .is_none_or(|source| same_site(source, target));
+        same_site_request
+            || !same_site_value.eq_ignore_ascii_case("strict")
+                && self.mode == RequestMode::Navigate
+                && self.destination == Destination::Document
+                && matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
+    }
+
+    /// Carry Fetch's origin taint and largest site relationship through a chain.
+    pub fn follow_redirect(&mut self, current: &str, next: &str) {
+        let relation = |target: &str| match self.source.as_deref() {
+            None => "none",
+            Some(_) if self.opaque_origin => "cross-site",
+            Some(source) if same_origin(source, target) => "same-origin",
+            Some(source) if same_site(source, target) => "same-site",
+            _ => "cross-site",
+        };
+        let previous = self
+            .redirect_site
+            .as_deref()
+            .unwrap_or_else(|| relation(current));
+        let next_site = relation(next);
+        let rank = |site: &str| match site {
+            "cross-site" => 2,
+            "same-site" => 1,
+            _ => 0,
+        };
+        let site = if rank(previous) > rank(next_site) {
+            previous
+        } else {
+            next_site
+        }
+        .to_owned();
+        if !same_origin(current, next)
+            && self
+                .source
+                .as_deref()
+                .is_some_and(|source| !same_origin(source, current))
+        {
+            self.origin_tainted = true;
+        }
+        self.redirect_site = Some(site);
     }
 
     pub fn headers(&self, target: &str, method: &str) -> BTreeMap<String, String> {
@@ -113,11 +197,15 @@ impl RequestContext {
         if trustworthy(target) {
             let site = match self.source.as_deref() {
                 None => "none",
+                Some(_) if self.opaque_origin => "cross-site",
                 Some(source) if same_origin(source, target) => "same-origin",
-                Some(source) if same_host_site(source, target) => "same-site",
+                Some(source) if same_site(source, target) => "same-site",
                 _ => "cross-site",
             };
-            h.insert("sec-fetch-site".into(), site.into());
+            h.insert(
+                "sec-fetch-site".into(),
+                self.redirect_site.as_deref().unwrap_or(site).into(),
+            );
             h.insert(
                 "sec-fetch-mode".into(),
                 match self.mode {
@@ -148,15 +236,20 @@ impl RequestContext {
             h.insert("upgrade-insecure-requests".into(), "1".into());
         }
         if let Some(source) = self.source.as_deref() {
-            if let Some(referer) = strict_origin_when_cross_origin(source, target) {
+            if let Some(referer) =
+                strict_origin_when_cross_origin(self.referrer.as_deref().unwrap_or(source), target)
+            {
                 h.insert("referer".into(), referer);
             }
             // Fetch's CORS flag adds Origin on cross-origin requests; other
             // requests add it for unsafe methods, including same-origin POSTs.
-            if (self.mode == RequestMode::Cors && !same_origin(source, target))
+            if (self.mode == RequestMode::Cors
+                && (self.opaque_origin || self.origin_tainted || !same_origin(source, target)))
                 || !matches!(method, "GET" | "HEAD")
             {
-                if let Some(origin) = origin(source) {
+                if self.opaque_origin || self.origin_tainted {
+                    h.insert("origin".into(), "null".into());
+                } else if let Some(origin) = origin(source) {
                     h.insert("origin".into(), origin);
                 }
             }
@@ -174,7 +267,7 @@ pub fn same_origin(source: &str, target: &str) -> bool {
     origin(source).is_some_and(|source| origin(target).as_deref() == Some(&source))
 }
 
-fn same_host_site(source: &str, target: &str) -> bool {
+pub fn same_site(source: &str, target: &str) -> bool {
     let (Ok(source), Ok(target)) = (Url::parse(source), Url::parse(target)) else {
         return false;
     };
@@ -280,11 +373,12 @@ impl ClientHints {
             "sec-ch-ua-platform".into(),
             profile.sec_ch_ua_platform.into(),
         );
-        if context.destination != Destination::Document
-            && context
-                .source
-                .as_deref()
-                .is_some_and(|source| !same_origin(source, target))
+        if context.opaque_origin
+            || context.destination != Destination::Document
+                && context
+                    .source
+                    .as_deref()
+                    .is_some_and(|source| !same_origin(source, target))
         {
             return headers;
         }
@@ -312,13 +406,9 @@ fn hint_value(name: &str, profile: &Profile) -> Option<String> {
         "sec-ch-ua-form-factors" => "\"Desktop\"".into(),
         "sec-ch-ua-platform-version" => format!("\"{}\"", profile.platform_version()),
         "sec-ch-ua-full-version" => format!("\"{}\"", profile.full_version),
-        "sec-ch-ua-full-version-list" => profile
-            .sec_ch_ua
-            .replace(
-                &format!("v=\"{}\"", profile.chrome_major),
-                &format!("v=\"{}\"", profile.full_version),
-            )
-            .replace("v=\"99\"", "v=\"99.0.0.0\""),
+        "sec-ch-ua-full-version-list" => {
+            crate::fingerprint::brand_header(profile.chrome_major, profile.full_version, true)
+        }
         "device-memory" | "sec-ch-device-memory" => profile.device_memory.to_string(),
         // Match the render tier's estimated NetworkInformation defaults.
         "downlink" => "10".into(),
@@ -333,6 +423,76 @@ fn hint_value(name: &str, profile: &Profile) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirect_origin_taint_preserves_cookie_site_and_fetch_site_chain() {
+        let mut context = RequestContext::resource(
+            "https://source.test/page",
+            Destination::Script,
+            RequestMode::Cors,
+        );
+        context.credentials = Credentials::Include;
+        context.follow_redirect(
+            "https://source.test:8443/module",
+            "https://source.test/final",
+        );
+        assert!(context.origin_tainted);
+        assert!(!context.opaque_origin);
+        let headers = context.headers("https://source.test/final", "GET");
+        assert_eq!(headers["origin"], "null");
+        assert_eq!(headers["sec-fetch-site"], "same-site");
+        assert!(context.allows_same_site_cookie("lax", "https://source.test/final", "GET"));
+        context.credentials = Credentials::SameOrigin;
+        assert!(!context.sends_credentials("https://source.test/final"));
+        context.follow_redirect("https://source.test/final", "https://other.test/module");
+        context.follow_redirect("https://other.test/module", "https://source.test/back");
+        assert_eq!(
+            context.headers("https://source.test/back", "GET")["sec-fetch-site"],
+            "cross-site"
+        );
+        assert!(!context.allows_same_site_cookie("strict", "https://source.test/back", "GET"));
+    }
+
+    #[test]
+    fn opaque_actors_do_not_inherit_url_origin_credentials_or_client_hints() {
+        let source = "https://example.com/sandbox";
+        let mut context = RequestContext::resource(source, Destination::Empty, RequestMode::Cors);
+        context.opaque_origin = true;
+        assert!(!context.sends_credentials(source));
+        let headers = context.headers(source, "GET");
+        assert_eq!(headers["origin"], "null");
+        assert_eq!(headers["sec-fetch-site"], "cross-site");
+        assert_eq!(headers["referer"], source);
+        let hints = ClientHints::default();
+        hints.observe(source, Some("sec-ch-ua-full-version"), false);
+        assert!(!hints
+            .headers(source, &context, &crate::fingerprint::default_profile())
+            .contains_key("sec-ch-ua-full-version"));
+    }
+
+    #[test]
+    fn resource_referrer_does_not_change_the_document_origin_or_credentials() {
+        let mut context = RequestContext::resource(
+            "https://document.test/page",
+            Destination::Style,
+            RequestMode::Cors,
+        );
+        context.referrer = Some("https://styles.test/assets/main.css".into());
+        let headers = context.headers("https://styles.test/assets/import.css", "GET");
+        assert_eq!(
+            headers.get("referer").map(String::as_str),
+            Some("https://styles.test/assets/main.css")
+        );
+        assert_eq!(
+            headers.get("origin").map(String::as_str),
+            Some("https://document.test")
+        );
+        assert_eq!(
+            headers.get("sec-fetch-site").map(String::as_str),
+            Some("cross-site")
+        );
+        assert!(!context.sends_credentials("https://styles.test/assets/import.css"));
+    }
 
     #[test]
     fn contexts_distinguish_navigation_script_and_cors() {
@@ -410,7 +570,7 @@ mod tests {
             port.headers("https://example.com:445", "GET")["sec-fetch-site"],
             "same-site"
         );
-        assert!(!same_host_site("http://example.com", "https://example.com"));
+        assert!(!same_site("http://example.com", "https://example.com"));
     }
 
     #[test]

@@ -1,0 +1,14 @@
+<!doctype html><html><head><script>
+globalThis.moduleLog=[];globalThis.moduleEvents={};
+function recordModuleEvent(event) {if(event.target.tagName!=='SCRIPT')return;const id=event.target.id;const states=moduleEvents[id]||(moduleEvents[id]=[]);states.push({type:event.type,trusted:event.isTrusted,target:event.target===document.getElementById(id),currentScript:document.currentScript===null});moduleLog.push(id+':'+event.type);}
+document.addEventListener('load',recordModuleEvent,true);document.addEventListener('error',recordModuleEvent,true);
+document.addEventListener('DOMContentLoaded',()=>{globalThis.moduleAtDcl={deferred:globalThis.deferredModule===true,async:globalThis.asyncModule===true,currentScript:document.currentScript===null};moduleLog.push('dcl');fetch('/module-gate');});
+window.addEventListener('load',()=>{moduleLog.push('window:load');globalThis.__browserFixture={events:moduleLog,scriptEvents:moduleEvents,dcl:moduleAtDcl,deferred:globalThis.deferredEvidence,async:globalThis.asyncEvidence,inline:globalThis.inlineModule,inlineSources:globalThis.inlineModuleSources};document.body.setAttribute('data-browser-fixture','complete');});
+</script>
+<script id="async" type="module" async src="/async.mjs"></script>
+<script id="deferred" type="module" src="/entry.mjs"></script>
+<script id="missing" type="module" src="/missing.mjs"></script>
+<script id="mime" type="module" src="/wrong-mime.mjs"></script>
+<script id="inline" type="module">globalThis.inlineModule=document.currentScript===null;const local="independent";(globalThis.inlineModuleSources ||= []).push({url:import.meta.url===document.URL,stack:new Error().stack.includes(document.URL)&&!new Error().stack.includes("#ts-inline-module-"),local});</script>
+<script id="inline2" type="module">globalThis.inlineModule=document.currentScript===null;const local="independent";(globalThis.inlineModuleSources ||= []).push({url:import.meta.url===document.URL,stack:new Error().stack.includes(document.URL)&&!new Error().stack.includes("#ts-inline-module-"),local});</script>
+</head><body><script>moduleLog.push('classic:'+document.readyState);</script></body></html>

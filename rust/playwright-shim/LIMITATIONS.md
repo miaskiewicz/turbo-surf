@@ -51,13 +51,35 @@ actions can hydrate on demand unless navigation used `waitUntil:"commit"`. Stati
 snapshot paths have no background app event loop. Live assertions can re-drain the
 session, but timing and waiting are not the same as a continuously running browser.
 
-The current render tier gives iframes separate V8 contexts and independent ECMAScript
-intrinsics; DOM wrappers and cross-origin access enforcement remain incomplete.
+The current render tier gives iframes separate V8 contexts, native DOM trees and
+constructor prototypes. V8 origin tokens restrict cross-origin access, while complete
+WindowProxy/navigation/policy semantics remain incomplete.
+Node/Element/HTMLElement/Document and character-data interfaces have separate prototype
+chains and projected native accessors validate their receivers. Document-specific
+instance properties and compatibility APIs still have partial Web IDL coverage.
+Native fragments move their children on insertion. ShadowRoot supports host/mode,
+open/closed lookup and scoped queries; slots, retargeting and composed painting remain
+incomplete. DOM event methods share EventTarget's prototype while retaining native tree
+listeners and independent subclass listener state.
+Native namespace-aware element/attribute APIs retain URIs, prefixes and qualified names;
+Attr nodes retain live values and ownership through attachment/removal. NamedNodeMap is live
+and branded. XML document parsing and serialization remain unsupported.
+Event state is private; script dispatch is untrusted and engine events use host dispatch.
+Element property handlers retain private state and participate in the native listener registry,
+including assignment order and cancellation. Inline handler attributes, event propagation,
+listener options and subclass coverage remain incomplete.
 Playwright `Frame`/`FrameLocator` objects are still not implemented by this shim.
 Classic page/frame scripts run through the Rust host pump with source locations rather
-than indirect eval. Parsed hidden inputs expose their token values, and style text
-exposes parsed CSSOM rules. Ordinary input dirty-value/defaultValue semantics and some
-select defaults remain incomplete. CSSOM changes made with `insertRule` do not alter
+than indirect eval. Parsed hidden inputs expose their token values; input/textarea dirty
+values, defaults, cloning and select selection state work in the live runtime. Input-type
+sanitization, validation/reset and persistence of live values through an HTML snapshot
+remain incomplete. Style text exposes grammar-validated CSSOM rules and live branded
+CSSRuleList/StyleSheetList collections with receiver-checked native list operations.
+Live hydration loads linked/imported stylesheets, enforces inline style CSP against native
+attributes, and protects opaque stylesheet rules from script access. Same-origin cross-realm
+CSS getters share private interface brands. It decodes PNG/JPEG/GIF/WebP image resources with load/error events; responsive images,
+SVG/AVIF and CSS image/font resource loading are incomplete. CSSOM changes made with
+`insertRule` do not alter
 serialized HTML and therefore are not automatically painted by snapshot screenshots.
 
 A `BrowserContext` owns request state shared by page navigations, live hydration,
@@ -66,7 +88,9 @@ negotiation and HTTP-client state when a live runtime is replaced. Navigation/re
 headers, referrer/Origin and credentials use explicit request contexts. This is not
 complete CORS enforcement or browser redirect/permissions-policy behavior.
 `APIRequestContext` calls, including the page/context request facade, currently do
-not retain this browser-context hint state or share its cookie jar. HttpOnly cookies remain available to HTTP and storage state,
+not retain this browser-context hint state or share its cookie jar. Concurrent live
+resource requests merge cookie writes/deletions rather than replacing the whole jar.
+HttpOnly cookies remain available to HTTP and storage state,
 while page JS cannot read, create or overwrite them through `document.cookie`.
 
 ## Page
@@ -78,7 +102,7 @@ while page JS cannot read, create or overwrite them through `document.cookie`.
 | `getAttribute`, `inputValue`, `isVisible/Hidden/Checked/Enabled/Disabled/Editable` | ✅ | Selector shortcuts → Locator. |
 | `locator`, `getByRole`, `getByText`, `getByLabel`, `getByTestId`, `getByPlaceholder`, `getByAltText`, `getByTitle` | ✅ | `getByTestId` honors the context `testIdAttribute`. |
 | `click`, `dblclick`, `tap`, `fill`, `type`, `press`, `check`, `uncheck`, `setChecked`, `selectOption` | ✅ | DOM-level events in live sessions; static paths resolve navigation/form intents. Not hardware input. |
-| `evaluate`, `evaluateHandle` | ✅ | String and `(fn, arg)` forms; runs in the V8 render tier over rtdom. |
+| `evaluate`, `evaluateHandle` | ⚠️ | String and `(fn, arg)` forms run in V8 over rtdom. The current bridge returns string values; typed result/handle serialization is incomplete. |
 | `render`, `addScriptTag({content})` | ✅ | Runs page JS and re-renders the DOM (hydration). |
 | `addInitScript` | ⚠️ | Stored for injection before page scripts when a live session opens; page-level calls also render it over the current HTML. Not complete child-frame init-script coverage. |
 | `setExtraHTTPHeaders` | ✅ | **Real** — extra headers are sent on page navigation and linked-CSS fetches; not a global override of every live fetch/XHR request. |

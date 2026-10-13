@@ -105,3 +105,28 @@ async fn cloned_parsed_controls_preserve_token_attributes_and_interface_getters(
     assert_eq!(result["selected"], "second");
     assert_eq!(result["index"], 1);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn live_control_values_preserve_defaults_and_explicit_empty_selection() {
+    let result = evaluate(
+        r#"<body><input value="initial"><textarea value="ignored">initial text</textarea><select><option disabled value="d">D</option><option value="a">A</option><option value="b">B</option></select></body>"#,
+        r#"
+        const input=document.querySelector('input'), text=document.querySelector('textarea'), select=document.querySelector('select');
+        const before=[input.value,text.value,select.value,select.selectedIndex];
+        input.value='edited';input.defaultValue='new default';
+        text.value='live';text.defaultValue='default';select.value='missing';
+        const after=[input.value,input.getAttribute('value'),text.value,text.textContent,select.value,select.selectedIndex];
+        const clones=[input.cloneNode(true).value,text.cloneNode(true).value,select.cloneNode(true).selectedIndex];
+        globalThis.__RESULT=JSON.stringify({before,after,clones});
+        "#,
+    ).await;
+    assert_eq!(
+        result["before"],
+        serde_json::json!(["initial", "initial text", "a", 1])
+    );
+    assert_eq!(
+        result["after"],
+        serde_json::json!(["edited", "new default", "live", "default", "", -1])
+    );
+    assert_eq!(result["clones"], serde_json::json!(["edited", "live", -1]));
+}

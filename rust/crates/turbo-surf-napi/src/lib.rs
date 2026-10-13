@@ -8,7 +8,9 @@ mod session;
 // Re-export the live-session napi free functions so they're reachable from the crate
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
 // napi still registers them either way).
-pub use session::{live_close, live_cookies, live_eval, live_open, live_serialize};
+pub use session::{
+    live_close, live_cookies, live_eval, live_network_log, live_open, live_serialize,
+};
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -53,7 +55,7 @@ use view::{Field, FieldType, QueryType, TextMode};
 
 #[napi]
 pub fn version() -> String {
-    "0.5.3".to_string()
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 fn to_json_string<T: serde::Serialize>(v: &T) -> String {
@@ -423,13 +425,9 @@ pub fn render(html: String, base_url: String, script: String) -> Result<String> 
     .map_err(Error::from_reason)
 }
 
-/// A persistent render worker: one long-lived OS thread owning ONE reused tokio
-/// current-thread runtime, fed render jobs over a channel. Two wins over `render`'s
-/// per-call `thread::spawn` + fresh runtime: (1) the OS thread + tokio runtime are
-/// built once, not per page; (2) the render tier's thread-local isolate pool
-/// (`render_page_pooled`) lives on this one thread, so the V8 isolate boot is paid
-/// once per process instead of once per page. Renders serialize through it — a JS
-/// crawl drives pages sequentially, so that's the real access pattern.
+/// A persistent worker reuses one OS thread and tokio current-thread runtime.
+/// Render jobs serialize through the channel. Each job gets a fresh V8 isolate;
+/// lexical bindings and mutations to built-ins must not survive a navigation.
 type RenderJob = (
     String,
     String,
@@ -470,7 +468,7 @@ fn render_worker() -> &'static std::sync::Mutex<std::sync::mpsc::Sender<RenderJo
 }
 
 /// Like [`render`] but routed to the persistent render worker (reused thread + tokio
-/// runtime + pooled V8 isolate). Same string-in/string-out contract; the isolate is a
+/// runtime). Same string-in/string-out contract; each page gets a fresh isolate, a
 /// true isolate per page, with cross-page page-JS isolation relaxed for crawl speed.
 #[napi]
 pub fn render_pooled(html: String, base_url: String, script: String) -> Result<String> {

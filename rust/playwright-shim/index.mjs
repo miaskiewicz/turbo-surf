@@ -872,10 +872,7 @@ class Page {
     if (!this._listeners.has("response") && !this._listeners.has("requestfinished")) return;
     let raw;
     try {
-      raw = await native.liveEval(
-        this._session,
-        "globalThis.__RESULT = JSON.stringify((globalThis[Symbol.for('ts')].netLog || []).splice(0));",
-      );
+      raw = await native.liveNetworkLog(this._session);
     } catch {
       return;
     }

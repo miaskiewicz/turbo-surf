@@ -24,17 +24,18 @@ or a workflow ships a mismatched version. Bump to the SAME `X.Y.Z`:
 - `package.json` → `"version"`
 - `rust/Cargo.toml` → `[workspace.package] version` **and** every crate's path-dep
   `version = "X.Y.Z"` (core/view/page/render/mcp/napi Cargo.toml)
-- `rust/crates/turbo-surf-core/src/lib.rs` + `turbo-surf-mcp/src/lib.rs` → `VERSION`
-- `rust/crates/turbo-surf-napi/src/lib.rs` → `version()` and its `package.json`
+- `rust/crates/turbo-surf-napi/package.json`
 - `rust/crates/turbo-surf-py/pyproject.toml` → `version` (**maturin builds the PyPI
   wheel from THIS, not the workspace version** — if it lags, the publish job
   `--skip-existing`s the old wheel and goes green without publishing anything)
-- `rust/crates/turbo-surf-py/src/lib.rs` → the `version()` pyfunction's returned
-  string (the Python module's self-reported version)
 - `README.md` status line
+- Root npm lockfile version and its root package version
 
-Sanity check (should print nothing): `grep -rn "<old-version>" package.json rust/
-README.md | grep -v /target/`.
+Compiled core/MCP constants and NAPI/Python version functions use
+`env!("CARGO_PKG_VERSION")`; they follow the workspace version automatically.
+
+Check manifests and lockfile roots for the old version with `rg`; historical
+changelog entries and unrelated dependency versions must retain their own versions.
 
 ## Cut a release
 
@@ -71,17 +72,29 @@ can't be reused) — only cut a tag when a release is intended.
   is declared in `scripts/browser-sidecar/package.json`. Other comparison crawlers
   are installed ad-hoc. None is an engine runtime dependency.
 
-## Caveat: the `trust-anchors` feature + vendored wreq
+## Current development transport and crate publishing
 
-`turbo-surf-core`'s optional `trust-anchors` feature depends on a **vendored fork of
-`wreq`** (`rust/vendor/wreq`) wired via `[patch.crates-io]` in `rust/Cargo.toml`. A
-`[patch]` is **workspace-local — it is NOT carried into a published crate**. So:
+The Chrome 155 target profile uses the measured headers/client hints and the
+pinned official Chrome 154 transport recipe from Git revisions of `wreq`,
+`wreq-util` and `btls` in the workspace. It supplies Chromium root certificates,
+real trust-anchor identifiers and signature-algorithm GREASE directly upstream;
+the old local `rust/vendor/wreq` fork has been removed. `trust-anchors` is retained
+as a compatibility feature alias; impersonation already includes real anchors.
 
-- The shipped `turbo-surf-mcp` binary (built from this workspace) gets the patch and
-  the feature works — including if you build the binary with `--features trust-anchors`.
-- A crates.io **library** consumer of `turbo-surf-core` who enables `trust-anchors`
-  resolves **upstream** `wreq` (no `trust_anchors` field) and **fails to compile**.
-  The default (feature-off) crate is unaffected and publishes/builds normally.
-- `cargo publish` of `turbo-surf-core` still succeeds (its default-feature verify build
-  never references the patched field). The feature is simply binary-only until `wreq`
-  ships `trust_anchors` upstream, at which point drop the vendored fork + `[patch]`.
+Build development binaries with Rust 1.98.0 and the committed workspace lockfile
+(`cargo build --locked`). This PR does not authorize a turbo-surf release.
+
+Crates.io publishing remains blocked: workspace patches do not propagate to
+library consumers, and registry `wreq` 0.16.1 / `wreq-util` 0.2.0 do not contain the
+Chrome 154 APIs used here. Before a new crates release, require compatible
+upstream registry releases or a properly packaged dependency fork, then verify
+packaged crates from a clean consumer project without workspace patches. An npm
+binary built from this workspace and a crates.io library have different dependency
+resolution; successful binary builds do not establish registry compatibility.
+
+The DOM API dependency is now published as turbo-dom 0.5.2 (PR #8, tagged merge
+commit `87c2077`) and no longer needs a workspace Git patch. The transport API
+requirement above still blocks clean crate consumers until compatible registry
+versions or reviewed distributable forks are available. A local
+`npm pack --dry-run` checks the launcher allowlist; it does not verify per-platform
+binaries staged by release CI.

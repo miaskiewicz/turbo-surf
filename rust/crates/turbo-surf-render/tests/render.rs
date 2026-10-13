@@ -207,11 +207,8 @@ static FP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 // renders don't race each other's hook value under cargo's parallel test threads.
 static WEBGL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-// --- pooled render (reused isolate) keeps fresh-navigation isolation --------
-// `render_page_pooled` reuses one V8 isolate across pages for speed; the cross-page
-// global scrub must make a reused isolate behave like a fresh navigation. Run a page
-// that leaks `window` globals, then a page that reads them — interleaved with the
-// fresh `render_page` to prove byte parity and no A→B contamination.
+// The legacy pooled entry point reuses its worker, but each page needs an isolated
+// realm, including non-configurable globals, lexical bindings and built-in objects.
 #[tokio::test]
 async fn pooled_render_scrubs_cross_page_globals() {
     let base = "http://localhost/";
@@ -241,6 +238,32 @@ async fn pooled_render_scrubs_cross_page_globals() {
             .unwrap();
         assert_eq!(a, fresh_leak, "pooled leak page parity, iter {i}");
         assert_eq!(b, fresh_reader, "pooled reader saw A's globals, iter {i}");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pooled_render_isolates_lexical_bindings_and_builtin_mutations() {
+    let html = "<body><p id=result></p></body>";
+    let base = "https://isolation.test/";
+    let writer = r#"let lexical = 'first'; const constant = 1;
+        Object.prototype.pageMutation = 'leak'; Array.prototype.pageMutation = 'leak';
+        Object.defineProperty(window, 'permanentPageValue', {value: 'leak'});
+        document.querySelector('#result').textContent = lexical;"#;
+    let reader = r#"let lexical = 'second'; const constant = 2;
+        document.querySelector('#result').textContent = [lexical,constant,
+          String(({}).pageMutation),String([].pageMutation),typeof permanentPageValue].join('|');"#;
+    for _ in 0..2 {
+        let first = render_page_pooled(html, base, writer, DEFAULT_RENDER_BUDGET_MS)
+            .await
+            .unwrap();
+        assert!(first.contains(">first</p>"), "{first}");
+        let second = render_page_pooled(html, base, reader, DEFAULT_RENDER_BUDGET_MS)
+            .await
+            .unwrap();
+        assert!(
+            second.contains("second|2|undefined|undefined|undefined"),
+            "{second}"
+        );
     }
 }
 
@@ -406,15 +429,21 @@ fn navigator_looks_like_chrome() {
 // reads performance.timing / performance.navigation / window.scheduler; deno_core ships
 // none, so without the ENV_BOOTSTRAP shims an anti-bot consistency check sees `undefined`
 // where real Chrome has objects. Assert presence + coherent shape.
-#[test]
-fn legacy_timing_and_scheduler_are_present() {
+#[tokio::test]
+async fn legacy_timing_and_scheduler_are_present() {
     let probe = "document.body.setAttribute('data-t', [\
         typeof performance.timing, performance.timing.navigationStart > 0,\
         typeof performance.navigation, performance.navigation.type,\
         typeof scheduler, typeof scheduler.postTask, typeof scheduler.yield,\
         typeof sessionStorage, typeof performance.memory,\
         performance.memory.jsHeapSizeLimit > 0, document.scrollingElement === document.documentElement].join('|'))";
-    let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
+    let out = render_page(
+        "<!doctype html><body></body>",
+        "https://example.test/",
+        probe,
+    )
+    .await
+    .unwrap();
     assert!(
         out.contains(
             "data-t=\"object|true|object|0|object|function|function|object|object|true|true\""
@@ -424,7 +453,9 @@ fn legacy_timing_and_scheduler_are_present() {
     // sessionStorage must actually store (round-trip), not just exist.
     let rt = "sessionStorage.setItem('k','v'); \
         document.body.setAttribute('data-s', sessionStorage.getItem('k') + '|' + sessionStorage.length)";
-    let out2 = turbo_surf_render::render_html("<body></body>", rt).unwrap();
+    let out2 = render_page("<body></body>", "https://example.test/", rt)
+        .await
+        .unwrap();
     assert!(
         out2.contains("data-s=\"v|1\""),
         "sessionStorage round-trip: {out2}"
@@ -581,6 +612,11 @@ async fn fingerprint_parity_permissions_location_charset_webgl() {
 // Date.now`). performance.now is real sub-ms monotonic (no flatline under a tight loop).
 #[tokio::test]
 async fn clock_reflects_virtual_time_and_is_coherent() {
+    let wall_before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+        * 1000.;
     let script = r#"
         var d0 = Date.now(), p0 = performance.now();
         setTimeout(function(){
@@ -589,14 +625,19 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
                 dateDelta: d1 - d0,
                 perfDelta: Math.round((p1 - p0) * 10) / 10,
                 coherent: Math.round(performance.timeOrigin + performance.now() - Date.now()),
-                originFractional: (performance.timeOrigin % 1) !== 0,
-                dateNowNative: Date.now.toString().includes('[native code]'),
+                origin: performance.timeOrigin,
+                dateNowNative: Function.prototype.toString.call(Date.now).includes('[native code]'),
                 dateNowName: Date.now.name,
+                dateStatics: ['now','parse','UTC'].every(name=>{const d=Object.getOwnPropertyDescriptor(Date,name);return !d.enumerable&&d.configurable&&d.writable;}),
                 dateNowHasProto: ('prototype' in Date.now),
                 // Constructor coherence + shape (Finding 2): new Date()/+new Date() read the SAME
                 // coherent clock as Date.now(), and the shim keeps native shape + Date semantics.
                 plusDateVsNow: Math.abs((+new Date()) - Date.now()),
-                dateCtorNative: Date.toString().includes('[native code]'),
+                dateCtorNative: Function.prototype.toString.call(Date).includes('[native code]'),
+                dateCall: Date()===new Date().toString(),
+                dateUTC: Date.UTC(2000,0,1),
+                dateParse: Date.parse('2000-01-01T00:00:00Z'),
+                reflectUnmodified: (()=>{const original=Reflect.construct;Reflect.construct=()=>{throw Error('modified');};try{return new Date(42).getTime()===42;}finally{Reflect.construct=original;}})(),
                 dateCtorName: Date.name,
                 dateCtorLen: Date.length,
                 dateCtorConstructor: ((new Date()).constructor === Date),
@@ -640,10 +681,21 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
         v["coherent"].as_f64().unwrap().abs() <= 1.0,
         "timeOrigin + performance.now() ≈ Date.now() (±1): {v}"
     );
-    assert_eq!(
-        v["originFractional"], true,
-        "timeOrigin is a fractional epoch: {v}"
+    let wall_after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+        * 1000.;
+    let origin = v["origin"].as_f64().unwrap();
+    assert!(
+        (wall_before..=wall_after).contains(&origin),
+        "timeOrigin is the actual host wall clock: {v}"
     );
+    assert_eq!(v["dateCall"], true, "{v}");
+    assert_eq!(v["dateStatics"], true, "{v}");
+    assert_eq!(v["reflectUnmodified"], true, "{v}");
+    assert_eq!(v["dateUTC"], 946684800000_u64, "{v}");
+    assert_eq!(v["dateParse"], 946684800000_u64, "{v}");
     // The coherent-clock override must not leak the arrow's JS source — Date.now has to look
     // native (toString + name + no own prototype), like real Chrome, else it's an anti-hook tell.
     assert_eq!(
@@ -1169,11 +1221,10 @@ fn webgl_readpixels_uses_the_host_executor() {
     );
 }
 
-// STEP 1 — trusted-event capability. A synthesized human-input event must read isTrusted:true to
-// a real listener (window/document/node), an ordinary script event must stay false, and isTrusted
-// must live as a prototype ACCESSOR (Chrome's descriptor shape), not an own instance prop.
+// Script-created input stays untrusted; Chrome owns a nonconfigurable accessor
+// on every Event instance, with an origin-relative creation timestamp.
 #[test]
-fn synthesized_events_are_trusted() {
+fn script_synthesized_input_preserves_browser_event_trust_contract() {
     let script = format!(
         "{hi}\n;(() => {{\
           const seen = {{}};\
@@ -1185,8 +1236,8 @@ fn synthesized_events_are_trusted() {
           el.addEventListener('click', e => {{ seen.node = e.isTrusted; }});\
           el.dispatchEvent(__hi.ev('MouseEvent','click',{{}}));\
           seen.plain = new MouseEvent('mousemove',{{}}).isTrusted;\
-          const d = Object.getOwnPropertyDescriptor(Event.prototype,'isTrusted');\
-          seen.protoAccessor = !!(d && typeof d.get === 'function');\
+          const d = Object.getOwnPropertyDescriptor(new Event('probe'),'isTrusted');\
+          seen.ownAccessor = !!(d && typeof d.get === 'function' && !d.configurable && !d.set);\
           seen.ts = __hi.ev('MouseEvent','mousemove',{{}}).timeStamp;\
           return JSON.stringify(seen);\
         }})()",
@@ -1197,24 +1248,24 @@ fn synthesized_events_are_trusted() {
     let v: serde_json::Value =
         serde_json::from_str(&out).unwrap_or_else(|e| panic!("json {e}: {out}"));
     assert_eq!(
-        v["win"], true,
-        "window listener must see isTrusted:true: {out}"
+        v["win"], false,
+        "window listener must see isTrusted:false: {out}"
     );
     assert_eq!(
-        v["doc"], true,
-        "document listener must see isTrusted:true: {out}"
+        v["doc"], false,
+        "document listener must see isTrusted:false: {out}"
     );
     assert_eq!(
-        v["node"], true,
-        "node listener must see isTrusted:true: {out}"
+        v["node"], false,
+        "node listener must see isTrusted:false: {out}"
     );
     assert_eq!(
         v["plain"], false,
         "an ordinary script event must be isTrusted:false: {out}"
     );
     assert_eq!(
-        v["protoAccessor"], true,
-        "isTrusted must be a prototype accessor (Chrome shape): {out}"
+        v["ownAccessor"], true,
+        "isTrusted must be an own nonconfigurable accessor: {out}"
     );
     // The synthesized event's timeStamp must ride the hi-res clock (performance.now, origin-relative)
     // — NOT the vendored `new Event()` default of Date.now() (a ~1.7e12 epoch). Assert it's an
@@ -1223,7 +1274,7 @@ fn synthesized_events_are_trusted() {
     // grid a hi-res stamp can legitimately land on an integer, so that would be a flaky proxy.)
     let ts = v["ts"].as_f64().unwrap();
     assert!(
-        ts > 0.0 && ts < 1_000_000.0,
+        (0.0..1_000_000.0).contains(&ts),
         "timeStamp is origin-relative (performance.now), not the Date.now epoch: {out}"
     );
 }
@@ -1567,6 +1618,7 @@ fn chrome_fingerprint_identity_is_coherent() {
           toDataURLNative: ts.call(document.createElement('canvas').toDataURL).indexOf('[native code]') >= 0,
           getContextNative: ts.call(document.createElement('canvas').getContext).indexOf('[native code]') >= 0,
           brands: navigator.userAgentData.brands.map(function(b){return b.brand+' '+b.version;}).join(','),
+          deviceMemory: navigator.deviceMemory,
           pdf: navigator.pdfViewerEnabled,
           mimeLen: navigator.mimeTypes.length,
           notif: (typeof Notification !== 'undefined') ? Notification.permission : 'absent',
@@ -1607,9 +1659,9 @@ fn chrome_fingerprint_identity_is_coherent() {
         v["getContextNative"], true,
         "getContext.toString must be native"
     );
-    // Grease + order validated against a live real-Chrome capture (greased brand LAST,
-    // token `Not A(Brand` v99); must match the on-wire sec-ch-ua in fingerprint.rs.
-    assert_eq!(v["brands"], "Chromium 154,Google Chrome 154,Not A(Brand 99");
+    // Measured Chrome 155 brand order and major-seeded GREASE match the wire header.
+    assert_eq!(v["brands"], "Google Chrome 155,Chromium 155,Not(A:Brand 24");
+    assert_eq!(v["deviceMemory"], 16);
     assert_eq!(v["pdf"], true);
     assert_eq!(v["mimeLen"], 2);
     assert_eq!(v["notif"], "default");
@@ -1629,7 +1681,7 @@ fn fingerprint_override_applies_and_resets() {
     let probe = "document.body.setAttribute('data-fp', \
         navigator.platform + '|' + navigator.hardwareConcurrency + '|' + \
         navigator.languages.join(',') + '|' + screen.width + '|' + \
-        navigator.userAgentData.brands[0].version)";
+        navigator.userAgentData.brands.find(b=>b.brand==='Google Chrome').version + '|' + navigator.deviceMemory)";
 
     turbo_surf_render::set_fingerprint(
         r#"{"platform":"Win32","hardwareConcurrency":16,"languages":["en-GB","en"],
@@ -1637,15 +1689,15 @@ fn fingerprint_override_applies_and_resets() {
     );
     let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
     assert!(
-        out.contains("data-fp=\"Win32|16|en-GB,en|2560|150\""),
+        out.contains("data-fp=\"Win32|16|en-GB,en|2560|150|8\""),
         "override not applied: {out}"
     );
 
-    // Reset → current-stable (Chrome 154) macOS defaults return.
+    // Reset restores the current Chrome 155 macOS defaults.
     turbo_surf_render::set_fingerprint("{}");
     let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
     assert!(
-        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|154\""),
+        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|155|16\""),
         "reset to defaults failed: {out}"
     );
 }
@@ -1949,58 +2001,41 @@ fn create_tree_walker_walks_the_dom() {
     );
 }
 
-// Next.js's webpack runtime resolves chunk paths via `document.currentScript`
-// (getPathFromScript → currentScript.getAttribute(...)). Our tier ran scripts as
-// one blob with no currentScript, so hydration crashed with "Cannot read
-// properties of undefined (reading 'getAttribute')". currentScript must be a real
-// element so that read is safe.
+// Host evaluation runs outside a page script. External classic scripts receive
+// their real currentScript element in the lifecycle/resource regression suite.
 #[test]
-fn document_current_script_is_present_for_webpack() {
+fn host_evaluation_has_no_current_script() {
     let out = run_with_dom(
         "<body><div id='root'></div></body>",
-        r#"
-        const cs = document.currentScript;
-        // webpack does currentScript.getAttribute('src').replace(...) — must be a string.
-        const src = cs && typeof cs.getAttribute === 'function' ? cs.getAttribute('src') : 'MISSING';
-        const safe = typeof src === 'string' ? src.replace(/x/g, 'x') : 'NOT-A-STRING';
-        document.getElementById('root').setAttribute('data-cs', safe);
-        document.getElementById('root').getAttribute('data-cs');
-        "#,
+        "String(document.currentScript === null)",
     )
     .unwrap();
-    assert_eq!(
-        out, "http://localhost/",
-        "currentScript.getAttribute('src') must be the page URL string, got {out}"
-    );
+    assert_eq!(out, "true");
 }
 
-// Embeddable widgets (PropelAuth's login) render into a Shadow DOM via
-// host.attachShadow(). rtdom has no shadow tree, so we fall back to the light DOM —
-// attachShadow returns the host, content lands in the serialized document. Without
-// it, hydration crashed with "attachShadow is not a function".
+// Shadow content belongs to its independent native root. A light-DOM HTML snapshot
+// preserves the host but cannot serialize a shadow tree as ordinary children.
 #[test]
-fn attach_shadow_falls_back_to_light_dom() {
-    let html = render_html(
-        "<body><div id='host'></div></body>",
-        r#"
-        const host = document.createElement('div'); // React creates the shadow host
-        document.getElementById('host').appendChild(host);
-        const root = host.attachShadow({ mode: 'open' });
-        // code reads shadowRoot.host to get the host back (Next devtools theme code)
-        root.host.setAttribute('data-host-ok', '1');
-        const input = document.createElement('input');
-        input.setAttribute('data-testid', 'shadow-input');
-        root.appendChild(input);
-        "#,
-    )
-    .unwrap();
+fn attach_shadow_keeps_native_tree_content_separate_from_light_dom() {
+    let html=render_html("<body><div id='host'></div></body>",r#"
+        const host=document.createElement('div');document.getElementById('host').appendChild(host);
+        const root=host.attachShadow({mode:'open'});root.host.setAttribute('data-host-ok','1');
+        const input=document.createElement('input');input.setAttribute('data-testid','shadow-input');root.appendChild(input);
+        host.setAttribute('data-shadow-live',String(root instanceof ShadowRoot && root.nodeType===11
+          && root.querySelector('input')===input && host.querySelector('input')===null
+          && input.getRootNode()===root && host.shadowRoot===root));
+    "#).unwrap();
     assert!(
-        html.contains(r#"data-testid="shadow-input""#),
-        "content rendered into a shadow root must reach the serialized light DOM: {html}"
+        !html.contains(r#"data-testid="shadow-input""#),
+        "shadow children must stay outside serialized light DOM: {html}"
     );
     assert!(
         html.contains(r#"data-host-ok="1""#),
-        "shadowRoot.host must point back to the host element: {html}"
+        "ShadowRoot.host preserves native host identity: {html}"
+    );
+    assert!(
+        html.contains(r#"data-shadow-live="true""#),
+        "shadow nodes must remain queryable in the live native root: {html}"
     );
 }
 
@@ -2148,7 +2183,7 @@ async fn constructable_stylesheet_and_extra_html_element_ctors() {
 async fn crypto_subtle_websocket_broadcastchannel_present() {
     let html = render_page(
         "<body><div id='root'></div></body>",
-        "about:blank",
+        "https://example.test/",
         r#"
         (async () => {
           const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("abc"));
@@ -2198,13 +2233,17 @@ fn encoding_crypto_base64_globals_present() {
         const enc = new TextEncoder().encode("héllo");
         const back = new TextDecoder().decode(enc);
         const rnd = new Uint8Array(4); crypto.getRandomValues(rnd);
-        JSON.stringify({ roundtrip: back, bytes: enc.length, uuid: typeof crypto.randomUUID(), b64: btoa("hi"), un: atob(btoa("hi")) });
+        JSON.stringify({ roundtrip: back, bytes: enc.length, uuid: typeof crypto.randomUUID, b64: btoa("hi"), un: atob(btoa("hi")) });
         "#,
     )
     .unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["roundtrip"], "héllo", "{out}");
     assert_eq!(v["bytes"], 6, "héllo is 6 UTF-8 bytes: {out}");
+    assert_eq!(
+        v["uuid"], "undefined",
+        "about:blank is not a secure context"
+    );
     assert_eq!(v["b64"], "aGk=", "{out}");
     assert_eq!(v["un"], "hi", "{out}");
 }
@@ -2788,21 +2827,33 @@ async fn fetch_over_net_hydrates_from_localhost() {
 }
 
 #[tokio::test]
-async fn fetch_failure_surfaces_as_failed_response() {
-    // Nothing listening → fetch resolves to a failed Response (no throw).
+async fn fetch_network_failure_rejects_with_type_error_instead_of_a_response() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
     let html = render_page(
         "<html><body><div id='app'></div></body></html>",
-        "http://127.0.0.1:1/",
+        &base(port),
         r#"
         (async () => {
-          const r = await fetch('/x');
-          document.getElementById('app').textContent = 'ok=' + r.ok + '/st=' + r.status;
+          let resolved = false;
+          try {
+            await fetch('/x');
+            resolved = true;
+          } catch (error) {
+            document.getElementById('app').textContent =
+              'resolved=' + resolved + '/type=' + (error instanceof TypeError) +
+              '/name=' + error.name;
+          }
         })();
         "#,
     )
     .await
     .unwrap();
-    assert!(html.contains("ok=false/st=0"), "got: {html}");
+    assert!(
+        html.contains("resolved=false/type=true/name=TypeError"),
+        "got: {html}"
+    );
 }
 
 // --- cookies + budget -------------------------------------------------------
@@ -2898,6 +2949,7 @@ fn iframe_content_window_exposes_builtins() {
 // "Add Manually" button. This must pass for the dynamic-import hydration path to work.
 #[tokio::test]
 async fn dynamically_injected_script_runs_and_fires_load() {
+    let port = spawn_js_server("globalThis.__wireHandlers();").await;
     let html = r#"<body>
       <div id="app">
         <button id="btn">go</button>
@@ -2908,7 +2960,7 @@ async fn dynamically_injected_script_runs_and_fires_load() {
         function loadChunk() {
           return new Promise((resolve, reject) => {
             const s = document.createElement('script');
-            s.textContent = "globalThis.__wireHandlers();";
+            s.src = "/chunk.js";
             s.onload = () => resolve();
             s.onerror = () => reject(new Error('chunk failed'));
             document.head.appendChild(s);
@@ -2930,7 +2982,7 @@ async fn dynamically_injected_script_runs_and_fires_load() {
 
     let mut session = PageSession::open(
         html,
-        "https://example.test/",
+        &format!("http://127.0.0.1:{port}/"),
         "",
         "",
         DEFAULT_RENDER_BUDGET_MS,
@@ -3528,7 +3580,7 @@ async fn iframe_realm_has_distinct_window_and_document() {
         "<body><div id='root'></div></body>",
         "http://localhost/",
         r#"
-        const f = document.createElement('iframe');
+        const f = document.createElement('iframe');document.body.appendChild(f);
         f.srcdoc = "<div>child</div>";
         const root = document.getElementById('root');
         root.setAttribute('data-win', String(f.contentWindow !== window));
@@ -3555,7 +3607,7 @@ async fn iframe_srcdoc_inline_script_mutates_child_document_only() {
         "<body><div id='root'></div></body>",
         "http://localhost/",
         r#"
-        const f = document.createElement('iframe');
+        const f = document.createElement('iframe');document.body.appendChild(f);
         f.srcdoc = "<scr" + "ipt>"
           + "document.title='child-was-here';"
           + "var e=document.createElement('span');e.id='made';document.body.appendChild(e);"
@@ -3599,8 +3651,8 @@ async fn iframe_frame_tree_length_and_parent_link() {
         "<body><div id='root'></div></body>",
         "http://localhost/",
         r#"
-        const f1 = document.createElement('iframe'); f1.srcdoc = "<div>a</div>";
-        const f2 = document.createElement('iframe'); f2.srcdoc = "<div>b</div>";
+        const f1 = document.createElement('iframe');document.body.appendChild(f1); f1.srcdoc = "<div>a</div>";
+        const f2 = document.createElement('iframe');document.body.appendChild(f2); f2.srcdoc = "<div>b</div>";
         const root = document.getElementById('root');
         root.setAttribute('data-len', String(window.length));
         root.setAttribute('data-frames-len', String(frames.length));
@@ -3631,9 +3683,9 @@ async fn grandchild_iframe_realm_tops_out_at_the_real_top_window() {
         "<body><div id='root'></div></body>",
         "http://localhost/",
         r#"
-        const f = document.createElement('iframe');
+        const f = document.createElement('iframe');document.body.appendChild(f);
         f.srcdoc = "<scr" + "ipt>"
-          + "var g=document.createElement('iframe');"
+          + "var g=document.createElement('iframe');document.body.appendChild(g);"
           + "g.srcdoc='<div>gc</div>';"
           + "var gw=g.contentWindow;"
           + "var r=top.document.getElementById('root');"
@@ -3669,9 +3721,9 @@ async fn nested_iframe_depth_cap_stops_the_recursion() {
         window.__BOMB = "<scr" + "ipt>"
           + "var t=top;t.__depthReached=(t.__depthReached||0)+1;"
           + "try{t.document.getElementById('root').setAttribute('data-depth', String(t.__depthReached));}catch(e){}"
-          + "var f=document.createElement('iframe');f.srcdoc=t.__BOMB;"
+          + "var f=document.createElement('iframe');document.body.appendChild(f);f.srcdoc=t.__BOMB;"
           + "</scr" + "ipt>";
-        const f0 = document.createElement('iframe');
+        const f0 = document.createElement('iframe');document.body.appendChild(f0);
         f0.srcdoc = window.__BOMB;
         "#,
     )
@@ -4136,14 +4188,14 @@ async fn srcdoc_scripts_use_child_intrinsics_and_persist_global_lexicals() {
         "<body><div id='root'></div></body>",
         "http://localhost/",
         r#"
-        const f = document.createElement('iframe');
+        const f = document.createElement('iframe');document.body.appendChild(f);
         f.srcdoc = '<scr' + 'ipt>let frameLexical = 11; var frameVar = 13; Array.prototype.iframeOnly=1;</scr' + 'ipt>'
           + '<scr' + 'ipt>top.document.getElementById("root").setAttribute("data-realm", String(Array !== top.Array && [] instanceof Array && globalThis === window && frameLexical + frameVar === 24 && top.Array.prototype.iframeOnly === undefined)); top.document.getElementById("root").setAttribute("data-stack", new Error("child-source").stack);</scr' + 'ipt>';
         "#,
     ).await.unwrap();
     assert!(html.contains("data-realm=\"true\""), "{html}");
     assert!(
-        html.contains("http://localhost/"),
+        html.contains("about:srcdoc"),
         "child stack needs document URL: {html}"
     );
     assert!(
@@ -4159,7 +4211,7 @@ async fn frame_messages_preserve_sender_identity_in_both_directions() {
     let html = render_page(
         "<body><div id='root'></div></body>", "http://localhost/",
         r#"
-        const f = document.createElement('iframe');
+        const f = document.createElement('iframe');document.body.appendChild(f);
         addEventListener('message', e => {
           if (e.data === 'child-ready') {
             document.getElementById('root').setAttribute('data-child-source', String(e.source === f.contentWindow && e.origin === location.origin));
@@ -4196,7 +4248,7 @@ async fn inherited_frame_cookies_share_the_jar_and_protect_http_only_values() {
     let raw = page
         .eval(
             r#"
-        const f = document.createElement('iframe');
+        const f = document.createElement('iframe');document.body.appendChild(f);
         const d = f.contentDocument;
         const before = d.cookie;
         d.cookie = 'secret=guest; Path=/';
@@ -4222,7 +4274,7 @@ async fn child_native_promises_can_reject_catch_and_resume_without_host_crashes(
     let html = render_page(
         "<body><div id='root'></div></body>", "http://localhost/",
         r#"
-        const f = document.createElement('iframe');
+        const f = document.createElement('iframe');document.body.appendChild(f);
         f.srcdoc = '<scr' + 'ipt>Promise.reject(new Error("child-rejection")).catch(e => top.document.getElementById("root").setAttribute("data-rejected",e.message)); Promise.resolve(17).then(v=>top.document.getElementById("root").setAttribute("data-resolved",String(v)));</scr' + 'ipt>';
         "#,
     ).await.unwrap();
@@ -4234,7 +4286,7 @@ async fn child_native_promises_can_reject_catch_and_resume_without_host_crashes(
 async fn child_unhandled_rejection_does_not_crash_and_next_runtime_remains_usable() {
     let result = render_page(
         "<body></body>", "http://localhost/",
-        r#"const f=document.createElement('iframe'); f.srcdoc='<scr'+'ipt>Promise.reject(new Error("uncaught-child-rejection"));</scr'+'ipt>';"#,
+        r#"const f=document.createElement('iframe');document.body.appendChild(f); f.srcdoc='<scr'+'ipt>Promise.reject(new Error("uncaught-child-rejection"));</scr'+'ipt>';"#,
     ).await;
     if let Err(error) = result {
         assert!(error.contains("uncaught-child-rejection"), "{error}");
@@ -4259,7 +4311,7 @@ async fn child_fetch_uses_frame_url_and_async_callbacks_survive() {
     let html = render_page(
         "<body><div id='root'></div></body>",
         &format!("http://127.0.0.1:{port}/parent"),
-        "const f=document.createElement('iframe'); f.src='/child/frame';",
+        "const f=document.createElement('iframe');document.body.appendChild(f); f.src='/child/frame';",
     )
     .await
     .unwrap();
@@ -4313,10 +4365,637 @@ async fn child_xhr_uses_relative_frame_url_and_request_source_metadata() {
     let html = render_page(
         "<body><div id='root'></div></body>",
         &format!("http://127.0.0.1:{port}/parent"),
-        "const f=document.createElement('iframe');f.src='/child/frame';",
+        "const f=document.createElement('iframe');document.body.appendChild(f);f.src='/child/frame';",
     )
     .await
     .unwrap();
     task.await.unwrap();
     assert!(html.contains("data-xhr=\"frame-xhr\""), "{html}");
+}
+
+#[tokio::test]
+async fn iframe_native_documents_and_browser_api_functions_belong_to_each_realm() {
+    let html = render_page(
+        "<body><div id='root'>parent</div></body>",
+        "http://localhost/",
+        r#"
+          const frame=document.createElement('iframe');document.body.appendChild(frame);
+          frame.srcdoc='<html><head><title>child</title><style>.child { color: red; }</style></head><body><p id="only-child">child</p></body></html>';
+          frame.onload=()=>{
+            const child=frame.contentWindow, doc=child.document;
+            const result={
+              tree: document.getElementById('only-child')===null && doc.getElementById('root')===null,
+              head: doc.head.querySelector('title').textContent==='child' && doc.head.querySelector('style').sheet.cssRules.length===1,
+              owner: doc.getElementById('only-child').ownerDocument===doc && doc.defaultView===child,
+              constructors: child.Event!==Event && child.Element!==Element && child.HTMLElement!==HTMLElement,
+              functions: child.fetch.constructor===child.Function && child.setTimeout.constructor===child.Function && child.XMLHttpRequest.constructor===child.Function && doc.createElement.constructor===child.Function,
+              cookie: Object.getOwnPropertyDescriptor(child.Document.prototype,'cookie').get.constructor===child.Function,
+            };
+            doc.getElementById('only-child').addEventListener('probe',()=>document.getElementById('root').textContent='updated');
+            doc.getElementById('only-child').dispatchEvent(new Event('probe'));
+            result.reentrant=document.getElementById('root').textContent==='updated' && doc.getElementById('only-child').textContent==='child';
+            let rejected=false;
+            try { document.body.appendChild(doc.getElementById('only-child')); } catch(error) { rejected=/Cross-document node adoption/.test(error.message); }
+            result.noAliasing=rejected && doc.getElementById('only-child').ownerDocument===doc;
+            document.getElementById('root').setAttribute('data-result',JSON.stringify(result));
+          };
+        "#,
+    ).await.unwrap();
+    for key in [
+        "tree",
+        "head",
+        "owner",
+        "constructors",
+        "functions",
+        "cookie",
+        "reentrant",
+        "noAliasing",
+    ] {
+        assert!(
+            html.contains(&format!("&quot;{key}&quot;:true")),
+            "{key}: {html}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn cross_origin_frames_enforce_native_global_boundaries_and_clone_messages() {
+    let port=spawn_paths_js_server(&[("/child", r#"<script>
+      let blocked=false;try{parent.document.body}catch(error){blocked=error.name==='SecurityError'}
+      const localFunctions=parent.postMessage.constructor('return globalThis')()===globalThis && fetch.constructor===Function && document.createElement.constructor===Function;
+      onmessage=(event)=>{if(event.data==='reply')parent.postMessage({reply:event.source===parent},'*')};
+      const cycle={};cycle.self=cycle;
+      parent.postMessage({blocked,localFunctions,nullFrameElement:frameElement===null,map:new Map([['answer',42]]),cycle},'*');
+      parent.postMessage({mustNotArrive:true},'https://wrong-origin.invalid');
+    </script>"#)]).await;
+    let script = format!(
+        r#"
+      const frame=document.createElement('iframe');document.body.appendChild(frame);
+      onmessage=(event)=>{{
+        if(event.data.mustNotArrive)document.body.setAttribute('data-wrong-origin','true');
+        if(event.data.reply)document.body.setAttribute('data-reply',String(event.source===frame.contentWindow));
+        if(event.data.map){{
+          const clone=event.data.map instanceof Map && event.data.map.get('answer')===42 && event.data.cycle.self===event.data.cycle;
+          document.body.setAttribute('data-details',JSON.stringify([event.data.blocked,event.data.localFunctions,event.data.nullFrameElement]));
+          document.body.setAttribute('data-blocked',String(event.data.blocked && event.data.localFunctions && event.data.nullFrameElement));
+          document.body.setAttribute('data-clone',String(clone));
+          document.body.setAttribute('data-source',String(event.source===frame.contentWindow));
+          const denied=frame.__realm===undefined;
+          document.body.setAttribute('data-native-denied',String(denied));
+          document.body.setAttribute('data-content-document',String(frame.contentDocument===null));
+          event.source.postMessage('reply','*');
+        }}
+      }};
+      frame.src='http://127.0.0.1:{port}/child';
+    "#
+    );
+    let html = render_page("<body></body>", "http://127.0.0.1:1/parent", &script)
+        .await
+        .unwrap();
+    for key in [
+        "blocked",
+        "clone",
+        "source",
+        "native-denied",
+        "content-document",
+        "reply",
+    ] {
+        assert!(
+            html.contains(&format!("data-{key}=\"true\"")),
+            "{key}: {html}"
+        );
+    }
+    assert!(!html.contains("data-wrong-origin"), "{html}");
+}
+
+#[tokio::test]
+async fn child_imports_preserve_realm_authority_through_eval_function_and_source_url() {
+    #[cfg(not(turbo_surf_native_proxy))]
+    let child = r#"<script>
+      const code='import("data:text/javascript,export const leaked=globalThis")';
+      Promise.all([
+        import('data:text/javascript,export const leaked=globalThis'),
+        eval(code+'\n//# sourceURL=http://127.0.0.1:1/parent'),
+        Function('return '+code+';\n//# sourceURL=http://127.0.0.1:1/parent')(),
+      ].map(p=>p.then(()=>false,error=>/child frames are not supported/.test(error.message))))
+       .then(results=>parent.postMessage({importsSafe:results.every(Boolean)},'*'));
+    </script>"#;
+    #[cfg(turbo_surf_native_proxy)]
+    let child = r#"<script>
+      const url=new URL('/owned.mjs',location.href).href;
+      const code='import('+JSON.stringify(url)+')';
+      const spoof='\n//# sourceURL=http://127.0.0.1:1/parent';
+      const attempts=[import(url),eval(code+spoof),Function('return '+code+';'+spoof)()];
+      const data='import("data:text/javascript,export const leaked=globalThis")';
+      const denied=[import('data:text/javascript,export const leaked=globalThis'),eval(data+spoof),Function('return '+data+';'+spoof)()];
+      Promise.all([
+        Promise.all(attempts).then(modules=>modules.every(module=>module.owner===globalThis && module.doc===document && module.array===Array && module.blocked && module.source===url) && modules.every(module=>module===modules[0]) && globalThis.moduleRuns===1),
+        Promise.all(denied.map(p=>p.then(()=>false,error=>error instanceof TypeError && /not an allowed HTTP URL/.test(error.message)))).then(results=>results.every(Boolean)),
+      ]).then(results=>parent.postMessage({importsSafe:results.every(Boolean)},'*'));
+    </script>"#;
+    let port = spawn_paths_js_server(&[
+        ("/child", child),
+        ("/owned.mjs", r#"globalThis.moduleRuns=(globalThis.moduleRuns||0)+1;
+          export const owner=globalThis,doc=document,array=Array,source=import.meta.url;
+          let denied=false;try{parent.document.body;}catch(error){denied=error.name==='SecurityError';}
+          export const blocked=denied;"#),
+    ]).await;
+    let html=render_page("<body></body>","http://127.0.0.1:1/parent",&format!("globalThis.parentOnly='parent';onmessage=e=>document.body.setAttribute('data-imports',String(e.data.importsSafe && globalThis.moduleRuns===undefined && globalThis.parentOnly==='parent'));const f=document.createElement('iframe');document.body.appendChild(f);f.src='http://127.0.0.1:{port}/child';")).await.unwrap();
+    assert!(html.contains("data-imports=\"true\""), "{html}");
+}
+
+#[tokio::test]
+async fn frame_loader_rejects_guest_parser_code_and_forged_owners() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let parent_port = listener.local_addr().unwrap().port();
+    let attacker_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let attacker_port = attacker_listener.local_addr().unwrap().port();
+    let parent_task = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut buffer = [0; 4096];
+            let _ = stream.read(&mut buffer).await;
+            let body = "<script>top.document.body.setAttribute('data-trusted','true');</script>";
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            let _ = stream.write_all(response.as_bytes()).await;
+        }
+    });
+    let attacker_task = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = attacker_listener.accept().await {
+            let mut buffer = [0; 4096];
+            let _ = stream.read(&mut buffer).await;
+            let body = format!(
+                r#"<script>
+              const original=RegExp.prototype.exec;
+              RegExp.prototype.exec=function(input){{
+                const match=original.call(this,input);
+                if(match && this.source.startsWith('<script'))match[2]="top.document.body.setAttribute('data-escaped','true')";
+                return match;
+              }};
+              const forged=document.createElement('iframe');document.body.appendChild(forged);
+              forged.__ownerWin=top;
+              forged.srcdoc='<script>top.document.body.setAttribute("data-forged","true")<'+ '/script>';
+              const nested=document.createElement('iframe');document.body.appendChild(nested);
+              nested.onload=()=>parent.postMessage({{finished:true}},'*');
+              nested.src='http://127.0.0.1:{parent_port}/target';
+            </script>"#
+            );
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            let _ = stream.write_all(response.as_bytes()).await;
+        }
+    });
+    let html = render_page(
+        "<body></body>",
+        &format!("http://127.0.0.1:{parent_port}/parent"),
+        &format!("onmessage=e=>{{if(e.data.finished)document.body.setAttribute('data-finished','true')}};const f=document.createElement('iframe');document.body.appendChild(f);f.src='http://127.0.0.1:{attacker_port}/attacker';"),
+    ).await.unwrap();
+    parent_task.abort();
+    attacker_task.abort();
+    assert!(html.contains("data-finished=\"true\""), "{html}");
+    assert!(html.contains("data-trusted=\"true\""), "{html}");
+    assert!(!html.contains("data-escaped"), "{html}");
+    assert!(!html.contains("data-forged"), "{html}");
+}
+
+#[tokio::test]
+async fn frame_scripts_use_native_html_parsing_and_browser_lifecycle_order() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buffer = [0; 4096];
+                let count = stream.read(&mut buffer).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buffer[..count]);
+                let path = request.split_whitespace().nth(1).unwrap_or("/");
+                let (kind, body) = match path {
+                    "/child" => ("text/html", "<html><head><base href=/assets/>\n<script data-note='é🙂 >'>window.order=['inline:'+document.readyState];window.inlineStack=new Error('located').stack;document.addEventListener('DOMContentLoaded',()=>order.push('dcl:'+document.readyState));window.onload=()=>{order.push('load:'+document.readyState);parent.postMessage({order,stack:inlineStack},'*')};</script>\n<script defer src=defer.js type=text/javascript></script>\n<script src=block.js></script>\n<script async src=async.js></script>\n<script type=application/json>top.document.body.setAttribute('data-json','ran')</script>\n<script nomodule>top.document.body.setAttribute('data-nomodule','ran')</script>\n<template><script>top.document.body.setAttribute('data-template','ran')</script></template></head><body></body></html>"),
+                    "/assets/block.js" => ("application/javascript", "order.push('block:'+document.readyState);"),
+                    "/assets/defer.js" => ("application/javascript", "order.push('defer:'+document.readyState);"),
+                    "/assets/async.js" => {
+                        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                        ("application/javascript", "order.push('async:'+document.readyState);")
+                    },
+                    _ => ("text/plain", "wrong script path"),
+                };
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    let html = render_page("<body></body>", &format!("http://127.0.0.1:{port}/parent"), "onmessage=e=>{document.body.setAttribute('data-order',e.data.order.join(','));document.body.setAttribute('data-location',String(e.data.stack.includes('/child:2:')))};const f=document.createElement('iframe');document.body.appendChild(f);f.src='/child';").await.unwrap();
+    task.abort();
+    assert!(html.contains("data-order=\"inline:loading,block:loading,defer:interactive,dcl:interactive,async:interactive,load:complete\""), "{html}");
+    assert!(html.contains("data-location=\"true\""), "{html}");
+    for skipped in ["data-json", "data-nomodule", "data-template"] {
+        assert!(!html.contains(skipped), "{skipped}: {html}");
+    }
+}
+
+#[cfg(not(turbo_surf_native_proxy))]
+#[tokio::test]
+async fn frame_navigation_retains_the_old_blank_realm_without_exposing_the_replacement() {
+    let port = spawn_paths_js_server(&[("/child", "<body data-secret=remote><script>window.remoteSecret='remote';parent.postMessage({loaded:true},'*');</script></body>")]).await;
+    let html = render_page("<body></body>", "http://127.0.0.1:1/parent", &format!(r#"
+        const frame=document.createElement('iframe');document.body.appendChild(frame);
+        const oldWindow=frame.contentWindow;
+        const oldDocument=oldWindow.document;
+        const oldFunction=oldWindow.Function;
+        oldDocument.body.setAttribute('data-retained','old');
+        oldWindow.setTimeout(()=>parent.document.body.setAttribute('data-old-timer','ran'),100000);
+        window.onmessage=e=>{{if(!e.data.loaded)return;
+          const current=frame.contentWindow;
+          let blocked=false;try{{current.document.body}}catch(error){{blocked=/SecurityError|denied|access/i.test(error.name+' '+error.message)}}
+          document.body.setAttribute('data-blocked',String(blocked));
+          document.body.setAttribute('data-identity',String(oldWindow===current));
+          document.body.setAttribute('data-old-document',String(oldWindow.document===oldDocument && oldDocument.body.getAttribute('data-retained')==='old'));
+          document.body.setAttribute('data-old-function',String(oldFunction('return globalThis.remoteSecret')()===undefined));
+          oldDocument.body.setAttribute('data-mutated','old-again');
+          const script=oldDocument.createElement('script');script.textContent="parent.document.body.setAttribute('data-old-script','ran')";oldDocument.body.appendChild(script);
+          const retiredChild=oldFunction("return document.body.appendChild(document.createElement('iframe')).contentWindow")()===null;
+          document.body.setAttribute('data-retired-child',String(retiredChild));
+          document.body.setAttribute('data-new-isolation',String(oldFunction('return globalThis.document.body.getAttribute("data-secret")')()===null));
+        }};
+        frame.src='http://127.0.0.1:{port}/child';
+    "#)).await.unwrap();
+    for key in [
+        "blocked",
+        "old-document",
+        "old-function",
+        "new-isolation",
+        "retired-child",
+    ] {
+        assert!(
+            html.contains(&format!("data-{key}=\"true\"")),
+            "{key}: {html}"
+        );
+    }
+    // Stable WindowProxy identity is an explicit remaining gap; old globals are
+    // isolated and retained rather than being repurposed for a new origin.
+    assert!(html.contains("data-identity=\"false\""), "{html}");
+    assert!(!html.contains("data-old-timer"), "{html}");
+    assert!(!html.contains("data-old-script"), "{html}");
+}
+
+#[tokio::test]
+async fn native_iframe_nodes_start_on_insertion_and_retire_on_removal() {
+    let fixture = include_str!("fixtures/iframe-lifecycle.html");
+    let mut page = PageSession::open(fixture, "http://localhost/frames", "", "", 5000)
+        .await
+        .unwrap();
+    let raw = page
+        .eval("globalThis.__RESULT=JSON.stringify(globalThis.__browserFixture)")
+        .await
+        .unwrap();
+    let values: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    for (key, value) in values.as_object().unwrap() {
+        assert_eq!(value, true, "{key}: {raw}");
+    }
+    assert_eq!(values.as_object().unwrap().len(), 14, "{raw}");
+    page.close();
+}
+
+#[tokio::test]
+async fn frame_in_shadow_tree_loads_and_markup_removal_discards_queued_work() {
+    let html = render_page("<body><div id=host></div></body>", "http://localhost/", r#"
+      const host=document.getElementById('host'), root=host.attachShadow({mode:'closed'});
+      const frame=document.createElement('iframe');
+      frame.srcdoc='<body><script>parent.document.body.setAttribute("data-shadow-loaded","true");<'+ '/script></body>';
+      root.appendChild(frame);
+      document.body.setAttribute('data-shadow-tree',String(root.querySelector('iframe')===frame && frame.isConnected && document.querySelector('iframe')===null));
+      const removable=document.createElement('iframe');document.body.appendChild(removable);
+      const old=removable.contentWindow;
+      old.setTimeout(()=>parent.document.body.setAttribute('data-retired-timer','ran'),10000);
+      removable.outerHTML='<p id=replacement>replaced</p>';
+      document.body.setAttribute('data-disconnected',String(removable.contentWindow===null && !removable.isConnected));
+    "#).await.unwrap();
+    for key in ["shadow-loaded", "shadow-tree", "disconnected"] {
+        assert!(
+            html.contains(&format!("data-{key}=\"true\"")),
+            "{key}: {html}"
+        );
+    }
+    assert!(!html.contains("data-retired-timer"), "{html}");
+}
+
+#[tokio::test]
+async fn initial_blank_iframe_globals_survive_load_and_srcdoc_commits_asynchronously() {
+    let mut page = PageSession::open("<body></body>", "http://localhost/", "", "", 5000)
+        .await
+        .unwrap();
+    page.eval(r#"
+      const blank=document.createElement('iframe');document.body.appendChild(blank);
+      const saved=blank.contentWindow;saved.eval('var retained=31');
+      const source=document.createElement('iframe');source.srcdoc='<body id=parsed></body>';document.body.appendChild(source);
+      const asynchronous=source.contentDocument.getElementById('parsed')===null;
+      globalThis.__RESULT=String(asynchronous);
+    "#).await.map(|result| assert_eq!(result,"true")).unwrap();
+    let result = page.eval("globalThis.__RESULT=String(blank.contentWindow===saved && saved.retained===31 && source.contentDocument.getElementById('parsed')!==null)").await.unwrap();
+    assert_eq!(result, "true");
+    page.close();
+}
+
+#[cfg(turbo_surf_native_proxy)]
+#[tokio::test]
+async fn frame_window_proxy_survives_same_and_cross_origin_document_replacements() {
+    let same_port = spawn_paths_js_server(&[(
+        "/same",
+        "<body data-page=same><script>parent.postMessage({loaded:true},'*');</script></body>",
+    )])
+    .await;
+    let cross_port = spawn_paths_js_server(&[(
+        "/cross",
+        "<body data-page=cross><script>parent.postMessage({loaded:true},'*');</script></body>",
+    )])
+    .await;
+    let mut page = PageSession::open(
+        "<body></body>",
+        &format!("http://127.0.0.1:{same_port}/parent"),
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval(&format!(
+        r#"
+      globalThis.frame=document.createElement('iframe');document.body.appendChild(frame);
+      globalThis.savedWindow=frame.contentWindow;globalThis.savedDocument=savedWindow.document;
+      globalThis.savedFunction=savedWindow.Function;
+      globalThis.savedCode=savedFunction('return document');
+      globalThis.savedGlobalCode=savedFunction('return globalThis.document');
+      savedDocument.body.setAttribute('data-old','retained');
+      savedWindow.setTimeout(()=>parent.document.body.setAttribute('data-old-timer','ran'),100000);
+      globalThis.messages=[];onmessage=e=>messages.push(e.source===savedWindow);
+      frame.src='http://127.0.0.1:{same_port}/same';
+    "#
+    ))
+    .await
+    .unwrap();
+    let same=page.eval(r#"globalThis.__RESULT=JSON.stringify({
+      identity:frame.contentWindow===savedWindow,
+      fresh:savedWindow.document!==savedDocument && savedWindow.document.body.getAttribute('data-page')==='same',
+      bare:savedFunction('return document')()===savedWindow.document,
+      global:savedFunction('return globalThis.document')()===savedWindow.document,
+      retained:savedDocument.body.getAttribute('data-old')==='retained',
+      metadata:savedDocument.URL==='about:blank',
+      sender:messages.length===1 && messages[0],
+      oldTimer:!document.body.hasAttribute('data-old-timer')
+    })"#).await.unwrap();
+    let same: serde_json::Value = serde_json::from_str(&same).unwrap();
+    for (key, value) in same.as_object().unwrap() {
+        assert_eq!(
+            value,
+            &serde_json::Value::Bool(true),
+            "same-origin {key}: {same}"
+        );
+    }
+    page.eval(&format!("frame.src='http://127.0.0.1:{cross_port}/cross';"))
+        .await
+        .unwrap();
+    let cross=page.eval(r#"globalThis.__RESULT=JSON.stringify({
+      identity:frame.contentWindow===savedWindow,
+      noDocument:frame.contentDocument===null,
+      functionDenied:(()=>{try{savedFunction('return document');return false}catch(e){return e.name==='TypeError'}})(),
+      compiledDenied:(()=>{try{savedCode();return false}catch(e){return e.name==='SecurityError'}})(),
+      compiledGlobalDenied:(()=>{try{savedGlobalCode();return false}catch(e){return e.name==='SecurityError'}})(),
+      prototype:Object.getPrototypeOf(savedWindow)===null,
+      self:savedWindow.self===savedWindow && savedWindow.window===savedWindow,
+      documentDenied:(()=>{try{savedWindow.document;return false}catch(e){return e.name==='SecurityError'}})(),
+      retained:savedDocument.body.getAttribute('data-old')==='retained',
+      ownKeys:Reflect.ownKeys(savedWindow).map(String).join(',')==='window,self,location,closed,frames,length,top,opener,parent,blur,close,focus,postMessage,then,Symbol(Symbol.toStringTag),Symbol(Symbol.hasInstance),Symbol(Symbol.isConcatSpreadable)',
+      messageIdentity:savedWindow.postMessage===savedWindow.postMessage && savedWindow.postMessage.constructor===Function,
+      immutable:(()=>{try{Object.setPrototypeOf(savedWindow,{});return false}catch(e){return e.name==='SecurityError'}})(),
+      metadata:savedDocument.URL==='about:blank',
+      sender:messages.length===2 && messages.every(Boolean)
+    })"#).await.unwrap();
+    let cross: serde_json::Value = serde_json::from_str(&cross).unwrap();
+    for (key, value) in cross.as_object().unwrap() {
+        assert_eq!(
+            value,
+            &serde_json::Value::Bool(true),
+            "cross-origin {key}: {cross}"
+        );
+    }
+    page.close();
+}
+
+#[cfg(turbo_surf_native_proxy)]
+#[tokio::test]
+async fn frame_cross_origin_location_is_restricted_and_navigates_from_the_caller_url() {
+    let parent_port = spawn_paths_js_server(&[
+        ("/parent/via-href", "<body data-nav=href></body>"),
+        ("/parent/via-replace", "<body data-nav=replace></body>"),
+        ("/parent/via-window", "<body data-nav=window></body>"),
+    ])
+    .await;
+    let child_port = spawn_paths_js_server(&[("/cross", "<body data-cross=true></body>")]).await;
+    let mut page = PageSession::open(
+        "<body></body>",
+        &format!("http://127.0.0.1:{parent_port}/parent/dir/page"),
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval(&format!(
+        r#"
+        globalThis.frame=document.createElement('iframe');document.body.append(frame);
+        globalThis.proxy=frame.contentWindow;globalThis.oldDoc=frame.contentDocument;
+        globalThis.oldLocation=proxy.location;
+        proxy.setTimeout(()=>parent.document.body.setAttribute('data-retired','ran'),100000);
+        frame.src='http://127.0.0.1:{child_port}/cross';
+    "#
+    ))
+    .await
+    .unwrap();
+    let probe=page.eval(r#"globalThis.__RESULT=JSON.stringify((()=>{
+      const loc=proxy.location, security=fn=>{try{fn();return false}catch(e){return e instanceof DOMException&&e.name==='SecurityError'&&e.code===18}}, typeError=fn=>{try{fn();return false}catch(e){return e instanceof TypeError}};
+      const href=Object.getOwnPropertyDescriptor(loc,'href'), replace=Object.getOwnPropertyDescriptor(loc,'replace'), windowLocation=Object.getOwnPropertyDescriptor(proxy,'location');
+      return {identity:loc===proxy.location&&loc!==oldLocation,prototype:Object.getPrototypeOf(loc)===null,
+        keys:Reflect.ownKeys(loc).map(String).join(',')==='href,replace,then,Symbol(Symbol.toStringTag),Symbol(Symbol.hasInstance),Symbol(Symbol.isConcatSpreadable)',
+        enumerable:Object.keys(loc).length===0,href:security(()=>loc.href),origin:security(()=>loc.origin),assign:security(()=>loc.assign),reload:security(()=>loc.reload),string:security(()=>String(loc)),
+        replace:typeof loc.replace==='function'&&loc.replace===loc.replace&&loc.replace.constructor===Function,
+        hrefDescriptor:href.get===undefined&&href.set.name==='set href'&&!href.enumerable&&href.configurable,
+        replaceDescriptor:replace.value===loc.replace&&!replace.writable&&!replace.enumerable&&replace.configurable,
+        windowDescriptor:windowLocation.get.name==='get location'&&windowLocation.set.name==='set location'&&!windowLocation.enumerable&&windowLocation.configurable,
+        windowEnumeration:Object.keys(proxy).length===0,
+        windowAccessors:['window','self','closed','frames','length','top','opener','parent'].every(name=>{const d=Object.getOwnPropertyDescriptor(proxy,name);return d.get.name==='get '+name&&!d.enumerable&&d.configurable&&d.get.call(proxy)===proxy[name]&&d.get.constructor===Function}),
+        windowMethods:['blur','close','focus','postMessage','then'].every(name=>{const d=Object.getOwnPropertyDescriptor(proxy,name);return d.value===proxy[name]&&!d.writable&&!d.enumerable&&d.configurable}),
+        has:'href' in loc,delete:security(()=>delete loc.href),define:security(()=>Object.defineProperty(loc,'href',{value:'x'})),immutable:security(()=>Object.setPrototypeOf(loc,{})),
+        illegalReceiver:typeError(()=>loc.replace.call({},'/ignored')),requiredArgument:typeError(()=>loc.replace()),
+        oldView:oldDoc.defaultView===null,retired:!document.body.hasAttribute('data-retired')};
+    })())"#).await.unwrap();
+    let value: serde_json::Value = serde_json::from_str(&probe).unwrap();
+    for (key, value) in value.as_object().unwrap() {
+        assert_eq!(value, true, "{key}: {probe}");
+    }
+    for (method, path) in [
+        ("href='../via-href'", "via-href"),
+        ("replace('../via-replace')", "via-replace"),
+    ] {
+        page.eval(&format!("frame.src='http://127.0.0.1:{child_port}/cross';"))
+            .await
+            .unwrap();
+        page.eval(&format!("proxy.location.{method};"))
+            .await
+            .unwrap();
+        let url = page
+            .eval("globalThis.__RESULT=frame.contentDocument.URL")
+            .await
+            .unwrap();
+        assert_eq!(url, format!("http://127.0.0.1:{parent_port}/parent/{path}"));
+    }
+    page.eval(&format!("frame.src='http://127.0.0.1:{child_port}/cross';"))
+        .await
+        .unwrap();
+    page.eval("proxy.location='../via-window';").await.unwrap();
+    assert_eq!(
+        page.eval("globalThis.__RESULT=frame.contentDocument.URL")
+            .await
+            .unwrap(),
+        format!("http://127.0.0.1:{parent_port}/parent/via-window")
+    );
+    page.eval("frame.removeAttribute('src');").await.unwrap();
+    assert_eq!(page.eval("globalThis.__RESULT=String(frame.contentWindow===proxy&&frame.contentDocument.URL==='about:blank'&&oldDoc.defaultView===null)").await.unwrap(),"true");
+    page.close();
+}
+
+#[tokio::test]
+async fn frame_indices_track_browsing_context_connection_order_and_moves_retire_callbacks() {
+    let mut page = PageSession::open("<body></body>", "http://localhost/", "", "", 5000)
+        .await
+        .unwrap();
+    page.eval(r#"
+      globalThis.a=document.createElement('iframe');globalThis.b=document.createElement('iframe');
+      document.body.append(a,b);globalThis.aw=a.contentWindow;globalThis.bw=b.contentWindow;
+      globalThis.initial=window[0]===aw&&window[1]===bw;
+      bw.setTimeout(()=>parent.document.body.setAttribute('data-old-moved-timer','ran'),100000);
+      document.body.insertBefore(b,a);
+      globalThis.moved=b.contentWindow!==bw&&a.contentWindow===aw;
+      globalThis.order=window[0]===a.contentWindow&&window[1]===b.contentWindow;
+      const host=document.createElement('div');document.body.append(host);const root=host.attachShadow({mode:'closed'});
+      globalThis.shadow=document.createElement('iframe');root.append(shadow);
+    "#).await.unwrap();
+    let probe=page.eval("globalThis.__RESULT=JSON.stringify({initial,moved,order,shadow:shadow.contentWindow!==null&&window.length===2&&window[2]===undefined,retired:!document.body.hasAttribute('data-old-moved-timer')})").await.unwrap();
+    let value: serde_json::Value = serde_json::from_str(&probe).unwrap();
+    for (key, value) in value.as_object().unwrap() {
+        assert_eq!(value, true, "{key}: {probe}");
+    }
+    page.close();
+}
+
+#[tokio::test]
+async fn frame_sandbox_origin_and_script_policy_use_native_context_state() {
+    let mut page = PageSession::open(
+        "<body></body>",
+        "http://localhost/parent",
+        "parent_cookie=1",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval("globalThis.messages=[];window.addEventListener('message',event=>messages.push({origin:event.origin,data:event.data}));").await.unwrap();
+    for (sandbox, opaque, scripts) in [
+        (None, false, true),
+        (Some(""), true, false),
+        (Some("allow-scripts"), true, true),
+        (Some("allow-same-origin"), false, false),
+        (Some("allow-scripts allow-same-origin"), false, true),
+    ] {
+        let setup = format!(
+            r#"
+          (()=>{{globalThis.frame=document.createElement('iframe');
+          const sandbox={};if(sandbox!==null)frame.setAttribute('sandbox',sandbox);
+          frame.srcdoc='<body><script>const capture=fn=>{{try{{return {{value:fn()}}}}catch(e){{return {{error:e.name,code:e.code}}}}}};document.body.setAttribute("data-ran","true");parent.postMessage({{origin:origin,locationOrigin:location.origin,url:document.URL,parent:capture(()=>parent.document.URL),cookie:capture(()=>document.cookie),storage:capture(()=>localStorage.length)}},"*");<'+ '/script></body>';
+          document.body.append(frame);
+          globalThis.initialAccessible=frame.contentDocument!==null;
+          globalThis.initialEval=null;try{{initialEval=frame.contentWindow.eval('1+1')}}catch(e){{initialEval=e.name}}
+          }})();
+        "#,
+            serde_json::to_string(&sandbox).unwrap()
+        );
+        page.eval(&setup).await.unwrap();
+        let raw=page.eval("globalThis.__RESULT=JSON.stringify({initialAccessible,initialEval,accessible:frame.contentDocument!==null,messages})").await.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["initialAccessible"], !opaque, "{sandbox:?}: {raw}");
+        assert_eq!(value["accessible"], !opaque, "{sandbox:?}: {raw}");
+        assert_eq!(
+            value["initialEval"],
+            if opaque {
+                serde_json::json!("SecurityError")
+            } else {
+                serde_json::json!(2)
+            },
+            "{sandbox:?}: {raw}"
+        );
+        let messages = value["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), usize::from(scripts), "{sandbox:?}: {raw}");
+        if scripts {
+            assert_eq!(
+                messages[0]["origin"],
+                if opaque { "null" } else { "http://localhost" },
+                "{raw}"
+            );
+            assert_eq!(messages[0]["data"]["locationOrigin"], "null", "{raw}");
+            assert_eq!(messages[0]["data"]["url"], "about:srcdoc", "{raw}");
+            if opaque {
+                for property in ["parent", "cookie", "storage"] {
+                    assert_eq!(
+                        messages[0]["data"][property]["error"], "SecurityError",
+                        "{property}: {raw}"
+                    );
+                    assert_eq!(messages[0]["data"][property]["code"], 18, "{raw}");
+                }
+            }
+        }
+        if !opaque && !scripts {
+            page.eval("const child=frame.contentWindow;const script=child.document.createElement('script');script.textContent='document.body.setAttribute(\"data-injected\",\"ran\")';child.document.body.append(script);").await.unwrap();
+            assert_eq!(page.eval("globalThis.__RESULT=String(!frame.contentDocument.body.hasAttribute('data-injected'))").await.unwrap(),"true");
+        }
+        page.eval("frame.remove();messages.length=0;")
+            .await
+            .unwrap();
+    }
+    page.eval(r#"globalThis.frame=document.createElement('iframe');frame.src='data:text/html,'+encodeURIComponent('<script>parent.postMessage({origin:origin,locationOrigin:location.origin,url:document.URL},"*")<'+ '/script>');document.body.append(frame);"#).await.unwrap();
+    let raw=page.eval("globalThis.__RESULT=JSON.stringify({accessible:frame.contentDocument!==null,messages})").await.unwrap();
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(value["accessible"], false, "{raw}");
+    assert_eq!(value["messages"].as_array().unwrap().len(), 1, "{raw}");
+    assert_eq!(value["messages"][0]["origin"], "null", "{raw}");
+    assert!(
+        value["messages"][0]["data"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:text/html,"),
+        "{raw}"
+    );
+    page.close();
+}
+
+#[cfg(turbo_surf_native_proxy)]
+#[tokio::test]
+async fn frame_native_location_reseeds_pooled_pages_and_reads_components() {
+    for base in [
+        "http://localhost:8010/one?x=1#first",
+        "https://example.test/two?y=2#second",
+        "http://localhost:8020/three",
+    ] {
+        let script = format!(
+            r#"(()=>{{const url=new URL({base:?});const descriptor=Object.getOwnPropertyDescriptor(window,'location');
+          document.body.setAttribute('data-location',String(location instanceof Location&&descriptor.get.name==='get location'&&descriptor.set.name==='set location'&&location.href===url.href&&location.origin===url.origin&&location.host===url.host&&location.pathname===url.pathname&&location.search===url.search&&location.hash===url.hash));
+          const frame=document.createElement('iframe');document.body.append(frame);const child=frame.contentWindow,origins=child.location.ancestorOrigins;
+          document.body.setAttribute('data-child',String(child.location.href==='about:blank'&&child.location.origin==='null'&&Object.prototype.toString.call(child.location)==='[object Location]'&&origins instanceof child.DOMStringList&&!Array.isArray(origins)&&origins.length===1&&origins[0]===url.origin&&origins.item(0)===url.origin&&origins.item(999)===null&&origins.contains(url.origin)&&DOMStringList.prototype.item.call(origins,0)===url.origin&&location.ancestorOrigins.length===0));}})();"#
+        );
+        let html = render_page_pooled("<body></body>", base, &script, DEFAULT_RENDER_BUDGET_MS)
+            .await
+            .unwrap();
+        assert!(html.contains("data-location=\"true\""), "{base}: {html}");
+        assert!(html.contains("data-child=\"true\""), "{base}: {html}");
+    }
 }

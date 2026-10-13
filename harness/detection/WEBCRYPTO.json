@@ -1,0 +1,2219 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-13T18:24:24.908Z",
+  "scope": "Same authored localhost fixture; no Google scripts, cookies or private key material. Algorithm support, public key metadata, behavioral roundtrip booleans and public known-answer digests.",
+  "profile": {
+    "chrome": "Chrome/155.0.8059.40",
+    "chromeV8": "15.5.35.20",
+    "nativeSdk": "default150.4",
+    "denoCrypto": "0.273.0",
+    "denoCryptoProvider": "0.53.0",
+    "collector": "webcrypto-probe.js"
+  },
+  "summary": {
+    "operationNameQueries": 210,
+    "parameterQueries": 14,
+    "remainingDifferences": 1,
+    "supportedKemRoundtrips": ["ML-KEM-768", "ML-KEM-1024"],
+    "profileRejectedKem": "ML-KEM-512"
+  },
+  "differences": [
+    {
+      "path": ".parameters.hybridKem.value",
+      "chrome": true,
+      "native": false
+    }
+  ],
+  "chrome": {
+    "supports": {
+      "digest": {
+        "SHA-256": {
+          "promise": false,
+          "value": true
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": true
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": true
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": true
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "generateKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": true
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "importKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": true
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": true
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "exportKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "sign": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": true
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "verify": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": true
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "encrypt": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "decrypt": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "deriveBits": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "deriveKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "getPublicKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": true
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": true
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "encapsulateBits": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "decapsulateBits": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "encapsulateKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "decapsulateKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      }
+    },
+    "parameters": {
+      "aesGenerate": {
+        "promise": false,
+        "value": true
+      },
+      "aesBadLength": {
+        "promise": false,
+        "value": false
+      },
+      "aesEncrypt": {
+        "promise": false,
+        "value": true
+      },
+      "aesBadTag": {
+        "promise": false,
+        "value": false
+      },
+      "hmacGenerate": {
+        "promise": false,
+        "value": true
+      },
+      "rsaGenerate": {
+        "promise": false,
+        "value": true
+      },
+      "rsaSign": {
+        "promise": false,
+        "value": true
+      },
+      "ecGenerate": {
+        "promise": false,
+        "value": true
+      },
+      "ecSign": {
+        "promise": false,
+        "value": true
+      },
+      "kemTarget": {
+        "promise": false,
+        "value": true
+      },
+      "mlDsa": {
+        "promise": false,
+        "value": true
+      },
+      "hybridKem": {
+        "promise": false,
+        "value": true
+      },
+      "chacha": {
+        "promise": false,
+        "value": true
+      },
+      "backendOnly": {
+        "promise": false,
+        "value": false
+      }
+    },
+    "shape": {
+      "getPublicKey": {
+        "length": 2,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      },
+      "encapsulateBits": {
+        "length": 2,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      },
+      "decapsulateBits": {
+        "length": 3,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      },
+      "encapsulateKey": {
+        "length": 5,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      },
+      "decapsulateKey": {
+        "length": 6,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      }
+    },
+    "ed": {
+      "publicPromise": true,
+      "privateKey": {
+        "tag": "[object CryptoKey]",
+        "type": "private",
+        "extractable": false,
+        "algorithm": {
+          "name": "Ed25519"
+        },
+        "usages": ["sign"]
+      },
+      "publicKey": {
+        "tag": "[object CryptoKey]",
+        "type": "public",
+        "extractable": true,
+        "algorithm": {
+          "name": "Ed25519"
+        },
+        "usages": ["verify"]
+      },
+      "verify": true,
+      "samePublic": true,
+      "privateExport": {
+        "error": "InvalidAccessError"
+      },
+      "publicArgument": {
+        "error": "InvalidAccessError"
+      }
+    },
+    "kem": {
+      "ML-KEM-512": {
+        "error": "NotSupportedError",
+        "message": "Failed to execute 'generateKey' on 'SubtleCrypto': Algorithm: Unrecognized name"
+      },
+      "ML-KEM-768": {
+        "privateKey": {
+          "tag": "[object CryptoKey]",
+          "type": "private",
+          "extractable": false,
+          "algorithm": {
+            "name": "ML-KEM-768"
+          },
+          "usages": ["decapsulateKey", "decapsulateBits"]
+        },
+        "publicKey": {
+          "tag": "[object CryptoKey]",
+          "type": "public",
+          "extractable": true,
+          "algorithm": {
+            "name": "ML-KEM-768"
+          },
+          "usages": ["encapsulateKey", "encapsulateBits"]
+        },
+        "bitsKeys": ["ciphertext", "sharedKey"],
+        "ciphertextBytes": 1088,
+        "secretBytes": 32,
+        "bitsMatch": true,
+        "keyPromise": true,
+        "decapsulatePromise": true,
+        "keyKeys": ["ciphertext", "sharedKey"],
+        "secretKey": {
+          "tag": "[object CryptoKey]",
+          "type": "secret",
+          "extractable": true,
+          "algorithm": {
+            "name": "AES-GCM",
+            "length": 256
+          },
+          "usages": ["encrypt", "decrypt"]
+        },
+        "keyMatch": true
+      },
+      "ML-KEM-1024": {
+        "privateKey": {
+          "tag": "[object CryptoKey]",
+          "type": "private",
+          "extractable": false,
+          "algorithm": {
+            "name": "ML-KEM-1024"
+          },
+          "usages": ["decapsulateKey", "decapsulateBits"]
+        },
+        "publicKey": {
+          "tag": "[object CryptoKey]",
+          "type": "public",
+          "extractable": true,
+          "algorithm": {
+            "name": "ML-KEM-1024"
+          },
+          "usages": ["encapsulateKey", "encapsulateBits"]
+        },
+        "bitsKeys": ["ciphertext", "sharedKey"],
+        "ciphertextBytes": 1568,
+        "secretBytes": 32,
+        "bitsMatch": true,
+        "keyPromise": true,
+        "decapsulatePromise": true,
+        "keyKeys": ["ciphertext", "sharedKey"],
+        "secretKey": {
+          "tag": "[object CryptoKey]",
+          "type": "secret",
+          "extractable": true,
+          "algorithm": {
+            "name": "AES-GCM",
+            "length": 256
+          },
+          "usages": ["encrypt", "decrypt"]
+        },
+        "keyMatch": true
+      }
+    },
+    "digest": {
+      "SHA-1": "a9993e364706816aba3e25717850c26c9cd0d89d",
+      "SHA-256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "SHA-384": "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7",
+      "SHA-512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+    }
+  },
+  "native": {
+    "supports": {
+      "digest": {
+        "SHA-256": {
+          "promise": false,
+          "value": true
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": true
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": true
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": true
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "generateKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": true
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "importKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": true
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": true
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "exportKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "sign": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": true
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "verify": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": true
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "encrypt": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "decrypt": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "deriveBits": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "deriveKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "getPublicKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": true
+        },
+        "X25519": {
+          "promise": false,
+          "value": true
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": true
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "encapsulateBits": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "decapsulateBits": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "encapsulateKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      },
+      "decapsulateKey": {
+        "SHA-256": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-384": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-512": {
+          "promise": false,
+          "value": false
+        },
+        "SHA-1": {
+          "promise": false,
+          "value": false
+        },
+        "AES-GCM": {
+          "promise": false,
+          "value": false
+        },
+        "HMAC": {
+          "promise": false,
+          "value": false
+        },
+        "Ed25519": {
+          "promise": false,
+          "value": false
+        },
+        "X25519": {
+          "promise": false,
+          "value": false
+        },
+        "RSA-PSS": {
+          "promise": false,
+          "value": false
+        },
+        "ECDSA": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-512": {
+          "promise": false,
+          "value": false
+        },
+        "ML-KEM-768": {
+          "promise": false,
+          "value": true
+        },
+        "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "unknown": {
+          "promise": false,
+          "value": false
+        }
+      }
+    },
+    "parameters": {
+      "aesGenerate": {
+        "promise": false,
+        "value": true
+      },
+      "aesBadLength": {
+        "promise": false,
+        "value": false
+      },
+      "aesEncrypt": {
+        "promise": false,
+        "value": true
+      },
+      "aesBadTag": {
+        "promise": false,
+        "value": false
+      },
+      "hmacGenerate": {
+        "promise": false,
+        "value": true
+      },
+      "rsaGenerate": {
+        "promise": false,
+        "value": true
+      },
+      "rsaSign": {
+        "promise": false,
+        "value": true
+      },
+      "ecGenerate": {
+        "promise": false,
+        "value": true
+      },
+      "ecSign": {
+        "promise": false,
+        "value": true
+      },
+      "kemTarget": {
+        "promise": false,
+        "value": true
+      },
+      "mlDsa": {
+        "promise": false,
+        "value": true
+      },
+      "hybridKem": {
+        "promise": false,
+        "value": false
+      },
+      "chacha": {
+        "promise": false,
+        "value": true
+      },
+      "backendOnly": {
+        "promise": false,
+        "value": false
+      }
+    },
+    "shape": {
+      "getPublicKey": {
+        "length": 2,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      },
+      "encapsulateBits": {
+        "length": 2,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      },
+      "decapsulateBits": {
+        "length": 3,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      },
+      "encapsulateKey": {
+        "length": 5,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      },
+      "decapsulateKey": {
+        "length": 6,
+        "invalid": {
+          "error": "TypeError"
+        },
+        "missing": {
+          "error": "TypeError"
+        }
+      }
+    },
+    "ed": {
+      "publicPromise": true,
+      "privateKey": {
+        "tag": "[object CryptoKey]",
+        "type": "private",
+        "extractable": false,
+        "algorithm": {
+          "name": "Ed25519"
+        },
+        "usages": ["sign"]
+      },
+      "publicKey": {
+        "tag": "[object CryptoKey]",
+        "type": "public",
+        "extractable": true,
+        "algorithm": {
+          "name": "Ed25519"
+        },
+        "usages": ["verify"]
+      },
+      "verify": true,
+      "samePublic": true,
+      "privateExport": {
+        "error": "InvalidAccessError"
+      },
+      "publicArgument": {
+        "error": "InvalidAccessError"
+      }
+    },
+    "kem": {
+      "ML-KEM-512": {
+        "error": "NotSupportedError",
+        "message": "Failed to execute 'generateKey' on 'SubtleCrypto': Algorithm: Unrecognized name"
+      },
+      "ML-KEM-768": {
+        "privateKey": {
+          "tag": "[object CryptoKey]",
+          "type": "private",
+          "extractable": false,
+          "algorithm": {
+            "name": "ML-KEM-768"
+          },
+          "usages": ["decapsulateKey", "decapsulateBits"]
+        },
+        "publicKey": {
+          "tag": "[object CryptoKey]",
+          "type": "public",
+          "extractable": true,
+          "algorithm": {
+            "name": "ML-KEM-768"
+          },
+          "usages": ["encapsulateKey", "encapsulateBits"]
+        },
+        "bitsKeys": ["ciphertext", "sharedKey"],
+        "ciphertextBytes": 1088,
+        "secretBytes": 32,
+        "bitsMatch": true,
+        "keyPromise": true,
+        "decapsulatePromise": true,
+        "keyKeys": ["ciphertext", "sharedKey"],
+        "secretKey": {
+          "tag": "[object CryptoKey]",
+          "type": "secret",
+          "extractable": true,
+          "algorithm": {
+            "name": "AES-GCM",
+            "length": 256
+          },
+          "usages": ["encrypt", "decrypt"]
+        },
+        "keyMatch": true
+      },
+      "ML-KEM-1024": {
+        "privateKey": {
+          "tag": "[object CryptoKey]",
+          "type": "private",
+          "extractable": false,
+          "algorithm": {
+            "name": "ML-KEM-1024"
+          },
+          "usages": ["decapsulateKey", "decapsulateBits"]
+        },
+        "publicKey": {
+          "tag": "[object CryptoKey]",
+          "type": "public",
+          "extractable": true,
+          "algorithm": {
+            "name": "ML-KEM-1024"
+          },
+          "usages": ["encapsulateKey", "encapsulateBits"]
+        },
+        "bitsKeys": ["ciphertext", "sharedKey"],
+        "ciphertextBytes": 1568,
+        "secretBytes": 32,
+        "bitsMatch": true,
+        "keyPromise": true,
+        "decapsulatePromise": true,
+        "keyKeys": ["ciphertext", "sharedKey"],
+        "secretKey": {
+          "tag": "[object CryptoKey]",
+          "type": "secret",
+          "extractable": true,
+          "algorithm": {
+            "name": "AES-GCM",
+            "length": 256
+          },
+          "usages": ["encrypt", "decrypt"]
+        },
+        "keyMatch": true
+      }
+    },
+    "digest": {
+      "SHA-1": "a9993e364706816aba3e25717850c26c9cd0d89d",
+      "SHA-256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "SHA-384": "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7",
+      "SHA-512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+    }
+  }
+}

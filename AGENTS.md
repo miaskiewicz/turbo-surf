@@ -28,7 +28,10 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   `rust/playwright-shim/` (a drop-in `@playwright/test` façade over the
   `turbo-surf-napi` addon — Page/Locator/expect/context/fixtures, no browser;
   see its [`LIMITATIONS.md`](./rust/playwright-shim/LIMITATIONS.md)).
-- **Vendored, never hand-edit:** `rust/crates/turbo-surf-render/src/browser_env{.rs,_upstream.rs,.js}`
+- **Vendored, never hand-edit:** `rust/crates/turbo-surf-render/src/browser_env{.rs,_upstream.rs,.js}`, `src/cssom_parser.rs`, `src/html_documents.rs`, `src/document_basics.rs`, `src/document_basics.js`, `src/element_tokens.js`, `src/element_relations.js`,
+  `src/element_relations.rs`, `src/html_text.rs`, `src/html_text.js`,
+  `src/html_popover.js`, `src/collection_records.rs`, `src/css_policy.rs`, `src/event_handlers.rs`,
+  `src/dom_mutations.rs` and `src/browser_sanitizer_default.json`
   — re-vendor from turbo-test's committed HEAD via
   `rust/crates/turbo-surf-render/scripts/vendor-browser-env.sh`.
 
@@ -39,7 +42,8 @@ The engine gate is **Rust** (`cd rust`): `cargo test --workspace`, `cargo clippy
 (`.githooks/pre-commit`, wired by `npm run prepare`) lints/formats staged JS
 (oxlint + biome over the launcher/harness; the vendored `browser_env.js` is
 skipped). `npm run check` runs the JS lint/format + the Rust gate + the Playwright
-shim tests (`test:playwright` = `build:addon` then `test:shim` + `test:e2e`). Never
+shim tests (`test:playwright` = `build:addon` then `test:shim` + `test:e2e`) and
+the offline detection harness tests (`test:detection`). Never
 bypass with `--no-verify`.
 
 ## Testing rules
@@ -86,7 +90,8 @@ bypass with `--no-verify`.
 **Pushing a `v*` tag IS the publish** — see [PUBLISHING.md](./PUBLISHING.md) for the
 full checklist. In short: bump every version string to the SAME `X.Y.Z`
 (`package.json`, `rust/Cargo.toml` workspace + each crate's path-dep `version`,
-`core`/`mcp` `VERSION`, napi `version()` + its `package.json`, README status line),
+napi `package.json`, Python `pyproject.toml`, lockfile root versions, README status line;
+compiled core/MCP/NAPI/Python versions derive from `CARGO_PKG_VERSION`),
 green the gate (`cd rust && cargo test/clippy/fmt`), update `CHANGELOG.md`, commit
 `chore(release): vX.Y.Z`, tag, push. On the tag, `release.yml` builds the
 `turbo-surf-mcp` binary per platform and publishes the launcher npm package, and

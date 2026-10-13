@@ -31,7 +31,7 @@ use view::{Field, FieldType, QueryType, TextMode};
 mod enid;
 use enid::{EnidCache, EnidCookie};
 
-pub const VERSION: &str = "0.5.3";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // --- native-google SERP diagnostics (env-gated) ------------------------------
 // `TURBO_SURF_TRACE` (any non-empty, non-"0" value) turns on single-line `serp:`
@@ -245,6 +245,8 @@ pub struct Session {
     headers: BTreeMap<String, String>,
     jar: CookieJar,
     client_hints: ClientHints,
+    response_headers: Vec<(String, String)>,
+    browsing_storage: turbo_surf_render::BrowserStorage,
     /// "" / "no-js" = Lane A; "fast" / "secure" / "js" = render page JS after fetch.
     mode: String,
     /// Hydrated-HTML trail (one entry per render/inject), newest last.
@@ -354,6 +356,12 @@ impl Session {
     pub fn load(&mut self, url: &str, html: &str) {
         self.url = url.to_string();
         self.tree = Some(Tree::parse(html));
+        self.response_headers.clear();
+    }
+
+    fn load_response(&mut self, url: &str, html: &str, headers: Vec<(String, String)>) {
+        self.load(url, html);
+        self.response_headers = headers;
     }
 
     fn tree(&self) -> Result<&Tree, String> {
@@ -403,9 +411,9 @@ impl Session {
             consent_socs: self.consent_socs.clone(),
             ..Default::default()
         };
-        let res = fetch_html_with(url, opts).await?;
-        let (mut cur_url, mut cur_html, mut status) = res;
-        self.load(&cur_url, &cur_html);
+        let (mut cur_url, mut cur_html, mut status, headers) =
+            fetch_document_with(url, opts).await?;
+        self.load_response(&cur_url, &cur_html, headers);
         // If the response is a Google "Before you continue" consent interstitial,
         // replay its Accept-all form to earn the real trusted session (`NID`) into the
         // jar, then re-fetch — the synthetic `SOCS` un-hides the page, but only this
@@ -472,9 +480,9 @@ impl Session {
             consent_socs: self.consent_socs.clone(),
             ..Default::default()
         };
-        let res = fetch_html_with(&target, opts).await?;
-        self.load(&res.0, &res.1);
-        Ok(Some(res))
+        let (url, html, status, headers) = fetch_document_with(&target, opts).await?;
+        self.load_response(&url, &html, headers);
+        Ok(Some((url, html, status)))
     }
 
     // Detect an anti-bot wall on a just-fetched response and, if a solver is set,
@@ -532,9 +540,9 @@ impl Session {
             profile: Some(&profile),
             ..Default::default()
         };
-        let res = fetch_html_with(url, opts).await?;
-        self.load(&res.0, &res.1);
-        Ok(Some(res.2))
+        let (url, html, status, headers) = fetch_document_with(url, opts).await?;
+        self.load_response(&url, &html, headers);
+        Ok(Some(status))
     }
 
     // Mint a reCAPTCHA token in-isolate for `url` (optionally with an explicit
@@ -628,10 +636,7 @@ impl Session {
     // session from the hydrated HTML; appends to the DOM-history trail.
     async fn render_current(&mut self) -> Result<(), String> {
         let html = self.tree.as_ref().map(serialize_doc).unwrap_or_default();
-        let script = self.page_script().await;
-        let hydrated = self
-            .render_script(&html, &self.url.clone(), &script)
-            .await?;
+        let hydrated = self.render_script(&html, &self.url.clone(), "").await?;
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
         Ok(())
@@ -643,7 +648,7 @@ impl Session {
         base: &str,
         script: &str,
     ) -> Result<String, String> {
-        let (html, cookies) = turbo_surf_render::render_capture_cookies_with_request_state(
+        let (html, cookies) = turbo_surf_render::render_capture_cookies_with_browsing_state(
             html,
             base,
             self.ua.as_deref().unwrap_or(""),
@@ -651,6 +656,8 @@ impl Session {
             script,
             turbo_surf_render::DEFAULT_RENDER_BUDGET_MS,
             self.client_hints.clone(),
+            &self.response_headers,
+            self.browsing_storage.clone(),
         )
         .await?;
         self.jar = CookieJar::from_storage_state(&cookies);
@@ -754,7 +761,7 @@ impl Session {
         Ok(json!({ "ok": true }))
     }
 
-    // Generic human-interaction driver: play an ordered sequence of realistic, TRUSTED input
+    // Generic human-interaction driver: play an ordered sequence of scripted input
     // gestures on the CURRENT page — move (curved, browser-sampled ~12ms), click (down→dwell→up→
     // click), focus/blur (+focusin/out), human typing, hover (enter/leave/over/out), wait — then
     // reload the session from the hydrated result. Steps target CSS selectors (resolved in-page
@@ -809,14 +816,12 @@ impl Session {
         let steps_json = js_safe_json(&steps)?;
         let opts_json = js_safe_json(&Value::Object(opts))?;
         let driver = format!("({HUMAN_DRIVER_TMPL})({steps_json}, {opts_json})");
-        // Run the page's OWN scripts first (so its listeners — the interaction-gated JS this tool
-        // exists to trigger — are installed), then the synthesizer, then the driver. install_dom
-        // doesn't auto-run inline <script>, so page_script() supplies them (as render_current does).
-        let page = self.page_script().await;
+        // The render pipeline hydrates the original script elements under the page policy
+        // before running the host interaction driver. Keep module/nonce/source metadata intact.
         let html = serialize_doc(self.tree()?);
         let base = self.url.clone();
         let b = turbo_surf_render::SCRIPT_BOUNDARY;
-        let script = format!("{page}{b}{}{b}{driver}", turbo_surf_render::HUMAN_INPUT_JS);
+        let script = format!("{}{b}{driver}", turbo_surf_render::HUMAN_INPUT_JS);
         let hydrated = self.render_script(&html, &base, &script).await?;
         let completed = hydrated.contains("data-hi-done=");
         self.dom_history.push(hydrated.clone());
@@ -1286,6 +1291,17 @@ async fn fetch_html_with(
 ) -> Result<(String, String, u16), String> {
     let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
     Ok((res.final_url, res.html, res.status))
+}
+
+// Document responses retain final-hop policy headers across consent/challenge refetches.
+async fn fetch_document_with(
+    url: &str,
+    opts: FetchOptions<'_>,
+) -> Result<(String, String, u16, Vec<(String, String)>), String> {
+    let res = fetch_html(url, opts)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok((res.final_url, res.html, res.status, res.headers))
 }
 
 // The (width, height) in a PNG's IHDR (big-endian at bytes 16..24), so the
@@ -2853,12 +2869,12 @@ pub fn tools() -> Value {
         ),
         (
             "human_interact",
-            "Play a sequence of realistic, TRUSTED human input gestures on the CURRENT page \
+            "Play a sequence of scripted human input gestures on the CURRENT page \
              (goto first), then keep the hydrated result. Generic page-interaction driver: \
              string together move / click / focus / type / blur / wait steps — curved \
              browser-sampled (~12ms) mouse motion, a real mousedown→dwell→mouseup→click, \
              human-paced typing, hover (enter/leave) + focus/blur (+focusin/out), all \
-             isTrusted:true on the hi-res clock. Args: `steps` (array; each {move:{selector|\
+             script-dispatched and untrusted. Args: `steps` (array; each {move:{selector|\
              toX,toY}} | {click:selector|true} | {focus:selector} | {type:'…'} | {blur:true} | \
              {wait:ms}) OR `routine` (saved preset, e.g. 'google-serp') + `params` ({query:'…'}); \
              plus startDelay?/startJitter?. Events are dispatched in-isolate (no browser).",
@@ -3438,6 +3454,28 @@ mod tests {
 
     async fn call(s: &mut Session, name: &str, args: Value) -> Value {
         call_tool(s, name, &args).await.unwrap()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn render_preserves_response_policy_and_session_storage_across_navigation() {
+        let mut session = Session::default();
+        let headers = vec![(
+            "Content-Security-Policy".into(),
+            "script-src 'nonce-good'".into(),
+        )];
+        session.load_response("https://policy.test/first", "<body><script>document.body.setAttribute('data-denied','ran')</script><script nonce=good>localStorage.setItem('navigation','retained');document.body.setAttribute('data-allowed','ran')</script></body>", headers.clone());
+        session.render_current().await.unwrap();
+        let first = serialize_doc(session.tree().unwrap());
+        assert!(first.contains("data-allowed=\"ran\""), "{first}");
+        assert!(!first.contains("data-denied=\"ran\""), "{first}");
+        session.load_response("https://policy.test/second", "<body><script nonce=good>document.body.setAttribute('data-storage',localStorage.getItem('navigation'))</script></body>", headers);
+        session.render_current().await.unwrap();
+        let second = serialize_doc(session.tree().unwrap());
+        assert!(second.contains("data-storage=\"retained\""), "{second}");
+        session.load("https://policy.test/third", "<body><script>document.body.setAttribute('data-no-stale-policy','ran')</script></body>");
+        session.render_current().await.unwrap();
+        let third = serialize_doc(session.tree().unwrap());
+        assert!(third.contains("data-no-stale-policy=\"ran\""), "{third}");
     }
 
     // The generic human_interact tool plays a step sequence on the current page to completion

@@ -51,8 +51,7 @@ async fn presents_a_chrome_tls_and_http2_fingerprint() {
     assert!(ua.contains("Chrome/"), "unexpected UA: {ua}");
 
     // `emulate` pins the wire UA to `fingerprint::default_profile` so the reported
-    // version stays current even though wreq's bundled emulation lags a few Chrome
-    // versions behind. Regression guard: the on-wire UA must be exactly that pinned
+    // full patch version matches the browser registry. Regression guard: the on-wire UA must be exactly that pinned
     // identity (not wreq's older bundled UA), keeping every layer on one version.
     let expected_ua = turbo_surf_core::fingerprint::default_profile().user_agent;
     assert_eq!(
@@ -79,8 +78,7 @@ async fn presents_a_chrome_tls_and_http2_fingerprint() {
         .map(|h| h.split(':').next().unwrap_or_default().trim())
         .collect();
 
-    // 1. HEADERS-frame priority weight is Chrome's 256 (wire byte 255), not
-    //    wreq-util's stock 220 — closed via the vendored wreq-util patch.
+    // 1. The upstream Chrome154 profile sends priority weight256 (wire byte255).
     assert_eq!(
         headers_frame["priority"]["weight"].as_u64(),
         Some(256),

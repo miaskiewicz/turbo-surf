@@ -1,0 +1,18 @@
+<!doctype html><html><head>
+<style id="allowed" nonce="good">#sheet-target { opacity: 0.2; }</style>
+<style id="blocked">#sheet-target { opacity: 0.9; }</style>
+<script nonce="good">
+window.addEventListener('load',()=>{
+ const element=document.getElementById('inline-target'),sheetTarget=document.getElementById('sheet-target');
+ const result={allowedSheet:!!document.getElementById('allowed').sheet,blockedSheet:document.getElementById('blocked').sheet===null,sheetApplies:getComputedStyle(sheetTarget).opacity==='0.2',authored:element.getAttribute('style'),initialDeclaration:element.style.opacity,initialBlocked:getComputedStyle(element).opacity!=='0.25'};
+ element.style.opacity='0.5';result.cssom={attribute:element.getAttribute('style'),declaration:element.style.opacity,applies:getComputedStyle(element).opacity==='0.5'};
+ element.setAttribute('style','opacity:0.75');result.deniedAttribute={attribute:element.getAttribute('style'),declaration:element.style.opacity,applies:getComputedStyle(element).opacity==='0.5'};
+ const attr=element.getAttributeNode('style');attr.value='opacity:0.8';result.deniedAttrNode={attribute:attr.value,declaration:element.style.opacity,applies:getComputedStyle(element).opacity==='0.5'};
+ element.style.cssText='opacity: 0.6;';result.cssText={declaration:element.style.opacity,applies:getComputedStyle(element).opacity==='0.6'};
+ element.removeAttribute('style');result.removed=element.style.opacity==='';
+ const dynamic=document.createElement('style');dynamic.textContent='#sheet-target {opacity:0.8}';document.head.appendChild(dynamic);result.dynamicBlocked=dynamic.sheet===null;
+ dynamic.nonce='good';dynamic.textContent='#sheet-target {opacity:0.3}';result.dynamicNonce=!!dynamic.sheet&&getComputedStyle(sheetTarget).opacity==='0.3';
+ result.privateHooks=typeof globalThis.__writeAppliedInlineStyle==='undefined'&&typeof globalThis[Symbol.for('ts')]?.attachLinkedStyleSheet==='undefined';
+ globalThis.__browserFixture=result;document.body.setAttribute('data-browser-fixture','complete');
+});
+</script></head><body><div id="sheet-target"></div><div id="inline-target" style="opacity:0.25"></div></body></html>

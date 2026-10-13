@@ -13,6 +13,10 @@
 //! drops — otherwise a later drop on a dead isolate crashes. Every entry point
 //! resets on the way out.
 
+#[cfg(turbo_surf_native_proxy)]
+#[path = "window_proxy.rs"]
+mod window_proxy;
+
 use deno_core::{
     op2, resolve_import, v8, JsRuntime, ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse,
     ModuleLoader, ModuleResolveResponse, ModuleSource, ModuleSourceCode, ModuleSpecifier,
@@ -22,11 +26,55 @@ use deno_error::JsErrorBox;
 use std::cell::RefCell;
 use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
-use turbo_surf_core::net::{fetch_html, FetchOptions};
+use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
 use turbo_surf_core::request_context::{
     ClientHints, Credentials, Destination, RequestContext, RequestMode,
 };
 use turbo_surf_core::url::resolve;
+
+#[cfg(turbo_surf_native_proxy)]
+fn register_frame_modules(scope: &mut v8::PinScope, base: &str) -> Result<(), JsErrorBox> {
+    let context = scope.get_current_context();
+    if context
+        .get_slot::<FrameSandbox>()
+        .is_some_and(|policy| policy.scripts_blocked)
+    {
+        return Ok(());
+    }
+    let state = JsRuntime::op_state_from(scope);
+    let state = state.borrow();
+    let opaque_origin = window_is_opaque(scope, context);
+    let credentials = ModuleCredentials::default();
+    context.set_slot(Rc::new(credentials.clone()));
+    let cookie_site_is_opaque = frame_cookie_site_is_opaque(scope, context);
+    let loader = NetModuleLoader {
+        base: base.to_string(),
+        source: context
+            .get_slot::<FrameDocumentUrl>()
+            .map_or_else(|| state.borrow::<Base>().0.clone(), |url| url.0.clone()),
+        top_level_source: state.borrow::<Base>().0.clone(),
+        cookie_site_is_opaque,
+        opaque_origin,
+        jar: state.borrow::<Jar>().clone(),
+        ua: state.borrow::<Ua>().0.clone(),
+        client_hints: state.borrow::<ClientHints>().clone(),
+        inline_sources: state.borrow::<InlineModules>().clone(),
+        credentials,
+        csp: (*context
+            .get_slot::<CspHandle>()
+            .ok_or_else(|| JsErrorBox::generic("Frame CSP context unavailable"))?)
+        .clone(),
+        module_stages: state.borrow::<ModuleStages>().clone(),
+    };
+    drop(state);
+    if JsRuntime::register_module_context(scope, Rc::new(loader)) {
+        Ok(())
+    } else {
+        Err(JsErrorBox::generic(
+            "Native frame module context unavailable",
+        ))
+    }
+}
 
 /// Loads ES modules (a `<script type="module">`'s `import` graph) over the host net
 /// layer — the same path `op_fetch` uses — so a Next dev / turbopack build (served as
@@ -34,12 +82,320 @@ use turbo_surf_core::url::resolve;
 /// are same-origin + session-authenticated like page fetches.
 struct NetModuleLoader {
     base: String,
+    source: String,
+    top_level_source: String,
+    cookie_site_is_opaque: bool,
+    opaque_origin: bool,
     jar: Jar,
     ua: String,
     client_hints: ClientHints,
+    inline_sources: InlineModules,
+    credentials: ModuleCredentials,
+    csp: CspHandle,
+    #[cfg(turbo_surf_native_proxy)]
+    module_stages: ModuleStages,
+}
+
+#[derive(Clone, Default)]
+struct InlineModules(Rc<RefCell<std::collections::HashMap<String, InlineModule>>>);
+struct InlineModule {
+    code: String,
+    base: String,
+    #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
+    source: String,
+}
+
+#[derive(Clone)]
+struct CspHandle {
+    id: u32,
+    policy: Rc<RefCell<crate::csp::DocumentPolicy>>,
+}
+impl CspHandle {
+    fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(1);
+        Self {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            policy: Rc::new(RefCell::new(crate::csp::DocumentPolicy::new(
+                base, headers, html,
+            ))),
+        }
+    }
+}
+#[derive(Default)]
+struct CspContexts(std::collections::HashMap<u32, CspHandle>);
+#[op2(fast)]
+fn op_csp_context(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> u32 {
+    document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<CspHandle>())
+        .map_or(0, |handle| handle.id)
+}
+#[op2(fast)]
+fn op_csp_script(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    element: v8::Local<v8::Object>,
+    index: u32,
+    #[string] url: &str,
+    #[string] text: &str,
+) -> bool {
+    let Some(context) = document.get_creation_context(scope) else {
+        return false;
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return true;
+    };
+    let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
+    let mut document = handle.policy.borrow_mut();
+    document.activate(index as usize);
+    context.set_allow_generation_from_strings(document.current().allows_eval());
+    if document.current().has_policy() {
+        crate::browser_env::hide_node_nonce(scope, element);
+    }
+    if url.is_empty() {
+        document
+            .current()
+            .allows_inline("script-src-elem", text, &nonce)
+    } else {
+        document
+            .current()
+            .allows_request("script-src-elem", url, &nonce, false)
+    }
+}
+#[op2(fast)]
+fn op_csp_inline(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    element: v8::Local<v8::Object>,
+    #[string] kind: &str,
+    #[string] text: &str,
+) -> bool {
+    let Some(context) = document.get_creation_context(scope) else {
+        return false;
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return true;
+    };
+    let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
+    let allowed = handle
+        .policy
+        .borrow()
+        .active
+        .allows_inline(kind, text, &nonce);
+    allowed
+}
+
+fn authorize_css(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let Some(document) = args.get(0).to_object(scope) else {
+        result.set_bool(false);
+        return;
+    };
+    let Some(context) = document.get_creation_context(scope) else {
+        result.set_bool(false);
+        return;
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        result.set_bool(true);
+        return;
+    };
+    let Some(element) = args.get(1).to_object(scope) else {
+        result.set_bool(false);
+        return;
+    };
+    let kind = args.get(2).to_rust_string_lossy(scope);
+    if kind == "script-src-attr"
+        && context
+            .get_slot::<FrameSandbox>()
+            .is_some_and(|policy| policy.scripts_blocked)
+    {
+        result.set_bool(false);
+        return;
+    }
+    let text = args.get(3).to_rust_string_lossy(scope);
+    let initial = args.get(4);
+    let mut policy = if initial.is_array() {
+        handle.policy.borrow().header.clone()
+    } else {
+        handle.policy.borrow().current().clone()
+    };
+    if let Ok(metas) = v8::Local::<v8::Array>::try_from(initial) {
+        for index in 0..metas.length() {
+            if let Some(value) = metas.get_index(scope, index) {
+                policy.add(&value.to_rust_string_lossy(scope));
+            }
+        }
+    }
+    let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
+    let allowed = policy.allows_inline(&kind, &text, &nonce);
+    if policy.has_policy() {
+        crate::browser_env::hide_node_nonce(scope, element);
+    }
+    result.set_bool(allowed);
+}
+
+fn install_css_authorization(scope: &mut v8::PinScope) {
+    let callback = v8::Function::new(scope, authorize_css).expect("native CSS policy callback");
+    crate::browser_env::install_css_policy(scope, callback);
+    let context = scope.get_current_context();
+    let base = context.get_slot::<CspHandle>().map_or_else(
+        || "about:blank".to_string(),
+        |handle| {
+            let policy = handle.policy.borrow();
+            context.set_allow_generation_from_strings(policy.current().allows_eval());
+            policy.header.origin().to_string()
+        },
+    );
+    crate::browser_env::install_inline_event_handlers(scope, callback, &base);
+}
+
+#[op2(fast, reentrant)]
+fn op_frame_script_allowed(
+    scope: &mut v8::PinScope,
+    window: v8::Local<v8::Object>,
+    index: u32,
+) -> bool {
+    let Some(context) = window.get_creation_context(scope) else {
+        return false;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let index = v8::Integer::new_from_unsigned(scope, index);
+    call_frame_helper(scope, "cspFrameScript", &[index.into()])
+        .is_some_and(|value| value.boolean_value(scope))
+}
+#[op2]
+#[string]
+fn op_csp_nonce(scope: &mut v8::PinScope, element: v8::Local<v8::Object>) -> String {
+    crate::browser_env::node_nonce(scope, element).unwrap_or_default()
+}
+
+#[derive(Clone, Default)]
+struct ModuleCredentials(Rc<RefCell<std::collections::HashMap<String, ModuleRequest>>>);
+#[derive(Clone)]
+struct ModuleRequest {
+    credentials: Credentials,
+    nonce: String,
+    policy: crate::csp::Policy,
+}
+
+#[op2(fast)]
+fn op_module_credentials(
+    scope: &mut v8::PinScope,
+    element: v8::Local<v8::Object>,
+    #[string] specifier: String,
+) -> Result<(), JsErrorBox> {
+    let context = scope.get_current_context();
+    let options = context
+        .get_slot::<ModuleCredentials>()
+        .ok_or_else(|| JsErrorBox::generic("Module context unavailable"))?;
+    let value =
+        crate::browser_env::node_attribute(scope, element, "crossorigin").unwrap_or_default();
+    let credentials = if value.eq_ignore_ascii_case("use-credentials") {
+        Credentials::Include
+    } else {
+        Credentials::SameOrigin
+    };
+    let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
+    let policy = context
+        .get_slot::<CspHandle>()
+        .map(|handle| handle.policy.borrow().active.clone())
+        .unwrap_or_default();
+    options
+        .0
+        .borrow_mut()
+        .entry(specifier)
+        .or_insert(ModuleRequest {
+            credentials,
+            nonce,
+            policy,
+        });
+    Ok(())
+}
+
+#[cfg(turbo_surf_native_proxy)]
+#[derive(Clone, Default)]
+struct ModuleStages(Rc<RefCell<std::collections::VecDeque<ModuleStage>>>);
+#[cfg(turbo_surf_native_proxy)]
+struct ModuleStage {
+    context: v8::Global<v8::Context>,
+    specifier: String,
+    ready: bool,
+    exception: Option<(v8::Global<v8::Value>, String, u32, u32)>,
+}
+#[op2(fast)]
+fn op_module_staging_enabled() -> bool {
+    cfg!(turbo_surf_native_proxy)
+}
+
+#[op2]
+#[string]
+fn op_inline_module(
+    state: &mut OpState,
+    #[string] code: String,
+    #[string] base: &str,
+    #[string] source: String,
+) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let specifier = format!(
+        "{}#ts-inline-module-{}",
+        base.split('#').next().unwrap_or(base),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    state.borrow::<InlineModules>().0.borrow_mut().insert(
+        specifier.clone(),
+        InlineModule {
+            code,
+            base: base.to_string(),
+            source,
+        },
+    );
+    specifier
 }
 
 impl ModuleLoader for NetModuleLoader {
+    #[cfg(turbo_surf_native_proxy)]
+    fn module_source_url(&self, specifier: &str) -> String {
+        self.inline_sources
+            .0
+            .borrow()
+            .get(specifier)
+            .map(|source| source.source.clone())
+            .unwrap_or_else(|| specifier.to_string())
+    }
+
+    #[cfg(turbo_surf_native_proxy)]
+    fn module_graph_ready(
+        &self,
+        scope: &mut v8::PinScope,
+        specifier: &ModuleSpecifier,
+        ready: bool,
+        exception: Option<v8::Local<v8::Value>>,
+    ) {
+        let exception = exception.map(|error| {
+            let message = v8::Exception::create_message(scope, error);
+            let source = message
+                .get_script_resource_name(scope)
+                .map(|value| value.to_rust_string_lossy(scope))
+                .unwrap_or_default();
+            let line = message.get_line_number(scope).unwrap_or(0) as u32;
+            let column = message.get_start_column() as u32 + 1;
+            (v8::Global::new(scope, error), source, line, column)
+        });
+        let context = scope.get_current_context();
+        let context = v8::Global::new(scope, context);
+        self.module_stages.0.borrow_mut().push_back(ModuleStage {
+            context,
+            specifier: specifier.to_string(),
+            ready,
+            exception,
+        });
+    }
+
     fn resolve(
         &self,
         specifier: &str,
@@ -52,46 +408,134 @@ impl ModuleLoader for NetModuleLoader {
         } else {
             referrer
         };
+        let sources = self.inline_sources.0.borrow();
+        let referrer = sources
+            .get(referrer)
+            .map(|source| source.base.as_str())
+            .unwrap_or(referrer);
         resolve_import(specifier, referrer).map_err(|e| JsErrorBox::generic(e.to_string()))
     }
 
     fn load(
         &self,
         module_specifier: &ModuleSpecifier,
-        _maybe_referrer: Option<&ModuleLoadReferrer>,
+        maybe_referrer: Option<&ModuleLoadReferrer>,
         _options: ModuleLoadOptions,
     ) -> ModuleLoadResponse {
         let url = module_specifier.clone();
+        if let Some(code) = self
+            .inline_sources
+            .0
+            .borrow()
+            .get(url.as_str())
+            .map(|source| source.code.clone())
+        {
+            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::String(code.into()),
+                &url,
+                None,
+            )));
+        }
+        let credentials = {
+            let mut options = self.credentials.0.borrow_mut();
+            let inherited = maybe_referrer
+                .and_then(|referrer| options.get(referrer.specifier.as_str()).cloned())
+                .unwrap_or_else(|| ModuleRequest {
+                    credentials: Credentials::SameOrigin,
+                    nonce: String::new(),
+                    policy: self.csp.policy.borrow().active.clone(),
+                });
+            options.entry(url.to_string()).or_insert(inherited).clone()
+        };
+        let module_credentials = self.credentials.clone();
         let jar = self.jar.clone();
         let ua = self.ua.clone();
-        let base = self.base.clone();
+        let base = self.source.clone();
+        let top_level_source = self.top_level_source.clone();
+        let cookie_site_is_opaque = self.cookie_site_is_opaque;
+        let opaque_origin = self.opaque_origin;
         let client_hints = self.client_hints.clone();
         ModuleLoadResponse::Async(Box::pin(async move {
-            let mut local = CookieJar::from_storage_state(&jar.borrow().storage_state());
+            let mut local = jar.borrow().fork_for_request();
             let mut headers = std::collections::BTreeMap::new();
             if !ua.is_empty() {
                 headers.insert("user-agent".to_string(), ua);
             }
-            let opts = FetchOptions {
-                headers,
-                context: Some(RequestContext::resource(
-                    &base,
-                    Destination::Script,
-                    RequestMode::Cors,
-                )),
-                client_hints: Some(&client_hints),
-                allow_non_html: true, // JS modules aren't HTML
-                jar: Some(&mut local),
-                ..Default::default()
+            let mut context =
+                RequestContext::resource(&base, Destination::Script, RequestMode::Cors);
+            context.opaque_origin = opaque_origin;
+            context.top_level_source = Some(top_level_source);
+            context.cookie_site_is_opaque = cookie_site_is_opaque;
+            context.credentials = credentials.credentials;
+            let allowed = |target: &str, redirected: bool| {
+                credentials.policy.allows_request(
+                    "script-src-elem",
+                    target,
+                    &credentials.nonce,
+                    redirected,
+                )
             };
-            let r = fetch_html(url.as_str(), opts)
-                .await
-                .map_err(|e| JsErrorBox::generic(format!("module fetch {url}: {e}")))?;
-            *jar.borrow_mut() = local;
-            Ok(ModuleSource::new(
+            let response = crate::script_fetch::fetch(
+                url.as_str(),
+                context,
+                headers,
+                &client_hints,
+                &mut local,
+                Some(&allowed),
+            )
+            .await;
+            jar.borrow_mut().merge_request_changes(local);
+            let r = response
+                .map_err(|error| JsErrorBox::type_error(format!("module fetch {url}: {error}")))?;
+            module_credentials
+                .0
+                .borrow_mut()
+                .entry(r.final_url.clone())
+                .or_insert(credentials);
+            if !(200..300).contains(&r.status) {
+                return Err(JsErrorBox::type_error(format!(
+                    "module fetch {url}: HTTP {}",
+                    r.status
+                )));
+            }
+            let mime = r
+                .content_type
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            if !matches!(
+                mime.as_str(),
+                "application/javascript"
+                    | "text/javascript"
+                    | "application/ecmascript"
+                    | "text/ecmascript"
+                    | "application/x-javascript"
+                    | "application/x-ecmascript"
+                    | "text/jscript"
+                    | "text/livescript"
+                    | "text/javascript1.0"
+                    | "text/javascript1.1"
+                    | "text/javascript1.2"
+                    | "text/javascript1.3"
+                    | "text/javascript1.4"
+                    | "text/javascript1.5"
+                    | "text/x-javascript"
+                    | "text/x-ecmascript"
+            ) {
+                return Err(JsErrorBox::type_error(format!(
+                    "module fetch {url}: unsupported JavaScript MIME type {mime}"
+                )));
+            }
+            let final_url = ModuleSpecifier::parse(&r.final_url)
+                .map_err(|error| JsErrorBox::generic(error.to_string()))?;
+            Ok(ModuleSource::new_with_redirect(
                 ModuleType::JavaScript,
                 ModuleSourceCode::String(r.html.into()),
                 &url,
+                &final_url,
                 None,
             ))
         }))
@@ -101,6 +545,8 @@ impl ModuleLoader for NetModuleLoader {
 /// Page base URL (the `location.href`): the base for relative `fetch` and the
 /// scope for the `document.cookie` bridge. Stored in op state.
 struct Base(String);
+#[derive(Default)]
+struct ResponseHeaders(Vec<(String, String)>);
 
 /// Shared cookie jar backing `document.cookie` (and page `fetch`). Stored in op
 /// state behind `Rc<RefCell<…>>` since ops borrow it across the isolate.
@@ -111,31 +557,76 @@ type Jar = Rc<RefCell<CookieJar>>;
 struct Ua(String);
 
 /// `fetch` result marshaled back to JS as a `Response`-like object.
-#[derive(serde::Serialize)]
+#[derive(Default, serde::Serialize)]
 struct FetchOut {
+    nosniff: bool,
+    response_received: bool,
+    policy_blocked: bool,
+    cross_origin: bool,
+    body_bytes: Vec<u8>,
+    headers: Vec<(String, String)>,
+    redirected: bool,
     status: u16,
     ok: bool,
     body: String,
     content_type: String,
+    frame_document: u32,
+    frame_script: u32,
+    final_url: String,
 }
+
+#[derive(Default)]
+struct NetworkLog(std::collections::VecDeque<serde_json::Value>);
 
 // Classic scripts are scheduled onto the host pump. Executing inside a JS eval
 // or a synchronous op retains the dispatcher's frames in page Error stacks.
+type ClassicScriptJob = (
+    u32,
+    String,
+    String,
+    Option<v8::Global<v8::Context>>,
+    Option<v8::Global<v8::Context>>,
+);
+
 #[derive(Default)]
 struct ClassicScripts {
     next_id: u32,
     html: String,
     used_inline_offsets: std::collections::BTreeSet<usize>,
-    jobs: std::collections::VecDeque<(u32, String, String, Option<v8::Global<v8::Context>>)>,
+    jobs: std::collections::VecDeque<ClassicScriptJob>,
 }
 
 #[op2(fast)]
 fn op_queue_classic_script(
+    scope: &mut v8::PinScope,
     state: &mut OpState,
+    window: v8::Local<v8::Object>,
     #[string] code: String,
     #[string] source: String,
     inline: bool,
-) -> u32 {
+) -> Result<u32, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("script context unavailable"))?;
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Err(JsErrorBox::generic("iframe document has been replaced"));
+    }
+    if context
+        .get_slot::<FrameSandbox>()
+        .is_some_and(|flags| flags.scripts_blocked)
+    {
+        return Err(JsErrorBox::generic(
+            "script execution is blocked by the iframe sandbox",
+        ));
+    }
+    let caller = scope.get_entered_or_microtask_context();
+    if !caller
+        .get_security_token(scope)
+        .strict_equals(context.get_security_token(scope))
+    {
+        return Err(JsErrorBox::generic("script context is not same-origin"));
+    }
+    let context = v8::Global::new(scope, context);
     let queue = state.borrow_mut::<ClassicScripts>();
     queue.next_id += 1;
     let id = queue.next_id;
@@ -161,8 +652,10 @@ fn op_queue_classic_script(
     } else {
         code
     };
-    queue.jobs.push_back((id, source, located, None));
-    id
+    queue
+        .jobs
+        .push_back((id, source, located, Some(context.clone()), Some(context)));
+    Ok(id)
 }
 
 fn cookie_now() -> f64 {
@@ -199,7 +692,7 @@ static FINGERPRINT_OVERRIDES: std::sync::RwLock<String> = std::sync::RwLock::new
 /// Override the render-tier navigator fields at runtime with a JSON object, e.g.
 /// `{"platform":"Win32","hardwareConcurrency":16,"languages":["en-GB","en"],
 /// "screen":{"width":2560,"height":1440},"userAgent":"…"}`. Unset keys keep their
-/// current-stable (Chrome 154) defaults. Pass `"{}"` (or `""`) to reset to defaults.
+/// current configured Chrome release defaults. Pass `"{}"` (or `""`) to reset to defaults.
 pub fn set_fingerprint(overrides_json: &str) {
     if let Ok(mut g) = FINGERPRINT_OVERRIDES.write() {
         *g = overrides_json.to_string();
@@ -213,6 +706,7 @@ fn op_fingerprint() -> String {
     let profile = turbo_surf_core::fingerprint::default_profile();
     let mut defaults = serde_json::json!({
         "fullVersion": profile.full_version,
+        "defaultUserAgent": profile.user_agent,
         "architecture": profile.architecture(),
         "platformVersion": profile.platform_version(),
     });
@@ -224,6 +718,22 @@ fn op_fingerprint() -> String {
         defaults.as_object_mut().unwrap().extend(overrides);
     }
     defaults.to_string()
+}
+
+#[op2]
+#[string]
+fn op_browser_brands(major: u32, #[string] version: &str, full: bool) -> String {
+    let major = u16::try_from(major).unwrap_or(turbo_surf_core::browser::DEFAULT_MAJOR);
+    serde_json::to_string(&turbo_surf_core::fingerprint::brand_versions(
+        major, version, full,
+    ))
+    .unwrap_or_else(|_| "[]".into())
+}
+
+#[op2(fast)]
+fn op_browser_device_memory(major: u32) -> u32 {
+    let major = u16::try_from(major).unwrap_or(turbo_surf_core::browser::DEFAULT_MAJOR);
+    u32::from(turbo_surf_core::browser::release(major).default_device_memory)
 }
 
 // Process-global text-measurement hook. The render crate has no font/layout stack, so the host
@@ -268,6 +778,57 @@ fn op_now_perf() -> f64 {
     use std::time::Instant;
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
+}
+
+// The performance origin needs the actual fractional wall epoch, independently
+// of Date's integer-millisecond representation and the virtual timer clock.
+#[op2(fast)]
+fn op_now_epoch() -> Result<f64, JsErrorBox> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs_f64() * 1000.0)
+        .map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+// User Timing uses V8 structured cloning; clone failures retain their DOMException brand.
+struct PerformanceClone(v8::Global<v8::Function>);
+impl v8::ValueSerializerImpl for PerformanceClone {
+    fn throw_data_clone_error<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        message: v8::Local<'s, v8::String>,
+    ) {
+        let constructor = v8::Local::new(scope, &self.0);
+        let name = v8::String::new(scope, "DataCloneError").unwrap();
+        if let Some(error) = constructor.new_instance(scope, &[message.into(), name.into()]) {
+            scope.throw_exception(error.into());
+        }
+    }
+}
+impl v8::ValueDeserializerImpl for PerformanceClone {}
+#[op2(reentrant)]
+fn op_performance_clone<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: v8::Local<'s, v8::Value>,
+    exception: v8::Local<'s, v8::Function>,
+) -> v8::Local<'s, v8::Value> {
+    let context = scope.get_current_context();
+    let constructor = v8::Global::new(scope, exception);
+    let serializer =
+        v8::ValueSerializer::new(scope, Box::new(PerformanceClone(constructor.clone())));
+    v8::ValueSerializerHelper::write_header(&serializer);
+    if serializer.write_value(context, value) != Some(true) {
+        return v8::undefined(scope).into();
+    }
+    let data = serializer.release();
+    let deserializer =
+        v8::ValueDeserializer::new(scope, Box::new(PerformanceClone(constructor)), &data);
+    if v8::ValueDeserializerHelper::read_header(&deserializer, context) != Some(true) {
+        return v8::undefined(scope).into();
+    }
+    deserializer
+        .read_value(context)
+        .unwrap_or_else(|| v8::undefined(scope).into())
 }
 
 // Host canvas rasterizer: replay a 2D draw list into real PNG bytes. Same injection
@@ -394,6 +955,194 @@ fn op_webgl_available() -> bool {
     WEBGL_EXEC.read().map(|g| g.is_some()).unwrap_or(false)
 }
 
+// URL parsing and component mutation use the native WHATWG URL implementation.
+#[op2]
+#[serde]
+fn op_surf_url_parse(
+    #[string] input: &str,
+    #[string] base: &str,
+) -> Result<serde_json::Value, JsErrorBox> {
+    let url = if base.is_empty() {
+        ModuleSpecifier::parse(input)
+    } else {
+        ModuleSpecifier::parse(base).and_then(|base| base.join(input))
+    }
+    .map_err(|_| JsErrorBox::type_error("Invalid URL"))?;
+    Ok(serde_json::json!({
+        "href":url.as_str(), "origin":url.origin().ascii_serialization(),
+        "protocol":format!("{}:",url.scheme()), "username":url.username(),
+        "password":url.password().unwrap_or(""), "hostname":url.host_str().unwrap_or(""),
+        "port":url.port().map(|p|p.to_string()).unwrap_or_default(),
+        "pathname":url.path(), "search":url::quirks::search(&url),
+        "hash":url::quirks::hash(&url),
+        "host":url[url::Position::BeforeHost..url::Position::AfterPort].to_string(),
+    }))
+}
+#[op2]
+#[string]
+fn op_url_update(
+    #[string] input: &str,
+    #[string] key: &str,
+    #[string] value: &str,
+) -> Result<String, JsErrorBox> {
+    let mut url =
+        ModuleSpecifier::parse(input).map_err(|_| JsErrorBox::type_error("Invalid URL"))?;
+    // Web-IDL setters silently ignore invalid component values.
+    match key {
+        "protocol" => {
+            let _ = url::quirks::set_protocol(&mut url, value);
+        }
+        "username" => {
+            let _ = url::quirks::set_username(&mut url, value);
+        }
+        "password" => {
+            let _ = url::quirks::set_password(&mut url, value);
+        }
+        "hostname" => {
+            let _ = url::quirks::set_hostname(&mut url, value);
+        }
+        "host" => {
+            let _ = url::quirks::set_host(&mut url, value);
+        }
+        "port" => {
+            let _ = url::quirks::set_port(&mut url, value);
+        }
+        "pathname" => url::quirks::set_pathname(&mut url, value),
+        "search" => url::quirks::set_search(&mut url, value),
+        "hash" => url::quirks::set_hash(&mut url, value),
+        _ => {}
+    }
+    Ok(url.into())
+}
+
+#[op2]
+#[serde]
+fn op_url_params_parse(#[string] input: &str) -> Vec<(String, String)> {
+    url::form_urlencoded::parse(input.as_bytes())
+        .into_owned()
+        .collect()
+}
+#[op2]
+#[string]
+fn op_url_params_serialize(#[string] input: &str) -> Result<String, JsErrorBox> {
+    let pairs: Vec<(String, String)> = serde_json::from_str(input)
+        .map_err(|_| JsErrorBox::type_error("Invalid search parameters"))?;
+    Ok(url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(pairs)
+        .finish())
+}
+
+#[op2]
+#[serde]
+fn op_heap_statistics(scope: &mut v8::PinScope) -> serde_json::Value {
+    let heap = scope.get_heap_statistics();
+    serde_json::json!({"jsHeapSizeLimit": heap.heap_size_limit(), "totalJSHeapSize":heap.total_heap_size(), "usedJSHeapSize":heap.used_heap_size()})
+}
+
+struct TextDecoderSlot {
+    encoding: &'static encoding_rs::Encoding,
+    decoder: Option<encoding_rs::Decoder>,
+    fatal: bool,
+    ignore_bom: bool,
+}
+#[derive(Default)]
+struct TextDecoders {
+    next: u32,
+    slots: std::collections::HashMap<u32, TextDecoderSlot>,
+}
+#[op2]
+#[serde]
+fn op_text_decoder_new(
+    state: &mut OpState,
+    #[string] label: &str,
+    fatal: bool,
+    ignore_bom: bool,
+) -> Result<serde_json::Value, JsErrorBox> {
+    let encoding = encoding_rs::Encoding::for_label_no_replacement(label.as_bytes())
+        .ok_or_else(|| JsErrorBox::range_error("Unsupported encoding"))?;
+    if !state.has::<TextDecoders>() {
+        state.put(TextDecoders::default());
+    }
+    let collection = state.borrow_mut::<TextDecoders>();
+    collection.next = collection
+        .next
+        .checked_add(1)
+        .ok_or_else(|| JsErrorBox::range_error("Too many decoders"))?;
+    let id = collection.next;
+    collection.slots.insert(
+        id,
+        TextDecoderSlot {
+            encoding,
+            decoder: None,
+            fatal,
+            ignore_bom,
+        },
+    );
+    Ok(serde_json::json!({"id":id,"encoding":encoding.name().to_ascii_lowercase()}))
+}
+#[op2]
+#[string]
+fn op_text_decode(
+    state: &mut OpState,
+    id: u32,
+    #[buffer] input: &[u8],
+    stream: bool,
+) -> Result<String, JsErrorBox> {
+    let slot = state
+        .borrow_mut::<TextDecoders>()
+        .slots
+        .get_mut(&id)
+        .ok_or_else(|| JsErrorBox::type_error("Invalid decoder"))?;
+    let mut decoder = slot.decoder.take().unwrap_or_else(|| {
+        if slot.ignore_bom {
+            slot.encoding.new_decoder_without_bom_handling()
+        } else {
+            slot.encoding.new_decoder_with_bom_removal()
+        }
+    });
+    let capacity = input
+        .len()
+        .checked_mul(4)
+        .and_then(|size| size.checked_add(32))
+        .ok_or_else(|| JsErrorBox::range_error("Input too large"))?;
+    let mut output = String::with_capacity(capacity);
+    if slot.fatal {
+        let (result, read) =
+            decoder.decode_to_string_without_replacement(input, &mut output, !stream);
+        if matches!(result, encoding_rs::DecoderResult::Malformed(_, _)) {
+            return Err(JsErrorBox::type_error("Encoded data is not valid"));
+        }
+        if read != input.len() || matches!(result, encoding_rs::DecoderResult::OutputFull) {
+            return Err(JsErrorBox::range_error("Decoder output exceeded capacity"));
+        }
+    } else {
+        let (result, read, _) = decoder.decode_to_string(input, &mut output, !stream);
+        if read != input.len() || matches!(result, encoding_rs::CoderResult::OutputFull) {
+            return Err(JsErrorBox::range_error("Decoder output exceeded capacity"));
+        }
+    }
+    if stream {
+        slot.decoder = Some(decoder);
+    }
+    Ok(output)
+}
+#[op2(fast)]
+fn op_text_decoder_drop(state: &mut OpState, id: u32) {
+    if state.has::<TextDecoders>() {
+        state.borrow_mut::<TextDecoders>().slots.remove(&id);
+    }
+}
+#[op2]
+#[buffer]
+fn op_text_encode(#[string] input: &str) -> Vec<u8> {
+    input.as_bytes().to_vec()
+}
+
+#[op2(fast)]
+fn op_random_fill(#[buffer] output: &mut [u8]) -> Result<(), JsErrorBox> {
+    getrandom::fill(output).map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
 // `document.cookie` setter: ingest a `name=value; attrs` line against the base.
 #[op2(fast)]
 fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
@@ -405,8 +1154,8 @@ fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
 }
 
 // `fetch(url)` over the tier-1 net stack. Relative URLs resolve against the
-// page base. Never throws across the boundary: a transport/parse failure comes
-// back as `{ status: 0, ok: false }` so page code sees a real (failed) Response.
+// page base. Transport/parse failures return a native failure record; the
+// captured fetch wrapper rejects with TypeError before exposing a Response.
 #[op2]
 #[serde]
 async fn op_fetch(
@@ -463,8 +1212,67 @@ async fn op_fetch(
         Some("image") => Destination::Image,
         _ => Destination::Empty,
     };
+    let csp = init.get("csp").and_then(|id| id.as_u64()).and_then(|id| {
+        state
+            .borrow()
+            .borrow::<CspContexts>()
+            .0
+            .get(&(id as u32))
+            .cloned()
+    });
+    let policy = csp
+        .map(|handle| handle.policy.borrow().active.clone())
+        .unwrap_or_default();
+    let directive = match destination {
+        Destination::Script => "script-src-elem",
+        Destination::Style => "style-src-elem",
+        Destination::Image => "img-src",
+        Destination::Iframe => "frame-src",
+        _ => "connect-src",
+    };
+    let nonce = init
+        .get("nonce")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if !policy.allows_request(directive, &target, nonce, false) {
+        return FetchOut {
+            policy_blocked: true,
+            final_url: target,
+            ..Default::default()
+        };
+    }
+    if target.starts_with("data:")
+        && init.get("destination").and_then(|value| value.as_str()) == Some("iframe")
+    {
+        let decoded = decode_data_document(&target);
+        let ok = decoded.is_some();
+        let (body, content_type) = decoded.unwrap_or_default();
+        let mut state = state.borrow_mut();
+        let frames = state.borrow_mut::<FrameContexts>();
+        frames.next_document += 1;
+        let id = frames.next_document;
+        frames.documents.insert(
+            id,
+            FrameDocument {
+                url: target.clone(),
+                html: body.clone(),
+                headers: Vec::new(),
+            },
+        );
+        return FetchOut {
+            status: if ok { 200 } else { 0 },
+            ok,
+            body_bytes: body.as_bytes().to_vec(),
+            body,
+            content_type,
+            frame_document: id,
+            final_url: target,
+            ..Default::default()
+        };
+    }
     let mode = match init.get("mode").and_then(|s| s.as_str()) {
         Some("no-cors") => RequestMode::NoCors,
+        Some("cors") => RequestMode::Cors,
         Some("same-origin") => RequestMode::SameOrigin,
         Some("navigate") => RequestMode::Navigate,
         _ if destination == Destination::Iframe => RequestMode::Navigate,
@@ -472,6 +1280,22 @@ async fn op_fetch(
         _ => RequestMode::Cors,
     };
     let mut context = RequestContext::resource(source, destination, mode);
+    context.referrer = init
+        .get("referrer_source")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    context.top_level_source = init
+        .get("top_level_source")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    context.cookie_site_is_opaque = init
+        .get("cookie_site_is_opaque")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    context.opaque_origin = init
+        .get("opaque_origin")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     if let Some(credentials) = init.get("credentials").and_then(|s| s.as_str()) {
         context.credentials = match credentials {
             "omit" => Credentials::Omit,
@@ -480,15 +1304,36 @@ async fn op_fetch(
         };
     }
     if mode == RequestMode::SameOrigin
-        && !turbo_surf_core::request_context::same_origin(source, &target)
+        && (context.opaque_origin
+            || !turbo_surf_core::request_context::same_origin(source, &target))
     {
         return FetchOut {
+            nosniff: false,
+            response_received: false,
+            policy_blocked: false,
+            cross_origin: false,
+            body_bytes: Vec::new(),
+            headers: Vec::new(),
+            redirected: false,
             status: 0,
             ok: false,
             body: String::new(),
             content_type: String::new(),
+            frame_document: 0,
+            frame_script: 0,
+            final_url: target.clone(),
         };
     }
+    let before_request =
+        |context, target, method, headers| -> turbo_surf_core::net::BeforeRequestFuture {
+            Box::pin(crate::fetch_cors::authorize_request(
+                context,
+                target,
+                method,
+                headers,
+                client_hints.clone(),
+            ))
+        };
     // Custom User-Agent (if set) overrides the net default for page fetches.
     if !ua.is_empty() {
         headers.insert("user-agent".to_string(), ua);
@@ -497,12 +1342,42 @@ async fn op_fetch(
     // session-authenticated hydration works (e.g. an auth SDK fetching the current user
     // with the session cookie). Snapshot the shared jar into a local one for the call —
     // a RefCell borrow can't be held across the await.
-    let mut local = CookieJar::from_storage_state(&jar_rc.borrow().storage_state());
+    let mut local = jar_rc.borrow().fork_for_request();
+    let policy_blocked = std::sync::atomic::AtomicBool::new(false);
+    let response_received = std::sync::atomic::AtomicBool::new(false);
+    let request_policy = |target: &str, redirected: bool| {
+        let allowed = policy.allows_request(directive, target, nonce, redirected);
+        policy_blocked.fetch_or(!allowed, std::sync::atomic::Ordering::Relaxed);
+        allowed
+    };
+    let crossed_origin = std::sync::atomic::AtomicBool::new(
+        context.opaque_origin || !turbo_surf_core::request_context::same_origin(source, &target),
+    );
+    let response_policy = |context: &RequestContext, target: &str, headers: &[(String, String)]| {
+        response_received.store(true, std::sync::atomic::Ordering::Relaxed);
+        let cross = context.opaque_origin
+            || context.origin_tainted
+            || !context.source.as_deref().is_some_and(|source| {
+                turbo_surf_core::request_context::same_origin(source, target)
+            });
+        crossed_origin.fetch_or(cross, std::sync::atomic::Ordering::Relaxed);
+        context.mode != RequestMode::Cors || !cross || crate::fetch_cors::allowed(context, headers)
+    };
     let opts = FetchOptions {
-        method,
+        redirect: Some(
+            match init.get("redirect").and_then(|value| value.as_str()) {
+                Some("manual") => turbo_surf_core::net::RedirectMode::Manual,
+                Some("error") => turbo_surf_core::net::RedirectMode::Error,
+                _ => turbo_surf_core::net::RedirectMode::Follow,
+            },
+        ),
+        response_policy: Some(&response_policy),
+        request_policy: Some(&request_policy),
+        before_request: Some(&before_request),
+        method: method.clone(),
         body,
         headers,
-        context: Some(context),
+        context: Some(context.clone()),
         client_hints: Some(&client_hints),
         allow_non_html: true, // fetch pulls JSON/text too
         // Follow redirects MANUALLY so `Set-Cookie` on an intermediate 3xx hop is
@@ -513,49 +1388,1613 @@ async fn op_fetch(
         jar: Some(&mut local),
         ..Default::default()
     };
-    let out = match fetch_html(&target, opts).await {
-        Ok(r) => FetchOut {
-            status: r.status,
-            ok: (200..300).contains(&r.status),
-            body: r.html,
-            content_type: r.content_type,
-        },
+    let response = if destination == Destination::Script {
+        crate::script_fetch::fetch(
+            &target,
+            context.clone(),
+            opts.headers.clone(),
+            &client_hints,
+            &mut local,
+            Some(&|target, redirected| policy.allows_request(directive, target, nonce, redirected)),
+        )
+        .await
+    } else {
+        fetch_html(&target, opts)
+            .await
+            .map_err(|error| error.to_string())
+    };
+    let out = match response {
+        Ok(r) => {
+            let frame_document = if destination == Destination::Iframe {
+                let mut state = state.borrow_mut();
+                let frames = state.borrow_mut::<FrameContexts>();
+                frames.next_document += 1;
+                let id = frames.next_document;
+                frames.documents.insert(
+                    id,
+                    FrameDocument {
+                        url: r.final_url.clone(),
+                        html: r.html.clone(),
+                        headers: r.headers.clone(),
+                    },
+                );
+                id
+            } else {
+                0
+            };
+            let frame_script = if destination == Destination::Script
+                && init.get("frame_script").and_then(|v| v.as_bool()) == Some(true)
+            {
+                let mut state = state.borrow_mut();
+                let frames = state.borrow_mut::<FrameContexts>();
+                frames.next_script += 1;
+                let id = frames.next_script;
+                frames.scripts.insert(
+                    id,
+                    FrameScriptResponse {
+                        request_url: target.clone(),
+                        url: r.final_url.clone(),
+                        code: r.html.clone(),
+                    },
+                );
+                id
+            } else {
+                0
+            };
+            FetchOut {
+                nosniff: r.headers.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("x-content-type-options")
+                        && value.trim().eq_ignore_ascii_case("nosniff")
+                }),
+                response_received: true,
+                policy_blocked: false,
+                cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
+                    || !turbo_surf_core::request_context::same_origin(source, &r.final_url),
+                body_bytes: r.body_bytes,
+                headers: crate::fetch_cors::exposed_headers(
+                    &context,
+                    r.headers,
+                    crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
+                        || !turbo_surf_core::request_context::same_origin(source, &r.final_url),
+                ),
+                redirected: r.redirected,
+                status: r.status,
+                ok: (200..300).contains(&r.status),
+                body: r.html,
+                content_type: r.content_type,
+                frame_document,
+                frame_script,
+                final_url: r.final_url,
+            }
+        }
         Err(_) => FetchOut {
+            nosniff: false,
+            response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
+            policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
+            cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
+            body_bytes: Vec::new(),
+            headers: Vec::new(),
+            redirected: false,
             status: 0,
             ok: false,
             body: String::new(),
             content_type: String::new(),
+            frame_document: 0,
+            frame_script: 0,
+            final_url: target.clone(),
         },
     };
-    *jar_rc.borrow_mut() = local; // persist any Set-Cookie updates for later fetches
+    jar_rc.borrow_mut().merge_request_changes(local);
+    let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"body":out.body});
+    let mut state = state.borrow_mut();
+    let log = state.borrow_mut::<NetworkLog>();
+    if log.0.len() == 1000 {
+        log.0.pop_front();
+    }
+    log.0.push_back(entry);
     out
 }
 
-// A frame shares the page isolate and budget, but V8 creates its own global and
-// intrinsic prototypes. The detached DOM bridge is installed by the JS factory.
+#[derive(Default, serde::Serialize)]
+struct ImageOut {
+    url: String,
+    status: u16,
+    width: u32,
+    height: u32,
+    ok: bool,
+}
+
 #[op2]
-fn op_create_frame<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Object> {
-    let parent = scope.get_current_context();
+#[serde]
+async fn op_load_image(
+    state: Rc<RefCell<OpState>>,
+    #[string] url: String,
+    #[string] source: String,
+    csp: u32,
+    #[string] context_json: String,
+) -> ImageOut {
+    let (base, jar, ua, hints) = {
+        let state = state.borrow();
+        (
+            state.borrow::<Base>().0.clone(),
+            state.borrow::<Jar>().clone(),
+            state.borrow::<Ua>().0.clone(),
+            state.borrow::<ClientHints>().clone(),
+        )
+    };
+    let source = if source.is_empty() { base } else { source };
+    let target = resolve(&source, &url).unwrap_or(url);
+    let policy = state
+        .borrow()
+        .borrow::<CspContexts>()
+        .0
+        .get(&csp)
+        .map(|handle| handle.policy.borrow().active.clone())
+        .unwrap_or_default();
+    if !policy.allows_request("img-src", &target, "", false) {
+        return ImageOut {
+            url: target,
+            ..Default::default()
+        };
+    }
+    let mut local = jar.borrow().fork_for_request();
+    let mut headers = std::collections::BTreeMap::new();
+    if !ua.is_empty() {
+        headers.insert("user-agent".to_string(), ua);
+    }
+    let request_policy =
+        |target: &str, redirected: bool| policy.allows_request("img-src", target, "", redirected);
+    let metadata: serde_json::Value = serde_json::from_str(&context_json).unwrap_or_default();
+    let mut context = RequestContext::resource(&source, Destination::Image, RequestMode::NoCors);
+    context.top_level_source = metadata
+        .get("top_level_source")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    context.cookie_site_is_opaque = metadata
+        .get("cookie_site_is_opaque")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    context.opaque_origin = metadata
+        .get("opaque_origin")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    let opts = FetchOptions {
+        request_policy: Some(&request_policy),
+        headers,
+        context: Some(context),
+        client_hints: Some(&hints),
+        jar: Some(&mut local),
+        ..Default::default()
+    };
+    let response = if let Some(data) = target.strip_prefix("data:") {
+        use base64::Engine;
+        data.split_once(",")
+            .filter(|(kind, _)| kind.ends_with(";base64"))
+            .and_then(|(_, data)| base64::engine::general_purpose::STANDARD.decode(data).ok())
+            .map(|bytes| (target.clone(), bytes, 200))
+    } else {
+        fetch_bytes(&target, opts).await.ok()
+    };
+    jar.borrow_mut().merge_request_changes(local);
+    let Some((url, bytes, status)) = response else {
+        return ImageOut::default();
+    };
+    let image = (200..300)
+        .contains(&status)
+        .then(|| image::load_from_memory(&bytes).ok())
+        .flatten();
+    match image {
+        Some(image) => ImageOut {
+            url,
+            status,
+            width: image.width(),
+            height: image.height(),
+            ok: true,
+        },
+        None => ImageOut {
+            url,
+            status,
+            ..Default::default()
+        },
+    }
+}
+
+// Each frame owns its native tree and JS browser APIs in its own V8 context.
+// The host retains contexts only until page reset/runtime destruction.
+#[derive(Default)]
+struct FrameContextMarker;
+struct FrameDocumentUrl(String);
+struct FrameDocumentSourceUrl(String);
+struct FrameDepth(u32);
+struct FrameParent(v8::Global<v8::Context>);
+struct FrameHost(v8::Global<v8::Object>);
+#[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
+struct FrameNavigator(v8::Global<v8::Function>);
+struct FrameConfigured;
+#[derive(Clone, Copy, Default)]
+struct FrameSandbox {
+    opaque: bool,
+    scripts_blocked: bool,
+    origin_restricted: bool,
+}
+impl FrameSandbox {
+    fn from_host(
+        scope: &mut v8::PinScope,
+        parent: v8::Local<v8::Context>,
+        host: v8::Local<v8::Object>,
+    ) -> Self {
+        let inherited = parent
+            .get_slot::<FrameSandbox>()
+            .map_or(Self::default(), |flags| *flags);
+        let mut flags = Self {
+            opaque: inherited.origin_restricted,
+            origin_restricted: inherited.origin_restricted,
+            scripts_blocked: inherited.scripts_blocked,
+        };
+        if let Some(attribute) = crate::browser_env::node_attribute(scope, host, "sandbox") {
+            let tokens = attribute.to_ascii_lowercase();
+            let tokens = tokens.split_ascii_whitespace().collect::<Vec<_>>();
+            flags.opaque |= !tokens.contains(&"allow-same-origin");
+            flags.origin_restricted |= !tokens.contains(&"allow-same-origin");
+            flags.scripts_blocked |= !tokens.contains(&"allow-scripts");
+        }
+        flags
+    }
+}
+struct FrameEnvironment(v8::Global<v8::Object>);
+#[derive(Default)]
+struct HostCapabilities(
+    std::cell::RefCell<std::collections::HashMap<String, v8::Global<v8::Function>>>,
+);
+
+#[op2(nofast, reentrant)]
+fn op_set_host_capabilities(scope: &mut v8::PinScope, record: v8::Local<v8::Object>) {
+    let Some(context) = record.get_creation_context(scope) else {
+        return;
+    };
+    let capabilities = context.get_slot::<HostCapabilities>().unwrap_or_else(|| {
+        let capabilities = Rc::new(HostCapabilities::default());
+        context.set_slot(capabilities.clone());
+        capabilities
+    });
+    let mut functions = Vec::new();
+    if let Some(names) = record.get_own_property_names(scope, Default::default()) {
+        for index in 0..names.length() {
+            let Some(key) = names.get_index(scope, index) else {
+                continue;
+            };
+            let name = key.to_rust_string_lossy(scope);
+            if let Some(function) = record
+                .get(scope, key)
+                .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+            {
+                functions.push((name, v8::Global::new(scope, function)));
+            }
+        }
+    }
+    capabilities.0.borrow_mut().extend(functions);
+}
+struct FrameRetired;
+
+#[derive(Default)]
+struct FrameContexts {
+    init_script: String,
+    contexts: Vec<v8::Global<v8::Context>>,
+    core: Option<v8::Global<v8::Value>>,
+    messages: std::collections::VecDeque<WindowMessage>,
+    next_document: u32,
+    documents: std::collections::HashMap<u32, FrameDocument>,
+    next_script: u32,
+    scripts: std::collections::HashMap<u32, FrameScriptResponse>,
+}
+struct FrameDocument {
+    url: String,
+    html: String,
+    headers: Vec<(String, String)>,
+}
+
+fn decode_data_document(url: &str) -> Option<(String, String)> {
+    use base64::Engine;
+    let url = url.strip_prefix("data:")?.split('#').next()?;
+    let (metadata, payload) = url.split_once(',')?;
+    let mut bytes = Vec::with_capacity(payload.len());
+    let input = payload.as_bytes();
+    let mut index = 0;
+    while index < input.len() {
+        if input[index] == b'%' && index + 2 < input.len() {
+            let high = (input[index + 1] as char).to_digit(16);
+            let low = (input[index + 2] as char).to_digit(16);
+            if let (Some(high), Some(low)) = (high, low) {
+                bytes.push((high * 16 + low) as u8);
+                index += 3;
+                continue;
+            }
+        }
+        bytes.push(input[index]);
+        index += 1;
+    }
+    let fields = metadata.split(';').collect::<Vec<_>>();
+    if fields
+        .last()
+        .is_some_and(|field| field.eq_ignore_ascii_case("base64"))
+    {
+        bytes.retain(|byte| !byte.is_ascii_whitespace());
+        let config = base64::engine::general_purpose::GeneralPurposeConfig::new()
+            .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent);
+        bytes = base64::engine::general_purpose::GeneralPurpose::new(
+            &base64::alphabet::STANDARD,
+            config,
+        )
+        .decode(bytes)
+        .ok()?;
+    }
+    let mime = fields
+        .first()
+        .copied()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("text/plain")
+        .to_ascii_lowercase();
+    let encoding = fields
+        .iter()
+        .find_map(|field| field.strip_prefix("charset="))
+        .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
+        .unwrap_or(encoding_rs::UTF_8);
+    let (body, _, _) = encoding.decode(&bytes);
+    let body = match mime.as_str() {
+        "text/html" => body.into_owned(),
+        "text/plain" => format!(
+            "<html><head></head><body><pre>{}</pre></body></html>",
+            body.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+        ),
+        _ => return None,
+    };
+    Some((body, mime))
+}
+
+struct FrameScriptResponse {
+    request_url: String,
+    url: String,
+    code: String,
+}
+#[derive(Clone, serde::Serialize)]
+struct FrameScriptSpec {
+    index: usize,
+    src: Option<String>,
+    code: String,
+    source: String,
+    line: usize,
+    column: usize,
+    asynchronous: bool,
+    deferred: bool,
+    module: bool,
+    crossorigin: Option<String>,
+}
+struct FrameScriptPolicy {
+    inline: Vec<String>,
+    external: std::collections::HashSet<String>,
+    scripts: Vec<FrameScriptSpec>,
+    base: String,
+}
+
+// Tree supplies executable nodes/attributes; this source-only scan retains the
+// opening-tag offsets that rtdom does not expose. Quoted '>' and raw-text content
+// cannot shift the location into an attribute or a preceding script.
+fn script_source_bodies(html: &str) -> Vec<(usize, usize)> {
+    let lower = html.to_ascii_lowercase();
+    let bytes = html.as_bytes();
+    let mut cursor = 0;
+    let mut bodies = Vec::new();
+    while let Some(relative) = lower[cursor..].find('<') {
+        let start = cursor + relative;
+        if lower[start..].starts_with("<!--") {
+            cursor = lower[start + 4..]
+                .find("-->")
+                .map_or(html.len(), |end| start + 4 + end + 3);
+            continue;
+        }
+        let mut name_end = start + 1;
+        while name_end < bytes.len() && bytes[name_end].is_ascii_alphanumeric() {
+            name_end += 1;
+        }
+        let name = &lower[start + 1..name_end];
+        let mut end = name_end;
+        let mut quote = None;
+        while end < bytes.len() {
+            match (quote, bytes[end]) {
+                (Some(q), c) if q == c => quote = None,
+                (None, b'\'' | b'"') => quote = Some(bytes[end]),
+                (None, b'>') => break,
+                _ => (),
+            }
+            end += 1;
+        }
+        cursor = (end + 1).min(html.len());
+        if name == "plaintext" {
+            break;
+        }
+        if !matches!(
+            name,
+            "script" | "style" | "textarea" | "title" | "xmp" | "iframe" | "noembed" | "noframes"
+        ) {
+            continue;
+        }
+        let closing = format!("</{name}");
+        let mut close = cursor;
+        loop {
+            let Some(relative) = lower[close..].find(&closing) else {
+                close = html.len();
+                break;
+            };
+            close += relative;
+            let delimiter = bytes.get(close + closing.len());
+            if delimiter.is_none_or(|c| c.is_ascii_whitespace() || matches!(*c, b'>' | b'/')) {
+                break;
+            }
+            close += closing.len();
+        }
+        if name == "script" {
+            bodies.push((cursor, close));
+        }
+        cursor = close;
+    }
+    bodies
+}
+
+impl FrameScriptPolicy {
+    fn from_html(html: &str, url: &str) -> Self {
+        let tree = turbo_dom_parser::rtdom::tree::Tree::parse(html);
+        let base = tree
+            .query_selector("base[href]")
+            .and_then(|node| tree.get_attribute(node, "href"))
+            .and_then(|href| resolve(url, href))
+            .unwrap_or_else(|| url.to_string());
+        let normalized = html.replace("\r\n", "\n").replace('\r', "\n");
+        let bodies = script_source_bodies(&normalized);
+        let mut next_body = 0;
+        let mut inline = Vec::new();
+        let mut external = std::collections::HashSet::new();
+        let mut scripts = Vec::new();
+        for (index, &node) in tree.query_selector_all("script").iter().enumerate() {
+            let code = tree.text_content(node);
+            let location = bodies
+                .iter()
+                .enumerate()
+                .skip(next_body)
+                .find(|(_, (start, end))| normalized[*start..*end] == code)
+                .map(|(index, (start, _))| {
+                    next_body = index + 1;
+                    *start
+                });
+            let kind = tree.get_attribute(node, "type").unwrap_or_default();
+            let kind = kind.trim().to_ascii_lowercase();
+            let module = kind == "module";
+            if (!module
+                && !matches!(
+                    kind.as_str(),
+                    "" | "text/javascript"
+                        | "application/javascript"
+                        | "text/ecmascript"
+                        | "application/ecmascript"
+                        | "application/x-javascript"
+                        | "text/jscript"
+                        | "text/livescript"
+                ))
+                || tree.has_attribute(node, "nomodule")
+            {
+                continue;
+            }
+            let mut ancestor = turbo_dom_parser::rtdom::NodeRef::new(&tree, node).parent();
+            let mut inert = false;
+            while let Some(parent) = ancestor {
+                if tree
+                    .tag_name(parent.handle())
+                    .is_some_and(|tag| tag.eq_ignore_ascii_case("template"))
+                {
+                    inert = true;
+                    break;
+                }
+                ancestor = parent.parent();
+            }
+            if inert {
+                continue;
+            }
+            let src = tree
+                .get_attribute(node, "src")
+                .and_then(|src| resolve(&base, src));
+            if !module {
+                if let Some(src) = &src {
+                    external.insert(src.clone());
+                } else {
+                    inline.push(code.clone());
+                }
+            }
+            let prefix = location.map_or("", |offset| &normalized[..offset]);
+            scripts.push(FrameScriptSpec {
+                index,
+                src,
+                code,
+                source: url.to_string(),
+                line: prefix.bytes().filter(|c| *c == b'\n').count(),
+                column: prefix
+                    .rsplit('\n')
+                    .next()
+                    .unwrap_or("")
+                    .encode_utf16()
+                    .count(),
+                asynchronous: tree.has_attribute(node, "async"),
+                deferred: tree.has_attribute(node, "defer"),
+                module,
+                crossorigin: tree.get_attribute(node, "crossorigin").map(str::to_string),
+            });
+        }
+        Self {
+            inline,
+            external,
+            scripts,
+            base,
+        }
+    }
+}
+
+#[op2]
+#[serde]
+fn op_frame_scripts(
+    scope: &mut v8::PinScope,
+    window: v8::Local<v8::Object>,
+) -> Result<Vec<FrameScriptSpec>, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    let policy = context
+        .get_slot::<FrameScriptPolicy>()
+        .ok_or_else(|| JsErrorBox::generic("frame script policy unavailable"))?;
+    Ok(policy.scripts.clone())
+}
+
+struct WindowMessage {
+    target: v8::Global<v8::Context>,
+    source: v8::Global<v8::Context>,
+    origin: String,
+    data: Vec<u8>,
+}
+struct WindowClone;
+impl v8::ValueSerializerImpl for WindowClone {
+    fn throw_data_clone_error<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        message: v8::Local<'s, v8::String>,
+    ) {
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+    }
+}
+impl v8::ValueDeserializerImpl for WindowClone {}
+
+fn run_frame_init_script(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
+    let source = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .init_script
+        .clone();
+    if source.is_empty() {
+        return Ok(());
+    }
+    let code = v8::String::new(scope, &source)
+        .ok_or_else(|| JsErrorBox::generic("frame init source unavailable"))?;
+    let name = v8::String::new(scope, "<frame-init>").unwrap();
+    let origin = v8::ScriptOrigin::new(
+        scope,
+        name.into(),
+        0,
+        0,
+        false,
+        0,
+        None,
+        false,
+        false,
+        false,
+        None,
+    );
+    v8::Script::compile(scope, code, Some(&origin))
+        .and_then(|script| script.run(scope))
+        .ok_or_else(|| JsErrorBox::generic("frame init script failed"))?;
+    Ok(())
+}
+
+fn frame_namespace<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
+    let context = scope.get_current_context();
+    if let Some(environment) = context.get_slot::<FrameEnvironment>() {
+        return Some(v8::Local::new(scope, &environment.0));
+    }
+    let global = context.global(scope);
+    let name = v8::String::new(scope, "ts").unwrap();
+    let key = v8::Symbol::for_key(scope, name);
+    global.get(scope, key.into())?.to_object(scope)
+}
+fn call_frame_helper<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    name: &str,
+    args: &[v8::Local<'s, v8::Value>],
+) -> Option<v8::Local<'s, v8::Value>> {
+    let context = scope.get_current_context();
+    let capability = context
+        .get_slot::<HostCapabilities>()
+        .and_then(|capabilities| capabilities.0.borrow().get(name).cloned());
+    if let Some(function) = capability {
+        let function = v8::Local::new(scope, function);
+        let receiver = v8::undefined(scope);
+        return function.call(scope, receiver.into(), args);
+    }
+    if matches!(
+        name,
+        "frameParsingDone"
+            | "frameDomReady"
+            | "fireFrameLoad"
+            | "deliverWindowMessage"
+            | "documentLoading"
+            | "markDocumentInteractive"
+            | "dispatchDocumentInteractive"
+            | "dispatchDocumentComplete"
+            | "completeClassicScript"
+            | "completeModuleGraph"
+    ) {
+        return None;
+    }
+    let namespace = frame_namespace(scope)?;
+    let key = v8::String::new(scope, name).unwrap();
+    let function = namespace.get(scope, key.into())?;
+    let function = v8::Local::<v8::Function>::try_from(function).ok()?;
+    function.call(scope, namespace.into(), args)
+}
+fn set_origin_token(scope: &mut v8::PinScope, context: v8::Local<v8::Context>, url: &str) {
+    if let Ok(url) = ModuleSpecifier::parse(url) {
+        let origin = url.origin().ascii_serialization();
+        if origin != "null" {
+            let token = v8::String::new_from_utf8(
+                scope,
+                origin.as_bytes(),
+                v8::NewStringType::Internalized,
+            )
+            .unwrap();
+            context.set_security_token(token.into());
+            return;
+        }
+    }
+    context.use_default_security_token();
+}
+fn window_origin(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) -> String {
+    let token = context.get_security_token(scope);
+    if token.is_string() {
+        token.to_rust_string_lossy(scope)
+    } else {
+        "null".to_string()
+    }
+}
+
+fn trustworthy_url(value: &str) -> bool {
+    let Ok(url) = url::Url::parse(value) else {
+        return false;
+    };
+    match url.scheme() {
+        "https" | "wss" | "file" => true,
+        "http" | "ws" => match url.host() {
+            Some(url::Host::Domain(host)) => host == "localhost" || host.ends_with(".localhost"),
+            Some(url::Host::Ipv4(address)) => address.is_loopback(),
+            Some(url::Host::Ipv6(address)) => address.is_loopback(),
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+fn secure_context(scope: &mut v8::PinScope) -> bool {
+    let context = scope.get_current_context();
+    secure_context_for(scope, context)
+}
+
+fn secure_context_for<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+) -> bool {
+    loop {
+        let parent = context.get_slot::<FrameParent>();
+        let url = context
+            .get_slot::<FrameDocumentUrl>()
+            .map(|value| value.0.clone())
+            .unwrap_or_else(|| {
+                if parent.is_some() {
+                    "about:blank".into()
+                } else {
+                    JsRuntime::op_state_from(scope)
+                        .borrow()
+                        .borrow::<Base>()
+                        .0
+                        .clone()
+                }
+            });
+        let inherited = parent.is_some()
+            && (url.starts_with("about:") || url.starts_with("data:") || url.starts_with("blob:"));
+        if !inherited && !trustworthy_url(&url) {
+            return false;
+        }
+        let Some(parent) = parent else {
+            return true;
+        };
+        context = v8::Local::new(scope, &parent.0);
+    }
+}
+
+#[op2(fast)]
+fn op_is_secure_context<'s>(scope: &mut v8::PinScope<'s, '_>) -> bool {
+    let context = scope.get_entered_or_microtask_context();
+    let context = v8::Global::new(scope, context);
+    let context = v8::Local::new(scope, context);
+    secure_context_for(scope, context)
+}
+
+#[op2]
+fn op_window_parent<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("Window context unavailable"))?;
+    let parent = context
+        .get_slot::<FrameParent>()
+        .map(|parent| v8::Local::new(scope, &parent.0))
+        .unwrap_or(context);
+    Ok(parent.global(scope))
+}
+
+#[op2]
+fn op_window_top<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let mut context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("Window context unavailable"))?;
+    for _ in 0..64 {
+        let Some(parent) = context.get_slot::<FrameParent>() else {
+            break;
+        };
+        context = v8::Local::new(scope, &parent.0);
+    }
+    Ok(context.global(scope))
+}
+
+#[op2(fast)]
+fn op_windows_same_origin(scope: &mut v8::PinScope, window: v8::Local<v8::Object>) -> bool {
+    let caller = scope.get_entered_or_microtask_context();
+    let Some(target) = window.get_creation_context(scope) else {
+        return false;
+    };
+    let a = caller.get_security_token(scope);
+    let b = target.get_security_token(scope);
+    a.strict_equals(b)
+}
+
+#[op2(fast, reentrant)]
+fn op_window_post_message<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+    message: v8::Local<'s, v8::Value>,
+    #[string] target_origin: &str,
+) -> Result<(), JsErrorBox> {
+    queue_window_message(scope, window, message, target_origin)
+}
+
+fn queue_window_message<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+    message: v8::Local<'s, v8::Value>,
+    target_origin: &str,
+) -> Result<(), JsErrorBox> {
+    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let source = v8::Local::new(scope, source);
+    let target = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("message target is not a Window"))?;
+    if target.get_slot::<FrameRetired>().is_some() {
+        return Ok(());
+    }
+    let origin = window_origin(scope, source);
+    let expected = if target_origin == "/" {
+        origin.as_str()
+    } else {
+        target_origin
+    };
+    if expected != "*" && expected != window_origin(scope, target) {
+        return Ok(());
+    }
+    let data = {
+        let scope = &mut v8::ContextScope::new(scope, source);
+        let serializer = v8::ValueSerializer::new(scope, Box::new(WindowClone));
+        v8::ValueSerializerHelper::write_header(&serializer);
+        if serializer.write_value(source, message) != Some(true) {
+            return Err(JsErrorBox::type_error("Message cannot be cloned"));
+        }
+        serializer.release()
+    };
+    if source == target {
+        let scope = &mut v8::ContextScope::new(scope, target);
+        let deserializer = v8::ValueDeserializer::new(scope, Box::new(WindowClone), &data);
+        if v8::ValueDeserializerHelper::read_header(&deserializer, target) != Some(true) {
+            return Err(JsErrorBox::generic("message clone header invalid"));
+        }
+        let cloned = deserializer
+            .read_value(target)
+            .ok_or_else(|| JsErrorBox::generic("message clone decode failed"))?;
+        let origin = v8::String::new(scope, &origin).unwrap();
+        let source_window = source.global(scope);
+        // Queue the JS timer immediately for synchronous run_with_dom callers;
+        // listener delivery remains asynchronous and sees an actual clone.
+        call_frame_helper(
+            scope,
+            "deliverWindowMessage",
+            &[cloned, source_window.into(), origin.into()],
+        )
+        .ok_or_else(|| JsErrorBox::generic("message dispatch unavailable"))?;
+        return Ok(());
+    }
+    let item = WindowMessage {
+        target: v8::Global::new(scope, target),
+        source: v8::Global::new(scope, source),
+        origin,
+        data,
+    };
+    JsRuntime::op_state_from(scope)
+        .borrow_mut()
+        .borrow_mut::<FrameContexts>()
+        .messages
+        .push_back(item);
+    Ok(())
+}
+
+#[op2(reentrant)]
+fn op_frame_set_document<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+    parent_window: v8::Local<'s, v8::Object>,
+    host: v8::Local<'s, v8::Object>,
+    #[string] html: &str,
+    #[string] metadata: &str,
+    response_id: u32,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let mut context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Err(JsErrorBox::generic("iframe document has been replaced"));
+    }
+    if context
+        .get_slot::<FrameHost>()
+        .is_some_and(|registered| !v8::Local::new(scope, &registered.0).strict_equals(host.into()))
+    {
+        return Err(JsErrorBox::generic("iframe host cannot be replaced"));
+    }
+    let parent = context
+        .get_slot::<FrameParent>()
+        .ok_or_else(|| JsErrorBox::generic("target is not a child frame"))?;
+    let parent = v8::Local::new(scope, &parent.0);
+    let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let caller = v8::Local::new(scope, caller);
+    let native_parent = parent.global(scope);
+    if !parent_window.strict_equals(native_parent.into())
+        || !caller
+            .get_security_token(scope)
+            .strict_equals(parent.get_security_token(scope))
+    {
+        return Err(JsErrorBox::generic(
+            "frame document can only be replaced by its owning context",
+        ));
+    }
+    // The recorded owner and V8 token authorize borrowed same-origin callbacks;
+    // a guest __ownerWin facade cannot substitute for the owner's actual global.
+    let parent_window = native_parent;
+    let mut metadata: serde_json::Value =
+        serde_json::from_str(metadata).map_err(|e| JsErrorBox::generic(e.to_string()))?;
+    // Origin assignment is authorized by a native network result, never by the
+    // guest's JSON or URL getters. srcdoc/blank documents inherit their owner.
+    let document = if response_id != 0 {
+        Some(
+            JsRuntime::op_state_from(scope)
+                .borrow_mut()
+                .borrow_mut::<FrameContexts>()
+                .documents
+                .remove(&response_id)
+                .ok_or_else(|| JsErrorBox::generic("frame response unavailable"))?,
+        )
+    } else {
+        None
+    };
+    let mut replaced = None;
+    if cfg!(turbo_surf_native_proxy)
+        || context.get_slot::<FrameConfigured>().is_some()
+        || document.is_some()
+    {
+        // References obtained from the initial empty document must retain its
+        // realm/tree. A token change on the same context would turn those old
+        // Function/document handles into access to the replacement origin.
+        let previous = context;
+        retire_frame_tree(scope, previous);
+        let window = allocate_frame(scope, parent, Some(previous), false)?;
+        context = window.get_creation_context(scope).unwrap();
+        replaced = Some(previous);
+    }
+    let mut sandbox = FrameSandbox::from_host(scope, parent, host);
+    let data_document = document
+        .as_ref()
+        .is_some_and(|document| document.url.starts_with("data:"));
+    sandbox.opaque |= data_document || document.is_none() && window_is_opaque(scope, parent);
+    context.set_slot(Rc::new(sandbox));
+    context.set_slot(Rc::new(FrameConfigured));
+    context.set_slot(Rc::new(FrameHost(v8::Global::new(scope, host))));
+    if let Some(document) = &document {
+        set_origin_token(scope, context, &document.url);
+        metadata["url"] = serde_json::Value::String(document.url.clone());
+        metadata["location"] = serde_json::Value::String(document.url.clone());
+        metadata["origin"] = serde_json::Value::String(window_origin(scope, context));
+    } else {
+        context.set_security_token(parent.get_security_token(scope));
+        metadata["origin"] = serde_json::Value::String(window_origin(scope, parent));
+        let owner_url = parent
+            .get_slot::<FrameDocumentUrl>()
+            .map(|url| url.0.clone())
+            .unwrap_or_else(|| {
+                JsRuntime::op_state_from(scope)
+                    .borrow()
+                    .borrow::<Base>()
+                    .0
+                    .clone()
+            });
+        metadata["url"] = serde_json::Value::String(owner_url);
+    }
+    if sandbox.origin_restricted || data_document {
+        context.use_default_security_token();
+    }
+    if sandbox.opaque {
+        metadata["origin"] = serde_json::Value::String("null".into());
+    }
+    #[cfg(turbo_surf_native_proxy)]
+    if replaced.is_some() {
+        window_proxy::synchronize_origins(scope, context);
+    }
+    #[cfg(not(turbo_surf_native_proxy))]
+    let _ = replaced;
+    metadata["depth"] =
+        serde_json::Value::from(context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0));
+    let url = metadata
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("about:blank");
+    context.set_slot(Rc::new(FrameDocumentUrl(url.to_string())));
+    let html = document
+        .as_ref()
+        .map_or(html, |document| document.html.as_str());
+    let csp = if let Some(document) = &document {
+        CspHandle::new(url, &document.headers, html)
+    } else {
+        let handle = CspHandle::new(url, &[], html);
+        if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
+            let inherited = parent_policy.policy.borrow().current().clone();
+            let mut policy = handle.policy.borrow_mut();
+            policy.header = inherited.clone();
+            policy.active = inherited;
+        }
+        handle
+    };
+    context.set_slot(Rc::new(csp.clone()));
+    JsRuntime::op_state_from(scope)
+        .borrow_mut()
+        .borrow_mut::<CspContexts>()
+        .0
+        .insert(csp.id, csp);
+    let mut policy = FrameScriptPolicy::from_html(html, url);
+    let source = metadata
+        .get("location")
+        .and_then(|value| value.as_str())
+        .unwrap_or(url)
+        .to_string();
+    context.set_slot(Rc::new(FrameDocumentSourceUrl(source.clone())));
+    for script in &mut policy.scripts {
+        if script.src.is_none() {
+            script.source = source.clone();
+        }
+    }
+    if sandbox.scripts_blocked {
+        policy.scripts.clear();
+        policy.inline.clear();
+        policy.external.clear();
+    }
+    let document_base = policy.base.clone();
+    context.set_slot(Rc::new(policy));
+    let core = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .core
+        .clone()
+        .ok_or_else(|| JsErrorBox::generic("iframe host core unavailable"))?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    #[cfg(turbo_surf_native_proxy)]
+    register_frame_modules(scope, &document_base)?;
+    crate::browser_env::install_independent_html(scope, html);
+    install_css_authorization(scope);
+    #[cfg(turbo_surf_native_proxy)]
+    window_proxy::install_document(scope);
+    let global = context.global(scope);
+    let core = v8::Local::new(scope, core);
+    restore_runtime_core(scope, global, core);
+
+    let location_key = v8::String::new(scope, "location").unwrap();
+    if let Some(location) = global
+        .get(scope, location_key.into())
+        .and_then(|v| v.to_object(scope))
+    {
+        for (name, value) in [
+            ("href", url),
+            (
+                "origin",
+                metadata
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("null"),
+            ),
+        ] {
+            let key = v8::String::new(scope, name).unwrap();
+            let value = v8::String::new(scope, value).unwrap();
+            location.set(scope, key.into(), value.into());
+        }
+    }
+    let depth_key = v8::String::new(scope, "__depth").unwrap();
+    let depth = v8::Integer::new_from_unsigned(
+        scope,
+        context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0),
+    );
+    global.set(scope, depth_key.into(), depth.into());
+    if let Some(namespace) = frame_namespace(scope) {
+        let name = v8::String::new(scope, "isFrame").unwrap();
+        let flag = v8::Boolean::new(scope, true);
+        namespace.set(scope, name.into(), flag.into());
+        context.set_slot(Rc::new(FrameEnvironment(v8::Global::new(scope, namespace))));
+    }
+    let code = v8::String::new(scope, ENV_BOOTSTRAP).unwrap();
+    v8::Script::compile(scope, code, None)
+        .and_then(|script| script.run(scope))
+        .ok_or_else(|| JsErrorBox::generic("frame document initialization failed"))?;
+    let secure = secure_context(scope);
+    let crypto_core = core
+        .to_object(scope)
+        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
+    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
+    #[cfg(turbo_surf_native_proxy)]
+    window_proxy::capture_exception(scope);
+    if let Some(namespace) = frame_namespace(scope) {
+        context.set_slot(Rc::new(FrameEnvironment(v8::Global::new(scope, namespace))));
+    }
+    metadata["base"] = serde_json::Value::String(document_base);
+    let metadata_location = metadata
+        .get("location")
+        .and_then(|value| value.as_str())
+        .unwrap_or("about:blank")
+        .to_string();
+    let json = v8::String::new(scope, &metadata.to_string()).unwrap();
+    let metadata = v8::json::parse(scope, json).unwrap();
+    call_frame_helper(
+        scope,
+        "configureFrame",
+        &[metadata, parent_window.into(), host.into()],
+    )
+    .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
+    #[cfg(turbo_surf_native_proxy)]
+    window_proxy::install_location(scope, &metadata_location);
+    #[cfg(not(turbo_surf_native_proxy))]
+    let _ = metadata_location;
+    run_frame_init_script(scope)?;
+    Ok(global)
+}
+
+#[op2(nofast, reentrant)]
+fn op_retire_frame<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+    owner: v8::Local<'s, v8::Object>,
+) -> Result<(), JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    let parent = context
+        .get_slot::<FrameParent>()
+        .ok_or_else(|| JsErrorBox::generic("target is not a child frame"))?;
+    let parent = v8::Local::new(scope, &parent.0);
+    let caller = scope.get_entered_or_microtask_context();
+    if !owner.strict_equals(parent.global(scope).into())
+        || !caller
+            .get_security_token(scope)
+            .strict_equals(parent.get_security_token(scope))
+    {
+        return Err(JsErrorBox::generic(
+            "frame can only be retired by its owning context",
+        ));
+    }
+    retire_frame_tree(scope, context);
+    Ok(())
+}
+
+#[op2(fast)]
+fn op_set_frame_navigator(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
+    if let Some(context) = callback.get_creation_context(scope) {
+        context.set_slot(Rc::new(FrameNavigator(v8::Global::new(scope, callback))));
+    }
+}
+
+fn frame_children<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    owner: v8::Local<'s, v8::Context>,
+) -> Vec<v8::Local<'s, v8::Context>> {
+    let contexts = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    contexts
+        .into_iter()
+        .filter_map(|context| {
+            let context = v8::Local::new(scope, context);
+            if context.get_slot::<FrameRetired>().is_some()
+                || context.get_slot::<FrameConfigured>().is_none()
+            {
+                return None;
+            }
+            let parent = context.get_slot::<FrameParent>()?;
+            if v8::Local::new(scope, &parent.0) != owner {
+                return None;
+            }
+            let host = context.get_slot::<FrameHost>()?;
+            let host = v8::Local::new(scope, &host.0);
+            crate::browser_env::is_light_document_node(scope, host).then_some(context)
+        })
+        .collect()
+}
+
+#[op2]
+fn op_frame_move_candidates<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    nodes: v8::Local<'s, v8::Array>,
+) -> v8::Local<'s, v8::Array> {
+    let contexts = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    let owner = document.get_creation_context(scope);
+    let mut values = Vec::new();
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameRetired>().is_some() {
+            continue;
+        }
+        let Some(parent) = context.get_slot::<FrameParent>() else {
+            continue;
+        };
+        if Some(v8::Local::new(scope, &parent.0)) != owner {
+            continue;
+        }
+        let Some(host) = context.get_slot::<FrameHost>() else {
+            continue;
+        };
+        let host = v8::Local::new(scope, &host.0);
+        for index in 0..nodes.length() {
+            let Some(node) = nodes
+                .get_index(scope, index)
+                .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+            else {
+                continue;
+            };
+            if crate::browser_env::composed_contains_node(scope, node, host) {
+                values.push(host.into());
+                break;
+            }
+        }
+    }
+    v8::Array::new_with_elements(scope, &values)
+}
+
+#[op2]
+fn op_window_child_frames<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> v8::Local<'s, v8::Array> {
+    let contexts = document
+        .get_creation_context(scope)
+        .map(|owner| frame_children(scope, owner))
+        .unwrap_or_default();
+    let values = contexts
+        .into_iter()
+        .map(|context| context.global(scope).into())
+        .collect::<Vec<_>>();
+    v8::Array::new_with_elements(scope, &values)
+}
+
+#[op2(fast)]
+fn op_window_opaque(scope: &mut v8::PinScope, window: v8::Local<v8::Object>) -> bool {
+    window
+        .get_creation_context(scope)
+        .is_none_or(|context| window_is_opaque(scope, context))
+}
+
+fn window_is_opaque(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) -> bool {
+    context.get_slot::<FrameSandbox>().map_or_else(
+        || !context.get_security_token(scope).is_string(),
+        |flags| flags.opaque,
+    )
+}
+
+#[op2(fast)]
+fn op_document_scripts_allowed(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document.get_creation_context(scope).is_some_and(|context| {
+        context.get_slot::<FrameRetired>().is_none()
+            && !context
+                .get_slot::<FrameSandbox>()
+                .is_some_and(|flags| flags.scripts_blocked)
+    })
+}
+
+#[op2(fast)]
+fn op_native_location_installed(scope: &mut v8::PinScope) -> bool {
+    #[cfg(turbo_surf_native_proxy)]
+    {
+        window_proxy::location_installed(scope)
+    }
+    #[cfg(not(turbo_surf_native_proxy))]
+    {
+        let _ = scope;
+        false
+    }
+}
+
+#[op2(fast)]
+fn op_native_window_proxy() -> bool {
+    cfg!(turbo_surf_native_proxy)
+}
+
+#[op2(fast)]
+fn op_window_active(scope: &mut v8::PinScope, window: v8::Local<v8::Object>) -> bool {
+    window
+        .get_creation_context(scope)
+        .is_some_and(|context| context.get_slot::<FrameRetired>().is_none())
+}
+
+#[op2(reentrant)]
+fn op_frame_finish<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<v8::Object>,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    call_frame_helper(scope, "fireFrameLoad", &[])
+        .ok_or_else(|| JsErrorBox::generic("frame lifecycle unavailable"))
+}
+
+#[op2(fast, reentrant)]
+fn op_frame_parser_done(
+    scope: &mut v8::PinScope,
+    window: v8::Local<v8::Object>,
+) -> Result<(), JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    call_frame_helper(scope, "frameParsingDone", &[])
+        .ok_or_else(|| JsErrorBox::generic("frame lifecycle unavailable"))?;
+    Ok(())
+}
+
+#[op2(fast, reentrant)]
+fn op_frame_dom_ready(
+    scope: &mut v8::PinScope,
+    window: v8::Local<v8::Object>,
+) -> Result<(), JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    call_frame_helper(scope, "frameDomReady", &[])
+        .ok_or_else(|| JsErrorBox::generic("frame lifecycle unavailable"))?;
+    Ok(())
+}
+
+#[op2(reentrant)]
+fn op_frame_resources<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<v8::Object>,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let global = context.global(scope);
+    let key = v8::String::new(scope, "document").unwrap();
+    let document = global.get(scope, key.into()).unwrap();
+    call_frame_helper(scope, "loadDocumentResources", &[document, global.into()])
+        .ok_or_else(|| JsErrorBox::generic("frame resource loading unavailable"))
+}
+
+#[op2(reentrant)]
+fn op_create_frame<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent_window: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let parent = parent_window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("frame owner context unavailable"))?;
+    let caller = scope.get_entered_or_microtask_context();
+    if !parent_window.strict_equals(parent.global(scope).into())
+        || !caller
+            .get_security_token(scope)
+            .strict_equals(parent.get_security_token(scope))
+    {
+        return Err(JsErrorBox::generic("frame owner is not same-origin"));
+    }
+    create_frame(scope, parent)
+}
+
+fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'s, v8::Context>) {
+    let contexts = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        let mut ancestor = context;
+        loop {
+            if ancestor == previous {
+                {
+                    let old_scope = &mut v8::ContextScope::new(scope, context);
+                    let _ = call_frame_helper(old_scope, "cancelModuleGraphs", &[]);
+                }
+                if context.get_slot::<FrameRetired>().is_none() {
+                    crate::script_inventory::retire_frame(scope, context);
+                }
+                context.set_slot(Rc::new(FrameRetired));
+                #[cfg(turbo_surf_native_proxy)]
+                JsRuntime::detach_module_context(scope, context);
+                break;
+            }
+            let Some(parent) = ancestor.get_slot::<FrameParent>() else {
+                break;
+            };
+            ancestor = v8::Local::new(scope, &parent.0);
+        }
+    }
+}
+
+fn create_frame<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    allocate_frame(scope, parent, None, true)
+}
+
+fn allocate_frame<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: v8::Local<'s, v8::Context>,
+    previous: Option<v8::Local<'s, v8::Context>>,
+    initialize: bool,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    if parent.get_slot::<FrameRetired>().is_some() {
+        return Err(JsErrorBox::generic(
+            "cannot create a child of an inactive document",
+        ));
+    }
+    let depth = parent
+        .get_slot::<FrameDepth>()
+        .map_or(1, |depth| depth.0 + 1);
+    if depth > 12 {
+        return Err(JsErrorBox::generic("iframe depth limit reached"));
+    }
     let token = parent.get_security_token(scope);
-    let context = v8::Context::new(scope, Default::default());
+    let state = JsRuntime::op_state_from(scope);
+    let saved_core = state
+        .borrow()
+        .borrow::<FrameContexts>()
+        .core
+        .clone()
+        .ok_or_else(|| JsErrorBox::generic("frame host core unavailable"))?;
+    let core = v8::Local::new(scope, saved_core);
+    #[cfg(turbo_surf_native_proxy)]
+    let context = window_proxy::context(scope, previous);
+    #[cfg(not(turbo_surf_native_proxy))]
+    let context = {
+        let _ = previous;
+        v8::Context::new(scope, Default::default())
+    };
+    crate::script_inventory::register_frame(scope, context);
+    context.set_slot(Rc::new(FrameContextMarker));
+    context.set_slot(Rc::new(FrameDepth(depth)));
+    context.set_slot(Rc::new(FrameParent(v8::Global::new(scope, parent))));
     context.set_security_token(token);
-    // deno_core's isolate-wide Promise and import callbacks read these public
-    // embedder slots in the current context. Borrow the runtime-owned state;
-    // these allocations remain valid whenever child JS executes. Runtime shutdown
-    // stops ops before destroying the main realm. Children have no owning deno_core
-    // realm destructor, so they never decrement the borrowed slot pointers.
+    // deno_core's isolate-wide Promise/import callbacks use these public slots.
+    // Borrow the main realm's allocation; child contexts never own/decrement it.
     for slot in [
         deno_core::CONTEXT_STATE_SLOT_INDEX,
         deno_core::MODULE_MAP_SLOT_INDEX,
     ] {
         let pointer = parent.get_aligned_pointer_from_embedder_data(slot);
-        // SAFETY: these aligned pointers are initialized by deno_core for the
-        // parent runtime and retain their allocation until the isolate drops.
+        // SAFETY: the main realm owns these pointers until this isolate drops.
         unsafe {
             context.set_aligned_pointer_in_embedder_data(slot, pointer);
         }
     }
-    context.global(scope)
+    let global = context.global(scope);
+    if initialize {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
+            let csp = CspHandle::new("about:blank", &[], "");
+            let inherited = parent_policy.policy.borrow().current().clone();
+            {
+                let mut policy = csp.policy.borrow_mut();
+                policy.header = inherited.clone();
+                policy.active = inherited;
+            }
+            context.set_slot(Rc::new(csp.clone()));
+            JsRuntime::op_state_from(scope)
+                .borrow_mut()
+                .borrow_mut::<CspContexts>()
+                .0
+                .insert(csp.id, csp);
+        }
+        crate::browser_env::install_independent_html(
+            scope,
+            "<!DOCTYPE html><html><head></head><body></body></html>",
+        );
+        install_css_authorization(scope);
+        #[cfg(turbo_surf_native_proxy)]
+        window_proxy::install_document(scope);
+        restore_runtime_core(scope, global, core);
+
+        let name = v8::String::new(scope, "ts").unwrap();
+        let namespace_key = v8::Symbol::for_key(scope, name);
+        let namespace = global
+            .get(scope, namespace_key.into())
+            .and_then(|v| v.to_object(scope))
+            .unwrap();
+        let name = v8::String::new(scope, "isFrame").unwrap();
+        let flag = v8::Boolean::new(scope, true);
+        namespace.set(scope, name.into(), flag.into());
+        context.set_slot(Rc::new(FrameEnvironment(v8::Global::new(scope, namespace))));
+        let depth_key = v8::String::new(scope, "__depth").unwrap();
+        let depth = v8::Integer::new_from_unsigned(scope, depth);
+        global.set(scope, depth_key.into(), depth.into());
+        let code = v8::String::new(scope, ENV_BOOTSTRAP).unwrap();
+        let script = v8::Script::compile(scope, code, None)
+            .ok_or_else(|| JsErrorBox::generic("frame environment compile failed"))?;
+        script
+            .run(scope)
+            .ok_or_else(|| JsErrorBox::generic("frame environment initialization failed"))?;
+        let secure = secure_context(scope);
+        let crypto_core = core
+            .to_object(scope)
+            .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
+        crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
+        #[cfg(turbo_surf_native_proxy)]
+        window_proxy::capture_exception(scope);
+        run_frame_init_script(scope)?;
+        // The bootstrap deletes its temporary Deno object; core remains native-only.
+    }
+    let retained = v8::Global::new(scope, context);
+    JsRuntime::op_state_from(scope)
+        .borrow_mut()
+        .borrow_mut::<FrameContexts>()
+        .contexts
+        .push(retained);
+    Ok(global)
+}
+
+#[op2(fast, reentrant)]
+fn op_run_frame_timers(scope: &mut v8::PinScope) -> u32 {
+    run_frame_timers(scope, 5000)
+}
+
+fn run_frame_timers(scope: &mut v8::PinScope, max: u32) -> u32 {
+    let frames = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    let mut fired = 0;
+    for context in frames {
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameRetired>().is_some() {
+            continue;
+        }
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let code = v8::String::new(
+            scope,
+            &format!("globalThis[Symbol.for('ts')].runTimers({max})"),
+        )
+        .unwrap();
+        if let Some(result) =
+            v8::Script::compile(scope, code, None).and_then(|script| script.run(scope))
+        {
+            fired += result.uint32_value(scope).unwrap_or(0);
+        }
+    }
+    fired
+}
+
+#[op2(fast, reentrant)]
+fn op_frame_pending(scope: &mut v8::PinScope) -> u32 {
+    let frames = JsRuntime::op_state_from(scope)
+        .borrow()
+        .borrow::<FrameContexts>()
+        .contexts
+        .clone();
+    let mut pending = 0;
+    for context in frames {
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameRetired>().is_some() {
+            continue;
+        }
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let code = v8::String::new(
+            scope,
+            "globalThis[Symbol.for('ts')].pendingWork() === '1' ? 1 : 0",
+        )
+        .unwrap();
+        if let Some(result) =
+            v8::Script::compile(scope, code, None).and_then(|script| script.run(scope))
+        {
+            pending += result.uint32_value(scope).unwrap_or(0);
+        }
+    }
+    pending
+}
+
+#[op2(reentrant)]
+fn op_frame_module<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<v8::Object>,
+    index: u32,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    if !cfg!(turbo_surf_native_proxy) {
+        return Err(JsErrorBox::generic(
+            "Child-frame ES modules require the exact native SDK",
+        ));
+    }
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    if context.get_slot::<FrameRetired>().is_some()
+        || context
+            .get_slot::<FrameSandbox>()
+            .is_some_and(|flags| flags.scripts_blocked)
+    {
+        return Err(JsErrorBox::generic("frame module execution is blocked"));
+    }
+    let policy = context
+        .get_slot::<FrameScriptPolicy>()
+        .ok_or_else(|| JsErrorBox::generic("frame script policy unavailable"))?;
+    if !policy
+        .scripts
+        .iter()
+        .any(|script| script.module && script.index == index as usize)
+    {
+        return Err(JsErrorBox::generic(
+            "frame module is not authorized by its document",
+        ));
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let index = v8::Integer::new_from_unsigned(scope, index);
+    call_frame_helper(scope, "executeFrameModule", &[index.into()])
+        .ok_or_else(|| JsErrorBox::generic("frame module dispatch failed"))
 }
 
 #[op2(fast)]
@@ -563,35 +3002,462 @@ fn op_queue_frame_script(
     scope: &mut v8::PinScope,
     state: &mut OpState,
     window: v8::Local<v8::Object>,
-    #[string] code: String,
-    #[string] source_url: String,
+    #[string] mut code: String,
+    #[string] mut source_url: String,
+    response_id: u32,
 ) -> Result<u32, JsErrorBox> {
+    let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let caller_local = v8::Local::new(scope, &caller);
     let context = window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Err(JsErrorBox::generic("iframe document has been replaced"));
+    }
+    if context
+        .get_slot::<FrameSandbox>()
+        .is_some_and(|flags| flags.scripts_blocked)
+    {
+        return Err(JsErrorBox::generic(
+            "script execution is blocked by the iframe sandbox",
+        ));
+    }
+    let same_origin = caller_local
+        .get_security_token(scope)
+        .strict_equals(context.get_security_token(scope));
+    let response = if response_id != 0 {
+        Some(
+            state
+                .borrow_mut::<FrameContexts>()
+                .scripts
+                .remove(&response_id)
+                .ok_or_else(|| JsErrorBox::generic("frame script response unavailable"))?,
+        )
+    } else {
+        None
+    };
+    if !same_origin {
+        // Parent-side guest parsers can be replaced by page code. Cross-origin
+        // execution must match the host's authenticated document/network bytes.
+        let policy = context
+            .get_slot::<FrameScriptPolicy>()
+            .ok_or_else(|| JsErrorBox::generic("frame script policy unavailable"))?;
+        if let Some(response) = response {
+            if !policy.external.contains(&response.request_url) {
+                return Err(JsErrorBox::generic(
+                    "frame script URL is not authorized by its document",
+                ));
+            }
+            code = response.code;
+            source_url = response.url;
+        } else {
+            let candidate = code.replace("\r\n", "\n");
+            if !policy
+                .inline
+                .iter()
+                .any(|trusted| trusted.replace("\r\n", "\n").trim_start() == candidate.trim_start())
+            {
+                return Err(JsErrorBox::generic(
+                    "frame script body is not authorized by its document",
+                ));
+            }
+            source_url = context
+                .get_slot::<FrameDocumentSourceUrl>()
+                .map_or_else(|| "about:blank".to_string(), |url| url.0.clone());
+        }
+    }
     let context = v8::Global::new(scope, context);
     let queue = state.borrow_mut::<ClassicScripts>();
     queue.next_id += 1;
     let id = queue.next_id;
-    queue.jobs.push_back((id, source_url, code, Some(context)));
+    queue
+        .jobs
+        .push_back((id, source_url, code, Some(context), Some(caller)));
     Ok(id)
+}
+
+fn frame_document_url(scope: &mut v8::PinScope, state: &OpState) -> String {
+    scope
+        .get_entered_or_microtask_context()
+        .get_slot::<FrameDocumentUrl>()
+        .map(|url| url.0.clone())
+        .unwrap_or_else(|| state.borrow::<Base>().0.clone())
+}
+
+struct DocumentRuntimeStateAccessor(v8::Global<v8::Function>);
+#[op2(fast)]
+fn op_set_document_runtime_state_accessor(
+    scope: &mut v8::PinScope,
+    callback: v8::Local<v8::Function>,
+) {
+    if let Some(context) = callback.get_creation_context(scope) {
+        context.set_slot(Rc::new(DocumentRuntimeStateAccessor(v8::Global::new(
+            scope, callback,
+        ))));
+    }
+}
+#[op2(reentrant)]
+fn op_document_runtime_state<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let context = document
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    let accessor = context
+        .get_slot::<DocumentRuntimeStateAccessor>()
+        .ok_or_else(|| JsErrorBox::type_error("Document context unavailable"))?;
+    let callback = v8::Local::new(scope, &accessor.0);
+    let receiver = v8::undefined(scope).into();
+    callback
+        .call(scope, receiver, &[document.into()])
+        .and_then(|value| value.to_object(scope))
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))
+}
+
+#[op2(fast)]
+fn op_document_cookie_allowed(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document
+        .get_creation_context(scope)
+        .is_some_and(|context| !window_is_opaque(scope, context))
+}
+
+#[op2(reentrant)]
+fn op_parse_html_document<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    #[string] html: &str,
+    sanitize: bool,
+) -> v8::Local<'s, v8::Object> {
+    crate::browser_env::parse_html_document(scope, html, sanitize)
+}
+
+#[op2(reentrant)]
+fn op_document_create_element<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<v8::Object>,
+    #[string] tag: &str,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    crate::browser_env::create_document_element(scope, document, tag)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))
+}
+
+#[op2(reentrant)]
+fn op_document_import_node<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    node: v8::Local<'s, v8::Object>,
+    deep: bool,
+) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    crate::browser_env::import_document_node(scope, document, node, deep)
+        .map_err(JsErrorBox::type_error)
+}
+
+#[op2(fast)]
+fn op_document_has_active_window(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+) -> bool {
+    document
+        .get_creation_context(scope)
+        .is_some_and(|context| context.get_slot::<FrameRetired>().is_none())
 }
 
 #[op2]
 #[string]
-fn op_frame_cookie_get(state: &mut OpState, #[string] url: &str) -> String {
+fn op_document_request_url(scope: &mut v8::PinScope, state: &mut OpState) -> String {
+    frame_document_url(scope, state)
+}
+
+#[op2]
+#[string]
+fn op_document_request_source(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    document: v8::Local<v8::Object>,
+) -> String {
+    document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
+        .map_or_else(|| state.borrow::<Base>().0.clone(), |url| url.0.clone())
+}
+
+fn frame_cookie_site_is_opaque<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut context: v8::Local<'s, v8::Context>,
+) -> bool {
+    let mut origins = Vec::new();
+    for _ in 0..64 {
+        if window_is_opaque(scope, context) {
+            return true;
+        }
+        origins.push(window_origin(scope, context));
+        let Some(parent) = context.get_slot::<FrameParent>() else {
+            return origins.last().is_none_or(|top| {
+                origins
+                    .iter()
+                    .any(|origin| !turbo_surf_core::request_context::same_site(origin, top))
+            });
+        };
+        context = v8::Local::new(scope, &parent.0);
+    }
+    true
+}
+
+#[op2]
+#[serde]
+fn op_document_cookie_site<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &mut OpState,
+    document: v8::Local<'s, v8::Object>,
+) -> serde_json::Value {
+    let opaque = document
+        .get_creation_context(scope)
+        .is_none_or(|context| frame_cookie_site_is_opaque(scope, context));
+    serde_json::json!({"top_level_source":state.borrow::<Base>().0,"cookie_site_is_opaque":opaque})
+}
+
+#[op2]
+#[string]
+fn op_frame_cookie_get(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    document: v8::Local<v8::Object>,
+) -> String {
+    let url = document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
+        .map(|url| url.0.clone())
+        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
     state
         .borrow::<Jar>()
         .borrow()
-        .document_cookie(url, cookie_now())
+        .document_cookie(&url, cookie_now())
 }
 
 #[op2(fast)]
-fn op_frame_cookie_set(state: &mut OpState, #[string] url: &str, #[string] line: &str) {
+fn op_frame_cookie_set(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    document: v8::Local<v8::Object>,
+    #[string] line: &str,
+) {
+    let url = document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<FrameDocumentUrl>())
+        .map(|url| url.0.clone())
+        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
     state
         .borrow::<Jar>()
         .borrow_mut()
-        .set_from_document(url, line, cookie_now());
+        .set_from_document(&url, line, cookie_now());
+}
+
+#[derive(Default)]
+struct StorageAreas {
+    next: u32,
+    by_origin: std::collections::BTreeMap<(String, bool), u32>,
+    values: std::collections::BTreeMap<u32, Vec<(String, String)>>,
+}
+
+/// Native storage backing for one browsing tab across document navigations.
+/// Independent handles have separate state; same-origin child frames share it.
+#[derive(Clone, Default)]
+pub struct BrowserStorage(std::sync::Arc<std::sync::Mutex<StorageAreas>>);
+
+#[op2(fast)]
+fn op_storage_area(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    window: v8::Local<v8::Object>,
+    session: bool,
+) -> Result<u32, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    if !window.strict_equals(context.global(scope).into()) {
+        return Err(JsErrorBox::type_error("Illegal invocation"));
+    }
+    if window_is_opaque(scope, context) {
+        return Err(JsErrorBox::type_error(
+            "Storage is unavailable to an opaque origin",
+        ));
+    }
+    let origin = window_origin(scope, context);
+    if !state.has::<BrowserStorage>() {
+        state.put(BrowserStorage::default());
+    }
+    let backing = state.borrow::<BrowserStorage>().clone();
+    let mut areas = backing
+        .0
+        .lock()
+        .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?;
+    if let Some(id) = areas.by_origin.get(&(origin.clone(), session)) {
+        return Ok(*id);
+    }
+    areas.next = areas
+        .next
+        .checked_add(1)
+        .ok_or_else(|| JsErrorBox::range_error("Too many storage areas"))?;
+    let id = areas.next;
+    areas.by_origin.insert((origin, session), id);
+    areas.values.insert(id, Vec::new());
+    Ok(id)
+}
+
+#[op2]
+#[serde]
+fn op_storage_call(
+    state: &mut OpState,
+    id: u32,
+    #[string] command: &str,
+    #[string] key: &str,
+    #[string] value: &str,
+) -> Result<serde_json::Value, JsErrorBox> {
+    let backing = state.borrow::<BrowserStorage>().clone();
+    let mut areas = backing
+        .0
+        .lock()
+        .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?;
+    let values = areas
+        .values
+        .get_mut(&id)
+        .ok_or_else(|| JsErrorBox::type_error("Storage area unavailable"))?;
+    Ok(match command {
+        "get" => values
+            .iter()
+            .find(|(name, _)| name == key)
+            .map_or(serde_json::Value::Null, |(_, value)| {
+                serde_json::json!(value)
+            }),
+        "set" => {
+            if let Some((_, stored)) = values.iter_mut().find(|(name, _)| name == key) {
+                *stored = value.to_string();
+            } else {
+                values.push((key.to_string(), value.to_string()));
+            }
+            serde_json::Value::Null
+        }
+        "delete" => {
+            values.retain(|(name, _)| name != key);
+            serde_json::Value::Null
+        }
+        "clear" => {
+            values.clear();
+            serde_json::Value::Null
+        }
+        "keys" => serde_json::json!(values.iter().map(|(name, _)| name).collect::<Vec<_>>()),
+        _ => return Err(JsErrorBox::type_error("Unknown storage operation")),
+    })
+}
+
+#[op2(fast)]
+fn op_storage_bind(scope: &mut v8::PinScope, object: v8::Local<v8::Object>, id: u32) {
+    let name = v8::String::new(scope, "turbo-surf.Storage.area").unwrap();
+    let key = v8::Private::for_api(scope, Some(name));
+    let value = v8::Integer::new_from_unsigned(scope, id);
+    object.set_private(scope, key, value.into());
+}
+
+#[op2(reentrant)]
+fn op_interface_record_get<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+) -> v8::Local<'s, v8::Value> {
+    crate::browser_env::get_interface_record(scope, object)
+        .unwrap_or_else(|| v8::undefined(scope).into())
+}
+
+#[op2(fast, reentrant)]
+fn op_interface_record_set<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+    record: v8::Local<'s, v8::Value>,
+) -> bool {
+    crate::browser_env::set_interface_record(scope, object, record)
+}
+
+#[op2(fast)]
+fn op_storage_id(
+    scope: &mut v8::PinScope,
+    object: v8::Local<v8::Object>,
+) -> Result<u32, JsErrorBox> {
+    let name = v8::String::new(scope, "turbo-surf.Storage.area").unwrap();
+    let key = v8::Private::for_api(scope, Some(name));
+    object
+        .get_private(scope, key)
+        .filter(|value| value.is_uint32())
+        .and_then(|value| value.uint32_value(scope))
+        .filter(|id| *id != 0)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))
+}
+
+struct RuntimeCore(v8::Global<v8::Object>);
+
+#[op2(fast)]
+fn op_capture_runtime_core(scope: &mut v8::PinScope, core: v8::Local<v8::Object>) {
+    let context = scope.get_current_context();
+    context.set_slot(Rc::new(RuntimeCore(v8::Global::new(scope, core))));
+    let core_value: v8::Local<v8::Value> = core.into();
+    JsRuntime::op_state_from(scope)
+        .borrow_mut()
+        .borrow_mut::<FrameContexts>()
+        .core = Some(v8::Global::new(scope, core_value));
+}
+
+fn restore_runtime_core(
+    scope: &mut v8::PinScope,
+    global: v8::Local<v8::Object>,
+    core: v8::Local<v8::Value>,
+) {
+    let temporary = v8::Object::new(scope);
+    let core_key = v8::String::new(scope, "core").unwrap();
+    temporary.set(scope, core_key.into(), core);
+    let deno_key = v8::String::new(scope, "Deno").unwrap();
+    global.set(scope, deno_key.into(), temporary.into());
+}
+
+struct HostInputDriver {
+    input: v8::Global<v8::Function>,
+    cancel: v8::Global<v8::Function>,
+}
+
+#[op2(fast)]
+fn op_set_host_input_driver(
+    scope: &mut v8::PinScope,
+    callback: v8::Local<v8::Function>,
+    cancel: v8::Local<v8::Function>,
+) {
+    let context = callback
+        .get_creation_context(scope)
+        .expect("host input callback realm");
+    context.set_slot(Rc::new(HostInputDriver {
+        input: v8::Global::new(scope, callback),
+        cancel: v8::Global::new(scope, cancel),
+    }));
+}
+
+#[op2(nofast, reentrant)]
+fn op_event_trust(scope: &mut v8::PinScope, event: v8::Local<v8::Object>, timestamp: f64) {
+    crate::browser_env::mark_event_trusted(scope, event, (timestamp >= 0.0).then_some(timestamp));
+}
+
+#[op2(nofast, reentrant)]
+fn op_dispatch_host_event(
+    scope: &mut v8::PinScope,
+    event: v8::Local<v8::Object>,
+    target: v8::Local<v8::Object>,
+) {
+    crate::browser_env::dispatch_host_event(scope, event, target);
+}
+
+#[op2(nofast, reentrant)]
+fn op_event_callback(
+    scope: &mut v8::PinScope,
+    event: v8::Local<v8::Object>,
+    target: v8::Local<v8::Object>,
+    active: bool,
+) {
+    crate::browser_env::event_callback_state(scope, event, target, active);
 }
 
 #[op2]
@@ -604,17 +3470,85 @@ deno_core::extension!(
     turbo_dom,
     ops = [
         op_create_frame,
+        op_windows_same_origin,
+        op_window_parent,
+        op_window_top,
+        op_window_post_message,
+        op_frame_set_document,
+        op_retire_frame,
+        op_window_active,
+        op_native_window_proxy,
+        op_native_location_installed,
+        op_window_opaque,
+        op_document_scripts_allowed,
+        op_set_frame_navigator,
+        op_window_child_frames,
+        op_frame_move_candidates,
+        op_frame_finish,
+        op_frame_dom_ready,
+        op_frame_parser_done,
+        op_frame_scripts,
+        op_frame_resources,
+        op_run_frame_timers,
+        op_frame_pending,
         op_queue_frame_script,
+        op_frame_module,
         op_message_source,
+        op_event_trust,
+        op_set_host_input_driver,
+        op_capture_runtime_core,
+        op_set_host_capabilities,
+        op_storage_area,
+        op_storage_call,
+        op_storage_bind,
+        op_interface_record_get,
+        op_interface_record_set,
+        op_storage_id,
+        op_dispatch_host_event,
+        op_event_callback,
         op_frame_cookie_get,
+        op_document_request_url,
+        op_document_request_source,
+        op_document_cookie_site,
+        op_set_document_runtime_state_accessor,
+        op_document_runtime_state,
+        op_document_has_active_window,
+        op_document_cookie_allowed,
+        op_parse_html_document,
+        op_document_create_element,
+        op_document_import_node,
         op_frame_cookie_set,
         op_queue_classic_script,
         op_cookie_get,
         op_cookie_set,
         op_fetch,
+        op_load_image,
         op_user_agent,
         op_fingerprint,
+        op_browser_brands,
+        op_browser_device_memory,
+        op_is_secure_context,
         op_now_perf,
+        op_now_epoch,
+        op_inline_module,
+        op_module_credentials,
+        op_csp_context,
+        op_csp_inline,
+        op_frame_script_allowed,
+        op_csp_script,
+        op_csp_nonce,
+        op_module_staging_enabled,
+        op_performance_clone,
+        op_heap_statistics,
+        op_text_decoder_new,
+        op_text_decode,
+        op_text_decoder_drop,
+        op_text_encode,
+        op_random_fill,
+        op_surf_url_parse,
+        op_url_update,
+        op_url_params_parse,
+        op_url_params_serialize,
         op_measure_text,
         op_raster_png,
         op_raster_rgba,
@@ -635,22 +3569,82 @@ deno_core::extension!(
 // top-level `const`/`let` would throw "already declared" the second time, but
 // inside the IIFE they're per-invocation. Globals are assigned to `globalThis`
 // (idempotent) and the cookie bridge re-applies to the current `document`.
-const ENV_BOOTSTRAP: &str = r##"(() => {
-// Capture deno_core's op table + print BEFORE removing the `Deno` global from page scope.
-// `'Deno' in window` / getOwnPropertyNames(window).includes('Deno') is the single biggest
-// browserless tell (deno_core leaks `Deno` onto globalThis), so we delete it at the end of
-// bootstrap. Our shims call ops through the captured `ops`/`__print` closures, not the global.
-// A reused isolate (run_with_dom / pooled) re-runs this bootstrap AFTER the delete, so stash
-// the core under a Symbol (absent from getOwnPropertyNames, so it doesn't reintroduce a
-// string-named tell) to recover it on the second pass.
-const __DC = Symbol.for("ts.dc");
-const __core = globalThis.Deno ? Deno.core : globalThis[__DC];
-try { Object.defineProperty(globalThis, __DC, { value: __core, configurable: true, enumerable: false, writable: false }); } catch (e) {}
+const ENV_BOOTSTRAP: &str = concat!(
+    r##"(() => {
+// The embedder restores this bootstrap-only object when reinstalling a realm.
+// Core recovery lives in native context slots; guest symbols cannot expose ops.
+const __core = globalThis.Deno.core;
 const ops = __core.ops;
 const __print = __core.print;
+ops.op_capture_runtime_core(__core);
 const __NS = Symbol.for("ts");
 const __G = globalThis[__NS] || (Object.defineProperty(globalThis, __NS, { value: {}, configurable: true, enumerable: false, writable: false }), globalThis[__NS]);
+const __hostEvent=globalThis.Event;
+let __hostErrorEvent;
+let __markDocumentInteractive;
+// Interface records use a native, isolate-owned ephemeron map. Same-origin
+// borrowed methods accept foreign-realm objects without exposing a brand setter.
+const __stringify = JSON.stringify, __String = String;
+const __recordOwn = Object.hasOwn, __recordCreate = Object.create, __recordDefine = Object.defineProperty;
+const __interfaceMap = brand => ({
+  has(receiver) { return this.get(receiver) !== undefined; },
+  get(receiver) {
+    if (receiver===null || !['object','function'].includes(typeof receiver)) return undefined;
+    const record=ops.op_interface_record_get(receiver);
+    return record && __recordOwn(record,'runtime') ? record.runtime[brand] : undefined;
+  },
+  set(receiver,value) {
+    let record=ops.op_interface_record_get(receiver);
+    if (!record) {record=__recordCreate(null);record.kind='runtime';if(!ops.op_interface_record_set(receiver,record))throw new TypeError('Interface state unavailable');}
+    if (!__recordOwn(record,'runtime')) __recordDefine(record,'runtime',{value:__recordCreate(null)});
+    record.runtime[brand]=value;return this;
+  },
+});
 globalThis.self = globalThis;
+// DOMException carries branded Web-IDL accessors, including the names/codes used
+// by origin checks and clone failures. The upstream interface shell has no state.
+const __domExceptionState = __interfaceMap("DOMException");
+const __domExceptionCodes = {IndexSizeError:1, HierarchyRequestError:3, WrongDocumentError:4,
+  InvalidCharacterError:5, NoModificationAllowedError:7, NotFoundError:8, NotSupportedError:9,
+  InUseAttributeError:10, InvalidStateError:11, SyntaxError:12, InvalidModificationError:13,
+  NamespaceError:14, InvalidAccessError:15, TypeMismatchError:17, SecurityError:18,
+  NetworkError:19, AbortError:20, URLMismatchError:21, QuotaExceededError:22,
+  TimeoutError:23, InvalidNodeTypeError:24, DataCloneError:25};
+const __exceptionStringConstructor = String, __exceptionTypeError = TypeError;
+const __exceptionState = (exception) => {
+  const state = __domExceptionState.get(exception);
+  if (!state) throw new __exceptionTypeError("Illegal invocation");
+  return state;
+};
+const __exceptionString = value => {
+  if (typeof value === "symbol") throw new __exceptionTypeError("Cannot convert a Symbol to a string");
+  return __exceptionStringConstructor(value);
+};
+globalThis.DOMException = class DOMException {
+  constructor(message = "", name = "Error") {
+    const text = __exceptionString(message), kind = __exceptionString(name);
+    __domExceptionState.set(this, {message: text, name: kind});
+  }
+  get name() { return __exceptionState(this).name; }
+  get message() { return __exceptionState(this).message; }
+  get code() { return __domExceptionCodes[__exceptionState(this).name] || 0; }
+};
+Object.setPrototypeOf(DOMException.prototype, Error.prototype);
+for (const name of ["name", "message", "code"]) {
+  const descriptor = Object.getOwnPropertyDescriptor(DOMException.prototype, name);
+  Object.defineProperty(DOMException.prototype, name, {...descriptor, enumerable: true});
+}
+Object.defineProperty(DOMException.prototype, Symbol.toStringTag, {value: "DOMException", configurable: true});
+for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:2,
+  HIERARCHY_REQUEST_ERR:3, WRONG_DOCUMENT_ERR:4, INVALID_CHARACTER_ERR:5, NO_DATA_ALLOWED_ERR:6,
+  NO_MODIFICATION_ALLOWED_ERR:7, NOT_FOUND_ERR:8, NOT_SUPPORTED_ERR:9, INUSE_ATTRIBUTE_ERR:10,
+  INVALID_STATE_ERR:11, SYNTAX_ERR:12, INVALID_MODIFICATION_ERR:13, NAMESPACE_ERR:14,
+  INVALID_ACCESS_ERR:15, VALIDATION_ERR:16, TYPE_MISMATCH_ERR:17, SECURITY_ERR:18,
+  NETWORK_ERR:19, ABORT_ERR:20, URL_MISMATCH_ERR:21, QUOTA_EXCEEDED_ERR:22, TIMEOUT_ERR:23,
+  INVALID_NODE_TYPE_ERR:24, DATA_CLONE_ERR:25})) {
+  for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true});
+}
+
 // Present a real Chrome (macOS) navigator so page JS that profiles the browser
 // (consistency-only anti-bot gates, feature detection) sees Chrome, not the old
 // `turbo-surf`/`turbo-test` tell. Kept in sync with the tier-1 HTTP UA in
@@ -662,24 +3656,26 @@ globalThis.self = globalThis;
 // cookie when the browser reports online — an undefined/falsy onLine made a cold load of
 // an authed page skip the refresh and render nothing.
 // Runtime fingerprint overrides (JSON object from op_fingerprint). Every navigator
-// field below has a current-stable (Chrome 154) default and is overridable by the matching key —
+// field below has a current configured Chrome release default and is overridable by the matching key —
 // settable per process via `set_fingerprint` (MCP `set_fingerprint` tool).
 const __fp = (() => { try { return JSON.parse(ops.op_fingerprint()); } catch (e) { return {}; } })();
 const __pick = (k, d) => (__fp[k] !== undefined ? __fp[k] : d);
 const __ua = __pick("userAgent",
-  (ops.op_user_agent && ops.op_user_agent()) ||
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36");
+  (ops.op_user_agent && ops.op_user_agent()) || __fp.defaultUserAgent ||
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36");
 // Derive the major from the ACTUAL UA string so navigator.userAgentData.brands always
 // agree with navigator.userAgent (a UA-string `Chrome/153` with `brands` v154 is a hard
 // tell). An explicit chromeMajor override still wins; else parse `Chrome/<major>` from
 // __ua, falling back to the current-stable default.
-const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || [])[1]) || 154));
+const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || [])[1]) || 155));
 // Full build for high-entropy UA-CH (fullVersionList / uaFullVersion) — real Chrome
 // reports the FULL version here (e.g. 154.0.8037.98), NOT the reduced <major>.0.0.0
 // the UA string carries. Default matches turbo-surf-core's browser registry default
 // release; a caller rotating to a non-default major should pass fullVersion too (the
 // session pushes it from the wire profile so both layers stay coherent).
-const __fullVersion = String(__pick("fullVersion", "154.0.8037.98"));
+const __fullVersion = String(__pick("fullVersion", "155.0.8059.40"));
+const __brands=JSON.parse(ops.op_browser_brands(Number(__major), __major, false));
+const __fullBrands=JSON.parse(ops.op_browser_brands(Number(__major), __fullVersion, true));
 // Chrome ships exactly these five PDF-viewer plugins, all aliased to the internal
 // viewer; `navigator.plugins.length === 0` is a classic headless giveaway.
 const __plugin = (name) => ({ name, filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 });
@@ -713,7 +3709,7 @@ const __navData = {
   // Automation tell: real Chrome exposes this as `false`, never `true`/undefined.
   webdriver: false,
   hardwareConcurrency: __pick("hardwareConcurrency", 8),
-  deviceMemory: __pick("deviceMemory", 8),
+  deviceMemory: __pick("deviceMemory", ops.op_browser_device_memory(Number(__major))),
   maxTouchPoints: __pick("maxTouchPoints", 0),
   cookieEnabled: true, doNotTrack: null,
   // Fire-and-forget telemetry beacon: real Chrome exposes it, and its absence is a
@@ -727,7 +3723,7 @@ const __navData = {
   // synchronously, per the spec (the boolean reports whether the UA QUEUED the transfer,
   // not whether it succeeded). `globalThis.fetch`/Blob/etc. are defined later in this
   // bootstrap, but this runs only at call time, by when they exist.
-  sendBeacon: (url, data) => {
+  sendBeacon: (url, data = undefined) => {
     try {
       if (url == null || url === "") return false;
       // Normalize the payload + its implicit content-type the way the spec's
@@ -769,15 +3765,8 @@ const __navData = {
   connection: __pick("connection", { effectiveType: "4g", rtt: 50, downlink: 10, saveData: false }),
   // UA-Client-Hints high-entropy surface, consistent with the UA above.
   userAgentData: __pick("userAgentData", {
-    // Order + greased token MUST match the on-wire sec-ch-ua (fingerprint.rs) — a wire/JS
-    // mismatch is a hard tell. Both are validated against a live real-Chrome capture:
-    // `"Chromium";v="M", "Google Chrome";v="M", "Not A(Brand";v="99"` (greased brand LAST,
-    // token `Not A(Brand` v99). The old `Not_A Brand v8` greased-middle matched nothing real.
-    brands: [
-      { brand: "Chromium", version: __major },
-      { brand: "Google Chrome", version: __major },
-      { brand: "Not A(Brand", version: "99" },
-    ],
+    // Rust owns the same major-seeded GREASE generation used by HTTP headers.
+    brands: __brands,
     mobile: false,
     platform: __uaPlatform,
     getHighEntropyValues: async (hints) => {
@@ -785,16 +3774,8 @@ const __navData = {
       architecture: __pick("architecture", "arm"), bitness: "64", model: "", wow64: false,
       platform: __uaPlatform, platformVersion: __pick("platformVersion", "15.0.0"), uaFullVersion: __fullVersion,
       mobile: false,
-      brands: [
-        { brand: "Chromium", version: __major },
-        { brand: "Google Chrome", version: __major },
-        { brand: "Not A(Brand", version: "99" },
-      ],
-      fullVersionList: [
-        { brand: "Chromium", version: __fullVersion },
-        { brand: "Google Chrome", version: __fullVersion },
-        { brand: "Not A(Brand", version: "99.0.0.0" },
-      ],
+      brands: __brands,
+      fullVersionList: __fullBrands,
       formFactors: ["Desktop"],
       };
       const result = {brands:values.brands, mobile:values.mobile, platform:values.platform};
@@ -883,7 +3864,11 @@ const __navData = {
     // for these, and `navigator.X.foo` must read `undefined` rather than throw on null. A fresh
     // object per property (not one shared ref) so `navigator.a !== navigator.b`.
     const val = has ? __navData[name] : (Object.prototype.hasOwnProperty.call(GET_STUB, name) ? GET_STUB[name] : {});
-    def(name, { get: () => val, enumerable: true, configurable: true });
+    const getter = Object.getOwnPropertyDescriptor({get [name]() {
+      if (this !== navigator) throw new TypeError("Illegal invocation");
+      return val;
+    }}, name).get;
+    def(name, { get: getter, enumerable: true, configurable: true });
   }
   const FN_IMPL = {
     javaEnabled: () => false,
@@ -966,21 +3951,48 @@ globalThis.chrome = globalThis.chrome || {
   app: { isInstalled: false },
 };
 globalThis.location = globalThis.location || { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
-const __mkStorage = () => {
-  const m = new Map();
-  return {
-    getItem: (k) => (m.has(k) ? m.get(k) : null),
-    setItem: (k, v) => m.set(k, String(v)),
-    removeItem: (k) => m.delete(k),
-    clear: () => m.clear(),
-    key: (i) => (Array.from(m.keys())[i] ?? null),
-    get length() { return m.size; },
-  };
+// Storage areas live in the host and are keyed by the actual Window's origin.
+// Private IDs remain attached to retained Storage objects across navigation.
+const __storageWindows = new WeakMap();
+const __storageMap = receiver => ops.op_storage_id(receiver);
+const __storageString = value => {if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);};
+const __storageCall = (receiver, command, key='', value='') => ops.op_storage_call(__storageMap(receiver),command,key,value);
+function Storage() {throw new TypeError('Illegal constructor');}
+const __storageMethods = {
+ getItem(key){if(!arguments.length)throw new TypeError('A key is required');return __storageCall(this,'get',__storageString(key));},
+ setItem(key,value){if(arguments.length<2)throw new TypeError('A key and value are required');__storageCall(this,'set',__storageString(key),__storageString(value));},
+ removeItem(key){if(!arguments.length)throw new TypeError('A key is required');__storageCall(this,'delete',__storageString(key));},
+ clear(){__storageCall(this,'clear');},
+ key(index){if(!arguments.length)throw new TypeError('An index is required');return __storageCall(this,'keys')[Number(index)>>>0]??null;},
+ get length(){return __storageCall(this,'keys').length;},
 };
-globalThis.localStorage = __mkStorage();
-// sessionStorage: a real Chrome global (per-tab web storage). deno_core ships neither;
-// google's homepage reads window.sessionStorage, so its absence is a consistency tell.
-globalThis.sessionStorage = __mkStorage();
+Object.defineProperties(Storage.prototype,Object.getOwnPropertyDescriptors(__storageMethods));
+Object.defineProperty(Storage.prototype,Symbol.toStringTag,{value:'Storage',configurable:true});
+globalThis.Storage=Storage;
+const __mkStorage = id => {
+ const call=(command,key='',value='')=>ops.op_storage_call(id,command,key,value);
+ const storage=__G.makeNamedObject(Storage.prototype,function(command,key,value){
+  if(command==='get')return call('get',key)??undefined;
+  if(command==='has')return call('get',key)!==null;
+  if(command==='keys')return call('keys');
+  if(command==='descriptor'){const value=call('get',key);return value===null?undefined:{value,writable:true,enumerable:true,configurable:true};}
+  if(command==='set'){call('set',key,__storageString(value));return true;}
+  if(command==='delete'){call('delete',key);return true;}
+  if(command==='define'){if('get'in value||'set'in value)throw new TypeError('Storage cannot define an accessor');call('set',key,__storageString(value.value));return true;}
+  throw new TypeError('Unknown Storage property operation');
+ });
+ ops.op_storage_bind(storage,id);return storage;
+};
+for(const [name,session]of [['localStorage',false],['sessionStorage',true]]){
+ const getter=Object.getOwnPropertyDescriptor({get [name](){
+  if(ops.op_window_opaque(this))throw new DOMException('Storage is unavailable to an opaque origin','SecurityError');
+  let areas=__storageWindows.get(this);if(!areas){areas={};__storageWindows.set(this,areas);}
+  const id=ops.op_storage_area(this,session);
+  if(areas[name]?.id!==id)areas[name]={id,value:__mkStorage(id)};return areas[name].value;
+ }},name).get;
+ Object.defineProperty(globalThis,name,{get:__G.makeNativeFunction(getter,'get '+name,0),enumerable:true,configurable:true});
+}
+
 // indexedDB — a real Chrome window global (IDBFactory). `typeof indexedDB === "undefined"`
 // is a classic headless tell. A shape stub (no real persistence) that answers presence +
 // class-tag + the IDBFactory method surface; requests stay pending (no backing store).
@@ -1030,27 +4042,14 @@ globalThis.clearTimeout = (id) => {
   if (i >= 0) __timers.splice(i, 1);
 };
 globalThis.clearInterval = globalThis.clearTimeout;
-// High-resolution monotonic clock matching Chrome (origin-relative, fractional, 100µs grid).
-// A BotGuard-class collector reads performance.now ×100+ and rAF ×20: it checks the resolution
-// (Chrome quantizes to 0.1ms), fractionality, monotonicity, that now() ≈ Date.now()-timeOrigin,
-// and that rAF/event timestamps ride the SAME origin-relative scale. The old fallback returned
-// integer epoch ms (wrong scale, 1ms grid, no fraction) — a timing tell. timeOrigin is a
-// fractional epoch anchor ~0.8–2.5s in the past (a just-navigated page); now() quantizes wall
-// elapsed to the 100µs grid, monotonic with a bounded creep so a tight loop shows 0.1ms deltas.
-// The observable clock is a single coherent quantity: REAL monotonic elapsed (op_now_perf, sub-ms)
-// + VIRTUAL elapsed (`__now`, advanced by the timer drain). This makes `setTimeout(100)`/rAF appear
-// to consume ~100ms/16.7ms even though the drain compresses them to ~0 real time (a real browser
-// observes the delay; the old clock, pure wall-clock, showed 0 — a hard tell), while a sync busy
-// loop still consumes real time (real hrtime advances). `Date.now()` is redefined from the SAME
-// quantity so `timeOrigin + performance.now() == Date.now()` holds (BotGuard's chronometric check).
-const __origDateNow = Date.now.bind(Date);
+// The origin-relative clock combines elapsed native monotonic time with the virtual
+// timer scheduler. Timers advance their scheduled delay; synchronous work consumes
+// real elapsed time. Date/rAF/Event timestamps share this navigation origin.
 const __hrNow = () => { try { return ops.op_now_perf(); } catch (e) { return 0; } };
 const __hr0 = __hrNow();               // monotonic anchor at bootstrap
-const __epoch0 = __origDateNow();      // wall epoch at bootstrap
-const __pageAge = Math.random() * 1700 + 800 + Math.random(); // a page open ~0.8–2.5s (perf.now start)
-const __perfTimeOrigin = __epoch0 - __pageAge;
-// Total observed elapsed since timeOrigin: page age + real monotonic since boot + virtual timer time.
-const __observed = () => __pageAge + (__hrNow() - __hr0) + __now;
+const __epoch0 = ops.op_now_epoch();      // wall epoch at bootstrap
+const __perfTimeOrigin = __epoch0;
+const __observed = () => (__hrNow() - __hr0) + __now;
 let __perfLast = 0;
 const __perfNow = () => {
   let t = Math.floor(__observed() * 10) / 10; // Chrome 100µs grid
@@ -1072,15 +4071,15 @@ try {
 // drain (real Chrome keeps them equal — the delta is a tell). Only the zero-arg path is retimed;
 // every other form (`new Date(ms)`, `new Date(y,m,d,…)`, `new Date(str)`) delegates unchanged.
 // Wrap the real constructor, preserving statics, prototype identity, `instanceof`, the
-// prototype.constructor back-link, and native fn shape (name/length/toString marked below).
+// prototype.constructor back-link; the final native factory embeds the delegate.
 try {
-  const __RealDate = Date;
+  const __RealDate = Date, __dateConstruct = Reflect.construct;
   function DateShim(...a) {
     if (!new.target) return new __RealDate(__coherentEpoch()).toString();
     // Reflect.construct with new.target so `class X extends Date {}` keeps its prototype chain
     // (`new X() instanceof X`); a plain `new __RealDate(...)` would hand back a bare Date instance
     // and break subclassing — itself a builtin-integrity tell. Zero-arg → the coherent epoch.
-    return Reflect.construct(__RealDate, a.length ? a : [__coherentEpoch()], new.target);
+    return __dateConstruct(__RealDate, a.length ? a : [__coherentEpoch()], new.target);
   }
   // Real Date.prototype is non-writable; match that attribute (writable:true→false is allowed
   // even on the function's non-configurable `prototype` slot).
@@ -1088,9 +4087,8 @@ try {
   Object.defineProperty(__RealDate.prototype, "constructor", {
     value: DateShim, configurable: true, writable: true,
   });
-  DateShim.now = __RealDate.now; // the coherent Date.now defined just above
-  DateShim.parse = __RealDate.parse;
-  DateShim.UTC = __RealDate.UTC;
+  for (const name of ["now", "parse", "UTC"]) Object.defineProperty(DateShim, name,
+    Object.getOwnPropertyDescriptor(__RealDate, name));
   Object.defineProperty(DateShim, "name", { value: "Date", configurable: true });
   Object.defineProperty(DateShim, "length", { value: 7, configurable: true }); // real Date.length === 7
   globalThis.Date = DateShim;
@@ -1144,6 +4142,7 @@ __G.runTimers = (max = 100000) => {
     n++;
     try { t.fn(...t.args); } catch (e) { __print("timer error: " + (e && e.stack ? e.stack : e) + "\n"); }
   }
+  if (!__G.isFrame) n += ops.op_run_frame_timers();
   return n; // count fired — lets the hydration pump detect quiescence
 };
 // NOTE: getElementsByTagName/ClassName/Name, lastChild/previous*/nextElementSibling,
@@ -1151,105 +4150,240 @@ __G.runTimers = (max = 100000) => {
 // turbo-test ≥ 71477ba) — real-world bundles (jQuery's load-time support probe,
 // document.write-driven pages) depend on them. They live upstream, not here.
 //
-// document.cookie bridge → the shared CookieJar (scoped to the page base URL). An
-// OWN accessor on the document instance, shadowing browser_env.js's pure-JS jar.
-Object.defineProperty(globalThis.document, "cookie", {
-  configurable: true,
-  get() { return ops.op_cookie_get(); },
-  set(v) { ops.op_cookie_set(String(v)); },
-});
+// Runtime document state stays outside the native node. Use the native brand
+// accessor before routing a borrowed method/getter to another same-origin realm.
+const __document = globalThis.document;
+const __documentType = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
+const __parsedDocumentStates = new WeakMap();
+const __documentRuntimeState = {document: __document, window: globalThis, frame: null, referrer: "", createElement: null, readyState: "complete", currentScript: null, fonts: __document.fonts, handlers: new Map()};
+const __documentState = (receiver) => {
+  if (__documentType.call(receiver) !== 9) throw new TypeError("Illegal invocation");
+  if (receiver === __document) return __documentRuntimeState;
+  if (__parsedDocumentStates.has(receiver)) return __parsedDocumentStates.get(receiver);
+  return ops.op_document_runtime_state(receiver);
+};
+__G.documentStateFor = (receiver) => {
+  if (__documentType.call(receiver) !== 9) throw new TypeError("Illegal invocation");
+  if (receiver === __document) return __documentRuntimeState;
+  if (__parsedDocumentStates.has(receiver)) return __parsedDocumentStates.get(receiver);
+  throw new TypeError("Illegal invocation");
+};
+ops.op_set_document_runtime_state_accessor(__G.documentStateFor);
+const __documentFunction = (fn, name, length) => typeof __G.makeNativeFunction === "function"
+  ? __G.makeNativeFunction(fn, name, length) : fn;
+const __defineDocumentAccessor = (name, read, write) => {
+  const getter = Object.getOwnPropertyDescriptor({get [name]() {return read(__documentState(this), this);}}, name).get;
+  const descriptor = {get: __documentFunction(getter, "get " + name, 0), configurable: true, enumerable: true};
+  if (write) {
+    const setter = Object.getOwnPropertyDescriptor({set [name](value) {write(__documentState(this), this, value);}}, name).set;
+    descriptor.set = __documentFunction(setter, "set " + name, 1);
+  }
+  Object.defineProperty(Document.prototype, name, descriptor);
+  if (Object.hasOwn(__document, name)) delete __document[name];
+};
+const __cookieAccess = () => {if (!ops.op_document_cookie_allowed(__document)) throw new DOMException("An opaque document cannot access cookies", "SecurityError");};
+__documentRuntimeState.readCookie = () => {__cookieAccess();return __documentRuntimeState.frame ? ops.op_frame_cookie_get(__document) : ops.op_cookie_get();};
+__documentRuntimeState.writeCookie = value => {__cookieAccess();return __documentRuntimeState.frame ? ops.op_frame_cookie_set(__document, value) : ops.op_cookie_set(value);};
+__defineDocumentAccessor("cookie", state => state.readCookie(),
+  (state, _receiver, value) => state.writeCookie(String(value)));
+__G.readDocumentCookie = __documentRuntimeState.readCookie;
+__G.writeDocumentCookie = __documentRuntimeState.writeCookie;
+__G.setDocumentReadyState = value => {__documentRuntimeState.readyState=value;};
+__G.setCurrentScript = value => {__documentRuntimeState.currentScript=value;};
+__defineDocumentAccessor("fonts", state => state.fonts);
+__defineDocumentAccessor("currentScript", state => state.currentScript);
+
+// Parsed HTML documents share the caller's interfaces but own an independent
+// native Tree. No bootstrap, script execution, or resource loader is installed.
+const __parseDocument = (input, sanitize, options = undefined, documentURL = "about:blank") => {
+  if (typeof input === "symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+  if (options != null && typeof options !== "object" && typeof options !== "function") throw new TypeError("Parse options must be a dictionary");
+  if (options?.sanitizer !== undefined && options.sanitizer !== "default")
+    throw new DOMException("Custom sanitizers for parsed documents are unsupported", "NotSupportedError");
+  if (options?.sanitizer === "default") sanitize=true;
+  const doc=ops.op_parse_html_document(String(input),sanitize);
+  const state={document:doc,window:null,frame:null,url:documentURL,inactive:true,referrer:"",readyState:"complete",currentScript:null,
+    fonts:__documentRuntimeState.fonts,handlers:new Map(),members:new Map(__documentRuntimeState.members),
+    readCookie:()=>"",writeCookie:()=>{},createElement:tag=>ops.op_document_create_element(doc,tag)};
+  state.members.set("contentType",{value:"text/html"});
+  state.members.set("hidden",{value:true});state.members.set("visibilityState",{value:"hidden"});
+  state.members.set("adoptedStyleSheets",{value:[]});
+  __parsedDocumentStates.set(doc,state);
+  Object.defineProperty(doc,"location",{get:__documentFunction(function(){__documentState(this);return null;},"get location",0),enumerable:true,configurable:false});
+  return doc;
+};
+const __domParserInstances=new WeakSet();
+class DOMParser {
+  constructor(){__domParserInstances.add(this);}
+  parseFromString(input,type){
+    if(!__domParserInstances.has(this))throw new TypeError("Illegal invocation");
+    if(arguments.length<2)throw new TypeError("parseFromString requires two arguments");
+    if(typeof type==="symbol")throw new TypeError("Cannot convert a Symbol value to a string");
+    type=String(type);
+    if(!["text/html","text/xml","application/xml","application/xhtml+xml","image/svg+xml"].includes(type))throw new TypeError("Unsupported MIME type");
+    if(type!=="text/html")throw new DOMException("XML document parsing is unsupported by the HTML Tree engine", "NotSupportedError");
+    return __parseDocument(input,false,undefined,__document.URL);
+  }
+}
+Object.defineProperty(DOMParser.prototype,Symbol.toStringTag,{value:"DOMParser",configurable:true});
+Object.defineProperty(DOMParser.prototype,"parseFromString",{enumerable:true});
+globalThis.DOMParser=DOMParser;
+for(const [name,sanitize]of [["parseHTMLUnsafe",false],["parseHTML",true]]) {
+  const method=({[name](input,options=undefined){if(!arguments.length)throw new TypeError(name+" requires an argument");return __parseDocument(input,sanitize,options);}})[name];
+  Object.defineProperty(Document,name,{value:__documentFunction(method,name,1),writable:true,configurable:true,enumerable:true});
+}
+const __importDocumentNode=({importNode(node,deep=false){
+  __documentState(this);
+  if(!arguments.length)throw new TypeError("importNode requires a node");
+  __documentType.call(node);
+  try{return ops.op_document_import_node(this,node,!!deep);}
+  catch(error){if(/unsupported/.test(error.message))throw new DOMException(error.message,"NotSupportedError");throw error;}
+}}).importNode;
+Object.defineProperty(Document.prototype,"importNode",{value:__documentFunction(__importDocumentNode,"importNode",1),writable:true,configurable:true,enumerable:true});
+
+// Browser pair iterators keep private live-collection state and inherit the
+// actual V8 Iterator prototype. Their next methods are native embedder callbacks.
+const __webIDLIterator = (tag, rows) => {
+  const states = __interfaceMap("Iterator:"+tag);
+  const prototype = Object.create(Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())));
+  Object.defineProperty(prototype, Symbol.toStringTag, {value: tag, configurable: true});
+  const next = function () {
+    const state = states.get(this);
+    if (!state) throw new TypeError("Illegal invocation");
+    if (state.done) return {done: true, value: undefined};
+    const values = rows(state.receiver);
+    if (state.index >= values.length) {state.done = true;return {done: true, value: undefined};}
+    const pair = values[state.index++];
+    return {done: false, value: state.kind === "key" ? pair[0] : state.kind === "value" ? pair[1] : pair.slice()};
+  };
+  Object.defineProperty(prototype, "next", {value: __G.makeNativeFunction(next, "next", 0), writable: true, enumerable: true, configurable: true});
+  return (receiver, kind) => {
+    rows(receiver); // validate the receiver immediately, before iteration starts
+    const iterator = Object.create(prototype);
+    states.set(iterator, {receiver, kind, index: 0, done: false});
+    return iterator;
+  };
+};
 // Headers — fetch + analytics (PostHog) construct/read these; deno_core ships none.
 // Case-insensitive name lookup, per the spec.
+let __setHeadersGuard;
 if (typeof globalThis.Headers === "undefined") {
+  const maps = __interfaceMap("Headers.map"), cookies = __interfaceMap("Headers.cookies"), guards = __interfaceMap("Headers.guard");
+  const map = (receiver) => {const value = maps.get(receiver); if (!value) throw new TypeError("Illegal invocation");return value;};
+  const string = value => {if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);};
+  const name = (value) => {value = string(value);if (!/^[!#$%&'*+.^_`|~0-9a-zA-Z-]+$/.test(value)) throw new TypeError("Invalid header name");return value.toLowerCase();};
+  const content = (value) => {value = string(value);if (/[\r\n\0]/.test(value) || [...value].some(c=>c.charCodeAt(0)>255)) throw new TypeError("Invalid header value");return value.replace(/^[\t ]+|[\t ]+$/g, "");};
+  const forbidden = key => key.startsWith('sec-')||key.startsWith('proxy-')||['accept-charset','accept-encoding','access-control-request-headers','access-control-request-method','connection','content-length','cookie','cookie2','date','dnt','expect','host','keep-alive','origin','permissions-policy','referer','set-cookie','te','trailer','transfer-encoding','upgrade','via'].includes(key);
+  const safe = (key,value) => value.length<=128 && (key==='accept'?!/[\x00-\x08\x0a-\x1f\x7f"():<>?@\[\\\]{}]/.test(value):['accept-language','content-language'].includes(key)?/^[a-zA-Z0-9 *,.\-;=]*$/.test(value):key==='content-type'?!/[\x00-\x08\x0a-\x1f\x7f"():<>?@\[\\\]{}]/.test(value)&&['application/x-www-form-urlencoded','multipart/form-data','text/plain'].includes(value.split(';')[0].trim().toLowerCase()):false);
+  const permitted = (receiver,key,value) => {const guard=guards.get(receiver);if(guard==='immutable')throw new TypeError('Headers are immutable');return !guard||!forbidden(key)&&(guard!=='request-no-cors'||safe(key,value));};
+  __setHeadersGuard=(receiver,guard)=>{const values=map(receiver);guards.set(receiver,guard);if(guard!=='immutable')for(const [key,value]of values)if(!permitted(receiver,key,value))values.delete(key);};
+  const entries = receiver => [...map(receiver)].flatMap(([key,value])=>key==="set-cookie"?cookies.get(receiver).map(value=>[key,value]):[[key,value]]).sort(([a],[b])=>a<b?-1:a>b?1:0);
+  const iterate = __webIDLIterator("Headers Iterator", entries);
   globalThis.Headers = class Headers {
-    constructor(init) {
-      this._m = new Map();
-      if (init) {
-        const ents = typeof init.forEach === "function" ? null : (Array.isArray(init) ? init : Object.entries(init));
-        if (ents) for (const [k, v] of ents) this.append(k, v);
-        else init.forEach((v, k) => this.append(k, v));
-      }
+    constructor(init = undefined) {
+      maps.set(this, new Map());
+      cookies.set(this, []);
+      if (init == null) return;
+      if (typeof init[Symbol.iterator] === "function") {
+        for (const pair of init) {const values = Array.from(pair);if(values.length!==2) throw new TypeError("Header pairs require two values");this.append(values[0], values[1]);}
+      } else for (const [key,value] of Object.entries(init)) this.append(key,value);
     }
-    append(k, v) { const key = String(k).toLowerCase(); this._m.set(key, this._m.has(key) ? this._m.get(key) + ", " + v : String(v)); }
-    set(k, v) { this._m.set(String(k).toLowerCase(), String(v)); }
-    get(k) { const v = this._m.get(String(k).toLowerCase()); return v == null ? null : v; }
-    has(k) { return this._m.has(String(k).toLowerCase()); }
-    delete(k) { this._m.delete(String(k).toLowerCase()); }
-    forEach(cb, thisArg) { for (const [k, v] of this._m) cb.call(thisArg, v, k, this); }
-    keys() { return this._m.keys(); }
-    values() { return this._m.values(); }
-    entries() { return this._m.entries(); }
-    [Symbol.iterator]() { return this._m.entries(); }
+    append(key, value) {const values=map(this);if(arguments.length<2)throw new TypeError("Two arguments required");key=name(key);value=content(value);const joined=values.has(key)?values.get(key)+", "+value:value;if(!permitted(this,key,joined))return;if(key==="set-cookie")cookies.get(this).push(value);values.set(key,joined);}
+    set(key, value) {const values=map(this);if(arguments.length<2)throw new TypeError("Two arguments required");key=name(key);value=content(value);if(!permitted(this,key,value))return;if(key==="set-cookie")cookies.set(this,[value]);values.set(key,value);}
+    get(key) {const values=map(this);if(!arguments.length)throw new TypeError("An argument is required");return values.get(name(key)) ?? null;}
+    has(key) {const values=map(this);if(!arguments.length)throw new TypeError("An argument is required");return values.has(name(key));}
+    delete(key) {const values=map(this);if(!arguments.length)throw new TypeError("An argument is required");key=name(key);if(!permitted(this,key,''))return;values.delete(key);if(key==="set-cookie")cookies.set(this,[]);}
+    getSetCookie() {map(this);return cookies.get(this).slice();}
+    forEach(callback, thisArg = undefined) {map(this);if(typeof callback!=="function")throw new TypeError("A callback is required");for(const [key,value] of iterate(this,"entry"))callback.call(thisArg,value,key,this);}
+    keys() {return iterate(this,"key");}
+    values() {return iterate(this,"value");}
+    entries() {return iterate(this,"entry");}
   };
+  Object.defineProperty(Headers.prototype,Symbol.iterator,{value:Headers.prototype.entries,writable:true,configurable:true});
+  Object.defineProperty(Headers.prototype,Symbol.toStringTag,{value:"Headers",configurable:true});
 }
-// Fetch `Response`/`Request` — real classes (not object literals) so libraries that
-// do `x instanceof Response` / `x instanceof Request` work instead of throwing
-// ("Right-hand side of 'instanceof' is not an object" — a single undefined `Response`
-// aborts a shared bundle and, cascading through webpack's module init, kills React
-// hydration entirely). Bodies are text-backed (the render tier marshals strings).
-if (typeof globalThis.Response === "undefined") {
+let __responseFromNetwork, __requestInit, __resourceResponse;
+const __fetchFailures=__interfaceMap("Fetch.failure");
+const __resourceFailure=error=>__fetchFailures.get(error);
+// Private body and interface state. Public members are receiver-checked Web-IDL
+// accessors; body reads consume once and retain the identity of their stream.
+{
+  const responses = __interfaceMap("Response"), requests = __interfaceMap("Request");
+  const state = (map, receiver) => {const value = map.get(receiver);if (!value) throw new TypeError("Illegal invocation");return value;};
+  const bodyState = raw => ({raw, used: false, stream: null});
+  const rawBytes = async raw => {
+    if (raw == null) return new Uint8Array();
+    if (raw instanceof ArrayBuffer) return new Uint8Array(raw.slice(0));
+    if (ArrayBuffer.isView(raw)) return new Uint8Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+    if (typeof raw.arrayBuffer === "function") return new Uint8Array(await raw.arrayBuffer());
+    if (typeof raw.getReader === "function") {
+      const reader=raw.getReader(), chunks=[];let size=0;
+      try {while(true){const part=await reader.read();if(part.done)break;const bytes=part.value instanceof Uint8Array?part.value:new Uint8Array(part.value);chunks.push(bytes);size+=bytes.length;}}
+      finally {reader.releaseLock();}
+      const bytes=new Uint8Array(size);let at=0;for(const part of chunks){bytes.set(part,at);at+=part.length;}return bytes;
+    }
+    return new TextEncoder().encode(String(raw));
+  };
+  const body = value => {
+    if(value.raw==null)return null;
+    if(value.stream)return value.stream;
+    value.stream=typeof value.raw.getReader==="function"?value.raw:new ReadableStream({async start(controller){try{controller.enqueue(await rawBytes(value.raw));controller.close();}catch(error){controller.error(error);}}});
+    const original=value.stream.getReader.bind(value.stream);
+    value.stream.getReader=(...args)=>{const reader=original(...args),read=reader.read.bind(reader),cancel=reader.cancel.bind(reader);reader.read=(...values)=>{value.used=true;return read(...values);};reader.cancel=(...values)=>{value.used=true;return cancel(...values);};return reader;};
+    return value.stream;
+  };
+  const consume = async value => {if(value.used || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.raw==null&&!value.stream)return new Uint8Array();value.used=true;return value.stream?rawBytes(value.stream):rawBytes(value.raw);};
+  const copyBody = value => {if(value.used || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.stream || value.raw?.getReader){const streams=body(value).tee();value.stream=streams[0];value.raw=streams[0];return streams[1];}return value.raw;};
+  const addContentType = (headers, raw) => {
+    if(headers.has("content-type") || raw==null)return;
+    if(typeof raw==="string")headers.set("content-type","text/plain;charset=UTF-8");
+    else if(raw instanceof URLSearchParams)headers.set("content-type","application/x-www-form-urlencoded;charset=UTF-8");
+    else if(raw.type)headers.set("content-type",raw.type);
+  };
+  const bodyMethods = map => ({
+    async arrayBuffer(){const bytes=await consume(state(map,this).body);return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);},
+    async bytes(){return consume(state(map,this).body);},
+    async text(){return new TextDecoder().decode(await consume(state(map,this).body));},
+    async json(){return JSON.parse(new TextDecoder().decode(await consume(state(map,this).body)));},
+    async blob(){const value=state(map,this);return new Blob([await consume(value.body)],{type:value.headers.get("content-type") || ""});},
+    textStream(){const value=state(map,this).body;if(value.used||value.stream?.locked)throw new TypeError("Body has already been consumed");const stream=body(value);value.used=true;const decoder=new TextDecoder();return new ReadableStream({async start(controller){try{if(stream){const reader=stream.getReader();try{while(true){const part=await reader.read();if(part.done)break;const text=decoder.decode(part.value,{stream:true});if(text)controller.enqueue(text);}}finally{reader.releaseLock();}}const rest=decoder.decode();if(rest)controller.enqueue(rest);controller.close();}catch(error){controller.error(error);}}});},
+    async formData(){const value=state(map,this),type=value.headers.get("content-type")||"",bytes=await consume(value.body);if(!/^application\/x-www-form-urlencoded(?:;|$)/i.test(type))throw new TypeError("Unsupported form encoding");const form=new FormData();for(const [key,item] of new URLSearchParams(new TextDecoder().decode(bytes)))form.append(key,item);return form;}
+  });
+  const project = (ctor,map,fields) => {
+    for(const field of fields)Object.defineProperty(ctor.prototype,field,{get:({["get "+field](){return state(map,this)[field];}})["get "+field],enumerable:true,configurable:true});
+    // Getter functions are extracted from descriptors, preserving nonconstructibility.
+    Object.defineProperty(ctor.prototype,"body",{get:Object.getOwnPropertyDescriptor({get body(){return body(state(map,this).body);}},"body").get,enumerable:true,configurable:true});
+    Object.defineProperty(ctor.prototype,"bodyUsed",{get:Object.getOwnPropertyDescriptor({get bodyUsed(){return state(map,this).body.used;}},"bodyUsed").get,enumerable:true,configurable:true});
+    for(const [name,method] of Object.entries(bodyMethods(map)))Object.defineProperty(ctor.prototype,name,{value:method,writable:true,enumerable:true,configurable:true});
+  };
   globalThis.Response = class Response {
-    constructor(body, init) {
-      init = init || {};
-      this._body = body == null ? "" : (typeof body === "string" ? body : String(body));
-      this.status = init.status == null ? 200 : init.status | 0;
-      this.statusText = init.statusText || "";
-      this.ok = this.status >= 200 && this.status < 300;
-      this.redirected = !!init.redirected;
-      this.type = init.type || "basic";
-      this.url = init.url || "";
-      this.bodyUsed = false;
-      const h = new globalThis.Headers(init.headers || undefined);
-      this.headers = h;
-    }
-    static json(data, init) {
-      const r = new globalThis.Response(JSON.stringify(data), init);
-      r.headers.set("content-type", "application/json");
-      return r;
-    }
-    static error() { const r = new globalThis.Response("", { status: 0 }); r.type = "error"; return r; }
-    static redirect(url, status) { return new globalThis.Response("", { status: status || 302, headers: { location: url } }); }
-    clone() { const r = new globalThis.Response(this._body, { status: this.status, statusText: this.statusText, url: this.url }); this.headers.forEach((v, k) => r.headers.set(k, v)); return r; }
-    async text() { this.bodyUsed = true; return this._body; }
-    async json() { this.bodyUsed = true; return JSON.parse(this._body || "null"); }
-    async arrayBuffer() { this.bodyUsed = true; return new TextEncoder().encode(this._body).buffer; }
-    async blob() { this.bodyUsed = true; return new globalThis.Blob([this._body], { type: this.headers.get("content-type") || "" }); }
-    async formData() { this.bodyUsed = true; const fd = new globalThis.FormData(); return fd; }
-    get body() { const b = this._body; return new globalThis.ReadableStream({ start(c) { if (b) c.enqueue(new TextEncoder().encode(b)); c.close(); } }); }
+    constructor(raw=null, init=undefined){init=init||{};const status=init.status==null?200:Number(init.status);if(!Number.isInteger(status)||status<200||status>599)throw new RangeError("Invalid response status");if(raw!=null&&[204,205,304].includes(status))throw new TypeError("Null body status cannot have a body");const headers=new Headers(init.headers),statusText=String(init.statusText||"");if(/[\r\n]/.test(statusText))throw new TypeError("Invalid status text");addContentType(headers,raw);responses.set(this,{body:bodyState(raw),status,statusText,headers,ok:status>=200&&status<300,type:"default",url:"",redirected:false});}
+    static json(data,init=undefined){const text=JSON.stringify(data);if(text===undefined)throw new TypeError("JSON data is not serializable");const headers=new Headers(init?.headers);if(!headers.has("content-type"))headers.set("content-type","application/json");return new Response(text,{...init,headers});}
+    static error(){const response=new Response();Object.assign(state(responses,response),{status:0,statusText:"",ok:false,type:"error"});return response;}
+    static redirect(url,status=302){const absolute=new URL(String(url),location.href);if(![301,302,303,307,308].includes(Number(status)))throw new RangeError("Invalid redirect status");return new Response(null,{status:Number(status),headers:{location:absolute.href}});}
+    clone(){const value=state(responses,this);const clone=new Response(copyBody(value.body),{status:value.status||200,statusText:value.statusText,headers:value.headers});Object.assign(state(responses,clone),{status:value.status,ok:value.ok,type:value.type,url:value.url,redirected:value.redirected});if(value.type!=="default")__setHeadersGuard(clone.headers,"immutable");return clone;}
   };
-}
-if (typeof globalThis.Request === "undefined") {
+  project(Response,responses,["status","statusText","headers","ok","type","url","redirected"]);
   globalThis.Request = class Request {
-    constructor(input, init) {
-      init = init || {};
-      this.url = (input && typeof input === "object") ? input.url : String(input);
-      this.method = (init.method || (input && input.method) || "GET").toUpperCase();
-      this.headers = new globalThis.Headers(init.headers || (input && input.headers) || undefined);
-      this._body = init.body != null ? init.body : (input && input._body) || null;
-      this.bodyUsed = false;
-      this.credentials = init.credentials || "same-origin";
-      this.mode = init.mode || "cors";
-      this.cache = init.cache || "default";
-      this.redirect = init.redirect || "follow";
-      this.referrer = init.referrer || "about:client";
-      this.signal = init.signal || (globalThis.AbortController ? new globalThis.AbortController().signal : null);
-    }
-    clone() { return new globalThis.Request(this.url, { method: this.method, headers: this.headers, body: this._body,
-      credentials: this.credentials, mode: this.mode, cache: this.cache, redirect: this.redirect,
-      referrer: this.referrer, signal: this.signal }); }
-    async text() { this.bodyUsed = true; return this._body == null ? "" : String(this._body); }
-    async json() { this.bodyUsed = true; return JSON.parse(this._body || "null"); }
-    async arrayBuffer() { this.bodyUsed = true; return new TextEncoder().encode(this._body == null ? "" : String(this._body)).buffer; }
+    constructor(input,init=undefined){if(!arguments.length)throw new TypeError("Request requires an input");init=init||{};const previous=requests.get(input),absolute=new URL(previous?previous.url:String(input),document.baseURI||location.href);if(absolute.username||absolute.password)throw new TypeError("Request URL cannot include credentials");const requested=String(init.method||previous?.method||"GET");if(!/^[!#$%&'*+.^_`|~0-9a-zA-Z-]+$/.test(requested)||["CONNECT","TRACE","TRACK"].includes(requested.toUpperCase()))throw new TypeError("Invalid request method");const method=["DELETE","GET","HEAD","OPTIONS","POST","PUT"].includes(requested.toUpperCase())?requested.toUpperCase():requested;const raw=init.body!==undefined?init.body:previous?copyBody(previous.body):null;if(raw!=null&&["GET","HEAD"].includes(method))throw new TypeError("GET and HEAD cannot have bodies");const headers=new Headers(init.headers||previous?.headers);addContentType(headers,raw);const mode=init.mode||previous?.mode||"cors",credentials=init.credentials||previous?.credentials||"same-origin",cache=init.cache||previous?.cache||"default",redirect=init.redirect||previous?.redirect||"follow";if(!["cors","no-cors","same-origin"].includes(mode)||!["omit","same-origin","include"].includes(credentials)||!["default","no-store","reload","no-cache","force-cache","only-if-cached"].includes(cache)||!["follow","error","manual"].includes(redirect)||cache==="only-if-cached"&&mode!=="same-origin")throw new TypeError("Invalid request option");if(mode==="no-cors"&&!["GET","HEAD","POST"].includes(method))throw new TypeError("Invalid no-cors request method");__setHeadersGuard(headers,mode==="no-cors"?"request-no-cors":"request");requests.set(this,{url:absolute.href,method,headers,body:bodyState(raw),mode,credentials,cache,redirect,referrer:init.referrer??previous?.referrer??"about:client",referrerPolicy:init.referrerPolicy??previous?.referrerPolicy??"",integrity:init.integrity??previous?.integrity??"",keepalive:!!(init.keepalive??previous?.keepalive),signal:init.signal||previous?.signal||new AbortController().signal,destination:"",duplex:"half",targetAddressSpace:init.targetAddressSpace??previous?.targetAddressSpace??"unknown",isHistoryNavigation:false,isReloadNavigation:false});}
+    clone(){const value=state(requests,this);return new Request(value.url,{...value,body:copyBody(value.body)});}
   };
+  project(Request,requests,["url","method","headers","mode","credentials","cache","redirect","referrer","referrerPolicy","integrity","keepalive","signal","destination","duplex","targetAddressSpace","isHistoryNavigation","isReloadNavigation"]);
+  const __NetworkResponse=Response,__NetworkHeaders=Headers;
+  __responseFromNetwork=(raw,options)=>{const filtered=options.type==="opaque"||options.type==="opaqueredirect";const response=new __NetworkResponse(filtered?null:raw,{...options,status:filtered?200:options.status});Object.assign(state(responses,response),filtered?{status:0,statusText:"",ok:false,url:options.type==="opaqueredirect"?options.url:"",redirected:false,type:options.type,headers:new __NetworkHeaders()}:{url:options.url,redirected:options.redirected,type:options.type||"basic"});const item=state(responses,response);__setHeadersGuard(item.headers,"immutable");item.resource=options.resource;return response;};
+  __resourceResponse=response=>{const item=state(responses,response);if(!item.resource)throw new TypeError("Not a network response");return item.resource;};
+  __requestInit = value => {const item=requests.get(value);return item?{...item,body:item.body.raw}:value;};
 }
 // fetch over the tier-1 net stack → a real Response (with real headers, so RSC
 // client navigation that reads `res.headers.get('content-type')` works).
-__G.fetchFromSource = async (url, init, source) => {
+const __fetchFromSource = async (url, init, referrerSource) => {
+  const source = ops.op_document_request_source(__document);
+  const cookieSite = ops.op_document_cookie_site(__document);
   // Marshal the request (method/headers/body) to the op — a Request object carries them
   // on itself; an init object carries them as fields. Headers may be a Headers instance,
   // an array of pairs, or a plain object.
   const req = (url && typeof url === "object") ? url : null;
-  const o = { ...(req || {}), ...(init || {}) };
+  const o = { ...(__requestInit(req) || {}), ...(init || {}) };
   let hdrs = o.headers;
   if (hdrs && typeof hdrs.forEach === "function" && !Array.isArray(hdrs)) {
     const obj = {}; hdrs.forEach((v, k) => { obj[k] = v; }); hdrs = obj;
@@ -1281,8 +4415,9 @@ __G.fetchFromSource = async (url, init, source) => {
       }
     }
   } catch (_e) {}
-  const initJson = JSON.stringify({ method: o.method, headers: hdrs || undefined, body,
-    mode: o.mode, credentials: o.credentials, destination: o.destination, source });
+  const initJson = __stringify({ method: o.method, headers: hdrs || undefined, body,
+    mode: o.mode, credentials: o.credentials, redirect:o.redirect, destination: o.destination, source, referrer_source:referrerSource,
+    opaque_origin: ops.op_window_opaque(__document), ...cookieSite, csp:ops.op_csp_context(__document), nonce:o.nonce });
   // Count in-flight fetches so the hydration/interaction drain doesn't quiesce while a
   // request is outstanding — otherwise a save POST resolves AFTER the drain gives up
   // (the DOM looks "stable" while waiting) and its success re-render (modal close,
@@ -1290,30 +4425,25 @@ __G.fetchFromSource = async (url, init, source) => {
   globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
   let r;
   try {
-    r = await ops.op_fetch(String((url && url.url) || url), initJson);
+    r = await ops.op_fetch(__String((url && url.url) || url), initJson);
   } finally {
     globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
   }
-  // Network log: the Playwright shim drains this to emit `page.on('response')`
-  // events (tests subscribe to capture API payloads — payroll period, employments).
-  try {
-    __G.netLog = __G.netLog || [];
-    __G.netLog.push({
-      url: String((url && url.url) || url),
-      status: r.status, ok: r.ok, method: (o.method || "GET"),
-      contentType: r.content_type || "", body: r.body,
-    });
-    if (__G.netLog.length > 1000) __G.netLog.splice(0, __G.netLog.length - 1000);
-  } catch (_e) {}
-  const headers = {};
-  if (r.content_type) headers["content-type"] = r.content_type;
-  return new globalThis.Response(r.body, {
-    status: r.status,
-    headers,
-    url: String((url && url.url) || url),
+  if (!r.status) {const error=new __exceptionTypeError("Failed to fetch");__fetchFailures.set(error,{policyBlocked:r.policy_blocked,started:!r.policy_blocked,crossOrigin:r.cross_origin,responseReceived:r.response_received});throw error;}
+  const crossOrigin = r.cross_origin;
+  const responseType = o.redirect==="manual"&&[301,302,303,307,308].includes(r.status)?"opaqueredirect":crossOrigin && (o.mode || "cors") === "no-cors" && !o.destination ? "opaque" : crossOrigin && (o.mode || "cors") === "cors" ? "cors" : "basic";
+  const headers = (r.headers || []).filter(([name]) => !["set-cookie", "set-cookie2"].includes(name.toLowerCase()));
+  if (r.content_type && !headers.some(([name]) => name.toLowerCase() === "content-type")) headers.push(["content-type",r.content_type]);
+  return __responseFromNetwork([204,205,304].includes(r.status) ? null : new Uint8Array(r.body_bytes || []), {
+    status: r.status, headers, type: responseType, url: r.final_url || __String((url && url.url) || url), redirected: r.redirected,
+    resource:{url:r.final_url,status:r.status,ok:r.ok,nosniff:r.nosniff,contentType:r.content_type,headers:r.headers,text:r.body,originClean:!crossOrigin||o.mode==="cors"},
   });
 };
-globalThis.fetch = (url, init) => __G.fetchFromSource(url, init, globalThis.location.href);
+const __FetchRequest=Request;
+globalThis.fetch = (input, init = undefined) => {
+  const request = new __FetchRequest(input, init);
+  return __fetchFromSource(request, {...__requestInit(request), destination:""}, ops.op_document_request_url());
+};
 // XMLHttpRequest over fetch (async; resolves in the event loop). Exposes the
 // EventTarget surface (`addEventListener`/`removeEventListener`/`dispatchEvent`) as well
 // as the `on*` props: real code wires the request via `req.addEventListener('load'/
@@ -1322,7 +4452,7 @@ globalThis.fetch = (url, init) => __G.fetchFromSource(url, init, globalThis.loca
 const __xhrContexts = new WeakMap();
 globalThis.XMLHttpRequest = class {
   constructor() {
-    __xhrContexts.set(this, {source: () => globalThis.location.href, base: () => globalThis.document.baseURI || globalThis.location.href});
+    __xhrContexts.set(this, {source: () => ops.op_document_request_url(), base: () => globalThis.document.baseURI || globalThis.location.href});
     this.readyState = 0; this.status = 0; this.statusText = ""; this.responseText = ""; this.response = "";
     this.responseType = ""; this.responseURL = ""; this.withCredentials = false; this.timeout = 0;
     // Real XHR exposes an XMLHttpRequestUpload EventTarget; collectors sometimes wire
@@ -1376,7 +4506,7 @@ globalThis.XMLHttpRequest = class {
   send(body) {
     const self = this;
     self._emit("loadstart");
-    __G.fetchFromSource(this._u, { method: this._m, body, headers: self._h,
+    __fetchFromSource(this._u, { method: this._m, body, headers: self._h,
       credentials: this.withCredentials ? "include" : "same-origin" }, __xhrContexts.get(this).source())
       .then(async (r) => {
         if (self._aborted) return;
@@ -1430,24 +4560,16 @@ function __mkObserver(name, withEntries) {
 globalThis.MutationObserver = __mkObserver("MutationObserver", false);
 globalThis.IntersectionObserver = __mkObserver("IntersectionObserver", true);
 globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
-// structuredClone — apps/SDKs use it (and probe `globalThis.structuredClone.prototype`);
-// absent, that probe throws. deno_core doesn't ship it. Structured-ish deep clone with a
-// few common types; falls back to JSON for the rest.
-if (typeof globalThis.structuredClone === "undefined") {
-  globalThis.structuredClone = (v) => {
-    const seen = new WeakMap();
-    const clone = (x) => {
-      if (x === null || typeof x !== "object") return x;
-      if (seen.has(x)) return seen.get(x);
-      if (x instanceof Date) return new Date(x.getTime());
-      if (x instanceof RegExp) return new RegExp(x.source, x.flags);
-      if (Array.isArray(x)) { const a = []; seen.set(x, a); for (const e of x) a.push(clone(e)); return a; }
-      if (x instanceof Map) { const m = new Map(); seen.set(x, m); for (const [k, val] of x) m.set(clone(k), clone(val)); return m; }
-      if (x instanceof Set) { const s = new Set(); seen.set(x, s); for (const e of x) s.add(clone(e)); return s; }
-      const o = {}; seen.set(x, o); for (const k of Object.keys(x)) o[k] = clone(x[k]); return o;
-    };
-    return clone(v);
-  };
+// V8 clones preserve cycles and built-in types and reject functions/host objects.
+// Transfers require an explicit native ownership bridge that this runtime lacks.
+{
+  const clone=__core.structuredClone, Exception=globalThis.DOMException;
+  globalThis.structuredClone=({structuredClone(value, options=undefined){
+    if(!arguments.length)throw new TypeError("A value is required");
+    if(options?.transfer!==undefined && Array.from(options.transfer).length)
+      throw new Exception("Transfer lists are unsupported by the native clone bridge","NotSupportedError");
+    try{return clone(value);}catch(error){throw new Exception(error.message,"DataCloneError");}
+  }}).structuredClone;
 }
 // NOTE: getComputedStyle is provided by the vendored browser_env.js (a jsdom-style
 // getComputedStyle the Playwright shim's cssValue/visibility reads). Do NOT redefine
@@ -1534,7 +4656,7 @@ if (typeof globalThis.FormData === "undefined") {
     getAll(name) { const n = String(name); return this._e.filter(([k]) => k === n).map(([, v]) => v); }
     has(name) { const n = String(name); return this._e.some(([k]) => k === n); }
     delete(name) { const n = String(name); this._e = this._e.filter(([k]) => k !== n); }
-    forEach(cb, thisArg) { for (const [k, v] of this._e) cb.call(thisArg, v, k, this); }
+    forEach(cb, thisArg = undefined) { for (const [k, v] of this._e) cb.call(thisArg, v, k, this); }
     keys() { return this._e.map(([k]) => k)[Symbol.iterator](); }
     values() { return this._e.map(([, v]) => v)[Symbol.iterator](); }
     entries() { return this._e.map(([k, v]) => [k, v])[Symbol.iterator](); }
@@ -1546,17 +4668,25 @@ if (typeof globalThis.FormData === "undefined") {
 // init). Minimal spec-shaped impls over the concatenated parts as a string — enough to
 // construct/inspect; no real binary I/O in this engine.
 if (typeof globalThis.Blob === "undefined") {
+  const blobs = new WeakMap();
+  const read = receiver => {const value=blobs.get(receiver);if(!value)throw new TypeError("Illegal invocation");return value;};
   globalThis.Blob = class Blob {
-    constructor(parts = [], opts = {}) {
-      this._s = (parts || []).map((p) => (typeof p === "string" ? p : String(p))).join("");
-      this.type = (opts && opts.type) || "";
+    constructor(parts = [], options = {}) {
+      if(parts==null || typeof parts[Symbol.iterator]!=="function")throw new TypeError("Blob parts must be iterable");
+      const chunks=[];let size=0;
+      for(const part of parts){let bytes;if(blobs.has(part))bytes=read(part).bytes;else if(part instanceof ArrayBuffer)bytes=new Uint8Array(part);else if(ArrayBuffer.isView(part))bytes=new Uint8Array(part.buffer,part.byteOffset,part.byteLength);else bytes=new TextEncoder().encode(String(part));chunks.push(bytes);size+=bytes.length;}
+      const bytes=new Uint8Array(size);let at=0;for(const chunk of chunks){bytes.set(chunk,at);at+=chunk.length;}
+      const type=String(options.type||"");blobs.set(this,{bytes,type:/[^\x20-\x7E]/.test(type)?"":type.toLowerCase()});
     }
-    get size() { return this._s.length; }
-    async text() { return this._s; }
-    async arrayBuffer() { return new TextEncoder().encode(this._s).buffer; }
-    slice(a, b, type) { const n = new Blob([this._s.slice(a, b)]); n.type = type || ""; return n; }
-    stream() { const s = this._s; return new globalThis.ReadableStream({ start(c) { c.enqueue(s); c.close(); } }); }
+    get size(){return read(this).bytes.length;}
+    get type(){return read(this).type;}
+    async text(){return new TextDecoder().decode(read(this).bytes);}
+    async arrayBuffer(){return read(this).bytes.slice().buffer;}
+    async bytes(){return read(this).bytes.slice();}
+    slice(start=0,end=undefined,type=""){const value=read(this),size=value.bytes.length;start=Number(start)||0;end=end===undefined?size:Number(end)||0;start=start<0?Math.max(size+start,0):Math.min(start,size);end=end<0?Math.max(size+end,0):Math.min(end,size);return new Blob([value.bytes.slice(start,Math.max(start,end))],{type});}
+    stream(){const bytes=read(this).bytes.slice();return new ReadableStream({start(controller){controller.enqueue(bytes);controller.close();}});}
   };
+  Object.defineProperty(Blob.prototype,Symbol.toStringTag,{value:"Blob",configurable:true});
 }
 if (typeof globalThis.File === "undefined") {
   globalThis.File = class File extends globalThis.Blob {
@@ -1625,28 +4755,78 @@ if (typeof globalThis.customElements === "undefined") {
 // stub, so `new MessageEvent('message',{data}).data` was undefined). Our postMessage / port /
 // BroadcastChannel dispatch build events via this so `ev instanceof MessageEvent` holds and the
 // event carries data/origin/source/ports like Chrome. Defined before the ports that use it.
-globalThis.MessageEvent = class MessageEvent {
-  constructor(type, init) {
-    init = init || {};
-    this.type = String(type);
-    this.data = init.data !== undefined ? init.data : null;
-    this.origin = init.origin || "";
-    this.lastEventId = init.lastEventId || "";
-    this.source = init.source || null;
-    this.ports = init.ports || [];
-    this.bubbles = !!init.bubbles;
-    this.cancelable = !!init.cancelable;
-    this.composed = !!init.composed;
-    this.isTrusted = false;
-    this.timeStamp = Date.now();
-    this.target = null;
-    this.currentTarget = null;
-    this.defaultPrevented = false;
-  }
-  preventDefault() { this.defaultPrevented = true; }
-  stopPropagation() {}
-  stopImmediatePropagation() {}
+const __messageEventState = __interfaceMap("MessageEvent");
+const __messageState = event => {
+  const state = __messageEventState.get(event);
+  if (!state) throw new TypeError("Illegal invocation");
+  return state;
 };
+const __messageString = value => {
+  if (typeof value === "symbol") throw new TypeError("Cannot convert a Symbol to a string");
+  return String(value);
+};
+globalThis.MessageEvent = class MessageEvent extends Event {
+  constructor(type, init = undefined) {
+    if (!arguments.length) throw new TypeError("MessageEvent requires a type");
+    super(type, init);
+    init = init || {};
+    __messageEventState.set(this, {
+      data: init.data === undefined ? null : init.data,
+      origin: init.origin === undefined ? "" : __messageString(init.origin),
+      lastEventId: init.lastEventId === undefined ? "" : __messageString(init.lastEventId),
+      source: init.source == null ? null : init.source,
+      ports: Object.freeze(init.ports === undefined ? [] : Array.from(init.ports)),
+    });
+  }
+  get data() { return __messageState(this).data; }
+  get origin() { return __messageState(this).origin; }
+  get lastEventId() { return __messageState(this).lastEventId; }
+  get source() { return __messageState(this).source; }
+  get ports() { return __messageState(this).ports; }
+  initMessageEvent(type, bubbles = false, cancelable = false, data = null, origin = "", lastEventId = "", source = null, ports = []) {
+    const state = __messageState(this);
+    if (!arguments.length) throw new TypeError("A type is required");
+    if (this.eventPhase !== Event.NONE) return;
+    Event.prototype.initEvent.call(this, type, bubbles, cancelable);
+    state.data = data; state.origin = __messageString(origin); state.lastEventId = __messageString(lastEventId);
+    state.source = source; state.ports = Object.freeze(Array.from(ports));
+  }
+};
+for (const name of ["data", "origin", "lastEventId", "source", "ports", "initMessageEvent"]) {
+  const descriptor = Object.getOwnPropertyDescriptor(MessageEvent.prototype, name);
+  Object.defineProperty(MessageEvent.prototype, name, {...descriptor, enumerable: true});
+}
+Object.defineProperty(MessageEvent.prototype, Symbol.toStringTag, {value: "MessageEvent", configurable: true});
+const __errorEventState = __interfaceMap("ErrorEvent");
+const __errorEventRecord = event => {
+  const state = __errorEventState.get(event);
+  if (!state) throw new TypeError("Illegal invocation");
+  return state;
+};
+globalThis.ErrorEvent = class ErrorEvent extends Event {
+  constructor(type, init = undefined) {
+    if (!arguments.length) throw new TypeError("ErrorEvent requires a type");
+    super(type, init);
+    init = init || {};
+    __errorEventState.set(this, {
+      message: init.message === undefined ? "" : __messageString(init.message),
+      filename: init.filename === undefined ? "" : __messageString(init.filename),
+      lineno: init.lineno === undefined ? 0 : (+init.lineno) >>> 0,
+      colno: init.colno === undefined ? 0 : (+init.colno) >>> 0,
+      error: init.error === undefined ? null : init.error,
+    });
+  }
+  get message() {return __errorEventRecord(this).message;}
+  get filename() {return __errorEventRecord(this).filename;}
+  get lineno() {return __errorEventRecord(this).lineno;}
+  get colno() {return __errorEventRecord(this).colno;}
+  get error() {return __errorEventRecord(this).error;}
+};
+for (const name of ["message", "filename", "lineno", "colno", "error"]) {
+  const descriptor = Object.getOwnPropertyDescriptor(ErrorEvent.prototype, name);
+  Object.defineProperty(ErrorEvent.prototype, name, {...descriptor, enumerable:true});
+}
+Object.defineProperty(ErrorEvent.prototype, Symbol.toStringTag, {value:"ErrorEvent", configurable:true});
 globalThis.MessagePort = class MessagePort {
   constructor() {
     this._onmessage = null; this._peer = null; this._l = []; this._started = false; this._q = [];
@@ -1660,9 +4840,11 @@ globalThis.MessagePort = class MessagePort {
   }
   _fire(data) {
     const ev = new globalThis.MessageEvent("message", { data });
-    ev.target = this;
-    if (typeof this._onmessage === "function") { try { this._onmessage(ev); } catch (e) {} }
-    for (const fn of this._l.slice()) { try { fn.call(this, ev); } catch (e) {} }
+    ops.op_event_callback(ev, this, true);
+    try {
+      if (typeof this._onmessage === "function") { try { this._onmessage(ev); } catch (e) {} }
+      for (const fn of this._l.slice()) { try { fn.call(this, ev); } catch (e) {} }
+    } finally { ops.op_event_callback(ev, this, false); }
   }
   postMessage(data) {
     const p = this._peer; if (!p) return;
@@ -1693,18 +4875,55 @@ globalThis.MessageChannel = class MessageChannel {
 // vendored binding supplies window `addEventListener`/`dispatchEvent`; we only add the
 // poster. MessageEvent is a bare stub here, so build a plain event carrying the fields
 // collectors read (data/origin/source/ports).
-globalThis.postMessage = function postMessage(message, targetOrigin, transfer) {
-  const source = __G.messageSource || ops.op_message_source();
-  const origin = (source.location && source.location.origin) || "";
-  const ports = Array.isArray(transfer) ? transfer : (transfer && transfer.length ? Array.prototype.slice.call(transfer) : []);
-  globalThis.setTimeout(() => {
-    const ev = new globalThis.MessageEvent("message", { data: message, origin, source, ports });
-    ev.target = globalThis;
-    ev.currentTarget = globalThis;
-    try { if (typeof globalThis.onmessage === "function") globalThis.onmessage(ev); } catch (_e) {}
-    try { if (typeof globalThis.dispatchEvent === "function") globalThis.dispatchEvent(ev); } catch (_e) {}
+globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
+  if (transfer && transfer.length) throw new DOMException("Message transfers are not supported by the native frame bridge", "DataCloneError");
+  if (arguments.length === 0) throw new TypeError("A message is required");
+  ops.op_window_post_message(globalThis, message, String(targetOrigin));
+}}).postMessage;
+const __windowViews = new WeakMap();
+__G.windowView = (target) => {
+  if (ops.op_native_window_proxy()) return target;
+  if (ops.op_windows_same_origin(target)) return target;
+  if (__windowViews.has(target)) return __windowViews.get(target);
+  const deny = () => { throw new DOMException("Blocked a frame with a different origin", "SecurityError"); };
+  const allowed = Object.create(null);
+  const view = new Proxy(allowed, {
+    get(_object, name) {
+      if (name === Symbol.toStringTag) return "Window";
+      if (name === "window" || name === "self" || name === "frames") return view;
+      if (name === "postMessage") return allowed.postMessage;
+      if (name === "parent") return __G.windowView(ops.op_window_parent(target));
+      if (name === "top") return __G.windowView(ops.op_window_top(target));
+      if (name === "closed") return false;
+      if (name === "blur" || name === "focus" || name === "close") return allowed[name];
+      return deny();
+    },
+    set() { return deny(); },
+    getPrototypeOf() { return null; },
+    ownKeys() { return ["window", "self", "frames", "parent", "top", "postMessage", "closed", "blur", "focus", "close"]; },
+  });
+  allowed.postMessage = (message, targetOrigin = "/", transfer) => {
+    if (transfer && transfer.length) throw new DOMException("Message transfers are not supported by the native frame bridge", "DataCloneError");
+    ops.op_window_post_message(target, message, String(targetOrigin));
+  };
+  for (const name of ["blur", "focus", "close"]) allowed[name] = () => {};
+  __windowViews.set(target, view);
+  return view;
+};
+const __hostMessageEvent=globalThis.MessageEvent;
+const __deliverWindowMessage = (message, sender, origin) => {
+  "use strict";
+  const source = __G.windowView(sender);
+  setTimeout(() => {
+    const event = new __hostMessageEvent("message", {data: message, source, origin});
+    ops.op_event_callback(event, globalThis, true);
+    try { if (typeof globalThis.onmessage === "function") globalThis.onmessage(event); }
+    finally { ops.op_event_callback(event, globalThis, false); }
+    ops.op_event_trust(event, -1);
+    ops.op_dispatch_host_event(event, globalThis);
   }, 0);
 };
+ops.op_set_host_capabilities({deliverWindowMessage:__deliverWindowMessage});
 // window `on*` event-handler slots default to `null` in a real browser (never
 // undefined). The reCAPTCHA VM reads `window.onmessage` while wiring its postMessage
 // handshake; an undefined read (vs null) is both a functional gap and a headless tell.
@@ -1736,86 +4955,117 @@ if (typeof globalThis.trustedTypes === "undefined") {
     isHTML: () => false, isScript: () => false, isScriptURL: () => false,
   };
 }
-// performance — React/Next read performance.now() for timing/scheduling. mark()/measure()
-// must RETURN the PerformanceEntry they create (real spec): RUM/timing code destructures
-// `const {startTime} = performance.mark(name)` (and reads `.duration`/`.entryType` off the
-// measure), so returning undefined crashed with "Cannot destructure property 'startTime' …"
-// (seen on nike.com's Boomerang beacon).
-// Install the hi-res clock onto `performance` (defineProperty, not the `||` guard, so it wins
-// whether or not deno_core preinstalled a coarse one). mark()/measure() ride the same clock.
-{
-  const P = globalThis.performance || (globalThis.performance = {});
-  try { Object.defineProperty(P, "now", { value: __perfNow, configurable: true, writable: true }); }
-  catch (e) { P.now = __perfNow; }
-  try { Object.defineProperty(P, "timeOrigin", { value: __perfTimeOrigin, configurable: true, enumerable: true }); }
-  catch (e) { P.timeOrigin = __perfTimeOrigin; }
-  if (typeof P.mark !== "function") P.mark = (name, opts) => ({ name: String(name == null ? "" : name), entryType: "mark",
-    startTime: (opts && +opts.startTime) || __perfNow(), duration: 0, detail: (opts && opts.detail) || null });
-  if (typeof P.measure !== "function") P.measure = (name) => ({ name: String(name == null ? "" : name), entryType: "measure", startTime: 0, duration: 0, detail: null });
-  if (typeof P.clearMarks !== "function") P.clearMarks = () => {};
-  if (typeof P.clearMeasures !== "function") P.clearMeasures = () => {};
-  if (typeof P.getEntries !== "function") P.getEntries = () => [];
-  if (typeof P.getEntriesByName !== "function") P.getEntriesByName = () => [];
-  if (typeof P.getEntriesByType !== "function") P.getEntriesByType = () => [];
+// User Timing stores real entries; navigation records only phases this runtime observes.
+const __performanceEntries = __interfaceMap("PerformanceEntry");
+const __performanceTimeline = [];
+// Each hard navigation owns its identifier; timeline entries retain that identity.
+// Chromium's navigation generator initializes the same public range, 100..10000.
+const __navigationRandom = new Uint32Array(1);
+do { ops.op_random_fill(new Uint8Array(__navigationRandom.buffer)); } while (__navigationRandom[0] >= 4294967296 - 4294967296 % 9901);
+const __navigationId = 100 + __navigationRandom[0] % 9901;
+const __performanceFields = ['navigationStart','unloadEventStart','unloadEventEnd','redirectStart','redirectEnd','fetchStart','domainLookupStart','domainLookupEnd','connectStart','secureConnectionStart','connectEnd','requestStart','responseStart','responseEnd','domLoading','domInteractive','domContentLoadedEventStart','domContentLoadedEventEnd','domComplete','loadEventStart','loadEventEnd'];
+const __navigationPhases = Object.fromEntries(__performanceFields.map(name=>[name,0]));
+__navigationPhases.navigationStart=Math.floor(__perfTimeOrigin);
+__navigationPhases.domLoading=Math.floor(__perfTimeOrigin+__perfNow());
+const __performanceString = value => {if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);};
+const __performanceNumber = value => {const n=Number(value);if(!Number.isFinite(n)||n<0)throw new TypeError('A nonnegative finite timestamp is required');return n;};
+const __entryState = receiver => {const state=__performanceEntries.get(receiver);if(!state)throw new TypeError('Illegal invocation');return state;};
+const __performanceDOMException=DOMException;
+const __performanceDetail = detail => detail===undefined?null:ops.op_performance_clone(detail,__performanceDOMException);
+globalThis.PerformanceEntry = class PerformanceEntry {
+  constructor(){throw new TypeError('Illegal constructor');}
+  get name(){return __entryState(this).name;}
+  get entryType(){return __entryState(this).entryType;}
+  get startTime(){return __entryState(this).startTime;}
+  get duration(){return __entryState(this).duration;}
+  get navigationId(){return __entryState(this).navigationId;}
+  toJSON(){const state=__entryState(this);const result={name:state.name,entryType:state.entryType,startTime:state.startTime,duration:state.duration,navigationId:state.navigationId};if(state.entryType==='navigation')Object.assign(result,__navigationRelative());return result;}
+};
+globalThis.PerformanceMark = class PerformanceMark {
+  constructor(name,options=undefined){if(!arguments.length)throw new TypeError('A mark name is required');name=__performanceString(name);if(__performanceFields.includes(name))throw new DOMException('Reserved timing name','SyntaxError');if(options!=null&&typeof options!=='object'&&typeof options!=='function')throw new TypeError('Mark options must be a dictionary');options=options||{};__performanceEntries.set(this,{name,navigationId:__navigationId,entryType:'mark',startTime:options.startTime===undefined?__perfNow():__performanceNumber(options.startTime),duration:0,detail:__performanceDetail(options.detail)});}
+  get detail(){const state=__entryState(this);if(state.entryType!=='mark')throw new TypeError('Illegal invocation');return state.detail;}
+};
+globalThis.PerformanceMeasure = class PerformanceMeasure {
+  constructor(){throw new TypeError('Illegal constructor');}
+  get detail(){const state=__entryState(this);if(state.entryType!=='measure')throw new TypeError('Illegal invocation');return state.detail;}
+};
+globalThis.PerformanceNavigationTiming = class PerformanceNavigationTiming {constructor(){throw new TypeError('Illegal constructor');}};
+for(const name of ['PerformanceMark','PerformanceMeasure','PerformanceNavigationTiming']){Object.setPrototypeOf(globalThis[name].prototype,PerformanceEntry.prototype);Object.setPrototypeOf(globalThis[name],PerformanceEntry);}
+for(const name of ['PerformanceEntry','PerformanceMark','PerformanceMeasure','PerformanceNavigationTiming']){
+  const proto=globalThis[name].prototype;Object.defineProperty(proto,Symbol.toStringTag,{value:name,configurable:true});
+  for(const key of Object.getOwnPropertyNames(proto)){if(key==='constructor')continue;const d=Object.getOwnPropertyDescriptor(proto,key);Object.defineProperty(proto,key,{...d,enumerable:true});}
 }
-// Legacy navigation timing: performance.timing (PerformanceTiming) + performance.navigation
-// (PerformanceNavigation). Deprecated but Chrome still exposes both, and deno_core's
-// `performance` ships neither — google's homepage reads them, so an anti-bot consistency
-// check sees `undefined` where real Chrome has objects. Coherent, monotonic values off
-// timeOrigin; the redirect/unload marks are 0 (a fresh top-level navigation).
-try {
-  const P = globalThis.performance;
-  if (P && !P.timing) {
-    // Realistic SPREAD of navigation phases (real Chrome: navigationStart < dns < connect <
-    // request < response < domInteractive < DCL < domComplete < loadEventEnd). All-equal
-    // timestamps are an obvious synthetic tell, so lay them out with plausible ordered gaps.
-    const t = Math.floor(P.timeOrigin || Date.now());
-    const r = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo));
-    const fetchStart = t + r(1, 4), dlS = fetchStart + r(1, 5), dlE = dlS + r(1, 6);
-    const cS = dlE + r(0, 3), sc = cS + r(4, 14), cE = sc + r(8, 26), reqS = cE + r(1, 4);
-    const resS = reqS + r(30, 120), resE = resS + r(15, 90), domL = resE + r(1, 6);
-    const domI = domL + r(60, 220), dclS = domI + r(2, 18), dclE = dclS + r(1, 6);
-    const domC = dclE + r(80, 400), lES = domC + r(1, 5), lEE = lES + r(1, 8);
-    const timing = {
-      navigationStart: t, unloadEventStart: 0, unloadEventEnd: 0, redirectStart: 0, redirectEnd: 0,
-      fetchStart, domainLookupStart: dlS, domainLookupEnd: dlE, connectStart: cS,
-      secureConnectionStart: sc, connectEnd: cE, requestStart: reqS, responseStart: resS,
-      responseEnd: resE, domLoading: domL, domInteractive: domI,
-      domContentLoadedEventStart: dclS, domContentLoadedEventEnd: dclE, domComplete: domC,
-      loadEventStart: lES, loadEventEnd: lEE,
-    };
-    timing.toJSON = function () { return timing; };
-    try { Object.defineProperty(P, "timing", { value: timing, configurable: true, enumerable: true }); }
-    catch (e) { P.timing = timing; }
-  }
-  if (P && !P.navigation) {
-    const nav = { type: 0, redirectCount: 0 };
-    Object.defineProperties(nav, {
-      TYPE_NAVIGATE: { value: 0 }, TYPE_RELOAD: { value: 1 },
-      TYPE_BACK_FORWARD: { value: 2 }, TYPE_RESERVED: { value: 255 },
-    });
-    try { Object.defineProperty(P, "navigation", { value: nav, configurable: true, enumerable: true }); }
-    catch (e) { P.navigation = nav; }
-  }
-  // performance.memory — Chrome-only non-standard heap gauge; real Chrome exposes it, and
-  // fingerprinters read it. jsHeapSizeLimit is Chrome's exact quantized ~4GB constant
-  // (4294705152), NOT a round synthetic number; total/used are plausible fresh-page values.
-  if (P && !P.memory) {
-    const mem = { jsHeapSizeLimit: 4294705152, totalJSHeapSize: 12100000, usedJSHeapSize: 10300000 };
-    try { Object.defineProperty(P, "memory", { value: mem, configurable: true, enumerable: true }); }
-    catch (e) { P.memory = mem; }
-  }
-} catch (e) {}
-// document.scrollingElement — real Chrome returns the root <html> in standards mode. rtdom's
-// document has no layout, so point it at documentElement (google's homepage reads it).
-try {
-  const D = globalThis.document;
-  if (D && !D.scrollingElement) {
-    Object.defineProperty(D, "scrollingElement", {
-      get() { return D.documentElement || null; }, configurable: true,
-    });
-  }
-} catch (e) {}
+const __navigationRelative = () => Object.fromEntries(__performanceFields.filter(name=>name!=='navigationStart'&&name!=='domLoading').map(name=>[name,__navigationPhases[name]?Math.max(0,__navigationPhases[name]-__navigationPhases.navigationStart):0]));
+const __navigationEntry=Object.create(PerformanceNavigationTiming.prototype);
+__performanceEntries.set(__navigationEntry,{name:location.href,navigationId:__navigationId,entryType:'navigation',startTime:0,duration:0});
+for(const name of __performanceFields.filter(name=>name!=='navigationStart'&&name!=='domLoading'))Object.defineProperty(PerformanceNavigationTiming.prototype,name,{get(){if(this!==__navigationEntry)throw new TypeError('Illegal invocation');return __navigationRelative()[name];},enumerable:true,configurable:true});
+for(const [name,value]of Object.entries({type:'navigate',redirectCount:0}))Object.defineProperty(PerformanceNavigationTiming.prototype,name,{get(){if(this!==__navigationEntry)throw new TypeError('Illegal invocation');return value;},enumerable:true,configurable:true});
+__performanceTimeline.push(__navigationEntry);
+__G.performancePhase = name => {if(__performanceFields.includes(name)){__navigationPhases[name]=Math.floor(__perfTimeOrigin+__perfNow());if(name==='loadEventEnd')__entryState(__navigationEntry).duration=__navigationRelative().loadEventEnd;}};
+const __latestMark = value => {
+  if(typeof value==='number')return __performanceNumber(value);
+  const name=__performanceString(value);
+  if(__performanceFields.includes(name)){if(name==='navigationStart')return 0;if(!__navigationPhases[name])throw new DOMException('Timing phase has not occurred','InvalidAccessError');return __navigationPhases[name]-__navigationPhases.navigationStart;}
+  for(let i=__performanceTimeline.length-1;i>=0;i--){const entry=__performanceTimeline[i];if(entry.entryType==='mark'&&entry.name===name)return entry.startTime;}
+  throw new DOMException('The mark does not exist','SyntaxError');
+};
+const __clearPerformanceEntries = (type,name) => {for(let i=__performanceTimeline.length-1;i>=0;i--)if(__performanceTimeline[i].entryType===type&&(name===undefined||__performanceTimeline[i].name===name))__performanceTimeline.splice(i,1);};
+const __eventCountsData=__interfaceMap("EventCounts");
+globalThis.EventCounts=class EventCounts {
+  constructor(){throw new TypeError('Illegal constructor');}
+  get size(){return __counts(this).size;}
+  entries(){return __counts(this).entries();}
+  keys(){return __counts(this).keys();}
+  values(){return __counts(this).values();}
+  get(key){if(!arguments.length)throw new TypeError('A key is required');return __counts(this).get(__performanceString(key));}
+  has(key){if(!arguments.length)throw new TypeError('A key is required');return __counts(this).has(__performanceString(key));}
+  forEach(callback,thisArg=undefined){const data=__counts(this);if(typeof callback!=='function')throw new TypeError('A callback is required');data.forEach((value,key)=>callback.call(thisArg,value,key,this));}
+  [Symbol.iterator](){return this.entries();}
+};
+const __counts=receiver=>{const data=__eventCountsData.get(receiver);if(!data)throw new TypeError('Illegal invocation');return data;};
+Object.defineProperty(EventCounts.prototype,Symbol.toStringTag,{value:'EventCounts',configurable:true});
+for(const key of Reflect.ownKeys(EventCounts.prototype)){if(key==='constructor'||key===Symbol.toStringTag)continue;const descriptor=Object.getOwnPropertyDescriptor(EventCounts.prototype,key);Object.defineProperty(EventCounts.prototype,key,{...descriptor,enumerable:true});}
+const __eventCounts=Object.create(EventCounts.prototype);
+__eventCountsData.set(__eventCounts,new Map(['auxclick','beforeinput','click','compositionend','compositionstart','compositionupdate','contextmenu','dblclick','dragend','dragenter','dragleave','dragover','dragstart','drop','gotpointercapture','input','keydown','keypress','keyup','lostpointercapture','mousedown','mouseenter','mouseleave','mouseout','mouseover','mouseup','pointercancel','pointerdown','pointerenter','pointerleave','pointerout','pointerover','pointerup','touchcancel','touchend','touchstart'].map(name=>[name,0])));
+let __resourceTimingBufferSize=250,__resourceBufferFullHandler=null;
+{
+  const P=globalThis.performance||(globalThis.performance={});
+  Object.defineProperties(P,{now:{value:__perfNow,configurable:true,writable:true},timeOrigin:{value:__perfTimeOrigin,configurable:true,enumerable:true},eventCounts:{value:__eventCounts,configurable:true,enumerable:true},interactionCount:{value:0,configurable:true,enumerable:true},onresourcetimingbufferfull:{get(){return __resourceBufferFullHandler;},set(value){__resourceBufferFullHandler=typeof value==='function'?value:null;},configurable:true,enumerable:true}});
+  P.mark=function(name,options=undefined){if(!arguments.length)throw new TypeError('A mark name is required');const entry=new PerformanceMark(name,options);__performanceTimeline.push(entry);return entry;};
+  P.measure=function(name,startOrOptions=undefined,endMark=undefined){
+    if(!arguments.length)throw new TypeError('A measure name is required');name=__performanceString(name);
+    let start=0,end=__perfNow(),detail=null;
+    const options=startOrOptions&&typeof startOrOptions==='object'?startOrOptions:null;
+    if(options&&['start','end','duration','detail'].some(key=>options[key]!==undefined)){
+      const hasStart=options.start!==undefined,hasEnd=options.end!==undefined,hasDuration=options.duration!==undefined;
+      if(endMark!==undefined||(!hasStart&&!hasEnd)||(hasStart&&hasEnd&&hasDuration))throw new TypeError('Invalid measure options');
+      if(hasStart)start=__latestMark(options.start);if(hasEnd)end=__latestMark(options.end);
+      if(hasDuration){const duration=__performanceNumber(options.duration);if(hasStart)end=start+duration;else start=end-duration;}
+      detail=__performanceDetail(options.detail);
+    }else{if(startOrOptions!==undefined&&!options)start=__latestMark(__performanceString(startOrOptions));if(endMark!==undefined)end=__latestMark(__performanceString(endMark));}
+    const entry=Object.create(PerformanceMeasure.prototype);__performanceEntries.set(entry,{name,navigationId:__navigationId,entryType:'measure',startTime:start,duration:end-start,detail});__performanceTimeline.push(entry);return entry;
+  };
+  P.clearMarks=function(name=undefined){__clearPerformanceEntries('mark',name===undefined?undefined:__performanceString(name));};
+  P.clearMeasures=function(name=undefined){__clearPerformanceEntries('measure',name===undefined?undefined:__performanceString(name));};
+  P.getEntries=function(){return __performanceTimeline.slice().sort((a,b)=>a.startTime-b.startTime);};
+  P.getEntriesByType=function(type){if(!arguments.length)throw new TypeError('An entry type is required');type=__performanceString(type);return P.getEntries().filter(entry=>entry.entryType===type);};
+  P.getEntriesByName=function(name,type=undefined){if(!arguments.length)throw new TypeError('An entry name is required');name=__performanceString(name);if(type!==undefined)type=__performanceString(type);return P.getEntries().filter(entry=>entry.name===name&&(type===undefined||entry.entryType===type));};
+  P.clearResourceTimings=function(){__clearPerformanceEntries('resource');};
+  P.setResourceTimingBufferSize=function(size){if(!arguments.length)throw new TypeError('A buffer size is required');__resourceTimingBufferSize=Number(size)>>>0;};
+  P.toJSON=function(){return {timeOrigin:__perfTimeOrigin};};
+  const timing={};for(const name of __performanceFields)Object.defineProperty(timing,name,{get(){return __navigationPhases[name];},enumerable:true,configurable:true});timing.toJSON=function(){return Object.fromEntries(__performanceFields.map(name=>[name,__navigationPhases[name]]));};
+  Object.defineProperty(P,'timing',{value:timing,configurable:true,enumerable:true});
+  const navigation={type:0,redirectCount:0};for(const [name,value]of Object.entries({TYPE_NAVIGATE:0,TYPE_RELOAD:1,TYPE_BACK_FORWARD:2,TYPE_RESERVED:255}))Object.defineProperty(navigation,name,{value,enumerable:true});navigation.toJSON=function(){return {type:this.type,redirectCount:this.redirectCount};};
+  Object.defineProperty(P,'navigation',{value:navigation,configurable:true,enumerable:true});
+  Object.defineProperty(P,'memory',{get(){return ops.op_heap_statistics();},configurable:true,enumerable:true});
+  __G.recordResourceTiming=(name,initiatorType,startTime,endTime,encodedSize=0)=>{
+    const count=__performanceTimeline.filter(entry=>entry.entryType==='resource').length;
+    if(count>=__resourceTimingBufferSize){if(__resourceBufferFullHandler)__resourceBufferFullHandler.call(P,new __hostEvent('resourcetimingbufferfull'));return;}
+    const entry=Object.create(PerformanceEntry.prototype);__performanceEntries.set(entry,{name:String(name),navigationId:__navigationId,entryType:'resource',startTime,duration:Math.max(0,endTime-startTime)});Object.defineProperties(entry,{initiatorType:{value:String(initiatorType),enumerable:true},encodedBodySize:{value:encodedSize,enumerable:true},decodedBodySize:{value:encodedSize,enumerable:true}});__performanceTimeline.push(entry);
+  };
+}
+__defineDocumentAccessor("scrollingElement", state => state.document.compatMode === "BackCompat"
+  ? state.document.body : state.document.documentElement);
 // window.scheduler — the Prioritized Task Scheduling API (Chrome). google's homepage reads
 // window.scheduler; deno_core doesn't ship it. postTask runs the callback through the virtual
 // timer queue (honoring `delay`) and resolves with its result; yield() defers to a macrotask.
@@ -1879,148 +5129,59 @@ if (typeof globalThis.CSS === "undefined") {
   };
 }
 // Encoding/crypto/base64 web globals deno_core doesn't ship but app bundles use.
-if (typeof globalThis.TextEncoder === "undefined") {
-  globalThis.TextEncoder = class TextEncoder {
-    get encoding() { return "utf-8"; }
-    encode(str = "") {
-      str = String(str);
-      const b = [];
-      for (let i = 0; i < str.length; i++) {
-        let c = str.charCodeAt(i);
-        if (c < 0x80) b.push(c);
-        else if (c < 0x800) b.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
-        else if (c >= 0xd800 && c <= 0xdbff) {
-          const c2 = str.charCodeAt(++i);
-          const cp = 0x10000 + ((c & 0x3ff) << 10) + (c2 & 0x3ff);
-          b.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
-        } else b.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
-      }
-      return new Uint8Array(b);
-    }
-    encodeInto(str, u8) {
-      const e = this.encode(str);
-      u8.set(e.subarray(0, u8.length));
-      return { read: str.length, written: Math.min(e.length, u8.length) };
-    }
-  };
+// WHATWG encodings use a native incremental decoder, including BOM/fatal state.
+{
+ const encoders=new WeakSet(),decoders=new WeakMap();
+ const record=receiver=>{const value=decoders.get(receiver);if(!value)throw new TypeError("Illegal invocation");return value;};
+ const cleanup=typeof FinalizationRegistry==="function"?new FinalizationRegistry(id=>ops.op_text_decoder_drop(id)):null;
+ const text=value=>{if(typeof value==="symbol")throw new TypeError("A Symbol cannot be converted to a string");return String(value);};
+ globalThis.TextEncoder=class TextEncoder {
+  constructor(){encoders.add(this);}
+  get encoding(){if(!encoders.has(this))throw new TypeError("Illegal invocation");return "utf-8";}
+  encode(input=""){if(!encoders.has(this))throw new TypeError("Illegal invocation");return ops.op_text_encode(text(input));}
+  encodeInto(input,destination){if(!encoders.has(this))throw new TypeError("Illegal invocation");if(arguments.length<2)throw new TypeError("Two arguments required");const getter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype),Symbol.toStringTag).get;if(getter.call(destination)!=="Uint8Array")throw new TypeError("Destination must be a Uint8Array");input=text(input);let read=0,written=0;for(const char of input){const bytes=ops.op_text_encode(char);if(written+bytes.length>destination.length)break;destination.set(bytes,written);written+=bytes.length;read+=char.length;}return {read,written};}
+ };
+ globalThis.TextDecoder=class TextDecoder {
+  constructor(label="utf-8",options={}){const value=ops.op_text_decoder_new(text(label),!!options.fatal,!!options.ignoreBOM);Object.assign(value,{fatal:!!options.fatal,ignoreBOM:!!options.ignoreBOM});decoders.set(this,value);cleanup?.register(this,value.id);}
+  get encoding(){return record(this).encoding;}
+  get fatal(){return record(this).fatal;}
+  get ignoreBOM(){return record(this).ignoreBOM;}
+  decode(input=undefined,options={}){const value=record(this);let bytes;if(input===undefined)bytes=new Uint8Array();else if(ArrayBuffer.isView(input))bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);else if(input instanceof ArrayBuffer || typeof SharedArrayBuffer==="function"&&input instanceof SharedArrayBuffer)bytes=new Uint8Array(input);else throw new TypeError("Input must be a BufferSource");return ops.op_text_decode(value.id,bytes,!!options.stream);}
+ };
+ for(const [ctor,name] of [[TextEncoder,"TextEncoder"],[TextDecoder,"TextDecoder"]])Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});
 }
-if (typeof globalThis.TextDecoder === "undefined") {
-  globalThis.TextDecoder = class TextDecoder {
-    constructor(enc) { this.encoding = enc || "utf-8"; }
-    decode(buf) {
-      if (!buf) return "";
-      const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf.buffer || buf);
-      let s = "", i = 0;
-      while (i < b.length) {
-        const c = b[i++];
-        if (c < 0x80) s += String.fromCharCode(c);
-        else if (c < 0xe0) s += String.fromCharCode(((c & 0x1f) << 6) | (b[i++] & 0x3f));
-        else if (c < 0xf0) s += String.fromCharCode(((c & 0xf) << 12) | ((b[i++] & 0x3f) << 6) | (b[i++] & 0x3f));
-        else {
-          const cp = ((c & 0x7) << 18) | ((b[i++] & 0x3f) << 12) | ((b[i++] & 0x3f) << 6) | (b[i++] & 0x3f);
-          const cc = cp - 0x10000;
-          s += String.fromCharCode(0xd800 + (cc >> 10), 0xdc00 + (cc & 0x3ff));
-        }
-      }
-      return s;
-    }
-  };
-}
-if (typeof globalThis.crypto === "undefined" || !globalThis.crypto.getRandomValues) {
-  const __rb = (n) => { let x = 0; for (let i = 0; i < n.length; i++) { x = (x * 1103515245 + 12345) & 0x7fffffff; n[i] = (Date.now() ^ x ^ (i * 2654435761)) & 0xff; } return n; };
-  globalThis.crypto = globalThis.crypto || {};
-  globalThis.crypto.getRandomValues = (arr) => __rb(arr);
-  globalThis.crypto.randomUUID = () => {
-    const h = [];
-    for (let i = 0; i < 16; i++) h.push((((Date.now() + i) * 9301 + 49297) % 256).toString(16).padStart(2, "0"));
-    return `${h.slice(0,4).join("")}-${h.slice(4,6).join("")}-4${h[6].slice(1)}-${h[8]}${h[9]}-${h.slice(10,16).join("")}`;
-  };
-}
-// crypto.subtle.digest (real SHA-256) — auth SDKs hash PKCE verifiers / state with it.
-// Other operations reject clearly (vs an undefined-property crash) rather than no-op.
-if (!globalThis.crypto.subtle) {
-  const K = new Uint32Array([
-    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,
-  ]);
-  const rotr = (n, x) => (x >>> n) | (x << (32 - n));
-  const sha256 = (msg) => {
-    const H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
-    const bitLen = msg.length * 8;
-    const pad = (56 - ((msg.length + 1) % 64) + 64) % 64;
-    const total = msg.length + 1 + pad + 8;
-    const m = new Uint8Array(total);
-    m.set(msg);
-    m[msg.length] = 0x80;
-    const dv = new DataView(m.buffer);
-    dv.setUint32(total - 8, Math.floor(bitLen / 0x100000000));
-    dv.setUint32(total - 4, bitLen >>> 0);
-    const w = new Uint32Array(64);
-    for (let i = 0; i < total; i += 64) {
-      for (let t = 0; t < 16; t++) w[t] = dv.getUint32(i + t * 4);
-      for (let t = 16; t < 64; t++) {
-        const s0 = rotr(7, w[t-15]) ^ rotr(18, w[t-15]) ^ (w[t-15] >>> 3);
-        const s1 = rotr(17, w[t-2]) ^ rotr(19, w[t-2]) ^ (w[t-2] >>> 10);
-        w[t] = (w[t-16] + s0 + w[t-7] + s1) >>> 0;
-      }
-      let a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
-      for (let t = 0; t < 64; t++) {
-        const S1 = rotr(6,e) ^ rotr(11,e) ^ rotr(25,e);
-        const ch = (e & f) ^ (~e & g);
-        const t1 = (h + S1 + ch + K[t] + w[t]) >>> 0;
-        const S0 = rotr(2,a) ^ rotr(13,a) ^ rotr(22,a);
-        const maj = (a & b) ^ (a & c) ^ (b & c);
-        const t2 = (S0 + maj) >>> 0;
-        h=g; g=f; f=e; e=(d + t1) >>> 0; d=c; c=b; b=a; a=(t1 + t2) >>> 0;
-      }
-      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
-      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
-    }
-    const out = new Uint8Array(32);
-    const odv = new DataView(out.buffer);
-    for (let i = 0; i < 8; i++) odv.setUint32(i * 4, H[i]);
-    return out;
-  };
-  const reject = (op) => () => Promise.reject(new Error("crypto.subtle." + op + " unavailable in the no-browser render tier"));
-  globalThis.crypto.subtle = {
-    digest: (algo, data) => {
-      const name = (typeof algo === "string" ? algo : (algo && algo.name) || "").toUpperCase();
-      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer || data);
-      if (name === "SHA-256") return Promise.resolve(sha256(bytes).buffer);
-      return Promise.reject(new Error("crypto.subtle.digest: " + name + " not supported (SHA-256 only)"));
-    },
-    importKey: reject("importKey"), exportKey: reject("exportKey"), generateKey: reject("generateKey"),
-    sign: reject("sign"), verify: reject("verify"), encrypt: reject("encrypt"), decrypt: reject("decrypt"),
-    deriveBits: reject("deriveBits"), deriveKey: reject("deriveKey"),
-  };
-}
-// BroadcastChannel — auth SDKs sync session state across tabs over it. One isolate =
-// "one tab", but deliver to other channels of the same name (some flows new up two).
+// The host installs native WebCrypto after the DOM environment is initialized.
+// Channels in a realm deliver asynchronously through native EventTarget dispatch.
 if (typeof globalThis.BroadcastChannel === "undefined") {
-  const __chans = {};
-  globalThis.BroadcastChannel = class BroadcastChannel {
+  const channels = new Map(), records = __interfaceMap("BroadcastChannel");
+  const schedule = globalThis.setTimeout, clone = globalThis.structuredClone;
+  const Message = globalThis.MessageEvent, dispatch = EventTarget.prototype.dispatchEvent;
+  const listen = EventTarget.prototype.addEventListener, unlisten = EventTarget.prototype.removeEventListener;
+  const record = channel => { const value=records.get(channel); if(!value)throw new TypeError("Illegal invocation");return value; };
+  globalThis.BroadcastChannel = class BroadcastChannel extends EventTarget {
     constructor(name) {
-      this.name = String(name);
-      this.onmessage = null;
-      this._closed = false;
-      (__chans[this.name] = __chans[this.name] || []).push(this);
+      if (!arguments.length) throw new TypeError("A channel name is required");
+      super(); name=__messageString(name);
+      records.set(this,{name,closed:false,onmessage:null,onmessageerror:null});
+      if(!channels.has(name))channels.set(name,new Set());channels.get(name).add(this);
     }
+    get name(){return record(this).name;}
+    get onmessage(){return record(this).onmessage;}
+    set onmessage(value){const state=record(this);if(state.onmessage)unlisten.call(this,"message",state.onmessage);state.onmessage=typeof value==="function"?value:null;if(state.onmessage)listen.call(this,"message",state.onmessage);}
+    get onmessageerror(){return record(this).onmessageerror;}
+    set onmessageerror(value){const state=record(this);if(state.onmessageerror)unlisten.call(this,"messageerror",state.onmessageerror);state.onmessageerror=typeof value==="function"?value:null;if(state.onmessageerror)listen.call(this,"messageerror",state.onmessageerror);}
     postMessage(data) {
-      for (const c of __chans[this.name] || []) {
-        if (c !== this && !c._closed) globalThis.setTimeout(() => { if (typeof c.onmessage === "function") { const ev = new globalThis.MessageEvent("message", { data }); ev.target = c; c.onmessage(ev); } }, 0);
-      }
+      const state=record(this);if(state.closed)throw new DOMException("Channel is closed","InvalidStateError");
+      if(!arguments.length)throw new TypeError("A message is required");
+      const snapshot=clone(data);
+      for(const channel of channels.get(state.name)||[])if(channel!==this)schedule(()=>{
+        if(!record(channel).closed)dispatch.call(channel,new Message("message",{data:clone(snapshot),origin:location.origin}));
+      },0);
     }
-    close() { this._closed = true; const a = __chans[this.name]; if (a) { const i = a.indexOf(this); if (i >= 0) a.splice(i, 1); } }
-    addEventListener(t, fn) { if (t === "message") this.onmessage = fn; }
-    removeEventListener() {}
-    dispatchEvent() { return true; }
+    close(){const state=record(this);state.closed=true;channels.get(state.name)?.delete(this);}
   };
+  Object.defineProperty(BroadcastChannel.prototype,Symbol.toStringTag,{value:"BroadcastChannel",configurable:true});
+  for(const name of ["name","onmessage","onmessageerror","postMessage","close"]){const descriptor=Object.getOwnPropertyDescriptor(BroadcastChannel.prototype,name);Object.defineProperty(BroadcastChannel.prototype,name,{...descriptor,enumerable:true});}
 }
 // WebSocket — no live socket headless. Stay CONNECTING forever (never open, never
 // close): apps connect in the background and render regardless, so this can't hang a
@@ -2124,6 +5285,7 @@ if (typeof globalThis.ReadableStream === "undefined") {
     get locked() { return this._locked; }
     getReader() {
       const self = this;
+      if (self._locked) throw new TypeError("Stream is locked");
       self._locked = true;
       const pump = async () => {
         if (!self._q.length && !self._closed && typeof self._source.pull === "function") {
@@ -2146,7 +5308,17 @@ if (typeof globalThis.ReadableStream === "undefined") {
     async cancel(r) { this._closed = true; if (typeof this._source.cancel === "function") await this._source.cancel(r); }
     pipeThrough(t) { return t && t.readable ? t.readable : this; }
     pipeTo() { return Promise.resolve(); }
-    tee() { return [this, this]; }
+    tee() {
+      const reader = this.getReader(), controllers = [], canceled = [false,false], reasons = [];
+      let reading = false;
+      const pull = async () => {
+        if (reading) return; reading = true;
+        try {const part = await reader.read();for(let i=0;i<2;i++)if(!canceled[i]){if(part.done)controllers[i].close();else controllers[i].enqueue(part.value instanceof Uint8Array ? part.value.slice() : part.value);}}
+        catch(error){for(let i=0;i<2;i++)if(!canceled[i])controllers[i].error(error);}
+        finally {reading = false;}
+      };
+      return [0,1].map(index => new ReadableStream({start(controller){controllers[index]=controller;},pull,cancel(reason){canceled[index]=true;reasons[index]=reason;if(canceled.every(Boolean))return reader.cancel(reasons);}}));
+    }
   };
 }
 // History API (single virtual entry; updates location.href).
@@ -2167,92 +5339,80 @@ globalThis.cancelIdleCallback = (id) => globalThis.clearTimeout(id);
 
 // WHATWG URL + URLSearchParams — deno_core ships neither, but app bundles (Next.js,
 // the PropelAuth SDK, …) use `new URL(...)` while hydrating, so without these the
-// page crashes with "URL is not defined" before rendering. Regex-parsed: covers the
-// http(s) shapes hydration reads (protocol/host/port/path/query/hash + searchParams).
+// page crashes with "URL is not defined" before rendering. Native parsing handles
+// Unicode hosts, dot segments and default-port normalization.
+const __urlParamStates = __interfaceMap("URLSearchParams"), __urlParamOwners = __interfaceMap("URLSearchParams.owner");
+const __urlPairs = receiver => {const pairs=__urlParamStates.get(receiver);if(!pairs)throw new TypeError("Illegal invocation");return pairs;};
+const __urlParamsChanged = receiver => {const owner=__urlParamOwners.get(receiver);if(owner)owner();};
+const __urlIterate = __webIDLIterator("URLSearchParams Iterator", __urlPairs);
 if (typeof globalThis.URLSearchParams === "undefined") {
   globalThis.URLSearchParams = class URLSearchParams {
     constructor(init = "") {
-      this._d = [];
-      if (init instanceof URLSearchParams) { this._d = init._d.map((p) => [p[0], p[1]]); return; }
-      if (init && typeof init === "object") {
-        for (const k of Object.keys(init)) this._d.push([String(k), String(init[k])]);
-        return;
-      }
-      let s = String(init);
-      if (s[0] === "?") s = s.slice(1);
-      if (!s) return;
-      for (const pair of s.split("&")) {
-        if (!pair) continue;
-        const i = pair.indexOf("=");
-        const k = i === -1 ? pair : pair.slice(0, i);
-        const v = i === -1 ? "" : pair.slice(i + 1);
-        const dec = (x) => { try { return decodeURIComponent(x.replace(/\+/g, " ")); } catch { return x; } };
-        this._d.push([dec(k), dec(v)]);
-      }
+      let pairs=[];
+      if(init instanceof URLSearchParams)pairs=__urlPairs(init).map(pair=>pair.slice());
+      else if(init != null && typeof init === "object") {
+        if(typeof init[Symbol.iterator] === "function") for(const pair of init){const values=Array.from(pair);if(values.length!==2)throw new TypeError("Search parameter pairs require two values");pairs.push(values.map(String));}
+        else pairs=Object.entries(init).map(([key,value])=>[key,String(value)]);
+      } else pairs=ops.op_url_params_parse(String(init).replace(/^\?/,""));
+      __urlParamStates.set(this,pairs);
     }
-    append(k, v) { this._d.push([String(k), String(v)]); }
-    delete(k) { this._d = this._d.filter((p) => p[0] !== k); }
-    get(k) { const p = this._d.find((p) => p[0] === k); return p ? p[1] : null; }
-    getAll(k) { return this._d.filter((p) => p[0] === k).map((p) => p[1]); }
-    has(k) { return this._d.some((p) => p[0] === k); }
-    set(k, v) { this.delete(k); this._d.push([String(k), String(v)]); }
-    sort() { this._d.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)); }
-    forEach(cb, t) { for (const p of this._d) cb.call(t, p[1], p[0], this); }
-    keys() { return this._d.map((p) => p[0])[Symbol.iterator](); }
-    values() { return this._d.map((p) => p[1])[Symbol.iterator](); }
-    entries() { return this._d.map((p) => [p[0], p[1]])[Symbol.iterator](); }
-    [Symbol.iterator]() { return this.entries(); }
-    get size() { return this._d.length; }
-    toString() {
-      return this._d.map((p) => encodeURIComponent(p[0]) + "=" + encodeURIComponent(p[1])).join("&");
-    }
+    append(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");__urlPairs(this).push([String(key),String(value)]);__urlParamsChanged(this);}
+    delete(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");key=String(key);__urlParamStates.set(this,__urlPairs(this).filter(pair=>pair[0]!==key||(value!==undefined&&pair[1]!==String(value))));__urlParamsChanged(this);}
+    get(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).find(pair=>pair[0]===String(key))?.[1]??null;}
+    getAll(key) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).filter(pair=>pair[0]===String(key)).map(pair=>pair[1]);}
+    has(key,value = undefined) {if(!arguments.length)throw new TypeError("An argument required");return __urlPairs(this).some(pair=>pair[0]===String(key)&&(value===undefined||pair[1]===String(value)));}
+    set(key,value) {if(arguments.length<2)throw new TypeError("Two arguments required");key=String(key);value=String(value);let found=false;const pairs=[];for(const pair of __urlPairs(this)){if(pair[0]!==key)pairs.push(pair);else if(!found){pairs.push([key,value]);found=true;}}if(!found)pairs.push([key,value]);__urlParamStates.set(this,pairs);__urlParamsChanged(this);}
+    sort() {__urlPairs(this).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);__urlParamsChanged(this);}
+    forEach(callback,thisArg = undefined) {if(typeof callback!=="function")throw new TypeError("A callback required");for(let index=0;index<__urlPairs(this).length;index++){const pair=__urlPairs(this)[index];callback.call(thisArg,pair[1],pair[0],this);}}
+    keys() {return __urlIterate(this,"key");}
+    values() {return __urlIterate(this,"value");}
+    entries() {return __urlIterate(this,"entry");}
+    get size() {return __urlPairs(this).length;}
+    toString() {return ops.op_url_params_serialize(JSON.stringify(__urlPairs(this)));}
   };
+  Object.defineProperty(URLSearchParams.prototype,Symbol.iterator,{value:URLSearchParams.prototype.entries,writable:true,configurable:true});
+  Object.defineProperty(URLSearchParams.prototype,Symbol.toStringTag,{value:"URLSearchParams",configurable:true});
 }
 if (typeof globalThis.URL === "undefined") {
-  const ABS = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+  const states = new WeakMap();
+  const state = (receiver) => { const value = states.get(receiver); if (!value) throw new TypeError("Illegal invocation"); return value; };
+  const parse = (input, base = "") => ops.op_surf_url_parse(String(input), base);
+  const update = (receiver, key, value) => {
+    const current = state(receiver);
+    current.parts = parse(ops.op_url_update(receiver.href, key, String(value)));
+    // URL.searchParams keeps its identity across URL mutations.
+    const replacement = new URLSearchParams(current.parts.search);
+    __urlParamStates.set(current.params,__urlPairs(replacement));
+  };
   globalThis.URL = class URL {
-    constructor(url, base) {
-      let input = String(url);
-      if (!ABS.test(input)) {
-        if (base == null) throw new TypeError("Invalid URL: " + url);
-        const b = base instanceof URL ? base : new URL(String(base));
-        if (input.startsWith("//")) input = b.protocol + input;
-        else if (input.startsWith("/")) input = b.protocol + "//" + b.host + input;
-        else if (input.startsWith("#")) input = b.protocol + "//" + b.host + b.pathname + b.search + input;
-        else if (input.startsWith("?")) input = b.protocol + "//" + b.host + b.pathname + input;
-        else {
-          const dir = b.pathname.slice(0, b.pathname.lastIndexOf("/") + 1) || "/";
-          input = b.protocol + "//" + b.host + dir + input;
-        }
-      }
-      const m = /^([a-zA-Z][a-zA-Z0-9+.-]*:)(\/\/(([^/?#@]*)@)?([^/?#:]*)(:(\d+))?)?([^?#]*)(\?[^#]*)?(#.*)?$/.exec(input);
-      if (!m) throw new TypeError("Invalid URL: " + url);
-      this.protocol = m[1];
-      const ui = (m[4] || "").split(":");
-      this.username = ui[0] || "";
-      this.password = ui[1] || "";
-      this.hostname = m[5] || "";
-      this.port = m[7] || "";
-      this.pathname = m[8] || (m[2] ? "/" : "");
-      this.hash = m[10] || "";
-      this.searchParams = new URLSearchParams(m[9] || "");
+    constructor(url, base = undefined) {
+      if (!arguments.length) throw new TypeError("URL requires an input");
+      const parts = parse(url, base === undefined ? "" : String(base));
+      const params=new URLSearchParams(parts.search),current={parts,params};
+      states.set(this,current);
+      __urlParamOwners.set(params,()=>{current.parts=parse(ops.op_url_update(current.parts.href,"search",params.toString()));});
     }
-    get host() { return this.port ? this.hostname + ":" + this.port : this.hostname; }
-    get origin() { return this.protocol + "//" + this.host; }
-    get search() { const q = this.searchParams.toString(); return q ? "?" + q : ""; }
-    set search(v) { this.searchParams = new URLSearchParams(String(v)); }
-    get href() {
-      const auth = this.username ? this.username + (this.password ? ":" + this.password : "") + "@" : "";
-      return this.protocol + "//" + auth + this.host + this.pathname + this.search + this.hash;
-    }
-    set href(v) { Object.assign(this, new URL(v)); }
+    get href() {return state(this).parts.href;}
+    set href(value) { const current = state(this), parts = parse(value); current.parts = parts; __urlParamStates.set(current.params,__urlPairs(new URLSearchParams(parts.search))); }
+    get origin() { return state(this).parts.origin; }
+    get searchParams() { return state(this).params; }
+    get search() {return state(this).parts.search;}
+    set search(value) { update(this, "search", value); }
     toString() { return this.href; }
     toJSON() { return this.href; }
+    static canParse(url, base = undefined) { if (!arguments.length) throw new TypeError("URL requires an input"); try { new URL(url, base); return true; } catch { return false; } }
+    static parse(url, base = undefined) { if (!arguments.length) throw new TypeError("URL requires an input"); try { return new URL(url, base); } catch { return null; } }
   };
+  for (const key of ["protocol", "username", "password", "host", "hostname", "port", "pathname", "hash"]) {
+    const descriptor = Object.getOwnPropertyDescriptor({get [key]() {return state(this).parts[key];}}, key);
+    descriptor.set = Object.getOwnPropertyDescriptor({set [key](value) {update(this, key, value);}}, key).set;
+    descriptor.enumerable = true;
+    Object.defineProperty(URL.prototype, key, descriptor);
+  }
+  Object.defineProperty(URL.prototype, Symbol.toStringTag, {value: "URL", configurable: true});
   globalThis.URL.createObjectURL = () => "blob:turbo-surf";
   globalThis.URL.revokeObjectURL = () => {};
 }
-
 // Object-URL registry + download capture. The common client-side export pattern is
 // `URL.createObjectURL(blob)` → set it on a `<a download href=…>` → `link.click()`. A real
 // createObjectURL (keyed store) lets us recover the blob bytes when the anchor is clicked,
@@ -2322,6 +5482,7 @@ if (typeof globalThis.URL === "undefined") {
 // guard saw pathname "/" (a protected route) rather than "/login". Defined AFTER the URL
 // polyfill so `new URL` is available. Components are live getters over the backing URL.
 (() => {
+  if (ops.op_native_location_installed()) return;
   let _u = null;
   const reparse = (v, base) => { try { _u = new globalThis.URL(String(v), base); } catch (_e) { /* keep prior */ } };
   reparse((globalThis.location && globalThis.location.href) || "http://localhost/");
@@ -2344,37 +5505,32 @@ if (typeof globalThis.URL === "undefined") {
   globalThis.location = loc;
 })();
 
-// document.referrer / URL / documentURI / baseURI — standard read-only document props
-// deno_core's binding lacks. Analytics (PostHog reads referrer + the URL and `.split`s
-// them) throws "Cannot read properties of undefined" without these, looping forever.
+// Document metadata is live and owned by Document.prototype; native body/head
+// accessors keep their original tree callbacks. location remains an own property
+// as in HTML documents, while inherited metadata checks the actual receiver.
+__defineDocumentAccessor("referrer", state => state.referrer);
+__defineDocumentAccessor("URL", state => state.inactive ? state.url : state.frame ? state.frame.location : state.window.location.href);
+__defineDocumentAccessor("documentURI", state => state.inactive ? state.url : state.frame ? state.frame.location : state.window.location.href);
+const __baseURI = Object.getOwnPropertyDescriptor({get baseURI() {
+  const kind = __documentType.call(this);
+  const doc = kind === 9 ? this : this.ownerDocument;
+  if (!doc) return "";
+  const state = __documentState(doc);
+  const fallback = state.inactive ? state.url : state.frame ? state.frame.url : state.window.location.href;
+  const base = doc.querySelector("base[href]");
+  try { return base ? new URL(base.getAttribute("href"), fallback).href : fallback; }
+  catch (_) { return fallback; }
+}}, "baseURI").get;
+Object.defineProperty(Node.prototype, "baseURI", {get: __documentFunction(__baseURI, "get baseURI", 0), configurable: true, enumerable: true});
+if (Object.hasOwn(__document, "baseURI")) delete __document.baseURI;
 (() => {
   const d = globalThis.document;
   if (!d) return;
-  const def = (name, get) => {
-    try {
-      if (typeof d[name] === "undefined") Object.defineProperty(d, name, { configurable: true, get });
-    } catch (_e) {}
-  };
-  def("referrer", () => "");
-  // document.location === window.location in a browser. Next's dev flight client reads
-  // `document.location.origin` (in findSourceMapURL, replaying server console entries);
-  // without this it throws "reading 'origin' of undefined", which aborts the ENTIRE RSC
-  // flight stream processing → the App Router page never finishes hydrating, silently.
-  def("location", () => globalThis.location);
-  def("URL", () => globalThis.location.href);
-  def("documentURI", () => globalThis.location.href);
-  def("baseURI", () => globalThis.location.href);
-  // hasFocus(): auth/idle code refreshes only a focused document; default to focused.
-  try { if (typeof d.hasFocus !== "function") d.hasFocus = () => true; } catch (_e) {}
-  // document.open()/close(): RUM beacons (nike.com's Boomerang/mPulse) do
-  // `iframe.contentWindow.document.open()` — our iframe contentWindow IS the realm — then
-  // `document.write(...)`. The binding had no `open`, so it threw "document.open is not a
-  // function" and aborted the beacon. open() must return the document (callers chain
-  // `d = document.open()`) and deliberately does NOT clear the already-parsed/hydrated tree
-  // (a real open() wipes the document, but wiping the hydrated DOM headless is worse than a
-  // no-op); close() is a no-op. write() is provided by the vendored binding.
-  try { if (typeof d.open !== "function") d.open = () => d; } catch (_e) {}
-  try { if (typeof d.close !== "function") d.close = () => {}; } catch (_e) {}
+  try { Object.defineProperty(d, "location", {configurable: true, enumerable: true,
+    get() {return __documentState(this).window.location;}}); } catch (_) {}
+  try { if (typeof d.hasFocus !== "function") d.hasFocus = () => true; } catch (_) {}
+  try { if (typeof d.open !== "function") d.open = () => d; } catch (_) {}
+  try { if (typeof d.close !== "function") d.close = () => {}; } catch (_) {}
 })();
 
 // document.createTreeWalker + NodeFilter — focus-management code (MUI's DataGrid / focus
@@ -2578,21 +5734,6 @@ if (typeof globalThis.URL === "undefined") {
   ].forEach(function (k) { def(k, element); });
 })();
 
-// Next.js's webpack runtime reads `document.currentScript` to resolve chunk paths
-// (getPathFromScript → `currentScript.getAttribute('src').replace(...)`). The tier
-// legacy bundle entry points have no current script element, so expose a detached
-// one whose src is the page URL for those callers. PageSession clears this shim
-// and the hydration pump supplies the actual executing script element.
-try {
-  if (globalThis.document && !globalThis.document.currentScript) {
-    const __cs = globalThis.document.createElement("script");
-    const __href = (globalThis.location && globalThis.location.href) || "";
-    __cs.setAttribute("src", __href);
-    try { __cs.src = __href; } catch (_e) {}
-    globalThis.document.currentScript = __cs;
-  }
-} catch (_e) {}
-
 // `import.meta` shim. A turbopack/webpack DEV runtime injects scripts that read
 // `import.meta.url` (and friends), but the pump first compiles ordinary scripts as
 // classic V8 scripts, which reject `import.meta` with a SyntaxError ("Cannot use
@@ -2625,10 +5766,162 @@ if (typeof globalThis.__name === "undefined") {
 // (inline → host compilation; external → fetch then host compilation), and fire
 // load/error so the loader resolves. `__G.hydrate()` drives this to quiescence.
 const __EXECUTABLE_TYPES = new Set(["", "text/javascript", "application/javascript", "module"]);
+const __parserScripts = new WeakSet(Array.from(document.querySelectorAll("script")));
+const __scriptAsyncFlags = new WeakMap();
+if (globalThis.HTMLScriptElement?.prototype) {
+  Object.defineProperty(HTMLScriptElement.prototype,"async",{get(){
+    if(__documentType.call(this)!==1 || String(this.tagName)!=="SCRIPT")throw new TypeError("Illegal invocation");
+    return this.hasAttribute("async")||(__scriptAsyncFlags.has(this)?__scriptAsyncFlags.get(this):!__parserScripts.has(this));
+  },set(value){
+    if(__documentType.call(this)!==1 || String(this.tagName)!=="SCRIPT")throw new TypeError("Illegal invocation");
+    __scriptAsyncFlags.set(this,false);
+    if(value)this.setAttribute("async","");else this.removeAttribute("async");
+  },enumerable:true,configurable:true});
+}
+const __resources = new WeakMap();
+const __resourcePromises = new Set();
+const __resourceSheetConstructor = CSSStyleSheet;
+const __resourceSheetRules = ops.op_interface_record_get(document).cssHost.readRules;
+const __resourceStyleRequests = new WeakMap();
+const __resourceCSSHosts = new WeakMap();
+const __resourceCompatMode=Object.getOwnPropertyDescriptor(Document.prototype,"compatMode").get;
+const __resourceAttribute=Element.prototype.getAttribute;
+const __resourceTagName=Object.getOwnPropertyDescriptor(Element.prototype,"tagName").get;
+const __resourceText=Object.getOwnPropertyDescriptor(Node.prototype,"textContent").get;
+const __resourceDocumentQuery=Document.prototype.querySelectorAll;
+const __resourceCompare=Node.prototype.compareDocumentPosition;
+const __resourceBaseURL=Object.getOwnPropertyDescriptor(Node.prototype,"baseURI").get;
+function __cssHost(doc) {let host=__resourceCSSHosts.get(doc);if(!host){host=ops.op_interface_record_get(doc).cssHost;__resourceCSSHosts.set(doc,host);}return host;}
+function __cssOriginClean(response) {return response.originClean===true;}
+function __validSheetResponse(response, doc, clean) {const mime=(response.contentType||"").split(";")[0].trim().toLowerCase();return mime==="text/css" || !response.nosniff && (__resourceCompatMode.call(doc)==="BackCompat" && clean || __cssHost(doc).looksLikeCSS(response.text));}
+function __fireResourceEvent(el, kind, win = globalThis) {
+  let ev;
+  try { ev = new __hostEvent(kind); } catch (_) { ev = {type:kind}; }
+  try { ops.op_dispatch_host_event(ev, el); } catch (_) {}
+}
+function __trackResource(promise) {
+  __resourcePromises.add(promise);
+  promise.finally(() => __resourcePromises.delete(promise));
+  return promise;
+}
+function __resourceNow() { return __perfNow(); }
+function __recordResource(win, url, kind, start) {
+  const ns = win[Symbol.for("ts")];
+  if (ns && typeof ns.recordResourceTiming === "function") ns.recordResourceTiming(url, kind, start, __resourceNow(win));
+}
+async function __loadSheetImports(sheet, source, win, depth = 0) {
+  if (!sheet || depth >= 16) return;
+  const request=__resourceStyleRequests.get(sheet)||{mode:"no-cors",credentials:"include",document:__document};
+  const rules=__resourceSheetRules(sheet);
+  for(let index=0;index<rules.length;index++) {
+    const rule=rules[index];
+    const info=__cssHost(request.document).readRule(rule);
+    if (info.type !== 3 || !info.href) continue;
+    const url = new URL(info.href, source).href;
+    const start = __resourceNow(win);
+    let recorded = false;
+    try {
+      const response = __resourceResponse(await __fetchFromSource(url, {destination:"style",mode:"no-cors",credentials:request.credentials}, source));
+      if (!response.ok || !__validSheetResponse(response,request.document,__cssOriginClean(response,request.document.URL,"no-cors"))) { __recordResource(win, url, "css", start); recorded=true; continue; }
+      const text = response.text;
+      __recordResource(win, url, "css", start);recorded=true;
+      const child = new __resourceSheetConstructor();
+      __cssHost(request.document).attachImport(rule,child,response.url||url,text,request.originClean!==false && __cssOriginClean(response,request.document.URL,"no-cors"));
+      __resourceStyleRequests.set(child,{...request,originClean:request.originClean!==false&&__cssOriginClean(response,request.document.URL,"no-cors")});
+      await __loadSheetImports(child, url, win, depth + 1);
+    } catch (_) { if(!recorded)__recordResource(win, url, "css", start); }
+  }
+}
+function __loadImage(el, win = globalThis) {
+  const src = el.getAttribute("src") || "";
+  const previous = __resources.get(el);
+  if (previous && previous.src === src) return previous.promise;
+  const state = {src,complete:!src,width:0,height:0,currentSrc:"",promise:null};
+  __resources.set(el,state);
+  if (!src) return Promise.resolve();
+  const source = (el.ownerDocument && el.ownerDocument.URL) || win.location.href;
+  state.promise = __trackResource((async () => {
+    let result;
+    const url = new URL(src, source).href, start = __resourceNow(win);
+    try { result = await ops.op_load_image(url, source,ops.op_csp_context(el.ownerDocument),JSON.stringify({...ops.op_document_cookie_site(el.ownerDocument),opaque_origin:ops.op_window_opaque(el.ownerDocument)})); } catch (_) {}
+    __recordResource(win, url, "img", start);
+    if (__resources.get(el) !== state) return;
+    state.complete=true;
+    if (result && result.ok) {state.width=result.width;state.height=result.height;state.currentSrc=result.url;}
+    __fireResourceEvent(el, result && result.ok ? "load" : "error", win);
+  })());
+  return state.promise;
+}
+function __patchImage(el, win = globalThis) {
+  if (el.__tcImagePatched) return;
+  el.__tcImagePatched=true;
+  for (const [name, key, fallback] of [["complete","complete",true],["naturalWidth","width",0],["naturalHeight","height",0],["currentSrc","currentSrc",""]]) {
+    Object.defineProperty(el,name,{configurable:true,get(){const state=__resources.get(this);return state?state[key]:fallback;}});
+  }
+  Object.defineProperty(el,"src",{configurable:true,get(){const src=this.getAttribute("src")||"";try{return src?new URL(src,(this.ownerDocument&&this.ownerDocument.URL)||win.location.href).href:"";}catch(_){return src;}},set(value){this.setAttribute("src",String(value));__loadImage(this,win);}});
+  el.decode=function(){return __loadImage(this,win).then(()=>{if(!this.naturalWidth){const error=new Error("The source image cannot be decoded");error.name="EncodingError";throw error;}});};
+}
+const __createResourceElement = document.createElement.bind(document);
+document.createElement = function(tag, options) {
+  const el=__createResourceElement(tag,options);
+  if (String(tag).toLowerCase()==="img") __patchImage(el);
+  return el;
+};
+globalThis.Image = function Image(width,height) {
+  const el=document.createElement("img");
+  if(width!=null)el.width=width;if(height!=null)el.height=height;
+  return el;
+};
+globalThis.Image.prototype=globalThis.HTMLImageElement.prototype;
+__G.loadDocumentResources = function(doc = __document, win = globalThis, before = null) {
+  if(doc!==__document || __documentType.call(doc)!==9)throw new TypeError("Resource loading requires the owning native Document");
+  const styles=[];
+  for (const el of Array.from(__resourceDocumentQuery.call(doc,"link,img,style"))) {
+    if(before&&(__resourceCompare.call(el,before)&4)===0)continue;
+    const tag=__resourceTagName.call(el);
+    if (tag==="IMG") {__patchImage(el,win);__loadImage(el,win);continue;}
+    if(tag==="STYLE"){
+      const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
+      const source=__resourceText.call(el);let state=__resources.get(el);
+      if(!state||state.src!==source){state={src:source,promise:null};__resources.set(el,state);__resourceStyleRequests.set(sheet,{mode:"no-cors",credentials:"include",document:doc,originClean:true});state.promise=__trackResource(__loadSheetImports(sheet,__resourceBaseURL.call(doc)||ops.op_document_request_url(),win));}
+      styles.push(state.promise);continue;
+    }
+    if (!(__resourceAttribute.call(el,"rel")||"").toLowerCase().split(/\s+/).includes("stylesheet") || el.disabled) continue;
+    const href=__resourceAttribute.call(el,"href");if(!href)continue;
+    const url=new URL(href,__resourceBaseURL.call(doc)||ops.op_document_request_url()).href;
+    let state=__resources.get(el);
+    if(!state||state.src!==url){
+      state={src:url,promise:null};__resources.set(el,state);
+      state.promise=__trackResource((async()=>{
+        const start = __resourceNow(win);
+        let recorded = false,receivedResponse=false;
+        try {
+          const crossOrigin=__resourceAttribute.call(el,"crossorigin");
+          const request={mode:crossOrigin===null?"no-cors":"cors",credentials:crossOrigin===null||crossOrigin.toLowerCase()==="use-credentials"?"include":"same-origin",document:doc};
+          const response=__resourceResponse(await __fetchFromSource(url,{destination:"style",mode:request.mode,credentials:request.credentials,referrerPolicy:__resourceAttribute.call(el,"referrerpolicy")||""},ops.op_document_request_url()));
+          receivedResponse=true;
+          const text=response.text;
+          __recordResource(win, url, "link", start);recorded=true;
+          if(!response.ok||!__validSheetResponse(response,doc,__cssOriginClean(response,doc.URL||win.location.href,request.mode)))throw new Error("Stylesheet request failed");
+          if(__resources.get(el)!==state)return;
+          const sheet=__cssHost(doc).attachLinked(el,text,response.url||url,__cssOriginClean(response,doc.URL||win.location.href,request.mode));
+          __resourceStyleRequests.set(sheet,{...request,originClean:__cssOriginClean(response,doc.URL||win.location.href,request.mode)});
+          await __loadSheetImports(sheet,url,win);
+          __fireResourceEvent(el,"load",win);
+        }catch(error){if(!recorded)__recordResource(win,url,"link",start);if(__resources.get(el)===state){const failure=__resourceFailure(error);if(receivedResponse||failure?.responseReceived&&!failure.policyBlocked)__cssHost(doc).attachLinked(el,"",url,false);__fireResourceEvent(el,"error",win);}}
+      })());
+    }
+    styles.push(state.promise);
+  }
+  return Promise.all(styles);
+};
+__G.pendingResourceCount=()=>__resourcePromises.size;
+__G.documentLoadReady=()=>__resourcePromises.size===0 && ops.op_frame_pending()===0;
+__G.waitForDocumentResources=()=>Promise.all(Array.from(__resourcePromises));
 function __fireScriptEvent(el, kind, err) {
-  const ev = { type: kind, target: el, currentTarget: el, error: err };
-  try { const h = kind === "load" ? el.onload : el.onerror; if (typeof h === "function") h.call(el, ev); } catch (_e) {}
-  try { if (typeof el.dispatchEvent === "function") el.dispatchEvent(ev); } catch (_e) {}
+  // Use the same private native event path as image and stylesheet loads.
+  // Plain records are not Events and cannot reach addEventListener handlers.
+  __fireResourceEvent(el, kind, globalThis);
 }
 // Rewrite `import.meta` (a SyntaxError in a classic script) onto the namespaced importMeta
 // stub the dev HMR runtime reads (`.url`/`.env`). Whether a chunk is a REAL ES module is
@@ -2647,7 +5940,7 @@ __G.rewriteEsmForClassic = function (code) {
   return code;
 }
 const __classicWaiters = new Map();
-__G.completeClassicScript = function(id, failure) {
+const __completeClassicScript = function(id, failure) {
   const waiter = __classicWaiters.get(id);
   if (!waiter) return;
   __classicWaiters.delete(id);
@@ -2659,9 +5952,46 @@ __G.completeClassicScript = function(id, failure) {
     waiter.reject(e);
   } else waiter.resolve();
 };
+ops.op_set_host_capabilities({completeClassicScript:__completeClassicScript});
+const __moduleStaging = ops.op_module_staging_enabled();
+const __moduleWaiters = new Map();
+__G.cancelModuleGraphs = () => {for(const waiters of __moduleWaiters.values()){for(const waiter of waiters){if(!waiter.done){waiter.done=true;waiter.resolve();}}}__moduleWaiters.clear();};
+function __reportModuleError(waiter, details) {
+  "use strict";
+  if (waiter.reported) return;
+  const error = details?.error || waiter.error;
+  if (!error) return;
+  waiter.reported = true;
+  const location = String(error.stack || "").match(/(https?:\/\/[^\s)]+):(\d+):(\d+)/);
+  const event = new __hostErrorEvent("error", {
+    cancelable:true, error,
+    message:"Uncaught " + String(error),
+    filename:details?.filename || location?.[1] || waiter.specifier,
+    lineno:details?.lineno || (location ? Number(location[2]) : 0),
+    colno:details?.colno || (location ? Number(location[3]) : 0),
+  });
+  ops.op_dispatch_host_event(event, globalThis);
+}
+function __completeModuleWaiter(waiter, ready, details) {
+  if (waiter.done) return;
+  waiter.done = true; waiter.ready = ready;
+  if (ready) {
+    __reportModuleError(waiter, details);
+    if (waiter.external) __fireScriptEvent(waiter.element, "load");
+  } else __fireScriptEvent(waiter.element, "error");
+  waiter.resolve();
+}
+const __completeModuleGraph = (specifier, ready, details) => {
+  const waiters = __moduleWaiters.get(specifier);
+  if (!waiters) return;
+  __moduleWaiters.delete(specifier);
+  for (const waiter of waiters) __completeModuleWaiter(waiter, ready, details);
+};
+ops.op_set_host_capabilities({completeModuleGraph:__completeModuleGraph});
 __G.execScriptEl = async function (el) {
   if (!el || el.__tcDone) return;
   el.__tcDone = true; // mark before await so a re-entrant pump round can't double-run
+  if (!ops.op_document_scripts_allowed(__document)) {el.__tcModule = true; return;}
   const get = (n) => (typeof el.getAttribute === "function" ? el.getAttribute(n) : null);
   // Module-capable browsers SKIP `<script nomodule>` (they run the module build
   // instead). We support module scripts, so honor it: otherwise we force-run a
@@ -2669,29 +5999,68 @@ __G.execScriptEl = async function (el) {
   // overwrites native Promise/queueMicrotask with impls whose microtask scheduler
   // is inert in this env — promises never settle and the render never commits.
   if (get("nomodule") !== null || get("noModule") !== null) return;
+  const parserType=(get("type")||"").toLowerCase();
+  if(__parserScripts.has(el)&&(parserType==="module"||__EXECUTABLE_TYPES.has(parserType))) {
+    // Claim above before awaiting styles, so load handlers cannot run this script twice.
+    // Later parser resources cannot dispatch before this script installs its listeners.
+    const external=!!get("src"),module=parserType==="module";
+    const deferred=!el.async&&(module||external&&get("defer")!==null);
+    const resources=__G.loadDocumentResources(__document,globalThis,deferred?null:el);
+    if(!el.async||!(external||module))await resources;
+  }
+  const absoluteSource=get("src")?new URL(get("src"),document.baseURI).href:"";
+  const parserIndex=Array.prototype.indexOf.call(document.querySelectorAll("script"),el);
+  if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,absoluteSource,el.textContent||"")){
+    el.__tcModule=true;if(absoluteSource)__fireScriptEvent(el,"error");return;
+  }
   // ES modules (`<script type="module">`) run through the Rust module pump (a real
-  // module graph + loader), NOT classic eval — leave them for `__G.takeModuleScript`.
-  if ((get("type") || "").toLowerCase() === "module") return;
+  // module graph + loader), with concurrent graph loading rather than classic eval.
+  if ((get("type") || "").toLowerCase() === "module") {
+    el.__tcModule = true;
+    const src = get("src");
+    const specifier = src ? new URL(src, document.baseURI).href
+      : ops.op_inline_module(el.textContent || "", document.baseURI, document.URL);
+    ops.op_module_credentials(el,specifier);
+    // The SDK loader observes actual graph/evaluation transitions independently
+    // of import()'s promise, which waits for top-level await. The published SDK
+    // fallback still waits for that promise and has partial TLA lifecycle support.
+    const waiter = {element:el, external:!!src, specifier, done:false, ready:false, error:null, reported:false};
+    const gate = new Promise(resolve => {waiter.resolve = resolve;});
+    if (__moduleStaging) {
+      const waiters = __moduleWaiters.get(specifier) || [];
+      waiters.push(waiter); __moduleWaiters.set(specifier, waiters);
+    }
+    import(specifier).then(() => {
+      if (!__moduleStaging) __completeModuleWaiter(waiter, true, null);
+    }, error => {
+      waiter.error = error;
+      if (!__moduleStaging) __completeModuleWaiter(waiter, false, null);
+      else if (waiter.done && waiter.ready) __reportModuleError(waiter, null);
+      __print("module error (" + specifier + "): " + error + "\n");
+    });
+    return __trackResource(gate);
+  }
   if (!__EXECUTABLE_TYPES.has((get("type") || "").toLowerCase())) return; // JSON/data blocks etc.
   const src = get("src");
   try {
-    let code;
+    let code, sourceURL=document.URL;
     if (src) {
       const abs = new URL(src, globalThis.location.href).href;
-      const res = await fetch(abs, { destination: "script" });
-      if (!res.ok) { __fireScriptEvent(el, "error"); return; }
-      code = await res.text();
+      const start = __resourceNow(globalThis);
+      try {
+        const cross=get("crossorigin");
+        const res = await __fetchFromSource(abs, { destination: "script", mode: cross===null?"no-cors":"cors", credentials:cross!==null&&cross.toLowerCase()!=="use-credentials"?"same-origin":"include",nonce:ops.op_csp_nonce(el) }, ops.op_document_request_url());
+        const resource=__resourceResponse(res);
+        if (!resource.ok) { __fireScriptEvent(el, "error"); return; }
+        code = resource.text; sourceURL=resource.url;
+      } finally { __recordResource(globalThis, abs, "script", start); }
     } else {
       code = el.textContent || el.text || "";
+      if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,"",code))return;
     }
-    // A turbopack/webpack DEV runtime injects scripts written with ESM-only syntax
-    // (`import.meta`, bare `import`/`export`), but we run every <script> as a CLASSIC
-    // script, and classic V8 rejects those tokens with a SyntaxError that aborts the
-    // whole chunk. `import.meta` is the common, fixable case (the dev HMR runtime reads
-    // `import.meta.url`/`.env`): rewrite it onto the namespaced importMeta so the read
-    // works. Real `import`/`export` statements need a module loader + resolved graph we
-    // don't have headless — those scripts are SKIPPED gracefully (logged) rather than
-    // hung/aborted.
+    // Legacy classic bundles retain their import.meta compatibility rewrite.
+    // Import/export parse failures move the original text to Deno's real graph;
+    // explicit module elements use the separate standards path above.
     const __orig = code;
     code = __G.rewriteEsmForClassic(code);
     // Set document.currentScript to THIS element during execution, like a browser.
@@ -2700,15 +6069,14 @@ __G.execScriptEl = async function (el) {
     // currentScript makes every chunk look identical and the module graph never
     // resolves. Restore the prior value after (nested injects during eval).
     let __prevCs;
-    try { __prevCs = globalThis.document.currentScript; globalThis.document.currentScript = el; } catch (_e) {}
+    try { __prevCs = globalThis.document.currentScript; __G.setCurrentScript(el); } catch (_e) {}
     try {
       await new Promise((resolve, reject) => {
-        const source = src ? new URL(src, globalThis.location.href).href : globalThis.location.href;
-        const id = ops.op_queue_classic_script(code, source, !src);
+        const id = ops.op_queue_classic_script(__document, code, sourceURL, !src);
         __classicWaiters.set(id, {resolve, reject});
       });
     } catch (e) {
-      try { globalThis.document.currentScript = __prevCs; } catch (_e) {}
+      try { __G.setCurrentScript(__prevCs); } catch (_e) {}
       // A genuine ES module? Classic V8 throws a module-syntax SyntaxError at PARSE time —
       // before ANY code runs — so it's safe to re-run through the module pump (a real module
       // graph + loader). This is the ONLY signal we route on: text that merely LOOKS like
@@ -2718,7 +6086,7 @@ __G.execScriptEl = async function (el) {
       if (e instanceof SyntaxError && /\b(import|export)\b|module/i.test(msg)) {
         // Keep the element: the module pump points document.currentScript at it during eval
         // so turbopack TURBOPACK.push([document.currentScript, …]) derives the right path.
-        const abs = src ? new URL(src, globalThis.location.href).href : "";
+        const abs = src ? sourceURL : "";
         el.__tcModule = true; // claim it so the __G.takeModuleScript DOM scan won't double-run it
         (__G.esmSrcQueue || (__G.esmSrcQueue = [])).push({ src: abs, code: __orig, el: el });
         __fireScriptEvent(el, "load");
@@ -2726,8 +6094,8 @@ __G.execScriptEl = async function (el) {
       }
       throw e; // real runtime error
     }
-    try { globalThis.document.currentScript = __prevCs; } catch (_e) {}
-    __fireScriptEvent(el, "load");
+    try { __G.setCurrentScript(__prevCs); } catch (_e) {}
+    if (src) __fireScriptEvent(el, "load");
   } catch (e) {
     __fireScriptEvent(el, "error", e);
     __print("script error (" + (src || "inline") + "): " + e + "\n");
@@ -2735,7 +6103,7 @@ __G.execScriptEl = async function (el) {
 };
 // Run every not-yet-run <script> in DOM order, drain timers, repeat while new
 // scripts appear or timers keep firing. Bounded by maxRounds (+ the render budget).
-__G.hydrate = async function (maxRounds = 300, timerBudget = 200000) {
+__G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers = true) {
   let timersLeft = timerBudget; // total timer-callback budget across rounds — an app
   // whose scheduler never reaches idle (e.g. React polling a backend that never
   // answers) would otherwise spin until the render budget; cap it and return the
@@ -2751,22 +6119,29 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000) {
     // `React is not defined` → the whole app never hydrates. So: non-defer scripts
     // first (document order), then `defer` scripts (document order). `async` isn't
     // deferred. New scripts injected mid-round re-partition on the next pass.
-    const isDeferred = (el) =>
-      el.getAttribute &&
-      el.getAttribute("defer") !== null &&
-      el.getAttribute("async") === null;
+    const isDeferred = (el) => el.getAttribute && !el.async &&
+      (((el.getAttribute("type") || "").toLowerCase() === "module") ||
+        (!!el.getAttribute("src") && el.getAttribute("defer") !== null));
     const all = Array.prototype.slice.call(document.querySelectorAll("script"));
     const ordered = all.filter((el) => !isDeferred(el)).concat(all.filter(isDeferred));
     for (const el of ordered) {
-      if (!el.__tcDone) { ranScript = true; await __G.execScriptEl(el); }
+      if (__G.initialLoading && isDeferred(el)) __markDocumentInteractive();
+      if (!el.__tcDone) {
+        ranScript = true;
+        const external=!!el.getAttribute("src"),module=el.getAttribute("type")==="module";
+        if(el.async && (external || module))__trackResource(__G.execScriptEl(el));
+        else await __G.execScriptEl(el);
+      }
     }
-    const fired = __G.runTimers(Math.min(timersLeft, 5000));
+    __G.loadDocumentResources();
+    if (__G.initialLoading) __markDocumentInteractive();
+    const fired = fireTimers ? __G.runTimers(Math.min(timersLeft, 5000)) : 0;
     timersLeft -= fired;
     if (!ranScript && fired === 0) break;
   }
 };
 // Claim the next un-run ES-module script (`<script type=module>` or an inline script
-// with `import`/`export`) in DOM order → `globalThis.__RESULT = {src, code}` JSON, or "" when
+// with `import`/`export`) in DOM order → `__G.moduleDescriptor = {src, code}` JSON, or "" when
 // none. The Rust module pump evaluates each through deno_core's real module graph
 // (`__G.execScriptEl` deliberately skips them). `__tcModule` is the claim marker.
 __G.moduleStmt = /(^|[;{}\n\r])\s*(import\s+[^(]|import\s*['"]|export\s+|export\s*\{|export\s*\*)/;
@@ -2777,7 +6152,7 @@ __G.takeModuleScript = function () {
   if (q && q.length) {
     const item = q.shift();
     __G.currentModuleEl = item.el || null; // for document.currentScript during eval
-    globalThis.__RESULT = JSON.stringify({ src: item.src, code: item.code });
+    __G.moduleDescriptor = JSON.stringify({ src: item.src, code: item.code });
     return;
   }
   const scripts = Array.prototype.slice.call(document.querySelectorAll("script"));
@@ -2787,16 +6162,17 @@ __G.takeModuleScript = function () {
     const type = ((el.getAttribute && el.getAttribute("type")) || "").toLowerCase();
     const src = (el.getAttribute && el.getAttribute("src")) || "";
     const code = src ? "" : (el.textContent || el.text || "");
-    const isModule = type === "module" || (!src && __G.moduleStmt.test(code));
+    // Explicit modules belong exclusively to the concurrent standards path.
+    const isModule = type !== "module" && !src && __G.moduleStmt.test(code);
     if (!isModule) continue;
     el.__tcModule = true;
     el.__tcDone = true;
     __G.currentModuleEl = el; // for document.currentScript during eval
-    globalThis.__RESULT = JSON.stringify({ src, code });
+    __G.moduleDescriptor = JSON.stringify({ src, code });
     return;
   }
   __G.currentModuleEl = null;
-  globalThis.__RESULT = "";
+  __G.moduleDescriptor = "";
 };
 // getByRole/getByText/getByLabel resolved IN the LIVE isolate, returning each match's
 // document-order index (querySelectorAll('*') position) so the Playwright shim can dispatch
@@ -3065,7 +6441,7 @@ __G.tcApplyHover = function (el) {
 // <script> hasn't run, an ES module is unclaimed, or a fetch is in-flight (more to do
 // after the next async drain), else "0".
 __G.pendingWork = () =>
-  (globalThis.__pendingFetches || 0) > 0 || __timers.length > 0 || ((__G.esmSrcQueue || []).length) > 0 || Array.prototype.some.call(document.querySelectorAll("script"), (s) => !s.__tcDone || (((s.getAttribute && s.getAttribute("type")) || "").toLowerCase() === "module" && !s.__tcModule)) ? "1" : "0";
+  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __timers.length > 0 || ((__G.esmSrcQueue || []).length) > 0 || Array.prototype.some.call(document.querySelectorAll("script"), (s) => !s.__tcDone || (((s.getAttribute && s.getAttribute("type")) || "").toLowerCase() === "module" && !s.__tcModule)) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
 __G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
@@ -3094,400 +6470,427 @@ __G.domSig = () => {
 // own props) on every created element + the existing roots. Not true encapsulation,
 // but enough to let a shadow-rendering widget mount into the document.
 (function () {
-  const addShadow = (el) => {
-    if (el && typeof el.attachShadow !== "function") {
-      el.attachShadow = function () {
-        // Light-DOM fallback: the root IS the host. Set `.host` back to the host
-        // (itself) too — code reads `shadowRoot.host` to get the host element back
-        // (Next devtools: `var e = er.host; e.classList…`); without it that's undefined.
-        try { this.shadowRoot = this; this.host = this; } catch (_e) {}
+  // Retain the compatibility fallback only when the canonical binding lacks
+  // ShadowRoot support. Interface methods are inherited and validate receivers.
+  if (typeof Element.prototype.attachShadow !== "function") {
+    const tagName = __G.domAccessor("tagName", false, "Element");
+    Object.defineProperty(Element.prototype, "attachShadow", {
+      value: ({attachShadow(options) {
+        tagName.call(this);
+        if (!arguments.length || !options || !["open", "closed"].includes(options.mode)) throw new TypeError("A valid shadow mode is required");
+        if (this.shadowRoot) throw new DOMException("Shadow root already attached", "NotSupportedError");
+        this.shadowRoot = this; this.host = this;
         return this;
-      };
+      }}).attachShadow, writable: true, configurable: true, enumerable: true
+    });
+  }
+  const addShadow = el => el;
+  // Every iframe is a native DOM node. Its browsing context exists only while
+  // connected; lifecycle records never become enumerable guest properties.
+  const frameRecords = new WeakMap(), frameHosts = new Set();
+  const iframeTag = __G.domAccessor("tagName", false, "Element");
+  const recordFor = (el) => {
+    if (iframeTag.call(el) !== "IFRAME") throw new TypeError("Illegal invocation");
+    if (Object.hasOwn(el, "__iframeWired")) {
+      for (const name of ["contentWindow", "contentDocument", "__realm", "__iframeWired"]) {
+        if (Object.hasOwn(el, name)) delete el[name];
+      }
     }
-    return el;
+    const owner = el.ownerDocument.defaultView;
+    if (!owner) return null;
+    if (owner !== globalThis) return owner[__NS].frameRecordFor(el);
+    let record = frameRecords.get(el);
+    if (!record) {
+      record = {owner, depth: (globalThis.__depth || 0) + 1, realm: null, started: false, connected: false, epoch: 0, loaded: false};
+      frameRecords.set(el, record); frameHosts.add(el);
+    }
+    return record;
   };
-  // Queue a one-shot load event after frame scripts finish. Stubbed churn hosts
-  // also receive it so auth widgets do not retry until the render budget expires.
-  const fireIframeLoad = (el) => {
-    if (el.__tcLoadFired) return;
-    el.__tcLoadFired = true;
-    el.__loaded = true;
+  __G.frameRecordFor = recordFor;
+  const FRAME_DEPTH_CAP = 12;
+  const FRAME_STUB_HOST_RE = /posthog|propelauth/i;
+  const frameSrcOf = el => el.getAttribute("src") || "";
+  const frameSrcdocOf = el => el.getAttribute("srcdoc");
+  const frameWantsRealm = el => !!frameSrcdocOf(el) || !FRAME_STUB_HOST_RE.test(frameSrcOf(el));
+  const resolveFrameUrl = el => {
+    const source = frameSrcOf(el);
+    if (!source) return "";
+    try { return new URL(source, el.ownerDocument.baseURI).href; } catch (_) { return source; }
+  };
+  const fireIframeLoad = (el, epoch) => {
+    const record = recordFor(el);
+    if (!record || record.loaded || record.epoch !== epoch || !el.isConnected) return;
+    record.loaded = true;
     globalThis.setTimeout(() => {
-      const ev = { type: "load", target: el, currentTarget: el };
-      try { if (typeof el.onload === "function") el.onload(ev); } catch (_e) {}
-      try { (el.__loadCbs || []).forEach((f) => { try { f(ev); } catch (_e) {} }); } catch (_e) {}
-      try { if (typeof el.dispatchEvent === "function") el.dispatchEvent(ev); } catch (_e) {}
+      if (record.epoch !== epoch || !el.isConnected) return;
+      const event = new __hostEvent("load");
+      ops.op_event_trust(event, -1);
+      ops.op_dispatch_host_event(event, el);
     }, 0);
   };
-  // ── <iframe> realms (generic, depth-capped) ──────────────────────────────────────
-  // Every iframe — created via createElement, present in the parsed HTML, or carrying
-  // `srcdoc` — instantiates a REAL bridged child realm (browser_env.s namespaced makeFrameRealm)
-  // that runs the frame's OWN inline + `<script src>` scripts, with a DISTINCT
-  // contentWindow/contentDocument, a wired frame tree (parent/top/frames/length), and a
-  // depth cap that guards frame-bombs. reCAPTCHA's bframe/anchor handshake is now just the
-  // special case this generalizes: it flows through the same loader. A hidden / src-less /
-  // blocklisted iframe stays an inert stub (the analytics/auth churn fix) so it costs nothing.
-  //
-  // Each child has a separate V8 context and native ECMAScript intrinsics. DOM nodes
-  // still use the detached bridge over the page's native binding; cross-origin access
-  // control and separate DOM constructor prototypes remain unsupported.
-  const FRAME_DEPTH_CAP = 12; // beyond this a nested iframe is an inert stub (frame-bomb guard)
-  // Hosts whose iframes are analytics/auth CHURN (created + torn down hundreds of times during
-  // hydration): keep them inert so the churn stays nearly free and the budget goes to the real
-  // DOM. Config-driven so the list can grow without touching the loader.
-  const FRAME_STUB_HOST_RE = /posthog|propelauth/i;
-
-  const frameSrcOf = (el) =>
-    String((el && (el.__src != null ? el.__src : el.src)) || (el && el.getAttribute && el.getAttribute("src")) || "");
-  const frameSrcdocOf = (el) => {
-    let s = el && (el.__srcdoc != null ? el.__srcdoc : el.srcdoc);
-    if ((s == null || s === "") && el && el.getAttribute) s = el.getAttribute("srcdoc");
-    return s == null ? null : String(s);
-  };
-  // Blank frames need their own realm too; churn hosts keep the inexpensive stub.
-  const frameWantsRealm = (el) => {
-    const sd = frameSrcdocOf(el);
-    if (sd != null && sd.length) return true;
-    const s = frameSrcOf(el);
-    if (!s || s === "about:blank") return true;
-    if (FRAME_STUB_HOST_RE.test(s)) return false;
-    return true;
-  };
-  const resolveFrameUrl = (el) => {
-    const s = frameSrcOf(el);
-    if (!s) return "";
-    // Resolve a relative src against the OWNING frame's URL (not always the top window), so a
-    // relative src in a nested/grandchild frame resolves correctly.
-    const owner = el.__ownerWin || globalThis;
-    const base = (owner.document && owner.document.baseURI) || (owner.location && owner.location.href) || (globalThis.location && globalThis.location.href) || "http://localhost/";
-    try { return new URL(s, base).href; }
-    catch (_e) { return s; }
-  };
-  // Walk `parent` links to the real top window (self-aliased at the top, so it terminates).
-  const realTopOf = (win) => {
-    let w = win, guard = 0;
-    while (w && w.parent && w.parent !== w && guard++ < 64) w = w.parent;
-    return w || globalThis;
-  };
-  // Frame tree on `parentWin`: window.length = child count, window[i]/frames[i] = child
-  // windows, and frames === window (as in a real browser).
-  const registerChildFrame = (parentWin, childWin) => {
-    const n = parentWin.__frameCount || 0;
-    try { parentWin[n] = childWin; } catch (_e) {}
-    parentWin.__frameCount = n + 1;
-    try { parentWin.length = n + 1; } catch (_e) {}
-    if (parentWin.frames == null || parentWin.frames === parentWin) {
-      try { parentWin.frames = parentWin; } catch (_e) {}
-    } else {
-      try { parentWin.frames[n] = childWin; parentWin.frames.length = n + 1; } catch (_e) {}
-    }
+  let frameCount = globalThis.length || 0;
+  for (let i = 0; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
+  globalThis.length = 0; globalThis.frames = globalThis;
+  const refreshFrameTree = () => {
+    const windows = ops.op_window_child_frames(__document);
+    for (let i = windows.length; i < frameCount; i++) { try { delete globalThis[i]; } catch (_) {} }
+    windows.forEach((window, index) => Object.defineProperty(globalThis, index, {
+      configurable: true, get() { return __G.windowView(window); }
+    }));
+    frameCount = windows.length; globalThis.length = frameCount;
   };
 
   // Compile in the child's V8 context, preserving its global lexical bindings and
   // native intrinsics. Function wrappers would leak the parent realm and stacks.
-  const runVmInRealm = (cw, code, sourceUrl) => new Promise((resolve, reject) => {
-    const id = ops.op_queue_frame_script(cw, code, sourceUrl || cw.location.href || "about:blank");
+  const runVmInRealm = (cw, code, sourceUrl, responseId = 0) => new Promise((resolve, reject) => {
+    const id = ops.op_queue_frame_script(cw, code, sourceUrl || "about:blank", responseId);
     __classicWaiters.set(id, {resolve, reject});
   });
   // Extract + run the frame document's scripts in the realm, in document order: inline
   // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL,
   // shared cookie jar).
-  const loadFrameScripts = async (cw, html, frameUrl) => {
-    const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
-    let m;
-    while ((m = re.exec(html)) !== null) {
-      const attrs = m[1] || "";
-      const srcM = /\ssrc\s*=\s*["']([^"']+)["']/i.exec(attrs);
-      if (srcM) {
-        let u = srcM[1];
-        try { u = new URL(u, frameUrl).href; } catch (_e) {}
-        const r = await ops.op_fetch(u, JSON.stringify({ destination: "script", source: frameUrl }));
-        if (r && r.body) { try { await runVmInRealm(cw, r.body, u); } catch (_e) {} }
-      } else if (m[2] && m[2].trim()) {
-        const prefix = html.slice(0, m.index + m[0].indexOf(">") + 1);
-        const line = prefix.split("\n").length - 1;
-        const column = prefix.length - prefix.lastIndexOf("\n") - 1;
-        const located = "\n".repeat(line) + " ".repeat(column) + m[2];
-        try { await runVmInRealm(cw, located, frameUrl); } catch (_e) {}
-      }
+  const loadFrameScripts = async (cw, frameUrl) => {
+    const scripts = ops.op_frame_scripts(cw), deferred = [], asynchronous = [];
+    const execute = async (script) => {
+      try {
+        if(script.module){await ops.op_frame_module(cw,script.index);return;}
+        if(!ops.op_frame_script_allowed(cw,script.index))return;
+        if (script.src) {
+          const response = await ops.op_fetch(script.src, JSON.stringify({ destination: "script", source: frameUrl, frame_script: true, ...ops.op_document_cookie_site(cw), csp:ops.op_csp_context(cw), opaque_origin:ops.op_window_opaque(cw), mode:script.crossorigin===null?"no-cors":"cors", credentials:script.crossorigin!==null&&script.crossorigin.toLowerCase()!=="use-credentials"?"same-origin":"include" }));
+          if (response && response.ok) await runVmInRealm(cw, response.body, response.final_url || script.src, response.frame_script || 0);
+        } else if (script.code.trim()) {
+          const located = "\n".repeat(script.line) + " ".repeat(script.column) + script.code;
+          await runVmInRealm(cw, located, script.source);
+        }
+      } catch (error) { __print("frame script error: " + (error && error.stack ? error.stack : error) + "\n"); }
+    };
+    for (const script of scripts) {
+      if (script.asynchronous && (script.src || script.module)) asynchronous.push(execute(script));
+      else if (script.module || (script.src && script.deferred)) deferred.push(script);
+      else await execute(script);
     }
+    ops.op_frame_parser_done(cw);
+    for (const script of deferred) await execute(script);
+    return {asynchronous};
   };
+  __G.cspFrameScript = index => {const element=document.querySelectorAll("script")[index];if(!element)return false;const src=element.getAttribute("src");return ops.op_csp_script(__document,element,index,src?new URL(src,document.baseURI).href:"",element.textContent||"");};
+  __G.executeFrameModule = index => {const element=document.querySelectorAll("script")[index];if(!element)throw new TypeError("Frame module element unavailable");return __G.execScriptEl(element);};
   // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
-  const fireRealmLoad = (cw) => {
-    const cd = cw.document;
-    globalThis.setTimeout(() => {
-      try { cd.readyState = "complete"; } catch (_e) {}
-      const dcl = { type: "DOMContentLoaded", target: cd, currentTarget: cd };
-      try { cd.dispatchEvent(dcl); } catch (_e) {}
-      const load = { type: "load", target: cw, currentTarget: cw };
-      const previousSender = __G.messageSource;
-      __G.messageSource = cw;
-      try { if (typeof cw.onload === "function") cw.onload(load); } catch (_e) {}
-      finally { __G.messageSource = previousSender; }
-      try { cw.dispatchEvent(load); } catch (_e) {}
-    }, 0);
-  };
-
-  // Augment browser_env's child realm FROM RUNTIME (without editing the vendored binding):
-  // give it the REAL parent + top window objects (identity: frames[0].parent === window),
-  // keep the source-tagging parent VIEW as __parentView for the message bridge, expose its
-  // own frame tree, and wire its document.createElement so a grandchild iframe builds a
-  // grandchild realm at depth+1.
-  const augmentRealm = (cw, parentWin, hostEl, depth) => {
-    if (!cw || cw.__augmented) return cw;
-    cw.__augmented = true;
-    for (const name of ["console", "fetch", "XMLHttpRequest", "URL", "URLSearchParams", "TextEncoder", "TextDecoder", "Event", "CustomEvent", "MessageEvent", "MessageChannel", "MessagePort", "Element", "HTMLElement", "HTMLIFrameElement", "Node", "Document", "DOMParser"]) {
-      if (cw[name] === undefined && parentWin[name] !== undefined) cw[name] = parentWin[name];
-    }
-    const withSender = (fn) => function(...args) {
-      const previous = __G.messageSource;
-      __G.messageSource = cw;
-      try { return fn.apply(this, args); }
-      finally { __G.messageSource = previous; }
-    };
-    const listeners = new WeakMap();
-    const addListener = cw.addEventListener.bind(cw);
-    const removeListener = cw.removeEventListener.bind(cw);
-    cw.addEventListener = (type, fn) => {
-      if (typeof fn !== "function") return;
-      const wrapped = listeners.get(fn) || withSender(fn);
-      listeners.set(fn, wrapped);
-      addListener(type, wrapped);
-    };
-    cw.removeEventListener = (type, fn) => removeListener(type, listeners.get(fn) || fn);
-    for (const name of ["setTimeout", "setInterval", "requestAnimationFrame"]) {
-      const schedule = cw[name];
-      if (typeof schedule === "function") cw[name] = (fn, ...args) => schedule(typeof fn === "function" ? withSender(fn) : fn, ...args);
-    }
-    cw.postMessage = (message, targetOrigin, transfer) => {
-      const source = __G.messageSource || ops.op_message_source();
-      const origin = (source.location && source.location.origin) || "";
-      const ports = Array.isArray(transfer) ? transfer : [];
-      globalThis.setTimeout(() => {
-        const ev = new globalThis.MessageEvent("message", {data: message, source, origin, ports});
-        if (typeof cw.onmessage === "function") withSender(cw.onmessage).call(cw, ev);
-        cw.dispatchEvent(ev);
-      }, 0);
-    };
-    cw.__depth = depth;
-    cw.__parentWin = parentWin;
-    cw.__parentView = cw.parent;              // browser_env's source-tagging view (parent.postMessage)
-    cw.parent = parentWin;                    // real immediate parent (identity check)
-    if (!frameSrcOf(hostEl) || frameSrcOf(hostEl) === "about:blank" || frameSrcdocOf(hostEl)) {
-      cw.origin = (parentWin.location && parentWin.location.origin) || "null";
-      cw.location.origin = cw.origin;
-      if (frameSrcdocOf(hostEl)) cw.location.href = "about:srcdoc";
-    }
-    cw.top = realTopOf(parentWin);            // real top window (top.foo reads work)
-    cw.frameElement = hostEl || null;
-    const ownerUrl = (parentWin.document && parentWin.document.URL) || parentWin.location.href;
-    const documentUrl = (!frameSrcOf(hostEl) || frameSrcOf(hostEl) === "about:blank" || frameSrcdocOf(hostEl))
-      ? ownerUrl : resolveFrameUrl(hostEl);
-    cw.document.URL = documentUrl;
-    cw.document.documentURI = cw.location.href;
-    cw.document.baseURI = documentUrl;
-    cw.fetch = (input, init) => {
-      const request = input && typeof input === "object" ? input : null;
-      const url = new globalThis.URL(String(request ? request.url : input), cw.document.baseURI).href;
-      return __G.fetchFromSource(url, { ...(request || {}), ...(init || {}) }, cw.document.URL);
-    };
-    cw.XMLHttpRequest = class XMLHttpRequest extends globalThis.XMLHttpRequest {
-      constructor() {
-        super();
-        __xhrContexts.set(this, {source: () => cw.document.URL, base: () => cw.document.baseURI});
-      }
-      _emit(type, ev) {
-        const previous = __G.messageSource;
-        __G.messageSource = cw;
-        try { return super._emit(type, ev); }
-        finally { __G.messageSource = previous; }
-      }
-    };
-    Object.defineProperty(cw.document, "cookie", {
-      configurable: true,
-      get() { return ops.op_frame_cookie_get(documentUrl); },
-      set(line) { ops.op_frame_cookie_set(documentUrl, String(line)); },
-    });
-    cw.frames = cw;                           // window.frames === window
-    cw.length = 0; cw.__frameCount = 0;
-    installFrameFactory(cw, cw.document, depth + 1);
-    return cw;
-  };
-
-  // Build (sync, idempotent) the child realm for `el` and wire its frame tree. Script loading
-  // is separate (async, see __G.loadFrame) so contentWindow is available immediately.
-  __G.frameRealm = (el, depth) => {
-    if (el.__realm) return el.__realm;
-    const makeFrameRealm = __G.makeFrameRealm || globalThis.__makeFrameRealm;
-    if (typeof makeFrameRealm !== "function") throw new Error("iframe realm factory unavailable");
-    const parentWin = el.__ownerWin || globalThis;
-    const cw = makeFrameRealm(el, parentWin, () => ops.op_create_frame());
-    augmentRealm(cw, parentWin, el, depth == null ? (el.__depth || 0) : depth);
-    registerChildFrame(parentWin, cw);
-    return cw;
-  };
-
-  // The full frame load: ensure the realm, fetch the frame HTML (op_fetch for `src`, or the
-  // `srcdoc` attribute directly), run its scripts in the realm, fire load. Counted in
-  // __pendingFetches so the hydration drain waits for it. Idempotent per element.
-  __G.loadFrame = async (el, depth) => {
-    if (el.__frameStarted) return el.__realm;
-    el.__frameStarted = true;
-    const cw = __G.frameRealm(el, depth);
-    if (!cw || cw === globalThis) { fireIframeLoad(el); return cw; }
-    globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
-    let frameUrl = cw.document.baseURI || (globalThis.location && globalThis.location.href) || "http://localhost/";
+  __G.configureFrame = (metadata, parentWin, hostEl) => {
+    const same = ops.op_windows_same_origin(parentWin);
+    globalThis.parent = __G.windowView(parentWin);
+    globalThis.top = __G.windowView(ops.op_window_top(parentWin));
+    globalThis.frameElement = same ? hostEl : null;
+    globalThis.__depth = metadata.depth;
+    __G.setDocumentReadyState("loading");
+    globalThis.origin = metadata.origin;
+    location.href = metadata.location;
+    location.origin = new URL(metadata.location).origin;
+    __documentRuntimeState.frame = metadata;
     try {
-      let html = "";
-      const sd = frameSrcdocOf(el);
-      if (sd != null && sd.length) {
-        html = sd;
-      } else {
-        const url = resolveFrameUrl(el);
-        if (url) { frameUrl = url; const r = await ops.op_fetch(url, JSON.stringify({ destination: "iframe", source: (el.__ownerWin && el.__ownerWin.document && el.__ownerWin.document.URL) || globalThis.location.href })); html = (r && r.body) || ""; }
+      const source = new URL(metadata.referrer || "about:blank");
+      source.hash = "";
+      __documentRuntimeState.referrer = metadata.inherited || source.origin === metadata.origin ? source.href
+        : source.protocol === "https:" && String(metadata.location).startsWith("http:") ? ""
+        : source.origin === "null" ? "" : source.origin + "/";
+    } catch (_) { __documentRuntimeState.referrer = ""; }
+    globalThis.frames = globalThis;
+    installFrameFactory(globalThis, document, metadata.depth + 1);
+  };
+  function fireFrameEvent(target, type, bubbles) {
+    "use strict";
+    const event = new __hostEvent(type, {bubbles});
+    ops.op_event_trust(event, -1);
+    try { ops.op_dispatch_host_event(event, target); } catch (error) { __print("frame event error: " + error + "\n"); }
+    return event;
+  };
+  const frameParsingDone = () => {
+    __G.performancePhase("domInteractive");
+    __G.setDocumentReadyState("interactive");
+    fireFrameEvent(document, "readystatechange");
+  };
+  const frameDomReady = () => {
+    for (const script of document.querySelectorAll("script")) { script.__tcDone = true; script.__tcModule = true; }
+    __G.performancePhase("domContentLoadedEventStart");
+    fireFrameEvent(document, "DOMContentLoaded", true);
+    fireFrameEvent(globalThis, "DOMContentLoaded", true);
+    __G.performancePhase("domContentLoadedEventEnd");
+  };
+  function fireFrameLoad() {
+    "use strict";
+    return new Promise((resolve) => {
+    setTimeout(async () => {
+      await __G.waitForDocumentResources();
+      __G.performancePhase("domComplete");
+      __G.setDocumentReadyState("complete");
+      fireFrameEvent(document, "readystatechange");
+      __G.performancePhase("loadEventStart");
+      const event = fireFrameEvent(globalThis, "load");
+      try { if (typeof globalThis.onload === "function") globalThis.onload(event); } catch (error) { __print("frame load error: " + error + "\n"); }
+      __G.performancePhase("loadEventEnd");
+      fireFrameEvent(globalThis, "pageshow");
+      resolve();
+    }, 0);
+  });
+  }
+  ops.op_set_host_capabilities({frameParsingDone,frameDomReady,fireFrameLoad});
+  const frameMetadata = (el) => {
+    const record = recordFor(el), owner = record.owner;
+    const inherited = record.navigationURL ? record.navigationURL === "about:blank" : !frameSrcOf(el) || frameSrcOf(el) === "about:blank" || frameSrcdocOf(el) !== null;
+    const url = record.navigationURL || (inherited ? owner.document.URL : resolveFrameUrl(el));
+    const origin = inherited ? owner.location.origin : new URL(url).origin;
+    const location = record.navigationURL || (frameSrcdocOf(el) !== null ? "about:srcdoc" : inherited ? "about:blank" : url);
+    return {url, origin, location, inherited, depth: record.depth, referrer: owner.document.URL};
+  };
+  __G.frameRealm = (el) => {
+    if (!ops.op_window_active(__document)) return null;
+    const record = recordFor(el);
+    if (!record || !ops.op_window_active(__document) || !el.isConnected || record.depth > FRAME_DEPTH_CAP || !frameWantsRealm(el)) return null;
+    if (record.realm) return record.realm;
+    let window = ops.op_create_frame(globalThis);
+    record.metadata = frameMetadata(el);
+    window = ops.op_frame_set_document(window, record.owner, el,
+      "<!DOCTYPE html><html><head></head><body></body></html>",
+      JSON.stringify({...record.metadata, inherited: true}), 0);
+    record.realm = window;
+    refreshFrameTree();
+    return window;
+  };
+  const loadFrameImpl = async (el) => {
+    const record = recordFor(el);
+    if (!record || record.started || !el.isConnected || !ops.op_window_active(__document)) return;
+    record.started = true;
+    const epoch = record.epoch;
+    let window = __G.frameRealm(el);
+    if (!window) { fireIframeLoad(el, epoch); return; }
+    globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
+    let frameUrl = record.metadata.url;
+    try {
+      // Insertion creates the initial empty document synchronously. Navigation
+      // commits on a later microtask, so srcdoc cannot appear during appendChild.
+      await Promise.resolve();
+      if (record.epoch !== epoch || !el.isConnected) return;
+      let html = "", responseId = 0;
+      const srcdoc = record.navigationURL ? null : frameSrcdocOf(el);
+      const blank = srcdoc === null && (record.navigationURL ? record.navigationURL === "about:blank" : !frameSrcOf(el) || frameSrcOf(el) === "about:blank");
+      if (srcdoc !== null) html = srcdoc;
+      else {
+        const url = record.navigationURL || resolveFrameUrl(el);
+        if (url && url !== "about:blank") {
+          const response = await ops.op_fetch(url, JSON.stringify({destination: "iframe", source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)}));
+          if (record.epoch !== epoch || !el.isConnected) return;
+          html = response.body || ""; responseId = response.frame_document || 0;
+          frameUrl = response.final_url || url;
+        }
       }
-      if (!sd && frameSrcOf(el) && frameSrcOf(el) !== "about:blank") cw.location.href = frameUrl;
-      if (html && cw.document.body) cw.document.body.innerHTML = html;
-      await loadFrameScripts(cw, html, frameUrl);
-      fireRealmLoad(cw);
-    } catch (_e) {
+      if (record.epoch !== epoch || !el.isConnected) return;
+      if (!blank || record.navigation) {
+        window = ops.op_frame_set_document(window, record.owner, el,
+          html || "<!DOCTYPE html><html><head></head><body></body></html>",
+          JSON.stringify({...record.metadata, url: frameUrl}), responseId);
+        record.realm = window; record.navigation = false;
+        refreshFrameTree();
+      }
+      await ops.op_frame_resources(window);
+      const work = await loadFrameScripts(window, frameUrl);
+      await ops.op_frame_dom_ready(window);
+      await Promise.all(work.asynchronous);
+      await ops.op_frame_finish(window);
+    } catch (error) {
+      if (record.epoch === epoch) __print("frame error: " + (error && error.stack ? error.stack : error) + "\n");
     } finally {
       globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
-      fireIframeLoad(el);
+      fireIframeLoad(el, epoch);
     }
-    return cw;
   };
-  // Back-compat shim: the reCAPTCHA bframe/anchor path is now just a frame load through the
-  // generic loader. `url` is the bframe src; set it so the loader fetches + runs the bframe VM.
+  __G.loadFrame = el => __trackResource(loadFrameImpl(el));
+  const retire = (el) => {
+    const record = recordFor(el);
+    if (!record) return;
+    if (record.realm) ops.op_retire_frame(record.realm, record.owner);
+    record.realm = null; record.started = false; record.loaded = false; record.epoch++;
+  };
+  __G.prepareFrameAdoption = (hosts) => {
+    const records = Array.from(hosts, recordFor).filter(Boolean);
+    return () => {
+      for (const record of records) {
+        if (record.realm) ops.op_retire_frame(record.realm, record.owner);
+        record.realm = null; record.started = false; record.loaded = false; record.epoch++;
+      }
+      refreshFrameTree();
+    };
+  };
+  const adoptNode = Document.prototype.adoptNode;
+  if (typeof adoptNode === "function") {
+    const delegate = function(node) {
+      __documentType.call(this);
+      if (!arguments.length) return Reflect.apply(adoptNode, this, []);
+      __documentType.call(node);
+      const source = node.ownerDocument;
+      const owner = source && source.defaultView;
+      const hosts = owner ? ops.op_frame_move_candidates(source, [node]) : [];
+      const finish = owner ? owner[__NS].prepareFrameAdoption(hosts) : null;
+      const result = Reflect.apply(adoptNode, this, [node]);
+      if (finish) finish();
+      return result;
+    };
+    Object.defineProperty(Document.prototype, "adoptNode", {value: __documentFunction(delegate, "adoptNode", 1), writable: true, configurable: true, enumerable: true});
+  }
+  const changedSource = (el) => {
+    const record = recordFor(el);
+    if (!record) return;
+    record.navigationURL = null; record.navigationSource = null;
+    if (!el.isConnected) return;
+    if (ops.op_native_window_proxy()) {
+      record.started = false; record.loaded = false; record.epoch++; record.navigation = true;
+      record.metadata = frameMetadata(el);
+    } else { retire(el); }
+    __G.loadFrame(el);
+  };
+  const syncConnections = (root = document) => {
+    try { if (root.nodeType === 1 && iframeTag.call(root) === "IFRAME") recordFor(root); } catch (_) {}
+    if (root && typeof root.querySelectorAll === "function") {
+      for (const el of root.querySelectorAll("iframe")) recordFor(el);
+    }
+    for (const el of frameHosts) {
+      const record = recordFor(el), connected = el.isConnected;
+      if (!record) continue;
+      if (!connected && record.connected) retire(el);
+      record.connected = connected;
+      if (connected && !record.started) __G.loadFrame(el);
+    }
+    refreshFrameTree();
+  };
+  __G.syncFrameConnections = syncConnections;
   __G.recaptchaBframeHandshake = (el, url) => {
-    try { if (url != null) el.__src = String(url); } catch (_e) {}
-    return __G.loadFrame(el, el.__depth || 1);
+    if (url != null) el.setAttribute("src", String(url));
+    if (el.isConnected) return __G.loadFrame(el);
   };
-
-  // A realm-capable iframe host: a plain object (it does NOT enter the rtdom tree, matching the
-  // pre-existing created-iframe behavior). `depth` is this frame's depth; `ownerWin` is the
-  // realm whose document created it (its parent). The src/srcdoc setters trigger a real realm
-  // load unless the frame is inert (churn / no meaningful src) or past the depth cap. Its lazy
-  // contentWindow/contentDocument mean an unused iframe still costs nothing.
-  const buildIframe = (depth, ownerWin) => {
-    const noop = () => {};
-    const el = {
-      nodeType: 1, nodeName: "IFRAME", tagName: "IFRAME", __iframeEl: true,
-      __depth: depth, __ownerWin: ownerWin || globalThis,
-      style: {}, dataset: {}, onload: null, onerror: null,
-      setAttribute(n, v) { if (n === "src") { this.src = v; return; } if (n === "srcdoc") { this.srcdoc = v; return; } this[n] = v; },
-      getAttribute(n) {
-        if (n === "src") return this.__src || null;
-        if (n === "srcdoc") return this.__srcdoc != null ? this.__srcdoc : null;
-        return this[n] != null ? String(this[n]) : null;
-      },
-      removeAttribute(n) { delete this[n]; },
-      appendChild(c) { return c; }, removeChild(c) { return c; },
-      insertBefore(c) { return c; }, remove: noop,
-      addEventListener(t, f) { if (t === "load") { (this.__loadCbs = this.__loadCbs || []).push(f); if (this.__loaded) fireIframeLoad(this); } },
-      removeEventListener: noop, dispatchEvent: noop,
-      getBoundingClientRect: () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }),
-      focus: noop, blur: noop, contains: () => false,
+  const frameReceiver = (el) => {
+    iframeTag.call(el);
+    if (iframeTag.call(el) !== "IFRAME") throw new TypeError("Illegal invocation");
+    return el.ownerDocument.defaultView;
+  };
+  const accessFrame = (el, documentOnly) => {
+    const owner = frameReceiver(el);
+    if (!owner) return null;
+    if (owner !== globalThis) return owner[__NS].accessFrame(el, documentOnly);
+    const window = __G.frameRealm(el);
+    if (!window) return null;
+    return documentOnly ? (ops.op_windows_same_origin(window) ? window.document : null) : __G.windowView(window);
+  };
+  __G.accessFrame = accessFrame;
+  const iframeProto = HTMLIFrameElement.prototype;
+  for (const [name, read] of [["contentWindow", el => accessFrame(el, false)], ["contentDocument", el => accessFrame(el, true)],
+    ["src", el => {frameReceiver(el); return frameSrcOf(el) ? resolveFrameUrl(el) : "";}],
+    ["srcdoc", el => {frameReceiver(el); return frameSrcdocOf(el) || "";}]]) {
+    const getter = Object.getOwnPropertyDescriptor({get [name]() {return read(this);}}, name).get;
+    const descriptor = {get: __documentFunction(getter, "get " + name, 0), enumerable: true, configurable: true};
+    if (name === "src" || name === "srcdoc") {
+      const setter = Object.getOwnPropertyDescriptor({set [name](value) {frameReceiver(this); this.setAttribute(name, String(value));}}, name).set;
+      descriptor.set = __documentFunction(setter, "set " + name, 1);
+    }
+    Object.defineProperty(iframeProto, name, descriptor);
+  }
+  // Mutations may connect a whole subtree/fragment, remove a frame, or move it
+  // into a shadow tree. Forward to the native DOM first, then update contexts.
+  const mutators = ["appendChild", "insertBefore", "removeChild", "append", "prepend", "before", "after", "remove", "replaceWith", "replaceChildren", "replaceChild", "insertAdjacentElement", "insertAdjacentHTML"];
+  for (const proto of [Node.prototype, Element.prototype, Document.prototype, DocumentFragment.prototype, CharacterData.prototype]) {
+    for (const name of mutators) {
+      const descriptor = Object.getOwnPropertyDescriptor(proto, name);
+      if (!descriptor || typeof descriptor.value !== "function") continue;
+      const original = descriptor.value;
+      const delegate = function(...args) {
+        const receiverDocument = this.nodeType === 9 ? this : this.ownerDocument;
+        if (!receiverDocument.defaultView) return Reflect.apply(original, this, args);
+        const parent = this.parentNode;
+        const moved = ["appendChild","insertBefore","replaceChild"].includes(name) ? [args[0]]
+          : name === "insertAdjacentElement" ? [args[1]]
+          : ["append","prepend","before","after","replaceWith","replaceChildren"].includes(name) ? args : [];
+        const candidates = ops.op_frame_move_candidates(__document, moved);
+        const result = Reflect.apply(original, this, args);
+        for (const host of candidates) retire(host);
+        const owner = (this.nodeType === 9 ? this : this.ownerDocument).defaultView;
+        if (!owner) return result;
+        owner[__NS].syncFrameConnections(this);
+        if (parent && parent !== this) owner[__NS].syncFrameConnections(parent);
+        return result;
+      };
+      Object.defineProperty(proto, name, {...descriptor, value: __documentFunction(delegate, name, original.length)});
+    }
+    for (const name of ["innerHTML", "outerHTML", "textContent"]) {
+      const descriptor = Object.getOwnPropertyDescriptor(proto, name);
+      if (!descriptor || !descriptor.set) continue;
+      const original = descriptor.set;
+      const delegate = function(value) {
+        const parent = this.parentNode;
+        const result = Reflect.apply(original, this, [value]);
+        const owner = (this.nodeType === 9 ? this : this.ownerDocument).defaultView;
+        if (!owner) return result;
+        owner[__NS].syncFrameConnections(this);
+        if (parent) owner[__NS].syncFrameConnections(parent);
+        return result;
+      };
+      Object.defineProperty(proto, name, {...descriptor, set: __documentFunction(delegate, "set " + name, 1)});
+    }
+  }
+  for (const name of ["setAttribute", "removeAttribute", "setAttributeNS", "removeAttributeNS"]) {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, name);
+    if (!descriptor || typeof descriptor.value !== "function") continue;
+    const original = descriptor.value;
+    const delegate = function(...args) {
+      const result = Reflect.apply(original, this, args);
+      const attribute = String(args[name.endsWith("NS") ? 1 : 0]).toLowerCase();
+      if (iframeTag.call(this) === "IFRAME" && (attribute === "src" || attribute === "srcdoc")) {
+        const owner = this.ownerDocument.defaultView;
+        if (owner) owner[__NS].frameSourceChanged(this);
+      }
+      return result;
     };
-    // Decide realm vs inert, then (for a realm) kick the async load. Idempotent.
-    const maybeLoad = () => {
-      if (el.__frameStarted) return;
-      if (depth > FRAME_DEPTH_CAP || !frameWantsRealm(el)) { fireIframeLoad(el); return; }
-      try { __G.loadFrame(el, depth); } catch (_e) { fireIframeLoad(el); }
-    };
-    Object.defineProperty(el, "src", { configurable: true,
-      get() { return el.__src || ""; },
-      set(v) { el.__src = String(v); maybeLoad(); } });
-    Object.defineProperty(el, "srcdoc", { configurable: true,
-      get() { return el.__srcdoc || ""; },
-      set(v) { el.__srcdoc = String(v); maybeLoad(); } });
-    // contentWindow/contentDocument are the child realm's DISTINCT window/document once the
-    // frame wants a realm. Frames beyond the safety cap expose no child window;
-    // sharing the parent's globals would violate realm identity.
-    Object.defineProperty(el, "contentWindow", { configurable: true,
-      get() {
-        if (el.__realm) return el.__realm;
-        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return __G.frameRealm(el, depth);
-        return null;
-      } });
-    Object.defineProperty(el, "contentDocument", { configurable: true,
-      get() {
-        if (el.__realm) return el.__realm.document;
-        if (depth <= FRAME_DEPTH_CAP && frameWantsRealm(el)) return __G.frameRealm(el, depth).document;
-        return null;
-      } });
+    Object.defineProperty(Element.prototype, name, {...descriptor, value: __documentFunction(delegate, name, original.length)});
+  }
+  __G.frameSourceChanged = changedSource;
+  const navigateFrame = (el,url,source) => {
+    const record = recordFor(el);
+    if (!record || !el.isConnected || !record.realm) return;
+    record.navigationURL = url; record.navigationSource = source;
+    record.started = false; record.loaded = false; record.epoch++; record.navigation = true;
+    record.metadata = frameMetadata(el);
+    __G.loadFrame(el);
+  };
+  ops.op_set_frame_navigator(navigateFrame);
+  const nativeCreate = document.createElement.bind(document);
+  document.createElement = function(tag, options) {
+    const el = nativeCreate(tag, options);
+    if (String(tag).toLowerCase() === "iframe") recordFor(el);
     return el;
   };
-
-  // Wire a document's createElement so `iframe` → a realm-capable host at `nextDepth`, owned by
-  // `win`. Non-iframe tags fall through to the original createElement (with the top document's
-  // shadow-DOM shim preserved for the top realm only).
-  const installFrameFactory = (win, doc, nextDepth) => {
-    if (!doc || doc.__frameFactory) return;
-    doc.__frameFactory = true;
-    const orig = typeof doc.createElement === "function" ? doc.createElement.bind(doc) : null;
-    const isTop = win === globalThis;
-    doc.createElement = (tag) => {
-      if (String(tag).toLowerCase() === "iframe") return buildIframe(nextDepth, win);
-      if (!orig) return null;
-      return isTop ? addShadow(orig(tag)) : orig(tag);
-    };
-  };
-  // Wire the TOP document: the iframes it creates are depth 1.
-  installFrameFactory(globalThis, document, 1);
-
-  // Pre-existing <iframe> elements in the parsed HTML get a realm too (created ones go through
-  // the factory above). They are REAL rtdom nodes, so wire lazy contentWindow/contentDocument
-  // accessors and load their content at depth 1.
-  const wireExistingIframe = (el) => {
-    if (!el || el.__frameStarted || el.__iframeWiredRT) return;
-    el.__iframeWiredRT = true;
-    el.__ownerWin = globalThis;
-    el.__depth = 1;
-    try {
-      Object.defineProperty(el, "contentWindow", { configurable: true, get() { return el.__realm || __G.frameRealm(el, 1); } });
-      Object.defineProperty(el, "contentDocument", { configurable: true, get() { return (el.__realm || __G.frameRealm(el, 1)).document; } });
-    } catch (_e) {}
-    if (frameWantsRealm(el)) { try { __G.loadFrame(el, 1); } catch (_e) {} }
-  };
-  try {
-    const pre = document.querySelectorAll ? document.querySelectorAll("iframe") : [];
-    for (let i = 0; i < pre.length; i++) wireExistingIframe(pre[i]);
-  } catch (_e) {}
+  // Retained for child configuration; DOM ownership already determines depth.
+  const installFrameFactory = () => {};
+  syncConnections();
 
   if (document.body) addShadow(document.body);
   if (document.documentElement) addShadow(document.documentElement);
 })();
-// Native-function fidelity: a fingerprinter calls `fn.toString()` on built-ins
-// and flags JS source where real Chrome returns "function x() { [native code] }".
-// Make our JS polyfills report native. Plain reassignment, not a Proxy — a Proxy
-// on toString is itself detectable (its own toString/`length` leak).
+"##,
+    include_str!("web_geometry.js"),
+    r##"
+// Web-IDL functions are embedded through V8 FunctionTemplates. Keep the
+// intrinsic Function.prototype.toString intact; guest delegates remain live.
 (() => {
   const orig = Function.prototype.toString;
   const native = new WeakSet();
-  // Define the trap as a CONCISE METHOD (via an object literal), not a `function` expression: a
-  // native function has NO own `prototype` property, but a `function` expression always does (and
-  // it's non-configurable, so it can't be deleted). Concise methods — like real native methods —
-  // have no `prototype`. A probe reading `'prototype' in Function.prototype.toString` would
-  // otherwise flag the trap (and every `function`-expression shim) as non-native despite the
-  // "[native code]" string. length must be 0 (native toString.length === 0), which a concise
-  // method already gives.
-  const ts = ({ toString() {
-    if (native.has(this)) return "function " + (this.name || "") + "() { [native code] }";
-    return orig.call(this);
-  } }).toString;
-  Function.prototype.toString = ts;
-  native.add(ts); // the trap must report itself native too
-  // Wrap a shim as a prototype-less, native-marked forwarder (concise-method form), preserving
-  // `this`/args and pinning name + length to match the real built-in. Use where a `function`
-  // shim's own `prototype` would be a native-shape tell.
-  const nativize = (orig2, name, len) => {
-    if (typeof orig2 !== "function") return orig2;
-    const holder = { [name](...args) { return orig2.apply(this, args); } };
-    const f = holder[name];
-    try { Object.defineProperty(f, "length", { value: len == null ? orig2.length : len, configurable: true }); } catch (e) {}
-    native.add(f);
-    return f;
+  const nativeBindings = new WeakMap();
+  const factory = __G.makeNativeFunction;
+  const nativize = (delegate, name, len) => {
+    if (typeof delegate !== "function") return delegate;
+    if (nativeBindings.has(delegate)) return nativeBindings.get(delegate);
+    if (orig.call(delegate).includes("[native code]")) return delegate;
+    if (typeof factory !== "function") return delegate;
+    const fn = factory(delegate, name || delegate.name, len == null ? delegate.length : len);
+    native.add(fn);
+    nativeBindings.set(delegate, fn);
+    return fn;
   };
   // NB: `nativize` stays a closure-local — exposing it as a global (window.__nativize) would itself
   // be a tamper tell. Every shim site that needs it is inside this same IIFE.
@@ -3521,8 +6924,8 @@ __G.domSig = () => {
     if (!ET || !ET.prototype) return;
     for (const name of __evNames) {
       // Prefer a working impl (window's own, else the proto's) and native-shape it on the proto.
-      const impl = (Object.prototype.hasOwnProperty.call(globalThis, name) && globalThis[name])
-        || ET.prototype[name]
+      const impl = ET.prototype[name]
+        || (Object.prototype.hasOwnProperty.call(globalThis, name) && globalThis[name])
         || (globalThis.document && globalThis.document[name]);
       if (typeof impl === "function") {
         try { ET.prototype[name] = nativize(impl, name, name === "dispatchEvent" ? 1 : 2); } catch (e) {}
@@ -3533,7 +6936,11 @@ __G.domSig = () => {
     const W = globalThis.Window;
     try {
       if (W && W.prototype) {
-        if (Object.getPrototypeOf(W.prototype) !== ET.prototype) Object.setPrototypeOf(W.prototype, ET.prototype);
+        const properties = Object.create(ET.prototype);
+        Object.defineProperty(properties, Symbol.toStringTag, {value:"WindowProperties",configurable:true});
+        Object.setPrototypeOf(W.prototype, properties);
+        Object.defineProperty(W.prototype, Symbol.toStringTag, {value:"Window",configurable:true});
+        if (Object.hasOwn(globalThis, Symbol.toStringTag)) delete globalThis[Symbol.toStringTag];
         if (Object.getPrototypeOf(globalThis) !== W.prototype) Object.setPrototypeOf(globalThis, W.prototype);
       } else if (Object.getPrototypeOf(globalThis) !== ET.prototype) {
         Object.setPrototypeOf(globalThis, ET.prototype);
@@ -3604,32 +7011,49 @@ __G.domSig = () => {
   const G = globalThis;
   const guard = (fn) => { try { fn(); } catch (e) {} };
   const tag = (obj, name) => { if (obj) Object.defineProperty(obj, Symbol.toStringTag, { value: name, configurable: true }); };
-  // Event.isTrusted as a real Chrome-shaped PROTOTYPE ACCESSOR (Chrome exposes it on
-  // Event.prototype, read-only, not as an own instance prop). The vendored Event ctor sets an
-  // own `isTrusted=false`; we install a proto getter reading a hidden `__trusted` flag so a
-  // synthesized human-input event marked trusted reads `true`, while ordinary script events stay
-  // false. A trusted-dispatch helper (see the human-input synthesizer) deletes the own prop and
-  // sets `__trusted`, leaving isTrusted only on the prototype — matching Chrome's descriptor
-  // shape (an anti-bot check reads Object.getOwnPropertyDescriptor(Event.prototype,'isTrusted')).
-  guard(() => {
-    if (typeof G.Event === "function" && G.Event.prototype) {
-      const get = function isTrusted() { return this.__trusted === true; };
-      mark(get, "get isTrusted");
-      Object.defineProperty(G.Event.prototype, "isTrusted", { get, enumerable: true, configurable: true });
+  // Canonical Event owns its nonconfigurable isTrusted getter and keeps the
+  // host-dispatch record private; writable page flags must never confer trust.
+  // Lifecycle transitions remain receiver-local in reused isolates and frames.
+  __defineDocumentAccessor("readyState", state => state.readyState);
+  function lifecycleEvent(target, type, bubbles, handler) {
+    "use strict";
+    const event = new __hostEvent(type, {bubbles});
+    ops.op_event_trust(event, -1);
+    ops.op_dispatch_host_event(event, target);
+    if (typeof handler === "function" && target === globalThis && (type === "load" || type === "pageshow")) {
+      handler.call(target, event);
+    } else if (typeof handler === "function") {
+      ops.op_event_callback(event, target, true);
+      try { handler.call(target, event); } finally { ops.op_event_callback(event, target, false); }
     }
-  });
-  // document.readyState as a MUTABLE accessor backed by a hidden Symbol slot, so the render loop
-  // can drive the real page-load sequence (loading → interactive → complete) and fire the matching
-  // events. The vendored binding hard-codes 'complete'; a collector that watches readyState
-  // transitions + gates init on DOMContentLoaded/load (google's homepage does) saw a frozen
-  // 'complete' and no lifecycle events on the main document/window — init never ran. Default
-  // (slot unset, e.g. the sync run_with_dom path) still reads 'complete', preserving old behavior.
-  guard(() => {
-    const SLOT = Symbol.for("__ts_rs");
-    const get = function readyState() { const v = G.document[SLOT]; return v === undefined ? "complete" : v; };
-    mark(get, "get readyState");
-    Object.defineProperty(G.document, "readyState", { get, configurable: true, enumerable: true });
-  });
+  };
+  __markDocumentInteractive = () => {
+    if (!__G.initialLoading) return;
+    __G.initialLoading = false;
+    __G.performancePhase("domInteractive");
+    __G.setDocumentReadyState("interactive");
+    lifecycleEvent(document, "readystatechange");
+  };
+  const dispatchDocumentInteractive = () => {
+    __markDocumentInteractive();
+    __G.performancePhase("domContentLoadedEventStart");
+    lifecycleEvent(document, "DOMContentLoaded", true);
+    lifecycleEvent(globalThis, "DOMContentLoaded", true);
+    __G.performancePhase("domContentLoadedEventEnd");
+  };
+  let __documentCompleted = false;
+  const dispatchDocumentComplete = () => {
+    if (__documentCompleted) return;
+    __documentCompleted = true;
+    __G.performancePhase("domComplete");
+    __G.setDocumentReadyState("complete");
+    lifecycleEvent(document, "readystatechange");
+    __G.performancePhase("loadEventStart");
+    lifecycleEvent(globalThis, "load", false, globalThis.onload);
+    __G.performancePhase("loadEventEnd");
+    lifecycleEvent(globalThis, "pageshow");
+  };
+  ops.op_set_host_capabilities({documentLoading:()=>{__G.initialLoading=true;__G.setDocumentReadyState("loading");},markDocumentInteractive:__markDocumentInteractive,dispatchDocumentInteractive,dispatchDocumentComplete});
   // A native-reporting getter (its source reads "[native code]" via the trap above).
   const nativeGetter = (val) => { const g = function () { return val; }; mark(g); return g; };
   // Insert a correctly-named host prototype between `obj` and its current prototype, carrying
@@ -3664,7 +7088,6 @@ __G.domSig = () => {
   guard(() => {
     const scr = G.screen;
     if (scr) {
-      if (scr.availHeight === scr.height) { try { scr.availHeight = scr.height - 25; } catch (e) {} }
       hostInterface(scr, "Screen", ["width", "height", "availWidth", "availHeight", "colorDepth", "pixelDepth"]);
     }
   });
@@ -3966,6 +7389,25 @@ __G.domSig = () => {
         if (typeof origReadPixels === "function") { try { return origReadPixels.call(gl, x, y, w, h, format, type, dst); } catch (e) {} }
       };
     };
+    const tagNameGetter = __G.domAccessor("tagName", false, "Element");
+    const requireCanvas = receiver => {
+      if (tagNameGetter.call(receiver) !== "CANVAS") throw new TypeError("Illegal invocation");
+    };
+    for (const [key, fallback] of [["width",300],["height",150]]) {
+      const get = Object.getOwnPropertyDescriptor({get [key]() {
+        requireCanvas(this);
+        const raw = this.getAttribute(key), match = raw != null && /^[\t\n\f\r ]*\+?(\d+)/.exec(raw);
+        const value = match ? Number(match[1]) : fallback;
+        return value <= 2147483647 ? value : fallback;
+      }},key).get;
+      const set = Object.getOwnPropertyDescriptor({set [key](value) {
+        requireCanvas(this);const size=Number(value)>>>0;
+        this.setAttribute(key,String(size));
+        if(this.__ctx2d && this.__ctx2d._ops)this.__ctx2d._ops.length=0;
+      }},key).set;
+      mark(get,"get "+key);mark(set,"set "+key);
+      Object.defineProperty(canvasProto,key,{get,set,enumerable:true,configurable:true});
+    }
     const origGetContext = canvasProto.getContext;
     // getContext returns the SAME context object on every call for a given (canvas, kind),
     // so a page that calls it twice would otherwise re-wrap getParameter/readPixels over our
@@ -3973,6 +7415,8 @@ __G.domSig = () => {
     // Track patched contexts so each is spoofed + instrumented exactly once.
     const glPatched = new WeakSet();
     const wrapped = function getContext(kind, opts) {
+      requireCanvas(this);
+      if (!arguments.length) throw new TypeError("A context type is required");
       const ctx = origGetContext.call(this, kind, opts);
       if (ctx) {
         const k = String(kind || "");
@@ -4119,6 +7563,8 @@ __G.domSig = () => {
     if (typeof origToDataURL === "function") {
       // Concise-method form (no own `prototype`, native shape); toDataURL.length === 0.
       canvasProto.toDataURL = nativize(({ toDataURL(type) {
+        requireCanvas(this);
+        if (this.width === 0 || this.height === 0) return "data:,";
         // The raster op only encodes PNG. For a non-PNG request (e.g. the webp-support probe
         // toDataURL('image/webp') or an explicit image/jpeg) defer to the vendored path, which
         // labels the data URL with the requested MIME — returning PNG for a webp request would be
@@ -4135,27 +7581,74 @@ __G.domSig = () => {
       } }).toDataURL, "toDataURL", 0);
     }
     if (typeof canvasProto.toBlob === "function") canvasProto.toBlob = nativize(canvasProto.toBlob, "toBlob", 1);
-    if (typeof canvasProto.getBoundingClientRect === "function") canvasProto.getBoundingClientRect = nativize(canvasProto.getBoundingClientRect, "getBoundingClientRect", 0);
+    // Canvas inherits the genuine Element geometry callback; do not shadow it.
 
   });
 
-  // document → HTMLDocument brand + 5 native getters (best-effort: the native DOM object may
-  // reject a prototype swap; the brand tag still lands on the instance).
-  guard(() => { if (G.document) tag(G.document, "HTMLDocument"); });
-  guard(() => hostInterface(G.document, "HTMLDocument", ["cookie", "title", "referrer", "readyState", "URL"]));
+  // The canonical binding owns HTMLDocument → Document → Node. Re-home only
+  // this runtime's resource/frame wrapper, without inserting another prototype.
+  __documentRuntimeState.createElement = G.document.createElement;
+  const createElement = ({createElement(tag, options = undefined) {
+    const state = __documentState(this);
+    if (!arguments.length) throw new TypeError("A tag name is required");
+    return state.createElement(String(tag), options);
+  }}).createElement;
+  Object.defineProperty(G.Document.prototype, "createElement", {value: __documentFunction(createElement, "createElement", 1),
+    writable: true, configurable: true, enumerable: true});
+  delete G.document.createElement;
+  if (Object.hasOwn(G.document, Symbol.toStringTag)) delete G.document[Symbol.toStringTag];
 
   // window / history / console brands (WINDOW_BRANDS: note console's brand is lowercase).
-  guard(() => tag(G, "Window"));
+  guard(() => { if(G.Window?.prototype)tag(G.Window.prototype,"Window"); });
   guard(() => {
     G.history = G.history || { length: 1, state: null, scrollRestoration: "auto",
       back() {}, forward() {}, go() {}, pushState() {}, replaceState() {} };
     tag(G.history, "History");
   });
   guard(() => { if (G.console) { tag(G.console, "console"); ["log", "info", "warn", "error", "debug"].forEach((m) => mark(G.console[m], m)); } });
-  guard(() => { if (G.performance && G.performance.now) mark(G.performance.now, "now"); });
-  // The coherent-clock override replaced Date.now with a plain arrow and wrapped the Date
-  // constructor with a JS shim — both leak JS source via toString (an anti-hook tell) unless
-  // native-masked. Mark the constructor + its static.
+  guard(() => {
+    const object = G.performance;
+    if (!object) return;
+    function Performance() { throw new TypeError("Illegal constructor"); }
+    const proto = Object.create(G.EventTarget.prototype);
+    Object.defineProperty(proto, "constructor", {value: Performance, configurable: true, writable: true});
+    Performance.prototype = proto;
+    Object.defineProperty(Performance, "prototype", {writable: false});
+    tag(proto, "Performance"); mark(Performance, "Performance");
+    for (const key of Reflect.ownKeys(object)) {
+      if (typeof key !== "string") {delete object[key];continue;}
+      const own = Object.getOwnPropertyDescriptor(object,key);
+      if (own?.get) {
+        const getter = Object.getOwnPropertyDescriptor({get value(){if(this!==object)throw new TypeError("Illegal invocation");return own.get.call(object);}},"value").get;
+        Object.defineProperty(getter,"name",{value:"get "+key,configurable:true});
+        const setter=own.set?Object.getOwnPropertyDescriptor({set value(value){if(this!==object)throw new TypeError("Illegal invocation");own.set.call(object,value);}},"value").set:undefined;
+        if(setter)Object.defineProperty(setter,"name",{value:"set "+key,configurable:true});
+        Object.defineProperty(proto,key,{get:getter,set:setter,enumerable:true,configurable:true});delete object[key];continue;
+      }
+      const value = object[key];
+      if (typeof value === "function") {
+        const method = ({[key](...args) {
+          if (this !== object) throw new TypeError("Illegal invocation");
+          return value.apply(object, args);
+        }})[key];
+        Object.defineProperty(method, "length", {value: value.length, configurable: true});
+        mark(method, key);
+        Object.defineProperty(proto, key, {value: method, writable: true, configurable: true, enumerable: true});
+      } else {
+        const getter = Object.getOwnPropertyDescriptor({get [key]() {
+          if (this !== object) throw new TypeError("Illegal invocation");
+          return value;
+        }}, key).get;
+        mark(getter, "get " + key);
+        Object.defineProperty(proto, key, {get: getter, configurable: true, enumerable: true});
+      }
+      delete object[key];
+    }
+    Object.setPrototypeOf(object, proto);
+    G.Performance = Performance;
+  });
+  // Normalize clock names here; the final native factory binds both the
+  // callable Date constructor and its coherent now callback.
   guard(() => { if (G.Date) mark(G.Date, "Date"); });
   guard(() => { if (G.Date && G.Date.now) mark(G.Date.now, "now"); });
 
@@ -4202,7 +7695,7 @@ __G.domSig = () => {
   defClass("URL", null);
   defClass("Event", null);
   defClass("DOMParser", "parseFromString");
-  guard(() => { if (G.crypto) tag(G.crypto, "Crypto"); });
+
 
   // rtdom nodes/elements expose DISTINCT per-tag prototypes reachable from JS, so brand each
   // (Symbol.toStringTag on the tag's own prototype) and native-mark its checked method IN PLACE
@@ -4237,43 +7730,13 @@ __G.domSig = () => {
     };
     const d = G.document;
     if (d) {
-      brandNode(d.createElement("a"), "HTMLAnchorElement", "click");
-      brandNode(d.createElement("canvas"), "HTMLCanvasElement", "getContext");
-      brandNode(d.createElement("video"), "HTMLVideoElement", "canPlayType");
-      brandNode(d.createElement("input"), "HTMLInputElement", null);
       brandNode(d.implementation, "DOMImplementation", null);
       brandNode(d.createRange && d.createRange(), "Range", "cloneRange");
-      brandNode(d.createTextNode && d.createTextNode("x"), "Text", null);
-      brandNode(d.createComment && d.createComment("x"), "Comment", null);
-      brandNode(d.createDocumentFragment && d.createDocumentFragment(), "DocumentFragment", null);
     }
   });
-  // video / text / comment / documentFragment share ONE generic rtdom prototype, so a static brand
-  // collides (last write wins). Install a COMPUTED Symbol.toStringTag accessor deriving the WebIDL
-  // brand from the node's own type — one proto, per-instance-correct brands. Distinct-proto nodes
-  // (a/canvas/input/range) keep their closer static brand.
-  guard(() => {
-    const d = G.document;
-    if (!d) return;
-    const EL = { A: "HTMLAnchorElement", CANVAS: "HTMLCanvasElement", VIDEO: "HTMLVideoElement",
-      INPUT: "HTMLInputElement", AUDIO: "HTMLAudioElement", IMG: "HTMLImageElement", DIV: "HTMLDivElement",
-      SPAN: "HTMLSpanElement", P: "HTMLParagraphElement", BUTTON: "HTMLButtonElement" };
-    const brandOf = function () {
-      try {
-        const nt = this.nodeType;
-        const nn = String(this.nodeName == null ? "" : this.nodeName);
-        if (nt === 3 || nn === "#text") return "Text";
-        if (nt === 8 || nn === "#comment") return "Comment";
-        if (nt === 11 || nn.toUpperCase() === "#DOCUMENT-FRAGMENT") return "DocumentFragment";
-        if (nt === 1) return EL[nn] || "HTMLElement";
-      } catch (e) {}
-      return "Object";
-    };
-    for (const o of [d.createTextNode("x"), d.createComment("x"), d.createDocumentFragment(), d.createElement("video")]) {
-      const p = o && Object.getPrototypeOf(o);
-      if (p) { try { Object.defineProperty(p, Symbol.toStringTag, { configurable: true, get: brandOf }); } catch (e) {} }
-    }
-  });
+  // The canonical binding supplies distinct branded interface prototypes for
+  // elements, Text, Comment and DocumentFragment. Do not replace their constant
+  // tags with the old shared-prototype fallback getter.
 
   // Presence of universal host constructors (no-webgl-context / no-audio-context / surface-missing).
   const ensureCtor = (name) => guard(() => { if (typeof G[name] !== "function") { const c = function () {}; Object.defineProperty(c, "name", { value: name, configurable: true }); G[name] = c; } mark(G[name], name); });
@@ -4288,28 +7751,93 @@ __G.domSig = () => {
   // prototype so all documents (incl. child realms) inherit; skip if already present.
   guard(() => {
     const d = G.document; if (!d) return;
-    // The vendored document already has an OWN `characterSet` that returns undefined, so an
-    // `in`/existence check would skip it — force-define the encoding accessors to "UTF-8".
-    for (const k of ["characterSet", "charset", "inputEncoding"]) {
-      try { Object.defineProperty(d, k, { configurable: true, get() { return "UTF-8"; } }); } catch (e) {}
+    for (const key of ["characterSet", "charset", "inputEncoding"]) __defineDocumentAccessor(key, () => "UTF-8");
+    for (const key of ["onchange", "onclick", "oninput", "onkeydown", "onkeyup", "onreadystatechange", "onvisibilitychange", "onfullscreenchange", "onfullscreenerror", "onpointerlockchange", "onpointerlockerror", "onsecuritypolicyviolation", "onbeforecopy", "onbeforecut", "onbeforepaste", "onfreeze", "onresume", "onsearch"]) {
+      __defineDocumentAccessor(key, state => state.handlers.get(key) || null,
+        (state, _receiver, value) => {
+          const callback=typeof value === "function" ? value : null;
+          const type=key.slice(2), previous=state.handlers.get(key);
+          if(previous===callback)return;
+          state.handlers.set(key,callback);
+          state.handlerListeners ||= new Map();
+          const listener=state.handlerListeners.get(key);
+          if(callback&&!listener){
+            const listener=function(event){const callback=state.handlers.get(key);if(callback)callback.call(this,event);};
+            state.handlerListeners.set(key,listener);state.document.addEventListener(type,listener);
+          }else if(!callback&&listener){state.document.removeEventListener(type,listener);state.handlerListeners.delete(key);}
+        });
     }
-    // Document event-handler slots (real Chrome exposes them as writable, default null). Framework
-    // code reads/sets document.onreadystatechange etc.; absence reads as undefined (a minor tell).
-    for (const k of ["onreadystatechange", "onvisibilitychange", "onfullscreenchange", "onfullscreenerror", "onpointerlockchange", "onpointerlockerror", "onsecuritypolicyviolation", "onbeforecopy", "onbeforecut", "onbeforepaste", "onfreeze", "onresume", "onsearch"]) {
-      // Force-define (the vendored document may already have it as an undefined-returning slot, so
-      // an `in` check would skip it — same as characterSet). A settable null handler, like Chrome.
-      try {
-        let cur = null;
-        Object.defineProperty(d, k, { enumerable: true, configurable: true, get() { return cur; }, set(v) { cur = v; } });
-      } catch (e) {}
+  });
+
+  // Keep creation-context delegates private: a retained Document must not resolve
+  // these through a WindowProxy that may already point at a newer navigation.
+  __documentRuntimeState.members = new Map();
+  for (const name of ["close", "open", "write", "writeln", "createEvent", "createNodeIterator", "createRange", "createTreeWalker", "elementFromPoint", "elementsFromPoint", "getSelection", "hasFocus", "implementation", "adoptedStyleSheets", "styleSheets", "contentType", "hidden", "visibilityState", "fullscreenElement"]) {
+    const descriptor = Object.getOwnPropertyDescriptor(__document, name);
+    if (!descriptor || descriptor.configurable === false) continue;
+    __documentRuntimeState.members.set(name, descriptor);
+    if (typeof descriptor.value === "function") {
+      const method = ({[name](...args) {
+        const state = __documentState(this);
+        return state.members.get(name).value.apply(this, args);
+      }})[name];
+      Object.defineProperty(Document.prototype, name, {value: __documentFunction(method, name, descriptor.value.length),
+        configurable: true, enumerable: true, writable: true});
+      delete __document[name];
+    } else {
+      __defineDocumentAccessor(name, (state, receiver) => {
+        const member = state.members.get(name);
+        return member.get ? member.get.call(receiver) : member.value;
+      }, descriptor.set ? (state, receiver, value) => state.members.get(name).set.call(receiver, value)
+        : name==="adoptedStyleSheets" && descriptor.writable ? (state, _receiver, value) => {state.members.get(name).value=value;} : undefined);
     }
+  }
+  for (const [alias, name] of Object.entries({webkitHidden:"hidden", webkitVisibilityState:"visibilityState",
+    webkitFullscreenElement:"fullscreenElement", webkitCurrentFullScreenElement:"fullscreenElement",
+    webkitIsFullScreen:"fullscreenElement"})) {
+    __defineDocumentAccessor(alias, (state, receiver) => {
+      const member=state.members.get(name);
+      const value=member.get ? member.get.call(receiver) : member.value;
+      return alias==="webkitIsFullScreen" ? value!=null : value;
+    });
+  }
+  __defineDocumentAccessor("defaultView", state => ops.op_document_has_active_window(state.document) ? state.window : null);
+  __defineDocumentAccessor("documentElement", (_state, receiver) => receiver.firstElementChild);
+  __defineDocumentAccessor("head", (_state, receiver) => {
+    const root = receiver.documentElement;
+    return root ? Array.from(root.children).find(child => child.localName === "head") || null : null;
+  });
+  __defineDocumentAccessor("body", (_state, receiver) => {
+    const root = receiver.documentElement;
+    return root ? Array.from(root.children).find(child => child.localName === "body" || child.localName === "frameset") || null : null;
+  }, (_state, receiver, value) => {
+    if (value != null) __documentType.call(value);
+    if (!value || !["body", "frameset"].includes(value.localName) || value.namespaceURI !== "http://www.w3.org/1999/xhtml")
+      throw new DOMException("The new body is not a body or frameset element", "HierarchyRequestError");
+    const current = receiver.body;
+    if (value === current) return;
+    if (current) current.parentNode.replaceChild(value, current);
+    else if (receiver.documentElement) receiver.documentElement.appendChild(value);
+    else throw new DOMException("The document has no document element", "HierarchyRequestError");
   });
 
   // Native-mask the Permissions API method: real `navigator.permissions.query.toString()`
   // reports "[native code]"; our JS closure would leak source (an anti-tamper tell).
   guard(() => {
-    const q = G.navigator && G.navigator.permissions && G.navigator.permissions.query;
-    if (typeof q === "function") mark(q, "query");
+    const permissions = G.navigator && G.navigator.permissions, query = permissions && permissions.query;
+    if (!permissions || typeof query !== "function") return;
+    function Permissions() {throw new TypeError("Illegal constructor");}
+    const proto = Object.create(G.EventTarget.prototype);
+    Object.defineProperty(proto, "constructor", {value: Permissions, configurable: true, writable: true});
+    Permissions.prototype = proto; Object.defineProperty(Permissions, "prototype", {writable: false});
+    tag(proto, "Permissions");mark(Permissions, "Permissions");
+    const method = ({query(descriptor) {
+      if (this !== permissions || !arguments.length) return Promise.reject(new TypeError("Illegal invocation"));
+      return query.call(permissions, descriptor);
+    }}).query;
+    mark(method, "query");
+    Object.defineProperty(proto, "query", {value: method, enumerable: true, writable: true, configurable: true});
+    delete permissions.query; Object.setPrototypeOf(permissions, proto); G.Permissions = Permissions;
   });
 
   // window.location must class-tag as "[object Location]". The vendored location is a plain
@@ -4360,14 +7888,20 @@ __G.domSig = () => {
         return r && r.length === 2 ? r : null;
       } catch (e) { return null; }
     };
-    let p = Object.getPrototypeOf(document.createElement("span"));
-    while (p && Object.getPrototypeOf(p) && Object.getPrototypeOf(p) !== Object.prototype) p = Object.getPrototypeOf(p);
+    const p = G.HTMLElement?.prototype;
     if (p) {
-      if (!Object.getOwnPropertyDescriptor(p, "offsetWidth")) {
-        Object.defineProperty(p, "offsetWidth", { configurable: true, get() { const m = measure(this); return m ? Math.round(m[0]) : 0; } });
-      }
-      if (!Object.getOwnPropertyDescriptor(p, "offsetHeight")) {
-        Object.defineProperty(p, "offsetHeight", { configurable: true, get() { const m = measure(this); return m ? Math.round(m[1]) : 0; } });
+      const valid = receiver => {
+        if (__documentType.call(receiver) !== 1 || receiver.namespaceURI !== "http://www.w3.org/1999/xhtml") throw new TypeError("Illegal invocation");
+      };
+      for (const [name, dimension] of [["offsetWidth", 0], ["offsetHeight", 1]]) {
+        if (!Object.getOwnPropertyDescriptor(p, name)) Object.defineProperty(p, name, {
+          configurable: true, enumerable: true, get() {
+            valid(this);
+            if (!this.isConnected) return 0;
+            const value = measure(this);
+            return value ? Math.round(value[dimension]) : 0;
+          },
+        });
       }
     }
   });
@@ -4410,7 +7944,7 @@ __G.domSig = () => {
       "BroadcastChannel MessageChannel MessagePort WebSocket XMLHttpRequestUpload XMLSerializer XPathEvaluator " +
       "XPathResult NodeIterator TreeWalker MutationRecord PerformanceEntry PerformanceMark PerformanceMeasure " +
       "PerformanceNavigationTiming PerformanceResourceTiming PerformanceObserverEntryList PerformancePaintTiming " +
-      "IntersectionObserverEntry ResizeObserverEntry ReportingObserver Crypto CryptoKey SubtleCrypto CacheStorage Cache " +
+      "IntersectionObserverEntry ResizeObserverEntry ReportingObserver CacheStorage Cache " +
       "ServiceWorker ServiceWorkerContainer ServiceWorkerRegistration Notification PushManager Permissions PermissionStatus " +
       "Geolocation MediaStream MediaStreamTrack RTCPeerConnection RTCDataChannel AudioBuffer AudioNode GainNode OscillatorNode " +
       "AnalyserNode BiquadFilterNode DynamicsCompressorNode Image Audio Option Path2D ImageData ImageBitmap OffscreenCanvas " +
@@ -4584,7 +8118,7 @@ __G.domSig = () => {
     const bar = () => ({ visible: true });
     const misc = {
       closed: false, length: 0, name: "", opener: null, status: "", crossOriginIsolated: false,
-      isSecureContext: true, originAgentCluster: true, offscreenBuffering: true, credentialless: false,
+      isSecureContext: ops.op_is_secure_context(), originAgentCluster: true, offscreenBuffering: true, credentialless: false,
       origin: (G.location && G.location.origin) || "https://www.google.com", clientInformation: G.navigator,
       locationbar: bar(), menubar: bar(), personalbar: bar(), scrollbars: bar(), statusbar: bar(), toolbar: bar(),
       // These real Web APIs are FEATURE-DETECTED by page code (`if (window.X)`) which then calls
@@ -4609,24 +8143,106 @@ __G.domSig = () => {
     for (const n of METHODS) { if (typeof G[n] !== "function") { try { G[n] = nativize(() => undefined, n); } catch (e) {} } }
   });
 
-  // Final safety net: in a real browser EVERY window-global function reports "[native code]".
-  // Native-mark any DATA-property function on window still unmarked (a shim/vendored fn that
-  // slipped through) so its toString can't leak JS source. Descriptor-based (never triggers a
-  // getter → no side effects); functions behind getters are covered where they're defined.
   guard(() => {
-    for (const k of Object.getOwnPropertyNames(G)) {
-      try {
-        const d = Object.getOwnPropertyDescriptor(G, k);
-        if (d && typeof d.value === "function" && !native.has(d.value)) mark(d.value, k);
-      } catch (e) {}
+    for (const name of ["Navigator","Performance","Permissions","Storage","Request","Response","Headers","URL","URLSearchParams","DOMException","MessageEvent","Event","CustomEvent","SubmitEvent","UIEvent","MouseEvent","KeyboardEvent","InputEvent","FocusEvent","PointerEvent","WheelEvent"]) {
+      const ctor=G[name];if(typeof ctor!=="function")continue;
+      Object.defineProperty(G,name,{value:ctor,writable:true,configurable:true,enumerable:false});
+      const descriptor=Object.getOwnPropertyDescriptor(ctor,"prototype");
+      if(descriptor && descriptor.writable)Object.defineProperty(ctor,"prototype",{writable:false});
     }
+    Object.setPrototypeOf(G.Performance,G.EventTarget);
+    Object.setPrototypeOf(G.Permissions,G.EventTarget);
+    Object.setPrototypeOf(G.DOMException,Function.prototype);
+    tag(G.Request.prototype,"Request");tag(G.Response.prototype,"Response");
   });
+
+  const submitEventRecords = __interfaceMap("SubmitEvent");
+  G.SubmitEvent = class SubmitEvent extends G.Event {
+    constructor(type, init = {}) {
+      if (!arguments.length) throw new TypeError("A type is required");
+      super(type, init);
+      const submitter = (init || {}).submitter || null;
+      if (submitter !== null && !(submitter instanceof G.HTMLElement)) throw new TypeError("submitter must be an HTMLElement");
+      submitEventRecords.set(this, submitter);
+    }
+    get submitter() {
+      if (!submitEventRecords.has(this)) throw new TypeError("Illegal invocation");
+      return submitEventRecords.get(this);
+    }
+  };
+  Object.defineProperty(G.SubmitEvent.prototype, "submitter", {...Object.getOwnPropertyDescriptor(G.SubmitEvent.prototype, "submitter"), enumerable: true});
+  Object.defineProperty(G.SubmitEvent.prototype, Symbol.toStringTag, {value: "SubmitEvent", configurable: true});
+
+  // Bind the implemented JS interfaces through genuine native callbacks. The
+  // class bridge uses Reflect.construct captured by the embedder, preserving
+  // private state, subclass new.target and the original exception behavior.
+  if (typeof factory === "function") {
+    const replacements = new Map();
+    const constructors = ["Date", "DOMParser", "Navigator", "Performance", "Permissions", "Storage", "Headers",
+      "Request", "Response", "URL", "URLSearchParams", "DOMException", "MessageEvent", "ErrorEvent",
+      "Event", "CustomEvent", "SubmitEvent", "UIEvent", "MouseEvent", "KeyboardEvent", "InputEvent", "FocusEvent", "PointerEvent", "WheelEvent", "MessageChannel", "MessagePort", "BroadcastChannel",
+      "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",
+      "TextEncoder", "TextDecoder", "Screen", "Window", "Crypto", "SubtleCrypto",
+      "IntersectionObserver", "ResizeObserver", "MutationObserver", "PerformanceObserver",
+      "PerformanceEntry", "PerformanceMark", "PerformanceMeasure", "PerformanceNavigationTiming", "EventCounts", "DOMPointReadOnly", "DOMPoint", "DOMMatrixReadOnly", "DOMMatrix"];
+    const bindProperties = (object, skip = []) => {
+      if (!object) return;
+      for (const key of Reflect.ownKeys(object)) {
+        if (skip.includes(key)) continue;
+        const descriptor = Object.getOwnPropertyDescriptor(object, key);
+        if (!descriptor || !descriptor.configurable) continue;
+        if (typeof descriptor.value === "function") descriptor.value = nativize(descriptor.value, typeof key === "string" ? key : descriptor.value.name);
+        if (typeof descriptor.get === "function") descriptor.get = nativize(descriptor.get, "get " + String(key), 0);
+        if (typeof descriptor.set === "function") descriptor.set = nativize(descriptor.set, "set " + String(key), 1);
+        Object.defineProperty(object, key, descriptor);
+      }
+    };
+    for (const name of constructors) {
+      const original = G[name];
+      if (typeof original !== "function" || !original.prototype) continue;
+      bindProperties(original.prototype, ["constructor"]);
+      bindProperties(original, ["prototype", "name", "length", "arguments", "caller"]);
+      if (orig.call(original).includes("[native code]")) continue;
+      const wrapper = factory(original, name, original.length, true, true, name !== "Date");
+      Object.defineProperty(wrapper, "prototype", {value: original.prototype, writable: false});
+      for (const key of Reflect.ownKeys(original)) {
+        if (["prototype", "name", "length", "arguments", "caller"].includes(key)) continue;
+        Object.defineProperty(wrapper, key, Object.getOwnPropertyDescriptor(original, key));
+      }
+      Object.defineProperty(original.prototype, "constructor", {value: wrapper, writable: true, configurable: true});
+      Object.defineProperty(G, name, {value: wrapper, writable: true, enumerable: false, configurable: true});
+      replacements.set(original, wrapper);
+    }
+    for (const [original, wrapper] of replacements) {
+      const parent = Object.getPrototypeOf(original);
+      Object.setPrototypeOf(wrapper, replacements.get(parent) || parent);
+    }
+    for (const key of Object.getOwnPropertyNames(G)) {
+      const descriptor = Object.getOwnPropertyDescriptor(G, key);
+      if (!descriptor || !descriptor.configurable || typeof descriptor.value !== "function") continue;
+      const fn = descriptor.value;
+      if (replacements.has(fn)) descriptor.value = replacements.get(fn);
+      else if (!Object.hasOwn(fn, "prototype")) descriptor.value = nativize(fn, key);
+      else if (native.has(fn) && orig.call(fn).includes("[native code]") === false && !["Date"].includes(key)) descriptor.value = nativize(fn, key);
+      Object.defineProperty(G, key, descriptor);
+    }
+    Object.setPrototypeOf(G.UIEvent, G.Event);
+    for (const object of [G.HTMLElement?.prototype, G.HTMLScriptElement?.prototype, G.Navigator?.prototype, G.Performance?.prototype,
+      G.Permissions?.prototype, G.HTMLCanvasElement?.prototype, G.CSS, G.console,
+      nav?.clipboard, G.trustedTypes, G.crypto, G.crypto?.subtle]) bindProperties(object, ["constructor"]);
+  }
+
 })();
+"##,
+    include_str!("host_input.js"),
+    r##"
 // LAST: remove the deno_core `Deno` global from page scope. Ops were captured into `ops`/
 // `__print` closures above, so our shims keep working; page JS now sees `typeof window.Deno
 // === "undefined"` and no `Deno` in getOwnPropertyNames(window), like real Chrome.
+__hostErrorEvent=globalThis.ErrorEvent;
 try { delete globalThis.Deno; } catch (e) {}
-})();"##;
+})();"##
+);
 
 /// Initialize the V8 platform ONCE, on a dedicated thread that lives for the whole
 /// process. Since V8 11.6 every `JsRuntime` must share the thread that first initialized
@@ -4697,6 +8313,8 @@ fn make_runtime_with_hints(
     ua: &str,
     client_hints: ClientHints,
 ) -> JsRuntime {
+    #[cfg(turbo_surf_native_proxy)]
+    assert_eq!(v8::V8::get_version(), env!("TURBO_SURF_EXPECTED_NATIVE_V8"), "the exact-engine runtime requires its verified native SDK; use the matching engine build helper");
     pin_timezone();
     // Build the shared cookie jar first so it backs BOTH page `fetch` (op_state) and the
     // ES-module loader (`<script type=module>` import graphs) — same session, one jar.
@@ -4705,13 +8323,59 @@ fn make_runtime_with_hints(
     } else {
         CookieJar::from_storage_state(cookies)
     }));
+    let inline_sources = InlineModules::default();
+    let module_credentials = ModuleCredentials::default();
+    let csp = CspHandle::new(base, &[], "");
+    #[cfg(turbo_surf_native_proxy)]
+    let module_stages = ModuleStages::default();
     let mut rt = JsRuntime::new(RuntimeOptions {
-        extensions: vec![turbo_dom::init()],
+        inspector: std::env::var_os("TURBO_SURF_JS_TRACE").is_some(),
+        extensions: {
+            let extension = turbo_dom::init();
+            #[cfg(turbo_surf_native_proxy)]
+            let extension = {
+                let mut extension = extension;
+                extension.global_template_middleware = Some(window_proxy::template);
+                extension
+            };
+            let mut extensions = crate::crypto_backend::extensions();
+            extensions.push(extension);
+            extensions
+        },
+        // Exact-engine children own native module maps. Published SDK children
+        // fail closed; actual context retirement and sandbox flags gate imports.
+        validate_import_attributes_cb: Some(Box::new(|scope, _attributes, _context| {
+            let current = scope.get_current_context();
+            if current.get_slot::<FrameContextMarker>().is_some()
+                && (!cfg!(turbo_surf_native_proxy)
+                    || current.get_slot::<FrameRetired>().is_some()
+                    || current
+                        .get_slot::<FrameSandbox>()
+                        .is_some_and(|policy| policy.scripts_blocked))
+            {
+                let message = v8::String::new(
+                    scope,
+                    "ES module imports in child frames are not supported by the native runtime",
+                )
+                .unwrap();
+                let error = v8::Exception::type_error(scope, message);
+                scope.throw_exception(error);
+            }
+        })),
         module_loader: Some(Rc::new(NetModuleLoader {
             base: base.to_string(),
+            source: base.to_string(),
+            top_level_source: base.to_string(),
+            cookie_site_is_opaque: turbo_surf_core::request_context::origin(base).is_none(),
+            opaque_origin: turbo_surf_core::request_context::origin(base).is_none(),
             jar: jar.clone(),
             ua: ua.to_string(),
             client_hints: client_hints.clone(),
+            inline_sources: inline_sources.clone(),
+            credentials: module_credentials.clone(),
+            csp: csp.clone(),
+            #[cfg(turbo_surf_native_proxy)]
+            module_stages: module_stages.clone(),
         })),
         ..Default::default()
     });
@@ -4719,9 +8383,27 @@ fn make_runtime_with_hints(
     // Date/Intl report the coherent zone rather than a cached host default.
     rt.v8_isolate()
         .date_time_configuration_change_notification(v8::TimeZoneDetection::Redetect);
+    #[cfg(turbo_surf_native_proxy)]
+    rt.v8_isolate()
+        .set_failed_access_check_callback(window_proxy::failed_access);
+    {
+        deno_core::scope!(scope, &mut rt);
+        let context = scope.get_current_context();
+        context.set_slot(Rc::new(module_credentials));
+        context.set_slot(Rc::new(csp.clone()));
+    }
     let state = rt.op_state();
     let mut state = state.borrow_mut();
+    state.put(NetworkLog::default());
+    state.put(ResponseHeaders::default());
+    state.put(CspContexts(std::collections::HashMap::from([(
+        csp.id, csp,
+    )])));
+    state.put(inline_sources);
+    #[cfg(turbo_surf_native_proxy)]
+    state.put(module_stages);
     state.put(ClassicScripts::default());
+    state.put(FrameContexts::default());
     state.put::<Base>(Base(base.to_string()));
     state.put::<Jar>(jar);
     state.put::<Ua>(Ua(ua.to_string()));
@@ -4737,6 +8419,12 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
     {
         let state = rt.op_state();
         let mut state = state.borrow_mut();
+        let frames = state.borrow_mut::<FrameContexts>();
+        let init_script = std::mem::take(&mut frames.init_script);
+        *frames = FrameContexts {
+            init_script,
+            ..Default::default()
+        };
         let queue = state.borrow_mut::<ClassicScripts>();
         queue.html = html.to_string();
         queue.used_inline_offsets.clear();
@@ -4749,12 +8437,51 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let mut scope = scope.init();
         let context = v8::Local::new(&scope, context);
         let mut scope = v8::ContextScope::new(&mut scope, context);
+        set_origin_token(&mut scope, context, base);
+        if let Some(csp) = context.get_slot::<CspHandle>() {
+            let headers = JsRuntime::op_state_from(&scope)
+                .borrow()
+                .borrow::<ResponseHeaders>()
+                .0
+                .clone();
+            *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
+        }
+        #[cfg(turbo_surf_native_proxy)]
+        window_proxy::seed_location(&mut scope, base);
         crate::browser_env::install_html(&mut scope, html);
+        install_css_authorization(&mut scope);
+        if let Some(core) = context.get_slot::<RuntimeCore>() {
+            let core = v8::Local::new(&scope, &core.0);
+            let global = context.global(&scope);
+            restore_runtime_core(&mut scope, global, core.into());
+        }
     }
+    let origin = ModuleSpecifier::parse(base)
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_else(|_| "null".to_string());
+    rt.execute_script("<location>", format!("location.href = {base:?}; location.origin = {origin:?}; globalThis.origin = {origin:?}"))
+        .map_err(|e| e.to_string())?;
     rt.execute_script("<env>", ENV_BOOTSTRAP)
         .map_err(|e| e.to_string())?;
-    rt.execute_script("<location>", format!("location.href = {base:?}"))
-        .map_err(|e| e.to_string())?;
+    {
+        deno_core::scope!(scope, rt);
+        let context = scope.get_current_context();
+        let core = context
+            .get_slot::<RuntimeCore>()
+            .ok_or("Native crypto core unavailable")?;
+        let core = v8::Local::new(scope, &core.0);
+        crate::crypto_backend::install(scope, core, trustworthy_url(base))?;
+    }
+    #[cfg(turbo_surf_native_proxy)]
+    {
+        let context = rt.main_context();
+        let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+        let mut scope = scope.init();
+        let context = v8::Local::new(&scope, context);
+        let scope = &mut v8::ContextScope::new(&mut scope, context);
+        window_proxy::capture_exception(scope);
+        window_proxy::install_location(scope, base);
+    }
     Ok(())
 }
 
@@ -4770,15 +8497,25 @@ fn read_string(rt: &mut JsRuntime, global: v8::Global<v8::Value>) -> Result<Stri
 }
 
 thread_local! {
-    /// Persistent evaluate runtime, reused across `run_with_dom` calls (i.e. across
-    /// pages) so the ~20ms V8-isolate boot is paid ONCE per thread, not per call —
-    /// the dominant per-page cost for a no-JS crawler whose link/field extraction
-    /// goes through `page.evaluate`. Safe to reuse across pages: each call reinstalls
-    /// a fresh DOM from the page's HTML, and the binding's V8 globals are cleared
-    /// (`browser_env::reset`) after every call, so the thread-local DOM is empty at
-    /// thread exit (no dangling handles when the isolate finally drops). Page-JS
-    /// isolation across pages is intentionally relaxed here — a crawl doesn't need it.
+    /// A document's repeated evaluations retain its runtime and native DOM. Changing
+    /// the supplied HTML discards the isolate, including global lexical bindings and
+    /// mutated intrinsics that cannot be removed by deleting global-object properties.
     static EVAL_RT: RefCell<Option<(JsRuntime, String)>> = const { RefCell::new(None) };
+}
+
+fn sync_task_runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        // deno_core captures this handle for delayed V8 foreground tasks (GC,
+        // compilation). It must remain driven between synchronous calls and
+        // outlive the thread-local isolate, independently of a caller's runtime.
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("v8-sync-tasks")
+            .enable_all()
+            .build()
+            .expect("create V8 synchronous task runtime")
+    })
 }
 
 /// Evaluate `script` against `html`'s DOM, returning its result as a string
@@ -4786,22 +8523,28 @@ thread_local! {
 /// thread-persistent isolate AND the installed DOM across calls on the SAME page
 /// (see [`EVAL_RT`]): the page is parsed + installed once, then repeated
 /// `page.evaluate`s on it just run script (~0.5 ms) instead of re-parsing the
-/// document (~5 ms). The DOM is re-installed only when the HTML changes (a new
-/// page). Same-page evaluates share the page's globals/DOM, which matches
+/// document (~5 ms). Changed HTML receives a fresh isolate, DOM, lexical environment
+/// and intrinsics. Same-HTML evaluates share the page's globals/DOM, which matches
 /// Playwright's page-scoped `evaluate` semantics.
 pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
+    let _task_context = sync_task_runtime().enter();
     EVAL_RT.with(|cell| {
         let mut slot = cell.borrow_mut();
-        if slot.is_none() {
-            *slot = Some((make_runtime("about:blank", "", ""), String::new()));
+        if slot.as_ref().is_none_or(|(_, installed)| installed != html) {
+            if let Some((mut previous, _)) = slot.take() {
+                crate::browser_env::reset();
+                crate::browser_env::clear_interface_records(previous.v8_isolate());
+                drop(previous);
+            }
+            let mut rt = make_runtime("about:blank", "", "");
+            if let Err(error) = install_dom(&mut rt, html, "about:blank") {
+                crate::browser_env::reset();
+                crate::browser_env::clear_interface_records(rt.v8_isolate());
+                return Err(error);
+            }
+            *slot = Some((rt, html.to_string()));
         }
-        let (rt, installed) = slot.as_mut().expect("eval runtime present");
-        if installed != html {
-            crate::browser_env::reset(); // drop the previous page's binding (isolate still alive)
-            install_dom(rt, html, "about:blank")?;
-            installed.clear();
-            installed.push_str(html);
-        }
+        let (rt, _) = slot.as_mut().expect("eval runtime present");
         let global = rt
             .execute_script(page_script_name("about:blank"), script.to_string())
             .map_err(|e| e.to_string())?;
@@ -4813,6 +8556,7 @@ pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
 /// document HTML. The Lane B render contract: JS-gated page in, HTML after the
 /// page's own scripts ran out. (Sync; no event loop — see [`render_page`].)
 pub fn render_html(html: &str, script: &str) -> Result<String, String> {
+    let _task_context = sync_task_runtime().enter();
     let mut rt = make_runtime("about:blank", "", "");
     let out = run_sync(&mut rt, html, script);
     crate::browser_env::reset();
@@ -4837,6 +8581,9 @@ fn execute_frame_script(
     let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
     let mut scope = scope.init();
     let context = v8::Local::new(&scope, context);
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Err("iframe document has been replaced".into());
+    }
     let mut scope = v8::ContextScope::new(&mut scope, context);
     let scope = std::pin::pin!(v8::TryCatch::new(&mut scope));
     let scope = &mut scope.init();
@@ -4873,13 +8620,131 @@ fn execute_frame_script(
 }
 
 async fn drain_event_loop(rt: &mut JsRuntime) -> Result<(), String> {
+    drain_event_loop_until(rt, None).await
+}
+
+// Parsing/deferred scripts gate DOMContentLoaded; unrelated image requests do not.
+// Returning as soon as their promise settles preserves that distinction while
+// leaving other ops alive for the later load/interaction drain.
+fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(), String> {
+    let scope = v8::HandleScope::new(rt.v8_isolate());
+    let scope = std::pin::pin!(scope);
+    let mut scope = scope.init();
+    let target = v8::Local::new(&scope, item.target);
+    if target.get_slot::<FrameRetired>().is_some() {
+        return Ok(());
+    }
+    let scope = &mut v8::ContextScope::new(&mut scope, target);
+    let source = v8::Local::new(scope, item.source);
+    let source_window = source.global(scope);
+    let deserializer = v8::ValueDeserializer::new(scope, Box::new(WindowClone), &item.data);
+    if v8::ValueDeserializerHelper::read_header(&deserializer, target) != Some(true) {
+        return Err("message clone header invalid".into());
+    }
+    let data = deserializer
+        .read_value(target)
+        .ok_or("message clone decode failed")?;
+    let origin = v8::String::new(scope, &item.origin).unwrap();
+    call_frame_helper(
+        scope,
+        "deliverWindowMessage",
+        &[data, source_window.into(), origin.into()],
+    )
+    .ok_or("message dispatch failed")?;
+    Ok(())
+}
+
+async fn drain_event_loop_until(rt: &mut JsRuntime, condition: Option<&str>) -> Result<(), String> {
+    drain_event_loop_until_completion(rt, condition, None).await
+}
+
+fn promise_settled(rt: &mut JsRuntime, value: &v8::Global<v8::Value>) -> bool {
+    deno_core::scope!(scope, rt);
+    let value = v8::Local::new(scope, value);
+    v8::Local::<v8::Promise>::try_from(value)
+        .map(|promise| promise.state() != v8::PromiseState::Pending)
+        .unwrap_or(true)
+}
+
+async fn drain_event_loop_until_completion(
+    rt: &mut JsRuntime,
+    condition: Option<&str>,
+    completion: Option<&v8::Global<v8::Value>>,
+) -> Result<(), String> {
+    let mut frame_timer_budget = 200000u32;
     loop {
+        // Operation completion is independent of unrelated timers, fetches and scripts.
+        // The native Promise stays private, so guest code cannot forge this gate.
+        if completion.is_some_and(|promise| promise_settled(rt, promise)) {
+            return Ok(());
+        }
+        #[cfg(turbo_surf_native_proxy)]
+        {
+            let stage = rt
+                .op_state()
+                .borrow()
+                .borrow::<ModuleStages>()
+                .0
+                .borrow_mut()
+                .pop_front();
+            if let Some(stage) = stage {
+                let context = stage.context;
+                let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+                let mut scope = scope.init();
+                let context = v8::Local::new(&scope, context);
+                let scope = &mut v8::ContextScope::new(&mut scope, context);
+                if context.get_slot::<FrameRetired>().is_some() {
+                    continue;
+                }
+                let specifier = v8::String::new(scope, &stage.specifier).unwrap();
+                let ready = v8::Boolean::new(scope, stage.ready);
+                let details: v8::Local<v8::Value> =
+                    if let Some((error, filename, line, column)) = stage.exception {
+                        let details = v8::Object::new(scope);
+                        for (name, value) in [
+                            ("error", v8::Local::new(scope, error)),
+                            (
+                                "filename",
+                                v8::String::new(scope, &filename).unwrap().into(),
+                            ),
+                            ("lineno", v8::Integer::new_from_unsigned(scope, line).into()),
+                            (
+                                "colno",
+                                v8::Integer::new_from_unsigned(scope, column).into(),
+                            ),
+                        ] {
+                            let key = v8::String::new(scope, name).unwrap();
+                            details.set(scope, key.into(), value);
+                        }
+                        details.into()
+                    } else {
+                        v8::null(scope).into()
+                    };
+                call_frame_helper(
+                    scope,
+                    "completeModuleGraph",
+                    &[specifier.into(), ready.into(), details],
+                )
+                .ok_or("module completion failed")?;
+                continue;
+            }
+        }
+        let message = {
+            let state = rt.op_state();
+            let mut state = state.borrow_mut();
+            state.borrow_mut::<FrameContexts>().messages.pop_front()
+        };
+        if let Some(message) = message {
+            deliver_window_message(rt, message)?;
+            continue;
+        }
+
         let job = {
             let state = rt.op_state();
             let mut state = state.borrow_mut();
             state.borrow_mut::<ClassicScripts>().jobs.pop_front()
         };
-        if let Some((id, source, code, context)) = job {
+        if let Some((id, source, code, context, waiter_context)) = job {
             let result = if let Some(context) = context {
                 execute_frame_script(rt, context, &source, &code)
             } else {
@@ -4913,15 +8778,58 @@ async fn drain_event_loop(rt: &mut JsRuntime) -> Result<(), String> {
                     serde_json::json!({ "name": name, "message": message, "stack": e })
                 }
             };
-            rt.execute_script(
-                "<script-completion>",
-                format!("globalThis[Symbol.for('ts')].completeClassicScript({id}, {failure})"),
-            )
-            .map_err(|e| e.to_string())?;
+            let context = waiter_context.unwrap_or_else(|| rt.main_context());
+            let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+            let mut scope = scope.init();
+            let context = v8::Local::new(&scope, context);
+            if context.get_slot::<FrameRetired>().is_none() {
+                let scope = &mut v8::ContextScope::new(&mut scope, context);
+                let id = v8::Integer::new_from_unsigned(scope, id);
+                let json = v8::String::new(scope, &failure.to_string()).unwrap();
+                let failure =
+                    v8::json::parse(scope, json).ok_or("Invalid classic script result")?;
+                call_frame_helper(scope, "completeClassicScript", &[id.into(), failure])
+                    .ok_or("Classic script completion failed")?;
+            }
             continue;
         }
         let result = std::future::poll_fn(|cx| {
-            let result = rt.poll_event_loop(cx, deno_core::PollEventLoopOptions::default());
+            let result = rt
+                .poll_event_loop(cx, deno_core::PollEventLoopOptions::default())
+                .map(|result| result.map_err(|error| error.to_string()));
+            if completion.is_some_and(|promise| promise_settled(rt, promise)) {
+                return std::task::Poll::Ready(Some(Ok(())));
+            }
+            #[cfg(turbo_surf_native_proxy)]
+            if !rt
+                .op_state()
+                .borrow()
+                .borrow::<ModuleStages>()
+                .0
+                .borrow()
+                .is_empty()
+            {
+                return std::task::Poll::Ready(None);
+            }
+            // A suspended child module can depend on a Window lifecycle timer.
+            // Drive the actual timer queues while native module futures are
+            // pending; waiting for Deno quiescence first would deadlock that gate.
+            if frame_timer_budget > 0 {
+                let context = rt.main_context();
+                let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+                let mut scope = scope.init();
+                let context = v8::Local::new(&scope, context);
+                let scope = &mut v8::ContextScope::new(&mut scope, context);
+                let batch = if completion.is_some() { 1 } else { 64 };
+                let max = v8::Integer::new_from_unsigned(scope, batch.min(frame_timer_budget));
+                let fired = call_frame_helper(scope, "runTimers", &[max.into()])
+                    .and_then(|value| value.uint32_value(scope))
+                    .unwrap_or(0);
+                frame_timer_budget = frame_timer_budget.saturating_sub(fired);
+                if fired > 0 {
+                    return std::task::Poll::Ready(None);
+                }
+            }
             // Polling may resume an async fetch and enqueue its script. Yield to
             // Rust immediately rather than waiting on the script's JS promise.
             if !rt
@@ -4932,6 +8840,18 @@ async fn drain_event_loop(rt: &mut JsRuntime) -> Result<(), String> {
                 .is_empty()
             {
                 return std::task::Poll::Ready(None);
+            }
+            if let Some(condition) = condition {
+                let value = rt
+                    .execute_script("<load-gate>", condition.to_string())
+                    .map_err(|error| error.to_string());
+                match value.and_then(|value| read_string(rt, value)) {
+                    Ok(value) if value == "1" => {
+                        return std::task::Poll::Ready(Some(Ok(())));
+                    }
+                    Err(error) => return std::task::Poll::Ready(Some(Err(error))),
+                    _ => {}
+                }
             }
             result.map(Some)
         })
@@ -4987,10 +8907,13 @@ pub async fn render_page_with_budget(
     let handle = rt.v8_isolate().thread_safe_handle();
     let done = Arc::new(AtomicBool::new(false));
     let watch = done.clone();
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let timeout = exceeded.clone();
     let watchdog = std::thread::spawn(move || {
         let start = std::time::Instant::now();
         while !watch.load(Ordering::Relaxed) {
             if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
+                timeout.store(true, Ordering::Relaxed);
                 handle.terminate_execution();
                 break;
             }
@@ -5001,7 +8924,11 @@ pub async fn render_page_with_budget(
     let result = run_async(&mut rt, html, base, script).await;
     done.store(true, Ordering::Relaxed);
     let _ = watchdog.join();
-    let out = result.map_err(|e| budget_msg(&e, budget_ms));
+    let out = if exceeded.load(Ordering::Relaxed) {
+        Err(format!("render budget exceeded ({budget_ms}ms)"))
+    } else {
+        result.map_err(|e| budget_msg(&e, budget_ms))
+    };
     crate::browser_env::reset();
     out
 }
@@ -5031,6 +8958,69 @@ pub async fn render_capture_cookies(
         ClientHints::default(),
     )
     .await
+}
+
+/// Hydrate authored HTML under its actual response policy, then run an optional
+/// host tool script. This preserves nonce/module metadata instead of concatenating
+/// fetched page scripts into a second, policy-free program.
+#[allow(clippy::too_many_arguments)]
+pub async fn render_capture_cookies_with_response_headers(
+    html: &str,
+    base: &str,
+    ua: &str,
+    cookies: &str,
+    script: &str,
+    budget_ms: u64,
+    client_hints: ClientHints,
+    response_headers: &[(String, String)],
+) -> Result<(String, String), String> {
+    render_capture_cookies_with_browsing_state(
+        html,
+        base,
+        ua,
+        cookies,
+        script,
+        budget_ms,
+        client_hints,
+        response_headers,
+        BrowserStorage::default(),
+    )
+    .await
+}
+
+/// Hydrate with origin-scoped native storage retained by the owning browser session.
+#[allow(clippy::too_many_arguments)]
+pub async fn render_capture_cookies_with_browsing_state(
+    html: &str,
+    base: &str,
+    ua: &str,
+    cookies: &str,
+    script: &str,
+    budget_ms: u64,
+    client_hints: ClientHints,
+    response_headers: &[(String, String)],
+    storage: BrowserStorage,
+) -> Result<(String, String), String> {
+    let mut page = PageSession::open_with_browsing_state(
+        html,
+        base,
+        cookies,
+        ua,
+        budget_ms,
+        "",
+        client_hints,
+        response_headers,
+        storage,
+    )
+    .await?;
+    for program in script.split(SCRIPT_BOUNDARY) {
+        if !program.trim().is_empty() {
+            page.eval(program).await?;
+        }
+    }
+    let result = (page.serialize(), page.cookies());
+    page.close();
+    Ok(result)
 }
 
 /// Like [`render_capture_cookies`], sharing the browsing session's Accept-CH state.
@@ -5077,96 +9067,16 @@ pub async fn render_capture_cookies_with_request_state(
     Ok((doc?, storage))
 }
 
-thread_local! {
-    /// Persistent render runtime, reused across `render_page_pooled` calls on a thread
-    /// so the V8-isolate boot + extension wiring is paid ONCE per worker thread instead
-    /// of per page — the dominant per-page cost on a JS-mode crawl (each page builds a
-    /// fresh isolate otherwise). Reuse is SAFE for the render contract the same way
-    /// [`EVAL_RT`] is: every call reinstalls a fresh DOM + re-runs the (idempotent)
-    /// `ENV_BOOTSTRAP` (which re-seeds the timer queue + env globals), and the binding's
-    /// V8 globals are cleared (`browser_env::reset`) after every call. Page-JS isolation
-    /// ACROSS pages is intentionally relaxed (a crawl doesn't need it); WITHIN a page the
-    /// isolate is still a true isolate. A poisoned runtime (budget-terminated, or any
-    /// error) is dropped instead of returned to the slot, so the next page starts clean.
-    static RENDER_RT: RefCell<Option<JsRuntime>> = const { RefCell::new(None) };
-}
-
-/// Repoint a reused runtime's per-page session (base URL / cookie jar / UA) in op
-/// state. The page `fetch`/`document.cookie` ops read these, so they must reflect the
-/// CURRENT page, not the one the runtime was first built for.
-fn reset_session(rt: &JsRuntime, base: &str, cookies: &str, ua: &str) {
-    let jar: Jar = Rc::new(RefCell::new(if cookies.is_empty() {
-        CookieJar::new()
-    } else {
-        CookieJar::from_storage_state(cookies)
-    }));
-    let state = rt.op_state();
-    let mut state = state.borrow_mut();
-    state.put::<Base>(Base(base.to_string()));
-    state.put::<Jar>(jar);
-    state.put::<Ua>(Ua(ua.to_string()));
-}
-
-/// Like [`render_page_with_budget`] but reuses a thread-local isolate across calls (see
-/// [`RENDER_RT`]) — the JS-crawl fast path. Only the classic-script render is pooled
-/// (module `import` graphs need a per-page module-loader base, which a reused runtime
-/// can't repoint), so this drives `render_page`, not the hydrate tier.
+/// Compatibility entry point for the render worker. Each navigation gets a fresh
+/// isolate: deleting global properties cannot reset lexical bindings or mutations
+/// to built-in prototypes. The worker thread remains reusable, the page realm does not.
 pub async fn render_page_pooled(
     html: &str,
     base: &str,
     script: &str,
     budget_ms: u64,
 ) -> Result<String, String> {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-
-    // Take the pooled runtime (or build one on first use on this thread), repointing
-    // its session to this page.
-    let mut rt = match RENDER_RT.with(|c| c.borrow_mut().take()) {
-        Some(rt) => {
-            reset_session(&rt, base, "", "");
-            rt
-        }
-        None => make_runtime(base, "", ""),
-    };
-
-    let handle = rt.v8_isolate().thread_safe_handle();
-    let done = Arc::new(AtomicBool::new(false));
-    let watch = done.clone();
-    let budget = std::time::Duration::from_millis(budget_ms);
-    let watchdog = std::thread::spawn(move || {
-        let start = std::time::Instant::now();
-        loop {
-            if watch.load(Ordering::Relaxed) {
-                break; // render completed → unparked us; no terminate
-            }
-            let elapsed = start.elapsed();
-            if elapsed >= budget {
-                handle.terminate_execution();
-                break;
-            }
-            // Park until completion unparks us or the budget deadline lapses — no fixed
-            // poll granularity, so a healthy render's join() returns in µs (the old 2ms
-            // sleep added up to 2ms of join latency to EVERY pooled render).
-            std::thread::park_timeout(budget - elapsed);
-        }
-    });
-
-    let result = run_async_pooled(&mut rt, html, base, script).await;
-    done.store(true, Ordering::Relaxed);
-    watchdog.thread().unpark();
-    let _ = watchdog.join();
-    crate::browser_env::reset(); // clear the binding while the isolate is still alive
-
-    match result {
-        Ok(html) => {
-            RENDER_RT.with(|c| *c.borrow_mut() = Some(rt)); // healthy → return to pool
-            Ok(html)
-        }
-        // Poisoned (budget terminate leaves the isolate in a terminated state, etc.) —
-        // drop the runtime so the next page rebuilds a clean one.
-        Err(e) => Err(budget_msg(&e, budget_ms)),
-    }
+    render_page_with_budget(html, base, script, budget_ms).await
 }
 
 /// The boundary a page-script bundle places between successive `<script>` bodies so
@@ -5178,17 +9088,15 @@ pub async fn render_page_pooled(
 pub const SCRIPT_BOUNDARY: &str = "\n/*__ts_script_boundary_9f3a__*/\n";
 
 /// Human-input synthesizer (installer). Evaluating this defines `globalThis.__hi`, a small
-/// API that generates a realistic pointer path A→B and dispatches a coherent, **trusted**
-/// pointer/mouse/keyboard sequence into the DOM the page's own listeners (and a BotGuard-class
-/// collector) observe. It exists to satisfy the interaction-gate + input-entropy blocker in the
-/// render isolate — the one place we control the whole event pipeline (unlike a real automated
-/// browser, where injected events are trusted-but-CDP-detectable). Two path modes:
+/// API that generates a pointer path A→B and dispatches a coherent script-created
+/// pointer/mouse/keyboard sequence into the DOM the page's own listeners observe.
+/// This models input ordering and scheduled interaction cadence. Two path modes:
 /// `"straight"` is a linear A→B at uniform cadence (a baseline / sanity path). `"human"` is a
 /// cubic-Bézier arc bowed off the A→B line (curvature) with per-step Gaussian coordinate noise, a
 /// slow→fast→slow velocity profile (non-uniform time deltas), and an occasional overshoot+settle
 /// near the target.
-/// Dispatched events carry `isTrusted:true` (via the `__trusted` flag the Event.prototype getter
-/// reads) and `timeStamp = performance.now()` (origin-relative, fractional), on the hi-res clock.
+/// Script-created input events remain untrusted, with origin-relative native-backed
+/// timestamps. Writable guest flags cannot mark an event trusted.
 ///
 /// Callers that need to leave no enumerable global should `delete globalThis.__hi` after use;
 /// tests read `__hi.path(...)` directly. This is generation + dispatch only — it does NOT defeat
@@ -5313,15 +9221,11 @@ pub const HUMAN_INPUT_JS: &str = r#"(() => {
     return { events, end: t + hold };
   }
 
-  // Build a trusted event (isTrusted:true via the __trusted flag + Event.prototype getter),
-  // stamped with an EXPLICIT origin-relative `ts` (the human timeline) — not live performance.now,
-  // so the cadence shows in event.timeStamp deltas regardless of the isolate's virtual clock.
+  // Script-created input events remain untrusted. Their native-backed timestamp
+  // comes from creation time; scheduled callbacks provide the interaction cadence.
   function ev(name, type, props, ts) {
     const C = globalThis[name] || globalThis.Event;
     const e = new C(type, Object.assign({ bubbles: true, cancelable: true }, props || {}));
-    try { delete e.isTrusted; } catch (_) {}   // drop the ctor's own false → proto getter wins
-    e.__trusted = true;
-    try { e.timeStamp = ts == null ? performance.now() : ts; } catch (_) {}
     return e;
   }
   const fire = (target, e) => { try { (target || document).dispatchEvent(e); } catch (_) {} };
@@ -5548,29 +9452,19 @@ fn exec_page_scripts(rt: &mut JsRuntime, bundle: &str, base: &str) -> Result<(),
 
 // Page-load lifecycle phases, driven by the async render loop so the main document/window fire
 // the real sequence a browser does — a collector that gates init on these (google's homepage
-// registers on DOMContentLoaded/load) otherwise never runs. `document.readyState` reads a hidden
-// Symbol slot (installed in ENV_BOOTSTRAP); each phase sets it + dispatches the matching TRUSTED
+// registers on DOMContentLoaded/load) otherwise never runs. `document.readyState` reads private
+// receiver-local state; each phase updates it and dispatches the matching trusted
 // events. All fully guarded so a lifecycle hiccup can't break a render.
-const LIFECYCLE_LOADING: &str =
-    r#"try { document[Symbol.for("__ts_rs")] = "loading"; } catch (e) {}"#;
-const LIFECYCLE_INTERACTIVE: &str = r#"(() => { try {
-  document[Symbol.for("__ts_rs")] = "interactive";
-  const mk = (t, b) => { let e; try { e = new Event(t, { bubbles: !!b }); } catch (_) { e = { type: t }; } try { delete e.isTrusted; } catch (_) {} e.__trusted = true; try { e.timeStamp = performance.now(); } catch (_) {} return e; };
-  try { document.dispatchEvent(mk("readystatechange", false)); } catch (_) {}
-  try { if (typeof document.onreadystatechange === "function") document.onreadystatechange(mk("readystatechange", false)); } catch (_) {}
-  try { document.dispatchEvent(mk("DOMContentLoaded", true)); } catch (_) {}
-  try { globalThis.dispatchEvent(mk("DOMContentLoaded", true)); } catch (_) {} // window listeners (DCL bubbles to window)
-} catch (e) {} })()"#;
-const LIFECYCLE_COMPLETE: &str = r#"(() => { try {
-  document[Symbol.for("__ts_rs")] = "complete";
-  const mk = (t, b) => { let e; try { e = new Event(t, { bubbles: !!b }); } catch (_) { e = { type: t }; } try { delete e.isTrusted; } catch (_) {} e.__trusted = true; try { e.timeStamp = performance.now(); } catch (_) {} return e; };
-  try { document.dispatchEvent(mk("readystatechange", false)); } catch (_) {}
-  try { if (typeof document.onreadystatechange === "function") document.onreadystatechange(mk("readystatechange", false)); } catch (_) {}
-  const load = mk("load", false);
-  try { globalThis.dispatchEvent(load); } catch (_) {}
-  try { if (typeof globalThis.onload === "function") globalThis.onload(load); } catch (_) {}
-  try { globalThis.dispatchEvent(mk("pageshow", false)); } catch (_) {}
-} catch (e) {} })()"#;
+fn run_lifecycle(rt: &mut JsRuntime, phase: &str) -> Result<(), String> {
+    let context = rt.main_context();
+    let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+    let mut scope = scope.init();
+    let context = v8::Local::new(&scope, context);
+    let scope = &mut v8::ContextScope::new(&mut scope, context);
+    call_frame_helper(scope, phase, &[])
+        .map(|_| ())
+        .ok_or_else(|| format!("Native lifecycle {phase} failed"))
+}
 
 async fn run_async(
     rt: &mut JsRuntime,
@@ -5579,63 +9473,16 @@ async fn run_async(
     script: &str,
 ) -> Result<String, String> {
     install_dom(rt, html, base)?;
-    let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING); // readyState "loading" while scripts run
+    run_lifecycle(rt, "documentLoading")?; // readyState "loading" while scripts run
     exec_page_scripts(rt, script, base)?;
-    let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // interactive + DOMContentLoaded
+    run_lifecycle(rt, "dispatchDocumentInteractive")?; // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
     rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
         .map_err(|e| e.to_string())?;
     drain_event_loop(rt).await?; // promises queued by timer callbacks
-    let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // complete + window load + pageshow
+    drain_to_quiescence_with_scripts(rt, false).await?;
+    run_lifecycle(rt, "dispatchDocumentComplete")?; // complete + window load + pageshow
     drain_event_loop(rt).await?; // load handlers' async work
-    Ok(crate::browser_env::document_html())
-}
-
-// Cross-page global scrub for the POOLED render path. A browser gives every navigation
-// a fresh global; a reused isolate does not, so a page that assigns `window.X = …` would
-// leak `X` into the next page. On the first pooled render this records the clean global
-// key set (env globals from `ENV_BOOTSTRAP` + V8 builtins); on every later render it
-// deletes any own-key NOT in that baseline, restoring fresh-navigation semantics for the
-// common "page sets window globals" case. (Builtins MUTATED in place aren't reverted —
-// `ENV_BOOTSTRAP` re-runs each page and re-seeds the env, covering the usual polyfills.)
-const SCRUB_GLOBALS: &str = r#"(() => {
-  if (!globalThis[Symbol.for('ts')].TS_BASELINE) {
-    // Baseline of the page's string own-prop globals. The baseline itself + all turbo-surf
-    // internals live on the Symbol namespace (globalThis[Symbol.for('ts')]) — a Symbol key, never
-    // in getOwnPropertyNames — so the scrub below (which only walks string names) never touches
-    // them, and no name needs adding to the set to protect it.
-    const b = new Set(Object.getOwnPropertyNames(globalThis));
-    globalThis[Symbol.for('ts')].TS_BASELINE = b;
-    return;
-  }
-  for (const k of Object.getOwnPropertyNames(globalThis)) {
-    if (!globalThis[Symbol.for('ts')].TS_BASELINE.has(k)) {
-      try { delete globalThis[k]; } catch (_e) { /* non-configurable: leave it */ }
-    }
-  }
-})()"#;
-
-// Pooled-path render: like [`run_async`] but scrubs page-added globals (see
-// [`SCRUB_GLOBALS`]) right after the env is (re)installed and before the page's own
-// script runs, so a reused isolate behaves like a fresh navigation.
-async fn run_async_pooled(
-    rt: &mut JsRuntime,
-    html: &str,
-    base: &str,
-    script: &str,
-) -> Result<String, String> {
-    install_dom(rt, html, base)?;
-    rt.execute_script("<scrub>", SCRUB_GLOBALS)
-        .map_err(|e| e.to_string())?;
-    let _ = rt.execute_script("<rs-loading>", LIFECYCLE_LOADING);
-    exec_page_scripts(rt, script, base)?;
-    let _ = rt.execute_script("<rs-interactive>", LIFECYCLE_INTERACTIVE); // DOMContentLoaded (before load)
-    drain_event_loop(rt).await?;
-    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
-        .map_err(|e| e.to_string())?;
-    drain_event_loop(rt).await?;
-    let _ = rt.execute_script("<rs-complete>", LIFECYCLE_COMPLETE); // window load + pageshow (after DCL)
-    drain_event_loop(rt).await?;
     Ok(crate::browser_env::document_html())
 }
 
@@ -5658,27 +9505,11 @@ pub async fn render_hydrate_with_budget(
     ua: &str,
     budget_ms: u64,
 ) -> Result<String, String> {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-
     let mut rt = make_runtime(base, cookies, ua);
-    let handle = rt.v8_isolate().thread_safe_handle();
-    let done = Arc::new(AtomicBool::new(false));
-    let watch = done.clone();
-    let watchdog = std::thread::spawn(move || {
-        let start = std::time::Instant::now();
-        while !watch.load(Ordering::Relaxed) {
-            if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
-                handle.terminate_execution();
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
-    });
-
-    let result = run_hydrate(&mut rt, html, base).await;
-    done.store(true, Ordering::Relaxed);
-    let _ = watchdog.join();
+    prepare_hydration(&mut rt, html, base)?;
+    let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
+    let result = hydrate_installed_document(&mut rt, base, "").await;
+    drop(watchdog);
     // Best-effort on a budget-exceed: a dev-mode SPA (Next `next dev`) can loop past the
     // budget without ever reaching idle, yet the partial DOM rendered so far is exactly
     // what a probe (readable-React-error diagnosis) needs. Mirror `PageSession.eval`:
@@ -5763,23 +9594,60 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
     out
 }
 
-async fn run_hydrate(rt: &mut JsRuntime, html: &str, base: &str) -> Result<String, String> {
-    run_hydrate_with_init(rt, html, base, "").await
+// Trusted setup must finish before the guest budget starts. Otherwise a short
+// budget can interrupt bootstrap before its private capabilities and hiding run,
+// and best-effort hydration would return a half-initialized live session.
+fn prepare_hydration(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String> {
+    let result = install_dom(rt, html, base).and_then(|()| {
+        deno_core::scope!(scope, rt);
+        let context = scope.get_current_context();
+        if context.get_slot::<HostInputDriver>().is_none() {
+            return Err("Trusted host input driver initialization failed".into());
+        }
+        Ok(())
+    });
+    if result.is_err() {
+        crate::browser_env::reset();
+        crate::browser_env::clear_interface_records(rt.v8_isolate());
+    }
+    result
 }
 
-async fn run_hydrate_with_init(
+async fn hydrate_installed_document(
     rt: &mut JsRuntime,
-    html: &str,
     base: &str,
     init_script: &str,
 ) -> Result<String, String> {
-    install_dom(rt, html, base)?;
-    rt.execute_script("<current-script>", "document.currentScript = null;")
-        .map_err(|e| e.to_string())?;
+    run_lifecycle(rt, "documentLoading").map_err(|error| error.to_string())?;
+    rt.execute_script(
+        "<current-script>",
+        "globalThis[Symbol.for('ts')].setCurrentScript(null);",
+    )
+    .map_err(|e| e.to_string())?;
     if !init_script.is_empty() {
         rt.execute_script("<init-script>", init_script.to_string())
             .map_err(|e| e.to_string())?;
     }
+    rt.execute_script(
+        "<initial-hydrate>",
+        "globalThis[Symbol.for('ts')].initialHydrated=false;globalThis[Symbol.for('ts')].tcHydrate=globalThis[Symbol.for('ts')].hydrate(300,200000,false).finally(()=>{globalThis[Symbol.for('ts')].initialHydrated=true});",
+    )
+    .map_err(|error| error.to_string())?;
+    drain_event_loop_until(
+        rt,
+        Some("globalThis[Symbol.for('ts')].initialHydrated ? '1' : '0'"),
+    )
+    .await?;
+    drain_module_scripts(rt, base).await?;
+    run_lifecycle(rt, "dispatchDocumentInteractive").map_err(|error| error.to_string())?;
+    // HTML load waits for script graph completion, images/styles and frames,
+    // independently of unrelated fetches or a module's pending top-level await.
+    drain_event_loop_until(
+        rt,
+        Some("globalThis[Symbol.for('ts')].documentLoadReady() ? '1' : '0'"),
+    )
+    .await?;
+    run_lifecycle(rt, "dispatchDocumentComplete")?;
     // Unified event-loop pump. A single "run scripts+timers, then drain" pass isn't
     // enough for a real SPA: React kicks a fetch, yields, the fetch resolves, React
     // schedules MORE work (a timer via its MessageChannel), which schedules another
@@ -5803,10 +9671,12 @@ async fn run_hydrate_with_init(
             break;
         }
     }
+    run_lifecycle(rt, "dispatchDocumentComplete").map_err(|error| error.to_string())?;
+    drain_to_quiescence(rt).await?;
     Ok(crate::browser_env::document_html())
 }
 
-// Evaluate every un-run ES-module `<script>` (claimed via `globalThis[Symbol.for('ts')].takeModuleScript`) through
+// Compatibility only: evaluate module syntax in classic script elements (claimed via `globalThis[Symbol.for('ts')].takeModuleScript`) through
 // deno_core's real module graph: inline modules load from their own code, `src` modules
 // load by URL (the `NetModuleLoader` fetches them + their imports over the host net).
 // This is the path a Next dev / turbopack build (served as ES modules) needs to hydrate.
@@ -5820,7 +9690,7 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
         let g = rt
             .execute_script(
                 "<take-mod-r>",
-                "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)",
+                "String(globalThis[Symbol.for('ts')].moduleDescriptor || '')",
             )
             .map_err(|e| e.to_string())?;
         let desc = read_string(rt, g)?;
@@ -5861,13 +9731,13 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
                 // Promise.all never resolves (→ the app never hydrates, no error).
                 rt.execute_script(
                     "<mod-cs>",
-                    "try{document.currentScript = globalThis[Symbol.for('ts')].currentModuleEl || null;}catch(_e){}",
+                    "globalThis[Symbol.for('ts')].setCurrentScript(globalThis[Symbol.for('ts')].currentModuleEl || null);",
                 )
                 .map_err(|e| e.to_string())?;
                 let ev = rt.mod_evaluate(id).await;
                 rt.execute_script(
                     "<mod-cs0>",
-                    "try{document.currentScript = null;}catch(_e){}",
+                    "globalThis[Symbol.for('ts')].setCurrentScript(null);",
                 )
                 .map_err(|e| e.to_string())?;
                 if let Err(e) = ev {
@@ -5884,6 +9754,7 @@ async fn drain_module_scripts(rt: &mut JsRuntime, base: &str) -> Result<(), Stri
 // budget, and is cancelled (thread joined) on drop. Replaces the hand-rolled
 // done-flag + spawn + join that each one-shot entry point repeats.
 struct Watchdog {
+    exceeded: std::sync::Arc<std::sync::atomic::AtomicBool>,
     done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -5892,17 +9763,22 @@ impl Watchdog {
         use std::sync::atomic::Ordering;
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let watch = done.clone();
+        let exceeded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let timed_out = exceeded.clone();
         let thread = std::thread::spawn(move || {
             let start = std::time::Instant::now();
             while !watch.load(Ordering::Relaxed) {
                 if start.elapsed() >= std::time::Duration::from_millis(budget_ms) {
+                    timed_out.store(true, Ordering::Relaxed);
+                    // Nested native callbacks can clear V8's termination state.
+                    // Keep the deadline enforced until the owner joins this guard.
                     handle.terminate_execution();
-                    break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
         });
         Watchdog {
+            exceeded,
             done,
             thread: Some(thread),
         }
@@ -5922,6 +9798,13 @@ impl Drop for Watchdog {
 // nothing is pending. Used after an interaction event re-enters the running app (the
 // handler may setState → schedule a re-render → fetch → schedule more).
 async fn drain_to_quiescence(rt: &mut JsRuntime) -> Result<(), String> {
+    drain_to_quiescence_with_scripts(rt, true).await
+}
+
+async fn drain_to_quiescence_with_scripts(
+    rt: &mut JsRuntime,
+    execute_document_scripts: bool,
+) -> Result<(), String> {
     // Fresh virtual-time window for this interaction so its transitions (e.g. a closing
     // MUI modal's Fade-exit timer) fire + complete even when the clock is already large.
     rt.execute_script(
@@ -5942,12 +9825,18 @@ async fn drain_to_quiescence(rt: &mut JsRuntime) -> Result<(), String> {
         // etc.) appends a <script src> when the component first renders. Without running it
         // the chunk never executes, the import() promise never resolves, and the modal never
         // appears. __hydrate is idempotent (skips already-run scripts via __tcDone).
-        rt.execute_script(
-            "<hydrate>",
-            "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
-        )
-        .map_err(|e| e.to_string())?;
+        if execute_document_scripts {
+            rt.execute_script(
+                "<hydrate>",
+                "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
+            )
+            .map_err(|e| e.to_string())?;
+        }
         drain_event_loop(rt).await?;
+        if execute_document_scripts {
+            let base = rt.op_state().borrow().borrow::<Base>().0.clone();
+            drain_module_scripts(rt, &base).await?;
+        }
         let fired = rt
             .execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers(2000)")
             .map_err(|e| e.to_string())?;
@@ -6000,8 +9889,17 @@ async fn drain_to_quiescence(rt: &mut JsRuntime) -> Result<(), String> {
 /// The V8 isolate + the binding's thread-local DOM are NOT `Send`: a session must be
 /// created and driven from a single owning thread (the napi layer pins one thread per
 /// session). `close()` (or drop) resets the binding while the isolate is still alive.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct HydrationDiagnostics {
+    pub budget_exceeded: bool,
+    pub open_error: Option<String>,
+    pub unsupported_csp: Vec<String>,
+}
+
 pub struct PageSession {
+    script_inventory: Option<crate::script_inventory::ScriptInventory>,
     rt: JsRuntime,
+    hydration_diagnostics: HydrationDiagnostics,
     budget_ms: u64,
     closed: bool,
 }
@@ -6052,14 +9950,107 @@ impl PageSession {
         init_script: &str,
         client_hints: ClientHints,
     ) -> Result<Self, String> {
+        Self::open_with_response_headers(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            &[],
+        )
+        .await
+    }
+
+    /// Hydrate the actual HTML with the native response headers that delivered it.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_response_headers(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+    ) -> Result<Self, String> {
+        Self::open_with_browsing_state(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            BrowserStorage::default(),
+        )
+        .await
+    }
+
+    /// Open with persistent private storage and the response policy for this document.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_browsing_state(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+    ) -> Result<Self, String> {
         let mut rt = make_runtime_with_hints(base, cookies, ua, client_hints);
-        let result = {
-            let _wd = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
-            run_hydrate_with_init(&mut rt, html, base, init_script).await
+        let mut script_inventory = std::env::var_os("TURBO_SURF_JS_TRACE")
+            .map(|root| {
+                crate::script_inventory::ScriptInventory::start(
+                    &mut rt,
+                    std::path::Path::new(&root),
+                )
+            })
+            .transpose()?;
+        rt.op_state()
+            .borrow_mut()
+            .borrow_mut::<FrameContexts>()
+            .init_script = init_script.to_owned();
+        rt.op_state().borrow_mut().put(storage);
+        rt.op_state().borrow_mut().borrow_mut::<ResponseHeaders>().0 = response_headers.to_vec();
+        prepare_hydration(&mut rt, html, base)?;
+        let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
+        let exceeded = watchdog.exceeded.clone();
+        let result = hydrate_installed_document(&mut rt, base, init_script).await;
+        drop(watchdog);
+        if let Some(inventory) = &mut script_inventory {
+            inventory.flush();
+        }
+        let budget_exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        let mut unsupported_csp = {
+            let context = rt.main_context();
+            let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
+            let scope = &mut scope.init();
+            let context = v8::Local::new(scope, context);
+            context
+                .get_slot::<CspHandle>()
+                .map_or_else(Vec::new, |handle| handle.policy.borrow().unsupported())
         };
+        if response_headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("content-security-policy-report-only"))
+        {
+            unsupported_csp.push("content-security-policy-report-only".into());
+        }
         match result {
             Ok(_) => Ok(PageSession {
+                script_inventory,
                 rt,
+                hydration_diagnostics: HydrationDiagnostics {
+                    budget_exceeded,
+                    open_error: budget_exceeded
+                        .then(|| format!("Hydration exceeded its {budget_ms}ms execution budget")),
+                    unsupported_csp,
+                },
                 budget_ms,
                 closed: false,
             }),
@@ -6068,17 +10059,27 @@ impl PageSession {
             // (so later `eval`s run) and KEEP the session alive — discarding it would lose
             // the partial render and force the caller back to the static HTML. Genuine
             // non-budget errors (install/parse) still fail the open.
-            Err(e) if e.contains("terminat") || e.contains("execution") => {
+            Err(e) if budget_exceeded || rt.v8_isolate().is_execution_terminating() => {
                 rt.v8_isolate().cancel_terminate_execution();
                 Ok(PageSession {
+                    script_inventory,
                     rt,
+                    hydration_diagnostics: HydrationDiagnostics {
+                        budget_exceeded,
+                        open_error: Some(if budget_exceeded {
+                            format!("render budget exceeded ({budget_ms}ms): {e}")
+                        } else {
+                            e
+                        }),
+                        unsupported_csp,
+                    },
                     budget_ms,
                     closed: false,
                 })
             }
             Err(e) => {
                 crate::browser_env::reset();
-                Err(budget_msg(&e, budget_ms))
+                Err(e)
             }
         }
     }
@@ -6117,6 +10118,173 @@ impl PageSession {
         }
     }
 
+    /// Evaluate an expression and await its own result without a page-global result slot.
+    /// Background page work does not postpone a completed collector Promise.
+    pub async fn eval_expression(&mut self, expression: &str) -> Result<String, String> {
+        if self.closed {
+            return Err("Page session is closed".into());
+        }
+        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
+                let value = self
+                    .rt
+                    .execute_script("<session-expression>", expression.to_owned())
+                    .map_err(|error| error.to_string())?;
+                let completion = self.rt.resolve(value.clone());
+                self.rt
+                    .execute_script(
+                        "<expression-budget>",
+                        "globalThis[Symbol.for('ts')].resetTimerBudget();",
+                    )
+                    .map_err(|error| error.to_string())?;
+                drain_event_loop_until_completion(&mut self.rt, None, Some(&value)).await?;
+                let value = self
+                    .rt
+                    .with_event_loop_promise(completion, Default::default())
+                    .await
+                    .map_err(|error| error.to_string())?;
+                read_string(&mut self.rt, value)
+            })
+            .await;
+        let exceeded = watchdog.exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        drop(watchdog);
+        self.rt.v8_isolate().cancel_terminate_execution();
+        if exceeded {
+            return Err("Expression exceeded the session execution budget".into());
+        }
+        result.map_err(|_| "Expression exceeded the session execution budget".to_owned())?
+    }
+
+    /// Deliver embedder input through a private native dispatch capability.
+    /// Guest dispatchEvent still creates untrusted input; this entry point is
+    /// available only to the Rust session owner. Supports the harness step schema.
+    pub async fn input(&mut self, steps: &serde_json::Value) -> Result<(), String> {
+        if self.closed {
+            return Err("Page session is closed".into());
+        }
+        let _watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(self.budget_ms), async {
+                let promise = {
+                    deno_core::scope!(scope, self.rt);
+                    let context = scope.get_current_context();
+                    let driver = context
+                        .get_slot::<HostInputDriver>()
+                        .ok_or("Host input driver unavailable")?;
+                    let callback = v8::Local::new(scope, &driver.input);
+                    let arguments = deno_core::serde_v8::to_v8(scope, steps)
+                        .map_err(|error| error.to_string())?;
+                    let receiver = v8::undefined(scope).into();
+                    let result = callback
+                        .call(scope, receiver, &[arguments])
+                        .ok_or("Host input dispatch failed")?;
+                    v8::Global::new(scope, result)
+                };
+                if _watchdog
+                    .exceeded
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    return Err("Host input exceeded the session execution budget".into());
+                }
+                let completion = self.rt.resolve(promise.clone());
+                self.rt
+                    .execute_script(
+                        "<input-budget>",
+                        "globalThis[Symbol.for('ts')].resetTimerBudget();",
+                    )
+                    .map_err(|error| error.to_string())?;
+                drain_event_loop_until_completion(&mut self.rt, None, Some(&promise)).await?;
+                self.rt
+                    .with_event_loop_promise(completion, Default::default())
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            })
+            .await;
+        let exceeded = _watchdog
+            .exceeded
+            .load(std::sync::atomic::Ordering::Relaxed);
+        drop(_watchdog);
+        self.rt.v8_isolate().cancel_terminate_execution();
+        if exceeded || !matches!(&result, Ok(Ok(()))) {
+            deno_core::scope!(scope, self.rt);
+            let context = scope.get_current_context();
+            if let Some(driver) = context.get_slot::<HostInputDriver>() {
+                let callback = v8::Local::new(scope, &driver.cancel);
+                let receiver = v8::undefined(scope).into();
+                callback.call(scope, receiver, &[]);
+            }
+        }
+        if exceeded {
+            return Err("Host input exceeded the session execution budget".into());
+        }
+        result.map_err(|_| "Host input exceeded the session execution budget".to_string())?
+    }
+
+    /// Host-only response records; page JS cannot read raw opaque resource bodies.
+    pub fn drain_network_log(&mut self) -> String {
+        let state = self.rt.op_state();
+        let mut state = state.borrow_mut();
+        let rows: Vec<_> = state.borrow_mut::<NetworkLog>().0.drain(..).collect();
+        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Snapshot the opt-in interface tracer inside each active native child context.
+    pub fn frame_interface_snapshots(&mut self) -> Vec<serde_json::Value> {
+        let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
+        let contexts = self
+            .rt
+            .op_state()
+            .borrow()
+            .borrow::<FrameContexts>()
+            .contexts
+            .clone();
+        let mut rows = Vec::new();
+        for context in contexts {
+            deno_core::scope!(scope, self.rt);
+            let context = v8::Local::new(scope, context);
+            if context.get_slot::<FrameRetired>().is_some() {
+                continue;
+            }
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let scope = std::pin::pin!(v8::TryCatch::new(scope));
+            let scope = &mut scope.init();
+            let Some(code)=v8::String::new(scope,"JSON.stringify({url:document.URL,interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})")else{rows.push(serde_json::json!({"error":"child snapshot budget exceeded"}));break;};
+            let name = v8::String::new(scope, "<turbo-cdp-host>").unwrap();
+            let origin = v8::ScriptOrigin::new(
+                scope,
+                name.into(),
+                0,
+                0,
+                false,
+                0,
+                None,
+                false,
+                false,
+                false,
+                None,
+            );
+            let result = v8::Script::compile(scope, code, Some(&origin))
+                .and_then(|script| script.run(scope));
+            match result {
+                Some(value) => match serde_json::from_str(&value.to_rust_string_lossy(scope)) {
+                    Ok(row) => rows.push(row),
+                    Err(error) => rows.push(serde_json::json!({"error":error.to_string()})),
+                },
+                None => rows.push(serde_json::json!({"error":"child interface snapshot failed"})),
+            }
+        }
+        drop(watchdog);
+        self.rt.v8_isolate().cancel_terminate_execution();
+        rows
+    }
+
+    /// Native hydration outcome; guest page scripts cannot overwrite this state.
+    pub fn hydration_diagnostics(&self) -> &HydrationDiagnostics {
+        &self.hydration_diagnostics
+    }
+
     /// Serialize the CURRENT live DOM to HTML (no reset — the page stays alive).
     pub fn serialize(&self) -> String {
         crate::browser_env::document_html()
@@ -6134,6 +10302,7 @@ impl PageSession {
 
     /// Tear down: reset the binding while the isolate is still alive, then drop it.
     pub fn close(mut self) {
+        self.script_inventory.take();
         self.closed = true;
         crate::browser_env::reset();
     }
@@ -6141,6 +10310,7 @@ impl PageSession {
 
 impl Drop for PageSession {
     fn drop(&mut self) {
+        self.script_inventory.take();
         if !self.closed {
             crate::browser_env::reset();
         }

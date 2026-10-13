@@ -1,0 +1,9 @@
+{
+  "chromeMajor": 154,
+  "chromeVersion": "154.0.8037.98",
+  "engineRevision": "b3d6849efaf11696198e15b32290e6d6b0d540c1",
+  "engineVersion": "15.4.80.20",
+  "buildRevision": "fdd530b37c6cd6c8645cdfa296d209643ab2dc26",
+  "icuRevision": "8cc91d9b6ab9991802fd208ee03a69714fd0251c",
+  "rustDependenciesRevision": "4dec6f65bcb34c4c289736b0e6fd571b35c6c665"
+}

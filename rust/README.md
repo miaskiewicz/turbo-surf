@@ -5,9 +5,11 @@ so the browserless crawler is Rust too. The only piece that *must* stay JS is th
 `@playwright/test` drop-in façade (agents `import` it inside their own Node
 process); it's a thin shim over the napi addon — all the muscle is Rust.
 
-turbo-dom is consumed from **crates.io** as the `turbo-dom-parser` crate
-(`{ package = "turbo-dom", version = "0.5.1" }`) — its pure-Rust `rtdom::Tree`
-(handle-based `u32` DOM, no napi/wasm boundary).
+turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
+`rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
+workspace now resolves the published `turbo-dom` 0.5.2 crate, including PR #8's
+additive fragment/document APIs and compact ordinary-node/attribute storage.
+The release tag is on merge commit `87c2077`; registry artifacts were verified.
 
 ## Crates
 
@@ -23,8 +25,9 @@ turbo-dom is consumed from **crates.io** as the `turbo-dom-parser` crate
 | `turbo-surf-napi` | the `.node` addon — in-process bridge from the core to Node (+ stateful `Session`) |
 | `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 80-tool surface over a stateful session |
 
-`cargo test` runs the full offline suite across the workspace (200+ tests);
-`cargo clippy --workspace --all-targets` and `cargo fmt` are clean.
+`cargo test --workspace` runs the offline engine suite. Required gates also include
+`cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
+the root npm test command checks versions, the addon/shim and detection harness too.
 
 ## Tier 1 — `turbo-surf-core`
 
@@ -80,9 +83,10 @@ place, and the render returns the hydrated HTML (the Lane B contract).
   Testing Library). A JS DOM node is a V8 object holding a turbo-dom handle in an
   internal field; methods/accessors are native callbacks straight onto `Tree`. No
   JS-DOM-in-JS-VM indirection. See [`src/browser_env.rs`](crates/turbo-surf-render/src/browser_env.rs)
-  for the vendor/sync story (verbatim copy + a one-command re-vendor script; the
-  turbo-surf-specific deltas — `install_html`/`document_html` and the env bootstrap
-  — live separately and are never patched into the upstream file).
+  for the vendor/sync story: the one-command script copies committed canonical
+  Rust/JS/CSS grammar and generates the surf adapter from
+  `scripts/browser-env-adapter.rs.in`. Seeded installation delegates to the
+  canonical API; surf additions remain outside the upstream binding.
 - The runtime in [`src/runtime.rs`](crates/turbo-surf-render/src/runtime.rs) grafts
   that binding onto deno_core's context, then layers the non-DOM `window` env a real
   page needs (`navigator`, `location`, virtual timers + real microtasks, `fetch`/XHR
@@ -92,9 +96,12 @@ place, and the render returns the hydrated HTML (the Lane B contract).
   hydration pump (executes injected `<script>` chunks, drains to quiescence).
 - **`fetch` is real** (async, event-loop-driven; relative URLs resolve against the
   page base) — promise/`await`/timer-driven hydration settles before serialization.
-- `run_with_dom` (the sync `page.evaluate` path) reuses a **thread-persistent
-  isolate across pages** — the ~20 ms boot is paid once, then ~5 ms/call. Page-JS
-  isolation across pages is intentionally relaxed (a crawl doesn't need it).
+- `run_with_dom` (the sync evaluation path) retains its isolate and native DOM for
+  repeated calls with identical HTML. Changing the HTML creates a fresh isolate,
+  clearing lexical declarations, globals and modified intrinsics. Fresh page hydration
+  also uses independent runtimes. `render_page_pooled` keeps its public compatibility
+  name but currently opens a fresh runtime on every call; the former cross-page boot
+  optimization was removed to preserve isolation.
 - `transform` (`turbo-surf-transform`, swc) turns a TS/JSX bundle into classic JS
   so it runs under the tier.
 

@@ -1,7 +1,19 @@
 (function(){
   var g = globalThis;
-  // The renderer shares the binding; keep cross-context host state off string globals.
+  var prepareInlineHandler=g.__prepareInlineHandler,noteInlineHandler=g.__noteInlineHandler;delete g.__prepareInlineHandler;delete g.__noteInlineHandler;
+  var collectionGet=g.__getCollectionRecord,collectionSet=g.__setCollectionRecord;
+  var appliedInlineRead=g.__readAppliedInlineStyle,appliedInlineWrite=g.__writeAppliedInlineStyle,inlineSheetAllowed=g.__isInlineSheetAllowed;
+  delete g.__readAppliedInlineStyle;delete g.__writeAppliedInlineStyle;delete g.__isInlineSheetAllowed;
+  function cssMap(family){return {get:function(object){var shared=collectionGet(object);return shared&&shared.css&&shared.css[family];},set:function(object,value){var shared=collectionGet(object);if(!shared){shared={kind:'CSS'};collectionSet(object,shared);}if(!shared.css)shared.css=Object.create(null);shared.css[family]=value;},delete:function(object){var shared=collectionGet(object);if(shared&&shared.css)delete shared.css[family];}};}
+  // turbo-surf shares this binding; its internal cross-context state lives on a Symbol-keyed
+  // namespace (absent from getOwnPropertyNames(window) — real Chrome has no such __* globals),
+  // not as `__*` string globals. Reachable from every realm via globalThis[Symbol.for('ts')].
   var __ns = g[Symbol.for('ts')] || (Object.defineProperty(g, Symbol.for('ts'), { value: {}, configurable: true, enumerable: false }), g[Symbol.for('ts')]);
+  if (typeof g.__parseCssNative === 'function') { __ns.parseCssNative = g.__parseCssNative; delete g.__parseCssNative; }
+  var cssNativeParse=__ns.parseCssNative,cssSetPrototype=Object.setPrototypeOf;
+  if (typeof g.__domAccessor === 'function') { __ns.domAccessor = g.__domAccessor; delete g.__domAccessor; }
+  if (typeof g.__nativeDOMFunction === 'function') { __ns.makeNativeFunction = g.__nativeDOMFunction; delete g.__nativeDOMFunction; }
+  if (typeof g.__nativeNamedObject === 'function') { __ns.makeNamedObject = g.__nativeNamedObject; delete g.__nativeNamedObject; }
   if (typeof g.navigator === 'undefined') g.navigator = { userAgent: 'turbo-test', platform: 'rust', language: 'en-US', languages: ['en-US'], clipboard: {}, maxTouchPoints: 0 };
   // Top-level window self-references (browsers + jsdom + vitest): a non-framed window is its own
   // parent/top, and `self`/`frames` alias the window. `window === globalThis` here, so point them at
@@ -92,9 +104,10 @@
     try {
       var sheets = el && el.ownerDocument ? (el.ownerDocument.styleSheets || []) : [];
       for (var si=0; si<sheets.length; si++) {
-        var rules = sheets[si].cssRules || [];
+        if(sheetRecord(sheets[si]).disabled)continue;
+        var rules = appliedSheetRules(sheets[si]);
         for (var ri=0; ri<rules.length; ri++) {
-          var txt = String(rules[ri].cssText || ''); var br = txt.indexOf('{'); if (br < 0) continue;
+          var txt = String(cssRuleText(cssRuleRecord(rules[ri])) || ''); var br = txt.indexOf('{'); if (br < 0) continue;
           var sel = txt.slice(0, br).trim(); var body = txt.slice(br+1, txt.lastIndexOf('}'));
           var matched = false;
           var parts = sel.split(',');
@@ -106,8 +119,8 @@
       }
     } catch(e){}
     // overlay inline style (own props React/components set: background, height, display, ...)
-    var st = el && el.style;
-    if (st) { for (var k in st) { if (k.indexOf('__') !== 0 && Object.prototype.hasOwnProperty.call(st, k) && typeof st[k] !== 'function') setProp(k, st[k]); } }
+    var st = el && __ns.makeInlineStyleDeclaration(el);
+    if (st) { var inline=declarationText(declarationRecord(st));cssParts(inline,';').forEach(function(part){var colon=part.indexOf(':');if(colon>0)setProp(part.slice(0,colon),part.slice(colon+1).trim().replace(/\s*!important$/,''));}); }
     if (decl.display == null) decl.display = '';
     // `visibility` is INHERITED: a child with no explicit visibility takes the parent's computed
     // value. testing-library / dom-accessibility-api rely on this — they treat an element as
@@ -115,8 +128,8 @@
     // have propagated down. The JS cascade above only sees this element's own rules, so we defer to
     // rtdom's native cascade (cascade::computed_style) which resolves inheritance. display is NOT
     // inherited, so it is left as the element's own value.
-    if ((decl.visibility == null || decl.visibility === '') && el && typeof el.__cascadeProp === 'function') {
-      try { decl.visibility = el.__cascadeProp('visibility') || ''; } catch(e){}
+    if ((decl.visibility == null || decl.visibility === '') && el && typeof __ns.cascadeProp === 'function') {
+      try { decl.visibility = __ns.cascadeProp.call(el,'visibility') || ''; } catch(e){}
     }
     if (decl.visibility == null) decl.visibility = '';
     if (decl.opacity == null) decl.opacity = '';
@@ -146,7 +159,7 @@
         }
       });
     } catch(e){}
-    return decl;
+    return __ns.makeComputedStyleDeclaration(decl,el);
   };
   if (typeof g.requestAnimationFrame === 'undefined') g.requestAnimationFrame = function(cb){ return setTimeout(function(){ cb(Date.now()); }, 0); };
   if (typeof g.cancelAnimationFrame === 'undefined') g.cancelAnimationFrame = function(id){ clearTimeout(id); };
@@ -167,33 +180,218 @@
     g.location = { href: 'http://localhost/', origin: 'http://localhost', protocol: 'http:', host: 'localhost', hostname: 'localhost', port: '', pathname: '/', search: '', hash: '', assign: function(){}, replace: function(){}, reload: function(){}, toString: function(){ return this.href; } };
   }
   // DOM interface constructors (for `instanceof` / global presence). Stubs; identity not enforced.
-  // Real Event base class (dispatch in browser_env.rs reads type/bubbles/defaultPrevented/__stop*).
-  if (!__ns.ttEvent) {
-    function Event(type, init){ init = init || {}; this.type = type; this.bubbles = !!init.bubbles; this.cancelable = !!init.cancelable; this.composed = !!init.composed; this.defaultPrevented = false; this.target = null; this.currentTarget = null; this.__stop = false; this.__stopImmediate = false; this.eventPhase = 0; this.timeStamp = Date.now(); this.isTrusted = false; this.detail = init.detail; }
-    Event.prototype.preventDefault = function(){ if (this.cancelable) this.defaultPrevented = true; };
-    Event.prototype.stopPropagation = function(){ this.__stop = true; };
-    Event.prototype.stopImmediatePropagation = function(){ this.__stop = true; this.__stopImmediate = true; };
-    Event.prototype.initEvent = function(type, bubbles, cancelable){ this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; };
-    Event.NONE = 0; Event.CAPTURING_PHASE = 1; Event.AT_TARGET = 2; Event.BUBBLING_PHASE = 3;
-    g.Event = Event;
-    function mkSub(extra){ return function(type, init){ init = init || {}; Event.call(this, type, init); if (extra) extra(this, init); for (var k in init){ if (!(k in this)) this[k] = init[k]; } }; }
-    function sub(name, extra){ var C = mkSub(extra); C.prototype = Object.create(Event.prototype); C.prototype.constructor = C; g[name] = C; }
-    var keyExtra = function(self, init){ self.key = init.key||''; self.code = init.code||''; self.keyCode = init.keyCode||0; self.which = init.which||init.keyCode||0; self.altKey=!!init.altKey; self.ctrlKey=!!init.ctrlKey; self.metaKey=!!init.metaKey; self.shiftKey=!!init.shiftKey; self.repeat=!!init.repeat; };
-    var mouseExtra = function(self, init){ self.button=init.button||0; self.buttons=init.buttons||0; self.clientX=init.clientX||0; self.clientY=init.clientY||0; self.pageX=init.pageX||0; self.pageY=init.pageY||0; self.altKey=!!init.altKey; self.ctrlKey=!!init.ctrlKey; self.metaKey=!!init.metaKey; self.shiftKey=!!init.shiftKey; self.relatedTarget=init.relatedTarget||null; };
-    sub('CustomEvent', function(self, init){ self.detail = init.detail; });
-    sub('UIEvent'); sub('MouseEvent', mouseExtra); sub('PointerEvent', mouseExtra); sub('KeyboardEvent', keyExtra);
-    sub('InputEvent', function(self, init){ self.data = init.data; self.inputType = init.inputType||''; });
-    sub('FocusEvent', function(self, init){ self.relatedTarget = init.relatedTarget||null; });
-    sub('CompositionEvent'); sub('WheelEvent', mouseExtra); sub('DragEvent', mouseExtra); sub('TouchEvent'); sub('ClipboardEvent');
-    g.document.createEvent = function(){ return new Event('', {}); };
-    __ns.ttEvent = true;
+  // Event records stay private: readonly Web-IDL getters and native dispatch
+  // share this state without exposing writable bookkeeping to page scripts.
+  var eventRecords = new WeakMap();
+  var getEventRecord = WeakMap.prototype.get.bind(eventRecords);
+  var setEventRecord = WeakMap.prototype.set.bind(eventRecords);
+  var eventClockOrigin = Date.now();
+  var nativeEventRecord = g.__nativeEventRecord;
+  delete g.__nativeEventRecord;
+  function eventRecord(event) {
+    var record = getEventRecord(event);
+    if (!record && nativeEventRecord) record = nativeEventRecord(event);
+    if (!record) throw new TypeError('Illegal invocation');
+    return record;
   }
+  if (!__ns.ttEvent) {
+    function eventString(value) {
+      if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol to a string');
+      return String(value);
+    }
+    function Event(type, init = {}) {
+      if (!new.target && !(this instanceof Event)) throw new TypeError('Event requires new');
+      if (!arguments.length) throw new TypeError('Event requires a type');
+      if (init != null && typeof init !== 'object' && typeof init !== 'function') throw new TypeError('EventInit must be a dictionary');
+      init = init || {};
+      var state = {type:eventString(type), bubbles:!!init.bubbles, cancelable:!!init.cancelable,
+        composed:!!init.composed, defaultPrevented:false, target:null, currentTarget:null,
+        stop:false, stopImmediate:false, eventPhase:0, timeStamp:g.performance&&typeof g.performance.now==='function'?g.performance.now():Date.now()-eventClockOrigin,
+        trusted:false, dispatching:false, path:[]};
+      setEventRecord(this,state);
+      var get = ({get isTrusted(){return eventRecord(this).trusted;}});
+      var trustedGetter=Object.getOwnPropertyDescriptor(get,'isTrusted').get;
+      if(__ns.makeNativeFunction)trustedGetter=__ns.makeNativeFunction(trustedGetter,'get isTrusted',0);
+      Object.defineProperty(this,'isTrusted',{get:trustedGetter,enumerable:true});
+    }
+    function eventMember(name, descriptor) {
+      descriptor.enumerable=true;descriptor.configurable=true;
+      if(descriptor.get&&__ns.makeNativeFunction)descriptor.get=__ns.makeNativeFunction(descriptor.get,'get '+name,0);
+      if(descriptor.set&&__ns.makeNativeFunction)descriptor.set=__ns.makeNativeFunction(descriptor.set,'set '+name,1);
+      if(descriptor.value){descriptor.writable=true;if(__ns.makeNativeFunction)descriptor.value=__ns.makeNativeFunction(descriptor.value,name,descriptor.value.length);}
+      Object.defineProperty(Event.prototype,name,descriptor);
+    }
+    ['type','target','currentTarget','eventPhase','bubbles','cancelable','defaultPrevented','composed','timeStamp'].forEach(function(name){
+      var getter=Object.getOwnPropertyDescriptor({get [name](){return eventRecord(this)[name];}},name).get;
+      eventMember(name,{get:getter});
+    });
+    eventMember('srcElement',{get:Object.getOwnPropertyDescriptor({get srcElement(){return eventRecord(this).target;}},'srcElement').get});
+    eventMember('returnValue',Object.getOwnPropertyDescriptor({get returnValue(){return !eventRecord(this).defaultPrevented;},set returnValue(value){var state=eventRecord(this);if(!value&&state.cancelable)state.defaultPrevented=true;}},'returnValue'));
+    eventMember('cancelBubble',Object.getOwnPropertyDescriptor({get cancelBubble(){return eventRecord(this).stop;},set cancelBubble(value){var state=eventRecord(this);if(value)state.stop=true;}},'cancelBubble'));
+    var methods={
+      preventDefault(){var state=eventRecord(this);if(state.cancelable)state.defaultPrevented=true;},
+      stopPropagation(){eventRecord(this).stop=true;},
+      stopImmediatePropagation(){var state=eventRecord(this);state.stop=true;state.stopImmediate=true;},
+      composedPath(){return eventRecord(this).path.slice();},
+      initEvent(type,bubbles=false,cancelable=false){
+        var state=eventRecord(this);if(!arguments.length)throw new TypeError('A type is required');if(state.dispatching)return;
+        state.type=eventString(type);state.bubbles=!!bubbles;state.cancelable=!!cancelable;
+        state.defaultPrevented=false;state.stop=false;state.stopImmediate=false;state.trusted=false;state.target=null;
+      }
+    };
+    Object.keys(methods).forEach(function(name){eventMember(name,{value:methods[name]});});
+    Object.defineProperty(Event.prototype,Symbol.toStringTag,{value:'Event',configurable:true});
+    ['NONE','CAPTURING_PHASE','AT_TARGET','BUBBLING_PHASE'].forEach(function(name,value){
+      [Event,Event.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});
+    });
+    g.Event = Event;
+    function mkSub(extra){ return function(type, init = {}){ if (arguments.length === 0) throw new TypeError('Event requires a type'); init = init || {}; Event.call(this, type, init); if (extra) extra(this, init); for (var k in init){ if (!(k in this)) this[k] = init[k]; } }; }
+    function sub(name, extra){ var C = mkSub(extra); Object.defineProperty(C, 'name', {value: name, configurable: true}); C.prototype = Object.create(Event.prototype); C.prototype.constructor = C; Object.defineProperty(C.prototype,Symbol.toStringTag,{value:name,configurable:true});g[name] = C; }
+    sub('CustomEvent', function(self, init){ self.detail = init.detail === undefined ? null : init.detail; });
+    sub('MessageEvent',function(self,init){self.data=init.data===undefined?null:init.data;self.origin=init.origin===undefined?'':eventString(init.origin);self.lastEventId=init.lastEventId===undefined?'':eventString(init.lastEventId);self.source=init.source||null;self.ports=init.ports||[];});
+    // UI input interfaces keep Web-IDL state private; arbitrary dictionary keys
+    // never become instance properties and inherited getters retain their brand.
+    var uiStates=new WeakMap(), mouseStates=new WeakMap(), keyStates=new WeakMap(), inputStates=new WeakMap(), focusStates=new WeakMap(), pointerStates=new WeakMap(), wheelStates=new WeakMap();
+    var numberValue=function(value,fallback=0){if(value===undefined)return fallback;if(typeof value==='bigint')throw new TypeError('Cannot convert a BigInt to a number');return Number(value);};
+    var intValue=function(value){return numberValue(value)>>0;};
+    var shortValue=function(value){return (intValue(value)<<16)>>16;};
+    var stringValue=function(value,fallback=''){return value===undefined?fallback:eventString(value);};
+    var stateOf=function(states,receiver){var state=states.get(receiver);if(!state)throw new TypeError('Illegal invocation');return state;};
+    var modifierNames={Alt:'altKey',Control:'ctrlKey',Meta:'metaKey',Shift:'shiftKey',AltGraph:'modifierAltGraph',CapsLock:'modifierCapsLock',Fn:'modifierFn',FnLock:'modifierFnLock',Hyper:'modifierHyper',NumLock:'modifierNumLock',ScrollLock:'modifierScrollLock',Super:'modifierSuper',Symbol:'modifierSymbol',SymbolLock:'modifierSymbolLock'};
+    function modifiers(init){var state={};Object.keys(modifierNames).forEach(function(name){state[modifierNames[name]]=!!init[modifierNames[name]];});return state;}
+    function member(prototype,name,descriptor){descriptor.configurable=true;descriptor.enumerable=true;if(descriptor.value){descriptor.writable=true;if(__ns.makeNativeFunction)descriptor.value=__ns.makeNativeFunction(descriptor.value,name,descriptor.value.length);}if(descriptor.get&&__ns.makeNativeFunction)descriptor.get=__ns.makeNativeFunction(descriptor.get,'get '+name,0);Object.defineProperty(prototype,name,descriptor);}
+    function readonly(prototype,states,names){names.forEach(function(name){member(prototype,name,{get:Object.getOwnPropertyDescriptor({get [name](){return stateOf(states,this)[name];}},name).get});});}
+    function tagEvent(Constructor,name){Object.defineProperty(Constructor.prototype,Symbol.toStringTag,{value:name,configurable:true});}
+    function initializeUI(event,init){var view=init.view===undefined?null:init.view;if(view!==null&&view!==g&&!((g.Window&&view instanceof g.Window)))throw new TypeError('view must be a Window');uiStates.set(event,{view:view,detail:intValue(init.detail),sourceCapabilities:null,pseudoTarget:null});}
+    class UIEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);initializeUI(this,init||{});}
+    }
+    readonly(UIEvent.prototype,uiStates,['view','detail','sourceCapabilities','pseudoTarget']);
+    member(UIEvent.prototype,'which',{get:Object.getOwnPropertyDescriptor({get which(){stateOf(uiStates,this);var keys=keyStates.get(this);if(keys)return keys.charCode||keys.keyCode;var mouse=mouseStates.get(this);if(mouse)return mouse.button===2?3:mouse.button===1?2:mouse.button===0?1:0;return 0;}},'which').get});
+    member(UIEvent.prototype,'initUIEvent',{value:function initUIEvent(type,bubbles=false,cancelable=false,view=null,detail=0){stateOf(uiStates,this);if(!arguments.length)throw new TypeError('A type is required');if(eventRecord(this).dispatching)return;Event.prototype.initEvent.call(this,type,bubbles,cancelable);initializeUI(this,{view:view,detail:detail});}});
+    tagEvent(UIEvent,'UIEvent');g.UIEvent=UIEvent;
+    function mouseState(init){var state=modifiers(init);['screenX','screenY','clientX','clientY','movementX','movementY'].forEach(function(name){state[name]=numberValue(init[name]);});state.button=shortValue(init.button);state.buttons=intValue(init.buttons)&65535;state.relatedTarget=init.relatedTarget||null;if(state.relatedTarget!==null&&!(state.relatedTarget instanceof g.EventTarget))throw new TypeError('relatedTarget must be an EventTarget');return state;}
+    class MouseEvent extends UIEvent {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);mouseStates.set(this,mouseState(init||{}));}
+    }
+    readonly(MouseEvent.prototype,mouseStates,['screenX','screenY','clientX','clientY','ctrlKey','shiftKey','altKey','metaKey','button','buttons','relatedTarget','movementX','movementY']);
+    ['pageX','pageY','x','y','offsetX','offsetY','layerX','layerY'].forEach(function(name){var axis=name.endsWith('X')||name==='x'?'clientX':'clientY';member(MouseEvent.prototype,name,{get:Object.getOwnPropertyDescriptor({get [name](){var value=stateOf(mouseStates,this)[axis];return name.startsWith('page')?value+(axis==='clientX'?(g.scrollX||0):(g.scrollY||0)):value;}},name).get});});
+    ['fromElement','toElement'].forEach(function(name){member(MouseEvent.prototype,name,{get:Object.getOwnPropertyDescriptor({get [name](){var state=stateOf(mouseStates,this),event=eventRecord(this);return (name==='fromElement')===(event.type==='mouseover'||event.type==='mouseenter')?state.relatedTarget:event.target;}},name).get});});
+    function modifier(states,receiver,key){var state=stateOf(states,receiver);return !!state[modifierNames[eventString(key)]];}
+    member(MouseEvent.prototype,'getModifierState',{value:function getModifierState(key){if(!arguments.length)throw new TypeError('A modifier is required');return modifier(mouseStates,this,key);}});
+    member(MouseEvent.prototype,'initMouseEvent',{value:function initMouseEvent(type,bubbles=false,cancelable=false,view=null,detail=0,screenX=0,screenY=0,clientX=0,clientY=0,ctrlKey=false,altKey=false,shiftKey=false,metaKey=false,button=0,relatedTarget=null){stateOf(mouseStates,this);if(!arguments.length)throw new TypeError('A type is required');if(eventRecord(this).dispatching)return;UIEvent.prototype.initUIEvent.call(this,type,bubbles,cancelable,view,detail);mouseStates.set(this,mouseState({screenX,screenY,clientX,clientY,ctrlKey,altKey,shiftKey,metaKey,button,relatedTarget}));}});
+    tagEvent(MouseEvent,'MouseEvent');g.MouseEvent=MouseEvent;
+    class KeyboardEvent extends UIEvent {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};var state=modifiers(init);state.key=stringValue(init.key);state.code=stringValue(init.code);state.location=intValue(init.location)>>>0;state.repeat=!!init.repeat;state.isComposing=!!init.isComposing;state.charCode=intValue(init.charCode)>>>0;state.keyCode=intValue(init.keyCode)>>>0;keyStates.set(this,state);}
+    }
+    readonly(KeyboardEvent.prototype,keyStates,['key','code','location','ctrlKey','shiftKey','altKey','metaKey','repeat','isComposing','charCode','keyCode']);
+    member(KeyboardEvent.prototype,'getModifierState',{value:function getModifierState(key){if(!arguments.length)throw new TypeError('A modifier is required');return modifier(keyStates,this,key);}});
+    member(KeyboardEvent.prototype,'initKeyboardEvent',{value:function initKeyboardEvent(type,bubbles=false,cancelable=false,view=null,key='',location=0,ctrlKey=false,altKey=false,shiftKey=false,metaKey=false){var state=stateOf(keyStates,this);if(!arguments.length)throw new TypeError('A type is required');if(eventRecord(this).dispatching)return;UIEvent.prototype.initUIEvent.call(this,type,bubbles,cancelable,view,0);Object.assign(state,{key:eventString(key),location:intValue(location)>>>0,ctrlKey:!!ctrlKey,altKey:!!altKey,shiftKey:!!shiftKey,metaKey:!!metaKey});}});
+    ['DOM_KEY_LOCATION_STANDARD','DOM_KEY_LOCATION_LEFT','DOM_KEY_LOCATION_RIGHT','DOM_KEY_LOCATION_NUMPAD'].forEach(function(name,value){[KeyboardEvent,KeyboardEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});});
+    tagEvent(KeyboardEvent,'KeyboardEvent');g.KeyboardEvent=KeyboardEvent;
+    class InputEvent extends UIEvent {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};inputStates.set(this,{data:init.data==null?null:eventString(init.data),isComposing:!!init.isComposing,inputType:stringValue(init.inputType),dataTransfer:init.dataTransfer||null});}
+    }
+    readonly(InputEvent.prototype,inputStates,['data','isComposing','inputType','dataTransfer']);
+    member(InputEvent.prototype,'getTargetRanges',{value:function getTargetRanges(){stateOf(inputStates,this);return [];}});
+    tagEvent(InputEvent,'InputEvent');g.InputEvent=InputEvent;
+    class FocusEvent extends UIEvent {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);var related=(init||{}).relatedTarget||null;if(related!==null&&!(related instanceof g.EventTarget))throw new TypeError('relatedTarget must be an EventTarget');focusStates.set(this,{relatedTarget:related});}
+    }
+    readonly(FocusEvent.prototype,focusStates,['relatedTarget']);tagEvent(FocusEvent,'FocusEvent');g.FocusEvent=FocusEvent;
+    class PointerEvent extends MouseEvent {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};var state={pointerId:intValue(init.pointerId),width:numberValue(init.width,1),height:numberValue(init.height,1),pressure:numberValue(init.pressure),tangentialPressure:numberValue(init.tangentialPressure),tiltX:intValue(init.tiltX),tiltY:intValue(init.tiltY),twist:intValue(init.twist)>>>0,pointerType:stringValue(init.pointerType),isPrimary:!!init.isPrimary,altitudeAngle:numberValue(init.altitudeAngle,Math.PI/2),azimuthAngle:numberValue(init.azimuthAngle),persistentDeviceId:intValue(init.persistentDeviceId)};pointerStates.set(this,state);}
+    }
+    readonly(PointerEvent.prototype,pointerStates,['pointerId','width','height','pressure','tangentialPressure','tiltX','tiltY','twist','pointerType','isPrimary','altitudeAngle','azimuthAngle','persistentDeviceId']);
+    member(PointerEvent.prototype,'getCoalescedEvents',{value:function getCoalescedEvents(){stateOf(pointerStates,this);return [];}});
+    member(PointerEvent.prototype,'getPredictedEvents',{value:function getPredictedEvents(){stateOf(pointerStates,this);return [];}});
+    tagEvent(PointerEvent,'PointerEvent');g.PointerEvent=PointerEvent;
+    class WheelEvent extends MouseEvent {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};wheelStates.set(this,{deltaX:numberValue(init.deltaX),deltaY:numberValue(init.deltaY),deltaZ:numberValue(init.deltaZ),deltaMode:intValue(init.deltaMode)>>>0,momentum:false});}
+    }
+    readonly(WheelEvent.prototype,wheelStates,['deltaX','deltaY','deltaZ','deltaMode','momentum']);
+    ['wheelDelta','wheelDeltaX','wheelDeltaY'].forEach(function(name){member(WheelEvent.prototype,name,{get:Object.getOwnPropertyDescriptor({get [name](){var state=stateOf(wheelStates,this);return -3*(name==='wheelDeltaX'?state.deltaX:state.deltaY);}},name).get});});
+    ['DOM_DELTA_PIXEL','DOM_DELTA_LINE','DOM_DELTA_PAGE'].forEach(function(name,value){[WheelEvent,WheelEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});});
+    tagEvent(WheelEvent,'WheelEvent');g.WheelEvent=WheelEvent;
+    // Use the native class bridge for actual implementations, preserving private
+    // records and subclass new.target rather than replacing Function.toString.
+    [UIEvent,MouseEvent,KeyboardEvent,InputEvent,FocusEvent,PointerEvent,WheelEvent].forEach(function(implementation){var name=implementation.name,constructor=__ns.makeNativeFunction?__ns.makeNativeFunction(implementation,name,1,true,true):implementation;constructor.prototype=implementation.prototype;Object.defineProperty(constructor.prototype,'constructor',{value:constructor,writable:true,configurable:true});Object.defineProperty(constructor,'prototype',{writable:false});Object.keys(implementation).forEach(function(key){Object.defineProperty(constructor,key,Object.getOwnPropertyDescriptor(implementation,key));});g[name]=constructor;});
+    [MouseEvent,KeyboardEvent,InputEvent,FocusEvent].forEach(function(implementation){Object.setPrototypeOf(g[implementation.name],g.UIEvent);});
+    [PointerEvent,WheelEvent].forEach(function(implementation){Object.setPrototypeOf(g[implementation.name],g.MouseEvent);});
+    sub('CompositionEvent'); sub('DragEvent'); sub('TouchEvent'); sub('ClipboardEvent');
+    g.document.createEvent = function(){ return new Event('', {}); };
+    // The installer captures and deletes this function before guest execution.
+    g.__captureEventRecord=function(event){return getEventRecord(event);};
+    __ns.ttEvent=true;
+  }
+const __domExceptionState = new WeakMap();
+const __domExceptionCodes = {IndexSizeError:1, HierarchyRequestError:3, WrongDocumentError:4,
+  InvalidCharacterError:5, NoModificationAllowedError:7, NotFoundError:8, NotSupportedError:9,
+  InUseAttributeError:10, InvalidStateError:11, SyntaxError:12, InvalidModificationError:13,
+  NamespaceError:14, InvalidAccessError:15, TypeMismatchError:17, SecurityError:18,
+  NetworkError:19, AbortError:20, URLMismatchError:21, QuotaExceededError:22,
+  TimeoutError:23, InvalidNodeTypeError:24, DataCloneError:25};
+const __domExceptionGet = __domExceptionState.get.bind(__domExceptionState);
+const __domExceptionSet = __domExceptionState.set.bind(__domExceptionState);
+const __exceptionStringConstructor = String;
+const __exceptionState = (exception) => {
+  const state = __domExceptionGet(exception);
+  if (!state) throw new TypeError("Illegal invocation");
+  return state;
+};
+const __exceptionString = value => {
+  if (typeof value === "symbol") throw new TypeError("Cannot convert a Symbol to a string");
+  return __exceptionStringConstructor(value);
+};
+g.DOMException = class DOMException {
+  constructor(message = "", name = "Error") {
+    const text = __exceptionString(message), kind = __exceptionString(name);
+    __domExceptionSet(this, {message: text, name: kind});
+  }
+  get name() { return __exceptionState(this).name; }
+  get message() { return __exceptionState(this).message; }
+  get code() { return __domExceptionCodes[__exceptionState(this).name] || 0; }
+};
+Object.setPrototypeOf(DOMException.prototype, Error.prototype);
+for (const name of ["name", "message", "code"]) {
+  const descriptor = Object.getOwnPropertyDescriptor(DOMException.prototype, name);
+  Object.defineProperty(DOMException.prototype, name, {...descriptor, enumerable: true});
+}
+Object.defineProperty(DOMException.prototype, Symbol.toStringTag, {value: "DOMException", configurable: true});
+for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:2,
+  HIERARCHY_REQUEST_ERR:3, WRONG_DOCUMENT_ERR:4, INVALID_CHARACTER_ERR:5, NO_DATA_ALLOWED_ERR:6,
+  NO_MODIFICATION_ALLOWED_ERR:7, NOT_FOUND_ERR:8, NOT_SUPPORTED_ERR:9, INUSE_ATTRIBUTE_ERR:10,
+  INVALID_STATE_ERR:11, SYNTAX_ERR:12, INVALID_MODIFICATION_ERR:13, NAMESPACE_ERR:14,
+  INVALID_ACCESS_ERR:15, VALIDATION_ERR:16, TYPE_MISMATCH_ERR:17, SECURITY_ERR:18,
+  NETWORK_ERR:19, ABORT_ERR:20, URL_MISMATCH_ERR:21, QUOTA_EXCEEDED_ERR:22, TIMEOUT_ERR:23,
+  INVALID_NODE_TYPE_ERR:24, DATA_CLONE_ERR:25})) {
+  for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true});
+}
+
+if(typeof __ns.makeNativeFunction==='function'){
+  var exceptionImplementation=g.DOMException;
+  var exceptionConstructor=__ns.makeNativeFunction(exceptionImplementation,'DOMException',0,true,true);
+  exceptionConstructor.prototype=exceptionImplementation.prototype;
+  Object.defineProperty(exceptionConstructor.prototype,'constructor',{value:exceptionConstructor,configurable:true,writable:true});
+  Object.defineProperty(exceptionConstructor,'prototype',{writable:false});
+  for(var exceptionKey of Object.keys(exceptionImplementation))Object.defineProperty(exceptionConstructor,exceptionKey,Object.getOwnPropertyDescriptor(exceptionImplementation,exceptionKey));
+  ['name','message','code'].forEach(function(key){var descriptor=Object.getOwnPropertyDescriptor(exceptionConstructor.prototype,key);descriptor.get=__ns.makeNativeFunction(descriptor.get,'get '+key,0);Object.defineProperty(exceptionConstructor.prototype,key,descriptor);});
+  g.DOMException=exceptionConstructor;
+}
+  function beginEventDispatch(event,target,path,host=false){
+    var state=eventRecord(event);
+    if(state.dispatching||!state.type)throw new g.DOMException('The event is already being dispatched or uninitialized.','InvalidStateError');
+    state.dispatching=true;state.trusted=host;
+    state.target=target;state.currentTarget=target;state.eventPhase=2;state.path=path;
+    return state;
+  }
+  function endEventDispatch(state){state.currentTarget=null;state.eventPhase=0;state.path=[];state.dispatching=false;state.stop=false;state.stopImmediate=false;}
   var ctors = ['Node','Element','HTMLElement','HTMLDivElement','HTMLInputElement','HTMLButtonElement','HTMLAnchorElement','HTMLSelectElement','HTMLTextAreaElement','HTMLFormElement','HTMLImageElement','HTMLLabelElement','HTMLOptionElement','HTMLUListElement','HTMLLIElement','HTMLSpanElement','HTMLParagraphElement','HTMLHeadingElement','HTMLTableElement','HTMLIFrameElement','HTMLCanvasElement','HTMLStyleElement','HTMLScriptElement','HTMLDocument','Document','DocumentFragment','ShadowRoot','Text','Comment','SVGElement','SVGSVGElement','DOMParser','EventTarget','AbortController','AbortSignal','DOMException',
     'UIEvent','MouseEvent','KeyboardEvent','FocusEvent','InputEvent','TouchEvent','PointerEvent','WheelEvent','DragEvent','ClipboardEvent','AnimationEvent','TransitionEvent','MessageEvent','ProgressEvent','CompositionEvent','PopStateEvent','HashChangeEvent','StorageEvent','ErrorEvent','CloseEvent',
     // DOM node/collection/CSS interfaces app bundles do `instanceof` against (an
     // undefined RHS throws "not an object" and aborts the chunk — a single missing
     // `Response`/`NodeList` cascades through webpack init and kills React hydration).
-    'CharacterData','Attr','CDATASection','ProcessingInstruction','NodeList','HTMLCollection',
+    'CharacterData','Attr','DocumentType','CDATASection','ProcessingInstruction','NodeList','HTMLCollection',
     'DOMTokenList','NamedNodeMap','CSSStyleDeclaration','CSSRule','StyleSheet','MediaList',
     'DOMStringMap','MutationRecord','MediaQueryList','DOMRect','DOMRectReadOnly','DOMPoint'];
   ctors.forEach(function(n){ if (typeof g[n] === "undefined") { var f = function(){}; f.prototype = {}; try { Object.defineProperty(f, "name", { value: n, configurable: true }); } catch(e){} g[n] = f; } });
@@ -215,14 +413,17 @@
         var m = this.__etl; if (!m || !m[type]) return;
         var i = m[type].indexOf(cb); if (i >= 0) m[type].splice(i, 1);
       };
-      ET.prototype.dispatchEvent = function(ev){
-        var m = this.__etl, type = ev && ev.type, list = m && type && m[type];
-        if (list) { try { if (!ev.target) ev.target = this; ev.currentTarget = this; } catch(e){}
-          for (var i = 0; i < list.length; i++){ var cb = list[i];
-            try { typeof cb === "function" ? cb.call(this, ev) : cb.handleEvent(ev); } catch(e){} } }
-        return !(ev && ev.defaultPrevented);
-      };
+
     }
+    if(ET&&ET.prototype)ET.prototype.dispatchEvent=function(ev){
+      var state=beginEventDispatch(ev,this,[this]);
+      var registry=this.__etl||this.__listeners,list=registry&&registry[state.type];
+      try{if(list)for(var cb of list.slice()){
+        if(state.stopImmediate)break;
+        try{typeof cb==='function'?cb.call(this,ev):cb.handleEvent(ev);}catch(e){}
+      }}finally{endEventDispatch(state);}
+      return !state.defaultPrevented;
+    };
   })();
   // make `node instanceof HTMLElement/Element/Node/...` work for native DOM nodes (jest-dom's
   // checkHtmlElement + many libs rely on it) via Symbol.hasInstance keyed on nodeType.
@@ -239,7 +440,7 @@
   iface('HTMLTextAreaElement', function(o){ return isNode(o) && o.nodeType === 1 && String(o.tagName).toUpperCase() === 'TEXTAREA'; });
   iface('HTMLSelectElement', function(o){ return isNode(o) && o.nodeType === 1 && String(o.tagName).toUpperCase() === 'SELECT'; });
   // Node subtypes keyed on nodeType (CharacterData is the Text/Comment/CDATA base).
-  iface('CharacterData', function(o){ return isNode(o) && (o.nodeType === 3 || o.nodeType === 4 || o.nodeType === 8); });
+  iface('CharacterData', function(o){ return isNode(o) && (o.nodeType === 3 || o.nodeType === 4 || o.nodeType === 7 || o.nodeType === 8); });
   iface('Attr', function(o){ return isNode(o) && o.nodeType === 2; });
   iface('CDATASection', function(o){ return isNode(o) && o.nodeType === 4; });
   iface('ProcessingInstruction', function(o){ return isNode(o) && o.nodeType === 7; });
@@ -313,14 +514,67 @@
     var winL = __ns.winListeners = {};
     g.addEventListener = function(type, fn){ if (typeof fn !== 'function') return; (winL[type] = winL[type] || []).push(fn); };
     g.removeEventListener = function(type, fn){ var a = winL[type]; if (a){ var i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } };
-    g.dispatchEvent = function(ev){ if (!ev) return true; if (ev.target == null) { try { ev.target = g; } catch(e){} } var a = winL[ev.type]; if (a) a.slice().forEach(function(fn){ try { fn.call(g, ev); } catch(e){} }); return !ev.defaultPrevented; };
+    g.dispatchEvent = function(ev){
+      var state=beginEventDispatch(ev,g,[g]),listeners=winL[state.type];
+      try{if(listeners)for(var fn of listeners.slice()){if(state.stopImmediate)break;try{fn.call(g,ev);}catch(e){}}}
+      finally{endEventDispatch(state);}return !state.defaultPrevented;
+    };
   }
+  // Captured privately by the host before page scripts can run.
+  g.__captureHostEventDispatch=function(event,target){
+    'use strict';
+    var state=beginEventDispatch(event,target,[target],true);
+    // Chrome's Window lifecycle dispatch retains its legacy target/path/dispatch state.
+    // Independently verified with raw CDP; ordinary dispatch still clears its state.
+    var legacyWindow=target===g&&(state.type==='load'||state.type==='pageshow');
+    if(legacyWindow)state.target=g.document;
+    var registry=target===g?__ns.winListeners:(target.__etl||target.__listeners);
+    var list=registry&&registry[state.type];
+    try{if(list)for(var listener of list.slice()){
+      if(state.stopImmediate)break;
+      try{typeof listener==='function'?listener.call(target,event):listener.handleEvent(event);}catch(e){}
+    }}finally{if(!legacyWindow)endEventDispatch(state);}
+    return !state.defaultPrevented;
+  };
   // document extras (pure-JS shims over the native tree).
   var d = g.document;
   d.defaultView = g;
-  // Parse text once per mutation, retaining rule identity until its source changes.
-  // The scanner respects strings/comments and nested blocks (regex splitting does not).
-  var cssList = function(){ var a=[]; a.item=function(i){ return this[i] || null; }; return a; };
+  // Native Lightning CSS validates selectors/declarations and recovers invalid rules.
+  // This scanner builds the facade's mutable object graph from that parsed CSS.
+  var cssStores=cssMap('list');
+  // Retained sheets keep their own list brand after this context installs another document.
+  var cssListPrototypes={};
+  var cssRecord=function(list){var record=cssStores.get(list);if(!record)throw new TypeError('Illegal invocation');if(record.refresh&&!record.refreshing){record.refreshing=true;try{record.items=record.refresh();}finally{record.refreshing=false;}}return record;};
+  ['CSSRuleList','StyleSheetList'].forEach(function(name){
+    var illegalConstructor=function(){throw new TypeError('Illegal constructor');};
+    var ctor=__ns.makeNativeFunction?__ns.makeNativeFunction(illegalConstructor,name,0,true):illegalConstructor;Object.defineProperty(ctor,'name',{value:name});
+    ctor.prototype={};
+    Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});
+    var lengthGetter=Object.getOwnPropertyDescriptor({get length(){return cssRecord(this).items.length;}},'length').get;
+    if(__ns.makeNativeFunction)lengthGetter=__ns.makeNativeFunction(lengthGetter,'get length',0);
+    Object.defineProperty(ctor.prototype,'length',{configurable:true,enumerable:true,get:lengthGetter});
+    var item=({item(index){if(!arguments.length)throw new TypeError("Failed to execute 'item': 1 argument required");return cssRecord(this).items[Number(index)>>>0]||null;}}).item;
+    if(__ns.makeNativeFunction)item=__ns.makeNativeFunction(item,'item',1);
+    Object.defineProperty(ctor.prototype,'item',{configurable:true,enumerable:true,writable:true,value:item});
+    Object.defineProperty(ctor.prototype,'constructor',{configurable:true,writable:true,value:ctor});
+    Object.defineProperty(ctor.prototype,Symbol.iterator,{configurable:true,writable:true,value:Array.prototype.values});
+    Object.defineProperty(ctor,'prototype',{writable:false});
+    Object.defineProperty(g,name,{value:ctor,writable:true,configurable:true,enumerable:false});
+    cssListPrototypes[name]=ctor.prototype;
+  });
+  var cssIndex=function(key){return typeof key==='string'&&/^(0|[1-9]\d*)$/.test(key)?Number(key):-1;};
+  var cssList=function(name,refresh){
+    var target=Object.create(cssListPrototypes[name||'CSSRuleList']),record={items:[],refresh:refresh,refreshing:false},proxy;
+    proxy=new Proxy(target,{
+      get:function(obj,key,receiver){var index=cssIndex(key);return index>=0?cssRecord(proxy).items[index]:Reflect.get(obj,key,receiver);},
+      has:function(obj,key){var index=cssIndex(key);return index>=0?index<cssRecord(proxy).items.length:Reflect.has(obj,key);},
+      ownKeys:function(){return cssRecord(proxy).items.map(function(_,i){return String(i);}).concat(Reflect.ownKeys(target));},
+      getOwnPropertyDescriptor:function(obj,key){var index=cssIndex(key),items=cssRecord(proxy).items;return index>=0&&index<items.length?{value:items[index],writable:false,enumerable:true,configurable:true}:Reflect.getOwnPropertyDescriptor(obj,key);},
+      set:function(obj,key,value,receiver){return cssIndex(key)<0&&Reflect.set(obj,key,value,receiver);},
+      deleteProperty:function(obj,key){return cssIndex(key)<0&&Reflect.deleteProperty(obj,key);}
+    });cssStores.set(proxy,record);return proxy;
+  };
+  var cssItems=function(list){return cssStores.get(list).items;};
   var cssParts = function(text, separator){
     var out=[], start=0, depth=0, quote='', escaped=false, comment=false;
     for (var i=0;i<text.length;i++) {
@@ -333,24 +587,55 @@
     }
     out.push(text.slice(start)); return out;
   };
-  var cssDeclaration = function(text){
-    var st=Object.create(g.CSSStyleDeclaration.prototype), values={}, names=[];
-    st.getPropertyValue=function(n){return (values[String(n)] || '').replace(/\s*!important$/,'');};
-    st.getPropertyPriority=function(n){return /!important$/.test(values[String(n)]||'')?'important':'';};
-    st.setProperty=function(n,v,priority){n=String(n);if(!(n in values))names.push(n);values[n]=String(v)+(priority==='important'?' !important':'');st[n]=String(v);};
-    st.removeProperty=function(n){var v=st.getPropertyValue(n);delete values[n];delete st[n];var i=names.indexOf(n);if(i>=0)names.splice(i,1);return v;};
-    st.item=function(i){return names[i]||'';};
-    Object.defineProperty(st,'length',{get:function(){return names.length;}});
-    Object.defineProperty(st,'cssText',{get:function(){return names.map(function(n){return n+': '+values[n]+';';}).join(' ');},set:function(t){names.slice().forEach(function(n){st.removeProperty(n);});parse(t);}});
-    var parse=function(t){cssParts(String(t),';').forEach(function(part){var i=part.indexOf(':');if(i>0){var n=part.slice(0,i).trim(),v=part.slice(i+1).trim();if(n&&v)st.setProperty(n,v);}});};
-    parse(text); return st;
-  };
-  if (typeof g.CSSStyleRule !== 'function') g.CSSStyleRule=function CSSStyleRule(){};
-  g.CSSRule.STYLE_RULE=1;
-  g.CSSStyleRule.prototype=Object.create(g.CSSRule.prototype);
-  g.CSSStyleRule.prototype.constructor=g.CSSStyleRule;
-  var parseCssRules = function(text, sheet, parent){
-    text=String(text); var out=cssList(), start=0, depth=0, quote='', escaped=false, comment=false, open=-1;
+  var declarationRecords=cssMap('declaration'),inlineDeclarations=cssMap('inlineDeclaration'),cssPropertyCache=new Map();
+  function declarationRecord(style){var record=declarationRecords.get(style);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=appliedInlineRead.call(record.owner);if(text!==record.source){record.source=text;parseDeclaration(record,text);}}if(record.refresh){var fresh=declarationRecords.get(record.refresh());if(fresh){record.values=fresh.values;record.names=fresh.names;}}return record;}
+  function cssString(value){if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);}
+  function cssPropertyName(name){if(name==='cssFloat')return 'float';return String(name).replace(/[A-Z]/g,function(c){return '-'+c.toLowerCase();}).replace(/^webkit-/,'-webkit-');}
+  function knownProperty(name){if(!cssPropertyCache.has(name))cssPropertyCache.set(name,typeof cssNativeParse==='function'&&cssNativeParse(name,true));return cssPropertyCache.get(name);}
+  function declarationText(record){return record.names.map(function(name){var value=record.values.get(name);return name+': '+value.text+(value.priority?' !important':'')+';';}).join(' ');}
+  __ns.readDeclarationText=function(style){return declarationText(declarationRecord(style));};
+  function colorText(name,text){if(!/(?:^color$|color$)/.test(name))return text;var match=/^#([\da-f]{3}|[\da-f]{6})$/i.exec(text);if(!match)return text;var hex=match[1];if(hex.length===3)hex=hex.replace(/./g,function(c){return c+c;});return 'rgb('+parseInt(hex.slice(0,2),16)+', '+parseInt(hex.slice(2,4),16)+', '+parseInt(hex.slice(4,6),16)+')';}
+  function storeDeclaration(record,name,text,priority){if(!record.values.has(name))record.names.push(name);record.values.set(name,{text:colorText(name,text),priority:priority||''});}
+  function parseDeclaration(record,text){record.names=[];record.values=new Map();var parsed=typeof cssNativeParse==='function'?cssNativeParse('x { '+text+' }'):'x { '+text+' }';var body=parsed.slice(parsed.indexOf('{')+1,parsed.lastIndexOf('}'));cssParts(body,';').forEach(function(part){var index=part.indexOf(':');if(index<1)return;var name=part.slice(0,index).trim();if(!name.startsWith('--')&&!knownProperty(name))return;var value=part.slice(index+1).trim(),important=/\s*!important\s*$/i.test(value);if(important)value=value.replace(/\s*!important\s*$/i,'').trim();var previous=record.values.get(name);if(previous&&previous.priority&&!important)return;storeDeclaration(record,name,value,important?'important':'');});}
+  function writableDeclaration(record){if(record.readOnly)throw new g.DOMException('The declaration is read-only','NoModificationAllowedError');}
+  function commitDeclaration(record){if(record.owner){record.source=declarationText(record);appliedInlineWrite.call(record.owner,record.source);}}
+  function removeDeclaration(record,name){var previous=record.values.get(name);if(!previous)return '';record.values.delete(name);record.names.splice(record.names.indexOf(name),1);commitDeclaration(record);return previous.text;}
+  function setDeclaration(record,name,value,priority){writableDeclaration(record);name=cssString(name);value=value===null?'':cssString(value);priority=priority==null?'':cssString(priority).toLowerCase();if(!value){removeDeclaration(record,name);return;}if(priority&&priority!=='important'||!name.startsWith('--')&&!knownProperty(name))return;var parsed={names:[],values:new Map()};parseDeclaration(parsed,name+': '+value+(priority?' !important':'')+';');var accepted=parsed.values.get(name);if(!accepted)return;storeDeclaration(record,name,accepted.text,accepted.priority);commitDeclaration(record);}
+  var declarationConstructor=__ns.makeNativeFunction(function(){throw new TypeError('Illegal constructor');},'CSSStyleDeclaration',0,true);
+  declarationConstructor.prototype={};Object.defineProperty(declarationConstructor.prototype,'constructor',{value:declarationConstructor,writable:true,configurable:true});Object.defineProperty(declarationConstructor.prototype,Symbol.toStringTag,{value:'CSSStyleDeclaration',configurable:true});Object.defineProperty(declarationConstructor,'prototype',{writable:false});Object.defineProperty(g,'CSSStyleDeclaration',{value:declarationConstructor,writable:true,configurable:true,enumerable:false});
+  var declarationPrototype=declarationConstructor.prototype;
+  function declarationMember(name,get,set){var descriptor={enumerable:true,configurable:true,get:__ns.makeNativeFunction(get,'get '+name,0)};if(set)descriptor.set=__ns.makeNativeFunction(set,'set '+name,1);Object.defineProperty(declarationPrototype,name,descriptor);}
+  declarationMember('length',function(){return declarationRecord(this).names.length;});
+  declarationMember('parentRule',function(){return declarationRecord(this).parentRule||null;});
+  declarationMember('cssFloat',function(){var value=declarationRecord(this).values.get('float');return value?value.text:'';},function(value){setDeclaration(declarationRecord(this),'float',value,'');});
+  declarationMember('cssText',function(){var record=declarationRecord(this);return record.computed?'':declarationText(record);},function(value){var record=declarationRecord(this);writableDeclaration(record);parseDeclaration(record,cssString(value));commitDeclaration(record);});
+  var declarationMethods={getPropertyValue:function(name){if(!arguments.length)throw new TypeError('getPropertyValue requires 1 argument');var record=declarationRecord(this),value=record.values.get(cssString(name));return value?value.text:'';},getPropertyPriority:function(name){if(!arguments.length)throw new TypeError('getPropertyPriority requires 1 argument');var value=declarationRecord(this).values.get(cssString(name));return value?value.priority:'';},setProperty:function(name,value,priority){if(arguments.length<2)throw new TypeError('setProperty requires 2 arguments');setDeclaration(declarationRecord(this),name,value,priority);},removeProperty:function(name){if(!arguments.length)throw new TypeError('removeProperty requires 1 argument');var record=declarationRecord(this);writableDeclaration(record);return removeDeclaration(record,cssString(name));},item:function(index){if(!arguments.length)throw new TypeError('item requires 1 argument');return declarationRecord(this).names[Number(index)>>>0]||'';}};
+  Object.keys(declarationMethods).forEach(function(name){Object.defineProperty(declarationPrototype,name,{value:__ns.makeNativeFunction(declarationMethods[name],name,name==='setProperty'?2:1),writable:true,enumerable:true,configurable:true});});
+  Object.defineProperty(declarationPrototype,Symbol.iterator,{value:Array.prototype.values,writable:true,configurable:true});
+  function declarationProperty(name){if(typeof name!=='string'||name.startsWith('--'))return null;var cssName=cssPropertyName(name);return knownProperty(cssName)?cssName:null;}
+  var cssDeclaration=function(text,owner,parentRule,readOnly){var target=Object.create(declarationPrototype),record={names:[],values:new Map(),owner:owner||null,parentRule:parentRule||null,source:String(text||''),readOnly:!!readOnly},proxy;parseDeclaration(record,record.source);proxy=new Proxy(target,{get:function(obj,key,receiver){var index=cssIndex(key);if(index>=0)return declarationRecord(proxy).names[index];if(Reflect.has(obj,key))return Reflect.get(obj,key,receiver);var name=declarationProperty(key),value=name&&declarationRecord(proxy).values.get(name);return name?value?value.text:'':undefined;},set:function(obj,key,value,receiver){if(cssIndex(key)>=0)return false;if(Reflect.has(obj,key))return Reflect.set(obj,key,value,receiver);var name=declarationProperty(key);if(name){setDeclaration(declarationRecord(proxy),name,value,'');return true;}return Reflect.set(obj,key,value,receiver);},has:function(obj,key){return cssIndex(key)>=0?cssIndex(key)<declarationRecord(proxy).names.length:Reflect.has(obj,key)||!!declarationProperty(key);},ownKeys:function(){return declarationRecord(proxy).names.map(function(_,i){return String(i);}).concat(Reflect.ownKeys(target));},getOwnPropertyDescriptor:function(obj,key){var index=cssIndex(key),names=declarationRecord(proxy).names;if(index>=0&&index<names.length)return {value:names[index],writable:false,enumerable:true,configurable:true};var descriptor=Reflect.getOwnPropertyDescriptor(obj,key);if(descriptor)return descriptor;if(Reflect.has(declarationPrototype,key))return undefined;var name=declarationProperty(key),value=name&&declarationRecord(proxy).values.get(name);return name?{value:value?value.text:'',writable:true,enumerable:true,configurable:true}:undefined;},deleteProperty:function(obj,key){return cssIndex(key)<0&&Reflect.deleteProperty(obj,key);}});declarationRecords.set(proxy,record);return proxy;};
+  var inlineDeclarationReceiver=__ns.domAccessor('nodeType',false,'Element');
+  __ns.makeInlineStyleDeclaration=function(element){inlineDeclarationReceiver.call(element);var style=inlineDeclarations.get(element);if(!style){style=cssDeclaration(appliedInlineRead.call(element),element);inlineDeclarations.set(element,style);}return style;};
+  var computedStyleReader=g.getComputedStyle;
+  __ns.makeComputedStyleDeclaration=function(values,element){var style=cssDeclaration(''),record=declarationRecords.get(style);Object.keys(values).forEach(function(name){var cssName=cssPropertyName(name),value=values[name];if(typeof value==='string'&&value&&knownProperty(cssName))storeDeclaration(record,cssName,value,'');});record.readOnly=true;record.computed=true;if(element)record.refresh=function(){return computedStyleReader(element);};return style;};
+  var cssRuleStates=cssMap('rule');
+  var cssRuleRecord=function(rule,type){var record=cssRuleStates.get(rule);if(!record||type&&record.type!==type)throw new TypeError('Illegal invocation');return record;};
+  function cssRuleInterface(name,parent){var ctor=__ns.makeNativeFunction(function(){throw new TypeError('Illegal constructor');},name,0,true);ctor.prototype=Object.create(parent||Object.prototype);Object.defineProperty(ctor.prototype,'constructor',{value:ctor,writable:true,configurable:true});Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});Object.defineProperty(ctor,'prototype',{writable:false});if(parent)Object.setPrototypeOf(ctor,parent.constructor);Object.defineProperty(g,name,{value:ctor,writable:true,configurable:true,enumerable:false});}
+  cssRuleInterface('CSSRule');cssRuleInterface('CSSStyleRule',g.CSSRule.prototype);cssRuleInterface('CSSImportRule',g.CSSRule.prototype);
+  function cssRuleMember(owner,name,get,set){var descriptor={enumerable:true,configurable:true,get:__ns.makeNativeFunction(get,'get '+name,0)};if(set)descriptor.set=__ns.makeNativeFunction(set,'set '+name,1);Object.defineProperty(g[owner].prototype,name,descriptor);}
+  ['type','parentRule','parentStyleSheet'].forEach(function(name){cssRuleMember('CSSRule',name,function(){return cssRuleRecord(this)[name];});});
+  function cssRuleText(record){if(record.type===1){var text=declarationText(declarationRecord(record.style));return record.selectorText+' {'+(text?' '+text+' ':' ')+'}';}return record.cssText;}
+  __ns.readCssRuleText=function(rule){return cssRuleText(cssRuleRecord(rule));};
+  cssRuleMember('CSSRule','cssText',function(){return cssRuleText(cssRuleRecord(this));},function(value){cssRuleRecord(this);if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');String(value);});
+  cssRuleMember('CSSStyleRule','selectorText',function(){return cssRuleRecord(this,1).selectorText;},function(value){var record=cssRuleRecord(this,1);if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');var parsed=parseCssRules(String(value)+' {}',record.parentStyleSheet,record.parentRule);if(parsed.length===1&&cssRuleRecord(parsed[0]).type===1)record.selectorText=cssRuleRecord(parsed[0],1).selectorText;});
+  cssRuleMember('CSSStyleRule','style',function(){return cssRuleRecord(this,1).style;},function(value){var record=cssRuleRecord(this,1);if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');record.style.cssText=String(value);});
+  ['href','media','styleSheet'].forEach(function(name){cssRuleMember('CSSImportRule',name,function(){return cssRuleRecord(this,3)[name];});});
+  var cssRuleConstants={STYLE_RULE:1,CHARSET_RULE:2,IMPORT_RULE:3,MEDIA_RULE:4,FONT_FACE_RULE:5,PAGE_RULE:6,KEYFRAMES_RULE:7,KEYFRAME_RULE:8,MARGIN_RULE:9,NAMESPACE_RULE:10,COUNTER_STYLE_RULE:11,SUPPORTS_RULE:12,FONT_FEATURE_VALUES_RULE:14};
+  Object.keys(cssRuleConstants).forEach(function(name){[g.CSSRule,g.CSSRule.prototype].forEach(function(owner){Object.defineProperty(owner,name,{value:cssRuleConstants[name],enumerable:true});});});
+  function finishCssRule(rule){var record={};['type','parentRule','parentStyleSheet','cssText','selectorText','href','media','styleSheet'].forEach(function(name){if(Object.hasOwn(rule,name)){record[name]=rule[name];delete rule[name];}});if(record.type===1){record.style=rule.style;delete rule.style;}cssRuleStates.set(rule,record);Object.setPrototypeOf(rule,record.type===1?g.CSSStyleRule.prototype:record.type===3?g.CSSImportRule.prototype:g.CSSRule.prototype);return rule;}
+  var parseCssRules = function(text, sheet, parent, validated){
+    text=String(text);if(!validated&&typeof cssNativeParse==='function')text=cssNativeParse(text);
+    var out=cssList(), start=0, depth=0, quote='', escaped=false, comment=false, open=-1;
     for(var i=0;i<text.length;i++){
       var c=text[i],next=text[i+1];
       if(comment){if(c==='*'&&next==='/'){comment=false;i++;}continue;}
@@ -360,25 +645,66 @@
       else if(c==='}'&&depth>0&&--depth===0){
         var head=text.slice(start,open).replace(/\/\*[\s\S]*?\*\//g,'').trim(),body=text.slice(open+1,i);
         if(head){
-          var isAt=head[0]==='@',rule=Object.create(isAt?g.CSSRule.prototype:g.CSSStyleRule.prototype);
+          var isAt=head[0]==='@',rule={};
           rule.parentStyleSheet=sheet;rule.parentRule=parent||null;
-          if(isAt){rule.type=/^@media\b/i.test(head)?4:/^@supports\b/i.test(head)?12:/^@font-face\b/i.test(head)?5:0;rule.cssRules=parseCssRules(body,sheet,rule);rule.cssText=head+' { '+body.trim()+' }';}
-          else {rule.type=1;rule.selectorText=head.replace(/\s*,\s*/g,', ');rule.style=cssDeclaration(body);Object.defineProperty(rule,'cssText',{get:function(){var t=this.style.cssText;return this.selectorText+' {'+(t?' '+t+' ':' ')+'}';}});}
-          out.push(rule);
+          if(isAt){rule.type=/^@media\b/i.test(head)?4:/^@supports\b/i.test(head)?12:/^@font-face\b/i.test(head)?5:/^@keyframes\b/i.test(head)?7:0;rule.cssText=head+' { '+body.trim()+' }';if(rule.type===5)rule.style=cssDeclaration(body,null,rule);else rule.cssRules=parseCssRules(body,sheet,rule,true);}
+          else {rule.type=1;rule.selectorText=head.replace(/\s*,\s*/g,', ');rule.style=cssDeclaration(body,null,rule);rule.cssText=head+' { '+body.trim()+' }';}
+          cssItems(out).push(finishCssRule(rule));
         }
         start=i+1;
-      } else if(c===';'&&depth===0){start=i+1;}
+      } else if(c===';'&&depth===0){
+        var statement=text.slice(start,i).trim(),imported=/^@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?\s*(.*)$/i.exec(statement);
+        if(imported){var rule={};rule.type=3;rule.href=imported[1];rule.media=makeMedia(imported[2]||'');rule.styleSheet=null;rule.parentStyleSheet=sheet;rule.parentRule=parent||null;rule.cssText=statement+';';cssItems(out).push(finishCssRule(rule));}start=i+1;
+      }
     }
     return out;
   };
-  var cssError=function(name){var e=new Error(name);e.name=name;return e;};
-  g.CSSStyleSheet=function CSSStyleSheet(){this.ownerNode=null;this.__rules=cssList();this.__constructed=true;};
-  Object.defineProperty(g.CSSStyleSheet.prototype,'cssRules',{configurable:true,get:function(){return this.__rules;}});
-  Object.defineProperty(g.CSSStyleSheet.prototype,'rules',{get:function(){return this.cssRules;}});
-  g.CSSStyleSheet.prototype.insertRule=function(text,index){var list=this.cssRules,i=index==null?0:Number(index);if(!Number.isInteger(i)||i<0||i>list.length)throw cssError('IndexSizeError');var parsed=parseCssRules(text,this,null);if(parsed.length!==1)throw cssError('SyntaxError');list.splice(i,0,parsed[0]);return i;};
-  g.CSSStyleSheet.prototype.deleteRule=function(index){var list=this.cssRules,i=Number(index);if(!Number.isInteger(i)||i<0||i>=list.length)throw cssError('IndexSizeError');list.splice(i,1);};
-  g.CSSStyleSheet.prototype.replaceSync=function(text){if(!this.__constructed)throw cssError('NotAllowedError');this.__rules=parseCssRules(text,this,null);};
-  g.CSSStyleSheet.prototype.replace=function(text){try{this.replaceSync(text);return Promise.resolve(this);}catch(e){return Promise.reject(e);}};
+  var sheetRecords=cssMap('sheet'),mediaRecords=cssMap('media'),elementSheets=cssMap('elementSheet');
+  function sheetRecord(sheet){var record=sheetRecords.get(sheet);if(!record)throw new TypeError('Illegal invocation');return record;}
+  function mediaRecord(media){var record=mediaRecords.get(media);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=record.owner.getAttribute('media')||'';if(text!==record.source){record.source=text;record.items=mediaQueries(text);}}return record;}
+  function cssInterface(name,parent,construct){var ctor=__ns.makeNativeFunction(construct||function(){throw new TypeError('Illegal constructor');},name,0,true);ctor.prototype=Object.create(parent?parent.prototype:Object.prototype);Object.defineProperty(ctor.prototype,'constructor',{value:ctor,writable:true,configurable:true});Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});Object.defineProperty(ctor,'prototype',{writable:false});if(parent)Object.setPrototypeOf(ctor,parent);Object.defineProperty(g,name,{value:ctor,writable:true,configurable:true,enumerable:false});return ctor;}
+  function cssMember(proto,name,get,set){var descriptor={enumerable:true,configurable:true,get:__ns.makeNativeFunction(get,'get '+name,0)};if(set)descriptor.set=__ns.makeNativeFunction(set,'set '+name,1);Object.defineProperty(proto,name,descriptor);}
+  function cssMethod(proto,name,length,method){Object.defineProperty(proto,name,{value:__ns.makeNativeFunction(method,name,length),enumerable:true,writable:true,configurable:true});}
+  function mediaQueries(text){text=cssString(text).trim();if(!text)return [];return cssParts(text,',').map(function(query){query=query.trim();return cssNativeParse(query,'media');});}
+  var mediaConstructor=cssInterface('MediaList');
+  cssMember(mediaConstructor.prototype,'length',function(){return mediaRecord(this).items.length;});
+  cssMember(mediaConstructor.prototype,'mediaText',function(){return mediaRecord(this).items.join(', ');},function(text){mediaRecord(this).items=mediaQueries(text);});
+  cssMethod(mediaConstructor.prototype,'item',1,function(index){if(!arguments.length)throw new TypeError('item requires 1 argument');return mediaRecord(this).items[Number(index)>>>0]||null;});
+  cssMethod(mediaConstructor.prototype,'appendMedium',1,function(text){var record=mediaRecord(this);if(!arguments.length)throw new TypeError('appendMedium requires 1 argument');var queries=mediaQueries(text);if(queries.length!==1)return;if(record.items.indexOf(queries[0])<0)record.items.push(queries[0]);});
+  cssMethod(mediaConstructor.prototype,'deleteMedium',1,function(text){var record=mediaRecord(this);if(!arguments.length)throw new TypeError('deleteMedium requires 1 argument');var query=mediaQueries(text).join(', '),index=record.items.indexOf(query);if(index<0)throw new g.DOMException('The medium was not found','NotFoundError');record.items.splice(index,1);});
+  cssMethod(mediaConstructor.prototype,'toString',0,function(){return mediaRecord(this).items.join(', ');});
+  Object.defineProperty(mediaConstructor.prototype,Symbol.iterator,{value:Array.prototype.values,writable:true,configurable:true});
+  function makeMedia(text,owner){var target=Object.create(mediaConstructor.prototype),record={items:mediaQueries(text||''),source:text||'',owner:owner||null},proxy;proxy=new Proxy(target,{get:function(obj,key,receiver){var index=cssIndex(key);return index>=0?mediaRecord(proxy).items[index]:Reflect.get(obj,key,receiver);},has:function(obj,key){var index=cssIndex(key);return index>=0?index<mediaRecord(proxy).items.length:Reflect.has(obj,key);},ownKeys:function(){return mediaRecord(proxy).items.map(function(_,i){return String(i);}).concat(Reflect.ownKeys(target));},getOwnPropertyDescriptor:function(obj,key){var index=cssIndex(key),items=mediaRecord(proxy).items;return index>=0&&index<items.length?{value:items[index],writable:false,enumerable:true,configurable:true}:Reflect.getOwnPropertyDescriptor(obj,key);},set:function(obj,key,value,receiver){return cssIndex(key)<0&&Reflect.set(obj,key,value,receiver);},deleteProperty:function(obj,key){return cssIndex(key)<0&&Reflect.deleteProperty(obj,key);}});mediaRecords.set(proxy,record);return proxy;}
+  var styleSheetConstructor=cssInterface('StyleSheet');
+  function newSheetRecord(options){return {rules:cssList(),constructed:true,ownerNode:null,href:null,parentStyleSheet:null,ownerRule:null,title:null,media:makeMedia(options&&options.media!==undefined?options.media:''),disabled:!!(options&&options.disabled),replacing:false,originClean:true};}
+  var sheetConstructor=cssInterface('CSSStyleSheet',styleSheetConstructor,function(options){if(options!==null&&options!==undefined&&typeof options!=='object'&&typeof options!=='function')throw new TypeError('CSSStyleSheetInit must be an object');sheetRecords.set(this,newSheetRecord(options));});
+  ['href','ownerNode','parentStyleSheet'].forEach(function(name){cssMember(styleSheetConstructor.prototype,name,function(){return sheetRecord(this)[name];});});
+  cssMember(styleSheetConstructor.prototype,'title',function(){var record=sheetRecord(this);return record.ownerNode?record.ownerNode.getAttribute('title')||null:record.title;});
+  cssMember(styleSheetConstructor.prototype,'type',function(){sheetRecord(this);return 'text/css';});
+  cssMember(styleSheetConstructor.prototype,'media',function(){return sheetRecord(this).media;},function(value){mediaRecord(sheetRecord(this).media).items=mediaQueries(value);});
+  cssMember(styleSheetConstructor.prototype,'disabled',function(){return sheetRecord(this).disabled;},function(value){sheetRecord(this).disabled=!!value;});
+  cssMember(sheetConstructor.prototype,'ownerRule',function(){return sheetRecord(this).ownerRule;});
+  function appliedSheetRules(sheet,seen){seen=seen||new Set();if(seen.has(sheet))return [];seen.add(sheet);var out=[];for(var rule of cssItems(sheetRecord(sheet).rules)){var record=cssRuleRecord(rule);if(record.type===3){if(record.styleSheet&&(!record.media.mediaText||g.matchMedia(record.media.mediaText).matches))out.push.apply(out,appliedSheetRules(record.styleSheet,seen));}else out.push(rule);}return out;}
+  function readableSheet(sheet){var record=sheetRecord(sheet);if(!record.originClean)throw new g.DOMException('Cannot access rules of a cross-origin stylesheet','SecurityError');return record;}
+  var cssStyleSheetRulesGetter=__ns.makeNativeFunction(function(){return readableSheet(this).rules;},'get cssRules',0);
+  Object.defineProperty(sheetConstructor.prototype,'cssRules',{get:cssStyleSheetRulesGetter,enumerable:true,configurable:true});
+  cssMember(sheetConstructor.prototype,'rules',function(){return readableSheet(this).rules;});
+
+  function detachCssRule(rule,parent){var record=cssRuleRecord(rule);record.parentStyleSheet=null;record.parentRule=parent||null;if(rule.cssRules)for(var child of cssItems(rule.cssRules))detachCssRule(child,rule);}
+  function replaceSheetRules(sheet,record,text,keepImports){var parsed=cssItems(parseCssRules(cssString(text),sheet,null));if(!keepImports)parsed=parsed.filter(function(rule){return cssRuleRecord(rule).type!==3;});var list=cssItems(record.rules);for(var rule of list)detachCssRule(rule);list.splice.apply(list,[0,list.length].concat(parsed));}
+  function insertSheetRule(sheet,text,index){var record=readableSheet(sheet),list=cssItems(record.rules),i=index===undefined?0:Number(index)>>>0;if(record.replacing)throw new g.DOMException('The sheet is being replaced','NotAllowedError');if(i>list.length)throw new g.DOMException('The rule index is out of range','IndexSizeError');var source=cssNativeParse(cssString(text),false,true),parsed=source===null?cssList():parseCssRules(source,sheet,null,true);if(parsed.length!==1)throw new g.DOMException('Expected one CSS rule','SyntaxError');var rule=cssItems(parsed)[0],type=cssRuleRecord(rule).type;if(type===3&&record.constructed)throw new g.DOMException('Cannot insert an import into a constructed sheet','SyntaxError');if(type===3&&list.slice(0,i).some(function(prior){return cssRuleRecord(prior).type!==3;}))throw new g.DOMException('Imports must precede style rules','HierarchyRequestError');if(type!==3&&list.slice(i).some(function(next){return cssRuleRecord(next).type===3;}))throw new g.DOMException('Style rules must follow imports','HierarchyRequestError');list.splice(i,0,rule);return i;}
+  function deleteSheetRule(sheet,index){var record=readableSheet(sheet),list=cssItems(record.rules),i=Number(index)>>>0;if(record.replacing)throw new g.DOMException('The sheet is being replaced','NotAllowedError');if(i>=list.length)throw new g.DOMException('The rule index is out of range','IndexSizeError');detachCssRule(list[i]);list.splice(i,1);}
+  cssMethod(sheetConstructor.prototype,'insertRule',1,function(text,index){sheetRecord(this);if(!arguments.length)throw new TypeError('insertRule requires 1 argument');return insertSheetRule(this,text,index);});
+  cssMethod(sheetConstructor.prototype,'deleteRule',1,function(index){sheetRecord(this);if(!arguments.length)throw new TypeError('deleteRule requires 1 argument');deleteSheetRule(this,index);});
+  cssMethod(sheetConstructor.prototype,'addRule',0,function(selector,style,index){var record=sheetRecord(this);insertSheetRule(this,(selector===undefined?'undefined':cssString(selector))+' {'+(style===undefined?'undefined':cssString(style))+'}',index===undefined?cssItems(record.rules).length:index);return -1;});
+  cssMethod(sheetConstructor.prototype,'removeRule',0,function(index){deleteSheetRule(this,index===undefined?0:index);});
+  cssMethod(sheetConstructor.prototype,'replaceSync',1,function(text){var record=sheetRecord(this);if(!arguments.length)throw new TypeError('replaceSync requires 1 argument');if(!record.constructed||record.replacing)throw new g.DOMException('The sheet cannot be replaced','NotAllowedError');replaceSheetRules(this,record,text,false);});
+  cssMethod(sheetConstructor.prototype,'replace',1,function(text){var record;try{record=sheetRecord(this);if(!arguments.length)throw new TypeError('replace requires 1 argument');if(!record.constructed||record.replacing)throw new g.DOMException('The sheet cannot be replaced','NotAllowedError');replaceSheetRules(this,record,text,false);return Promise.resolve(this);}catch(error){return Promise.reject(error);}});
+  function linkedSheet(el,text,url){var sheet=Object.create(sheetConstructor.prototype),record=newSheetRecord();record.constructed=false;record.ownerNode=el;record.href=url||null;record.title=el.getAttribute('title')||null;record.media=makeMedia(el.getAttribute('media')||'',el);sheetRecords.set(sheet,record);replaceSheetRules(sheet,record,text,true);return sheet;}
+  function detachSheet(sheet){if(sheet){var record=sheetRecord(sheet);if(record.ownerNode)record.title=record.ownerNode.getAttribute('title')||null;mediaRecord(record.media).owner=null;record.ownerNode=null;}}
+  function attachLinkedStyleSheet(el,text,url,originClean){var sheet=linkedSheet(el,text,url),old=elementSheets.get(el);sheetRecord(sheet).originClean=originClean!==false;if(old)detachSheet(old.sheet);elementSheets.set(el,{sheet:sheet,text:null});return sheet;};
+  function attachImportStyleSheet(rule,sheet,url,text,originClean){var parent=cssRuleRecord(rule,3),record=sheetRecord(sheet);record.constructed=false;record.ownerRule=rule;record.parentStyleSheet=parent.parentStyleSheet;record.href=url||null;record.originClean=originClean!==false;if(text!==undefined)replaceSheetRules(sheet,record,text,true);parent.styleSheet=sheet;};
+  var documentCSSRecord=collectionGet(d)||{kind:'Document'};documentCSSRecord.cssHost={looksLikeCSS:function(text){return !String(text).trim()||!!cssNativeParse(String(text)).trim();},sheet:function(element){return currentSheetGetter.call(element);},readRules:function(sheet){var source=cssItems(sheetRecord(sheet).rules),snapshot=[];cssSetPrototype(snapshot,null);for(var index=0;index<source.length;index++)snapshot[index]=source[index];return snapshot;},readRule:function(rule){var record=cssRuleRecord(rule);return {type:record.type,href:record.href||null};},attachLinked:attachLinkedStyleSheet,attachImport:attachImportStyleSheet};collectionSet(d,documentCSSRecord);
   // adoptedStyleSheets — must be a real, settable ARRAY (a non-iterable getter or
   // absent prop both break the read-modify-write spread above).
   if (!Array.isArray(d.adoptedStyleSheets)) {
@@ -426,7 +752,6 @@
   if (!d.head) { try { d.head = d.createElement('head'); if (d.documentElement) d.documentElement.appendChild(d.head); } catch(e){} }
   // NOTE: document.createElementNS uses the native binding (namespace-aware: SVG/MathML elements keep
   // their namespace + case-preserved attributes like viewBox). Previously aliased to createElement.
-  d.createDocumentFragment = function(){ return d.createElement('#document-fragment'); };
   // NOTE: document.addEventListener/removeEventListener/dispatchEvent use the native binding (the
   // document is a wrapped node) so document-level listeners — click-outside handlers, global
   // keydown — register and fire via the bubble path. (Previously stubbed to no-ops.)
@@ -434,8 +759,10 @@
   // OWN accessor on each control element (testing-library's setNativeValue reads
   // getOwnPropertyDescriptor(element)) AND on the interface .prototype (React's value-tracker reads
   // node.constructor.prototype). No setPrototypeOf — avoids touching the native proto chain.
+  var currentSheetGetter;
+  var sheetTagName=__ns.domAccessor('tagName',false,'Element'),sheetConnected=__ns.domAccessor('isConnected',false,'Node');
   (function(){
-    var mkSheet = function(el){var sheet=new g.CSSStyleSheet();sheet.ownerNode=el;sheet.__constructed=false;sheet.__rules=parseCssRules(el.textContent||'',sheet,null);return sheet;};
+    var mkSheet = function(el){return linkedSheet(el,el.textContent||'',null);};
     var orig = d.createElement.bind(d);
     // value/checked live ONLY on the interface .prototype (NOT own — React's value-tracker bails on
     // node.hasOwnProperty('value')). Each control's actual proto is set to that interface prototype
@@ -455,10 +782,29 @@
       if (t === 'number') return (v === '' || /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(v)) ? v : '';
       return v;
     };
-    // The `value` IDL accessor, backed by the `value` content attribute (defaultValue==value here,
-    // which suffices for getByDisplayValue/[value]); the value-change tracker (attachValueTracker)
-    // layers the dirty-since-last-seen signal on top for framework change detection.
-    var valDesc = { configurable: true, get: function(){ var v = this.getAttribute('value'); return v == null ? (String(this.tagName).toLowerCase()==='textarea' ? this.textContent || '' : '') : v; }, set: function(v){ this.setAttribute('value', validForType(this, v == null ? '' : String(v))); } };
+    // Live input/textarea values have a dirty flag, separate from their defaults.
+    // Hidden/button values remain reflected attributes as required by HTML.
+    var controlValues = new WeakMap();
+    var isTextarea = function(el){ return String(el.tagName).toUpperCase() === 'TEXTAREA'; };
+    var reflectedValue = function(el){ return /^(hidden|button|submit|reset|image|checkbox|radio)$/.test(el.type || ''); };
+    var defaultValueOf = function(el){ return isTextarea(el) ? el.textContent || '' : el.getAttribute('value') || ''; };
+    var valDesc = { configurable: true,
+      get: function(){
+        if (controlValues.has(this) && !reflectedValue(this)) return validForType(this, controlValues.get(this));
+        var value = defaultValueOf(this);
+        if (!isTextarea(this) && /^(checkbox|radio)$/.test(this.type || '') && !this.hasAttribute('value')) return 'on';
+        return validForType(this, value);
+      },
+      set: function(v){
+        v = v == null ? '' : String(v);
+        if (reflectedValue(this)) this.setAttribute('value', v);
+        else controlValues.set(this, validForType(this, v));
+      }
+    };
+    var defaultValueDesc = { configurable: true, get: function(){ return defaultValueOf(this); }, set: function(v){
+      if (isTextarea(this)) this.textContent = String(v);
+      else this.setAttribute('value', String(v));
+    } };
     // Reflect the live `checked` property to the `checked` content attribute so rtdom's `:checked`
     // pseudo (which matches on the attribute) finds controlled checkboxes/radios React toggles.
     var checkedDesc = { configurable: true, get: function(){ return this.__checked === undefined ? this.hasAttribute('checked') : !!this.__checked; }, set: function(v){ v = !!v; this.__checked = v; try { if (v) this.setAttribute('checked', ''); else this.removeAttribute('checked'); } catch(e){} } };
@@ -583,6 +929,7 @@
       // attribute; reading returns hasAttribute. Tests read el.disabled / [disabled] / multiple.
       [['disabled','disabled'],['multiple','multiple'],['required','required'],['readOnly','readonly'],['autoFocus','autofocus']].forEach(function(pair){ Object.defineProperty(p, pair[0], { configurable: true, get: function(){ return this.hasAttribute(pair[1]); }, set: function(v){ if (v) this.setAttribute(pair[1], ''); else this.removeAttribute(pair[1]); } }); });
       if (n === 'HTMLInputElement' || n === 'HTMLTextAreaElement') {
+        Object.defineProperty(p, 'defaultValue', defaultValueDesc);
         Object.defineProperty(p, 'selectionStart', selStartDesc); Object.defineProperty(p, 'selectionEnd', selEndDesc); Object.defineProperty(p, 'selectionDirection', selDirDesc);
         p.setSelectionRange = function(s, e, dir){ this.__selStart = s; this.__selEnd = e; this.__selDir = dir || 'none'; };
         p.select = function(){ this.__selStart = 0; this.__selEnd = String(this.value||'').length; };
@@ -611,14 +958,35 @@
     // <option>: `value` falls back to text content (HTML spec), `selected`/`defaultSelected` track
     // the live + attribute state. React-DOM's updateOptions reads option.value and writes
     // option.selected for every option of a controlled <select>.
+    var selection;
     (function(){
       var op = protoFor.HTMLOptionElement;
       Object.defineProperty(op, 'value', { configurable: true, get: function(){ var v = this.getAttribute('value'); return v == null ? (this.textContent || '') : v; }, set: function(v){ this.setAttribute('value', v == null ? '' : String(v)); } });
-      // Setting selected=true on a single (non-multiple) <select> deselects its siblings — the
-      // browser enforces the single-selection invariant. Without this, an option marked during the
-      // detached commit stays selected after userEvent.selectOptions marks another, and select.value
-      // (first selected) returns the stale one.
-      Object.defineProperty(op, 'selected', { configurable: true, get: function(){ return this.__selected === undefined ? this.hasAttribute('selected') : !!this.__selected; }, set: function(v){ v = !!v; this.__selected = v; if (v){ var s = ownerSelect(this); if (s && !s.multiple){ var os = optionsOf(s); for (var i=0;i<os.length;i++) if (os[i] !== this) os[i].__selected = false; } } } });
+      var optionStates = new WeakMap(), emptySelects = new WeakSet();
+      var isSelected = function(o){ return optionStates.has(o) ? optionStates.get(o) : o.hasAttribute('selected'); };
+      var selectionOf = function(sel){
+        var os = optionsOf(sel), chosen = [];
+        for (var i=0;i<os.length;i++) if (isSelected(os[i])) chosen.push(os[i]);
+        if (!sel.multiple && chosen.length > 1) chosen = [chosen[chosen.length-1]];
+        if (!chosen.length && !sel.multiple && Number(sel.getAttribute('size') || 0) <= 1 && !emptySelects.has(sel)) {
+          for (var j=0;j<os.length;j++) {
+            var group = os[j].parentNode;
+            if (!os[j].disabled && !(group && String(group.tagName).toUpperCase() === 'OPTGROUP' && group.hasAttribute('disabled'))) { chosen.push(os[j]); break; }
+          }
+        }
+        return chosen;
+      };
+      Object.defineProperty(op, 'selected', { configurable: true, get: function(){
+        var sel = ownerSelect(this); return sel ? selectionOf(sel).indexOf(this) >= 0 : isSelected(this);
+      }, set: function(v){
+        v = !!v; optionStates.set(this, v);
+        var sel = ownerSelect(this);
+        if (sel && v) {
+          emptySelects.delete(sel);
+          if (!sel.multiple) optionsOf(sel).forEach(function(o){ if (o !== this) optionStates.set(o, false); }, this);
+        }
+      } });
+      selection = { selectionOf: selectionOf, optionStates: optionStates, emptySelects: emptySelects };
       Object.defineProperty(op, 'defaultSelected', { configurable: true, get: function(){ return this.hasAttribute('selected'); }, set: function(v){ if (v) this.setAttribute('selected',''); else this.removeAttribute('selected'); } });
       Object.defineProperty(op, 'disabled', { configurable: true, get: function(){ return this.hasAttribute('disabled'); }, set: function(v){ if (v) this.setAttribute('disabled',''); else this.removeAttribute('disabled'); } });
       Object.defineProperty(op, 'text', { configurable: true, get: function(){ return this.textContent || ''; }, set: function(v){ this.textContent = v; } });
@@ -629,14 +997,33 @@
       var sp = protoFor.HTMLSelectElement;
       var opts = optionsOf;
       Object.defineProperty(sp, 'options', { configurable: true, get: function(){ return opts(this); } });
-      Object.defineProperty(sp, 'selectedOptions', { configurable: true, get: function(){ return opts(this).filter(function(o){ return o.selected; }); } });
+
+      Object.defineProperty(sp, 'selectedOptions', { configurable: true, get: function(){ var list = selection.selectionOf(this); list.item = function(i){ return this[i] || null; }; return list; } });
       Object.defineProperty(sp, 'selectedIndex', { configurable: true,
-        get: function(){ var o = opts(this); for (var i=0;i<o.length;i++) if (o[i].selected) return i; return o.length ? -1 : -1; },
-        set: function(idx){ var o = opts(this); for (var i=0;i<o.length;i++) o[i].selected = (i === idx); } });
+        get: function(){ var chosen = selection.selectionOf(this); return chosen.length ? opts(this).indexOf(chosen[0]) : -1; },
+        set: function(idx){ var o = opts(this), index = Number(idx) >> 0;
+          selection.emptySelects.add(this);
+          for (var i=0;i<o.length;i++) { selection.optionStates.set(o[i], i === index); }
+          if (index >= 0 && index < o.length) selection.emptySelects.delete(this);
+        } });
       Object.defineProperty(sp, 'value', { configurable: true,
-        get: function(){ var o = opts(this); for (var i=0;i<o.length;i++) if (o[i].selected) return o[i].value; return o.length ? o[0].value : ''; },
-        set: function(v){ var o = opts(this); var s = String(v); var hit = false; for (var i=0;i<o.length;i++){ var m = (o[i].value === s); o[i].selected = m; if (m) hit = true; } if (!hit) for (var j=0;j<o.length;j++) o[j].selected = false; } });
+        get: function(){ var chosen = selection.selectionOf(this); return chosen.length ? chosen[0].value : ''; },
+        set: function(v){ var o = opts(this), s = String(v), hit = false;
+          selection.emptySelects.add(this);
+          for (var i=0;i<o.length;i++){ var m = !hit && o[i].value === s; selection.optionStates.set(o[i], m); if (m) hit = true; }
+          if (hit) selection.emptySelects.delete(this);
+        } });
     })();
+    var cloneChildren=__ns.domAccessor('childNodes',false,'Node');
+    __ns.cloneControlState = function cloneControlState(source, clone, deep){
+      if (controlValues.has(source)) clone.value = controlValues.get(source);
+      if (selection.optionStates.has(source)) selection.optionStates.set(clone, selection.optionStates.get(source));
+      if (selection.emptySelects.has(source)) selection.emptySelects.add(clone);
+      if (deep) {
+        var originals = cloneChildren.call(source), copies = cloneChildren.call(clone);
+        for (var i=0;i<originals.length && i<copies.length;i++) cloneControlState(originals[i], copies[i], true);
+      }
+    };
     // <label>: htmlFor + control resolution. testing-library's getByLabelText filters
     // querySelectorAll('label') by `label.control === element`, so without `control` NO label ever
     // associates and every form field fails with "no form control was found associated to that label".
@@ -938,19 +1325,20 @@
       };
       cp.getBoundingClientRect = function(){ return { x:0, y:0, top:0, left:0, right:0, bottom:0, width:0, height:0, toJSON:function(){ return this; } }; };
     })();
-    d.createElement = function(tag){
+    d.createElement = ({ createElement(tag){
       var el = orig(tag); var t = String(tag).toLowerCase();
       applyControlProto(el);
       // canvas: drop the own native getBoundingClientRect so it resolves to the (mockable)
       // HTMLCanvasElement.prototype version; getContext/toDataURL/toBlob are on the proto too.
       if (t === 'canvas') { try { if (Object.prototype.hasOwnProperty.call(el, 'getBoundingClientRect')) delete el.getBoundingClientRect; } catch(e){} }
       return el;
-    };
+    } }).createElement;
     // NOTE: cloneNode re-applies the control prototype natively (el_clone_node copies the source's
     // prototype to the clone), so a cloned <input>/<select> keeps its type/value/checked accessors
     // (userEvent's isValidDateOrTimeValue clones a date input, assigns, and checks the value stuck).
     void applyControlProto;
-    try { Object.defineProperty(d, 'styleSheets', { configurable: true, get: function(){ var list=cssList();var els=d.querySelectorAll('style');for(var i=0;i<els.length;i++){var sheet=els[i].sheet;if(sheet)list.push(sheet);}return list; } }); } catch(e){}
+    var documentSheets=cssList('StyleSheetList',function(){var list=[],els=d.querySelectorAll('style,link');for(var i=0;i<els.length;i++){var sheet=els[i].sheet;if(sheet)list.push(sheet);}return list;});
+    try { Object.defineProperty(d, 'styleSheets', { configurable: true, get: function(){return documentSheets;} }); } catch(e){}
 
     // Alias the shim interface-constructor `.prototype`s onto the REAL element/document prototypes,
     // so a test patching HTMLElement.prototype.requestFullscreen / Document.prototype.exitFullscreen
@@ -969,21 +1357,22 @@
       // Defined on the shared element prototype and
       // WITHOUT a descriptor guard (the NON_MASKING interceptor makes every lookup
       // report a descriptor, so a guard would wrongly skip). Caches per element.
-      Object.defineProperty(baseProto, 'sheet', {
-        configurable: true,
-        get: function(){
-          var tag = this.tagName;
-          if (!tag || String(tag).toUpperCase() !== 'STYLE') return null;
-          if (!this.isConnected) {if(this.__tcSheet)this.__tcSheet.ownerNode=null;this.__tcSheet=null;return null;}
+      currentSheetGetter=function(){
+          var tag = sheetTagName.call(this);
+          if (!tag) return null;
+          tag=String(tag).toUpperCase();if(tag!=='STYLE'&&tag!=='LINK')return null;
+          var cached=elementSheets.get(this);
+          if (!sheetConnected.call(this)) {if(cached)detachSheet(cached.sheet);elementSheets.delete(this);return null;}
+          if(tag==='LINK')return cached?cached.sheet:null;
+          if(!inlineSheetAllowed.call(this)){if(cached)detachSheet(cached.sheet);elementSheets.set(this,{sheet:null,text:null});return null;}
           var text=String(this.textContent||'');
-          if (!this.__tcSheet || this.__tcSheetText!==text) {
-            if(this.__tcSheet)this.__tcSheet.ownerNode=null;
-            try { this.__tcSheet = mkSheet(this); this.__tcSheetText=text; }
-            catch (e) { return mkSheet(this); }
+          if (!cached || !cached.sheet || cached.text!==text) {
+            if(cached)detachSheet(cached.sheet);
+            cached={sheet:mkSheet(this),text:text};elementSheets.set(this,cached);
           }
-          return this.__tcSheet;
-        }
-      });
+          return cached.sheet;
+        };
+      Object.defineProperty(baseProto, 'sheet', {configurable:true,get:currentSheetGetter});
       var docProto = Object.getPrototypeOf(d) || baseProto;
       if (g.Document) g.Document.prototype = docProto;
       if (g.HTMLDocument) g.HTMLDocument.prototype = docProto;
@@ -1075,7 +1464,7 @@
   (function(){
     var ranges = [];
     var firing = false;
-    function fireSelectionChange(){ if(firing) return; firing=true; try { var ev = { type:'selectionchange', bubbles:false, cancelable:false, target:d, currentTarget:null }; if (d.dispatchEvent) d.dispatchEvent(ev); } catch(e){} firing=false; }
+    function fireSelectionChange(){ if(firing) return; firing=true; try { var ev = new g.Event('selectionchange');eventRecord(ev).trusted=true;if (d.dispatchEvent) d.dispatchEvent(ev); } catch(e){} firing=false; }
     var sel = {
       get rangeCount(){ return ranges.length; },
       get anchorNode(){ return ranges.length?ranges[0].startContainer:null; },
@@ -1128,10 +1517,9 @@
   (function(){
     // A `message` event shaped like the fields cross-frame protocols read.
     var mkMsgEvent = function(data, origin, source, ports){
-      return { type:'message', data:data, origin: origin||'', lastEventId:'', source: source||null,
-        ports: ports||[], bubbles:false, cancelable:false, composed:false, defaultPrevented:false,
-        target:null, currentTarget:null, eventPhase:0, isTrusted:false, timeStamp: Date.now(),
-        preventDefault:function(){}, stopPropagation:function(){}, stopImmediatePropagation:function(){} };
+      var event=new g.MessageEvent('message',{data:data,origin:origin||'',source:source||null,ports:ports||[]});
+      eventRecord(event).trusted=true;
+      return event;
     };
     // Deliver a message event to a window-like target's `message` listeners + onmessage.
     // Async via setTimeout when present (matches the real message-loop ordering + the
@@ -1139,9 +1527,10 @@
     var deliver = function(win, ev){
       var st = g.setTimeout || function(f){ return f(); };
       st(function(){
-        ev.target = win; ev.currentTarget = win;
+        var state=eventRecord(ev);state.target=win;state.currentTarget=win;state.trusted=true;state.eventPhase=2;
         try { if (typeof win.onmessage === 'function') win.onmessage(ev); } catch(e){}
         try { if (typeof win.dispatchEvent === 'function') win.dispatchEvent(ev); } catch(e){}
+        finally{endEventDispatch(state);}
       }, 0);
     };
     // Minimal child document: real (native) elements forming a subtree DETACHED from the
@@ -1249,7 +1638,7 @@
         atob: g.atob, btoa: g.btoa, crypto: g.crypto, performance: g.performance,
         addEventListener: function(t,f){ if(typeof f==='function') (wl[t]=wl[t]||[]).push(f); },
         removeEventListener: function(t,f){ var a=wl[t]; if(a){ var i=a.indexOf(f); if(i>=0) a.splice(i,1); } },
-        dispatchEvent: function(ev){ if(!ev) return true; if(ev.target==null){ try{ev.target=childWin;}catch(e){} } var a=wl[ev.type]; if(a) a.slice().forEach(function(f){ try{f.call(childWin,ev);}catch(e){} }); return !ev.defaultPrevented; },
+        dispatchEvent: function(ev){var state=beginEventDispatch(ev,childWin,[childWin]),a=wl[state.type];try{if(a)a.slice().forEach(function(f){try{f.call(childWin,ev);}catch(e){}});}finally{endEventDispatch(state);}return !state.defaultPrevented;},
         focus:function(){}, blur:function(){}, close:function(){ childWin.closed = true; },
         // parent → child: fire the CHILD's listeners; source is the parent view.
         postMessage: function(msg, targetOrigin, transfer){
@@ -1278,7 +1667,7 @@
     // lazily on first access (or when src is set). Kept general so any consumer gets it;
     // the lazy build means an unused iframe costs nothing.
     var origCreateEl = d.createElement.bind(d);
-    d.createElement = function(tag){
+    d.createElement = ({ createElement(tag){
       var el = origCreateEl(tag);
       if (el && String(tag).toLowerCase() === 'iframe' && !el.__iframeWired) {
         el.__iframeWired = true;
@@ -1293,6 +1682,309 @@
         }
       }
       return el;
-    };
+    } }).createElement;
   })();
+  // Native ObjectTemplate accessors expose value descriptors. Project through
+  // real native getter/setter functions so values stay backed by the same tree.
+  (function(){
+    if (typeof __ns.domAccessor !== 'function') return;
+    var oldBase=g.HTMLElement.prototype,oldDocument=g.Document.prototype;
+    var nodeConstructors=['Node','Element','HTMLElement','Document','HTMLDocument','CharacterData','Attr','DocumentType','NamedNodeMap','Text','Comment','CDATASection','ProcessingInstruction','DocumentFragment','ShadowRoot','SVGElement','SVGSVGElement'];
+    Object.getOwnPropertyNames(g).forEach(function(name){if(/^HTML.*Element$/.test(name)&&typeof g[name]==='function'&&nodeConstructors.indexOf(name)<0)nodeConstructors.push(name);});
+    nodeConstructors.forEach(function(name){var previous=g[name];var ctor=__ns.makeNativeFunction(function(){throw new TypeError('Illegal constructor');},name,0,true);ctor.prototype=previous.prototype;Object.defineProperty(g,name,{value:ctor,writable:true,configurable:true,enumerable:false});});
+    var prototypes={};
+    function defineInterface(name,parent,existing){
+      var ctor=g[name],proto=existing||Object.create(parent);
+      if(existing)Object.setPrototypeOf(proto,parent);
+      Object.defineProperty(proto,'constructor',{value:ctor,writable:true,configurable:true});
+      Object.defineProperty(proto,Symbol.toStringTag,{value:name,configurable:true});
+      ctor.prototype=proto;
+      if(parent&&parent.constructor&&parent.constructor!==Object)Object.setPrototypeOf(ctor,parent.constructor);
+      Object.defineProperty(ctor,'prototype',{writable:false});
+      Object.defineProperty(g,name,{value:ctor,writable:true,configurable:true,enumerable:false});
+      try{delete ctor[Symbol.hasInstance];}catch(e){}
+      prototypes[name]=proto;
+      return proto;
+    }
+    var eventTargetProto=g.EventTarget.prototype;
+    var eventTargets=__ns.eventTargetInstances||(__ns.eventTargetInstances=new WeakSet());
+    var eventCallbacks=__ns.eventTargetCallbacks||(__ns.eventTargetCallbacks={});
+    var windowCallbacks=__ns.windowEventCallbacks||(__ns.windowEventCallbacks={});
+    ['addEventListener','removeEventListener','dispatchEvent'].forEach(function(name){
+      if(!eventCallbacks[name])eventCallbacks[name]=eventTargetProto[name];
+      if(!windowCallbacks[name])windowCallbacks[name]=g[name];
+    });
+    var PreviousEventTarget=g.EventTarget;
+    var eventTargetCtor=__ns.makeNativeFunction(class extends PreviousEventTarget{constructor(){super();eventTargets.add(this);}},'EventTarget',0,true,true);
+    eventTargetCtor.prototype=eventTargetProto;
+    Object.defineProperty(g,'EventTarget',{value:eventTargetCtor,writable:true,configurable:true,enumerable:false});
+    Object.defineProperty(eventTargetProto,'constructor',{value:eventTargetCtor,writable:true,configurable:true});
+    Object.defineProperty(eventTargetProto,Symbol.toStringTag,{value:'EventTarget',configurable:true});
+    Object.defineProperty(g.EventTarget,'prototype',{writable:false});
+    Object.defineProperty(g,'EventTarget',{value:g.EventTarget,writable:true,configurable:true,enumerable:false});
+    var nodeProto=defineInterface('Node',g.EventTarget.prototype);
+    var elementProto=defineInterface('Element',nodeProto);
+    var htmlProto=defineInterface('HTMLElement',elementProto);
+    var documentProto=defineInterface('Document',nodeProto);
+    defineInterface('HTMLDocument',documentProto);
+    var characterProto=defineInterface('CharacterData',nodeProto);
+    defineInterface('Attr',nodeProto);
+    defineInterface('DocumentType',nodeProto);
+    defineInterface('Text',characterProto);
+    defineInterface('Comment',characterProto);
+    defineInterface('CDATASection',characterProto);
+    defineInterface('ProcessingInstruction',characterProto);
+    defineInterface('DocumentFragment',nodeProto);
+    defineInterface('ShadowRoot',g.DocumentFragment.prototype);
+    defineInterface('SVGElement',elementProto);
+    defineInterface('SVGSVGElement',g.SVGElement.prototype);
+    Object.getOwnPropertyNames(g).forEach(function(name){
+      if(!/^HTML.*Element$/.test(name)||name==='HTMLElement'||typeof g[name]!=='function')return;
+      var proto=g[name].prototype;
+      defineInterface(name,htmlProto,proto===oldBase?null:proto);
+    });
+    ['HTMLAudioElement','HTMLVideoElement'].forEach(function(name){Object.setPrototypeOf(prototypes[name],prototypes.HTMLMediaElement);Object.setPrototypeOf(g[name],g.HTMLMediaElement);});
+    // Keep existing compatibility behavior while separating the base interfaces;
+    // the native members below replace these descriptors on their proper owner.
+    Reflect.ownKeys(oldBase).forEach(function(key){
+      if(key==='constructor'||key===Symbol.toStringTag)return;
+      var descriptor=Object.getOwnPropertyDescriptor(oldBase,key);
+      if(descriptor)Object.defineProperty(htmlProto,key,descriptor);
+    });
+    // Read-only constructor prototypes can leave the previous bootstrap's sheet getter in oldBase.
+    if(currentSheetGetter)Object.defineProperty(htmlProto,'sheet',{configurable:true,get:currentSheetGetter});
+    Reflect.ownKeys(oldDocument).forEach(function(key){
+      if(key!=='exitFullscreen'&&key!=='cookie')return;
+      var descriptor=Object.getOwnPropertyDescriptor(oldDocument,key);
+      if(descriptor)Object.defineProperty(documentProto,key,descriptor);
+    });
+    var accessorOwners={
+      Node:['nodeType','nodeName','isConnected','ownerDocument','parentNode','parentElement','childNodes','firstChild','nextSibling','nodeValue','textContent'],
+      Element:['namespaceURI','prefix','localName','tagName','id','className','attributes','innerHTML','outerHTML','children','firstElementChild','shadowRoot'],
+      HTMLElement:['style','dataset','contentEditable','isContentEditable'],
+      CharacterData:['data'],
+      DocumentType:['publicId','systemId'],
+      Document:['activeElement','children','firstElementChild'],
+      DocumentFragment:['children','firstElementChild'],
+      ShadowRoot:['host','mode','innerHTML']
+    };
+    var writable={nodeValue:1,textContent:1,id:1,className:1,innerHTML:1,outerHTML:1,contentEditable:1,data:1};
+    var nativeKeys=['constructor'];
+    Object.keys(accessorOwners).forEach(function(owner){
+      accessorOwners[owner].forEach(function(name){
+        nativeKeys.push(name);
+        var descriptor={enumerable:true,configurable:true,get:__ns.domAccessor(name,false,owner)};
+        if(writable[name])descriptor.set=__ns.domAccessor(name,true,owner);
+        Object.defineProperty(prototypes[owner],name,descriptor);
+      });
+    });
+    [['name','nodeName'],['value','__attrValue'],['ownerElement','__attrOwner'],['specified','__attrSpecified'],['namespaceURI','namespaceURI'],['prefix','prefix'],['localName','localName']].forEach(function(pair){
+      var name=pair[0],raw=pair[1],get=__ns.domAccessor(raw,false,'Attr');
+      var descriptor={configurable:true,enumerable:true,get:raw===name?get:__ns.makeNativeFunction(function(){return get.call(this);},'get '+name,0)};
+      if(name==='value'){var set=__ns.domAccessor(raw,true,'Attr');descriptor.set=__ns.makeNativeFunction(function(value){set.call(this,value);},'set value',1);}
+      Object.defineProperty(prototypes.Attr,name,descriptor);
+    });
+    var doctypeName=__ns.domAccessor('__nodeName',false,'DocumentType');Object.defineProperty(prototypes.DocumentType,'name',{get:__ns.makeNativeFunction(function(){return doctypeName.call(this);},'get name',0),enumerable:true,configurable:true});
+    var inlineStyle=Object.getOwnPropertyDescriptor(htmlProto,'style');inlineStyle.set=__ns.makeNativeFunction(function(value){var style=inlineStyle.get.call(this);Object.getOwnPropertyDescriptor(declarationPrototype,'cssText').set.call(style,value);},'set style',1);Object.defineProperty(htmlProto,'style',inlineStyle);
+    ['Element','Document','DocumentFragment'].forEach(function(owner){
+      var children=Object.getOwnPropertyDescriptor(prototypes[owner],'children').get;
+      ['childElementCount','lastElementChild'].forEach(function(name){
+        var getter=__ns.makeNativeFunction(function(){var list=children.call(this);return name==='childElementCount'?list.length:list[list.length-1]||null;},'get '+name,0);
+        Object.defineProperty(prototypes[owner],name,{get:getter,enumerable:true,configurable:true});
+      });
+    });
+    var getType=Object.getOwnPropertyDescriptor(nodeProto,'nodeType').get;
+    var getTag=Object.getOwnPropertyDescriptor(elementProto,'tagName').get;
+    var getNamespace=Object.getOwnPropertyDescriptor(elementProto,'namespaceURI').get;
+    var getLocalTag=Object.getOwnPropertyDescriptor(elementProto,'localName').get;
+    var nativeAttributes=Object.getOwnPropertyDescriptor(elementProto,'attributes').get;
+    var mapRecords=new WeakMap(),mapsByElement=new WeakMap(),namedFactory=__ns.makeNamedObject;
+    var namedMapCtor=defineInterface('NamedNodeMap',Object.prototype),namedMapProto=namedMapCtor;
+    function mapOwner(map){var record=collectionGet?collectionGet(map):null,owner=record&&record.kind==='NamedNodeMap'?record.owner:collectionGet?null:mapRecords.get(map);if(!owner)throw new TypeError('Illegal invocation');return owner;}
+    function mapEntries(map){return nativeAttributes.call(mapOwner(map));}
+    function mapIndex(value){return Number(value)>>>0;}
+    var mapMethods={
+      item(index){return mapEntries(this)[mapIndex(index)]||null;},
+      getNamedItem(name){name=attributeString(name);return mapOwner(this).getAttributeNode(name);},
+      getNamedItemNS(namespace,local){return mapOwner(this).getAttributeNodeNS(namespace,local);},
+      setNamedItem(attribute){return mapOwner(this).setAttributeNode(attribute);},
+      setNamedItemNS(attribute){return mapOwner(this).setAttributeNodeNS(attribute);},
+      removeNamedItem(name){var owner=mapOwner(this),attribute=owner.getAttributeNode(attributeString(name));if(!attribute)throw new g.DOMException('The attribute is absent','NotFoundError');return owner.removeAttributeNode(attribute);},
+      removeNamedItemNS(namespace,local){var owner=mapOwner(this),attribute=owner.getAttributeNodeNS(namespace,local);if(!attribute)throw new g.DOMException('The attribute is absent','NotFoundError');return owner.removeAttributeNode(attribute);}
+    };
+    Object.keys(mapMethods).forEach(function(name){var delegate=mapMethods[name];Object.defineProperty(namedMapProto,name,{value:__ns.makeNativeFunction(function(){mapOwner(this);if(arguments.length<delegate.length)throw new TypeError('Not enough arguments');return delegate.apply(this,arguments);},name,delegate.length),writable:true,enumerable:true,configurable:true});});
+    Object.defineProperty(namedMapProto,'length',{get:__ns.makeNativeFunction(function(){return mapEntries(this).length;},'get length',0),enumerable:true,configurable:true});
+    Object.defineProperty(namedMapProto,Symbol.iterator,{value:__ns.makeNativeFunction(function(){var map=this;mapOwner(map);var index=0;return {next(){var entries=mapEntries(map);return index<entries.length?{value:entries[index++],done:false}:{value:undefined,done:true};},[Symbol.iterator](){return this;}};},'values',0),writable:true,configurable:true});
+    Object.defineProperty(elementProto,'attributes',{get:__ns.makeNativeFunction(function(){getTag.call(this);var owner=this,map=mapsByElement.get(owner);if(map)return map;map=namedFactory(namedMapProto,function(operation,key,value){var entries=nativeAttributes.call(owner),index=/^(0|[1-9]\d*)$/.test(key)?Number(key):null,attribute=index===null?Array.from(entries).find(function(entry){return entry.name===key;}):entries[index];if(operation==='indices')return Array.from(entries,function(_,index){return index;});if(operation==='keys')return Array.from(new Set(Array.from(entries,function(entry){return entry.name;})));if(operation==='get')return attribute;if(operation==='has')return !!attribute;if(operation==='descriptor')return attribute?{value:attribute,writable:false,enumerable:index!==null,configurable:true}:undefined;if(operation==='set'||operation==='define')return attribute?true:undefined;if(operation==='delete')return attribute?false:undefined;},true);mapRecords.set(map,owner);if(collectionSet)collectionSet(map,{kind:'NamedNodeMap',owner:owner});mapsByElement.set(owner,map);return map;},'get attributes',0),enumerable:true,configurable:true});
+    var isShadowRoot=__ns.domAccessor('__isShadowRoot',false,'Node');
+    var probe=d.createElement('div');
+    __ns.cascadeProp=Object.getOwnPropertyDescriptor(probe,'__cascadeProp').value;
+    nativeKeys.push('__nodeName','__attrValue','__attrOwner','__attrSpecified','__cascadeProp','__isShadowRoot','host','mode','containsNode','activeElement');
+    var constants={ELEMENT_NODE:1,ATTRIBUTE_NODE:2,TEXT_NODE:3,CDATA_SECTION_NODE:4,ENTITY_REFERENCE_NODE:5,ENTITY_NODE:6,PROCESSING_INSTRUCTION_NODE:7,COMMENT_NODE:8,DOCUMENT_NODE:9,DOCUMENT_TYPE_NODE:10,DOCUMENT_FRAGMENT_NODE:11,NOTATION_NODE:12,DOCUMENT_POSITION_DISCONNECTED:1,DOCUMENT_POSITION_PRECEDING:2,DOCUMENT_POSITION_FOLLOWING:4,DOCUMENT_POSITION_CONTAINS:8,DOCUMENT_POSITION_CONTAINED_BY:16,DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC:32};
+    Object.keys(constants).forEach(function(name){
+      nativeKeys.push(name);
+      [g.Node,nodeProto].forEach(function(owner){Object.defineProperty(owner,name,{value:constants[name],enumerable:true});});
+    });
+    ['addEventListener','removeEventListener','dispatchEvent'].forEach(function(name){
+      var native=Object.getOwnPropertyDescriptor(probe,name).value;
+      var minimum=name==='dispatchEvent'?1:2;
+      var method=__ns.makeNativeFunction(function(){
+        if(arguments.length<minimum)throw new TypeError(name+' requires '+minimum+' arguments');
+        if(this===g)return windowCallbacks[name].apply(this,arguments);
+        var node=false;try{getType.call(this);node=true;}catch(e){}
+        if(node)return native.apply(this,arguments);
+        if(!eventTargets.has(this))throw new TypeError('Illegal invocation');
+        return eventCallbacks[name].apply(this,arguments);
+      },name,minimum);
+      Object.defineProperty(eventTargetProto,name,{value:method,writable:true,configurable:true,enumerable:true});
+      nativeKeys.push(name);
+    });
+    var controls=['HTMLInputElement','HTMLTextAreaElement','HTMLSelectElement','HTMLButtonElement','HTMLFieldSetElement','HTMLObjectElement','HTMLOutputElement'];
+    ['checkValidity','reportValidity','setCustomValidity','setSelectionRange','setRangeText','select'].forEach(function(name){
+      var descriptor=Object.getOwnPropertyDescriptor(probe,name);
+      nativeKeys.push(name);
+      var owners=/^(setSelectionRange|setRangeText|select)$/.test(name)?controls.slice(0,2):controls;
+      if(name!=='setCustomValidity'&&owners===controls)owners=owners.concat('HTMLFormElement');
+      owners.forEach(function(owner){var proto=prototypes[owner];if(proto&&!Object.hasOwn(proto,name)&&descriptor)Object.defineProperty(proto,name,{value:descriptor.value,writable:true,configurable:true,enumerable:true});});
+    });
+    var methodOwners={
+      Node:['appendChild','removeChild','insertBefore','replaceChild','contains','hasChildNodes','cloneNode','getRootNode'],
+      Element:['setAttribute','getAttribute','getAttributeNode','getAttributeNodeNS','setAttributeNode','setAttributeNodeNS','removeAttributeNode','hasAttribute','removeAttribute','querySelector','querySelectorAll','matches','closest','append','prepend','remove','before','after','replaceWith','replaceChildren','insertAdjacentElement','insertAdjacentHTML','toggleAttribute','getAttributeNS','hasAttributeNS','setAttributeNS','removeAttributeNS','scrollIntoView','scrollTo','scrollBy','getBoundingClientRect','attachShadow'],
+      HTMLElement:['focus','blur','click'],
+      CharacterData:['insertData','deleteData','appendData','replaceData','substringData'],
+      Text:['splitText']
+    };
+    Object.keys(methodOwners).forEach(function(owner){
+      methodOwners[owner].forEach(function(name){
+        var descriptor=Object.getOwnPropertyDescriptor(probe,name);
+        if(descriptor&&typeof descriptor.value==='function'){
+          Object.defineProperty(prototypes[owner],name,{value:descriptor.value,writable:true,configurable:true,enumerable:true});
+          nativeKeys.push(name);
+        }
+      });
+    });
+    ['querySelector','querySelectorAll','append','prepend','replaceChildren'].forEach(function(name){
+      var descriptor=Object.getOwnPropertyDescriptor(d,name)||Object.getOwnPropertyDescriptor(elementProto,name);
+      if(descriptor)Object.defineProperty(documentProto,name,descriptor);
+      if(name!=='getElementById')Object.defineProperty(prototypes.DocumentFragment,name,Object.getOwnPropertyDescriptor(elementProto,name));
+    });
+    ['before','after','remove','replaceWith'].forEach(function(name){
+      Object.defineProperty(characterProto,name,Object.getOwnPropertyDescriptor(elementProto,name));
+    });
+    function projectCompatibility(owner,names,source){
+      var proto=prototypes[owner],check=__ns.domAccessor('nodeType',false,owner);
+      names.forEach(function(name){
+        var descriptor=Object.getOwnPropertyDescriptor(source,name);
+        if(!descriptor)return;
+        ['get','set','value'].forEach(function(key){
+          var delegate=descriptor[key];if(typeof delegate!=='function')return;
+          descriptor[key]=__ns.makeNativeFunction(function(){check.call(this);return delegate.apply(this,arguments);},key==='get'?'get '+name:key==='set'?'set '+name:name,delegate.length);
+        });
+        descriptor.enumerable=true;Object.defineProperty(proto,name,descriptor);
+      });
+    }
+    projectCompatibility('Document',['getElementsByTagName','getElementsByClassName','getElementsByName'],htmlProto);
+    projectCompatibility('Node',['isEqualNode','isSameNode','lastChild','previousSibling'],htmlProto);
+    projectCompatibility('Element',['classList','getClientRects','getElementsByTagName','getElementsByClassName','nextElementSibling','previousElementSibling','requestFullscreen'],htmlProto);
+    ['isEqualNode','isSameNode','lastChild','previousSibling','replaceChild','classList','getClientRects','getElementsByTagName','getElementsByClassName','getElementsByName','nextElementSibling','previousElementSibling','requestFullscreen','lastElementChild','cookie','exitFullscreen'].forEach(function(name){delete htmlProto[name];});
+    ['createTextNode','createComment','createDocumentFragment','createElementNS','getElementById'].forEach(function(name){
+      var descriptor=Object.getOwnPropertyDescriptor(d,name);
+      if(descriptor&&typeof descriptor.value==='function'){
+        Object.defineProperty(documentProto,name,{value:descriptor.value,writable:true,configurable:true,enumerable:true});
+        nativeKeys.push(name);
+      }
+    });
+    ['accept','autoFocus','autocomplete','checked','disabled','form','max','min','multiple','name','pattern','placeholder','readOnly','required','step','value','getBoundingClientRect'].forEach(function(name){delete prototypes.HTMLCanvasElement[name];});
+    function reflectAttribute(owner,name,attribute,nullable){
+      var check=__ns.domAccessor('nodeType',false,owner);
+      Object.defineProperty(prototypes[owner],name,{configurable:true,enumerable:true,
+        get:__ns.makeNativeFunction(function(){check.call(this);var value=this.getAttribute(attribute);return nullable?value:value||'';},'get '+name,0),
+        set:__ns.makeNativeFunction(function(value){check.call(this);if(nullable&&value==null){this.removeAttribute(attribute);return;}if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');this.setAttribute(attribute,String(value));},'set '+name,1)});
+    }
+    ['title','lang','accessKey'].forEach(function(name){reflectAttribute('HTMLElement',name,name.toLowerCase(),false);});
+    var ariaNames='Atomic AutoComplete BrailleLabel BrailleRoleDescription Busy Checked ColCount ColIndex ColIndexText ColSpan Current Description Disabled Expanded HasPopup Hidden Invalid KeyShortcuts Label Level Live Modal MultiLine MultiSelectable Orientation Placeholder PosInSet Pressed ReadOnly Relevant Required RoleDescription RowCount RowIndex RowIndexText RowSpan Selected SetSize Sort ValueMax ValueMin ValueNow ValueText'.split(' ');
+    ariaNames.forEach(function(name){reflectAttribute('Element','aria'+name,'aria-'+name.toLowerCase(),true);});
+    reflectAttribute('Element','role','role',true);
+    ['slot','elementTiming'].forEach(function(name){reflectAttribute('Element',name,name.toLowerCase(),false);});
+    function reflectedMember(name,get,set){var check=__ns.domAccessor('nodeType',false,'HTMLElement');Object.defineProperty(htmlProto,name,{configurable:true,enumerable:true,get:__ns.makeNativeFunction(function(){check.call(this);return get.call(this);},'get '+name,0),set:__ns.makeNativeFunction(function(value){check.call(this);return set.call(this,value);},'set '+name,1)});}
+    function attributeString(value){if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);}
+    function enumAttribute(name,keywords,fallback){reflectedMember(name,function(){var value=(this.getAttribute(name.toLowerCase())||'').toLowerCase();return keywords.indexOf(value)>=0?value:fallback;},function(value){this.setAttribute(name.toLowerCase(),attributeString(value));});}
+    enumAttribute('dir',['ltr','rtl','auto'],'');
+    enumAttribute('inputMode',['none','text','tel','url','email','numeric','decimal','search'],'');
+    enumAttribute('enterKeyHint',['enter','done','go','next','previous','search','send'],'');
+    enumAttribute('virtualKeyboardPolicy',['auto','manual'],'');
+    ['autofocus','inert'].forEach(function(name){reflectedMember(name,function(){return this.hasAttribute(name);},function(value){if(value)this.setAttribute(name,'');else this.removeAttribute(name);});});
+    reflectedMember('hidden',function(){var value=this.getAttribute('hidden');return value===null?false:value.toLowerCase()==='until-found'?'until-found':true;},function(value){if(typeof value!=='boolean'&&value!=null){value=attributeString(value);if(value.toLowerCase()==='until-found'){this.setAttribute('hidden','until-found');return;}}if(value)this.setAttribute('hidden','');else this.removeAttribute('hidden');});
+    function inheritedAttribute(el,name,accepted){for(var node=el;node&&node.nodeType===1;node=node.parentElement){var value=node.getAttribute(name);if(value!==null&&accepted.indexOf(value.toLowerCase())>=0)return value.toLowerCase();}return null;}
+    reflectedMember('translate',function(){return inheritedAttribute(this,'translate',['','yes','no'])!=='no';},function(value){this.setAttribute('translate',value?'yes':'no');});
+    reflectedMember('spellcheck',function(){var value=inheritedAttribute(this,'spellcheck',['','true','false']);if(value!==null)return value!=='false';return String(getTag.call(this)).toUpperCase()!=='INPUT'||(this.getAttribute('type')||'').toLowerCase()!=='password';},function(value){this.setAttribute('spellcheck',value?'true':'false');});
+    reflectedMember('writingSuggestions',function(){var value=this.getAttribute('writingsuggestions');if(value===null)value=inheritedAttribute(this.parentElement,'writingsuggestions',['true','false']);return value!==null&&value.toLowerCase()==='false'?'false':'true';},function(value){this.setAttribute('writingsuggestions',attributeString(value));});
+    reflectedMember('draggable',function(){var value=(this.getAttribute('draggable')||'').toLowerCase();if(value==='true'||value==='false')return value==='true';var tag=String(getTag.call(this)).toUpperCase();return tag==='IMG'||tag==='A'&&this.hasAttribute('href');},function(value){this.setAttribute('draggable',value?'true':'false');});
+    reflectedMember('autocapitalize',function(){var value=this.getAttribute('autocapitalize');if(value===null&&this.form)value=this.form.getAttribute('autocapitalize');value=(value||'').toLowerCase();return value===''?'':value==='off'?'none':value==='on'?'sentences':['none','sentences','words','characters'].indexOf(value)>=0?value:'sentences';},function(value){this.setAttribute('autocapitalize',attributeString(value));});
+    reflectedMember('autocorrect',function(){var value=this.getAttribute('autocorrect');if(value===null&&this.form)value=this.form.getAttribute('autocorrect');return (value||'').toLowerCase()!=='off';},function(value){this.setAttribute('autocorrect',value?'on':'off');});
+    var reflectedOwners={src:['HTMLScriptElement','HTMLImageElement','HTMLIFrameElement','HTMLMediaElement','HTMLInputElement','HTMLEmbedElement','HTMLSourceElement','HTMLTrackElement'],href:['HTMLAnchorElement','HTMLAreaElement','HTMLBaseElement','HTMLLinkElement'],rel:['HTMLAnchorElement','HTMLAreaElement','HTMLLinkElement'],as:['HTMLLinkElement'],media:['HTMLLinkElement','HTMLStyleElement','HTMLSourceElement'],type:['HTMLInputElement','HTMLButtonElement','HTMLScriptElement','HTMLLinkElement','HTMLStyleElement','HTMLEmbedElement','HTMLObjectElement','HTMLSourceElement'],valueAsNumber:['HTMLInputElement'],sheet:['HTMLStyleElement','HTMLLinkElement']};
+    Object.keys(reflectedOwners).forEach(function(name){
+      var descriptor=Object.getOwnPropertyDescriptor(htmlProto,name);if(!descriptor)return;
+      reflectedOwners[name].forEach(function(owner){
+        var proto=prototypes[owner];if(!proto||name!=='sheet'&&Object.hasOwn(proto,name))return;
+        var copy={configurable:true,enumerable:true},check=__ns.domAccessor('nodeType',false,'HTMLElement');
+        var ownerTags=Object.keys(htmlByTag).filter(function(tag){return htmlByTag[tag]===owner;});
+        var extraTags={HTMLInputElement:['INPUT'],HTMLButtonElement:['BUTTON'],HTMLAnchorElement:['A'],HTMLImageElement:['IMG'],HTMLIFrameElement:['IFRAME'],HTMLScriptElement:['SCRIPT'],HTMLStyleElement:['STYLE'],HTMLMediaElement:['AUDIO','VIDEO']};
+        if(extraTags[owner])ownerTags=ownerTags.concat(extraTags[owner]);
+        ['get','set'].forEach(function(kind){var delegate=descriptor[kind];if(!delegate)return;copy[kind]=__ns.makeNativeFunction(function(){check.call(this);if(ownerTags.indexOf(String(getTag.call(this)).toUpperCase())<0)throw new TypeError('Illegal invocation');var value=delegate.apply(this,arguments);if(kind==='get'&&(name==='src'||name==='href')&&value&&typeof g.URL==='function'){try{return new g.URL(value,this.ownerDocument.URL||g.location.href).href;}catch(e){}}return value;},kind+' '+name,kind==='get'?0:1);});
+        Object.defineProperty(proto,name,copy);
+      });
+      delete htmlProto[name];
+    });
+    var elementOperations={getAttributeNames(){return Array.from(this.attributes,function(attribute){return attribute.name;});},hasAttributes(){return this.attributes.length>0;},insertAdjacentText(position,text){if(typeof position==='symbol'||typeof text==='symbol')throw new TypeError('Cannot convert a Symbol to a string');position=String(position).toLowerCase();var node=this.ownerDocument.createTextNode(String(text));if(position==='beforebegin'){if(this.parentNode)this.parentNode.insertBefore(node,this);}else if(position==='afterend'){if(this.parentNode)this.parentNode.insertBefore(node,this.nextSibling);}else if(position==='afterbegin')this.insertBefore(node,this.firstChild);else if(position==='beforeend')this.appendChild(node);else throw new g.DOMException('Invalid adjacent position','SyntaxError');}};
+    Object.keys(elementOperations).forEach(function(name){var delegate=elementOperations[name],check=__ns.domAccessor('nodeType',false,'Element');Object.defineProperty(elementProto,name,{value:__ns.makeNativeFunction(function(){check.call(this);if(arguments.length<delegate.length)throw new TypeError(name+' requires '+delegate.length+' arguments');return delegate.apply(this,arguments);},name,delegate.length),writable:true,enumerable:true,configurable:true});});
+    var eventHandlers=new WeakMap(),checkHandlerReceiver=__ns.domAccessor('nodeType',false,'HTMLElement');
+    var handlerNames='abort animationcancel animationend animationiteration animationstart auxclick beforeinput beforematch beforetoggle beforexrselect blur cancel canplay canplaythrough change click close command contentvisibilityautostatechange contextlost contextmenu contextrestored copy cuechange cut dblclick drag dragend dragenter dragleave dragover dragstart drop durationchange emptied ended error focus formdata gotpointercapture input invalid keydown keypress keyup load loadeddata loadedmetadata loadstart lostpointercapture mousedown mouseenter mouseleave mousemove mouseout mouseover mouseup mousewheel paste pause play playing pointercancel pointerdown pointerenter pointerleave pointermove pointerout pointerover pointerrawupdate pointerup progress ratechange reset resize scroll scrollend scrollsnapchange scrollsnapchanging securitypolicyviolation seeked seeking select selectionchange selectstart slotchange stalled submit suspend timeupdate toggle transitioncancel transitionend transitionrun transitionstart volumechange waiting webkitanimationend webkitanimationiteration webkitanimationstart webkittransitionend wheel'.split(' ');
+    handlerNames.forEach(function(type){
+      var name='on'+type;
+      Object.defineProperty(htmlProto,name,{configurable:true,enumerable:true,
+        get:__ns.makeNativeFunction(function(){checkHandlerReceiver.call(this);if(prepareInlineHandler)prepareInlineHandler.call(this,name);var handlers=eventHandlers.get(this);return handlers&&handlers[name]&&handlers[name].value||null;},'get '+name,0),
+        set:__ns.makeNativeFunction(function(value){
+          checkHandlerReceiver.call(this);if(noteInlineHandler)noteInlineHandler.call(this,name);value=typeof value==='function'?value:null;
+          var handlers=eventHandlers.get(this);if(!handlers){handlers=Object.create(null);eventHandlers.set(this,handlers);}
+          var entry=handlers[name];
+          if(!entry){entry={value:null,callback:__ns.makeNativeFunction(function(event){var current=eventHandlers.get(this)[name].value;if(current&&current.call(this,event)===false)event.preventDefault();},name,1)};handlers[name]=entry;}
+          if(value&&!entry.value)this.addEventListener(type,entry.callback);
+          if(!value&&entry.value)this.removeEventListener(type,entry.callback);
+          entry.value=value;
+        },'set '+name,1)});
+    });
+    var nodeOperations={
+      lookupNamespaceURI(prefix){prefix=prefix==null||prefix===''?null:attributeString(prefix);var element=this.nodeType===9?this.documentElement:this.nodeType===2?this.ownerElement:this.nodeType===1?this:this.parentElement;while(element){if(prefix==='xml')return 'http://www.w3.org/XML/1998/namespace';if(prefix==='xmlns')return 'http://www.w3.org/2000/xmlns/';if(element.namespaceURI&&element.prefix===prefix)return element.namespaceURI;var declaration=element.getAttributeNodeNS('http://www.w3.org/2000/xmlns/',prefix===null?'xmlns':prefix);if(declaration&&(prefix===null?declaration.prefix===null:declaration.prefix==='xmlns'))return declaration.value||null;element=element.parentElement;}return null;},
+      lookupPrefix(namespace){namespace=namespace==null||namespace===''?null:attributeString(namespace);if(namespace===null)return null;var element=this.nodeType===9?this.documentElement:this.nodeType===2?this.ownerElement:this.nodeType===1?this:this.parentElement;while(element){if(element.prefix&&element.namespaceURI===namespace&&this.lookupNamespaceURI(element.prefix)===namespace)return element.prefix;var attributes=element.attributes;for(var index=0;index<attributes.length;index++){var attribute=attributes[index];if(attribute.namespaceURI==='http://www.w3.org/2000/xmlns/'&&attribute.prefix==='xmlns'&&attribute.value===namespace&&this.lookupNamespaceURI(attribute.localName)===namespace)return attribute.localName;}element=element.parentElement;}return null;},
+      isDefaultNamespace(namespace){namespace=namespace==null||namespace===''?null:String(namespace);return this.lookupNamespaceURI(null)===namespace;},
+      normalize(){var nodes=this.childNodes;for(var index=0;index<nodes.length;){var node=nodes[index];if(node.nodeType!==3){node.normalize();index++;continue;}while(index+1<nodes.length&&nodes[index+1].nodeType===3){node.data+=nodes[index+1].data;this.removeChild(nodes[index+1]);nodes=this.childNodes;}if(!node.data){this.removeChild(node);nodes=this.childNodes;}else index++;}},
+      compareDocumentPosition(other){getType.call(other);if(this===other)return 0;var root=this.getRootNode(),otherRoot=other.getRootNode();if(root!==otherRoot){var order=__ns.nodeComparisonOrder||(__ns.nodeComparisonOrder=new WeakMap());var next=__ns.nodeComparisonNext||1;[this,other].forEach(function(node){if(!order.has(node))order.set(node,next++);});__ns.nodeComparisonNext=next;return 33|(order.get(this)<order.get(other)?4:2);}if(this.contains(other))return 20;if(other.contains(this))return 10;var before=false,found=false;(function visit(node){if(found)return;if(node===this)before=true;if(node===other){found=true;return;}var children=node.childNodes;for(var i=0;i<children.length;i++)visit.call(this,children[i]);}).call(this,root);return before?4:2;}
+    };
+    Object.keys(nodeOperations).forEach(function(name){var delegate=nodeOperations[name];var fn=__ns.makeNativeFunction(function(){getType.call(this);if(arguments.length<delegate.length)throw new TypeError(name+' requires '+delegate.length+' arguments');return delegate.apply(this,arguments);},name,delegate.length);Object.defineProperty(nodeProto,name,{value:fn,writable:true,configurable:true,enumerable:true});});
+    var tags={DIV:'HTMLDivElement',SPAN:'HTMLSpanElement',P:'HTMLParagraphElement',INPUT:'HTMLInputElement',TEXTAREA:'HTMLTextAreaElement',SELECT:'HTMLSelectElement',OPTION:'HTMLOptionElement',BUTTON:'HTMLButtonElement',LABEL:'HTMLLabelElement',CANVAS:'HTMLCanvasElement',A:'HTMLAnchorElement',FORM:'HTMLFormElement',STYLE:'HTMLStyleElement',SCRIPT:'HTMLScriptElement',IFRAME:'HTMLIFrameElement',IMG:'HTMLImageElement',UL:'HTMLUListElement',LI:'HTMLLIElement',TABLE:'HTMLTableElement'};
+    Object.keys(htmlByTag).forEach(function(tag){tags[tag]=htmlByTag[tag];});
+    Object.assign(tags,{TD:'HTMLTableCellElement',TH:'HTMLTableCellElement',THEAD:'HTMLTableSectionElement',TBODY:'HTMLTableSectionElement',TFOOT:'HTMLTableSectionElement',COLGROUP:'HTMLTableColElement',Q:'HTMLQuoteElement',BLOCKQUOTE:'HTMLQuoteElement'});
+    for(var heading=1;heading<=6;heading++)tags['H'+heading]='HTMLHeadingElement';
+    var projected=new WeakSet();
+    __ns.projectNativeNode=function(obj){
+      if(projected.has(obj))return obj;
+      var type=getType.call(obj),name;
+      if(type===1){
+        var tag=getLocalTag.call(obj),namespace=getNamespace.call(obj);
+        name=namespace==='http://www.w3.org/2000/svg'?(String(tag).split(':').pop()==='svg'?'SVGSVGElement':'SVGElement'):namespace==='http://www.w3.org/1999/xhtml'?(tags[String(tag).toUpperCase()]||'HTMLElement'):'Element';
+      }else name=type===11&&isShadowRoot.call(obj)?'ShadowRoot':({2:'Attr',10:'DocumentType',3:'Text',4:'CDATASection',7:'ProcessingInstruction',8:'Comment',9:'HTMLDocument',11:'DocumentFragment'})[type]||'Node';
+      Object.setPrototypeOf(obj,prototypes[name]);
+      projected.add(obj);
+      nativeKeys.forEach(function(key){if(Object.prototype.hasOwnProperty.call(obj,key))delete obj[key];});
+      return obj;
+    };
+    __ns.projectNativeNode(d);
+    var roots=[d.documentElement,d.head,d.body];
+    roots.forEach(function(node){if(node)__ns.projectNativeNode(node);});
+    var all=d.querySelectorAll('*');
+    for(var i=0;i<all.length;i++)__ns.projectNativeNode(all[i]);
+    __ns.projectNativeNode(probe);
+  })();
+
 })();

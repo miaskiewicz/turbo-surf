@@ -24,7 +24,17 @@
     if (recording) return;
     recording = true;
     try {
-      const id = `${name}:${kind}`;
+      const stack = new ErrorCtor().stack?.split("\n").slice(3, 9).join("\n");
+      const caller = stack?.split("\n")[0] || "";
+      // Native host pumps are implemented in JS. Preserve their observations separately
+      // so polling/loading does not masquerade as target-script interface queries.
+      const origin =
+        /<(?:env|rs-[^>]*|initial-hydrate|hydrate|pending|dom-bootstrap|frame-resources|turbo-cdp-host|frame-init|session-eval)>/.test(
+          caller,
+        )
+          ? "runtime"
+          : "page";
+      const id = `${origin}:${name}:${kind}`;
       const old = rows.get(id);
       if (old) {
         old.count++;
@@ -40,13 +50,14 @@
         rows.set(id, {
           name,
           kind,
+          origin,
           count: 1,
           at: now(),
           args: args.map(describe),
           result: describe(result),
           error: error ? String(error) : null,
           samples: [],
-          stack: new ErrorCtor().stack?.split("\n").slice(3, 9).join("\n"),
+          stack,
         });
       } else dropped++;
     } finally {
@@ -65,6 +76,30 @@
           throw error;
         }
         record(name, kind, args, result, null);
+        if (
+          result &&
+          typeof result === "object" &&
+          ((kind === "get" && /^(?:HTMLElement|Element|CSSStyleRule)\.style$/.test(name)) ||
+            name === "window.getComputedStyle")
+        ) {
+          // Native declarations may still expose supported methods as own properties.
+          // Inspect only known CSS members; installer descriptor reads are not page queries.
+          const previous = recording;
+          recording = true;
+          try {
+            instrument(result, "CSSStyleDeclaration", [
+              "getPropertyValue",
+              "getPropertyPriority",
+              "setProperty",
+              "removeProperty",
+              "item",
+              "length",
+              "cssText",
+            ]);
+          } finally {
+            recording = previous;
+          }
+        }
         return result;
       },
     }.invoke;
@@ -110,6 +145,9 @@
   });
   for (const name of [
     "Navigator",
+    "WorkerNavigator",
+    "WorkerGlobalScope",
+    "DedicatedWorkerGlobalScope",
     "Screen",
     "Document",
     "HTMLDocument",
@@ -142,12 +180,12 @@
     instrument(globalThis[name]?.prototype, name);
   }
   // Some native shims have own methods rather than prototype methods.
-  instrument(navigator, "navigator");
-  instrument(screen, "screen");
-  instrument(performance, "performance");
-  instrument(navigator.permissions, "permissions");
-  instrument(navigator.userAgentData, "userAgentData");
-  instrument(document, "document", [
+  instrument(globalThis.navigator, "navigator");
+  instrument(globalThis.screen, "screen");
+  instrument(globalThis.performance, "performance");
+  instrument(globalThis.navigator?.permissions, "permissions");
+  instrument(globalThis.navigator?.userAgentData, "userAgentData");
+  instrument(globalThis.document, "document", [
     "cookie",
     "readyState",
     "contentType",

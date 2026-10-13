@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "collectedAt": "2026-10-13T17:28:36.292Z",
+  "chromeVersion": "Chrome/155.0.8059.40",
+  "targetChromeMajor": 155,
+  "upstreamBaseTemplateMajor": 154,
+  "note": "Localhost TLS ClientHello capabilities and HTTPS/H2 settings/window/header-order controls. No Google traffic or reused cookies. GREASE values, extension permutation and opaque ECH lengths are normalized; full browser transport parity is not established.",
+  "clientHintsSource": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/components/embedder_support/user_agent_utils.cc",
+  "tls": {
+    "binaryHash": "78095bba0e79a2e86789e3e91195c9db567ae46713b2a21315d980c99aded5bc",
+    "normalized": {
+      "native": {
+        "ciphers": [
+          4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47, 53
+        ],
+        "cipherGrease": true,
+        "extensions": [
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [4588, 29, 23, 24],
+            "grease": true
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+            "grease": true
+          },
+          {
+            "type": 16,
+            "length": 14
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [772, 771],
+            "grease": true
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 51,
+            "length": 1263
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 65037
+          },
+          {
+            "type": 65281,
+            "length": 1
+          }
+        ],
+        "extensionGreaseCount": 2
+      },
+      "chrome": {
+        "ciphers": [
+          4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47, 53
+        ],
+        "cipherGrease": true,
+        "extensions": [
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [4588, 29, 23, 24],
+            "grease": true
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+            "grease": true
+          },
+          {
+            "type": 16,
+            "length": 14
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [772, 771],
+            "grease": true
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 51,
+            "length": 1263
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 65037
+          },
+          {
+            "type": 65281,
+            "length": 1
+          }
+        ],
+        "extensionGreaseCount": 2
+      }
+    },
+    "differences": []
+  },
+  "http2": {
+    "binaryHash": "41e13f16631c7521747c97069edb2c0262897cf63cbf98ae4abd6492e6efd648",
+    "nativeBuild": {
+      "profileMajor": 155,
+      "status": 200,
+      "transportChromeMajor": 155
+    },
+    "normalized": {
+      "chrome": {
+        "alpn": "h2",
+        "settings": {
+          "headerTableSize": 65536,
+          "enablePush": false,
+          "initialWindowSize": 6291456,
+          "maxFrameSize": 16384,
+          "maxConcurrentStreams": 4294967295,
+          "maxHeaderListSize": 262144,
+          "maxHeaderSize": 262144,
+          "enableConnectProtocol": false
+        },
+        "connectionWindow": 15728640,
+        "headerOrder": [
+          ":method",
+          ":authority",
+          ":scheme",
+          ":path",
+          "sec-ch-ua",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-platform",
+          "upgrade-insecure-requests",
+          "user-agent",
+          "accept",
+          "sec-fetch-site",
+          "sec-fetch-mode",
+          "sec-fetch-user",
+          "sec-fetch-dest",
+          "accept-encoding",
+          "accept-language",
+          "priority"
+        ],
+        "headers": {
+          ":method": "GET",
+          ":scheme": "https",
+          ":path": "/",
+          "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": "\"macOS\"",
+          "upgrade-insecure-requests": "1",
+          "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+          "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+          "sec-fetch-site": "none",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-user": "?1",
+          "sec-fetch-dest": "document",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "accept-language": "en-US,en;q=0.9",
+          "priority": "u=0, i"
+        }
+      },
+      "native": {
+        "alpn": "h2",
+        "settings": {
+          "headerTableSize": 65536,
+          "enablePush": false,
+          "initialWindowSize": 6291456,
+          "maxFrameSize": 16384,
+          "maxConcurrentStreams": 4294967295,
+          "maxHeaderListSize": 262144,
+          "maxHeaderSize": 262144,
+          "enableConnectProtocol": false
+        },
+        "connectionWindow": 15728640,
+        "headerOrder": [
+          ":method",
+          ":authority",
+          ":scheme",
+          ":path",
+          "sec-ch-ua",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-platform",
+          "upgrade-insecure-requests",
+          "user-agent",
+          "accept",
+          "sec-fetch-site",
+          "sec-fetch-mode",
+          "sec-fetch-user",
+          "sec-fetch-dest",
+          "accept-encoding",
+          "accept-language",
+          "priority"
+        ],
+        "headers": {
+          ":method": "GET",
+          ":scheme": "https",
+          ":path": "/",
+          "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": "\"macOS\"",
+          "upgrade-insecure-requests": "1",
+          "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+          "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+          "sec-fetch-site": "none",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-user": "?1",
+          "sec-fetch-dest": "document",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "accept-language": "en-US,en;q=0.9",
+          "priority": "u=0, i"
+        }
+      }
+    },
+    "differences": []
+  }
+}

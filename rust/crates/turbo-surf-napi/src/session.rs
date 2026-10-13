@@ -219,6 +219,7 @@ enum LiveJob {
     Eval(String, SyncSender<std::result::Result<String, String>>),
     Serialize(SyncSender<String>),
     Cookies(SyncSender<String>),
+    NetworkLog(SyncSender<String>),
     Close(SyncSender<()>),
 }
 
@@ -298,6 +299,9 @@ impl Task for LiveOpenTask {
                     }
                     LiveJob::Serialize(reply) => {
                         let _ = reply.send(session.serialize());
+                    }
+                    LiveJob::NetworkLog(reply) => {
+                        let _ = reply.send(session.drain_network_log());
                     }
                     LiveJob::Cookies(reply) => {
                         let _ = reply.send(session.cookies());
@@ -381,6 +385,31 @@ impl Task for LiveEvalTask {
 #[napi]
 pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
     AsyncTask::new(LiveEvalTask { id, script })
+}
+
+pub struct LiveNetworkLogTask {
+    id: u32,
+}
+
+#[napi]
+impl Task for LiveNetworkLogTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(self.id, LiveJob::NetworkLog(reply)).map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live session dropped network log reply"))
+    }
+    fn resolve(&mut self, _env: Env, out: String) -> Result<String> {
+        Ok(out)
+    }
+}
+
+/// Drain native response records without exposing raw resource bodies to guest JS.
+#[napi]
+pub fn live_network_log(id: u32) -> AsyncTask<LiveNetworkLogTask> {
+    AsyncTask::new(LiveNetworkLogTask { id })
 }
 
 /// Serialize the live DOM to HTML (sync — no network).

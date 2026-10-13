@@ -53,6 +53,8 @@ jobs:
         with:
           python-version: '3.12'
 
+      - uses: dtolnay/rust-toolchain@1.98.0
+
       # maturin-action builds the wheel from the crate's pyproject.toml. abi3
       # means ONE wheel per platform serves every CPython >= 3.8.
       - name: Build wheels
@@ -74,6 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:

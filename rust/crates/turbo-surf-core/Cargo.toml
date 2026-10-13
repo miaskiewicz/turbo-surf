@@ -8,16 +8,11 @@ description = "Browserless native-speed crawler core (Rust port, tier 1)"
 
 [features]
 default = ["impersonate"]
-# Swap the stock reqwest+rustls client for wreq (BoringSSL), which presents a
-# real Chrome TLS/JA3/JA4 + HTTP-2 (Akamai) fingerprint. Off by default: wreq
-# pulls BoringSSL, which needs a C toolchain (cmake/nasm) to build. ON by default (anti-bot); disable with --no-default-features. See net.rs.
+# BoringSSL-backed Chrome 154 transport. Requires the pinned upstream stack and
+# Rust 1.98 (workspace Cargo.toml); disable with --no-default-features for rustls.
 impersonate = ["dep:wreq", "dep:wreq-util"]
-# Emit Chrome 152+'s `trust_anchors` TLS extension (codepoint 0xCA34 / 51764) in
-# the ClientHello, so our JA4 matches real Chrome's `t13d1517h2` (wreq-util's
-# Chrome149 profile alone yields `t13d1516h2`). Off by default — it's a new,
-# non-standard extension. Implies `impersonate` (the emitter lives on the wreq
-# path). Uses the vendored wreq fork's `TlsOptions::trust_anchors`; see net.rs
-# `emulate()` and the [patch.crates-io] note in the workspace Cargo.toml.
+# Compatibility alias: the Chrome 154 profile always sends real trust-anchor IDs,
+# sourced from the same Chromium root store used to verify server certificates.
 trust-anchors = ["impersonate"]
 
 [dependencies]
@@ -34,18 +29,18 @@ reqwest = { version = "0.12", default-features = false, features = [
 # because wreq's Chrome emulation advertises `accept-encoding: gzip, deflate, br,
 # zstd` — without them it can't decode the responses it asks for.
 #
-# Pinned to the 6.0.0-rc / 3.0.0-rc line because Chrome 149 only lands there
-# (stable wreq-util 2.x tops out at Chrome 137); keeps the emulated version in
-# lockstep with the tier-1 HTTP UA + the render-tier navigator. Pre-release, but
-# only pulled by this opt-in feature — the default build never sees it.
-wreq = { version = "6.0.0-rc.29", optional = true, features = [
+# These published version numbers identify the current upstream release line;
+# workspace Git patches supply the newer Chrome 154 APIs. See publishing limits.
+wreq = { version = "0.16.1", default-features = false, optional = true, features = [
+    "tokio-rt",
+    "chromium-roots",
     "stream",
     "gzip",
     "brotli",
     "deflate",
     "zstd",
 ] }
-wreq-util = { version = "3.0.0-rc.13", optional = true }
+wreq-util = { version = "0.2.0", optional = true, features = ["emulation-chromium-pki"] }
 encoding_rs = "0.8"
 bytes = "1"
 tokio = { version = "1", features = [

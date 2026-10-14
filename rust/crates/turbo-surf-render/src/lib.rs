@@ -33,6 +33,7 @@ mod resource_policy;
 mod runtime;
 mod script_fetch;
 mod script_inventory;
+mod storage_gc;
 
 pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};
 pub use runtime::{

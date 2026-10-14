@@ -55,6 +55,11 @@ impl<F: Future> Future for ActiveFuture<F> {
         // runtime externally, so polling cannot destroy the guarded isolate.
         let this = unsafe { self.get_unchecked_mut() };
         let _activation = this.key.enter();
-        unsafe { Pin::new_unchecked(&mut this.future) }.poll(context)
+        let result = unsafe { Pin::new_unchecked(&mut this.future) }.poll(context);
+        if result.is_ready() {
+            let mut isolate = unsafe { v8::Isolate::from_raw_isolate_ptr(this.key.0) };
+            crate::storage_gc::boundary(&mut isolate);
+        }
+        result
     }
 }

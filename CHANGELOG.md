@@ -4,8 +4,12 @@
 
 - Consume verified published turbo-dom 0.5.4 and re-vendor canonical native
   per-isolate DOM state, bounded storage collection and genuine host-job node pins.
-  Dropping/resetting a session preserves its peers. Collection remains explicit;
-  automatic host-boundary scheduling and queued-task integration are in progress.
+  Dropping/resetting a session preserves its peers. Actual V8 GC notifications
+  schedule bounded collection after completed host operations, outside guest scopes;
+  callbacks only mark pending work and are removed before isolate disposal.
+  Two actual storage regressions reclaim detached nodes/payloads while preserving
+  retained subtree/Range identity and independent peer sessions. Resource-task
+  integration and genuine native155 certification remain in progress.
 - Park persistent V8 isolates between operations and asynchronous polls. Scoped
   runtime activation restores both V8 and the native document world before yielding,
   including cancellation, concurrent opening, cached/stateless evaluation and

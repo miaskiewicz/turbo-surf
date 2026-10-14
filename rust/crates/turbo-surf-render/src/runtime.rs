@@ -76,6 +76,7 @@ impl Drop for OwnedRuntime {
             unsafe { self.0.v8_isolate().enter() };
         }
         let _native = crate::browser_env::activate_isolate(self.0.v8_isolate());
+        crate::storage_gc::uninstall(self.0.v8_isolate());
         {
             deno_core::scope!(scope, self.0);
             crate::browser_env::clear_context_capabilities(scope);
@@ -8926,6 +8927,10 @@ fn make_runtime_with_hints(
     state.put::<Ua>(Ua(ua.to_string()));
     state.put::<ClientHints>(client_hints);
     drop(state);
+    {
+        deno_core::scope!(scope, &mut rt);
+        crate::storage_gc::install(scope);
+    }
     let key = ActivationKey::new(rt.v8_isolate());
     OwnedRuntime(rt, false, key)
 }
@@ -9087,7 +9092,9 @@ pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
         let global = rt
             .execute_script(page_script_name("about:blank"), script.to_string())
             .map_err(|e| e.to_string())?;
-        read_string(rt, global)
+        let result = read_string(rt, global);
+        crate::storage_gc::boundary(rt.v8_isolate());
+        result
     })
 }
 
@@ -9099,6 +9106,7 @@ pub fn render_html(html: &str, script: &str) -> Result<String, String> {
     let mut rt = make_runtime("about:blank", "", "");
     let _activation = rt.activation_key().enter();
     let out = run_sync(&mut rt, html, script);
+    crate::storage_gc::boundary(rt.v8_isolate());
     crate::browser_env::reset_isolate(rt.v8_isolate());
     out
 }
@@ -10924,6 +10932,12 @@ impl PageSession {
             crate::message_ports::sweep(scope);
         }
         crate::browser_env::sweep_collected_documents();
+    }
+
+    #[doc(hidden)]
+    pub fn native_storage_diagnostics_for_testing(&mut self) -> serde_json::Value {
+        let _activation = self.rt.activation_key().enter();
+        crate::storage_gc::diagnostics(self.rt.v8_isolate())
     }
 
     #[doc(hidden)]

@@ -12,8 +12,12 @@ batches, fragment/document APIs and bounded storage collection. Its release tag
 identifies PR #10 merge commit `181ed8996e7ddc9561b72ed234f0aeacc2ccc871`;
 the npm metadata, release workflow and official crate archive hash were verified.
 The canonical binding consumes collection through the public API with genuine
-weak wrapper roots and native job pins. Collection remains explicit; automatic
-host-boundary scheduling is still in progress. Native DOM state is isolate-owned;
+weak wrapper roots and native job pins. Real V8 GC notifications schedule a
+bounded scan after completed host operations; no Tree traversal runs inside the
+GC callback. Limits are 250,000 nodes, 2,000,000 edges and 64 MiB retained payload
+per Tree, with at most 256 Documents. Rejection leaves that Tree unchanged and
+is retained in host diagnostics; earlier Trees in a multi-document scan may have
+committed. Native DOM state is isolate-owned;
 PageSessions enter their V8 isolate and native world for each future poll, then
 restore the caller before yielding.
 

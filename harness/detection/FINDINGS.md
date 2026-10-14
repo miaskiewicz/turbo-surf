@@ -37,8 +37,14 @@ returning; the previous completion shortcut stranded MutationObserver delivery.
 The public turbo-dom 0.5.4 bounded storage collector is integrated with real weak
 wrapper roots and genuine host-job node pins. Thirteen storage and eight isolation
 contracts cover retention, collection budgets, teardown and cold installation.
-Collection remains explicit; automatic host-boundary scheduling and queued native
-handle pinning still require consumer integration.
+The default runtime now consumes actual V8 GC notifications at completed host
+operation boundaries. The GC callback only sets a private per-isolate flag; the
+scan runs later with fixed per-Tree limits (250,000 nodes, 2,000,000 edges, 64 MiB
+retained payload) and at most 256 Documents. Budget rejection is recorded privately
+and does not fail page work. No forced GC is introduced. Two genuine storage
+contracts reclaim detached nodes/payloads while preserving retained Range/subtree
+identity and independent sessions; the refreshed focused runtime cohort passes 50
+contracts. Resource task-root integration and native155 certification remain open.
 
 Integrated and tested behavior includes real document factories and private node
 projection, native cross-document insertion and live Range boundaries, live CSSOM
@@ -85,11 +91,11 @@ caught an iframe bootstrap allocation abort; private capability publication is n
 fallible and interruption recovery passes. Strict Clippy passes the affected core/
 render libraries and GC/geometry/referrer/input/transfer test targets.
 
-Still open: automatic bounded native storage collection and queued-task pinning,
+Still open: final resource-task root integration/native155 storage certification,
 full geometry and DOM lifecycle/parsing/lossless UTF-16, remaining CSP/COOP/COEP/
 permissions policy, fetch streaming/cancellation/cache and partitioned storage/access.
 The public storage API is integrated from verified published turbo-dom 0.5.4; final
-runtime scheduling remains pending. Text provenance APIs remain under review
+resource-task integration remains pending. Text provenance APIs remain under review
 in turbo-html2pdf PR #20. The
 historical missing-own-member count is **94**, not a current measurement. The prior
 848-test workspace gate is historical and does not certify these changes.

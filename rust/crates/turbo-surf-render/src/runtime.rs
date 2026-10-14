@@ -207,6 +207,86 @@ fn op_csp_context(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> 
         .and_then(|context| context.get_slot::<CspHandle>())
         .map_or(0, |handle| handle.id)
 }
+#[op2]
+#[string]
+fn op_csp_base_url(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    #[string] href: &str,
+    #[string] fallback: &str,
+    initial: bool,
+    enforce: bool,
+) -> String {
+    if document
+        .get_creation_context(scope)
+        .is_some_and(|context| context.get_slot::<FrameRetired>().is_some())
+    {
+        return fallback.to_string();
+    }
+    let Some(url) = resolve(fallback, href) else {
+        return fallback.to_string();
+    };
+    if url::Url::parse(&url).is_ok_and(|url| matches!(url.scheme(), "data" | "javascript")) {
+        return fallback.to_string();
+    }
+    let allowed = !enforce
+        || document
+            .get_creation_context(scope)
+            .and_then(|context| context.get_slot::<CspHandle>())
+            .is_none_or(|handle| {
+                let policy = handle.policy.borrow();
+                let policy = if initial {
+                    &policy.initial_base
+                } else {
+                    policy.current()
+                };
+                policy.allows_request("base-uri", &url, "", false)
+            });
+    if allowed {
+        url
+    } else {
+        fallback.to_string()
+    }
+}
+
+#[op2(fast)]
+fn op_csp_finish_parser(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) {
+    let Some(context) = document.get_creation_context(scope) else {
+        return;
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return;
+    };
+    let mut policy = handle.policy.borrow_mut();
+    policy.activate(usize::MAX);
+    context.set_allow_generation_from_strings(policy.current().allows_eval());
+}
+
+#[op2(fast)]
+fn op_csp_meta(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    meta: v8::Local<v8::Object>,
+) {
+    let Some(context) = document.get_creation_context(scope) else {
+        return;
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return;
+    };
+    if !crate::browser_env::node_attribute(scope, meta, "http-equiv")
+        .is_some_and(|value| value.eq_ignore_ascii_case("content-security-policy"))
+    {
+        return;
+    }
+    let Some(content) = crate::browser_env::node_attribute(scope, meta, "content") else {
+        return;
+    };
+    let mut policy = handle.policy.borrow_mut();
+    policy.active.add(&content);
+    context.set_allow_generation_from_strings(policy.current().allows_eval());
+}
+
 #[op2(fast)]
 fn op_csp_script(
     scope: &mut v8::PinScope,
@@ -2008,12 +2088,20 @@ fn script_source_bodies(html: &str) -> Vec<(usize, usize)> {
 }
 
 impl FrameScriptPolicy {
-    fn from_html(html: &str, url: &str) -> Self {
+    fn from_html(html: &str, url: &str, base_policy: &crate::csp::Policy) -> Self {
         let tree = turbo_dom_parser::rtdom::tree::Tree::parse(html);
         let base = tree
-            .query_selector("base[href]")
+            .query_selector_all("base[href]")
+            .iter()
+            .copied()
+            .find(|node| tree.namespace_id(*node) == 0 && tree.local_name(*node) == Some("base"))
             .and_then(|node| tree.get_attribute(node, "href"))
             .and_then(|href| resolve(url, href))
+            .filter(|target| {
+                url::Url::parse(target)
+                    .is_ok_and(|url| !matches!(url.scheme(), "data" | "javascript"))
+                    && base_policy.allows_request("base-uri", target, "", false)
+            })
             .unwrap_or_else(|| url.to_string());
         let normalized = html.replace("\r\n", "\n").replace('\r', "\n");
         let bodies = script_source_bodies(&normalized);
@@ -2709,19 +2797,21 @@ fn op_frame_set_document<'s>(
             let inherited = parent_policy.policy.borrow().current().clone();
             let mut policy = handle.policy.borrow_mut();
             policy.header = inherited.clone();
+            policy.initial_base.inherit_headers(&inherited);
             policy.active = inherited;
             policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
             policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
         }
         handle
     };
+    let initial_base = csp.policy.borrow().initial_base.clone();
     context.set_slot(Rc::new(csp.clone()));
     JsRuntime::op_state_from(scope)
         .borrow_mut()
         .borrow_mut::<CspContexts>()
         .0
         .insert(csp.id, csp);
-    let mut policy = FrameScriptPolicy::from_html(html, url);
+    let mut policy = FrameScriptPolicy::from_html(html, url, &initial_base);
     let source = metadata
         .get("location")
         .and_then(|value| value.as_str())
@@ -3214,6 +3304,7 @@ fn allocate_frame<'s>(
             {
                 let mut policy = csp.policy.borrow_mut();
                 policy.header = inherited.clone();
+                policy.initial_base.inherit_headers(&inherited);
                 policy.active = inherited;
                 policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
                 policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
@@ -3607,6 +3698,26 @@ fn op_document_has_active_window(
 
 #[op2]
 #[string]
+fn op_document_location_url(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    document: v8::Local<v8::Object>,
+) -> String {
+    let Some(context) = document.get_creation_context(scope) else {
+        return state.borrow::<Base>().0.clone();
+    };
+    #[cfg(turbo_surf_native_proxy)]
+    if let Some(url) = window_proxy::location_url(context) {
+        return url;
+    }
+    context.get_slot::<FrameDocumentLocation>().map_or_else(
+        || state.borrow::<Base>().0.clone(),
+        |location| location.0.clone(),
+    )
+}
+
+#[op2]
+#[string]
 fn op_document_request_url(scope: &mut v8::PinScope, state: &mut OpState) -> String {
     frame_document_url(scope, state)
 }
@@ -3991,6 +4102,7 @@ deno_core::extension!(
         op_dispatch_host_event,
         op_event_callback,
         op_frame_cookie_get,
+        op_document_location_url,
         op_document_request_url,
         op_document_request_source,
         op_frame_owner_metadata,
@@ -4024,6 +4136,9 @@ deno_core::extension!(
         op_inline_module,
         op_module_credentials,
         op_csp_context,
+        op_csp_base_url,
+        op_csp_meta,
+        op_csp_finish_parser,
         op_csp_inline,
         op_frame_script_allowed,
         op_frame_script_event,
@@ -4877,7 +4992,7 @@ const __resourceFailure=error=>__fetchFailures.get(error);
   };
   project(Response,responses,["status","statusText","headers","ok","type","url","redirected"]);
   globalThis.Request = class Request {
-    constructor(input,init=undefined){if(!arguments.length)throw new TypeError("Request requires an input");init=init||{};const previous=requests.get(input),integrity=init.integrity,absolute=new URL(previous?previous.url:String(input),document.baseURI||location.href);if(absolute.username||absolute.password)throw new TypeError("Request URL cannot include credentials");const requested=String(init.method||previous?.method||"GET");if(!/^[!#$%&'*+.^_`|~0-9a-zA-Z-]+$/.test(requested)||["CONNECT","TRACE","TRACK"].includes(requested.toUpperCase()))throw new TypeError("Invalid request method");const method=["DELETE","GET","HEAD","OPTIONS","POST","PUT"].includes(requested.toUpperCase())?requested.toUpperCase():requested;const raw=init.body!==undefined?init.body:previous?copyBody(previous.body):null;if(raw!=null&&["GET","HEAD"].includes(method))throw new TypeError("GET and HEAD cannot have bodies");const headers=new Headers(init.headers||previous?.headers);addContentType(headers,raw);const mode=init.mode||previous?.mode||"cors",credentials=init.credentials||previous?.credentials||"same-origin",cache=init.cache||previous?.cache||"default",redirect=init.redirect||previous?.redirect||"follow";if(!["cors","no-cors","same-origin"].includes(mode)||!["omit","same-origin","include"].includes(credentials)||!["default","no-store","reload","no-cache","force-cache","only-if-cached"].includes(cache)||!["follow","error","manual"].includes(redirect)||cache==="only-if-cached"&&mode!=="same-origin")throw new TypeError("Invalid request option");if(mode==="no-cors"&&!["GET","HEAD","POST"].includes(method))throw new TypeError("Invalid no-cors request method");__setHeadersGuard(headers,mode==="no-cors"?"request-no-cors":"request");
+    constructor(input,init=undefined){if(!arguments.length)throw new TypeError("Request requires an input");init=init||{};const previous=requests.get(input),integrity=init.integrity,absolute=new URL(previous?previous.url:String(input),__baseApply(__baseURI,__document,[]));if(absolute.username||absolute.password)throw new TypeError("Request URL cannot include credentials");const requested=String(init.method||previous?.method||"GET");if(!/^[!#$%&'*+.^_`|~0-9a-zA-Z-]+$/.test(requested)||["CONNECT","TRACE","TRACK"].includes(requested.toUpperCase()))throw new TypeError("Invalid request method");const method=["DELETE","GET","HEAD","OPTIONS","POST","PUT"].includes(requested.toUpperCase())?requested.toUpperCase():requested;const raw=init.body!==undefined?init.body:previous?copyBody(previous.body):null;if(raw!=null&&["GET","HEAD"].includes(method))throw new TypeError("GET and HEAD cannot have bodies");const headers=new Headers(init.headers||previous?.headers);addContentType(headers,raw);const mode=init.mode||previous?.mode||"cors",credentials=init.credentials||previous?.credentials||"same-origin",cache=init.cache||previous?.cache||"default",redirect=init.redirect||previous?.redirect||"follow";if(!["cors","no-cors","same-origin"].includes(mode)||!["omit","same-origin","include"].includes(credentials)||!["default","no-store","reload","no-cache","force-cache","only-if-cached"].includes(cache)||!["follow","error","manual"].includes(redirect)||cache==="only-if-cached"&&mode!=="same-origin")throw new TypeError("Invalid request option");if(mode==="no-cors"&&!["GET","HEAD","POST"].includes(method))throw new TypeError("Invalid no-cors request method");__setHeadersGuard(headers,mode==="no-cors"?"request-no-cors":"request");
       const referrerPolicy=__String(init.referrerPolicy??previous?.referrerPolicy??"");
       if(!["","no-referrer","no-referrer-when-downgrade","same-origin","origin","strict-origin","origin-when-cross-origin","strict-origin-when-cross-origin","unsafe-url"].includes(referrerPolicy))throw new TypeError("Invalid referrer policy");
       let referrer=__String(init.referrer??previous?.referrer??"about:client");
@@ -4974,7 +5089,7 @@ globalThis.fetch = (input, init = undefined) => {
 const __xhrContexts = new WeakMap();
 globalThis.XMLHttpRequest = class {
   constructor() {
-    __xhrContexts.set(this, {source: () => ops.op_document_request_url(), base: () => globalThis.document.baseURI || globalThis.location.href});
+    __xhrContexts.set(this, {source: () => ops.op_document_request_url(), base: () => __baseApply(__baseURI,__document,[])});
     this.readyState = 0; this.status = 0; this.statusText = ""; this.responseText = ""; this.response = "";
     this.responseType = ""; this.responseURL = ""; this.withCredentials = false; this.timeout = 0;
     // Real XHR exposes an XMLHttpRequestUpload EventTarget; collectors sometimes wire
@@ -6000,26 +6115,31 @@ if (typeof globalThis.URL === "undefined") {
 // polyfill so `new URL` is available. Components are live getters over the backing URL.
 (() => {
   if (ops.op_native_location_installed()) return;
-  let _u = null;
-  const reparse = (v, base) => { try { _u = new globalThis.URL(String(v), base); } catch (_e) { /* keep prior */ } };
-  reparse((globalThis.location && globalThis.location.href) || "http://localhost/");
-  const loc = {
-    assign(v) { reparse(v, _u ? _u.href : undefined); },
-    replace(v) { reparse(v, _u ? _u.href : undefined); },
-    reload() {},
-    toString() { return _u ? _u.href : ""; },
+  const LocationURL=globalThis.URL,locations=__interfaceMap("Location.URL");
+  let url=null;
+  const reparse=(value,base)=>{try{url=new LocationURL(__String(value),base);}catch(_){}};
+  reparse((globalThis.location&&globalThis.location.href)||"http://localhost/");
+  const location={};
+  locations.set(location,{__proto__:null,owner:globalThis,
+    read:name=>url?url[name]:"",
+    write(name,value){if(name==="href")reparse(value,url?url.href:undefined);else if(url){try{url[name]=value;}catch(_){}}}});
+  const state=receiver=>{
+    const value=locations.get(receiver);
+    if(!value)throw new __exceptionTypeError("Illegal invocation");
+    if(!ops.op_windows_same_origin(value.owner))throw new DOMException("Cross-origin Location access","SecurityError");
+    return value;
   };
-  for (const f of ["href", "protocol", "host", "hostname", "port", "pathname", "search", "hash", "origin"]) {
-    Object.defineProperty(loc, f, {
-      enumerable: true,
-      configurable: true,
-      get() { return _u ? _u[f] : ""; },
-      // setting href reparses (relative allowed against the current URL); other
-      // components write through to the backing URL where it supports it.
-      set(v) { if (f === "href") reparse(v, _u ? _u.href : undefined); else if (_u) { try { _u[f] = v; } catch (_e) {} } },
-    });
+  for(const name of ["href","protocol","host","hostname","port","pathname","search","hash","origin"]){
+    const descriptor={__proto__:null,enumerable:true,configurable:false,
+      get:__documentFunction(function(){return state(this).read(name);},"get "+name,0)};
+    if(name!=="origin")descriptor.set=__documentFunction(function(value){state(this).write(name,value);},"set "+name,1);
+    Object.defineProperty(location,name,descriptor);
   }
-  globalThis.location = loc;
+  for(const name of ["assign","replace","toString","reload"]){
+    const callback=__documentFunction(function(value){const record=state(this);if(name==="toString")return record.read("href");if(name!=="reload"){if(!arguments.length)throw new __exceptionTypeError("A URL is required");record.write("href",value);}},name,name==="assign"||name==="replace"?1:0);
+    Object.defineProperty(location,name,{__proto__:null,value:callback,writable:false,enumerable:true});
+  }
+  globalThis.location=location;
 })();
 
 // Document metadata is live and owned by Document.prototype; native body/head
@@ -6028,18 +6148,9 @@ if (typeof globalThis.URL === "undefined") {
 __defineDocumentAccessor("referrer", state => state.referrer);
 __defineDocumentAccessor("URL", state => state.inactive ? state.url : state.frame ? state.frame.location : state.window.location.href);
 __defineDocumentAccessor("documentURI", state => state.inactive ? state.url : state.frame ? state.frame.location : state.window.location.href);
-const __baseURI = Object.getOwnPropertyDescriptor({get baseURI() {
-  const kind = __documentType.call(this);
-  const doc = kind === 9 ? this : this.ownerDocument;
-  if (!doc) return "";
-  const state = __documentState(doc);
-  const fallback = state.inactive ? state.url : state.frame ? state.frame.url : state.window.location.href;
-  const base = doc.querySelector("base[href]");
-  try { return base ? new URL(base.getAttribute("href"), fallback).href : fallback; }
-  catch (_) { return fallback; }
-}}, "baseURI").get;
-Object.defineProperty(Node.prototype, "baseURI", {get: __documentFunction(__baseURI, "get baseURI", 0), configurable: true, enumerable: true});
-if (Object.hasOwn(__document, "baseURI")) delete __document.baseURI;
+"##,
+    include_str!("document_base.js"),
+    r##"
 (() => {
   const d = globalThis.document;
   if (!d) return;
@@ -6525,7 +6636,7 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
     const resources=__G.loadDocumentResources(__document,globalThis,deferred?null:el);
     if(!prepared.asynchronous||!(external||module))await resources;
   }
-  const absoluteSource=get("src")?new URL(get("src"),document.baseURI).href:"";
+  const absoluteSource=get("src")?new URL(get("src"),__baseApply(__resourceBaseURL,__document,[])).href:"";
   const parserIndex=Array.prototype.indexOf.call(document.querySelectorAll("script"),el);
   if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,absoluteSource,prepared.source)){
     if(absoluteSource)__fireScriptEvent(el,"error");return;
@@ -6534,8 +6645,8 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
   // module graph + loader), with concurrent graph loading rather than classic eval.
   if (prepared.kind === "module") {
     const src = get("src");
-    const specifier = src ? new URL(src, document.baseURI).href
-      : ops.op_inline_module(prepared.source, document.baseURI, document.URL);
+    const specifier = src ? new URL(src, __baseApply(__resourceBaseURL,__document,[])).href
+      : ops.op_inline_module(prepared.source, __baseApply(__resourceBaseURL,__document,[]), document.URL);
     ops.op_module_credentials(el,specifier);
     // The SDK loader observes actual graph/evaluation transitions independently
     // of import()'s promise, which waits for top-level await. The published SDK
@@ -6627,14 +6738,13 @@ function __startResourceScript(element, prepared) {
     __trackResource(next);
   } else __trackResource(__G.execScriptEl(element, prepared));
 }
-ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;ops.op_retire_resource_document(__document);}});
+ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;ops.op_retire_resource_document(__document);ops.op_install_resource_consumer(__document,event=>__documentBaseMutation(event,()=>{}),__documentRuntimeState);}});
+__initializeDocumentBase();
 ops.op_install_resource_consumer(__document, event => {
-  const candidates = event.scriptCandidates;
-  for (let index = 0; index < candidates.length; index++) {
-    const element = candidates[index];
-    const prepared = __prepareResourceScript(element);
-    if (prepared) __startResourceScript(element, prepared);
-  }
+  __documentBaseMutation(event,element=>{
+    const prepared=__prepareResourceScript(element);
+    if(prepared)__startResourceScript(element,prepared);
+  });
 }, __documentRuntimeState);
 // Run every not-yet-run <script> in DOM order, drain timers, repeat while new
 // scripts appear or timers keep firing. Bounded by maxRounds (+ the render budget).
@@ -6997,12 +7107,7 @@ __G.domSig = () => {
   const frameListLength = Object.getOwnPropertyDescriptor(NodeList.prototype,"length").get;
   const frameListItem = NodeList.prototype.item;
   const frameResolvedURL = (source,base) => frameApply(frameURLHref,new frameURL(source,base),[]);
-  const frameBaseURI = node => {
-    const doc=frameDocument(node),fallback=ops.op_document_request_source(doc);
-    const base=frameApply(frameDocumentQueryOne,doc,["base[href]"]);
-    if(!base)return fallback;
-    try{return frameResolvedURL(frameApply(frameAttribute,base,["href"]),fallback);}catch(_){return fallback;}
-  };
+  const frameBaseURI = node => frameApply(__baseURI,frameDocument(node),[]);
   const frameDocumentQuery = Document.prototype.querySelectorAll;
   const frameElementQuery = Element.prototype.querySelectorAll;
   const frameFragmentQuery = DocumentFragment.prototype.querySelectorAll;
@@ -7113,7 +7218,7 @@ __G.domSig = () => {
     const prepared=__prepareResourceScript(element);if(!prepared || prepared.src==="")return false;
     if (prepared.kind!=="module" && __recordOwn(__resourceScriptAttributes(prepared),"nomodule"))return false;
     const src=prepared.src;
-    return ops.op_csp_script(__document,element,index,src?new URL(src,__resourceBaseURL.call(__document)).href:"",prepared.source);
+    return ops.op_csp_script(__document,element,index,src?new URL(src,__baseApply(__resourceBaseURL,__document,[])).href:"",prepared.source);
   };
   __G.executeFrameModule = index => {const element=__frameScriptElements[index];if(!element)throw new TypeError("Frame module element unavailable");return __G.execScriptEl(element);};
   // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
@@ -7126,8 +7231,8 @@ __G.domSig = () => {
     __G.setDocumentReadyState("loading");
     globalThis.origin = metadata.origin;
     location.href = metadata.location;
-    location.origin = new URL(metadata.location).origin;
     __documentRuntimeState.frame = metadata;
+    __initializeDocumentBase();
     try {
       const source = new URL(metadata.referrer || "about:blank");
       source.hash = "";
@@ -7146,6 +7251,7 @@ __G.domSig = () => {
     return event;
   };
   const frameParsingDone = () => {
+    ops.op_csp_finish_parser(__document);
     __G.performancePhase("domInteractive");
     __G.setDocumentReadyState("interactive");
     fireFrameEvent(document, "readystatechange");
@@ -7594,6 +7700,7 @@ __G.domSig = () => {
   __markDocumentInteractive = () => {
     if (!__G.initialLoading) return;
     __G.initialLoading = false;
+    ops.op_csp_finish_parser(__document);
     __G.performancePhase("domInteractive");
     __G.setDocumentReadyState("interactive");
     lifecycleEvent(document, "readystatechange");
@@ -9529,6 +9636,18 @@ async fn drain_event_loop_until_completion(
             {
                 return std::task::Poll::Ready(None);
             }
+            // Polling may resume an async fetch and enqueue its script. Yield to
+            // Rust immediately rather than waiting on the script's JS promise.
+            if !rt
+                .op_state()
+                .borrow()
+                .borrow::<ClassicScripts>()
+                .jobs
+                .is_empty()
+            {
+                return std::task::Poll::Ready(None);
+            }
+
             // A suspended child module can depend on a Window lifecycle timer.
             // Drive the actual timer queues while native module futures are
             // pending; waiting for Deno quiescence first would deadlock that gate.
@@ -9547,17 +9666,6 @@ async fn drain_event_loop_until_completion(
                 if fired > 0 {
                     return std::task::Poll::Ready(None);
                 }
-            }
-            // Polling may resume an async fetch and enqueue its script. Yield to
-            // Rust immediately rather than waiting on the script's JS promise.
-            if !rt
-                .op_state()
-                .borrow()
-                .borrow::<ClassicScripts>()
-                .jobs
-                .is_empty()
-            {
-                return std::task::Poll::Ready(None);
             }
             if let Some(condition) = condition {
                 let value = rt

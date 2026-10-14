@@ -5,9 +5,17 @@ import subprocess
 import tempfile
 import unittest
 from surf_workspace import prepare_workspace, cargo_arguments
+from prepare import profile_for
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_default_profiles_use_certified_current155_and_preserve154(self):
+        self.assertEqual(profile_for(155)['chromeVersion'], '155.0.8059.79')
+        self.assertEqual(profile_for(155)['engineVersion'], '15.5.35.23')
+        self.assertEqual(profile_for(154)['chromeMajor'], 154)
+        legacy=json.loads((Path(__file__).parent / 'profiles/155.json').read_text())
+        self.assertEqual(legacy['engineVersion'], '15.5.35.20')
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

@@ -744,3 +744,9 @@ pub(super) fn seed(scope: &mut v8::PinScope, url: &str) {
         *state.url.borrow_mut() = url.to_string();
     }
 }
+
+pub(super) fn url(context: v8::Local<v8::Context>) -> Option<String> {
+    context
+        .get_slot::<State>()
+        .map(|state| state.url.borrow().clone())
+}

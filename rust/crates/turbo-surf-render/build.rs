@@ -7,8 +7,8 @@ fn main() {
     let version = match std::env::var("TURBO_SURF_ENGINE").as_deref() {
         Ok("154") => Some("15.4.80.20-rusty"),
         Ok("155") => match std::env::var("TURBO_SURF_ENGINE_VERSION").as_deref() {
-            Ok("15.5.35.23-rusty") => Some("15.5.35.23-rusty"),
-            Err(_) | Ok("15.5.35.20-rusty") => Some("15.5.35.20-rusty"),
+            Err(_) | Ok("15.5.35.23-rusty") => Some("15.5.35.23-rusty"),
+            Ok("15.5.35.20-rusty") => Some("15.5.35.20-rusty"),
             Ok(value) => panic!("unrecognized pinned native155 version {value:?}"),
         },
         Ok(value) => panic!(

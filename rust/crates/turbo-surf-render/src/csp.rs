@@ -40,7 +40,15 @@ impl Policy {
         self.policies
             .extend(Self::new(&self.origin, [value.to_string()]).policies);
     }
+    pub fn inherit_headers(&mut self, inherited: &Self) {
+        let own = std::mem::take(&mut self.policies);
+        *self = inherited.clone();
+        self.policies.extend(own);
+    }
     fn list<'a>(policy: &'a BTreeMap<String, Vec<String>>, kind: &str) -> Option<&'a [String]> {
+        if matches!(kind, "base-uri" | "form-action") {
+            return policy.get(kind).map(Vec::as_slice);
+        }
         let fallback = match kind {
             "script-src-elem" | "script-src-attr" => Some("script-src"),
             "style-src-elem" | "style-src-attr" => Some("style-src"),
@@ -101,6 +109,7 @@ impl Policy {
     }
     pub fn unsupported(&self) -> Vec<String> {
         const SUPPORTED: &[&str] = &[
+            "base-uri",
             "default-src",
             "script-src",
             "script-src-elem",
@@ -209,6 +218,7 @@ fn matches_source(source: &str, document: &str, target: &str, redirected: bool) 
 pub struct DocumentPolicy {
     pub header: Policy,
     pub active: Policy,
+    pub initial_base: Policy,
     pub referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
     pub embedder_policy: crate::resource_policy::EmbedderPolicy,
     metas: Vec<(usize, String)>,
@@ -256,6 +266,32 @@ impl DocumentPolicy {
                 }
             }
         }
+        let mut initial_base = active.clone();
+        for &node in tree.query_selector_all("base,meta").iter() {
+            if tree.namespace_id(node) != 0 {
+                continue;
+            }
+            if tree.local_name(node) == Some("base") && tree.get_attribute(node, "href").is_some() {
+                break;
+            }
+            if tree.local_name(node) != Some("meta")
+                || !tree
+                    .get_attribute(node, "http-equiv")
+                    .is_some_and(|value| value.eq_ignore_ascii_case("content-security-policy"))
+            {
+                continue;
+            }
+            let mut parent = tree.parent(node);
+            while let Some(handle) = parent {
+                if tree.local_name(handle) == Some("head") && tree.namespace_id(handle) == 0 {
+                    if let Some(value) = tree.get_attribute(node, "content") {
+                        initial_base.add(value);
+                    }
+                    break;
+                }
+                parent = tree.parent(handle);
+            }
+        }
         let referrer_header = headers
             .iter()
             .filter(|(name, _)| name.eq_ignore_ascii_case("referrer-policy"))
@@ -269,13 +305,14 @@ impl DocumentPolicy {
             .unwrap_or_default(),
             embedder_policy: crate::resource_policy::EmbedderPolicy::from_headers(headers),
             header: active.clone(),
+            initial_base,
             active,
             metas,
             next_meta: 0,
         }
     }
     pub fn unsupported(&self) -> Vec<String> {
-        let mut limitations = std::collections::BTreeSet::from_iter(self.header.unsupported());
+        let mut limitations = std::collections::BTreeSet::from_iter(self.active.unsupported());
         for (_, value) in &self.metas {
             limitations.extend(Policy::new(&self.header.origin, [value.clone()]).unsupported());
         }
@@ -283,11 +320,7 @@ impl DocumentPolicy {
     }
 
     pub fn current(&self) -> &Policy {
-        if self.next_meta == 0 {
-            &self.header
-        } else {
-            &self.active
-        }
+        &self.active
     }
 
     pub fn activate(&mut self, index: usize) {
@@ -332,5 +365,48 @@ mod tests {
         assert!(p.active.allows_inline("script-src-elem", "before()", ""));
         p.activate(1);
         assert!(!p.active.allows_inline("script-src-elem", "after()", ""));
+    }
+    #[test]
+    fn base_and_form_directives_do_not_fall_back_to_default_sources() {
+        let policy = Policy::new("https://source.test/root", ["default-src 'none'".into()]);
+        assert!(policy.allows_request("base-uri", "https://cross.test/root", "", false));
+        assert!(policy.allows_request("form-action", "https://cross.test/send", "", false));
+        let policy = Policy::new(
+            "https://source.test/root",
+            ["default-src *;base-uri 'self';form-action 'none'".into()],
+        );
+        assert!(policy.allows_request("base-uri", "https://source.test/root", "", false));
+        assert!(!policy.allows_request("base-uri", "https://cross.test/root", "", false));
+        assert!(!policy.allows_request("form-action", "https://source.test/send", "", false));
+    }
+    #[test]
+    fn initial_base_freezes_before_later_metas_and_intersects_inherited_headers() {
+        let html = r#"<head><base href='/allowed/'><meta http-equiv='Content-Security-Policy' content="base-uri 'none'"></head>"#;
+        let mut policy = DocumentPolicy::new("https://source.test/root", &[], html);
+        assert!(policy.initial_base.allows_request(
+            "base-uri",
+            "https://source.test/allowed/",
+            "",
+            false
+        ));
+        policy.activate(0);
+        assert!(!policy.current().allows_request(
+            "base-uri",
+            "https://source.test/allowed/",
+            "",
+            false
+        ));
+        let html = r#"<head><meta http-equiv='Content-Security-Policy' content="base-uri 'none'"><base href='/blocked/'></head>"#;
+        let mut policy = DocumentPolicy::new("about:blank", &[], html);
+        policy.initial_base.inherit_headers(&Policy::new(
+            "https://source.test",
+            ["base-uri 'self'".into()],
+        ));
+        assert!(!policy.initial_base.allows_request(
+            "base-uri",
+            "https://source.test/blocked/",
+            "",
+            false
+        ));
     }
 }

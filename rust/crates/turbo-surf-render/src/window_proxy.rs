@@ -785,3 +785,7 @@ pub(super) fn seed_location(scope: &mut v8::PinScope, url: &str) {
     }
     location::seed(scope, url);
 }
+
+pub(super) fn location_url(context: v8::Local<v8::Context>) -> Option<String> {
+    location::url(context)
+}

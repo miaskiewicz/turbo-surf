@@ -9,7 +9,9 @@ for commands and [FINDINGS.md](./FINDINGS.md) for current certification bounds.
 Resource preparation never stores an unwrapped tree node handle across host turns.
 Its document-private plain state is an ordinary V8 edge owned by that document;
 the canonical trusted mutation consumer is also document scoped. Retirement
-removes the consumer and disables preparation.
+removes the resource consumer and disables preparation. A replacement document-owned
+metadata-only consumer maintains retained inactive documents' base URL behavior,
+without executing or preparing scripts.
 
 | Root | Purpose | Release boundary |
 | --- | --- | --- |
@@ -19,6 +21,7 @@ removes the consumer and disables preparation.
 | Pending native PromiseResolver global | Settle exactly that queued script without calling JS completion helpers | Job completion, interruption or runtime teardown |
 | Bootstrap script wrapper array | Admit parser scripts once without later DOM rescans | Consumed by initial hydration; cleared on retirement |
 | Frame script wrapper array | Authenticate indexed frame script execution and resource event targets | Cleared after all frame scripts/resources finish, or on retirement |
+| Private frozen-base record | Keep the actual first active base and its frozen URL with its Document | Replaced when native mutations select another base; ephemeron dies with Document |
 | Dynamic resource promise/closure | Keep a genuinely active script/resource request and its target alive | Promise settlement or runtime teardown |
 
 The currentScript previous value and original exception globals are transient
@@ -49,7 +52,12 @@ srcdoc policies and 12 structured policy header syntaxes. Tests match original
 exception realms, load/error distinction, SRI rejection, private linked colors,
 opaque stylesheet access and actual Cookie headers.
 
-Still open: COOP/isolation and navigation embedding compatibility, report-only and
+CSP base-uri, dynamic head metas and parser completion now have four fresh authored
+controls, including the distinct parser/compound-fragment timing and retired-document
+fallback. Private base records retain only the genuine current first base element;
+replacement/removal releases the previous element at the original mutation boundary.
+
+Still open: form-action, SecurityPolicyViolationEvent/reporting, COOP/isolation and navigation embedding compatibility, report-only and
 reporting endpoints, permissions policy, full parser/document.write lifecycle,
 import maps/speculation rules, async adoption/navigation races, full script stack
 source parity, complete CSS cascade/color-scheme, and wider resource cancellation

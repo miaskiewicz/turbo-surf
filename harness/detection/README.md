@@ -500,3 +500,21 @@ syntax controls and inherited srcdoc fetches preserve child-realm error brands.
 Native regressions use only saved authored controls and localhost servers. Do not
 change oracle values to match native failures: recapture after changing any source,
 and keep the saved actual engine identity.
+
+
+### CSP metadata and base URL timing controls
+
+Use the generic fresh normal Chrome collector for each source-pinned authored probe:
+
+```sh
+node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-probe.js harness/detection/fixtures/csp-base-chrome155.json
+node harness/detection/authored-dom-chrome.mjs harness/detection/csp-meta-probe.js harness/detection/fixtures/csp-meta-chrome155.json
+node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-order-probe.js harness/detection/fixtures/csp-base-order-chrome155.json
+node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-retired-probe.js harness/detection/fixtures/csp-base-retired-chrome155.json
+cargo test --manifest-path rust/Cargo.toml -p turbo-surf-render --test csp_document_policy
+```
+
+The saved controls distinguish parser insertion, compound fragment insertion,
+policy changes after accepted base freezing, HTML namespace/head membership and
+retained inactive documents. See [RESOURCE-LIFECYCLE.md](./RESOURCE-LIFECYCLE.md)
+for genuine task roots and the metadata-only retirement consumer.

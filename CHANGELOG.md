@@ -2,6 +2,20 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Run freshly queued native scripts before advancing delayed virtual timers after
+  an event-loop poll. A two-frame source-pinned Chrome control exposed a false
+  opaque-frame timeout. Read native Location state privately during frame bootstrap;
+  default Location getters use private receiver records and native-shaped functions.
+  Controls cover own srcdoc Location descriptors and live base reads after public
+  attribute/query poisoning.
+- Freeze document base URLs at authentic native mutation boundaries, enforcing
+  CSP base-uri without default-src fallback. Dynamic head CSP metas intersect
+  policies on insertion/content/http-equiv changes; parsed metas activate before
+  deferred scripts and DOMContentLoaded. Original connection witnesses suppress
+  fragment construction records, and base insertion precedes meta postconnection
+  steps. Resource, Request/XHR and iframe base consumers use private native reads.
+  Normal Chrome155 parser/fragment/head/body and retired-document controls cover
+  the measured subset; form-action, violation reporting and broader CSP remain open.
 - Dispose cached runtimes safely after native DOM thread-local cells are destroyed.
   Genuine thread-exit regressions preserve isolate-owned cleanup and normal peer
   activation. Add iframe sandbox DOMTokenList with live attributes, authentic
@@ -10,14 +24,15 @@
 
 - Reflect HTMLMetaElement name/httpEquiv/content/media/scheme through genuine
   native attributes with exact receiver brands, conversion and descriptors against
-  a fresh Chrome155 control. This enables authentic mutation-time CSP processing;
-  frozen base/live-meta policy integration is still in progress.
+  a fresh Chrome155 control. Authentic mutation-time CSP processing uses those
+  private native attributes.
 - Isolate experimental SDK Cargo manifests/locks from the production workspace.
   Actual offline Cargo regressions cover lock preservation, current source/version
   updates and member/plugin argument handling. Add the official source pin for
   installed Chrome155.0.8059.79 / V8 15.5.35.23 and align current HTTP/JS
   full-version defaults with that oracle while preserving the older155
-  profile; compilation and merged certification of the new engine are in progress.
+  profile. The genuine current engine passes 231 focused merged renderer contracts
+  and strict affected Clippy; full gates and Google validation remain open.
 
 - Native155 WindowProxy/Location/context slots use weak lookups and actual lexical
   private ownership. Per-caller weak method caches preserve function identity and

@@ -1364,3 +1364,16 @@ even after returning to the original origin. Saved normal Chrome155 controls and
 localhost Rust contracts cover direct requests, redirects, resource errors and
 frame inheritance. COOP/isolation, navigation embedding compatibility, reporting,
 permissions policy and broader parser/resource lifecycle remain open.
+
+
+CSP base-uri now freezes the accepted base URL at mutation admission rather than
+re-querying guest overrides on every read. Document-owned records use captured
+native DOM callbacks and native URL/source checks. Head meta CSP changes accumulate
+restrictions; body metas have no effect. Original mutation ancestor snapshots
+exclude disconnected construction records from premature policy activation.
+Parser completion applies pending metas before deferred execution/DCL. Normal
+Chrome155 controls measure parser vs compound-fragment order and retained retired
+documents; a metadata-only retired consumer updates fallback bases without
+reviving native scripts. The canonical HTMLMetaElement property/attribute reflection
+fix is required for ordinary httpEquiv/content assignments to reach native state.
+Form-action, violation/reporting behavior and wider CSP remain open.

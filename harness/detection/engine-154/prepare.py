@@ -16,7 +16,8 @@ HERE = Path(__file__).resolve().parent
 VERSIONS = [('deno_core', '0.412.0', 'deno_core'), ('deno_v8', '0.4.0', 'deno_v8'), ('v8', '152.2.0', 'v8-exact')]
 
 def profile_for(major):
-    profile = json.loads((HERE / 'profiles' / (str(major) + '.json')).read_text())
+    name = '155-8059.79.json' if str(major) == '155' else str(major) + '.json'
+    profile = json.loads((HERE / 'profiles' / name).read_text())
     if profile['chromeMajor'] != int(major):
         raise ValueError('Engine profile major mismatch')
     return profile

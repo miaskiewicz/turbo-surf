@@ -114,8 +114,8 @@ full geometry and DOM lifecycle/parsing/lossless UTF-16, remaining CSP/COOP/COEP
 permissions policy, fetch streaming/cancellation/cache and partitioned storage/access.
 The public storage API is integrated from verified published turbo-dom 0.5.4; final
 focused default and native155 resource/storage validation passes; broader policy
-and full final gates remain pending. Text provenance APIs remain under review
-in turbo-html2pdf PR #20. The
+and full final gates remain pending. Text provenance APIs are published in turbo-html2pdf0.3.6 from PR #20;
+Surf consumer integration remains in progress. The
 historical missing-own-member count is **94**, not a current measurement. The prior
 848-test workspace gate is historical and does not certify these changes.
 
@@ -123,13 +123,14 @@ Current default HTTP/high-entropy JS profile fields use Chrome155.0.8059.79;
 older Chrome controls retain their original captured version. The additional
 source profile pins the official installed-release V8 revision
 `d89479ac5446a374c55a35be19b5a23437558d99` / 15.5.35.23. Its independent
-native compilation is in progress and is not yet certified. Experimental Cargo
+native source build, matching archive/bindings and SDK security smoke are
+certified; the merged renderer passes231 focused contracts and affected Clippy. Experimental Cargo
 commands resolve copied manifests/private locks with current source links; real
 Cargo regressions verify production lock preservation and source/manifest updates.
 The detection harness now passes 41 offline contracts.
 
-The experimental native155 engine is 15.5.35.20-rusty; the current installed Chrome
-oracle is 155.0.8059.79 / V8 15.5.35.23. The merged native155 ownership/session/storage cohort now passes 39 focused
+The current experimental native155 engine is15.5.35.23-rusty, matching installed
+Chrome155.0.8059.79 / V815.5.35.23. The preserved155.20 engine previously passed39 focused
 contracts, with strict affected owned-code Clippy. Native WindowProxy/Location
 lookups are weak and their private capabilities belong to the genuine lexical
 JSGlobalObject, independent of proxy navigation. Per-caller weak caches preserve
@@ -625,12 +626,12 @@ This is engine provenance, not full browser API parity or Google acceptance.
 
 [TRANSPORT-155.json](./TRANSPORT-155.json) preserves the local TLS and HTTP/2
 controls. Measured ClientHello fields, H2 settings/window and navigation header
-order have zero normalized differences with normal Chrome 155. The target profile
-now reports 155.0.8059.40, includes image/jxl in navigation Accept, and uses actual
+order have zero normalized differences with normal Chrome 155. At that saved transport checkpoint the target profile
+reported155.0.8059.40, includes image/jxl in navigation Accept, and uses actual
 major-seeded client-hint GREASE. Its pinned upstream recipe remains154. No claim
 is made about all H2 frame priorities, HTTP/3, or image/jxl decoding.
 
-The DOM dependency is now published turbo-dom 0.5.2, after PR #8's tested tagged
+At that checkpoint the DOM dependency was published turbo-dom0.5.2, after PR #8's tested tagged
 merge `87c2077`. Surf resolves the registry crate without a DOM Git patch. This
 removes the DOM publication blocker; compatible transport registry APIs remain
 unpublished. Surf 0.5.4 is still unreleased.
@@ -873,3 +874,59 @@ full browser parity or Google acceptance. COOP/crossOriginIsolated, navigation
 embedding compatibility, permissions policy, reporting endpoints, complete CSS
 cascade/color-scheme, document.write, import maps, speculation rules and wider
 resource/lifecycle scheduling still need independent controls and implementation.
+
+
+## CSP metadata and frozen base URLs checkpoint — 2026-10-14
+
+Normal Chrome155 controls distinguish base insertion from CSP meta postconnection
+processing. In a compound fragment, a new base freezes before the fragment's CSP
+meta is applied, even when that meta precedes the base. With parser insertion,
+an earlier head meta does constrain the later base. A later policy cannot change an
+accepted frozen base retroactively; writing href subsequently rechecks it. Body
+metas are ignored, removed/tightened/loosened head metas retain every previously
+applied restriction, and default-src does not fall back to base-uri.
+
+The implementation uses captured authentic DOM callbacks, native URL/CSP checks
+and a private document record. Queued disconnected attribute construction records
+are ignored using original native ancestor witnesses. Parsed metas activate at
+parser completion even when the document contains no scripts. Frame script host
+allowlists and module bases obey initial base admission; Request/XHR, scripts and
+iframe URL resolution use the private base getter. A retired retained document
+keeps its existing frozen URL until mutation; rewritten/replaced bases then fall
+back, matching the fresh Chrome control. A document-owned metadata-only consumer
+keeps that behavior while native script preparation remains disabled.
+
+Four reusable authored controls cover six live base cases, six meta mutation
+cases, six parser/fragment/namespace cases and two retired-document cases. A
+separate native regression poisons public tree hooks and confirms zero reads.
+Canonical HTMLMetaElement reflection now updates native attributes instead of
+creating ordinary properties; its normal Chrome descriptor/brand/conversion
+control and 159-binding cohort pass. These are bounded default SDK150 checks;
+final integrated native155/workspace validation remains separate. Form-action,
+SecurityPolicyViolationEvent/reporting, COOP/isolation/embedding compatibility,
+permissions policy and broader parser/CSP resource scheduling remain open.
+
+### Current engine and mutation-policy follow-up
+
+The real source-built155.0.8059.79 engine reports15.5.35.23-rusty and passes
+native version/archive/binding checks and WindowProxy/security smoke. The merged
+renderer passes231 focused contracts (203library,6CSP/base,1cached teardown,
+9input,2storage,4Window ownership and6session) with strict affected Clippy.
+The preserved155.20 artifact still reproduces historical checkpoints. These
+results close the measured engine-version difference; full browser/transport
+parity and Google acceptance remain unverified.
+
+A fresh same-origin/opaque srcdoc control found a pump ordering bug: polling
+could enqueue a native script, then advance its parent's delayed timeout before
+executing that script. Queued scripts now take precedence over virtual timer
+advancement. Native bootstrap base reads authenticate the actual Document and
+read private Location state, avoiding cross-origin descriptor interception.
+Both own Location descriptor and live base reads survive guest attribute/query
+poisoning in the saved Chrome control. The default Location facade uses private
+receiver records and captured URL parsing for corresponding getter behavior.
+
+Fresh Chrome shadow-slot controls now record named/manual assignment, stealing,
+foreign-node adoption, fallback flattening, closed-root assignedSlot visibility,
+failed conversion and native descriptors/receiver brands. Slotchange coalesces
+after MutationObserver callbacks and before the later Promise reaction. The
+authored probe/control are reusable; native slot implementation remains in progress.

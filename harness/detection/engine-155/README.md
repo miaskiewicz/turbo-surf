@@ -1,20 +1,30 @@
 # Native Chrome 155 engine profile
 
-This preserved profile compiles V8 **15.5.35.20** from the engine revision pinned by **Chrome 155.0.8059.40**. The current installed Chrome oracle is **155.0.8059.79 / V8 15.5.35.23**, so exact patch-version parity remains open. The version comes from the compiled engine; the harness checks its native `V8::get_version()` before accepting an archive or running Surf. It shares the SDK preparation and binding patches with the preserved Chrome 154 profile.
+The current profile compiles actual V8 **15.5.35.23** from the revision pinned by
+**Chrome155.0.8059.79**, matching the installed oracle's engine version. The macOS
+arm64 source build, native version/archive/binding verification and WindowProxy
+security smoke pass. The current merged renderer passes 231 focused contracts on
+this engine, including all203 library tests, six CSP/base controls and cached,
+frame ownership, input, session and storage checks; strict affected Clippy passes.
+Final workspace/addon and fresh Google validation remain separate.
+
+The older155.0.8059.40 / V815.5.35.20 profile and artifacts remain preserved in
+`../engine-154/profiles/155.json`. Select that file explicitly when reproducing a
+historical build. The default155 preparation now selects155-8059.79.json.
 
 ```sh
-python3 harness/detection/engine-155/prepare.py .native-builds/sdk155
-python3 harness/detection/engine-155/build.py .native-builds/sdk155 --jobs 4
-python3 harness/detection/engine-155/build.py .native-builds/sdk155 --surf test --manifest-path rust/Cargo.toml -p turbo-surf-render
+python3 harness/detection/engine-155/prepare.py .native-builds/sdk155-8059.79
+python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 4
+python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --surf test --manifest-path rust/Cargo.toml -p turbo-surf-render
 ```
 
 The detection executable needs all four native features. Run its renderer/MCP checks and build with the same SDK override:
 
 ```sh
-python3 harness/detection/engine-155/build.py .native-builds/sdk155 --surf test --manifest-path rust/Cargo.toml -p turbo-surf-render -p turbo-surf-mcp --no-fail-fast --features turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext
-python3 harness/detection/engine-155/build.py .native-builds/sdk155 --surf clippy --manifest-path rust/Cargo.toml -p turbo-surf-render -p turbo-surf-mcp --all-targets --features turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext -- -D warnings
-python3 harness/detection/engine-155/build.py .native-builds/sdk155 --surf build --manifest-path rust/Cargo.toml -p turbo-surf-mcp --example detection_trace --features turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext
-.native-builds/sdk155/target/debug/examples/detection_trace --build-info
+python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --surf test --manifest-path rust/Cargo.toml -p turbo-surf-render -p turbo-surf-mcp --no-fail-fast --features turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext
+python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --surf clippy --manifest-path rust/Cargo.toml -p turbo-surf-render -p turbo-surf-mcp --all-targets --features turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext -- -D warnings
+python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --surf build --manifest-path rust/Cargo.toml -p turbo-surf-mcp --example detection_trace --features turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext
+.native-builds/sdk155-8059.79/target/debug/examples/detection_trace --build-info
 ```
 
 The default MCP feature supplies `impersonate`; the explicit flags enable trust anchors, Metal and CoreText. Check the executable's build information before a capture. The source-built engine, native WindowProxy/security smoke and all-feature executable have been validated on macOS arm64; other host builds remain unverified.
@@ -22,18 +32,18 @@ The default MCP feature supplies `impersonate`; the explicit flags enable trust 
 The native addon uses the same verified engine override. On macOS arm64, select its release build explicitly for the shim checks:
 
 ```sh
-python3 harness/detection/engine-155/build.py .native-builds/sdk155 --surf build --manifest-path rust/Cargo.toml --release -p turbo-surf-napi --features turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext,turbo-surf-core/trust-anchors
-cp .native-builds/sdk155/target/release/libturbo_surf_napi.dylib .native-builds/sdk155/frozen/turbo-surf-native155-release.node
-codesign --force --sign - .native-builds/sdk155/frozen/turbo-surf-native155-release.node
-TURBO_SURF_NAPI_PATH="$PWD/.native-builds/sdk155/frozen/turbo-surf-native155-release.node" npm run test:shim
-TURBO_SURF_NAPI_PATH="$PWD/.native-builds/sdk155/frozen/turbo-surf-native155-release.node" npm run test:e2e
+python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --surf build --manifest-path rust/Cargo.toml --release -p turbo-surf-napi --features turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext,turbo-surf-core/trust-anchors
+cp .native-builds/sdk155-8059.79/target/release/libturbo_surf_napi.dylib .native-builds/sdk155-8059.79/frozen/turbo-surf-native155-release.node
+codesign --force --sign - .native-builds/sdk155-8059.79/frozen/turbo-surf-native155-release.node
+TURBO_SURF_NAPI_PATH="$PWD/.native-builds/sdk155-8059.79/frozen/turbo-surf-native155-release.node" npm run test:shim
+TURBO_SURF_NAPI_PATH="$PWD/.native-builds/sdk155-8059.79/frozen/turbo-surf-native155-release.node" npm run test:e2e
 ```
 
 An explicit addon path prevents the loader from choosing another engine's release or debug library. Building the addon does not publish it.
 
 Use a separate persistent, ignored destination. The helper never overwrites the SDK 154 source, native archive, bindings or frozen executables. A new engine requires recompiling C++ and generating matching bindings; a cached 154 archive cannot substitute for the 155 engine. Every accepted build runs the smoke program and the native WindowProxy/security regressions. A Surf command receives `TURBO_SURF_ENGINE=155`, the selected Cargo source patches and the verified native artifact paths.
 
-The checked profile is [`../engine-154/profiles/155.json`](../engine-154/profiles/155.json). [Chrome's exact release DEPS](https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/DEPS) pins V8 revision `56832c166a78bd1eb61068ac69876d6880eaabdf`; [the official V8 version header](https://chromium.googlesource.com/v8/v8/+/refs/tags/15.5.35.20/include/v8-version.h) declares `15.5.35.20`. The imported source dependency fragments follow that engine's DEPS: build `8ca8a372cab9ff143072204053d30fbc2c17bd7a`, ICU `6ebb40c594776cc2c21ea14df85a2a89a328b364`, and Rust dependencies `4dec6f65bcb34c4c289736b0e6fd571b35c6c665`.
+The historical profile is [`../engine-154/profiles/155.json`](../engine-154/profiles/155.json). [Chrome's exact release DEPS](https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/DEPS) pins V8 revision `56832c166a78bd1eb61068ac69876d6880eaabdf`; [the official V8 version header](https://chromium.googlesource.com/v8/v8/+/refs/tags/15.5.35.20/include/v8-version.h) declares `15.5.35.20`. The imported source dependency fragments follow that engine's DEPS: build `8ca8a372cab9ff143072204053d30fbc2c17bd7a`, ICU `6ebb40c594776cc2c21ea14df85a2a89a328b364`, and Rust dependencies `4dec6f65bcb34c4c289736b0e6fd571b35c6c665`.
 
 V8 155 adds a metagen build step that requires the LLVM libclang library and Python bindings. Preparation installs the official platform package pinned in that engine's DEPS and verifies its SHA-256. These package URLs and hashes are in the profile manifest; `prepare.py --adopt` repairs this dependency in an already prepared destination. Platforms without an official package entry fail explicitly. The build helper also exposes the SDK's own downloaded GN/Ninja tools and a local `python` alias for its active Python interpreter on the subprocess PATH, so metagen reconstructs compile flags using the same GN executable that generated the native build.
 

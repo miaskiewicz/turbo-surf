@@ -175,8 +175,15 @@ async fn corp_controls_native_opaque_fetch_and_classic_script_admission() {
     assert_eq!(
         value,
         json!([
-            3,
-            ["TypeError", "opaque", "opaque", "opaque", "opaque", "cors"]
+            2,
+            [
+                "TypeError",
+                "TypeError",
+                "opaque",
+                "opaque",
+                "opaque",
+                "cors"
+            ]
         ])
     );
     page.close();

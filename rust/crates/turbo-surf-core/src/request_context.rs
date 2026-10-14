@@ -51,6 +51,8 @@ pub struct RequestContext {
     pub cookie_site_is_opaque: bool,
     pub user_activation: bool,
     pub credentials: Credentials,
+    /// COEP credentialless omits credentials for cross-origin no-cors hops.
+    pub credentialless: bool,
     /// Sandboxed/data documents can have an opaque origin despite a tuple URL.
     pub opaque_origin: bool,
     /// Redirect-tainted request Origin is distinct from the document's cookie site.
@@ -76,6 +78,7 @@ impl RequestContext {
             cookie_site_is_opaque: false,
             user_activation,
             credentials: Credentials::Include,
+            credentialless: false,
             opaque_origin: false,
             origin_tainted: false,
             redirect_site: None,
@@ -97,6 +100,7 @@ impl RequestContext {
             } else {
                 Credentials::Include
             },
+            credentialless: false,
             opaque_origin: false,
             origin_tainted: false,
             redirect_site: None,
@@ -104,6 +108,20 @@ impl RequestContext {
     }
 
     pub fn sends_credentials(&self, target: &str) -> bool {
+        if self.credentialless
+            && self.mode == RequestMode::NoCors
+            && (self.opaque_origin
+                || self
+                    .redirect_site
+                    .as_deref()
+                    .is_some_and(|site| site != "same-origin")
+                || !self
+                    .source
+                    .as_deref()
+                    .is_some_and(|source| same_origin(source, target)))
+        {
+            return false;
+        }
         match self.credentials {
             Credentials::Include => true,
             Credentials::SameOrigin => self.source.as_deref().is_some_and(|source| {
@@ -616,5 +634,29 @@ mod tests {
         assert!(hints
             .headers("http://example.com", &context, &profile)
             .is_empty());
+    }
+}
+
+#[cfg(test)]
+mod credentialless_tests {
+    use super::*;
+
+    #[test]
+    fn credentialless_cookie_admission_tracks_the_entire_redirect_chain() {
+        let source = "https://source.test";
+        let mut context =
+            RequestContext::resource(source, Destination::Script, RequestMode::NoCors);
+        context.credentialless = true;
+        assert!(context.sends_credentials(source));
+        assert!(!context.sends_credentials("https://cross.test"));
+        context.follow_redirect(source, "https://cross.test");
+        assert!(!context.sends_credentials("https://cross.test"));
+        context.follow_redirect("https://cross.test", source);
+        assert!(!context.sends_credentials(source));
+        context.mode = RequestMode::Cors;
+        assert!(context.sends_credentials(source));
+        context.mode = RequestMode::NoCors;
+        context.opaque_origin = true;
+        assert!(!context.sends_credentials(source));
     }
 }

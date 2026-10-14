@@ -1,0 +1,158 @@
+{
+  "htmlSha256": "4875cb5a27425df65d39749d20896b0cc7147aacb95382d90bfbce132b7c5607",
+  "pixelSha256": "f7f4ba3e32a1904f6c9cbea9a479d532ae7af45a7fbcf8c1a29499231cf3c289",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "5c83f4b2848b6a3194c8fb80cbc2844113bc63b89e9b617f2e9753b67162bc01",
+  "collectorSha256": "9185f4ae6702491bea5b4088f3c8931b4b0dcadd4e797db995114404c8373d70",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "policy": "unsafe-none",
+      "rows": {
+        "events": ["authorized:load", "image:load", "integrity:error", "plain:load", "style:load"],
+        "scripts": {
+          "plain": 1,
+          "authorized": 1
+        },
+        "sheet": {
+          "present": true,
+          "rules": null,
+          "rulesError": "SecurityError"
+        },
+        "integritySheet": true,
+        "color": "rgb(12, 34, 56)",
+        "image": {
+          "complete": true,
+          "width": 3,
+          "height": 2
+        }
+      },
+      "requests": [
+        {
+          "path": "/authorized.js",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/integrity.css",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/pixel.png",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/plain.js",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/sheet.css",
+          "cookie": "seed=local"
+        }
+      ]
+    },
+    {
+      "policy": "require-corp",
+      "rows": {
+        "events": [
+          "authorized:load",
+          "image:error",
+          "integrity:error",
+          "plain:error",
+          "style:error"
+        ],
+        "scripts": {
+          "plain": 0,
+          "authorized": 1
+        },
+        "sheet": {
+          "present": true,
+          "rules": null,
+          "rulesError": "SecurityError"
+        },
+        "integritySheet": true,
+        "color": "rgb(0, 0, 0)",
+        "image": {
+          "complete": true,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "requests": [
+        {
+          "path": "/authorized.js",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/integrity.css",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/pixel.png",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/plain.js",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/sheet.css",
+          "cookie": "seed=local"
+        }
+      ]
+    },
+    {
+      "policy": "credentialless",
+      "rows": {
+        "events": ["authorized:load", "image:load", "integrity:error", "plain:load", "style:load"],
+        "scripts": {
+          "plain": 1,
+          "authorized": 1
+        },
+        "sheet": {
+          "present": true,
+          "rules": null,
+          "rulesError": "SecurityError"
+        },
+        "integritySheet": true,
+        "color": "rgb(12, 34, 56)",
+        "image": {
+          "complete": true,
+          "width": 3,
+          "height": 2
+        }
+      },
+      "requests": [
+        {
+          "path": "/authorized.js",
+          "cookie": ""
+        },
+        {
+          "path": "/integrity.css",
+          "cookie": "seed=local"
+        },
+        {
+          "path": "/pixel.png",
+          "cookie": ""
+        },
+        {
+          "path": "/plain.js",
+          "cookie": ""
+        },
+        {
+          "path": "/sheet.css",
+          "cookie": ""
+        }
+      ]
+    }
+  ]
+}

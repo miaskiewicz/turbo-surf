@@ -1338,3 +1338,29 @@ observer fanout; scalar script preparation flags retain native node history acro
 cloning/adoption and retired/inert documents. Resource execution integration and
 full observer lifecycle coverage are still in progress. Raw native heap retention
 diagnostics are available to lifecycle tests through the detection harness.
+
+
+## Native resource preparation checkpoint (2026-10-14)
+
+Resource consumers claim the canonical native PreparedScript state and original
+owner document. Guest getters, Array iterators, JSON hooks and public expando
+markers do not decide whether code executes. The bootstrap captures parser script
+wrappers once; native mutation records supply later real preparation candidates.
+This avoids reviving CharacterData-only, parser-inert or already-started scripts on
+later PageSession calls. Retiring a frame disables its document resource consumer.
+
+Inserted inline classics compile and run directly in the owning V8 context before
+insertion returns. Native currentScript writes are restored after execution and
+budget interruption. Ordered dynamic external classics start their downloads
+concurrently and wait for their predecessor only before execution. Native queued
+PromiseResolver handles replace JS completion maps; interruption performs only
+native state restoration/rejection while temporarily clearing termination.
+
+COEP headers use RFC8941 structured field parsing. require-corp/credentialless and
+CORP cover general no-CORS fetches, scripts, stylesheets and images, while CORS and
+SRI retain separate admission. Aboutblank/srcdoc documents inherit the parent's
+embedder policy. Credentialless transports strip cookies after a cross-origin hop,
+even after returning to the original origin. Saved normal Chrome155 controls and
+localhost Rust contracts cover direct requests, redirects, resource errors and
+frame inheritance. COOP/isolation, navigation embedding compatibility, reporting,
+permissions policy and broader parser/resource lifecycle remain open.

@@ -474,3 +474,29 @@ Its exact Chrome source hash and 723 observations are saved in the canonical
 binding's `element_interface_chrome155.json`. Current tests compare all HTML/null
 interface fields and foreign control brands. SVGScriptElement/SVGImageElement
 projection and resources remain recorded gaps; their observations are retained.
+
+### Authored COEP and script preparation controls
+
+These collectors launch fresh normal installed Chrome against localhost. They do
+not provide cookies or other session state to turbo-surf. Each saved JSON records
+actual browser/V8 identity and collector/probe hashes; redirect/resource collectors
+also record real request hops and relevant fixture hashes. Run from the repository:
+
+```sh
+node harness/detection/coep-chrome.mjs harness/detection/fixtures/coep-chrome155.json
+node harness/detection/coep-dom-chrome.mjs harness/detection/fixtures/coep-dom-chrome155.json
+node harness/detection/coep-redirect-chrome.mjs harness/detection/fixtures/coep-redirect-chrome155.json
+node harness/detection/coep-header-chrome.mjs harness/detection/fixtures/coep-header-chrome155.json
+node harness/detection/coep-inherit-chrome.mjs harness/detection/fixtures/coep-inherit-chrome155.json
+node harness/detection/authored-dom-chrome.mjs harness/detection/dynamic-script-probe.js harness/detection/fixtures/dynamic-script-chrome155.json
+node harness/detection/dynamic-script-ordering-chrome.mjs harness/detection/fixtures/dynamic-script-ordering-chrome155.json
+node harness/detection/authored-dom-chrome.mjs harness/detection/retired-script-probe.js harness/detection/fixtures/retired-script-chrome155.json
+cargo test --manifest-path rust/Cargo.toml -p turbo-surf-render --test coep_resources --test dynamic_script_preparation
+```
+
+The first control contains 54 direct fetch cases; the DOM control records 15
+requests; redirect controls contain 12 cases/23 actual hops. Field parsing has 12
+syntax controls and inherited srcdoc fetches preserve child-realm error brands.
+Native regressions use only saved authored controls and localhost servers. Do not
+change oracle values to match native failures: recapture after changing any source,
+and keep the saved actual engine identity.

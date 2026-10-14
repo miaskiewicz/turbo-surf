@@ -68,8 +68,17 @@ MutationObserver delivers typed native records in a V8 notification microtask,
 including compound mutation batches, old values, namespace filters and transient
 removed subtrees. A trusted Document-private consumer runs after observer fanout.
 Native script flags cover parser/force-async/already-started state, clone/import/
-adoption and inert/retired documents; runtime resource execution integration,
-parser reentry, SVG scripts, import maps and speculation rules remain open. Broader
+adoption and inert/retired documents. Trusted native postconnection consumers now
+compile inline classics directly and synchronously, with authentic private
+currentScript/error reporting and ordered external execution over concurrent
+fetches. Native completion resolvers settle interrupted queued scripts without
+guest code running during termination cleanup. Parser wrapper arrays release when
+their lifecycle work finishes. COEP/CORP controls cover require-corp/credentialless,
+redirect cookie admission, DOM resources and inherited srcdoc policy. The integrated
+default resource/script/error/input/frame/session/storage cohort passes 35 focused
+contracts and strict affected Clippy; merged native155 resource reruns remain pending.
+See [RESOURCE-LIFECYCLE.md](./RESOURCE-LIFECYCLE.md) for bounds and genuine task-root
+inventory. Parser reentry, SVG scripts, import maps and speculation rules remain open. Broader
 observer lifecycle, Intersection/Resize queues, slots and custom elements remain.
 
 The renderer now consumes published turbo-html2pdf-core 0.3.5 for genuine live DOM
@@ -91,11 +100,11 @@ caught an iframe bootstrap allocation abort; private capability publication is n
 fallible and interruption recovery passes. Strict Clippy passes the affected core/
 render libraries and GC/geometry/referrer/input/transfer test targets.
 
-Still open: final resource-task root integration/native155 storage certification,
+Still open: merged native155 resource/storage certification,
 full geometry and DOM lifecycle/parsing/lossless UTF-16, remaining CSP/COOP/COEP/
 permissions policy, fetch streaming/cancellation/cache and partitioned storage/access.
 The public storage API is integrated from verified published turbo-dom 0.5.4; final
-resource-task integration remains pending. Text provenance APIs remain under review
+merged native155 resource/storage validation remains pending. Text provenance APIs remain under review
 in turbo-html2pdf PR #20. The
 historical missing-own-member count is **94**, not a current measurement. The prior
 848-test workspace gate is historical and does not certify these changes.
@@ -812,3 +821,36 @@ CSP form/base/report-only, COOP/COEP, HTTP cache, streaming/cancellation, storag
 partitioning or Google clearance. The integrated default source gate passes three core policy tests and seven
 native referrer/fetch-header/resource-integrity contracts. Final broader workspace
 and genuine155 gates remain pending until the remaining implementation areas land.
+
+
+## Resource admission and COEP checkpoint — 2026-10-14
+
+The resource consumers now admit scripts through native scalar preparation state,
+using authentic original document/element wrappers rather than guest properties,
+markers or ongoing script-node polling. Inserted inline classics compile directly
+in the owning V8 context and execute before insertion returns. Text replacement,
+CharacterData-only edits, changed data-block types, parser-inert scripts, cloning,
+shadow currentScript and retained/retired document adoption match the saved authored
+Chrome controls. Ordered dynamic external scripts download concurrently and execute
+in insertion order. Native queued completion resolvers remove the JS waiter map;
+interruption restores currentScript and settles pending completion without invoking
+guest JavaScript while termination is temporarily cleared.
+
+COEP require-corp and credentialless now affect the shared transport and the
+separate classic-script fetch path. CORP, CORS, SRI, opaque stylesheet identities,
+computed linked colors and images are tested against actual responses. The authored
+Chrome155 controls record 54 direct fetches and cookie headers, 15 DOM resource
+requests, 12 redirect cases with 23 hops, inherited srcdoc policies/error realms,
+and 12 policy-header syntaxes. The measured browser rejects RFC9651 date/display
+string parameters; native parsing explicitly uses the maintained RFC8941 dialect.
+IP addresses across different ports do not satisfy CORP same-site. Credentialless
+requests suppress cookies after crossing an origin, including redirects back to
+that origin; CORS requests retain their independent credential mode.
+
+These controls used fresh normal Chrome 155.0.8059.79 / V8 15.5.35.23, without
+borrowing cookies for native execution. The isolated native checkpoint uses the
+actual default V8 SDK150 and preserves that identity. It does not certify native155,
+full browser parity or Google acceptance. COOP/crossOriginIsolated, navigation
+embedding compatibility, permissions policy, reporting endpoints, complete CSS
+cascade/color-scheme, document.write, import maps, speculation rules and wider
+resource/lifecycle scheduling still need independent controls and implementation.

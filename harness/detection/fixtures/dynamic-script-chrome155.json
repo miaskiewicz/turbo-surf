@@ -1,0 +1,82 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "37a49d14b699838ae3017c3463abf9aeb7436a7323a48e5e469e8ae1ec3fba63",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "name": "immediate",
+      "value": ["immediate"]
+    },
+    {
+      "name": "reinsert",
+      "value": ["immediate"]
+    },
+    {
+      "name": "late-text",
+      "value": ["immediate", "late-text"]
+    },
+    {
+      "name": "character-data",
+      "value": ["immediate", "late-text"]
+    },
+    {
+      "name": "type-change",
+      "value": ["immediate", "late-text"]
+    },
+    {
+      "name": "data-write",
+      "value": ["immediate", "late-text", "data-block"]
+    },
+    {
+      "name": "innerhtml",
+      "value": ["immediate", "late-text", "data-block"]
+    },
+    {
+      "name": "clone-started",
+      "value": ["immediate", "late-text", "data-block"]
+    },
+    {
+      "name": "adopt-inert-started",
+      "value": ["immediate", "late-text", "data-block"]
+    },
+    {
+      "name": "private-preparation",
+      "value": {
+        "reads": 0,
+        "marks": ["immediate", "late-text", "data-block", "private-preparation"]
+      }
+    },
+    {
+      "name": "shadow-inline",
+      "value": ["immediate", "late-text", "data-block", "private-preparation", "shadow-null"]
+    },
+    {
+      "name": "throwing",
+      "value": ["immediate", "late-text", "data-block", "private-preparation", "shadow-null"]
+    },
+    {
+      "name": "error-event",
+      "value": [
+        {
+          "message": "authored dynamic error",
+          "current": "throwing"
+        }
+      ]
+    },
+    {
+      "name": "outside-current-script",
+      "value": true
+    }
+  ]
+}

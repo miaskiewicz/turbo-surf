@@ -1,0 +1,224 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "2ab341e5dc306b549de529105661a7cf723680df5644f792eb34a4d40bf34d5a",
+  "collectorSha256": "b423709bc02f9ea309c00812bf08d0cfc05d752604867fdecbef58b61f54678d",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "policy": "unsafe-none",
+      "rows": [
+        {
+          "id": "source-open",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "source-authorized",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "cross-back",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "cross-open-back",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        }
+      ],
+      "requests": [
+        {
+          "side": "source",
+          "path": "/source-open",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/final-source-open",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "source",
+          "path": "/source-authorized",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/final-source-authorized",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/cross-back",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "source",
+          "path": "/final-cross-back",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/cross-open-back",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "source",
+          "path": "/final-cross-open-back",
+          "cookie": "seed=local"
+        }
+      ]
+    },
+    {
+      "policy": "require-corp",
+      "rows": [
+        {
+          "id": "source-open",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "source-authorized",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "cross-back",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "cross-open-back",
+          "allowed": false,
+          "name": "TypeError"
+        }
+      ],
+      "requests": [
+        {
+          "side": "source",
+          "path": "/source-open",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/final-source-open",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "source",
+          "path": "/source-authorized",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/final-source-authorized",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/cross-back",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "source",
+          "path": "/final-cross-back",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/cross-open-back",
+          "cookie": "seed=local"
+        }
+      ]
+    },
+    {
+      "policy": "credentialless",
+      "rows": [
+        {
+          "id": "source-open",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "source-authorized",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "cross-back",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "cross-open-back",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        }
+      ],
+      "requests": [
+        {
+          "side": "source",
+          "path": "/source-open",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/final-source-open",
+          "cookie": ""
+        },
+        {
+          "side": "source",
+          "path": "/source-authorized",
+          "cookie": "seed=local"
+        },
+        {
+          "side": "cross",
+          "path": "/final-source-authorized",
+          "cookie": ""
+        },
+        {
+          "side": "cross",
+          "path": "/cross-back",
+          "cookie": ""
+        },
+        {
+          "side": "source",
+          "path": "/final-cross-back",
+          "cookie": ""
+        },
+        {
+          "side": "cross",
+          "path": "/cross-open-back",
+          "cookie": ""
+        },
+        {
+          "side": "source",
+          "path": "/final-cross-open-back",
+          "cookie": ""
+        }
+      ]
+    }
+  ]
+}

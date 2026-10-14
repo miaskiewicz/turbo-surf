@@ -20,8 +20,8 @@
   schedule bounded collection after completed host operations, outside guest scopes;
   callbacks only mark pending work and are removed before isolate disposal.
   Two actual storage regressions reclaim detached nodes/payloads while preserving
-  retained subtree/Range identity and independent peer sessions. Resource-task
-  integration and genuine native155 certification remain in progress.
+  retained subtree/Range identity and independent peer sessions. Genuine native155
+  session/storage contracts pass; merged resource certification remains pending.
 - Park persistent V8 isolates between operations and asynchronous polls. Scoped
   runtime activation restores both V8 and the native document world before yielding,
   including cancellation, concurrent opening, cached/stateless evaluation and
@@ -38,6 +38,21 @@
   A source-pinned 723-row Chrome155 matrix preserves all observations; its tests
   cover HTML/null-namespace mapping and foreign control brands. SVGScriptElement
   and SVGImageElement projection/resource differences remain open.
+- Prepare scripts from native scalar state and authenticated owner documents;
+  remove guest-visible execution markers and repeated dynamic DOM rescans. Actual
+  postconnection/text replacement triggers execute inline classics synchronously,
+  with direct V8 compilation, private `currentScript`, original Window errors,
+  concurrent ordered external downloads and inert retired/adopted documents.
+  Native queued completion resolvers settle interruptions without invoking guest
+  JavaScript during temporarily cleared termination. Reusable authored Chrome155
+  controls and offline mutation, ordering, retirement and budget regressions cover
+  this subset; document.write, import maps and broader scheduling remain open.
+- Enforce COEP require-corp/credentialless and CORP on fetch, classic scripts,
+  stylesheets and images, including inherited srcdoc policy and redirect cookie
+  admission. Parse policy fields with the maintained RFC8941 structured-field
+  parser. Chrome155 controls cover 54 direct fetches, 15 DOM resource requests,
+  12 redirect cases/23 hops, inherited frame errors and 12 policy-field syntaxes.
+  Navigation embedding compatibility, COOP/isolation and reporting remain open.
 
 - Replace native wrapper/helper/context roots with weak lookups and private V8
   Document/subtree ownership; trace real cppgc crypto edges. A genuine heap trace

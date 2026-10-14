@@ -1,0 +1,22 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "7447bdf9f93afc7a7cc85682831a6cc846cec5ddade6d53cfc0fab0c6f5069e8",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "error": null,
+    "inserted": true,
+    "adopted": true,
+    "executed": false
+  }
+}

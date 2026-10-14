@@ -16,7 +16,45 @@ pub fn active_mixed_content_allowed(source: &str, target: &str) -> bool {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EmbedderPolicy {
+    #[default]
+    UnsafeNone,
+    RequireCorp,
+    Credentialless,
+}
+
+impl EmbedderPolicy {
+    pub fn from_headers(headers: &[(String, String)]) -> Self {
+        let Some(value) = crate::fetch_cors::header(headers, "cross-origin-embedder-policy") else {
+            return Self::UnsafeNone;
+        };
+        // The fresh Chrome 155 control rejects RFC 9651 date/display-string parameters.
+        let Ok(item) = sfv::Parser::new(value)
+            .with_version(sfv::Version::Rfc8941)
+            .parse::<sfv::Item>()
+        else {
+            return Self::UnsafeNone;
+        };
+        match item.bare_item.as_token().map(|token| token.as_str()) {
+            Some("require-corp") => Self::RequireCorp,
+            Some("credentialless") => Self::Credentialless,
+            _ => Self::UnsafeNone,
+        }
+    }
+}
+
+#[cfg(test)]
 pub fn corp_allowed(context: &RequestContext, target: &str, headers: &[(String, String)]) -> bool {
+    embedder_allowed(EmbedderPolicy::UnsafeNone, context, target, headers)
+}
+
+pub fn embedder_allowed(
+    policy: EmbedderPolicy,
+    context: &RequestContext,
+    target: &str,
+    headers: &[(String, String)],
+) -> bool {
     if context.mode != RequestMode::NoCors {
         return true;
     }
@@ -28,8 +66,12 @@ pub fn corp_allowed(context: &RequestContext, target: &str, headers: &[(String, 
     match crate::fetch_cors::header(headers, "cross-origin-resource-policy") {
         Some("same-origin") => false,
         Some("same-site") => !context.opaque_origin && corp_same_site(source, target),
-        // Invalid/duplicate fields do not impose CORP without an embedder policy.
-        _ => true,
+        Some("cross-origin") => true,
+        // Missing, invalid and duplicate CORP fields inherit COEP's default.
+        _ => {
+            policy == EmbedderPolicy::UnsafeNone
+                || policy == EmbedderPolicy::Credentialless && !context.sends_credentials(target)
+        }
     }
 }
 
@@ -45,6 +87,12 @@ fn corp_same_site(source: &str, target: &str) -> bool {
     // above. Reuse the core's PSL-aware comparison after normalizing the scheme.
     if target_url.set_scheme(source_url.scheme()).is_err() {
         return false;
+    }
+    // Site origins without a registrable domain (including IP addresses) require
+    // the same origin; sharing an IP across ports does not authorize CORP.
+    if !matches!(source_url.host(), Some(url::Host::Domain(host)) if psl::domain_str(host).is_some())
+    {
+        return same_origin(source, target_url.as_str());
     }
     same_site(source, target_url.as_str())
 }
@@ -122,7 +170,7 @@ mod tests {
             "http://a.example.com",
             "https://b.example.com"
         ));
-        assert!(corp_same_site(
+        assert!(!corp_same_site(
             "http://127.0.0.1:1234",
             "http://127.0.0.1:5678"
         ));
@@ -156,6 +204,123 @@ mod tests {
             assert!(
                 active_mixed_content_allowed("http://source.test", target),
                 "{target}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod embedder_tests {
+    use super::*;
+    use turbo_surf_core::request_context::{Credentials, Destination};
+
+    #[test]
+    fn embedder_headers_parse_full_structured_items_and_reject_duplicates() {
+        for value in [
+            "require-corp",
+            "require-corp; report-to=\"authored\"",
+            "require-corp; optional",
+            "require-corp; flag=?1",
+            "require-corp; n=-12.34",
+            "require-corp; bytes=:YQ==:",
+        ] {
+            assert_eq!(
+                EmbedderPolicy::from_headers(&[(
+                    "Cross-Origin-Embedder-Policy".into(),
+                    value.into()
+                )]),
+                EmbedderPolicy::RequireCorp,
+                "{value}"
+            );
+        }
+        for value in [
+            "\"require-corp\"",
+            "Require-Corp",
+            "require-corp, credentialless",
+            "require-corp; flag=?9",
+            "require-corp; report-to=\"unterminated",
+            "require-corp; x=1000000000000000",
+        ] {
+            assert_eq!(
+                EmbedderPolicy::from_headers(&[(
+                    "Cross-Origin-Embedder-Policy".into(),
+                    value.into()
+                )]),
+                EmbedderPolicy::UnsafeNone,
+                "{value}"
+            );
+        }
+        assert_eq!(
+            EmbedderPolicy::from_headers(&[
+                ("Cross-Origin-Embedder-Policy".into(), "require-corp".into()),
+                ("Cross-Origin-Embedder-Policy".into(), "require-corp".into())
+            ]),
+            EmbedderPolicy::UnsafeNone
+        );
+    }
+
+    #[test]
+    fn credentialless_never_weakens_an_explicit_resource_policy() {
+        let mut context = RequestContext::resource(
+            "https://source.test",
+            Destination::Script,
+            RequestMode::NoCors,
+        );
+        context.credentialless = true;
+        context.credentials = Credentials::Include;
+        assert!(embedder_allowed(
+            EmbedderPolicy::Credentialless,
+            &context,
+            "https://cross.test/script",
+            &[]
+        ));
+        assert!(!embedder_allowed(
+            EmbedderPolicy::Credentialless,
+            &context,
+            "https://cross.test/script",
+            &[("Cross-Origin-Resource-Policy".into(), "same-origin".into())]
+        ));
+        assert!(!embedder_allowed(
+            EmbedderPolicy::RequireCorp,
+            &context,
+            "https://cross.test/script",
+            &[]
+        ));
+        context.mode = RequestMode::Cors;
+        assert!(embedder_allowed(
+            EmbedderPolicy::RequireCorp,
+            &context,
+            "https://cross.test/script",
+            &[]
+        ));
+    }
+}
+
+#[cfg(test)]
+mod measured_embedder_headers {
+    use super::*;
+    #[test]
+    fn chrome155_structured_header_dialect_matches_native_policy_parsing() {
+        let control: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../harness/detection/fixtures/coep-header-chrome155.json"
+        ))
+        .unwrap();
+        for row in control["result"].as_array().unwrap() {
+            let expected = if row["rows"][0]["allowed"] == false {
+                EmbedderPolicy::RequireCorp
+            } else if row["requests"][0]["cookie"] == "" {
+                EmbedderPolicy::Credentialless
+            } else {
+                EmbedderPolicy::UnsafeNone
+            };
+            let value = row["policy"].as_str().unwrap();
+            assert_eq!(
+                EmbedderPolicy::from_headers(&[(
+                    "Cross-Origin-Embedder-Policy".into(),
+                    value.into()
+                )]),
+                expected,
+                "{value}"
             );
         }
     }

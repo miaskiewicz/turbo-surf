@@ -17,6 +17,13 @@
 #[path = "window_proxy.rs"]
 mod window_proxy;
 
+#[path = "resource_lifecycle.rs"]
+mod resource_lifecycle;
+use resource_lifecycle::{
+    op_execute_inline_script, op_install_resource_consumer, op_prepare_resource_script,
+    op_retire_resource_document,
+};
+
 use deno_core::{
     op2, resolve_import, v8, JsRuntime, ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse,
     ModuleLoader, ModuleResolveResponse, ModuleSource, ModuleSourceCode, ModuleSpecifier,
@@ -580,7 +587,10 @@ impl ModuleLoader for NetModuleLoader {
                 headers,
                 &client_hints,
                 &mut local,
-                Some(&allowed),
+                crate::script_fetch::ScriptPolicies {
+                    request: Some(&allowed),
+                    ..Default::default()
+                },
                 &credentials.integrity,
             )
             .await;
@@ -683,32 +693,35 @@ struct NetworkLog(std::collections::VecDeque<serde_json::Value>);
 // Classic scripts are scheduled onto the host pump. Executing inside a JS eval
 // or a synchronous op retains the dispatcher's frames in page Error stacks.
 struct ClassicScriptJob {
-    id: u32,
+    resolver: v8::Global<v8::PromiseResolver>,
     source: String,
     code: String,
     context: v8::Global<v8::Context>,
     waiter_context: v8::Global<v8::Context>,
+    document: v8::Global<v8::Object>,
     muted_errors: bool,
+    element: Option<v8::Global<v8::Object>>,
 }
 
 #[derive(Default)]
 struct ClassicScripts {
-    next_id: u32,
     html: String,
     used_inline_offsets: std::collections::BTreeSet<usize>,
     jobs: std::collections::VecDeque<ClassicScriptJob>,
 }
 
-#[op2(fast)]
-fn op_queue_classic_script(
-    scope: &mut v8::PinScope,
+#[op2(reentrant)]
+fn op_queue_classic_script<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
     state: &mut OpState,
-    window: v8::Local<v8::Object>,
+    window: v8::Local<'s, v8::Object>,
     #[string] code: String,
     #[string] source: String,
     inline: bool,
     muted_errors: bool,
-) -> Result<u32, JsErrorBox> {
+    element: v8::Local<'s, v8::Object>,
+    in_shadow_tree: bool,
+) -> Result<v8::Local<'s, v8::Promise>, JsErrorBox> {
     let context = window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("script context unavailable"))?;
@@ -730,10 +743,13 @@ fn op_queue_classic_script(
     {
         return Err(JsErrorBox::generic("script context is not same-origin"));
     }
+    let resolver = v8::PromiseResolver::new(scope)
+        .ok_or_else(|| JsErrorBox::generic("script completion allocation failed"))?;
+    let promise = resolver.get_promise(scope);
+    let element = (!in_shadow_tree).then(|| v8::Global::new(scope, element));
     let context = v8::Global::new(scope, context);
+    let caller = v8::Global::new(scope, caller);
     let queue = state.borrow_mut::<ClassicScripts>();
-    queue.next_id += 1;
-    let id = queue.next_id;
     let located = if inline && !code.is_empty() {
         if let Some((start, _)) = queue
             .html
@@ -757,14 +773,16 @@ fn op_queue_classic_script(
         code
     };
     queue.jobs.push_back(ClassicScriptJob {
-        id,
+        resolver: v8::Global::new(scope, resolver),
         source,
         code: located,
-        context: context.clone(),
-        waiter_context: context,
+        context,
+        waiter_context: caller,
+        document: v8::Global::new(scope, window),
         muted_errors,
+        element,
     });
-    Ok(id)
+    Ok(promise)
 }
 
 fn cookie_now() -> f64 {
@@ -1297,6 +1315,10 @@ async fn op_fetch(
                 .map(|handle| handle.policy.borrow().referrer_policy)
         })
         .unwrap_or_default();
+    let embedder_policy = csp
+        .as_ref()
+        .map(|handle| handle.policy.borrow().embedder_policy)
+        .unwrap_or_default();
     let policy = csp
         .map(|handle| handle.policy.borrow().active.clone())
         .unwrap_or_default();
@@ -1368,6 +1390,8 @@ async fn op_fetch(
         .and_then(|value| value.as_str())
         .map(str::to_string);
     context.referrer_policy = referrer_policy;
+    context.credentialless =
+        embedder_policy == crate::resource_policy::EmbedderPolicy::Credentialless;
     if let Some(referrer) = init.get("referrer").and_then(|value| value.as_str()) {
         if referrer != "about:client" {
             context.referrer = Some(referrer.to_string());
@@ -1453,7 +1477,7 @@ async fn op_fetch(
                 turbo_surf_core::request_context::same_origin(source, target)
             });
         crossed_origin.fetch_or(cross, std::sync::atomic::Ordering::Relaxed);
-        crate::resource_policy::corp_allowed(context, target, headers)
+        crate::resource_policy::embedder_allowed(embedder_policy, context, target, headers)
             && (context.mode != RequestMode::Cors
                 || !cross
                 || crate::fetch_cors::allowed(context, headers))
@@ -1491,7 +1515,12 @@ async fn op_fetch(
             opts.headers.clone(),
             &client_hints,
             &mut local,
-            Some(&|target, redirected| policy.allows_request(directive, target, nonce, redirected)),
+            crate::script_fetch::ScriptPolicies {
+                request: Some(&|target, redirected| {
+                    policy.allows_request(directive, target, nonce, redirected)
+                }),
+                embedder: embedder_policy,
+            },
             integrity,
         )
         .await
@@ -1647,12 +1676,15 @@ async fn op_load_image(
     };
     let source = if source.is_empty() { base } else { source };
     let target = resolve(&source, &url).unwrap_or(url);
-    let policy = state
+    let (policy, embedder_policy) = state
         .borrow()
         .borrow::<CspContexts>()
         .0
         .get(&csp)
-        .map(|handle| handle.policy.borrow().active.clone())
+        .map(|handle| {
+            let policy = handle.policy.borrow();
+            (policy.active.clone(), policy.embedder_policy)
+        })
         .unwrap_or_default();
     if !policy.allows_request("img-src", &target, "", false) {
         return ImageOut {
@@ -1669,6 +1701,8 @@ async fn op_load_image(
         |target: &str, redirected: bool| policy.allows_request("img-src", target, "", redirected);
     let metadata: serde_json::Value = serde_json::from_str(&context_json).unwrap_or_default();
     let mut context = RequestContext::resource(&source, Destination::Image, RequestMode::NoCors);
+    context.credentialless =
+        embedder_policy == crate::resource_policy::EmbedderPolicy::Credentialless;
     context.top_level_source = metadata
         .get("top_level_source")
         .and_then(|value| value.as_str())
@@ -1684,7 +1718,7 @@ async fn op_load_image(
     let opts = FetchOptions {
         request_policy: Some(&request_policy),
         response_policy: Some(&|context, target, headers| {
-            crate::resource_policy::corp_allowed(context, target, headers)
+            crate::resource_policy::embedder_allowed(embedder_policy, context, target, headers)
         }),
         headers,
         context: Some(context),
@@ -2183,11 +2217,14 @@ fn call_frame_helper<'s>(
             | "markDocumentInteractive"
             | "dispatchDocumentInteractive"
             | "dispatchDocumentComplete"
-            | "completeClassicScript"
             | "completeModuleGraph"
             | "fireFrameScript"
+            | "frameScriptElement"
+            | "frameScriptDocument"
             | "reportClassicScriptError"
+            | "setCurrentScript"
             | "cancelDocumentTasks"
+            | "retireResourceDocument"
             | "frameRecordFor"
             | "accessFrame"
             | "prepareFrameAdoption"
@@ -2674,6 +2711,7 @@ fn op_frame_set_document<'s>(
             policy.header = inherited.clone();
             policy.active = inherited;
             policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
+            policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
         }
         handle
     };
@@ -3064,6 +3102,7 @@ fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'
                     let old_scope = &mut v8::ContextScope::new(scope, context);
                     let _ = call_frame_helper(old_scope, "cancelModuleGraphs", &[]);
                     let _ = call_frame_helper(old_scope, "cancelDocumentTasks", &[]);
+                    let _ = call_frame_helper(old_scope, "retireResourceDocument", &[]);
                 }
                 if context.get_slot::<FrameRetired>().is_none() {
                     crate::script_inventory::retire_frame(scope, context);
@@ -3177,6 +3216,7 @@ fn allocate_frame<'s>(
                 policy.header = inherited.clone();
                 policy.active = inherited;
                 policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
+                policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
             }
             context.set_slot(Rc::new(csp.clone()));
             JsRuntime::op_state_from(scope)
@@ -3334,15 +3374,16 @@ fn op_frame_module<'s>(
         .ok_or_else(|| JsErrorBox::generic("frame module dispatch failed"))
 }
 
-#[op2(fast)]
-fn op_queue_frame_script(
-    scope: &mut v8::PinScope,
+#[op2(reentrant)]
+fn op_queue_frame_script<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
     state: &mut OpState,
-    window: v8::Local<v8::Object>,
+    window: v8::Local<'s, v8::Object>,
     #[string] mut code: String,
     #[string] mut source_url: String,
     response_id: u32,
-) -> Result<u32, JsErrorBox> {
+    script_index: u32,
+) -> Result<v8::Local<'s, v8::Promise>, JsErrorBox> {
     let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
     let caller_local = v8::Local::new(scope, &caller);
     let context = window
@@ -3406,19 +3447,36 @@ fn op_queue_frame_script(
                 .map_or_else(|| "about:blank".to_string(), |url| url.0.clone());
         }
     }
+    let element = {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let index = v8::Integer::new_from_unsigned(scope, script_index);
+        call_frame_helper(scope, "frameScriptElement", &[index.into()])
+            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+            .map(|value| v8::Global::new(scope, value))
+    };
+    let document = {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let document = call_frame_helper(scope, "frameScriptDocument", &[])
+            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+            .ok_or_else(|| JsErrorBox::generic("frame script document unavailable"))?;
+        v8::Global::new(scope, document)
+    };
+    let resolver = v8::PromiseResolver::new(scope)
+        .ok_or_else(|| JsErrorBox::generic("frame script completion allocation failed"))?;
+    let promise = resolver.get_promise(scope);
     let context = v8::Global::new(scope, context);
     let queue = state.borrow_mut::<ClassicScripts>();
-    queue.next_id += 1;
-    let id = queue.next_id;
     queue.jobs.push_back(ClassicScriptJob {
-        id,
+        resolver: v8::Global::new(scope, resolver),
         source: source_url,
         code,
         context,
         waiter_context: caller,
+        document,
         muted_errors,
+        element,
     });
-    Ok(id)
+    Ok(promise)
 }
 
 fn frame_document_url(scope: &mut v8::PinScope, state: &OpState) -> String {
@@ -3948,6 +4006,10 @@ deno_core::extension!(
         op_document_import_node,
         op_frame_cookie_set,
         op_queue_classic_script,
+        op_install_resource_consumer,
+        op_prepare_resource_script,
+        op_retire_resource_document,
+        op_execute_inline_script,
         op_cookie_get,
         op_cookie_set,
         op_fetch,
@@ -4634,7 +4696,8 @@ __defineDocumentAccessor("cookie", state => state.readCookie(),
 __G.readDocumentCookie = __documentRuntimeState.readCookie;
 __G.writeDocumentCookie = __documentRuntimeState.writeCookie;
 __G.setDocumentReadyState = value => {__documentRuntimeState.readyState=value;};
-__G.setCurrentScript = value => {__documentRuntimeState.currentScript=value;};
+__G.setCurrentScript = value => {const previous=__documentRuntimeState.currentScript;__documentRuntimeState.currentScript=value;return previous;};
+ops.op_set_host_capabilities({setCurrentScript:__G.setCurrentScript});
 __defineDocumentAccessor("fonts", state => state.fonts);
 __defineDocumentAccessor("currentScript", state => state.currentScript);
 
@@ -6219,8 +6282,10 @@ if (typeof globalThis.__name === "undefined") {
 // promise hangs and the app never mounts. So: execute each <script> element once
 // (inline → host compilation; external → fetch then host compilation), and fire
 // load/error so the loader resolves. `__G.hydrate()` drives this to quiescence.
-const __EXECUTABLE_TYPES = new Set(["", "text/javascript", "application/javascript", "module"]);
-const __parserScripts = new WeakSet(Array.from(document.querySelectorAll("script")));
+const __resourceJSONParse = JSON.parse;
+const __resourceThen = Function.prototype.call.bind(Promise.prototype.then);
+const __initialResourceScripts = Array.from(document.querySelectorAll("script"));
+let __orderedDynamicScripts = Promise.resolve();
 const __resources = new WeakMap();
 const __resourcePromises = new Set();
 const __resourceSheetConstructor = CSSStyleSheet;
@@ -6230,6 +6295,7 @@ const __resourceCSSHosts = new WeakMap();
 const __resourceCompatMode=Object.getOwnPropertyDescriptor(Document.prototype,"compatMode").get;
 const __resourceAttribute=Element.prototype.getAttribute;
 const __resourceTagName=Object.getOwnPropertyDescriptor(Element.prototype,"tagName").get;
+const __resourceScriptAsync=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,"async").get;
 const __resourceText=Object.getOwnPropertyDescriptor(Node.prototype,"textContent").get;
 const __resourceDocumentQuery=Document.prototype.querySelectorAll;
 const __resourceCompare=Node.prototype.compareDocumentPosition;
@@ -6382,22 +6448,13 @@ __G.rewriteEsmForClassic = function (code) {
   }
   return code;
 }
-const __classicWaiters = new Map();
-const __completeClassicScript = function(id, failure) {
-  const waiter = __classicWaiters.get(id);
-  if (!waiter) return;
-  __classicWaiters.delete(id);
-  if (failure) {
-    waiter.reject(failure.error);
-  } else waiter.resolve();
-};
-ops.op_set_host_capabilities({completeClassicScript:__completeClassicScript,
+ops.op_set_host_capabilities({
   reportClassicScriptError:(error,details)=>{
     const event=new __hostErrorEvent("error",{cancelable:true,error,...details});
     ops.op_dispatch_host_event(event,globalThis);
   }});
 const __frameScriptElements=Array.from(__resourceDocumentQuery.call(__document,"script"));
-ops.op_set_host_capabilities({fireFrameScript:(index,kind)=>{const element=__frameScriptElements[index];if(element)__fireScriptEvent(element,kind);}});
+ops.op_set_host_capabilities({fireFrameScript:(index,kind)=>{const element=__frameScriptElements[index];if(element)__fireScriptEvent(element,kind);},frameScriptElement:index=>__frameScriptElements[index] || null,frameScriptDocument:()=>__document});
 const __moduleStaging = ops.op_module_staging_enabled();
 const __moduleWaiters = new Map();
 __G.cancelModuleGraphs = () => {for(const waiters of __moduleWaiters.values()){for(const waiter of waiters){if(!waiter.done){waiter.done=true;waiter.resolve();}}}__moduleWaiters.clear();};
@@ -6433,38 +6490,52 @@ const __completeModuleGraph = (specifier, ready, details) => {
   for (const waiter of waiters) __completeModuleWaiter(waiter, ready, details);
 };
 ops.op_set_host_capabilities({completeModuleGraph:__completeModuleGraph});
-__G.execScriptEl = async function (el) {
-  if (!el || el.__tcDone) return;
-  el.__tcDone = true; // mark before await so a re-entrant pump round can't double-run
-  if (!ops.op_document_scripts_allowed(__document)) {el.__tcModule = true; return;}
-  const get = (n) => (typeof el.getAttribute === "function" ? el.getAttribute(n) : null);
+function __resourceScriptAttributes(prepared) {
+  const attributes = __recordCreate(null);
+  for (let index = 0; index < prepared.attributes.length; index++) {
+    const pair = prepared.attributes[index];
+    attributes[pair[0]] = pair[1];
+  }
+  return attributes;
+}
+function __prepareResourceScript(el) {
+  const raw = ops.op_prepare_resource_script(__document, el);
+  return raw ? __resourceJSONParse(raw) : null;
+}
+__G.execScriptEl = async function (el, preparation = null, executionGate = null) {
+  if (!el || !ops.op_document_scripts_allowed(__document)) return;
+  const prepared = preparation || __prepareResourceScript(el);
+  if (!prepared) return;
+  const attributes = __resourceScriptAttributes(prepared);
+  if (prepared.kind === "importmap" || prepared.kind === "speculationrules") return;
+  if (prepared.src === "") { __fireScriptEvent(el, "error"); return; }
+  const get = (name) => attributes[name] ?? null;
   // Module-capable browsers SKIP `<script nomodule>` (they run the module build
   // instead). We support module scripts, so honor it: otherwise we force-run a
   // page's legacy polyfill bundle (e.g. Next's core-js `polyfill-nomodule`), which
   // overwrites native Promise/queueMicrotask with impls whose microtask scheduler
   // is inert in this env — promises never settle and the render never commits.
-  if (get("nomodule") !== null || get("noModule") !== null) return;
-  const parserType=(get("type")||"").toLowerCase();
-  if(__parserScripts.has(el)&&(parserType==="module"||__EXECUTABLE_TYPES.has(parserType))) {
+  if (prepared.kind !== "module" && get("nomodule") !== null) return;
+  const parserType=prepared.kind;
+  if(prepared.parserInserted) {
     // Claim above before awaiting styles, so load handlers cannot run this script twice.
     // Later parser resources cannot dispatch before this script installs its listeners.
     const external=!!get("src"),module=parserType==="module";
-    const deferred=!el.async&&(module||external&&get("defer")!==null);
+    const deferred=!prepared.asynchronous&&(module||external&&get("defer")!==null);
     const resources=__G.loadDocumentResources(__document,globalThis,deferred?null:el);
-    if(!el.async||!(external||module))await resources;
+    if(!prepared.asynchronous||!(external||module))await resources;
   }
   const absoluteSource=get("src")?new URL(get("src"),document.baseURI).href:"";
   const parserIndex=Array.prototype.indexOf.call(document.querySelectorAll("script"),el);
-  if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,absoluteSource,el.textContent||"")){
-    el.__tcModule=true;if(absoluteSource)__fireScriptEvent(el,"error");return;
+  if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,absoluteSource,prepared.source)){
+    if(absoluteSource)__fireScriptEvent(el,"error");return;
   }
   // ES modules (`<script type="module">`) run through the Rust module pump (a real
   // module graph + loader), with concurrent graph loading rather than classic eval.
-  if ((get("type") || "").toLowerCase() === "module") {
-    el.__tcModule = true;
+  if (prepared.kind === "module") {
     const src = get("src");
     const specifier = src ? new URL(src, document.baseURI).href
-      : ops.op_inline_module(el.textContent || "", document.baseURI, document.URL);
+      : ops.op_inline_module(prepared.source, document.baseURI, document.URL);
     ops.op_module_credentials(el,specifier);
     // The SDK loader observes actual graph/evaluation transitions independently
     // of import()'s promise, which waits for top-level await. The published SDK
@@ -6485,7 +6556,7 @@ __G.execScriptEl = async function (el) {
     });
     return __trackResource(gate);
   }
-  if (!__EXECUTABLE_TYPES.has((get("type") || "").toLowerCase())) return; // JSON/data blocks etc.
+  // Native preparation has already checked all classic JavaScript MIME aliases.
   const src = get("src");
   let downloaded=false,mutedErrors=false;
   try {
@@ -6501,9 +6572,10 @@ __G.execScriptEl = async function (el) {
         code = resource.text; sourceURL=resource.url; downloaded=true; mutedErrors=resource.mutedErrors;
       } finally { __recordResource(globalThis, abs, "script", start); }
     } else {
-      code = el.textContent || el.text || "";
+      code = prepared.source;
       if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,"",code))return;
     }
+    if (executionGate) await executionGate;
     // Legacy classic bundles retain their import.meta compatibility rewrite.
     // Import/export parse failures move the original text to Deno's real graph;
     // explicit module elements use the separate standards path above.
@@ -6514,15 +6586,9 @@ __G.execScriptEl = async function (el) {
     // to correlate each chunk with the element that loaded it — a single static
     // currentScript makes every chunk look identical and the module graph never
     // resolves. Restore the prior value after (nested injects during eval).
-    let __prevCs;
-    try { __prevCs = globalThis.document.currentScript; __G.setCurrentScript(el); } catch (_e) {}
     try {
-      await new Promise((resolve, reject) => {
-        const id = ops.op_queue_classic_script(__document, code, sourceURL, !src, mutedErrors);
-        __classicWaiters.set(id, {resolve, reject});
-      });
+      await ops.op_queue_classic_script(__document, code, sourceURL, !src, mutedErrors, el, prepared.inShadowTree);
     } catch (e) {
-      try { __G.setCurrentScript(__prevCs); } catch (_e) {}
       // A genuine ES module? Classic V8 throws a module-syntax SyntaxError at PARSE time —
       // before ANY code runs — so it's safe to re-run through the module pump (a real module
       // graph + loader). This is the ONLY signal we route on: text that merely LOOKS like
@@ -6533,20 +6599,43 @@ __G.execScriptEl = async function (el) {
         // Keep the element: the module pump points document.currentScript at it during eval
         // so turbopack TURBOPACK.push([document.currentScript, …]) derives the right path.
         const abs = src ? sourceURL : "";
-        el.__tcModule = true; // claim it so the __G.takeModuleScript DOM scan won't double-run it
         (__G.esmSrcQueue || (__G.esmSrcQueue = [])).push({ src: abs, code: __orig, el: el });
         __fireScriptEvent(el, "load");
         return;
       }
       throw e; // real runtime error
     }
-    try { __G.setCurrentScript(__prevCs); } catch (_e) {}
     if (src) __fireScriptEvent(el, "load");
   } catch (e) {
     if(src)__fireScriptEvent(el,downloaded?"load":"error");
     __print("script error (" + (src || "inline") + "): " + e + "\n");
   }
 };
+function __startResourceScript(element, prepared) {
+  if (!prepared || prepared.kind === "importmap" || prepared.kind === "speculationrules") return;
+  const attributes = __resourceScriptAttributes(prepared);
+  if (prepared.kind !== "module" && __recordOwn(attributes,"nomodule")) return;
+  if (prepared.src === "") { __fireScriptEvent(element,"error"); return; }
+  if (!prepared.src && prepared.kind !== "module" && !prepared.parserInserted) {
+    if (!ops.op_document_scripts_allowed(__document) || !ops.op_csp_script(__document, element, 4294967295, "", prepared.source)) return;
+    ops.op_execute_inline_script(__document, element, prepared.source, ops.op_document_request_url(), prepared.inShadowTree);
+    return;
+  }
+  if (prepared.src && prepared.kind !== "module" && !prepared.parserInserted && !prepared.asynchronous) {
+    const next = __G.execScriptEl(element, prepared, __orderedDynamicScripts);
+    __orderedDynamicScripts = __resourceThen(next, undefined, () => {});
+    __trackResource(next);
+  } else __trackResource(__G.execScriptEl(element, prepared));
+}
+ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;ops.op_retire_resource_document(__document);}});
+ops.op_install_resource_consumer(__document, event => {
+  const candidates = event.scriptCandidates;
+  for (let index = 0; index < candidates.length; index++) {
+    const element = candidates[index];
+    const prepared = __prepareResourceScript(element);
+    if (prepared) __startResourceScript(element, prepared);
+  }
+}, __documentRuntimeState);
 // Run every not-yet-run <script> in DOM order, drain timers, repeat while new
 // scripts appear or timers keep firing. Bounded by maxRounds (+ the render budget).
 __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers = true) {
@@ -6565,19 +6654,19 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     // `React is not defined` → the whole app never hydrates. So: non-defer scripts
     // first (document order), then `defer` scripts (document order). `async` isn't
     // deferred. New scripts injected mid-round re-partition on the next pass.
-    const isDeferred = (el) => el.getAttribute && !el.async &&
-      (((el.getAttribute("type") || "").toLowerCase() === "module") ||
-        (!!el.getAttribute("src") && el.getAttribute("defer") !== null));
-    const all = Array.prototype.slice.call(document.querySelectorAll("script"));
-    const ordered = all.filter((el) => !isDeferred(el)).concat(all.filter(isDeferred));
-    for (const el of ordered) {
-      if (__G.initialLoading && isDeferred(el)) __markDocumentInteractive();
-      if (!el.__tcDone) {
-        ranScript = true;
-        const external=!!el.getAttribute("src"),module=el.getAttribute("type")==="module";
-        if(el.async && (external || module))__trackResource(__G.execScriptEl(el));
-        else await __G.execScriptEl(el);
-      }
+    const all = __initialResourceScripts.splice(0);
+    if(!__G.isFrame)__frameScriptElements.length=0;
+    const isDeferred = element => !__resourceScriptAsync.call(element) &&
+      ((__resourceAttribute.call(element,"type") || "").trim().toLowerCase() === "module" ||
+        __resourceAttribute.call(element,"src") !== null && __resourceAttribute.call(element,"defer") !== null);
+    const ordered = all.filter(element => !isDeferred(element)).concat(all.filter(isDeferred));
+    for (const element of ordered) {
+      const prepared = __prepareResourceScript(element);
+      if (!prepared) continue;
+      ranScript = true;
+      if (__G.initialLoading && prepared.parserInserted && isDeferred(element)) __markDocumentInteractive();
+      if (prepared.asynchronous && (prepared.src || prepared.kind === "module")) __trackResource(__G.execScriptEl(element, prepared));
+      else await __G.execScriptEl(element, prepared);
     }
     __G.loadDocumentResources();
     if (__G.initialLoading) __markDocumentInteractive();
@@ -6586,11 +6675,8 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     if (!ranScript && fired === 0) break;
   }
 };
-// Claim the next un-run ES-module script (`<script type=module>` or an inline script
-// with `import`/`export`) in DOM order → `__G.moduleDescriptor = {src, code}` JSON, or "" when
-// none. The Rust module pump evaluates each through deno_core's real module graph
-// (`__G.execScriptEl` deliberately skips them). `__tcModule` is the claim marker.
-__G.moduleStmt = /(^|[;{}\n\r])\s*(import\s+[^(]|import\s*['"]|export\s+|export\s*\{|export\s*\*)/;
+// The compatibility module queue contains only native-prepared classic scripts
+// whose V8 parse failed on module syntax. Explicit modules use the import path.
 __G.takeModuleScript = function () {
   // src chunks whose body was ESM, already fetched + queued by __G.execScriptEl. Both
   // `src` (its URL identity, for import resolution) and `code` (the fetched body) set.
@@ -6599,22 +6685,6 @@ __G.takeModuleScript = function () {
     const item = q.shift();
     __G.currentModuleEl = item.el || null; // for document.currentScript during eval
     __G.moduleDescriptor = JSON.stringify({ src: item.src, code: item.code });
-    return;
-  }
-  const scripts = Array.prototype.slice.call(document.querySelectorAll("script"));
-  for (let i = 0; i < scripts.length; i++) {
-    const el = scripts[i];
-    if (el.__tcModule) continue;
-    const type = ((el.getAttribute && el.getAttribute("type")) || "").toLowerCase();
-    const src = (el.getAttribute && el.getAttribute("src")) || "";
-    const code = src ? "" : (el.textContent || el.text || "");
-    // Explicit modules belong exclusively to the concurrent standards path.
-    const isModule = type !== "module" && !src && __G.moduleStmt.test(code);
-    if (!isModule) continue;
-    el.__tcModule = true;
-    el.__tcDone = true;
-    __G.currentModuleEl = el; // for document.currentScript during eval
-    __G.moduleDescriptor = JSON.stringify({ src, code });
     return;
   }
   __G.currentModuleEl = null;
@@ -6887,7 +6957,7 @@ __G.tcApplyHover = function (el) {
 // <script> hasn't run, an ES module is unclaimed, or a fetch is in-flight (more to do
 // after the next async drain), else "0".
 __G.pendingWork = () =>
-  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __timers.length > 0 || ((__G.esmSrcQueue || []).length) > 0 || Array.prototype.some.call(document.querySelectorAll("script"), (s) => !s.__tcDone || (((s.getAttribute && s.getAttribute("type")) || "").toLowerCase() === "module" && !s.__tcModule)) ? "1" : "0";
+  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __timers.length > 0 || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
 __G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
@@ -6909,28 +6979,7 @@ __G.domSig = () => {
   }
 };
 
-// Shadow DOM light-DOM fallback: embeddable widgets (PropelAuth's login) call
-// host.attachShadow() and render into the returned root. rtdom has no shadow tree,
-// so the root IS the host — rendered content lands in the serialized light DOM and
-// stays queryable. Stamped as an OWN property (the binding's interceptor returns real
-// own props) on every created element + the existing roots. Not true encapsulation,
-// but enough to let a shadow-rendering widget mount into the document.
 (function () {
-  // Retain the compatibility fallback only when the canonical binding lacks
-  // ShadowRoot support. Interface methods are inherited and validate receivers.
-  if (typeof Element.prototype.attachShadow !== "function") {
-    const tagName = __G.domAccessor("tagName", false, "Element");
-    Object.defineProperty(Element.prototype, "attachShadow", {
-      value: ({attachShadow(options) {
-        tagName.call(this);
-        if (!arguments.length || !options || !["open", "closed"].includes(options.mode)) throw new TypeError("A valid shadow mode is required");
-        if (this.shadowRoot) throw new DOMException("Shadow root already attached", "NotSupportedError");
-        this.shadowRoot = this; this.host = this;
-        return this;
-      }}).attachShadow, writable: true, configurable: true, enumerable: true
-    });
-  }
-  const addShadow = el => el;
   // Every iframe is a native DOM node. Its browsing context exists only while
   // connected; lifecycle records never become enumerable guest properties.
   const frameRecords = __interfaceMap("HTMLIFrameElement.lifecycle"), frameHosts = new Set();
@@ -7025,10 +7074,8 @@ __G.domSig = () => {
 
   // Compile in the child's V8 context, preserving its global lexical bindings and
   // native intrinsics. Function wrappers would leak the parent realm and stacks.
-  const runVmInRealm = (cw, code, sourceUrl, responseId = 0) => new Promise((resolve, reject) => {
-    const id = ops.op_queue_frame_script(cw, code, sourceUrl || "about:blank", responseId);
-    __classicWaiters.set(id, {resolve, reject});
-  });
+  const runVmInRealm = (cw, code, sourceUrl, responseId = 0, scriptIndex = 4294967295) =>
+    ops.op_queue_frame_script(cw, code, sourceUrl || "about:blank", responseId, scriptIndex);
   // Extract + run the frame document's scripts in the realm, in document order: inline
   // bodies inline, and `<script src>` fetched over op_fetch (resolved against the frame URL,
   // shared cookie jar).
@@ -7043,12 +7090,12 @@ __G.domSig = () => {
           const response = await ops.op_fetch(script.src, __stringify({ __proto__:null, destination: "script", source: frameUrl, frame_script: true, integrity:script.integrity, ...ops.op_document_cookie_site(cw), csp:ops.op_csp_context(cw), opaque_origin:ops.op_window_opaque(cw), mode:script.crossorigin===null?"no-cors":"cors", credentials:script.crossorigin!==null&&script.crossorigin.toLowerCase()!=="use-credentials"?"same-origin":"include" }));
           if (response && response.ok) {
             downloaded=true;
-            await runVmInRealm(cw, response.body, response.final_url || script.src, response.frame_script || 0);
+            await runVmInRealm(cw, response.body, response.final_url || script.src, response.frame_script || 0, script.index);
             ops.op_frame_script_event(cw,script.index,true);
           } else ops.op_frame_script_event(cw,script.index,false);
         } else if (script.code.trim()) {
           const located = "\n".repeat(script.line) + " ".repeat(script.column) + script.code;
-          await runVmInRealm(cw, located, script.source);
+          await runVmInRealm(cw, located, script.source, 0, script.index);
         }
       } catch (error) { if(script.src)ops.op_frame_script_event(cw,script.index,downloaded); __print("frame script error: " + (error && error.stack ? error.stack : error) + "\n"); }
     };
@@ -7061,8 +7108,14 @@ __G.domSig = () => {
     for (const script of deferred) await execute(script);
     return {asynchronous};
   };
-  __G.cspFrameScript = index => {const element=document.querySelectorAll("script")[index];if(!element)return false;const src=element.getAttribute("src");return ops.op_csp_script(__document,element,index,src?new URL(src,document.baseURI).href:"",element.textContent||"");};
-  __G.executeFrameModule = index => {const element=document.querySelectorAll("script")[index];if(!element)throw new TypeError("Frame module element unavailable");return __G.execScriptEl(element);};
+  __G.cspFrameScript = index => {
+    const element=__frameScriptElements[index];if(!element)return false;
+    const prepared=__prepareResourceScript(element);if(!prepared || prepared.src==="")return false;
+    if (prepared.kind!=="module" && __recordOwn(__resourceScriptAttributes(prepared),"nomodule"))return false;
+    const src=prepared.src;
+    return ops.op_csp_script(__document,element,index,src?new URL(src,__resourceBaseURL.call(__document)).href:"",prepared.source);
+  };
+  __G.executeFrameModule = index => {const element=__frameScriptElements[index];if(!element)throw new TypeError("Frame module element unavailable");return __G.execScriptEl(element);};
   // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
   __G.configureFrame = (metadata, parentWin, hostEl) => {
     for (const [name,read] of [["parent",ops.op_window_parent],["top",ops.op_window_top],["frameElement",ops.op_frame_owner_element]]) {
@@ -7098,8 +7151,7 @@ __G.domSig = () => {
     fireFrameEvent(document, "readystatechange");
   };
   const frameDomReady = () => {
-    const scripts = frameQuery(__document, "script");
-    for (let index = 0,length=frameApply(frameListLength,scripts,[]); index < length; index++) {const script=frameApply(frameListItem,scripts,[index]);script.__tcDone = true; script.__tcModule = true;}
+    __initialResourceScripts.length=0;
     __G.performancePhase("domContentLoadedEventStart");
     fireFrameEvent(document, "DOMContentLoaded", true);
     __G.performancePhase("domContentLoadedEventEnd");
@@ -7109,6 +7161,7 @@ __G.domSig = () => {
     return new Promise((resolve) => {
     setTimeout(async () => {
       await __G.waitForDocumentResources();
+      __frameScriptElements.length=0;
       __G.performancePhase("domComplete");
       __G.setDocumentReadyState("complete");
       fireFrameEvent(document, "readystatechange");
@@ -7387,8 +7440,6 @@ __G.domSig = () => {
     frameSourceChanged:changedSource, recaptchaBframeHandshake});
   for (const name of ["frameRecordFor", "frameRealm", "loadFrame", "prepareFrameAdoption",
     "syncFrameConnections", "accessFrame", "frameSourceChanged", "recaptchaBframeHandshake"]) delete __G[name];
-  if (document.body) addShadow(document.body);
-  if (document.documentElement) addShadow(document.documentElement);
 })();
 "##,
     include_str!("web_geometry.js"),
@@ -9121,6 +9172,7 @@ fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, Stri
 }
 
 struct ClassicScriptFailure {
+    interrupted: bool,
     error: Option<v8::Global<v8::Value>>,
     message: String,
     line: usize,
@@ -9130,6 +9182,7 @@ struct ClassicScriptFailure {
 impl ClassicScriptFailure {
     fn host(message: &str) -> Self {
         Self {
+            interrupted: false,
             error: None,
             message: message.into(),
             line: 0,
@@ -9177,6 +9230,11 @@ fn execute_frame_script(
             return Ok(());
         }
     }
+    if scope.has_terminated() || scope.is_execution_terminating() {
+        let mut failure = ClassicScriptFailure::host("script execution was interrupted");
+        failure.interrupted = true;
+        return Err(failure);
+    }
     let Some(error) = scope.exception() else {
         return Err(ClassicScriptFailure::host(
             "script execution was interrupted",
@@ -9184,6 +9242,7 @@ fn execute_frame_script(
     };
     let message = scope.message();
     Err(ClassicScriptFailure {
+        interrupted: false,
         error: Some(v8::Global::new(scope, error)),
         message: message
             .map(|message| message.get(scope).to_rust_string_lossy(scope))
@@ -9332,16 +9391,55 @@ async fn drain_event_loop_until_completion(
             state.borrow_mut::<ClassicScripts>().jobs.pop_front()
         };
         if let Some(ClassicScriptJob {
-            id,
+            resolver,
             source,
             code,
             context: script_context,
             waiter_context,
+            document,
             muted_errors,
+            element,
         }) = job
         {
+            let previous_script = {
+                deno_core::scope!(scope, rt);
+                let context = v8::Local::new(scope, &script_context);
+                let scope = &mut v8::ContextScope::new(scope, context);
+                let document = v8::Local::new(scope, &document);
+                let value = match &element {
+                    Some(element) => v8::Local::new(scope, element).into(),
+                    None => v8::null(scope).into(),
+                };
+                resource_lifecycle::set_current_script(scope, document, value)
+                    .map(|value| v8::Global::new(scope, value))
+            };
             let result = execute_frame_script(rt, script_context.clone(), &source, &code);
-            if rt.v8_isolate().is_execution_terminating() {
+            if rt.v8_isolate().is_execution_terminating()
+                || result
+                    .as_ref()
+                    .err()
+                    .is_some_and(|failure| failure.interrupted)
+            {
+                rt.v8_isolate().cancel_terminate_execution();
+                {
+                    deno_core::scope!(scope, rt);
+                    let context = v8::Local::new(scope, &script_context);
+                    let scope = &mut v8::ContextScope::new(scope, context);
+                    if let Some(previous) = previous_script {
+                        let document = v8::Local::new(scope, &document);
+                        let previous = v8::Local::new(scope, previous);
+                        resource_lifecycle::restore_current_script(scope, document, previous);
+                    }
+                    let context = v8::Local::new(scope, waiter_context);
+                    let scope = &mut v8::ContextScope::new(scope, context);
+                    let resolver = v8::Local::new(scope, resolver);
+                    let message =
+                        v8::String::new(scope, "Classic script execution was interrupted")
+                            .ok_or("Classic interruption allocation failed")?;
+                    let error = v8::Exception::error(scope, message);
+                    resolver.reject(scope, error);
+                }
+                rt.v8_isolate().terminate_execution();
                 return Err("Classic script execution was interrupted".into());
             }
             let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
@@ -9349,7 +9447,7 @@ async fn drain_event_loop_until_completion(
             let failure = match result {
                 Ok(()) => None,
                 Err(failure) => {
-                    let context = v8::Local::new(&scope, script_context);
+                    let context = v8::Local::new(&scope, &script_context);
                     let scope = &mut v8::ContextScope::new(&mut scope, context);
                     let error = match failure.error {
                         Some(error) => v8::Local::new(scope, error),
@@ -9382,23 +9480,25 @@ async fn drain_event_loop_until_completion(
                     Some(v8::Global::new(scope, error))
                 }
             };
-            let context = v8::Local::new(&scope, waiter_context);
-            if context.get_slot::<FrameRetired>().is_none() {
+            if let Some(previous) = previous_script {
+                let context = v8::Local::new(&scope, &script_context);
                 let scope = &mut v8::ContextScope::new(&mut scope, context);
-                let id = v8::Integer::new_from_unsigned(scope, id);
-                let failure = match failure {
-                    Some(error) => {
-                        let result = v8::Object::new(scope);
-                        let key = v8::String::new(scope, "error")
-                            .ok_or("Classic error allocation failed")?;
-                        let error = v8::Local::new(scope, error);
-                        result.create_data_property(scope, key.into(), error);
-                        result.into()
-                    }
-                    None => v8::null(scope).into(),
-                };
-                call_frame_helper(scope, "completeClassicScript", &[id.into(), failure])
-                    .ok_or("Classic script completion failed")?;
+                let previous = v8::Local::new(scope, previous);
+                let document = v8::Local::new(scope, &document);
+                resource_lifecycle::restore_current_script(scope, document, previous);
+            }
+            let context = v8::Local::new(&scope, waiter_context);
+            let scope = &mut v8::ContextScope::new(&mut scope, context);
+            let resolver = v8::Local::new(scope, resolver);
+            match failure {
+                Some(error) => {
+                    let error = v8::Local::new(scope, error);
+                    resolver.reject(scope, error);
+                }
+                None => {
+                    let value = v8::undefined(scope);
+                    resolver.resolve(scope, value.into());
+                }
             }
             continue;
         }
@@ -10460,7 +10560,7 @@ async fn drain_to_quiescence_with_scripts(
         // runtime — Next's `dynamic(() => import('…'))` (lazy modals: AddVacationTimeModal,
         // etc.) appends a <script src> when the component first renders. Without running it
         // the chunk never executes, the import() promise never resolves, and the modal never
-        // appears. __hydrate is idempotent (skips already-run scripts via __tcDone).
+        // appears. Native script flags and mutation admission prevent repeat execution.
         if execute_document_scripts {
             rt.execute_script(
                 "<hydrate>",

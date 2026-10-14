@@ -210,6 +210,7 @@ pub struct DocumentPolicy {
     pub header: Policy,
     pub active: Policy,
     pub referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
+    pub embedder_policy: crate::resource_policy::EmbedderPolicy,
     metas: Vec<(usize, String)>,
     next_meta: usize,
 }
@@ -266,6 +267,7 @@ impl DocumentPolicy {
                 &referrer_header,
             )
             .unwrap_or_default(),
+            embedder_policy: crate::resource_policy::EmbedderPolicy::from_headers(headers),
             header: active.clone(),
             active,
             metas,

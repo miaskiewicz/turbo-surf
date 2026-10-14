@@ -239,7 +239,10 @@ fn build_headers(url: &str, method: &str, opts: &FetchOptions) -> BTreeMap<Strin
             }
         }
     }
-    if opts.bypass_consent {
+    if context.credentialless && !context.sends_credentials(url) {
+        h.remove("cookie");
+    }
+    if opts.bypass_consent && context.sends_credentials(url) {
         seed_consent_cookies(&mut h, url, opts.consent_socs.as_deref());
     }
     if let Some(cache) = &opts.cache {

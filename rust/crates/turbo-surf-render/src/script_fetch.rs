@@ -4,6 +4,12 @@ use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::net::{fetch_html, FetchOptions, FetchResult};
 use turbo_surf_core::request_context::{same_origin, ClientHints, RequestContext, RequestMode};
 
+#[derive(Default)]
+pub struct ScriptPolicies<'a> {
+    pub request: Option<ScriptPolicy<'a>>,
+    pub embedder: crate::resource_policy::EmbedderPolicy,
+}
+
 type ScriptPolicy<'a> = &'a dyn Fn(&str, bool) -> bool;
 
 pub struct ScriptResponse {
@@ -17,7 +23,7 @@ pub async fn fetch(
     mut headers: BTreeMap<String, String>,
     hints: &ClientHints,
     jar: &mut CookieJar,
-    policy: Option<ScriptPolicy<'_>>,
+    policies: ScriptPolicies<'_>,
     integrity: &str,
 ) -> Result<ScriptResponse, String> {
     let mut target = url.to_string();
@@ -29,7 +35,10 @@ pub async fn fetch(
         ) {
             return Err("Script request blocked as active mixed content".into());
         }
-        if policy.is_some_and(|allowed| !allowed(&target, redirected)) {
+        if policies
+            .request
+            .is_some_and(|allowed| !allowed(&target, redirected))
+        {
             return Err("Script blocked by Content Security Policy".into());
         }
         let parsed = url::Url::parse(&target).map_err(|error| error.to_string())?;
@@ -59,7 +68,12 @@ pub async fn fetch(
         )
         .await
         .map_err(|error| error.to_string())?;
-        if !crate::resource_policy::corp_allowed(&context, &target, &response.headers) {
+        if !crate::resource_policy::embedder_allowed(
+            policies.embedder,
+            &context,
+            &target,
+            &response.headers,
+        ) {
             return Err("Script response blocked by Cross-Origin-Resource-Policy".into());
         }
         if context.mode == RequestMode::Cors

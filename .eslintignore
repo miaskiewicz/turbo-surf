@@ -39,3 +39,5 @@ rust/crates/turbo-surf-render/src/element_relations.js
 rust/crates/turbo-surf-render/src/html_text.js
 rust/crates/turbo-surf-render/src/html_popover.js
 .native-builds/**
+rust/crates/turbo-surf-render/src/element_interface_probe.js
+rust/crates/turbo-surf-render/src/element_interface_chrome155.json

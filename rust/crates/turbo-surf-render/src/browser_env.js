@@ -2026,6 +2026,21 @@ if(typeof __ns.makeNativeFunction==='function'){
     reflectedMember('draggable',function(){var value=(this.getAttribute('draggable')||'').toLowerCase();if(value==='true'||value==='false')return value==='true';var tag=String(getTag.call(this)).toUpperCase();return tag==='IMG'||tag==='A'&&this.hasAttribute('href');},function(value){this.setAttribute('draggable',value?'true':'false');});
     reflectedMember('autocapitalize',function(){var value=this.getAttribute('autocapitalize');if(value===null&&this.form)value=this.form.getAttribute('autocapitalize');value=(value||'').toLowerCase();return value===''?'':value==='off'?'none':value==='on'?'sentences':['none','sentences','words','characters'].indexOf(value)>=0?value:'sentences';},function(value){this.setAttribute('autocapitalize',attributeString(value));});
     reflectedMember('autocorrect',function(){var value=this.getAttribute('autocorrect');if(value===null&&this.form)value=this.form.getAttribute('autocorrect');return (value||'').toLowerCase()!=='off';},function(value){this.setAttribute('autocorrect',value?'on':'off');});
+    var reflectedApply=Reflect.apply,reflectedSetHas=Set.prototype.has;
+    // Compatibility control delegates still require genuine interface receivers.
+    var controlInterfaces={HTMLInputElement:'input',HTMLTextAreaElement:'textarea',HTMLSelectElement:'select',HTMLOptionElement:'option',HTMLButtonElement:'button',HTMLLabelElement:'label',HTMLCanvasElement:'canvas'};
+    Object.keys(controlInterfaces).forEach(function(owner){
+      var proto=prototypes[owner],check=__ns.domAccessor('nodeType',false,'HTML:'+controlInterfaces[owner]);
+      Object.getOwnPropertyNames(proto).forEach(function(name){
+        if(name==='constructor')return;
+        var descriptor=Object.getOwnPropertyDescriptor(proto,name);
+        ['get','set','value'].forEach(function(kind){
+          var delegate=descriptor[kind];if(typeof delegate!=='function')return;
+          descriptor[kind]=__ns.makeNativeFunction(function(){reflectedApply(check,this,[]);return reflectedApply(delegate,this,arguments);},kind==='get'?'get '+name:kind==='set'?'set '+name:name,delegate.length);
+        });
+        Object.defineProperty(proto,name,descriptor);
+      });
+    });
     var reflectedOwners={src:['HTMLScriptElement','HTMLImageElement','HTMLIFrameElement','HTMLMediaElement','HTMLInputElement','HTMLEmbedElement','HTMLSourceElement','HTMLTrackElement'],href:['HTMLAnchorElement','HTMLAreaElement','HTMLBaseElement','HTMLLinkElement'],rel:['HTMLAnchorElement','HTMLAreaElement','HTMLLinkElement'],as:['HTMLLinkElement'],media:['HTMLLinkElement','HTMLStyleElement','HTMLSourceElement'],type:['HTMLInputElement','HTMLButtonElement','HTMLScriptElement','HTMLLinkElement','HTMLStyleElement','HTMLEmbedElement','HTMLObjectElement','HTMLSourceElement'],valueAsNumber:['HTMLInputElement'],sheet:['HTMLStyleElement','HTMLLinkElement']};
     Object.keys(reflectedOwners).forEach(function(name){
       var descriptor=Object.getOwnPropertyDescriptor(htmlProto,name);if(!descriptor)return;
@@ -2035,7 +2050,8 @@ if(typeof __ns.makeNativeFunction==='function'){
         var ownerTags=Object.keys(htmlByTag).filter(function(tag){return htmlByTag[tag]===owner;});
         var extraTags={HTMLInputElement:['INPUT'],HTMLButtonElement:['BUTTON'],HTMLAnchorElement:['A'],HTMLImageElement:['IMG'],HTMLIFrameElement:['IFRAME'],HTMLScriptElement:['SCRIPT'],HTMLStyleElement:['STYLE'],HTMLMediaElement:['AUDIO','VIDEO']};
         if(extraTags[owner])ownerTags=ownerTags.concat(extraTags[owner]);
-        ['get','set'].forEach(function(kind){var delegate=descriptor[kind];if(!delegate)return;copy[kind]=__ns.makeNativeFunction(function(){check.call(this);if(ownerTags.indexOf(String(getTag.call(this)).toUpperCase())<0)throw new TypeError('Illegal invocation');var value=delegate.apply(this,arguments);if(kind==='get'&&(name==='src'||name==='href')&&value&&typeof g.URL==='function'){try{return new g.URL(value,this.ownerDocument.URL||g.location.href).href;}catch(e){}}return value;},kind+' '+name,kind==='get'?0:1);});
+        var ownerLocals=new Set(ownerTags.map(function(tag){return tag.toLowerCase();}));
+        ['get','set'].forEach(function(kind){var delegate=descriptor[kind];if(!delegate)return;copy[kind]=__ns.makeNativeFunction(function(){reflectedApply(check,this,[]);if(!reflectedApply(reflectedSetHas,ownerLocals,[reflectedApply(getLocalTag,this,[])]))throw new TypeError('Illegal invocation');var value=reflectedApply(delegate,this,arguments);if(kind==='get'&&(name==='src'||name==='href')&&value&&typeof g.URL==='function'){try{return new g.URL(value,this.ownerDocument.URL||g.location.href).href;}catch(e){}}return value;},kind+' '+name,kind==='get'?0:1);});
         Object.defineProperty(proto,name,copy);
       });
       delete htmlProto[name];
@@ -2070,11 +2086,25 @@ if(typeof __ns.makeNativeFunction==='function'){
     Object.keys(htmlByTag).forEach(function(tag){tags[tag]=htmlByTag[tag];});
     Object.assign(tags,{TD:'HTMLTableCellElement',TH:'HTMLTableCellElement',THEAD:'HTMLTableSectionElement',TBODY:'HTMLTableSectionElement',TFOOT:'HTMLTableSectionElement',COLGROUP:'HTMLTableColElement',Q:'HTMLQuoteElement',BLOCKQUOTE:'HTMLQuoteElement'});
     for(var heading=1;heading<=6;heading++)tags['H'+heading]='HTMLHeadingElement';
+    // HTML interfaces follow the exact namespace/local name, including XML-created nodes.
+    var htmlInterfaces=Object.create(null);
+    Object.keys(tags).forEach(function(tag){htmlInterfaces[tag.toLowerCase()]=tags[tag];});
+    htmlInterfaces.listing=htmlInterfaces.xmp='HTMLPreElement';
+    var genericHTML='abbr acronym address article aside b basefont bdi bdo big center code dd dfn dt em figcaption figure footer header hgroup i kbd main mark nav nobr noembed noframes noscript plaintext rb rp rt rtc ruby s samp search section small strike strong sub summary sup tt u var wbr'.split(' ');
+    genericHTML.forEach(function(tag){htmlInterfaces[tag]='HTMLElement';});
+    var customNames=/^[a-z][-._0-9a-z\u00b7\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u037d\u037f-\u1fff\u200c-\u200d\u203f-\u2040\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}]*-[-._0-9a-z\u00b7\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u037d\u037f-\u1fff\u200c-\u200d\u203f-\u2040\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}]*$/u;
+    Object.defineProperty(customNames,'exec',{value:RegExp.prototype.exec});
+    var reservedCustomNames=new Set(['annotation-xml','color-profile','font-face','font-face-src','font-face-uri','font-face-format','font-face-name','missing-glyph']);
+    var projectionRegexTest=RegExp.prototype.test,projectionSetHas=Set.prototype.has;
+    function htmlInterfaceName(tag){
+      if(projectionApply(projectionHasOwn,htmlInterfaces,[tag]))return htmlInterfaces[tag];
+      return projectionApply(projectionRegexTest,customNames,[tag])&&!projectionApply(projectionSetHas,reservedCustomNames,[tag])?'HTMLElement':'HTMLUnknownElement';
+    }
     var projected=new WeakSet();
     // First wrapping can happen after page scripts replace the public builtins.
     var projectionApply=Reflect.apply,projectionSetPrototype=Object.setPrototypeOf;
     var projectionHasOwn=Object.prototype.hasOwnProperty,projectionHas=WeakSet.prototype.has,projectionAdd=WeakSet.prototype.add;
-    var projectionUpper=String.prototype.toUpperCase,projectionSlice=String.prototype.slice;
+    var projectionSlice=String.prototype.slice;
     __ns.projectNativeNode=function(obj){
       if(projectionApply(projectionHas,projected,[obj]))return obj;
       var type=projectionApply(getType,obj,[]),name;
@@ -2083,7 +2113,7 @@ if(typeof __ns.makeNativeFunction==='function'){
         if(namespace==='http://www.w3.org/2000/svg'){
           var localStart=0;for(var index=0;index<tag.length;index++)if(tag[index]===':')localStart=index+1;
           name=projectionApply(projectionSlice,tag,[localStart])==='svg'?'SVGSVGElement':'SVGElement';
-        }else name=namespace==='http://www.w3.org/1999/xhtml'?(projectionApply(projectionHasOwn,tags,[projectionApply(projectionUpper,tag,[])])?tags[projectionApply(projectionUpper,tag,[])]:'HTMLElement'):'Element';
+        }else name=namespace==='http://www.w3.org/1999/xhtml'?htmlInterfaceName(tag):'Element';
       }else name=type===11&&projectionApply(isShadowRoot,obj,[])?'ShadowRoot':({2:'Attr',10:'DocumentType',3:'Text',4:'CDATASection',7:'ProcessingInstruction',8:'Comment',9:'HTMLDocument',11:'DocumentFragment'})[type]||'Node';
       projectionSetPrototype(obj,prototypes[name]);
       projectionApply(projectionAdd,projected,[obj]);

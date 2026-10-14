@@ -67,7 +67,7 @@ git -C "$repo" show HEAD:src/html_text.js > "$dest/html_text.js"
 git -C "$repo" show HEAD:src/html_popover.js > "$dest/html_popover.js"
 git -C "$repo" show HEAD:src/html_popover.rs > "$dest/html_popover.rs"
 git -C "$repo" show HEAD:src/dom_mutations.rs > "$dest/dom_mutations.rs"
-for file in dom_adoption_probe.js dom_adoption_chrome155.json dom_projection_tests.rs dom_variadic_errors_probe.js dom_variadic_errors_chrome155.json; do
+for file in dom_adoption_probe.js dom_adoption_chrome155.json dom_projection_tests.rs element_interface_probe.js element_interface_chrome155.json dom_variadic_errors_probe.js dom_variadic_errors_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
 for file in script_state.rs script_preparation_probe.js script_preparation_chrome155.json; do

@@ -7,11 +7,22 @@ its retry. Chrome oracle cookies were never reused in native tests.
 ## Local integration checkpoint — 2026-10-14
 
 Native Google acceptance remains unverified. The current canonical binding is
-re-vendored from turbo-test `7088ce6` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25));
-it passes 134 focused contracts in canonical Rusty V8 149.3.0 and in Surf's default
+re-vendored from turbo-test `e1e3d4c` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25));
+it passes 135 focused contracts in canonical Rusty V8 149.3.0 and in Surf's default
 Rusty V8 150.4.0 configuration. These SDK versions identify the actual dependencies,
 not the Chrome 155 target profile. Full default/native155 gates and current addon,
 shim/E2E, prototype inventory and Google artifacts remain pending.
+
+The new authored element-interface matrix records 723 cases in real Chrome155,
+including all preserved SVG observations. Native HTML/null-namespace interface
+selection now uses exact local names, with genuine unknown/custom-name identity
+and namespace-aware borrowed control brands. The canonical control passes;
+SVGScriptElement and SVGImageElement projection/resource support are still gaps,
+so the tested interface subset is not full SVG or custom-element lifecycle parity.
+The mapping follows the [HTML element-interface algorithm](https://html.spec.whatwg.org/multipage/dom.html#elements-in-the-dom)
+and independently recorded behavior. Both canonical and default native cohorts
+pass135 contracts; nine host-input/termination contracts and strict affected
+render/core Clippy also pass.
 
 Integrated and tested behavior includes real document factories and private node
 projection, native cross-document insertion and live Range boundaries, live CSSOM

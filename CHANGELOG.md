@@ -2,6 +2,13 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Choose HTML element interfaces by exact native namespace/local name, preserving
+  uppercase XML-created unknown elements, valid custom names and legacy aliases.
+  Borrowed control getters/methods validate native namespace/local-name brands.
+  A source-pinned 723-row Chrome155 matrix preserves all observations; its tests
+  cover HTML/null-namespace mapping and foreign control brands. SVGScriptElement
+  and SVGImageElement projection/resource differences remain open.
+
 - Replace native wrapper/helper/context roots with weak lookups and private V8
   Document/subtree ownership; trace real cppgc crypto edges. A genuine heap trace
   identified and fixed both a main Window initializer retaining the last child

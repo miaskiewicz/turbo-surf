@@ -155,3 +155,56 @@ fn interrupted_native_wrapping_leaves_no_unprojected_cached_object() {
     );
     reset();
 }
+
+#[test]
+fn html_namespace_local_names_and_foreign_control_brands_match_chrome() {
+    super::tests::init_v8();
+    let isolate = &mut v8::Isolate::new(Default::default());
+    v8::scope!(let scope, isolate);
+    let context = v8::Context::new(scope, Default::default());
+    let scope = &mut v8::ContextScope::new(scope, context);
+    install_independent_html(scope, "<!doctype html><body></body>");
+    let probe = include_str!("element_interface_probe.js");
+    let source = format!("JSON.stringify({})", probe.trim().trim_end_matches(';'));
+    let source = v8::String::new(scope, &source).unwrap();
+    v8::tc_scope!(let scope, scope);
+    let result = v8::Script::compile(scope, source, None)
+        .and_then(|script| script.run(scope))
+        .unwrap_or_else(|| panic!("{}", scope.exception().unwrap().to_rust_string_lossy(scope)));
+    let actual: serde_json::Value =
+        serde_json::from_str(&result.to_rust_string_lossy(scope)).unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("element_interface_chrome155.json")).unwrap();
+    let actual = actual.as_array().unwrap();
+    let expected = expected["result"].as_array().unwrap();
+    assert_eq!(actual.len(), expected.len());
+    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+        if expected["namespace"] == "http://www.w3.org/2000/svg" {
+            // SVG-specific interfaces are a separate implementation backlog.
+            for field in [
+                "kind",
+                "namespace",
+                "name",
+                "localName",
+                "prefix",
+                "tagName",
+                "html",
+                "input",
+                "unknown",
+                "scriptAsync",
+                "inputType",
+            ] {
+                assert_eq!(
+                    actual[field], expected[field],
+                    "foreign control brand row {index}: {field}"
+                );
+            }
+        } else {
+            assert_eq!(
+                actual, expected,
+                "HTML/null-namespace interface row {index}"
+            );
+        }
+    }
+    reset();
+}

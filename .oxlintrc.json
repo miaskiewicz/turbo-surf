@@ -17,6 +17,8 @@
     "prefer-const": "error"
   },
   "ignorePatterns": [
+    "rust/crates/turbo-surf-render/src/element_interface_probe.js",
+    "rust/crates/turbo-surf-render/src/element_interface_chrome155.json",
     "rust/crates/turbo-surf-render/src/document_basics.js",
     "rust/crates/turbo-surf-render/src/script_preparation_probe.js",
     "rust/crates/turbo-surf-render/src/script_preparation_chrome155.json",

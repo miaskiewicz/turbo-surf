@@ -5204,7 +5204,13 @@ fn dom_accessor_dispatch(
                     "Document" => kind == 9,
                     "DocumentFragment" => kind == 11,
                     "ShadowRoot" => kind == 11 && tree.is_shadow_root(h),
-                    _ => false,
+                    _ => owner.strip_prefix("HTML:").is_some_and(|names| {
+                        kind == 1
+                            && tree.namespace_id(h) == 0
+                            && tree
+                                .local_name(h)
+                                .is_some_and(|local| names.split('|').any(|name| name == local))
+                    }),
                 }
             })
         })

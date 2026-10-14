@@ -458,3 +458,19 @@ Shortest unconditional paths identify strong native roots; they do not completel
 model ephemeron reachability. The removed-iframe initializer regression was traced
 through the main Window's private initializer to the last child Document. Heap
 snapshots remain local; they can contain page memory.
+
+## In-flight work and restart recovery
+
+Keep unfinished source candidates and their exact patches, source hashes and test
+receipts under repository-local `.native-builds/recovery/`, which is ignored.
+Temporary-directory candidates can disappear across restarts. Save reviewed
+canonical changes in turbo-test before re-vendoring; preserve an unfinished source
+packet until its tested equivalent is committed. Raw live traces stay under the
+ignored artifacts directory. Remove obsolete owned build outputs after integration.
+
+The authored `element-interface-probe.js` records namespace/local-name constructor
+identity and borrowed control brands across active/inert HTML and XML documents.
+Its exact Chrome source hash and 723 observations are saved in the canonical
+binding's `element_interface_chrome155.json`. Current tests compare all HTML/null
+interface fields and foreign control brands. SVGScriptElement/SVGImageElement
+projection and resources remain recorded gaps; their observations are retained.

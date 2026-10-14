@@ -13,7 +13,7 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
 ## Current integration checkpoint (2026-10-14)
 
 The member counts above are historical and have not been recomputed for current
-source. Canonical binding `7088ce6` passes 134 focused contracts on default SDK
+source. Canonical binding `e1e3d4c` passes 135 focused contracts on default SDK
 149.3.0 and Surf's default SDK 150.4.0. The current Surf checkpoint passes 56
 focused document, GC, geometry, referrer, host-budget and transfer contracts plus
 strict Clippy and format checks. Earlier tests are historical evidence, not a full
@@ -164,6 +164,7 @@ is bounded; it is not a census of every browser interface.
 | Related resource policies | SRI, Trusted Types, mixed content, CORP/COEP/COOP, permissions policy, Critical-CH | SRI raw-byte/strongest/opaque/tampering, blocked stylesheet ownership and iframe errors pass native tests. CORP per-hop origin/site/header policy and active mixed-content admission are implemented; paired full-resource audit pending. COEP/COOP, passive image upgrades, Permissions/Integrity Policy and additional directives remain open |
 | Fetch lifecycle | Cancellation, native cache/integrity/keepalive/referrer-policy effects, streaming, preflight cache | All eight referrer policies affect actual request and redirect headers;33 authored Chrome request cases and focused native controls pass. Streaming, cancellation, cache/integrity/keepalive and preflight-cache effects remain open |
 | Cookies/privacy/storage | Complete storage-access, partitioning, third-party browser policy/private-token APIs | HttpOnly/SameSite/host-only/default-path/prefix checks pass; broader policy open |
+| Element interfaces | Exact HTML namespace/local-name mapping, native borrowed control brands and SVG interfaces | Canonical135 cohort passes the authored723-row matrix's HTML/null mappings and foreign brands. All SVG observations remain saved; SVGScriptElement/SVGImageElement projection/resources and broader custom-element lifecycle are open |
 | HTML/XML parsing | XML documents, custom sanitizer configuration, full template behavior, lossless unpaired UTF-16 at Rust boundary | Supported native HTML/Attr/PI/import/adopt subset tested; bf2a0ef plus four Surf contracts cover cross-document identity/realms, fragment overlap, variadic errors, genuine frame retirement and repeated-bootstrap traversal |
 | Structured clone | Complete web-interface serialization and transfer lists | Native V8 clone, genuine ArrayBuffer/resizable-buffer transfers, DOMException, private Rust-only CryptoKey snapshots, borrowed realms, User Timing, Window/MessagePort delivery and genuine interface rejection have saved Chrome controls. Current integrated transfer24/clone17 contracts pass. Endpoint weak anchors, reservations and queued native material enforce admission before ownership commit; retired context registries, timer roots and Window queues have six lifecycle contracts. Weak native ownership/cppgc tracing and private DOMRect snapshots are integrated; full native155 ownership and detached-node collection integration, Blob/File, SAB exposure and wider serialization remain open |
 | BroadcastChannel | Shared cross-realm/tab/browser-session delivery and lifecycle | Local asynchronous delivery/brands tested |

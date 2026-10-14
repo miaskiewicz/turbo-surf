@@ -2,6 +2,18 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Schedule asynchronous Window timers as individual tasks across parent and child
+  realms on a shared monotonic/virtual clock. Run native microtasks between tasks
+  instead of advancing a parent's delayed timeout before a child's load work.
+  A fresh Chrome155 control covers trusted iframe load, target/receiver identity
+  and complete ready state for ordinary and inert-template documents.
+  The combined renderer/source/frame/transfer/policy cohort reports301 passing
+  tests on each engine; the default build's two guarded native source cases do
+  not establish native execution. All43 offline detection tests pass.
+  Keep the current remaining-work checklist explicit in detection findings;
+  isolated template/geometry candidates, historical API counts and successful
+  native Google clearance are not reported as completed integrations.
+
 - Consume verified published turbo-dom 0.5.5 and re-vendor original DOMString
   storage, names, parsing, mutation records, handlers and prepared script sources.
   Inline module snapshots preserve native code units through an additive SDK
@@ -48,6 +60,7 @@
   default Location getters use private receiver records and native-shaped functions.
   Controls cover own srcdoc Location descriptors and live base reads after public
   attribute/query poisoning.
+- Add native branded SecurityPolicyViolationEvent constructors/descriptors and trusted asynchronous enforced/report-only inline script, style and fetch violation events, including actual initiating V8 source locations, policy text and connected targets. Bound private report tasks to4096/64MiB, release before reentrant guest dispatch, cancel on frame retirement and retain startup reports through genuine private V8 edges until bootstrap. Source-pinned fresh Chrome controls cover constructor dictionary/brand behavior, dynamic report fields/order, successful inline classic/module execution without load events and initial parser report delivery. Parser positions require an additive backend seam; HTTP report endpoints, broader resource/directive coverage and exact Unicode report samples remain pending.
 
 - Apply authentic response CSP sandbox script/origin restrictions to top and child documents; intersect header policies and inherited iframe flags, preserving nominal Location origins while cookies/storage and message origins use the actual opaque principal. Preserve opaque self Permissions Policy separately from explicit null URL targets. Native module requests track current origin/cookie-site state; CORS scripts now send Origin even on the same URL origin, matching fresh Chrome. Controls cover13 child,9 top and4 real module transport cases, including an opaque isolated top document sharing its actual SAB backing store. Full sandbox form/popup/navigation flags and reporting remain pending.
 

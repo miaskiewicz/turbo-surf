@@ -9,12 +9,21 @@ use turbo_surf_core::request_context::same_origin;
 pub struct Policy {
     origin: String,
     policies: Vec<BTreeMap<String, Vec<String>>>,
+    originals: Vec<String>,
 }
 impl Policy {
     pub fn new(origin: &str, values: impl IntoIterator<Item = String>) -> Self {
-        let policies = values
+        let originals: Vec<String> = values
             .into_iter()
-            .flat_map(|value| value.split(',').map(str::to_owned).collect::<Vec<_>>())
+            .flat_map(|value| {
+                value
+                    .split(',')
+                    .map(|value| value.trim().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let policies = originals
+            .iter()
             .map(|value| {
                 let mut directives = BTreeMap::new();
                 for directive in value.split(';') {
@@ -31,19 +40,23 @@ impl Policy {
         Self {
             origin: origin.to_string(),
             policies,
+            originals,
         }
     }
     pub fn origin(&self) -> &str {
         &self.origin
     }
     pub fn add(&mut self, value: &str) {
-        self.policies
-            .extend(Self::new(&self.origin, [value.to_string()]).policies);
+        let added = Self::new(&self.origin, [value.to_string()]);
+        self.policies.extend(added.policies);
+        self.originals.extend(added.originals);
     }
     pub fn inherit_headers(&mut self, inherited: &Self) {
         let own = std::mem::take(&mut self.policies);
+        let originals = std::mem::take(&mut self.originals);
         *self = inherited.clone();
         self.policies.extend(own);
+        self.originals.extend(originals);
     }
     fn list<'a>(policy: &'a BTreeMap<String, Vec<String>>, kind: &str) -> Option<&'a [String]> {
         if matches!(kind, "base-uri" | "form-action") {
@@ -74,6 +87,44 @@ impl Policy {
                         .any(|source| matches_source(source, &self.origin, target, redirected))
             })
         })
+    }
+    pub fn request_violations(&self, kind: &str, url: &str, nonce: &str) -> Vec<(String, String)> {
+        self.policies
+            .iter()
+            .zip(&self.originals)
+            .filter_map(|(policy, original)| {
+                let single = Self {
+                    origin: self.origin.clone(),
+                    policies: vec![policy.clone()],
+                    originals: vec![original.clone()],
+                };
+                (!single.allows_request(kind, url, nonce, false))
+                    .then(|| (original.clone(), String::new()))
+            })
+            .collect()
+    }
+    pub fn inline_violations(&self, kind: &str, text: &str, nonce: &str) -> Vec<(String, String)> {
+        self.policies
+            .iter()
+            .zip(&self.originals)
+            .filter_map(|(policy, original)| {
+                let single = Self {
+                    origin: self.origin.clone(),
+                    policies: vec![policy.clone()],
+                    originals: vec![original.clone()],
+                };
+                (!single.allows_inline(kind, text, nonce)).then(|| {
+                    let sample = if Self::list(policy, kind)
+                        .is_some_and(|list| list.iter().any(|token| token == "'report-sample'"))
+                    {
+                        text.trim().chars().take(40).collect()
+                    } else {
+                        String::new()
+                    };
+                    (original.clone(), sample)
+                })
+            })
+            .collect()
     }
     pub fn sandbox_restrictions(&self) -> Option<(bool, bool)> {
         let mut restrictions = None;
@@ -251,6 +302,7 @@ fn matches_source(source: &str, document: &str, target: &str, redirected: bool) 
 pub struct DocumentPolicy {
     pub header: Policy,
     pub active: Policy,
+    pub report_only: Policy,
     pub initial_base: Policy,
     pub referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
     pub embedder_policy: crate::resource_policy::EmbedderPolicy,
@@ -265,6 +317,15 @@ impl DocumentPolicy {
             .filter(|(name, _)| name.eq_ignore_ascii_case("content-security-policy"))
             .map(|(_, value)| value.clone());
         let active = Policy::new(base, values);
+        let report_only = Policy::new(
+            base,
+            headers
+                .iter()
+                .filter(|(name, _)| {
+                    name.eq_ignore_ascii_case("content-security-policy-report-only")
+                })
+                .map(|(_, value)| value.clone()),
+        );
         let tree = turbo_dom_parser::rtdom::Tree::parse(html);
         let mut index = 0;
         let mut metas = Vec::new();
@@ -347,6 +408,7 @@ impl DocumentPolicy {
             header: active.clone(),
             initial_base,
             active,
+            report_only,
             metas,
             next_meta: 0,
         }

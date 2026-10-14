@@ -4,6 +4,56 @@ Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
+## Remaining checklist — 2026-10-14
+
+This is the current work list, not a claim of complete browser parity. The
+source/UTF-16 checkpoint is `118a754`, with canonical binding `dfaff47`; the current
+integration adds CSP reporting and native Window task ordering. Isolated candidates
+and their private dependency overrides are not integrated or registry-release proof.
+
+1. **Messaging / reclamation:** complete broader frame/realm retirement and
+   reclamation coverage. The merged 68-contract lifetime cohort covers frame GC,
+   frame retirement, host budgets, transfers, native storage and independent sessions
+   on both engines; it does not prove every browser lifetime edge.
+2. **Layout / Range / caret:** integrate the pending geometry consumer and finish
+   scrolling, point hit testing and caret coverage. The producer candidate addresses
+   fractional layout and paint transforms, including ordinary rotated elements.
+   Original lone-surrogate glyph shaping still differs from replacing units with
+   U+FFFD, and image/font/SVG/resource coverage remains incomplete.
+3. **Template ownership:** integrate the real associated inert-document candidate
+   through the production page runtime. The merged isolated binding passes 188 standalone
+   contracts; the unpublished additive backend seam passed independent review and
+   nine backend contracts. Both isolated genuine155 page-runtime contracts now pass
+   after fixing cross-Window timer ordering, including retained content identity
+   and original units after frame adoption. Those results do not certify a public
+   dependency release or the production consumer.
+4. **DOM / lifecycle:** finish genuine custom-element construction, upgrade,
+   reactions and scoped registry behavior; broader parsing and observer behavior
+   also remain. A registry shape alone is not an implementation. Existing slots,
+   live Range boundaries and original DOM/source UTF-16 preservation are integrated.
+5. **Audio:** deferred as requested in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+6. **Security / resources:** finish CSP violations/reporting and remaining policy
+   effects, including sandbox forms, popup/navigation behavior and wider resource
+   coverage. The integrated reporting batch passes 44 focused contracts on each
+   engine and delivers parser reports after the existing script-before-timer fix;
+   parser source positions remain a measured gap.
+7. **Fetch / storage:** integrate genuine response streaming and network cancellation,
+   dependent Request signals, cache/referrer effects, upload/body behavior and broader
+   partitioning/storage-access behavior. Validating Request.cache without applying it
+   to transport does not establish parity.
+8. **Validation:** run final combined workspace/default/native checks and rebuild
+   addons before shim/E2E certification after the remaining integrations. The
+   verified experimental155 SDK does not replace the production default150 build.
+9. **API inventory:** freshly compare own members, descriptors and behavior against
+   Chrome. **94 is historical**, not a current missing-member count.
+10. **PR housekeeping:** commit/push each tested integration and refresh the changelog,
+    PR description and source-pinned findings; do not describe isolated work as shipped.
+11. **Live Google:** capture a fresh native run with the GPU bridge and wreq transport,
+    a fresh native cookie jar and consent handling, without importing sidecar cookies.
+    Remeasure actual GPU identity and transport behavior: the155 HTTP identity still
+    uses the pinned upstream154 TLS/H2 recipe. Successful native SERP clearance
+    remains unverified.
+
 ## Local integration checkpoint — 2026-10-14
 
 Native Google acceptance remains unverified. The current canonical binding is
@@ -19,6 +69,15 @@ affected checks pass on both; all42 offline harness tests pass.
 The current native SDK matches installed Chrome155.0.8059.79's V8 source pin;
 the earlier155.20/SDK152 results below are historical checkpoints. Full gates,
 rebuilt addon/shim/E2E, prototype inventory and fresh Google artifacts remain pending.
+
+The subsequent integrated CSP-reporting/timer checkpoint reports301 passing tests
+on each engine (222 renderer library contracts plus79 source/frame/host/policy/
+transfer/microtask/timer tests). Two default source tests return through a native
+SDK guard; only the genuine155 run certifies those source cases. All43 offline
+harness tests pass, including original probe/collector/case hash checks. The new
+frame-load control catches parent deadlines incorrectly advancing before child
+load tasks; the native asynchronous pump now selects one due task across active
+Window realms with a shared clock and microtask checkpoints between tasks.
 
 Published turbo-dom0.5.5 preserves original DOMString payloads, names, namespace
 identity and parsing through the native binding. Inline classics, handlers,
@@ -113,7 +172,8 @@ contracts and strict affected Clippy; the merged genuine155 resource cohort pass
 COEP, scripts, integrity, frame GC and actual session/storage integration.
 See [RESOURCE-LIFECYCLE.md](./RESOURCE-LIFECYCLE.md) for bounds and genuine task-root
 inventory. Parser reentry, SVG scripts, import maps and speculation rules remain open. Broader
-observer lifecycle, Intersection/Resize queues, slots and custom elements remain.
+observer lifecycle, Intersection/Resize queues and custom elements remain;
+the later canonical slot checkpoint is integrated.
 
 The renderer now consumes published turbo-html2pdf-core 0.3.5 for genuine live DOM
 rectangles, client/offset metrics, element scroll extents/projection and point hit
@@ -135,9 +195,10 @@ fallible and interruption recovery passes. Strict Clippy passes the affected cor
 render libraries and GC/geometry/referrer/input/transfer test targets.
 
 Still open: full final native155/default release gates,
-full geometry and DOM lifecycle/parsing/lossless UTF-16, remaining CSP/COOP/COEP/
+full geometry and broader DOM lifecycle/parsing, original-unit glyph shaping,
+remaining CSP/COOP/COEP/
 permissions policy, fetch streaming/cancellation/cache and partitioned storage/access.
-The public storage API is integrated from verified published turbo-dom 0.5.4; final
+The public storage API is integrated through verified published turbo-dom 0.5.5; final
 focused default and native155 resource/storage validation passes; broader policy
 and full final gates remain pending. Text provenance APIs are published in turbo-html2pdf0.3.6 from PR #20;
 Surf consumer integration remains in progress. The

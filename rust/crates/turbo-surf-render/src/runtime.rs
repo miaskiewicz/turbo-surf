@@ -477,11 +477,165 @@ fn op_csp_meta(
     context.set_allow_generation_from_strings(policy.current().allows_eval());
 }
 
-#[op2(fast)]
-fn op_csp_script(
-    scope: &mut v8::PinScope,
-    document: v8::Local<v8::Object>,
-    element: v8::Local<v8::Object>,
+#[derive(Default)]
+struct CspBootstrapTasks(std::cell::Cell<usize>);
+
+fn csp_bootstrap_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
+    let name = v8::String::new(scope, "turbo-surf.csp-bootstrap-tasks")?;
+    Some(v8::Private::for_api(scope, Some(name)))
+}
+
+fn enqueue_csp_bootstrap<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    target: v8::Local<'s, v8::Object>,
+    metadata: v8::Local<'s, v8::Value>,
+    bytes: usize,
+) -> bool {
+    let Some(key) = csp_bootstrap_key(scope) else {
+        return false;
+    };
+    let global = context.global(scope);
+    let tasks = global
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+        .unwrap_or_else(|| v8::Array::new(scope, 0));
+    let quota = context.get_slot::<CspBootstrapTasks>().unwrap_or_else(|| {
+        let quota = Rc::new(CspBootstrapTasks::default());
+        context.set_slot(quota.clone());
+        quota
+    });
+    if tasks.length() >= 4096 || bytes > (64 * 1024 * 1024_usize).saturating_sub(quota.0.get()) {
+        return false;
+    }
+    let entry = v8::Array::new_with_elements(scope, &[target.into(), metadata]);
+    if tasks.set_index(scope, tasks.length(), entry.into()) != Some(true)
+        || global.set_private(scope, key, tasks.into()) != Some(true)
+    {
+        return false;
+    }
+    quota.0.set(quota.0.get() + bytes);
+    true
+}
+
+fn flush_csp_bootstrap<'s>(scope: &mut v8::PinScope<'s, '_>, context: v8::Local<'s, v8::Context>) {
+    let Some(key) = csp_bootstrap_key(scope) else {
+        return;
+    };
+    let global = context.global(scope);
+    let tasks = global
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok());
+    global.delete_private(scope, key);
+    if let Some(quota) = context.get_slot::<CspBootstrapTasks>() {
+        quota.0.set(0);
+    }
+    let Some(tasks) = tasks else {
+        return;
+    };
+    for index in 0..tasks.length() {
+        let Some(entry) = tasks
+            .get_index(scope, index)
+            .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+        else {
+            continue;
+        };
+        let Some(target) = entry.get_index(scope, 0) else {
+            continue;
+        };
+        let Some(metadata) = entry.get_index(scope, 1) else {
+            continue;
+        };
+        if call_frame_helper(scope, "queueCspViolation", &[target, metadata])
+            .is_some_and(|value| value.is_false())
+        {
+            scope.terminate_execution();
+            return;
+        }
+    }
+}
+
+fn queue_csp_violations<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    element: v8::Local<'s, v8::Object>,
+    kind: &str,
+    blocked: &str,
+    disposition: &str,
+    records: Vec<(String, String)>,
+) {
+    if records.is_empty() || scope.is_execution_terminating() {
+        return;
+    }
+    let (mut source, mut line, mut column) = (String::new(), 0, 0);
+    if let Some(trace) = v8::StackTrace::current_stack_trace(scope, 32) {
+        for index in 0..trace.get_frame_count() {
+            let Some(frame) = trace.get_frame(scope, index) else {
+                continue;
+            };
+            let Some(name) = frame.get_script_name_or_source_url(scope) else {
+                continue;
+            };
+            let name = name.to_rust_string_lossy(scope);
+            if name.starts_with("<") || name.is_empty() {
+                continue;
+            }
+            source = name;
+            line = frame.get_line_number();
+            column = frame.get_column();
+            break;
+        }
+    }
+    let url = context.get_slot::<FrameDocumentLocation>().map_or_else(
+        || {
+            JsRuntime::op_state_from(scope)
+                .borrow()
+                .borrow::<Base>()
+                .0
+                .clone()
+        },
+        |value| value.0.clone(),
+    );
+    if source.is_empty() {
+        source = url::Url::parse(&url)
+            .map(|mut url| {
+                url.set_query(None);
+                url.set_fragment(None);
+                url.to_string()
+            })
+            .unwrap_or_else(|_| url.clone());
+    }
+    let scope = &mut v8::ContextScope::new(scope, context);
+    for (original, sample) in records {
+        let metadata = serde_json::json!({"documentURI":url,"referrer":"","blockedURI":blocked,"violatedDirective":kind,"effectiveDirective":kind,"originalPolicy":original,"disposition":disposition,"sourceFile":source,"statusCode":200,"lineNumber":line,"columnNumber":column,"sample":sample});
+        let bytes = metadata
+            .to_string()
+            .len()
+            .saturating_mul(2)
+            .saturating_add(96);
+        let Some(json) = v8::String::new(scope, &metadata.to_string()) else {
+            return;
+        };
+        let Some(metadata) = v8::json::parse(scope, json) else {
+            return;
+        };
+        let accepted = call_frame_helper(scope, "queueCspViolation", &[element.into(), metadata])
+            .map_or_else(
+                || enqueue_csp_bootstrap(scope, context, element, metadata, bytes),
+                |value| !value.is_false(),
+            );
+        if !accepted {
+            scope.terminate_execution();
+            return;
+        }
+    }
+}
+
+#[op2(fast, reentrant)]
+fn op_csp_script<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    element: v8::Local<'s, v8::Object>,
     index: u32,
     #[string] url: &str,
     #[string] text: &str,
@@ -500,15 +654,93 @@ fn op_csp_script(
         crate::browser_env::hide_node_nonce(scope, element);
     }
     if url.is_empty() {
-        document
-            .current()
-            .allows_inline("script-src-elem", text, &nonce)
+        let policy = document.current().clone();
+        let report_only = document.report_only.clone();
+        drop(document);
+        let allowed = policy.allows_inline("script-src-elem", text, &nonce);
+        queue_csp_violations(
+            scope,
+            context,
+            element,
+            "script-src-elem",
+            "inline",
+            "enforce",
+            policy.inline_violations("script-src-elem", text, &nonce),
+        );
+        queue_csp_violations(
+            scope,
+            context,
+            element,
+            "script-src-elem",
+            "inline",
+            "report",
+            report_only.inline_violations("script-src-elem", text, &nonce),
+        );
+        allowed
     } else {
         document
             .current()
             .allows_request("script-src-elem", url, &nonce, false)
     }
 }
+#[op2(fast, reentrant)]
+fn op_csp_request<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    #[string] target: &str,
+    #[string] kind: &str,
+    #[string] nonce: &str,
+) -> bool {
+    let Some(context) = document.get_creation_context(scope) else {
+        return false;
+    };
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return true;
+    };
+    let policy = handle.policy.borrow().active.clone();
+    let allowed = policy.allows_request(kind, target, nonce, false);
+    let mut blocked = target.to_string();
+    if let Ok(mut url) = url::Url::parse(target) {
+        url.set_fragment(None);
+        blocked = if window_origin(scope, context) == url.origin().ascii_serialization() {
+            url.to_string()
+        } else {
+            url.origin().ascii_serialization()
+        };
+    }
+    queue_csp_violations(
+        scope,
+        context,
+        document,
+        kind,
+        &blocked,
+        "enforce",
+        policy.request_violations(kind, target, nonce),
+    );
+    let report_only = handle.policy.borrow().report_only.clone();
+    queue_csp_violations(
+        scope,
+        context,
+        document,
+        kind,
+        &blocked,
+        "report",
+        report_only.request_violations(kind, target, nonce),
+    );
+    if allowed {
+        queue_csp_violations(
+            scope,
+            context,
+            document,
+            kind,
+            &blocked,
+            "report",
+            report_only.request_violations(kind, target, nonce),
+        );
+    }
+    allowed
+}
+
 #[op2(fast)]
 fn op_csp_inline(
     scope: &mut v8::PinScope,
@@ -581,6 +813,25 @@ fn authorize_css(
     if policy.has_policy() {
         crate::browser_env::hide_node_nonce(scope, element);
     }
+    queue_csp_violations(
+        scope,
+        context,
+        element,
+        &kind,
+        "inline",
+        "enforce",
+        policy.inline_violations(&kind, &text, &nonce),
+    );
+    let report_only = handle.policy.borrow().report_only.clone();
+    queue_csp_violations(
+        scope,
+        context,
+        element,
+        &kind,
+        "inline",
+        "report",
+        report_only.inline_violations(&kind, &text, &nonce),
+    );
     result.set_bool(allowed);
 }
 
@@ -2153,7 +2404,85 @@ fn op_set_host_capabilities(scope: &mut v8::PinScope, record: v8::Local<v8::Obje
             }
         }
     }
+    let has_csp_queue = functions
+        .iter()
+        .any(|(name, _)| name == "queueCspViolation");
     capabilities.0.borrow_mut().extend(functions);
+    if has_csp_queue {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        flush_csp_bootstrap(scope, context);
+    }
+}
+struct TimerClock {
+    started: std::time::Instant,
+    advance: std::cell::Cell<f64>,
+}
+impl Default for TimerClock {
+    fn default() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            advance: std::cell::Cell::new(0.0),
+        }
+    }
+}
+#[op2(fast)]
+fn op_timer_clock(state: &mut OpState) -> f64 {
+    let clock = state.borrow::<TimerClock>();
+    clock.started.elapsed().as_secs_f64() * 1000.0 + clock.advance.get()
+}
+#[op2(fast)]
+fn op_timer_offset(state: &mut OpState) -> f64 {
+    state.borrow::<TimerClock>().advance.get()
+}
+#[op2(fast)]
+fn op_timer_advance(state: &mut OpState, due: f64) {
+    let clock = state.borrow::<TimerClock>();
+    if due.is_finite() {
+        clock.advance.set(
+            clock
+                .advance
+                .get()
+                .max(due - clock.started.elapsed().as_secs_f64() * 1000.0),
+        );
+    }
+}
+
+fn run_next_window_timer(rt: &mut JsRuntime) -> u32 {
+    let mut contexts = vec![rt.main_context()];
+    contexts.extend(
+        rt.op_state()
+            .borrow()
+            .borrow::<FrameContexts>()
+            .contexts
+            .iter()
+            .cloned(),
+    );
+    deno_core::scope!(scope, rt);
+    let mut next: Option<(f64, v8::Local<v8::Context>)> = None;
+    for context in contexts {
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameRetired>().is_some() {
+            continue;
+        }
+        let active = &mut v8::ContextScope::new(scope, context);
+        if let Some(value) = call_frame_helper(active, "timerNextDue", &[]) {
+            if value.is_number() {
+                if let Some(due) = value.number_value(active) {
+                    if due.is_finite() && next.as_ref().is_none_or(|(previous, _)| due < *previous)
+                    {
+                        next = Some((due, context));
+                    }
+                }
+            }
+        }
+    }
+    let Some((_, context)) = next else {
+        return 0;
+    };
+    let active = &mut v8::ContextScope::new(scope, context);
+    call_frame_helper(active, "runNextTimer", &[])
+        .and_then(|value| value.uint32_value(active))
+        .unwrap_or(0)
 }
 struct FrameRetired;
 
@@ -2588,8 +2917,11 @@ fn call_frame_helper<'s>(
             | "frameScriptDocument"
             | "reportClassicScriptError"
             | "setCurrentScript"
+            | "timerNextDue"
+            | "runNextTimer"
             | "cancelDocumentTasks"
             | "retireResourceDocument"
+            | "queueCspViolation"
             | "frameRecordFor"
             | "accessFrame"
             | "prepareFrameAdoption"
@@ -3206,6 +3538,7 @@ fn op_frame_set_document<'s>(
             policy.header = inherited.clone();
             policy.initial_base.inherit_headers(&inherited);
             policy.active = inherited;
+            policy.report_only = parent_policy.policy.borrow().report_only.clone();
             policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
             policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
         }
@@ -4577,6 +4910,9 @@ deno_core::extension!(
         op_frame_parser_done,
         op_frame_scripts,
         op_frame_resources,
+        op_timer_clock,
+        op_timer_offset,
+        op_timer_advance,
         op_run_frame_timers,
         op_frame_pending,
         op_queue_frame_script,
@@ -4638,6 +4974,7 @@ deno_core::extension!(
         op_csp_meta,
         op_csp_finish_parser,
         op_csp_inline,
+        op_csp_request,
         op_frame_script_allowed,
         op_frame_script_event,
         op_csp_script,
@@ -5135,8 +5472,9 @@ const __timerSplice = Array.prototype.splice.bind(__timers);
 const __timerFindIndex = Array.prototype.findIndex.bind(__timers);
 const __timerApply = Reflect.apply;
 let __tid = 1;
-// Virtual clock (ms). A timer's `due` is `__now + delay` at schedule time; the drain
-// advances `__now` to each fired timer's `due`. This makes the env behave like
+// One native clock is shared by the agent's Window realms. A timer's deadline is
+// its actual scheduling time plus delay; the drain advances the shared virtual
+// offset to each fired deadline. This makes the env behave like
 // wall-clock for SELF-RESCHEDULING timers: a `setTimeout(poll, 1000)` that reschedules
 // itself fires at virtual 1000, 2000, 3000… so over the virtual budget it fires a
 // browser-like number of times (~tens), not thousands. Previously `delay` was only a
@@ -5144,20 +5482,20 @@ let __tid = 1;
 // count cap — spinning the entire render budget and starving the real commit. Delay-0
 // work (microtasks / the React scheduler) still drains promptly (it never advances the
 // clock); only delayed polls are time-gated.
-let __now = 0;
+const __timerNow = () => ops.op_timer_clock();
 // Virtual-time ceiling, RELATIVE to the start of the current pump/drain (`__budgetBase`).
 // Once the clock passes base+budget, delayed timers stop firing so a never-idle poll can't
-// hold a drain open. RELATIVE (not absolute) is essential: `__now` accumulates across a
+// hold a drain open. RELATIVE (not absolute) is essential: virtual time accumulates across a
 // long session (each modal transition / poll advances it), so an absolute ceiling would,
 // late in a flow, refuse to fire even a brand-new short timer — e.g. a closing MUI modal's
 // 195ms Fade-exit timer never fires, so the modal never unmounts and `waitFor(hidden)` /
 // subsequent `[role=dialog].first()` break. Resetting the base per drain gives every
 // interaction a fresh window so its transitions complete, while still capping runaway polls.
 const __VIRTUAL_BUDGET_MS = 15000;
-let __budgetBase = 0;
-__G.resetTimerBudget = () => { __budgetBase = __now; };
+let __budgetBase = __timerNow();
+__G.resetTimerBudget = () => { __budgetBase = __timerNow(); };
 globalThis.setTimeout = (fn, delay = 0, ...args) => {
-  __timerPush({__proto__:null, id: __tid, fn, due: __now + (+delay || 0), args });
+  __timerPush({__proto__:null, id: __tid, fn, due: __timerNow() + (+delay || 0), args });
   return __tid++;
 };
 globalThis.setInterval = globalThis.setTimeout; // one-shot here (no event loop)
@@ -5174,7 +5512,7 @@ const __hrNow = () => { try { return ops.op_now_perf(); } catch (e) { return 0; 
 const __hr0 = __hrNow();               // monotonic anchor at bootstrap
 const __epoch0 = ops.op_now_epoch();      // wall epoch at bootstrap
 const __perfTimeOrigin = __epoch0;
-const __observed = () => (__hrNow() - __hr0) + __now;
+const __observed = () => (__hrNow() - __hr0) + ops.op_timer_offset();
 let __perfLast = 0;
 const __perfNow = () => {
   let t = Math.floor(__observed() * 10) / 10; // Chrome 100µs grid
@@ -5248,25 +5586,31 @@ globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) =
 // Native V8 jobs share the real Promise/observer microtask checkpoint and the
 // host watchdog. Their callbacks retain private realm ownership until delivery.
 ops.op_install_microtask_queue();
-__G.runTimers = (max = 100000) => {
-  let n = 0;
-  while (__timers.length && n < max) {
-    if(ops.op_window_message_pending())break;
-    // Earliest-due first.
-    let bi = 0;
-    for (let i = 1; i < __timers.length; i++) if (__timers[i].due < __timers[bi].due) bi = i;
-    const t = __timers[bi];
-    // A delayed timer past the (relative) virtual budget is a never-idle poll — stop firing
-    // it so the drain can quiesce. (Delay-0 work has due <= __now and always runs.)
-    if (t.due > __now && t.due - __budgetBase > __VIRTUAL_BUDGET_MS) break;
-    __timerSplice(bi, 1);
-    if (t.due > __now) __now = t.due; // advance the virtual clock
-    n++;
-    try { __timerApply(t.fn, globalThis, t.args); } catch (e) { __print("timer error: " + (e && e.stack ? e.stack : e) + "\n"); }
-  }
-  if (!__G.isFrame) n += ops.op_run_frame_timers();
-  return n; // count fired — lets the hydration pump detect quiescence
+const __nextLocalTimer = () => {
+  if (!__timers.length || ops.op_window_message_pending()) return -1;
+  let index=0;
+  for(let i=1;i<__timers.length;i++)if(__timers[i].due<__timers[index].due)index=i;
+  const due=__timers[index].due;
+  return due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
 };
+const __runLocalTimers = (max=100000) => {
+  let fired=0;
+  while(fired<max){
+    const index=__nextLocalTimer();if(index<0)break;
+    const timer=__timers[index];__timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;
+    try{__timerApply(timer.fn,globalThis,timer.args);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
+  }
+  return fired;
+};
+__G.runTimers = (max=100000) => {
+  let fired=__runLocalTimers(max);
+  if(!__G.isFrame)fired+=ops.op_run_frame_timers();
+  return fired;
+};
+ops.op_set_host_capabilities({
+  timerNextDue:()=>{const index=__nextLocalTimer();return index<0?null:__timers[index].due;},
+  runNextTimer:()=>__runLocalTimers(1)
+});
 // NOTE: getElementsByTagName/ClassName/Name, lastChild/previous*/nextElementSibling,
 // and document.write/writeln are provided by the vendored binding (browser_env.js,
 // turbo-test ≥ 71477ba) — real-world bundles (jQuery's load-time support probe,
@@ -5565,6 +5909,9 @@ const __fetchFromSource = async (url, init, referrerSource) => {
       }
     }
   } catch (_e) {}
+  const requestTarget=o.url || __String(url);
+  const directive=o.destination==="script"?"script-src-elem":o.destination==="style"?"style-src-elem":o.destination==="image"?"img-src":o.destination==="iframe"?"frame-src":"connect-src";
+  if(!ops.op_csp_request(__document,requestTarget,directive,o.nonce||""))throw new __exceptionTypeError("Failed to fetch");
   const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body,
     referrer:o.referrer,referrerPolicy:o.referrerPolicy,
     mode: o.mode, credentials: o.credentials, redirect:o.redirect, integrity:o.integrity, destination: o.destination, source, referrer_source:referrerSource,
@@ -6038,6 +6385,9 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
 }}).postMessage;
 const __windowPostMessageNative=globalThis.postMessage, __windowPostingApply=Reflect.apply;
 ops.op_set_host_capabilities({postWindowMessage:(target,message,origin,transfer)=>__windowPostingApply(__windowPostMessageNative,target,[message,origin,transfer])});
+"##,
+    include_str!("security_policy_event.js"),
+    r##"
 const __windowViews = __interfaceMap("Window.view");
 __G.windowView = (target) => {
   if (target==null)return null;
@@ -7198,7 +7548,6 @@ __G.execScriptEl = async function (el, preparation = null, executionGate = null)
       } finally { __recordResource(globalThis, abs, "script", start); }
     } else {
       code = prepared.source;
-      if(!ops.op_csp_script(__document,el,parserIndex<0?4294967295:parserIndex,"",code))return;
     }
     if (executionGate) await executionGate;
     // Legacy classic bundles retain their import.meta compatibility rewrite.
@@ -7252,9 +7601,30 @@ function __startResourceScript(element, prepared) {
     __trackResource(next);
   } else __trackResource(__G.execScriptEl(element, prepared));
 }
-ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;ops.op_retire_resource_document(__document);ops.op_install_resource_consumer(__document,event=>__documentBaseMutation(event,()=>{}),__documentRuntimeState);}});
+ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;__retireCspViolationTasks();ops.op_retire_resource_document(__document);ops.op_install_resource_consumer(__document,event=>__documentBaseMutation(event,()=>{}),__documentRuntimeState);}});
+const __cspStyleSheetGetter=(()=>{
+  for(let prototype=HTMLStyleElement.prototype;prototype;prototype=Object.getPrototypeOf(prototype)){
+    const descriptor=Object.getOwnPropertyDescriptor(prototype,"sheet");
+    if(descriptor && descriptor.get)return descriptor.get;
+  }
+  return null;
+})();
+const __cspStyleQuery=Element.prototype.querySelectorAll;
+function __prepareCspStyleMutation(event){
+  if(!__cspStyleSheetGetter)return;
+  const prepare=element=>{if(__htmlPolicyElement(element,"style"))__baseApply(__cspStyleSheetGetter,element,[]);};
+  for(let index=0;index<event.ancestors.length;index++)prepare(event.ancestors[index]);
+  if(event.type==="childList")for(let index=0;index<event.added.length;index++){
+    const node=event.added[index];
+    if(__baseApply(__documentType,node,[])!==1)continue;
+    prepare(node);
+    const children=__baseApply(__cspStyleQuery,node,["style"]);
+    for(let child=0;child<children.length;child++)prepare(children[child]);
+  }
+}
 __initializeDocumentBase();
 ops.op_install_resource_consumer(__document, event => {
+  __prepareCspStyleMutation(event);
   __documentBaseMutation(event,element=>{
     const prepared=__prepareResourceScript(element);
     if(prepared)__startResourceScript(element,prepared);
@@ -9356,7 +9726,7 @@ __G.domSig = () => {
     const replacements = new Map();
     const constructors = ["Date", "DOMParser", "Navigator", "Performance", "Permissions", "PermissionsPolicy", "PermissionStatus", "Storage", "Headers",
       "Request", "Response", "URL", "URLSearchParams", "DOMException", "MessageEvent", "ErrorEvent",
-      "Event", "CustomEvent", "SubmitEvent", "UIEvent", "MouseEvent", "KeyboardEvent", "InputEvent", "FocusEvent", "PointerEvent", "WheelEvent", "MessageChannel", "MessagePort", "BroadcastChannel",
+      "Event", "SecurityPolicyViolationEvent", "CustomEvent", "SubmitEvent", "UIEvent", "MouseEvent", "KeyboardEvent", "InputEvent", "FocusEvent", "PointerEvent", "WheelEvent", "MessageChannel", "MessagePort", "BroadcastChannel",
       "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",
       "TextEncoder", "TextDecoder", "Screen", "Window", "Crypto", "SubtleCrypto",
       "IntersectionObserver", "ResizeObserver", "MutationObserver", "PerformanceObserver",
@@ -9603,6 +9973,7 @@ fn make_runtime_with_hints(
     state.put(module_stages);
     state.put(ClassicScripts::default());
     state.put(FrameContexts::default());
+    state.put(TimerClock::default());
     state.put::<Base>(Base(base.to_string()));
     state.put::<Jar>(jar);
     state.put::<Ua>(Ua(ua.to_string()));
@@ -10224,16 +10595,7 @@ async fn drain_event_loop_until_completion(
             // Drive the actual timer queues while native module futures are
             // pending; waiting for Deno quiescence first would deadlock that gate.
             if frame_timer_budget > 0 {
-                let context = rt.main_context();
-                let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
-                let mut scope = scope.init();
-                let context = v8::Local::new(&scope, context);
-                let scope = &mut v8::ContextScope::new(&mut scope, context);
-                let batch = if completion.is_some() { 1 } else { 64 };
-                let max = v8::Integer::new_from_unsigned(scope, batch.min(frame_timer_budget));
-                let fired = call_frame_helper(scope, "runTimers", &[max.into()])
-                    .and_then(|value| value.uint32_value(scope))
-                    .unwrap_or(0);
+                let fired = run_next_window_timer(rt);
                 frame_timer_budget = frame_timer_budget.saturating_sub(fired);
                 if fired > 0 {
                     return std::task::Poll::Ready(None);

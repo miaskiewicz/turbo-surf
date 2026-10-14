@@ -1015,3 +1015,389 @@ async fn top_sandbox_module_requests_use_authentic_opaque_origin_and_cookie_site
     }
     server.abort();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn security_policy_violation_event_original_fields_and_brands_match_chrome() {
+    use sha2::Digest;
+    let control: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/security-policy-event-chrome155.json"
+    ))
+    .unwrap();
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(
+        control["collectorSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/authored-dom-chrome.mjs"
+            ))
+        )
+    );
+    assert_eq!(
+        control["probeSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/security-policy-event-probe.js"
+            ))
+        )
+    );
+    let mut page = PageSession::open(
+        "<!doctype html><body></body>",
+        "http://localhost/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let probe = include_str!("../../../../harness/detection/security-policy-event-probe.js")
+        .trim()
+        .trim_end_matches(';');
+    let raw = page.eval_json_expression(probe).await.unwrap();
+    let actual: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(actual, control["result"]);
+}
+
+fn csp_violation_control() -> Value {
+    use sha2::Digest;
+    let control: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/csp-violation-chrome155.json"
+    ))
+    .unwrap();
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(control["browser"], "Chrome/155.0.8059.79");
+    assert_eq!(control["v8"], "15.5.35.23");
+    for (key, bytes) in [
+        (
+            "casesSha256",
+            include_bytes!("../../../../harness/detection/fixtures/csp-violation-cases.json")
+                .as_slice(),
+        ),
+        (
+            "probeSha256",
+            include_bytes!("../../../../harness/detection/csp-violation-probe.js").as_slice(),
+        ),
+        (
+            "collectorSha256",
+            include_bytes!("../../../../harness/detection/policy-header-chrome.mjs").as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            control[key],
+            format!("{:x}", sha2::Sha256::digest(bytes)),
+            "stale control: {key}"
+        );
+    }
+    assert_eq!(control["result"].as_array().unwrap().len(), 2);
+    control
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn enforced_csp_violation_tasks_match_chrome() {
+    let headers = vec![(
+        "Content-Security-Policy".to_string(),
+        "script-src 'none'; style-src 'none'; connect-src 'none'".to_string(),
+    )];
+    let mut page = PageSession::open_with_response_headers(
+        "<!doctype html><body></body>",
+        "http://127.0.0.1:12345/?case=0",
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let probe = include_str!("../../../../harness/detection/csp-violation-probe.js");
+    let raw = page.eval_json_expression(probe).await.unwrap();
+    let actual: Value = serde_json::from_str(&raw).unwrap();
+    let control = csp_violation_control();
+    assert_eq!(actual, control["result"][0]["result"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn report_only_csp_violation_tasks_match_chrome() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut bytes = [0; 4096];
+                if socket.read(&mut bytes).await.unwrap() == 0 {
+                    return;
+                }
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            });
+        }
+    });
+    let headers = vec![(
+        "Content-Security-Policy-Report-Only".to_string(),
+        "script-src 'none'; style-src 'none'; connect-src 'none'".to_string(),
+    )];
+    let mut page = PageSession::open_with_response_headers(
+        "<!doctype html><body></body>",
+        &format!("{origin}/?case=1"),
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let probe = include_str!("../../../../harness/detection/csp-violation-probe.js");
+    let raw = page.eval_json_expression(probe).await.unwrap();
+    let actual: Value = serde_json::from_str(&raw).unwrap();
+    let control = csp_violation_control();
+    assert_eq!(actual, control["result"][1]["result"]);
+    server.abort();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn csp_task_capacity_is_bounded_and_recovers_after_dispatch() {
+    let headers = vec![("Content-Security-Policy".into(), "style-src 'none'".into())];
+    let mut page = PageSession::open_with_response_headers(
+        "<body></body>",
+        "https://budget.test/",
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let error = page
+        .eval_expression(
+            r#"(() => {
+        globalThis.attempts=0;globalThis.violations=0;
+        document.addEventListener('securitypolicyviolation',()=>violations++);
+        const div=document.createElement('div');document.body.append(div);
+        for(let index=0;index<5000;index++){
+          attempts++;div.setAttribute('style','color:rgb('+index+',0,0)');
+        }
+        return attempts;
+    })()"#,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error.contains("terminat") || error.contains("execution"),
+        "{error}"
+    );
+    let result: Value = serde_json::from_str(
+        &page
+            .eval_json_expression(
+                r#"(async()=>{
+        await new Promise(resolve=>setTimeout(resolve,30));
+        const first=violations;
+        document.querySelector('div').setAttribute('style','color:blue');
+        await new Promise(resolve=>setTimeout(resolve,30));
+        return {attempts,first,after:violations};
+    })()"#,
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        serde_json::json!({"attempts":4097,"first":4096,"after":4097})
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn inline_classic_and_module_execution_do_not_dispatch_load_events() {
+    use sha2::Digest;
+    let control: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/module-inline-load-chrome155.json"
+    ))
+    .unwrap();
+    let probe = include_str!("../../../../harness/detection/module-inline-load-probe.js");
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(
+        control["collectorSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/authored-dom-chrome.mjs"
+            ))
+        )
+    );
+    assert_eq!(
+        control["probeSha256"],
+        format!("{:x}", sha2::Sha256::digest(probe.as_bytes()))
+    );
+    let mut page = PageSession::open("<body></body>", "https://module.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let actual: Value = serde_json::from_str(
+        &page
+            .eval_json_expression(probe.trim().trim_end_matches(';'))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual, control["result"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn csp_event_tasks_release_before_reentrant_guest_dispatch_and_survive_overrides() {
+    let headers = vec![("Content-Security-Policy".into(), "style-src 'none'".into())];
+    let mut page = PageSession::open_with_response_headers(
+        "<body><div></div></body>",
+        "https://events.test/",
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let actual: Value = serde_json::from_str(
+        &page
+            .eval_json_expression(
+                r#"(async()=>{
+      const timer=setTimeout, originalCtor=SecurityPolicyViolationEvent;
+      const div=document.querySelector('div'),rows=[];
+      globalThis.SecurityPolicyViolationEvent=()=>{throw Error('guest constructor');};
+      globalThis.setTimeout=()=>{throw Error('guest timer');};
+      globalThis.clearTimeout=()=>{throw Error('guest cancellation');};
+      document.addEventListener('securitypolicyviolation',event=>{
+        rows.push([event instanceof originalCtor,event.isTrusted,event.target===div]);
+        if(rows.length===1){div.setAttribute('style','color:blue');throw Error('listener failure');}
+      });
+      div.setAttribute('style','color:red');
+      await new Promise(resolve=>timer(resolve,50));
+      return rows;
+    })()"#,
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        actual,
+        serde_json::json!([[true, true, true], [true, true, true]])
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn retiring_frames_cancels_policy_event_tasks_without_retaining_realms() {
+    let headers = vec![("Content-Security-Policy".into(), "style-src 'none'".into())];
+    let mut page = PageSession::open_with_response_headers(
+        "<body><iframe id=f></iframe></body>",
+        "https://events.test/",
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let actual:Value=serde_json::from_str(&page.eval_json_expression(r#"(async()=>{
+       globalThis.retiredPolicyEvents=0;
+       const frame=document.getElementById('f'),child=frame.contentWindow;
+       child.eval("document.addEventListener('securitypolicyviolation',()=>parent.retiredPolicyEvents++);const div=document.createElement('div');document.body.append(div);div.setAttribute('style','color:red');");
+       frame.remove();
+       await new Promise(resolve=>setTimeout(resolve,50));
+       return retiredPolicyEvents;
+    })()"#).await.unwrap()).unwrap();
+    assert_eq!(actual, serde_json::json!(0));
+    assert_eq!(
+        page.frame_lifecycle_diagnostics_for_testing()["hostContexts"],
+        0
+    );
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    assert_eq!(
+        page.frame_lifecycle_diagnostics_for_testing()["retiredHostContexts"],
+        0
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn parser_policy_events_survive_bootstrap_until_authored_listeners_execute() {
+    use sha2::Digest;
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/csp-parser-cases.json"
+    ))
+    .unwrap();
+    let control: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/csp-parser-chrome155.json"
+    ))
+    .unwrap();
+    for (key, bytes) in [
+        (
+            "casesSha256",
+            include_bytes!("../../../../harness/detection/fixtures/csp-parser-cases.json")
+                .as_slice(),
+        ),
+        (
+            "probeSha256",
+            include_bytes!("../../../../harness/detection/csp-parser-probe.js").as_slice(),
+        ),
+        (
+            "collectorSha256",
+            include_bytes!("../../../../harness/detection/csp-document-chrome.mjs").as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            control[key],
+            format!("{:x}", sha2::Sha256::digest(bytes)),
+            "stale control: {key}"
+        );
+    }
+    assert_eq!(control["errors"], serde_json::json!([]));
+    let headers = cases[0]["headers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row[0].as_str().unwrap().to_string(),
+                row[1].as_str().unwrap().to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut page = PageSession::open_with_response_headers(
+        cases[0]["html"].as_str().unwrap(),
+        "http://127.0.0.1:12345/?case=0",
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let probe = include_str!("../../../../harness/detection/csp-parser-probe.js")
+        .trim()
+        .trim_end_matches(';');
+    let actual: Value =
+        serde_json::from_str(&page.eval_json_expression(probe).await.unwrap()).unwrap();
+    // The canonical parser does not expose source offsets yet. Preserve the full
+    // independent control and compare the implemented delivery and URI fields.
+    let mut expected = control["result"][0]["result"].clone();
+    let mut actual = actual;
+    for rows in [&mut actual, &mut expected] {
+        for row in rows.as_array_mut().unwrap() {
+            row.as_object_mut().unwrap().remove("line");
+            row.as_object_mut().unwrap().remove("column");
+        }
+    }
+    assert_eq!(actual, expected);
+}

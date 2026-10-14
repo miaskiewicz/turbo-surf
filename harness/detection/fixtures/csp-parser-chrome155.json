@@ -1,0 +1,42 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "7cd487b55cb39a3c564eaa3a99208ace110137e64e0f37e211037faa6c3a089f",
+  "probeSha256": "9b525d10d04e0c59eb787852138fa50969c9a753831ed8e1157abae2d05036a9",
+  "collectorSha256": "5de38e775337d1aa4e7c84f772f8d3e9e561d0bc76cf836e0e2f6bbbca6554dc",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": [
+        {
+          "target": "style",
+          "sourceFile": "<origin>/",
+          "line": 3,
+          "column": 8,
+          "directive": "style-src-elem",
+          "original": "script-src 'unsafe-inline'; style-src 'none'",
+          "trusted": true
+        },
+        {
+          "target": "div",
+          "sourceFile": "<origin>/",
+          "line": 3,
+          "column": 61,
+          "directive": "style-src-attr",
+          "original": "script-src 'unsafe-inline'; style-src 'none'",
+          "trusted": true
+        }
+      ]
+    }
+  ]
+}

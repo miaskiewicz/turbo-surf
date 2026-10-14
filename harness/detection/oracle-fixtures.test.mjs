@@ -49,13 +49,47 @@ test("iframe ownership controls retain their exact measured collectors", () => {
 
 test("native microtask and module controls retain their measured probe and Chrome collector", () => {
   const collector = readFileSync(new URL("./authored-dom-chrome.mjs", import.meta.url));
-  for (const name of ["microtask-order", "microtask-frame", "dom-utf16-module"]) {
+  for (const name of [
+    "microtask-order",
+    "microtask-frame",
+    "dom-utf16-module",
+    "frame-load-order",
+    "security-policy-event",
+    "module-inline-load",
+  ]) {
     const fixture = JSON.parse(
       readFileSync(new URL(`./fixtures/${name}-chrome155.json`, import.meta.url), "utf8"),
     );
     const probe = readFileSync(new URL(`./${name}-probe.js`, import.meta.url));
     assert.equal(createHash("sha256").update(probe).digest("hex"), fixture.probeSha256, name);
     assert.equal(createHash("sha256").update(collector).digest("hex"), fixture.collectorSha256);
+    assert.deepEqual(fixture.errors, []);
+    assert.equal(fixture.browser, "Chrome/155.0.8059.79");
+    assert.equal(fixture.v8, "15.5.35.23");
+  }
+});
+
+test("CSP violation controls pin their original collectors, cases and probes", () => {
+  for (const [name, collectorName] of [
+    ["csp-violation", "policy-header-chrome.mjs"],
+    ["csp-parser", "csp-document-chrome.mjs"],
+  ]) {
+    const fixture = JSON.parse(
+      readFileSync(new URL(`./fixtures/${name}-chrome155.json`, import.meta.url), "utf8"),
+    );
+    for (const [file, expected] of [
+      [`./${name}-probe.js`, fixture.probeSha256],
+      [`./fixtures/${name}-cases.json`, fixture.casesSha256],
+      [`./${collectorName}`, fixture.collectorSha256],
+    ]) {
+      assert.equal(
+        createHash("sha256")
+          .update(readFileSync(new URL(file, import.meta.url)))
+          .digest("hex"),
+        expected,
+        file,
+      );
+    }
     assert.deepEqual(fixture.errors, []);
     assert.equal(fixture.browser, "Chrome/155.0.8059.79");
     assert.equal(fixture.v8, "15.5.35.23");

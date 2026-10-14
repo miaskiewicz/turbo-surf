@@ -5,8 +5,8 @@ use deno_error::JsErrorBox;
 use std::{cell::RefCell, rc::Rc};
 
 struct KeyAdapter {
-    key: v8::Global<v8::Function>,
-    error: v8::Global<v8::Function>,
+    key: v8::Weak<v8::Function>,
+    error: v8::Weak<v8::Function>,
 }
 
 #[op2(fast)]
@@ -16,10 +16,13 @@ fn op_install_crypto_clone_adapter(
     error: v8::Local<v8::Function>,
 ) {
     if let Some(context) = adapter.get_creation_context(scope) {
-        context.set_slot(Rc::new(KeyAdapter {
-            key: v8::Global::new(scope, adapter),
-            error: v8::Global::new(scope, error),
-        }));
+        let Some(key) = crate::context_ownership::function(scope, adapter) else {
+            return;
+        };
+        let Some(error) = crate::context_ownership::function(scope, error) else {
+            return;
+        };
+        context.set_slot(Rc::new(KeyAdapter { key, error }));
     }
 }
 
@@ -55,6 +58,7 @@ enum NativeSnapshot {
     Key(Box<deno_crypto::NativeKeySnapshot>),
     HybridKey(crate::crypto_hybrid::HybridKeySnapshot),
     Port(usize),
+    Rectangle(crate::geometry_backend::RectData),
     Exception { name: String, message: String },
 }
 
@@ -65,6 +69,7 @@ impl NativeSnapshot {
             Self::HybridKey(key) => key.size_bytes(),
             Self::Exception { name, message } => name.len().saturating_add(message.len()),
             Self::Port(_) => 0,
+            Self::Rectangle(_) => 40,
         }
     }
 }
@@ -161,7 +166,7 @@ impl v8::ValueSerializerImpl for Delegate {
         message: v8::Local<'s, v8::String>,
     ) {
         if let Some(adapter) = scope.get_current_context().get_slot::<KeyAdapter>() {
-            let factory = v8::Local::new(scope, &adapter.error);
+            let factory = crate::context_ownership::local(scope, &adapter.error);
             let receiver = v8::undefined(scope);
             let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
             let scope = &mut scope.init();
@@ -233,6 +238,8 @@ impl v8::ValueSerializerImpl for Delegate {
                 scope,
                 object.into(),
             )?)
+        } else if let Some(rectangle) = crate::geometry_backend::snapshot(scope, object) {
+            NativeSnapshot::Rectangle(rectangle)
         } else if let Some(snapshot) = exception_snapshot(scope, object) {
             snapshot
         } else {
@@ -290,9 +297,16 @@ impl v8::ValueDeserializerImpl for Delegate {
                 .get(*index)
                 .map(|object| v8::Local::new(scope, object));
         }
+        if let NativeSnapshot::Rectangle(data) = snapshot {
+            let data = *data;
+            drop(objects);
+            let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
+            let scope = &mut scope.init();
+            return crate::geometry_backend::restore(scope, data);
+        }
         let adapter = scope.get_current_context().get_slot::<KeyAdapter>()?;
         if let NativeSnapshot::Exception { name, message } = snapshot {
-            let factory = v8::Local::new(scope, &adapter.error);
+            let factory = crate::context_ownership::local(scope, &adapter.error);
             let message = v8::String::new(scope, message)?;
             let name = v8::String::new(scope, name)?;
             drop(objects);
@@ -311,7 +325,7 @@ impl v8::ValueDeserializerImpl for Delegate {
             _ => return None,
         };
         drop(objects);
-        let adapter = v8::Local::new(scope, &adapter.key);
+        let adapter = crate::context_ownership::local(scope, &adapter.key);
         let receiver = v8::undefined(scope);
         let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
         let scope = &mut scope.init();
@@ -592,4 +606,8 @@ deno_core::extension!(
 
 pub(crate) fn extension() -> Extension {
     turbo_surf_crypto_clone::init()
+}
+
+pub(crate) fn clear_context(context: v8::Local<v8::Context>) {
+    context.remove_slot::<KeyAdapter>();
 }

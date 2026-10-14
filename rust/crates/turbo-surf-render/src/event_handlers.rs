@@ -2,7 +2,7 @@
 use super::*;
 #[derive(Default)]
 pub(super) struct State {
-    policy: Option<v8::Global<v8::Function>>,
+    policy: Option<v8::Weak<v8::Function>>,
     base: String,
     sources: HashMap<(Handle, String), Option<String>>,
 }
@@ -84,7 +84,7 @@ pub(super) fn refresh(scope: &mut v8::PinScope, node: Handle, name: &str) {
     let document = wrap(scope, root);
     let function = source.and_then(|text| {
         if let Some(policy) = policy {
-            let callback = v8::Local::new(scope, policy);
+            let callback = dom_ownership::local(scope, policy);
             let kind = v8::String::new(scope, "script-src-attr").unwrap();
             let code = v8::String::new(scope, &text).unwrap();
             let receiver = v8::undefined(scope);
@@ -171,7 +171,15 @@ pub(super) fn install(
     policy: Option<v8::Local<v8::Function>>,
     base: &str,
 ) {
-    let policy = policy.map(|callback| v8::Global::new(scope, callback));
+    let policy = match policy {
+        Some(callback) => {
+            let Some(callback) = dom_ownership::helper_function(scope, callback) else {
+                return;
+            };
+            Some(callback)
+        }
+        None => None,
+    };
     DOM.with(|dom| {
         dom.borrow_mut().as_mut().unwrap().event_handlers = State {
             policy,

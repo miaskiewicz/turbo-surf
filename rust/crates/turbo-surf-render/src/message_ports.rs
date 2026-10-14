@@ -263,9 +263,9 @@ pub(crate) fn sweep(scope: &mut v8::PinScope) {
 }
 
 struct Adapter {
-    create: v8::Global<v8::Function>,
-    dispatch: v8::Global<v8::Function>,
-    schedule: v8::Global<v8::Function>,
+    create: v8::Weak<v8::Function>,
+    dispatch: v8::Weak<v8::Function>,
+    schedule: v8::Weak<v8::Function>,
 }
 fn registry(scope: &mut v8::PinScope) -> RegistryHandle {
     JsRuntime::op_state_from(scope)
@@ -430,7 +430,7 @@ pub(crate) fn receive<'s>(
     }
     let context = scope.get_current_context();
     let adapter = context.get_slot::<Adapter>()?;
-    let create = v8::Local::new(scope, &adapter.create);
+    let create = crate::context_ownership::local(scope, &adapter.create);
     let receiver = v8::undefined(scope).into();
     let scope = std::pin::pin!(v8::AllowJavascriptExecutionScope::new(scope));
     let scope = &mut scope.init();
@@ -468,7 +468,7 @@ fn schedule(scope: &mut v8::PinScope, endpoint: &EndpointHandle) {
     let Some(adapter) = context.get_slot::<Adapter>() else {
         return;
     };
-    let callback = v8::Local::new(scope, &adapter.schedule);
+    let callback = crate::context_ownership::local(scope, &adapter.schedule);
     let receiver = v8::undefined(scope).into();
     callback.call(scope, receiver, &[object.into()]);
 }
@@ -486,10 +486,19 @@ fn op_port_install_adapter(
         let scope = &mut v8::ContextScope::new(scope, context);
         crate::browser_env::set_native_event_target_observer(scope, listener_changed);
     }
+    let Some(create) = crate::context_ownership::function(scope, create) else {
+        return;
+    };
+    let Some(dispatch) = crate::context_ownership::function(scope, dispatch) else {
+        return;
+    };
+    let Some(schedule) = crate::context_ownership::function(scope, schedule) else {
+        return;
+    };
     context.set_slot(Rc::new(Adapter {
-        create: v8::Global::new(scope, create),
-        dispatch: v8::Global::new(scope, dispatch),
-        schedule: v8::Global::new(scope, schedule),
+        create,
+        dispatch,
+        schedule,
     }));
 }
 #[op2(reentrant)]
@@ -708,7 +717,7 @@ fn op_port_deliver(
     let adapter = context
         .get_slot::<Adapter>()
         .ok_or_else(|| JsErrorBox::generic("Port event adapter unavailable"))?;
-    let dispatch = v8::Local::new(scope, &adapter.dispatch);
+    let dispatch = crate::context_ownership::local(scope, &adapter.dispatch);
     let receiver = v8::undefined(scope).into();
     dispatch.call(scope, receiver, &[object.into(), value, ports_array.into()]);
     schedule(scope, &endpoint);
@@ -861,4 +870,8 @@ deno_core::extension!(
 );
 pub(crate) fn extension() -> Extension {
     turbo_surf_message_ports::init()
+}
+
+pub(crate) fn clear_context(context: v8::Local<v8::Context>) {
+    context.remove_slot::<Adapter>();
 }

@@ -65,8 +65,11 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   (`NetModuleLoader` in `runtime.rs`); classic scripts are queued by the script-element
   pump and compiled/executed by the Rust host pump with their document/source URL.
   Global lexical bindings persist; classic execution no longer uses indirect eval.
-- Observer/layout behavior remains synthetic; inspect the runtime implementation
-  for the callbacks a particular observer supports rather than assuming browser layout.
+- Observer delivery remains partial. Element box geometry now uses the public native
+  live-tree layout seam, private actual CSSOM rules and transform provenance. Supported
+  client/offset/scroll metrics and point-hit regions have authored Chrome controls;
+  fragmented inline/text/caret, full stacking contexts, composed shadow layout and
+  broader scrolling remain incomplete. See [the scope and controls](../harness/detection/LIVE-GEOMETRY.md).
 
 **Current interface corrections (2026-10-10):**
 
@@ -241,7 +244,9 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   context. Opaque cross-origin sheets protect their rules and mutations with SecurityError;
   CORS-authorized stylesheet access uses the actual native response policy. Loader functions and
   internal response metadata stay private. This facade still has partial at-rule, nesting and Web IDL coverage, and CSSOM
-  changes are not automatically applied to the native snapshot layout cascade.
+  changes feed the live geometry cascade through private stylesheet exports.
+  Unsupported grammar, dynamic pseudo states, downloaded fonts and composed shadow
+  scoping still limit this native cascade; it is not complete browser layout.
 - Scalar ARIA, editing enums, hidden state and basic HTML properties reflect actual native
   attributes. Spellcheck, translation and writing suggestions resolve ancestor values;
   capitalization/correction use associated forms. Reflection of `inert`/`autofocus` does
@@ -1318,3 +1323,18 @@ template-content imports, and unsupported node kinds throw NotSupportedError.
 The [HTML parsing and sanitization algorithms](https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#html-parsing-methods)
 and `harness/detection/document-parser.mjs` define the measured behavior and reusable
 browser comparison; this is not a claim of complete Sanitizer API coverage.
+
+### Native ownership and mutation delivery
+
+The binding uses weak native lookups with private V8 Document/subtree edges.
+Crypto's native objects trace their actual JavaScript edges through cppgc. The
+workspace consumes a reproducible Rusty V8 150.4.0 ownership teardown fix; see
+[`vendor/RUSTY_V8.md`](./vendor/RUSTY_V8.md). This does not upgrade the default
+engine to Chrome 155.
+
+MutationObserver records are native semantic batches delivered through a V8
+notification microtask. A Document-private consumer receives mutations after
+observer fanout; scalar script preparation flags retain native node history across
+cloning/adoption and retired/inert documents. Resource execution integration and
+full observer lifecycle coverage are still in progress. Raw native heap retention
+diagnostics are available to lifecycle tests through the detection harness.

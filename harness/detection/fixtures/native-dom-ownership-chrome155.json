@@ -1,0 +1,73 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "first": [
+    {
+      "name": "connected-wrapper-and-expando",
+      "alive": [true, true]
+    },
+    {
+      "name": "held-detached-descendant-retains-subtree",
+      "alive": [true, true, true, true]
+    },
+    {
+      "name": "split-detached-subtree",
+      "alive": [true, true, false, false]
+    },
+    {
+      "name": "unreachable-listener-node-cycle",
+      "alive": [false, false]
+    },
+    {
+      "name": "retained-style-keeps-native-owner",
+      "alive": [true, true, true]
+    },
+    {
+      "name": "adopted-wrapper-releases-source-document",
+      "alive": [false, true, true, true]
+    }
+  ],
+  "afterRelease": [
+    {
+      "name": "connected-wrapper-and-expando",
+      "alive": [false, false]
+    },
+    {
+      "name": "held-detached-descendant-retains-subtree",
+      "alive": [false, false, false, false]
+    },
+    {
+      "name": "split-detached-subtree",
+      "alive": [false, false, false, false]
+    },
+    {
+      "name": "unreachable-listener-node-cycle",
+      "alive": [false, false]
+    },
+    {
+      "name": "retained-style-keeps-native-owner",
+      "alive": [false, false, false]
+    },
+    {
+      "name": "adopted-wrapper-releases-source-document",
+      "alive": [false, false, false, false]
+    }
+  ],
+  "sourcePins": [
+    {
+      "path": "harness/detection/message-port-lifetime-chrome.mjs",
+      "sha256": "e6884f1ef4d194a987b3882468e136064b91dd2a0d6444a1bf3fc68962d8903c"
+    },
+    {
+      "path": "harness/detection/cdp-connection.mjs",
+      "sha256": "7b9f522db23484f79575ee46cf320277a4a516de53becba1eef5730d5a5549a0"
+    },
+    {
+      "path": "harness/detection/native-dom-ownership-probe.js",
+      "sha256": "ca5a120288c9fe2070493f047b06015b621a89eaa99bf740b6640045f6748bba"
+    }
+  ],
+  "mode": "host-gc",
+  "freshProfile": true,
+  "pageGcExposed": false
+}

@@ -139,7 +139,9 @@ fn interrupted_native_wrapping_leaves_no_unprojected_cached_object() {
     v8::tc_scope!(let scope, scope);
     scope.terminate_execution();
     let _discarded = wrap(scope, handle);
-    assert!(scope.is_execution_terminating());
+    // Weak-handle localization can materialize the interrupt into TryCatch
+    // before JavaScript runs; the isolate pending flag is then already cleared.
+    assert!(scope.is_execution_terminating() || scope.has_terminated());
     assert!(DOM.with(|dom| !dom.borrow().as_ref().unwrap().cache.contains_key(&handle)));
     scope.cancel_terminate_execution();
     scope.reset();

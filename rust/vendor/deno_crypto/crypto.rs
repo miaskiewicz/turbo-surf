@@ -49,19 +49,20 @@ pub fn op_crypto_random_uuid_batch<'s>(
 
 pub struct Crypto {
   /// The single `SubtleCrypto` instance returned by the `subtle` getter.
-  /// Stored as a `v8::Global` so the getter returns the same identity
+  /// Traced with its cppgc owner so the getter returns the same identity
   /// across calls, as required by Web IDL.
-  subtle: v8::Global<v8::Value>,
+  subtle: v8::TracedReference<v8::Value>,
 }
 
 impl WebIdlInterfaceConverter for Crypto {
   const NAME: &'static str = "Crypto";
 }
 
-// SAFETY: the `subtle` field is a `v8::Global` whose backing object is owned
-// by V8 itself; no Rust-side roots that need cppgc tracing.
+// SAFETY: every JavaScript reference is visited with its native cppgc owner.
 unsafe impl GarbageCollected for Crypto {
-  fn trace(&self, _visitor: &mut v8::cppgc::Visitor) {}
+  fn trace(&self, visitor: &mut v8::cppgc::Visitor) {
+    visitor.trace(&self.subtle);
+  }
 
   fn get_name(&self) -> &'static CStr {
     c"Crypto"
@@ -85,21 +86,18 @@ impl Crypto {
   #[required(1)]
   #[static_method]
   #[cppgc]
-  fn create(
-    scope: &mut v8::PinScope<'_, '_>,
-    subtle: v8::Local<v8::Value>,
-  ) -> Crypto {
+  fn create(scope: &mut v8::PinScope<'_, '_>, subtle: v8::Local<v8::Value>) -> Crypto {
     Crypto {
-      subtle: v8::Global::new(scope, subtle),
+      subtle: v8::TracedReference::new(scope, subtle),
     }
   }
 
   #[getter]
-  fn subtle<'s>(
-    &self,
-    scope: &mut v8::PinScope<'s, '_>,
-  ) -> v8::Local<'s, v8::Value> {
-    v8::Local::new(scope, &self.subtle)
+  fn subtle<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
+    self
+      .subtle
+      .get(scope)
+      .expect("live cppgc owner traces its values")
   }
 
   /// `Crypto.getRandomValues(typedArray)` — fills `typedArray` with

@@ -6,66 +6,72 @@ its retry. Chrome oracle cookies were never reused in native tests.
 
 ## Local integration checkpoint — 2026-10-14
 
-This checkpoint does not establish native Google acceptance. The previous default
-batch passed 848 workspace tests with strict Clippy and formatting. More recent
-local changes require a new full default/native build and paired inventory.
+Native Google acceptance remains unverified. The current canonical binding is
+re-vendored from turbo-test `7088ce6` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25));
+it passes 134 focused contracts in canonical Rusty V8 149.3.0 and in Surf's default
+Rusty V8 150.4.0 configuration. These SDK versions identify the actual dependencies,
+not the Chrome 155 target profile. Full default/native155 gates and current addon,
+shim/E2E, prototype inventory and Google artifacts remain pending.
 
-Canonical DOM/CSS/Range code is now re-vendored from turbo-test `9f5a1f1`
-([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25)). The preceding full canonical
-checkpoint passes 133 Rust library and 63 npm tests; the latest stylesheet-adoption
-follow-up passes two new controls plus seven live-CSS and one repeated-bootstrap
-regression. The latest projection/dependency checkpoint passes 114 focused canonical
-binding tests on published turbo-dom 0.5.3. After consuming that release, 35 Surf
-adoption, frame-ownership, transfer and teardown tests pass. Full end-of-work gates will cover the combined source. Cross-document insertions
-preserve wrapper identity and original realms; failed single-node preflight keeps
-inputs intact, while variadic conversion follows Chrome's fragment draining,
-last-duplicate ordering and detachment before insertion errors. Repeated bootstrap
-captures the current raw-node compatibility prototype rather than losing traversal
-members through previous read-only constructor prototypes.
+Integrated and tested behavior includes real document factories and private node
+projection, native cross-document insertion and live Range boundaries, live CSSOM
+exports/adoption, Window/MessagePort transfers and endpoint cleanup. Wrapper,
+helper and context lookups are weak; private V8 ownership edges preserve live
+Document/subtree identity. WebCrypto uses actual cppgc tracing, and queued key
+snapshots retain native data rather than sender realms. A source-pinned Rusty V8
+teardown patch keeps weak handles live until native slot/finalizer cleanup finishes.
 
-The integrated default follow-up passes 73 focused Rust contracts: 24 transfers,
-17 clones, nine host-input, six events, six frame lifetime, four frame ownership,
-four adoption/conversion and three teardown controls. A transfer fixture had used
-`Window.closed` as storage; its assignment correctly fails with the genuine
-read-only getter, so the fixture now uses an explicit retained-port name. The
-complete detection harness passes 40 tests without skips. These focused gates do
-not replace the full default and genuine V8 155 production gates. Broad native/artifact/release
-checks are deferred until implementation items 1–4 and 6–7 finish; focused checks
-continue as each change lands. The interim default workspace attempt compiled all
-targets but could not complete localhost core tests under its filesystem/network
-sandbox; it is not a completed full gate.
+An actual heap trace found the main Window's private inert-document initializer
+retaining the last child Document. Shared Deno ops run in their creation realm;
+registration now uses the initializer callback's creation realm. A second trace
+found main-Document component maps allocated in a child realm: ownership graph
+objects now allocate in their actual Document's creation context, and draining
+observer records no longer dirties unchanged ownership graphs. The paired Chrome
+GC control passes after releasing retained Documents. The reusable host-only heap
+snapshot diagnostic and `heap-retainers.py` identify unconditional native root paths;
+raw heap payloads remain local.
 
-Native document factories are now integrated locally with genuine independent
-Trees, opaque DOMImplementation receivers, constructors and doctype identity.
-XML element creation preserves case/default namespaces and keeps colon local names
-distinct from qualified createElementNS names. The canonical cohort passes 117
-tests; 37 affected Surf API, factory, adoption, frame and teardown contracts pass.
-XML parsing/CDATA, lossless UTF-16 and broader lifecycle behavior remain open.
+MutationObserver delivers typed native records in a V8 notification microtask,
+including compound mutation batches, old values, namespace filters and transient
+removed subtrees. A trusted Document-private consumer runs after observer fanout.
+Native script flags cover parser/force-async/already-started state, clone/import/
+adoption and inert/retired documents; runtime resource execution integration,
+parser reentry, SVG scripts, import maps and speculation rules remain open. Broader
+observer lifecycle, Intersection/Resize queues, slots and custom elements remain.
 
-The latest private projection follow-up passes 119 canonical binding contracts and
-43 affected Surf API, factory, adoption, frame-ownership and host-input budget
-contracts. Native wrapping reads its trusted projector from the owner Document,
-avoiding page-replaced constructor/public namespace getters and inherited tag-map
-entries. Interrupted wrapping does not cache an unprojected object.
+The renderer now consumes published turbo-html2pdf-core 0.3.5 for genuine live DOM
+rectangles, client/offset metrics, element scroll extents/projection and point hit
+regions. It uses native source identities and CSSOM exports, with private DOMRect
+clones and no page layout getters. The 17 V8 geometry controls pass. Text/caret/
+Range geometry, complete stacking/scrolling, image/font lifecycle and SVG remain:
+any active SVG namespace currently rejects the whole snapshot, including HTML
+receivers in pages with SVG icons. Fractional native layout arithmetic also differs
+from Chrome's LayoutUnit arithmetic; returned rectangles are not rounded to hide it.
+See [LIVE-GEOMETRY.md](./LIVE-GEOMETRY.md) for precise bounds.
 
-Endpoint GC and queued Rust-only key snapshots are integrated. Removed Window
-messages still serialize valid transfers before discarding delivery; getter-driven
-retirement also discards the final snapshot. Retired host context registries,
-Window-message queues and timer payload roots are released, while retained old
-Documents preserve their DOM methods. Fresh Chrome controls distinguish failed
-variadic insertions that actually detach frames from single-node and WebIDL failures
-that leave live frames unchanged. Actual complete realm/node GC still requires
-traced ownership changes to canonical native caches and callback roots.
+All eight referrer policies affect actual native request headers and redirects;
+the fresh Chrome loopback control records 33 request cases. Focused integration
+passes 56 document, GC, teardown, geometry, referrer and host-budget/transfer
+tests. The earlier affected checkpoint also passed 45 clone, crypto, hybrid,
+event and retained-frame tests. The host-budget test
+caught an iframe bootstrap allocation abort; private capability publication is now
+fallible and interruption recovery passes. Strict Clippy passes the affected core/
+render libraries and GC/geometry/referrer/input/transfer test targets.
 
-The combined build also exposed a genuine V8 teardown abort when an iframe left
-private Range records alive. Private runtime ownership clears binding handles before
-isolate disposal on all return paths, including cached runtime/thread exit and both
-TLS initialization orders. Fresh Google validation remains pending until integrated
-gates, rebuilt artifacts and the current prototype audit finish.
+Still open: detached native storage reclamation integration, full geometry and DOM
+lifecycle/parsing/lossless UTF-16, remaining CSP/COOP/COEP/permissions policy, fetch
+streaming/cancellation/cache and partitioned storage/access. The additive detached-storage API is verified published in turbo-dom 0.5.4;
+consumer integration remains pending. Text provenance APIs remain under review
+in turbo-html2pdf PR #20. The
+historical missing-own-member count is **94**, not a current measurement. The prior
+848-test workspace gate is historical and does not certify these changes.
 
-Remaining advanced audio is deferred to [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27) at the user's
-request. The active completion scope covers checklist items 1–4 and 6–11. No
-captured evidence here establishes audio as the cause of Google's rejection.
+The experimental native155 engine is 15.5.35.20-rusty; the current installed Chrome
+oracle is 155.0.8059.79 / V8 15.5.35.23. Native155 ownership changes are not yet
+validated. The Chrome 155 target transport uses a pinned official Chrome 154 base
+recipe with separately measured 155 headers/client hints; that distinction remains
+in trace provenance. Audio is deferred in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27)
+as requested. No captured evidence establishes it as Google's rejection cause.
 
 ## Original audit checkout and execution context
 
@@ -484,7 +490,16 @@ Remaining DOM member gaps include:
   ElementInternals, editing contexts, focus groups, popovers and Typed OM.
   HTMLCanvasElement lacks `captureStream` and `transferControlToOffscreen`.
 
-The supported subset is narrower than these member lists might suggest. Native
+The following paragraph records the earlier audit's implementation state. The
+subsequent live geometry bridge replaces its zero-layout values for the measured
+block/replaced subset with native layout from published core 0.3.5, real CSSOM
+exports, element scroll metrics and point-hit regions. Its initial 17-contract
+proof uses default V8 150, independently measured against Chrome 155; genuine155
+and fresh Google certification remain pending. [LIVE-GEOMETRY.md](./LIVE-GEOMETRY.md)
+records exact coverage and open inline/caret/scroll/stacking/namespace limits,
+including the measured fractional layout-unit difference.
+
+The supported subset was narrower than these member lists might suggest. Native
 namespace-aware elements and attributes, live Attr/NamedNodeMap and document
 collections, supported import/adoption, scalar ARIA and HTML attribute reflection
 have meaningful mutation/identity tests. DOMMatrix/DOMPoint arithmetic and the
@@ -738,3 +753,20 @@ subagent work and are not part of that saved source checkpoint. The current
 private crypto/DOMException graph and User Timing semantics, and actual Blob
 download content. Wider transfer types, browser interface serialization and
 advanced audio behavior remain open until independently integrated and tested.
+
+## Native referrer-policy checkpoint — 2026-10-14
+
+The native transport now applies all eight Referrer-Policy values to actual
+outgoing Referer headers. Document response/meta defaults, Request/fetch overrides
+and response-header policy changes across redirects use the same implementation.
+Credentials and fragments are removed, long URLs reduce to an origin, and
+trustworthy downgrade checks include loopback exemptions. Initial blank child
+documents inherit the private parent policy; custom referrers must be same origin.
+
+The reusable `referrer-policy-chrome.mjs` / `referrer-policy-probe.js` collector
+and `fixtures/referrer-policy-chrome155.json` record 33 independent authored
+loopback requests against Chrome155. The checkpoint does not establish full
+CSP form/base/report-only, COOP/COEP, HTTP cache, streaming/cancellation, storage
+partitioning or Google clearance. The integrated default source gate passes three core policy tests and seven
+native referrer/fetch-header/resource-integrity contracts. Final broader workspace
+and genuine155 gates remain pending until the remaining implementation areas land.

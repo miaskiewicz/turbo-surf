@@ -5789,9 +5789,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-html2pdf-core"
-version = "0.3.2"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77ef733dd1176d4a512ae729368694846faf21d2a8825c15bc3827f1fe63e906"
+checksum = "c9b44ea3442cae7c3006ae6e6acb15021db04ad5a72e5bb4d2e8ff9e13d50f7a"
 dependencies = [
  "chrono",
  "html5ever",
@@ -5940,6 +5940,7 @@ dependencies = [
  "subtle",
  "tokio",
  "turbo-dom",
+ "turbo-html2pdf-core",
  "turbo-surf-core",
  "url",
  "x25519-dalek",
@@ -6169,8 +6170,6 @@ dependencies = [
 [[package]]
 name = "v8"
 version = "150.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42a978ff11f15b24e5c05a7123cf2b68f41e763546699781a924ef4e2cf43a49"
 dependencies = [
  "bindgen 0.72.1",
  "bitflags 2.13.0",

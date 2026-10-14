@@ -52,6 +52,24 @@ impl std::ops::DerefMut for OwnedRuntime {
 
 impl Drop for OwnedRuntime {
     fn drop(&mut self) {
+        {
+            deno_core::scope!(scope, self.0);
+            crate::browser_env::clear_context_capabilities(scope);
+            for context in crate::context_ownership::take_contexts(scope) {
+                if let Some(context) = context.to_local(scope) {
+                    context.remove_slot::<HostCapabilities>();
+                    context.remove_slot::<FrameEnvironment>();
+                    context.remove_slot::<FrameNavigator>();
+                    context.remove_slot::<DocumentRuntimeStateAccessor>();
+                    context.remove_slot::<RuntimeCore>();
+                    context.remove_slot::<HostInputDriver>();
+                    context.remove_slot::<FrameParent>();
+                    context.remove_slot::<FrameHost>();
+                    crate::crypto_clone::clear_context(context);
+                    crate::message_ports::clear_context(context);
+                }
+            }
+        }
         crate::browser_env::reset();
         crate::browser_env::clear_interface_records(self.0.v8_isolate());
         crate::message_ports::clear(&mut self.0);
@@ -1245,6 +1263,15 @@ async fn op_fetch(
             .get(&(id as u32))
             .cloned()
     });
+    let referrer_policy = init
+        .get("referrerPolicy")
+        .and_then(|value| value.as_str())
+        .and_then(turbo_surf_core::referrer_policy::ReferrerPolicy::parse)
+        .or_else(|| {
+            csp.as_ref()
+                .map(|handle| handle.policy.borrow().referrer_policy)
+        })
+        .unwrap_or_default();
     let policy = csp
         .map(|handle| handle.policy.borrow().active.clone())
         .unwrap_or_default();
@@ -1315,6 +1342,12 @@ async fn op_fetch(
         .get("referrer_source")
         .and_then(|value| value.as_str())
         .map(str::to_string);
+    context.referrer_policy = referrer_policy;
+    if let Some(referrer) = init.get("referrer").and_then(|value| value.as_str()) {
+        if referrer != "about:client" {
+            context.referrer = Some(referrer.to_string());
+        }
+    }
     context.top_level_source = init
         .get("top_level_source")
         .and_then(|value| value.as_str())
@@ -1675,10 +1708,10 @@ struct FrameDocumentUrl(String);
 struct FrameDocumentLocation(String);
 struct FrameDocumentSourceUrl(String);
 struct FrameDepth(u32);
-struct FrameParent(v8::Global<v8::Context>);
-struct FrameHost(v8::Global<v8::Object>);
+struct FrameParent(v8::Weak<v8::Context>);
+struct FrameHost(v8::Weak<v8::Object>);
 #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
-struct FrameNavigator(v8::Global<v8::Function>);
+struct FrameNavigator(v8::Weak<v8::Function>);
 struct FrameConfigured;
 #[derive(Clone, Copy, Default)]
 struct FrameSandbox {
@@ -1710,10 +1743,10 @@ impl FrameSandbox {
         flags
     }
 }
-struct FrameEnvironment(v8::Global<v8::Object>);
+struct FrameEnvironment(v8::Weak<v8::Object>);
 #[derive(Default)]
 struct HostCapabilities(
-    std::cell::RefCell<std::collections::HashMap<String, v8::Global<v8::Function>>>,
+    std::cell::RefCell<std::collections::HashMap<String, v8::Weak<v8::Function>>>,
 );
 
 #[op2(nofast, reentrant)]
@@ -1737,7 +1770,9 @@ fn op_set_host_capabilities(scope: &mut v8::PinScope, record: v8::Local<v8::Obje
                 .get(scope, key)
                 .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
             {
-                functions.push((name, v8::Global::new(scope, function)));
+                if let Some(function) = crate::context_ownership::function(scope, function) {
+                    functions.push((name, function));
+                }
             }
         }
     }
@@ -2091,7 +2126,7 @@ fn run_frame_init_script(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
 fn frame_namespace<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
     let context = scope.get_current_context();
     if let Some(environment) = context.get_slot::<FrameEnvironment>() {
-        return Some(v8::Local::new(scope, &environment.0));
+        return Some(crate::context_ownership::local(scope, &environment.0));
     }
     let global = context.global(scope);
     let name = v8::String::new(scope, "ts").unwrap();
@@ -2108,7 +2143,7 @@ fn call_frame_helper<'s>(
         .get_slot::<HostCapabilities>()
         .and_then(|capabilities| capabilities.0.borrow().get(name).cloned());
     if let Some(function) = capability {
-        let function = v8::Local::new(scope, function);
+        let function = crate::context_ownership::local(scope, function);
         let receiver = v8::undefined(scope);
         return function.call(scope, receiver.into(), args);
     }
@@ -2237,7 +2272,19 @@ fn secure_context(scope: &mut v8::PinScope) -> bool {
     secure_context_for(scope, context)
 }
 
+struct SecureContext(bool);
 fn secure_context_for<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> bool {
+    if let Some(value) = context.get_slot::<SecureContext>() {
+        return value.0;
+    }
+    let secure = compute_secure_context(scope, context);
+    context.set_slot(Rc::new(SecureContext(secure)));
+    secure
+}
+fn compute_secure_context<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     mut context: v8::Local<'s, v8::Context>,
 ) -> bool {
@@ -2265,7 +2312,10 @@ fn secure_context_for<'s>(
         let Some(parent) = parent else {
             return true;
         };
-        context = v8::Local::new(scope, &parent.0);
+        let Some(parent) = parent.0.to_local(scope) else {
+            return false;
+        };
+        context = parent;
     }
 }
 
@@ -2281,32 +2331,71 @@ fn op_is_secure_context<'s>(scope: &mut v8::PinScope<'s, '_>) -> bool {
 fn op_window_parent<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<v8::Object>,
-) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
     let context = window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("Window context unavailable"))?;
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Ok(v8::null(scope).into());
+    }
     let parent = context
         .get_slot::<FrameParent>()
-        .map(|parent| v8::Local::new(scope, &parent.0))
+        .map(|parent| crate::context_ownership::local(scope, &parent.0))
         .unwrap_or(context);
-    Ok(parent.global(scope))
+    Ok(parent.global(scope).into())
 }
 
 #[op2]
 fn op_window_top<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<v8::Object>,
-) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
     let mut context = window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("Window context unavailable"))?;
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Ok(v8::null(scope).into());
+    }
     for _ in 0..64 {
         let Some(parent) = context.get_slot::<FrameParent>() else {
             break;
         };
-        context = v8::Local::new(scope, &parent.0);
+        context = crate::context_ownership::local(scope, &parent.0);
     }
-    Ok(context.global(scope))
+    Ok(context.global(scope).into())
+}
+
+#[op2(reentrant)]
+fn op_frame_owner_element<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    if !window.strict_equals(context.global(scope).into()) {
+        return Err(JsErrorBox::type_error("Illegal invocation"));
+    }
+    if context.get_slot::<FrameRetired>().is_some() {
+        return Ok(v8::null(scope).into());
+    }
+    let Some(parent) = context
+        .get_slot::<FrameParent>()
+        .and_then(|parent| parent.0.to_local(scope))
+    else {
+        return Ok(v8::null(scope).into());
+    };
+    if !parent
+        .get_security_token(scope)
+        .strict_equals(context.get_security_token(scope))
+    {
+        return Ok(v8::null(scope).into());
+    }
+    Ok(context
+        .get_slot::<FrameHost>()
+        .and_then(|host| host.0.to_local(scope))
+        .map(|host| host.into())
+        .unwrap_or_else(|| v8::null(scope).into()))
 }
 
 #[op2(fast)]
@@ -2436,16 +2525,18 @@ fn op_frame_set_document<'s>(
     if context.get_slot::<FrameRetired>().is_some() {
         return Err(JsErrorBox::generic("iframe document has been replaced"));
     }
-    if context
-        .get_slot::<FrameHost>()
-        .is_some_and(|registered| !v8::Local::new(scope, &registered.0).strict_equals(host.into()))
-    {
+    if context.get_slot::<FrameHost>().is_some_and(|registered| {
+        registered
+            .0
+            .to_local(scope)
+            .is_none_or(|registered| !registered.strict_equals(host.into()))
+    }) {
         return Err(JsErrorBox::generic("iframe host cannot be replaced"));
     }
     let parent = context
         .get_slot::<FrameParent>()
         .ok_or_else(|| JsErrorBox::generic("target is not a child frame"))?;
-    let parent = v8::Local::new(scope, &parent.0);
+    let parent = crate::context_ownership::local(scope, &parent.0);
     let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
     let caller = v8::Local::new(scope, caller);
     let native_parent = parent.global(scope);
@@ -2498,7 +2589,7 @@ fn op_frame_set_document<'s>(
     sandbox.opaque |= data_document || document.is_none() && window_is_opaque(scope, parent);
     context.set_slot(Rc::new(sandbox));
     context.set_slot(Rc::new(FrameConfigured));
-    context.set_slot(Rc::new(FrameHost(v8::Global::new(scope, host))));
+    context.set_slot(Rc::new(FrameHost(v8::Weak::new(scope, host))));
     if let Some(document) = &document {
         set_origin_token(scope, context, &document.url);
         metadata["url"] = serde_json::Value::String(document.url.clone());
@@ -2557,6 +2648,7 @@ fn op_frame_set_document<'s>(
             let mut policy = handle.policy.borrow_mut();
             policy.header = inherited.clone();
             policy.active = inherited;
+            policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
         }
         handle
     };
@@ -2631,7 +2723,10 @@ fn op_frame_set_document<'s>(
         let name = v8::String::new(scope, "isFrame").unwrap();
         let flag = v8::Boolean::new(scope, true);
         namespace.set(scope, name.into(), flag.into());
-        context.set_slot(Rc::new(FrameEnvironment(v8::Global::new(scope, namespace))));
+        context.set_slot(Rc::new(FrameEnvironment(
+            crate::context_ownership::object(scope, namespace)
+                .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
+        )));
     }
     install_environment(scope, core).map_err(JsErrorBox::generic)?;
     let secure = secure_context(scope);
@@ -2640,10 +2735,14 @@ fn op_frame_set_document<'s>(
         .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
     crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
     crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
     #[cfg(turbo_surf_native_proxy)]
     window_proxy::capture_exception(scope);
     if let Some(namespace) = frame_namespace(scope) {
-        context.set_slot(Rc::new(FrameEnvironment(v8::Global::new(scope, namespace))));
+        context.set_slot(Rc::new(FrameEnvironment(
+            crate::context_ownership::object(scope, namespace)
+                .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
+        )));
     }
     metadata["base"] = serde_json::Value::String(document_base);
     let metadata_location = metadata
@@ -2679,7 +2778,7 @@ fn op_retire_frame<'s>(
     let parent = context
         .get_slot::<FrameParent>()
         .ok_or_else(|| JsErrorBox::generic("target is not a child frame"))?;
-    let parent = v8::Local::new(scope, &parent.0);
+    let parent = crate::context_ownership::local(scope, &parent.0);
     let caller = scope.get_entered_or_microtask_context();
     if !owner.strict_equals(parent.global(scope).into())
         || !caller
@@ -2697,7 +2796,10 @@ fn op_retire_frame<'s>(
 #[op2(fast)]
 fn op_set_frame_navigator(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
     if let Some(context) = callback.get_creation_context(scope) {
-        context.set_slot(Rc::new(FrameNavigator(v8::Global::new(scope, callback))));
+        let Some(callback) = crate::context_ownership::function(scope, callback) else {
+            return;
+        };
+        context.set_slot(Rc::new(FrameNavigator(callback)));
     }
 }
 
@@ -2720,11 +2822,11 @@ fn frame_children<'s>(
                 return None;
             }
             let parent = context.get_slot::<FrameParent>()?;
-            if v8::Local::new(scope, &parent.0) != owner {
+            if crate::context_ownership::local(scope, &parent.0) != owner {
                 return None;
             }
             let host = context.get_slot::<FrameHost>()?;
-            let host = v8::Local::new(scope, &host.0);
+            let host = host.0.to_local(scope)?;
             crate::browser_env::is_light_document_node(scope, host).then_some(context)
         })
         .collect()
@@ -2751,13 +2853,15 @@ fn op_frame_move_candidates<'s>(
         let Some(parent) = context.get_slot::<FrameParent>() else {
             continue;
         };
-        if Some(v8::Local::new(scope, &parent.0)) != owner {
+        if Some(crate::context_ownership::local(scope, &parent.0)) != owner {
             continue;
         }
         let Some(host) = context.get_slot::<FrameHost>() else {
             continue;
         };
-        let host = v8::Local::new(scope, &host.0);
+        let Some(host) = host.0.to_local(scope) else {
+            continue;
+        };
         for index in 0..nodes.length() {
             let Some(node) = nodes
                 .get_index(scope, index)
@@ -2830,6 +2934,11 @@ fn op_native_location_installed(scope: &mut v8::PinScope) -> bool {
 #[op2(fast)]
 fn op_native_window_proxy() -> bool {
     cfg!(turbo_surf_native_proxy)
+}
+
+#[op2(fast)]
+fn op_window_message_pending(state: &mut OpState) -> bool {
+    !state.borrow::<FrameContexts>().messages.is_empty()
 }
 
 #[op2(fast)]
@@ -2936,6 +3045,7 @@ fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'
                 }
                 crate::message_ports::retire_context(scope, context);
                 context.set_slot(Rc::new(FrameRetired));
+                crate::context_ownership::release_parent(scope, context);
                 #[cfg(turbo_surf_native_proxy)]
                 JsRuntime::detach_module_context(scope, context);
                 break;
@@ -2943,7 +3053,7 @@ fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'
             let Some(parent) = ancestor.get_slot::<FrameParent>() else {
                 break;
             };
-            ancestor = v8::Local::new(scope, &parent.0);
+            ancestor = crate::context_ownership::local(scope, &parent.0);
         }
     }
     let state = JsRuntime::op_state_from(scope);
@@ -3014,7 +3124,10 @@ fn allocate_frame<'s>(
     crate::script_inventory::register_frame(scope, context);
     context.set_slot(Rc::new(FrameContextMarker));
     context.set_slot(Rc::new(FrameDepth(depth)));
-    context.set_slot(Rc::new(FrameParent(v8::Global::new(scope, parent))));
+    context.set_slot(Rc::new(FrameParent(
+        crate::context_ownership::parent(scope, context, parent)
+            .ok_or_else(|| JsErrorBox::generic("Frame parent ownership interrupted"))?,
+    )));
     context.set_security_token(token);
     // deno_core's isolate-wide Promise/import callbacks use these public slots.
     // Borrow the main realm's allocation; child contexts never own/decrement it.
@@ -3038,6 +3151,7 @@ fn allocate_frame<'s>(
                 let mut policy = csp.policy.borrow_mut();
                 policy.header = inherited.clone();
                 policy.active = inherited;
+                policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
             }
             context.set_slot(Rc::new(csp.clone()));
             JsRuntime::op_state_from(scope)
@@ -3061,12 +3175,16 @@ fn allocate_frame<'s>(
             .and_then(|v| v.to_object(scope))
             .ok_or_else(|| {
                 context.set_slot(Rc::new(FrameRetired));
+                crate::context_ownership::release_parent(scope, context);
                 JsErrorBox::generic("frame initialization was interrupted")
             })?;
         let name = v8::String::new(scope, "isFrame").unwrap();
         let flag = v8::Boolean::new(scope, true);
         namespace.set(scope, name.into(), flag.into());
-        context.set_slot(Rc::new(FrameEnvironment(v8::Global::new(scope, namespace))));
+        context.set_slot(Rc::new(FrameEnvironment(
+            crate::context_ownership::object(scope, namespace)
+                .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
+        )));
         let depth_key = v8::String::new(scope, "__depth").unwrap();
         let depth = v8::Integer::new_from_unsigned(scope, depth);
         global.set(scope, depth_key.into(), depth.into());
@@ -3077,6 +3195,7 @@ fn allocate_frame<'s>(
             .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
         crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
         crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+        crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
         #[cfg(turbo_surf_native_proxy)]
         window_proxy::capture_exception(scope);
         run_frame_init_script(scope)?;
@@ -3285,16 +3404,17 @@ fn frame_document_url(scope: &mut v8::PinScope, state: &OpState) -> String {
         .unwrap_or_else(|| state.borrow::<Base>().0.clone())
 }
 
-struct DocumentRuntimeStateAccessor(v8::Global<v8::Function>);
+struct DocumentRuntimeStateAccessor(v8::Weak<v8::Function>);
 #[op2(fast)]
 fn op_set_document_runtime_state_accessor(
     scope: &mut v8::PinScope,
     callback: v8::Local<v8::Function>,
 ) {
     if let Some(context) = callback.get_creation_context(scope) {
-        context.set_slot(Rc::new(DocumentRuntimeStateAccessor(v8::Global::new(
-            scope, callback,
-        ))));
+        let Some(callback) = crate::context_ownership::function(scope, callback) else {
+            return;
+        };
+        context.set_slot(Rc::new(DocumentRuntimeStateAccessor(callback)));
     }
 }
 #[op2(reentrant)]
@@ -3315,7 +3435,7 @@ fn document_runtime_state<'s>(
     let accessor = context
         .get_slot::<DocumentRuntimeStateAccessor>()
         .ok_or_else(|| JsErrorBox::type_error("Document context unavailable"))?;
-    let callback = v8::Local::new(scope, &accessor.0);
+    let callback = crate::context_ownership::local(scope, &accessor.0);
     let receiver = v8::undefined(scope).into();
     callback
         .call(scope, receiver, &[document.into()])
@@ -3457,7 +3577,7 @@ fn frame_cookie_site_is_opaque<'s>(
                     .any(|origin| !turbo_surf_core::request_context::same_site(origin, top))
             });
         };
-        context = v8::Local::new(scope, &parent.0);
+        context = crate::context_ownership::local(scope, &parent.0);
     }
     true
 }
@@ -3650,12 +3770,15 @@ fn op_storage_id(
         .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))
 }
 
-struct RuntimeCore(v8::Global<v8::Object>);
+struct RuntimeCore(v8::Weak<v8::Object>);
 
 #[op2(fast)]
 fn op_capture_runtime_core(scope: &mut v8::PinScope, core: v8::Local<v8::Object>) {
     let context = scope.get_current_context();
-    context.set_slot(Rc::new(RuntimeCore(v8::Global::new(scope, core))));
+    let Some(owned_core) = crate::context_ownership::object(scope, core) else {
+        return;
+    };
+    context.set_slot(Rc::new(RuntimeCore(owned_core)));
     let core_value: v8::Local<v8::Value> = core.into();
     JsRuntime::op_state_from(scope)
         .borrow_mut()
@@ -3689,8 +3812,8 @@ fn install_environment<'s>(
 }
 
 struct HostInputDriver {
-    input: v8::Global<v8::Function>,
-    cancel: v8::Global<v8::Function>,
+    input: v8::Weak<v8::Function>,
+    cancel: v8::Weak<v8::Function>,
 }
 
 #[op2(fast)]
@@ -3702,10 +3825,13 @@ fn op_set_host_input_driver(
     let context = callback
         .get_creation_context(scope)
         .expect("host input callback realm");
-    context.set_slot(Rc::new(HostInputDriver {
-        input: v8::Global::new(scope, callback),
-        cancel: v8::Global::new(scope, cancel),
-    }));
+    let Some(input) = crate::context_ownership::function(scope, callback) else {
+        return;
+    };
+    let Some(cancel) = crate::context_ownership::function(scope, cancel) else {
+        return;
+    };
+    context.set_slot(Rc::new(HostInputDriver { input, cancel }));
 }
 
 #[op2(nofast, reentrant)]
@@ -3745,11 +3871,13 @@ deno_core::extension!(
         op_frame_host_helper,
         op_windows_same_origin,
         op_window_parent,
+        op_frame_owner_element,
         op_window_top,
         op_window_post_message,
         op_frame_set_document,
         op_retire_frame,
         op_window_active,
+        op_window_message_pending,
         op_native_window_proxy,
         op_native_location_installed,
         op_window_opaque,
@@ -4411,6 +4539,7 @@ globalThis.queueMicrotask = (fn) => globalThis.setTimeout(fn, 0);
 __G.runTimers = (max = 100000) => {
   let n = 0;
   while (__timers.length && n < max) {
+    if(ops.op_window_message_pending())break;
     // Earliest-due first.
     let bi = 0;
     for (let i = 1; i < __timers.length; i++) if (__timers[i].due < __timers[bi].due) bi = i;
@@ -4660,7 +4789,16 @@ const __resourceFailure=error=>__fetchFailures.get(error);
   };
   project(Response,responses,["status","statusText","headers","ok","type","url","redirected"]);
   globalThis.Request = class Request {
-    constructor(input,init=undefined){if(!arguments.length)throw new TypeError("Request requires an input");init=init||{};const previous=requests.get(input),integrity=init.integrity,absolute=new URL(previous?previous.url:String(input),document.baseURI||location.href);if(absolute.username||absolute.password)throw new TypeError("Request URL cannot include credentials");const requested=String(init.method||previous?.method||"GET");if(!/^[!#$%&'*+.^_`|~0-9a-zA-Z-]+$/.test(requested)||["CONNECT","TRACE","TRACK"].includes(requested.toUpperCase()))throw new TypeError("Invalid request method");const method=["DELETE","GET","HEAD","OPTIONS","POST","PUT"].includes(requested.toUpperCase())?requested.toUpperCase():requested;const raw=init.body!==undefined?init.body:previous?copyBody(previous.body):null;if(raw!=null&&["GET","HEAD"].includes(method))throw new TypeError("GET and HEAD cannot have bodies");const headers=new Headers(init.headers||previous?.headers);addContentType(headers,raw);const mode=init.mode||previous?.mode||"cors",credentials=init.credentials||previous?.credentials||"same-origin",cache=init.cache||previous?.cache||"default",redirect=init.redirect||previous?.redirect||"follow";if(!["cors","no-cors","same-origin"].includes(mode)||!["omit","same-origin","include"].includes(credentials)||!["default","no-store","reload","no-cache","force-cache","only-if-cached"].includes(cache)||!["follow","error","manual"].includes(redirect)||cache==="only-if-cached"&&mode!=="same-origin")throw new TypeError("Invalid request option");if(mode==="no-cors"&&!["GET","HEAD","POST"].includes(method))throw new TypeError("Invalid no-cors request method");__setHeadersGuard(headers,mode==="no-cors"?"request-no-cors":"request");requests.set(this,{url:absolute.href,method,headers,body:bodyState(raw),mode,credentials,cache,redirect,referrer:init.referrer??previous?.referrer??"about:client",referrerPolicy:init.referrerPolicy??previous?.referrerPolicy??"",integrity:__String(integrity!==undefined?integrity:previous?.integrity??""),keepalive:!!(init.keepalive??previous?.keepalive),signal:init.signal||previous?.signal||new AbortController().signal,destination:"",duplex:"half",targetAddressSpace:init.targetAddressSpace??previous?.targetAddressSpace??"unknown",isHistoryNavigation:false,isReloadNavigation:false});}
+    constructor(input,init=undefined){if(!arguments.length)throw new TypeError("Request requires an input");init=init||{};const previous=requests.get(input),integrity=init.integrity,absolute=new URL(previous?previous.url:String(input),document.baseURI||location.href);if(absolute.username||absolute.password)throw new TypeError("Request URL cannot include credentials");const requested=String(init.method||previous?.method||"GET");if(!/^[!#$%&'*+.^_`|~0-9a-zA-Z-]+$/.test(requested)||["CONNECT","TRACE","TRACK"].includes(requested.toUpperCase()))throw new TypeError("Invalid request method");const method=["DELETE","GET","HEAD","OPTIONS","POST","PUT"].includes(requested.toUpperCase())?requested.toUpperCase():requested;const raw=init.body!==undefined?init.body:previous?copyBody(previous.body):null;if(raw!=null&&["GET","HEAD"].includes(method))throw new TypeError("GET and HEAD cannot have bodies");const headers=new Headers(init.headers||previous?.headers);addContentType(headers,raw);const mode=init.mode||previous?.mode||"cors",credentials=init.credentials||previous?.credentials||"same-origin",cache=init.cache||previous?.cache||"default",redirect=init.redirect||previous?.redirect||"follow";if(!["cors","no-cors","same-origin"].includes(mode)||!["omit","same-origin","include"].includes(credentials)||!["default","no-store","reload","no-cache","force-cache","only-if-cached"].includes(cache)||!["follow","error","manual"].includes(redirect)||cache==="only-if-cached"&&mode!=="same-origin")throw new TypeError("Invalid request option");if(mode==="no-cors"&&!["GET","HEAD","POST"].includes(method))throw new TypeError("Invalid no-cors request method");__setHeadersGuard(headers,mode==="no-cors"?"request-no-cors":"request");
+      const referrerPolicy=__String(init.referrerPolicy??previous?.referrerPolicy??"");
+      if(!["","no-referrer","no-referrer-when-downgrade","same-origin","origin","strict-origin","origin-when-cross-origin","strict-origin-when-cross-origin","unsafe-url"].includes(referrerPolicy))throw new TypeError("Invalid referrer policy");
+      let referrer=__String(init.referrer??previous?.referrer??"about:client");
+      if(referrer!==""&&referrer!=="about:client"){
+        const referrerUrl=new URL(referrer,ops.op_document_request_url());
+        const documentUrl=new URL(ops.op_document_request_url());
+        referrer=referrerUrl.origin===documentUrl.origin?referrerUrl.href:"about:client";
+      }
+      requests.set(this,{url:absolute.href,method,headers,body:bodyState(raw),mode,credentials,cache,redirect,referrer,referrerPolicy,integrity:__String(integrity!==undefined?integrity:previous?.integrity??""),keepalive:!!(init.keepalive??previous?.keepalive),signal:init.signal||previous?.signal||new AbortController().signal,destination:"",duplex:"half",targetAddressSpace:init.targetAddressSpace??previous?.targetAddressSpace??"unknown",isHistoryNavigation:false,isReloadNavigation:false});}
     clone(){const value=state(requests,this);return new Request(value.url,{...value,body:copyBody(value.body)});}
   };
   project(Request,requests,["url","method","headers","mode","credentials","cache","redirect","referrer","referrerPolicy","integrity","keepalive","signal","destination","duplex","targetAddressSpace","isHistoryNavigation","isReloadNavigation"]);
@@ -4710,7 +4848,8 @@ const __fetchFromSource = async (url, init, referrerSource) => {
       }
     }
   } catch (_e) {}
-  const initJson = __stringify({ method: o.method, headers: hdrs || undefined, body,
+  const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body,
+    referrer:o.referrer,referrerPolicy:o.referrerPolicy,
     mode: o.mode, credentials: o.credentials, redirect:o.redirect, integrity:o.integrity, destination: o.destination, source, referrer_source:referrerSource,
     opaque_origin: ops.op_window_opaque(__document), ...cookieSite, csp:ops.op_csp_context(__document), nonce:o.nonce });
   // Count in-flight fetches so the hydration/interaction drain doesn't quiesce while a
@@ -4852,7 +4991,6 @@ function __mkObserver(name, withEntries) {
     } } }[name];
   return C;
 }
-globalThis.MutationObserver = __mkObserver("MutationObserver", false);
 globalThis.IntersectionObserver = __mkObserver("IntersectionObserver", true);
 globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
 // V8 clones preserve cycles and built-in types. Supported native keys use a
@@ -5185,6 +5323,7 @@ const __windowPostMessageNative=globalThis.postMessage, __windowPostingApply=Ref
 ops.op_set_host_capabilities({postWindowMessage:(target,message,origin,transfer)=>__windowPostingApply(__windowPostMessageNative,target,[message,origin,transfer])});
 const __windowViews = __interfaceMap("Window.view");
 __G.windowView = (target) => {
+  if (target==null)return null;
   if (ops.op_native_window_proxy()) return target;
   if (ops.op_windows_same_origin(target)) return target;
   if (__windowViews.has(target)) return __windowViews.get(target);
@@ -6057,17 +6196,6 @@ if (typeof globalThis.__name === "undefined") {
 // load/error so the loader resolves. `__G.hydrate()` drives this to quiescence.
 const __EXECUTABLE_TYPES = new Set(["", "text/javascript", "application/javascript", "module"]);
 const __parserScripts = new WeakSet(Array.from(document.querySelectorAll("script")));
-const __scriptAsyncFlags = new WeakMap();
-if (globalThis.HTMLScriptElement?.prototype) {
-  Object.defineProperty(HTMLScriptElement.prototype,"async",{get(){
-    if(__documentType.call(this)!==1 || String(this.tagName)!=="SCRIPT")throw new TypeError("Illegal invocation");
-    return this.hasAttribute("async")||(__scriptAsyncFlags.has(this)?__scriptAsyncFlags.get(this):!__parserScripts.has(this));
-  },set(value){
-    if(__documentType.call(this)!==1 || String(this.tagName)!=="SCRIPT")throw new TypeError("Illegal invocation");
-    __scriptAsyncFlags.set(this,false);
-    if(value)this.setAttribute("async","");else this.removeAttribute("async");
-  },enumerable:true,configurable:true});
-}
 const __resources = new WeakMap();
 const __resourcePromises = new Set();
 const __resourceSheetConstructor = CSSStyleSheet;
@@ -6912,10 +7040,10 @@ __G.domSig = () => {
   __G.executeFrameModule = index => {const element=document.querySelectorAll("script")[index];if(!element)throw new TypeError("Frame module element unavailable");return __G.execScriptEl(element);};
   // Fire the child realm's DOMContentLoaded + load so the frame VM's init runs.
   __G.configureFrame = (metadata, parentWin, hostEl) => {
-    const same = ops.op_windows_same_origin(parentWin);
-    globalThis.parent = frameWindowView(parentWin);
-    globalThis.top = frameWindowView(ops.op_window_top(parentWin));
-    globalThis.frameElement = same ? hostEl : null;
+    for (const [name,read] of [["parent",ops.op_window_parent],["top",ops.op_window_top],["frameElement",ops.op_frame_owner_element]]) {
+      const getter=__documentFunction(function(){if(!ops.op_surf_is_window(this))throw new __exceptionTypeError("Illegal invocation");const value=read(this);return name==="frameElement"?value:frameWindowView(value);},"get "+name,0);
+      Object.defineProperty(globalThis,name,{__proto__:null,get:getter,configurable:true,enumerable:true});
+    }
     globalThis.__depth = metadata.depth;
     __G.setDocumentReadyState("loading");
     globalThis.origin = metadata.origin;
@@ -8684,6 +8812,7 @@ fn make_runtime_with_hints(
             extensions.push(crate::crypto_clone::extension());
             extensions.push(crate::message_ports::extension());
             extensions.push(crate::audio_backend::extension());
+            extensions.push(crate::geometry_backend::extension());
             extensions.push(extension);
             extensions
         },
@@ -8747,7 +8876,10 @@ fn make_runtime_with_hints(
             .get(scope, name.into())
             .and_then(|value| value.to_object(scope))
             .expect("Deno core initialization must provide its private op table");
-        context.set_slot(Rc::new(RuntimeCore(v8::Global::new(scope, core))));
+        context.set_slot(Rc::new(RuntimeCore(
+            crate::context_ownership::object(scope, core)
+                .expect("new runtime owns its private core before guest execution"),
+        )));
         for name in ["Deno", "__bootstrap"] {
             let key = v8::String::new(scope, name).unwrap();
             global.delete(scope, key.into());
@@ -8823,10 +8955,11 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let core = context
             .get_slot::<RuntimeCore>()
             .ok_or("Native crypto core unavailable")?;
-        let core = v8::Local::new(scope, &core.0);
+        let core = crate::context_ownership::local(scope, &core.0);
         install_environment(scope, core.into())?;
         crate::crypto_backend::install(scope, core, trustworthy_url(base))?;
         crate::audio_backend::install(scope, core)?;
+        crate::geometry_backend::install(scope, core)?;
     }
     #[cfg(turbo_surf_native_proxy)]
     {
@@ -9240,6 +9373,15 @@ async fn drain_event_loop_until_completion(
                 .borrow::<ModuleStages>()
                 .0
                 .borrow()
+                .is_empty()
+            {
+                return std::task::Poll::Ready(None);
+            }
+            if !rt
+                .op_state()
+                .borrow()
+                .borrow::<FrameContexts>()
+                .messages
                 .is_empty()
             {
                 return std::task::Poll::Ready(None);
@@ -10622,7 +10764,7 @@ impl PageSession {
                     let driver = context
                         .get_slot::<HostInputDriver>()
                         .ok_or("Host input driver unavailable")?;
-                    let callback = v8::Local::new(scope, &driver.input);
+                    let callback = crate::context_ownership::local(scope, &driver.input);
                     let arguments = deno_core::serde_v8::to_v8(scope, steps)
                         .map_err(|error| error.to_string())?;
                     let receiver = v8::undefined(scope).into();
@@ -10661,7 +10803,7 @@ impl PageSession {
             deno_core::scope!(scope, self.rt);
             let context = scope.get_current_context();
             if let Some(driver) = context.get_slot::<HostInputDriver>() {
-                let callback = v8::Local::new(scope, &driver.cancel);
+                let callback = crate::context_ownership::local(scope, &driver.cancel);
                 let receiver = v8::undefined(scope).into();
                 callback.call(scope, receiver, &[]);
             }
@@ -10670,6 +10812,17 @@ impl PageSession {
             return Err("Host input exceeded the session execution budget".into());
         }
         result.map_err(|_| "Host input exceeded the session execution budget".to_string())?
+    }
+
+    /// Host-only retention diagnostics; never installed on the guest global.
+    #[doc(hidden)]
+    pub fn native_heap_snapshot_for_testing(&mut self) -> Vec<u8> {
+        let mut snapshot = Vec::new();
+        self.rt.v8_isolate().take_heap_snapshot(|chunk| {
+            snapshot.extend_from_slice(chunk);
+            true
+        });
+        snapshot
     }
 
     /// Host-only deterministic collection for native lifecycle contract tests.
@@ -10685,6 +10838,7 @@ impl PageSession {
             deno_core::scope!(scope, &mut self.rt);
             crate::message_ports::sweep(scope);
         }
+        crate::browser_env::sweep_collected_documents();
     }
 
     #[doc(hidden)]

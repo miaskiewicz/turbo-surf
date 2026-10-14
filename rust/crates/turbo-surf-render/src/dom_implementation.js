@@ -2,12 +2,12 @@
   'use strict';
   const g=globalThis,native=g.__domImplementationNative;delete g.__domImplementationNative;
   const make=g[Symbol.for('ts')].makeNativeFunction, define=Object.defineProperty,apply=Reflect.apply,setPrototype=Object.setPrototypeOf;
-  const TypeErrorValue=TypeError,StringValue=String,Exception=g.DOMException,regexTest=RegExp.prototype.test,stringSlice=String.prototype.slice;
-  const invalidDoctype=/[\u0000>\t\n\f\r ]/;
+  const TypeErrorValue=TypeError,StringValue=String,Exception=g.DOMException,regexTest=RegExp.prototype.test,regexExec=RegExp.prototype.exec,stringSlice=String.prototype.slice;
   const string=value=>{if(typeof value==='symbol')throw new TypeErrorValue('Cannot convert a Symbol value to a string');return StringValue(value);};
   const type=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
   const namespaceXML='http://www.w3.org/XML/1998/namespace',namespaceXMLNS='http://www.w3.org/2000/xmlns/';
-  const xmlName=/^[:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}][:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}\-\.0-9\u00b7\u0300-\u036f\u203f-\u2040]*$/u;
+  const xmlName=/^[:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}][:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}\-.0-9\u00b7\u0300-\u036f\u203f-\u2040]*$/u;
+  define(xmlName,'exec',{__proto__:null,value:regexExec});
   function qualified(namespace,name) {
     if(!apply(regexTest,xmlName,[name]))throw new Exception('Invalid element name','InvalidCharacterError');
     let colon=-1;
@@ -29,7 +29,10 @@
   method('createDocumentType',3,function(name,publicId,systemId){
     native('check',this);if(arguments.length<3)throw new TypeErrorValue('createDocumentType requires 3 arguments');
     name=string(name);publicId=string(publicId);systemId=string(systemId);
-    if(apply(regexTest,invalidDoctype,[name]))throw new Exception('Invalid doctype name','InvalidCharacterError');
+    for(let index=0;index<name.length;index++){
+      const character=name[index];
+      if(character==='\0'||character==='>'||character==='\t'||character==='\n'||character==='\f'||character==='\r'||character===' ')throw new Exception('Invalid doctype name','InvalidCharacterError');
+    }
     return native('doctype',this,name,publicId,systemId);
   });
   method('createDocument',2,function(namespace,name,doctype){

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["vendor/deno_crypto"]
+exclude = ["vendor/deno_crypto", "vendor/rusty_v8"]
 members = [
     "crates/turbo-surf-core",
     "crates/turbo-surf-napi",
@@ -32,6 +32,7 @@ lto = "thin"
 # Workspace patches do not propagate to crates.io consumers: library publishing
 # remains blocked until these APIs are published or a distributable fork is reviewed.
 [patch.crates-io]
+v8 = { path = "vendor/rusty_v8" }
 deno_crypto = { path = "vendor/deno_crypto" }
 wreq = { git = "https://github.com/0x676e67/wreq", rev = "c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5" }
 wreq-util = { git = "https://github.com/0x676e67/wreq-util", rev = "5715529002738f46eea86a7271f918f9374d3582" }

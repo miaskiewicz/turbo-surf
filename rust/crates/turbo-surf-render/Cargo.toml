@@ -27,6 +27,8 @@ deno_error = "=0.7.1"
 # would make the DOM handles incompatible with the runtime's context.
 v8 = { package = "deno_v8", version = "=0.4.0" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.5.3" }
+# Public live-tree snapshots preserve source provenance without HTML serialization.
+turbo-html2pdf-core = "0.3.5"
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
 # fetch backend, so downstream non-binary consumers (the PyO3 wheel) avoid its
 # extra transport build. V8, native crypto and audio still require native toolchains.

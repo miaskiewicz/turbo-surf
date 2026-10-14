@@ -32,6 +32,9 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   `src/element_relations.rs`, `src/html_text.rs`, `src/html_text.js`,
   `src/html_popover.js`, `src/html_popover.rs`, `src/collection_records.rs`, `src/css_policy.rs`, `src/event_handlers.rs`, `src/event_brands.rs`, `src/event_listeners.rs`, `src/event_listeners.js`,
   `src/dom_mutations.rs`, `src/dom_adoption_probe.js`, `src/dom_adoption_chrome155.json`, `src/dom_variadic_errors_probe.js`, `src/dom_variadic_errors_chrome155.json`, `src/dom_projection_tests.rs`, `src/range_contents{.rs,.js}`, `src/range_probe.js`, `src/range_chrome155.json`, `src/css_adoption_tests.rs`, `src/css_adoption_probe.js`, `src/css_adoption_ownership_probe.js`, `src/css_adoption_chrome155.json`, `src/css_adoption_ownership_chrome155.json`, `src/css_live_tests.rs`, `src/css_live_probe.js`, `src/css_live_chrome155.json`, `src/range_live.rs`, `src/range_live_probe.js`, `src/range_live_chrome155.json`, `src/document_xpath{.rs,.js}`, `src/xpath_provider/` and `src/browser_sanitizer_default.json`
+  and `src/dom_ownership.rs`, `src/realm_ownership.rs`, `src/ownership_guard_tests.rs`,
+  `src/mutation_observers{.rs,.js}`, its tests/probe/Chrome control
+  and `src/script_state.rs`, its preparation probe/Chrome control
   — re-vendor from turbo-test's committed HEAD via
   `rust/crates/turbo-surf-render/scripts/vendor-browser-env.sh`.
 

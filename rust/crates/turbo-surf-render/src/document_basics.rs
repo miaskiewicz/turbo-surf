@@ -249,6 +249,7 @@ pub fn adopt<'s>(
                 tree.remove_child(parent, source_handle);
             }
         });
+        mutation_observers::flush(scope);
         return Ok(node);
     }
     let mapping = {
@@ -258,7 +259,7 @@ pub fn adopt<'s>(
             .ok_or("Document tree unavailable")?;
         mapping
     };
-    let (cache, styles, listeners, nonces, modes, handlers) = {
+    let (cache, styles, listeners, nonces, modes, handlers, scripts) = {
         let _source = DomScope::for_object(scope, node);
         html_popover::attribute_node_change(scope, source_handle, None);
         html_popover::disconnect(scope, source_handle, true);
@@ -271,8 +272,10 @@ pub fn adopt<'s>(
                 tree.remove_child(parent, source_handle);
             }
         });
+        mutation_observers::flush(scope);
         let mut cache = Vec::new();
         let mut nonces = Vec::new();
+        let mut scripts = Vec::new();
         let mut modes = Vec::new();
         DOM.with(|dom| {
             let mut dom = dom.borrow_mut();
@@ -280,6 +283,9 @@ pub fn adopt<'s>(
             for (old, new) in &mapping {
                 if let Some(value) = state.cache.remove(old) {
                     cache.push((*new, value));
+                }
+                if let Some(value) = state.scripts.remove(old) {
+                    scripts.push((*new, value));
                 }
                 if let Some(value) = state.nonces.remove(old) {
                     nonces.push((*new, value));
@@ -289,6 +295,17 @@ pub fn adopt<'s>(
                 }
             }
         });
+        let ownership = DOM.with(|state| {
+            state
+                .borrow()
+                .as_ref()
+                .and_then(|state| state.ownership.clone())
+        });
+        if let Some(ownership) = ownership {
+            for (old, _) in &mapping {
+                ownership.borrow_mut().forget(scope, old.raw());
+            }
+        }
         let styles = STYLE.with(|styles| {
             let mut styles = styles.borrow_mut();
             mapping
@@ -318,12 +335,14 @@ pub fn adopt<'s>(
             }
         });
         let handlers = event_handlers::take_adopted_sources(&mapping);
-        (cache, styles, listeners, nonces, modes, handlers)
+        (cache, styles, listeners, nonces, modes, handlers, scripts)
     };
     let _target = DomScope::for_object(scope, document);
     event_handlers::restore_adopted_sources(handlers);
     for (handle, object) in cache {
-        let local = v8::Local::new(scope, &object);
+        let Some(local) = object.to_local(scope) else {
+            continue;
+        };
         let handle_value = v8::Integer::new_from_unsigned(scope, handle.raw());
         let id = v8::BigInt::new_from_u64(scope, target_id);
         local.set_internal_field(0, handle_value.into());
@@ -335,12 +354,14 @@ pub fn adopt<'s>(
                 .cache
                 .insert(handle, object);
         });
+        dom_ownership::observe(scope, handle, local);
     }
     STYLE.with(|state| state.borrow_mut().extend(styles));
     LISTENERS.with(|state| state.borrow_mut().extend(listeners));
     DOM.with(|dom| {
         let mut dom = dom.borrow_mut();
         let state = dom.as_mut().unwrap();
+        state.scripts.extend(scripts);
         state.nonces.extend(nonces);
         state.shadow_modes.extend(modes);
     });
@@ -446,14 +467,16 @@ pub fn dispatch<'s>(
                     .as_ref()
                     .and_then(|dom| dom.basics_state.clone())
             });
-            let state = existing
-                .map(|state| v8::Local::new(scope, state))
-                .unwrap_or_else(|| {
-                    let state = v8::Object::new(scope);
-                    let stored = v8::Global::new(scope, state);
-                    DOM.with(|dom| dom.borrow_mut().as_mut().unwrap().basics_state = Some(stored));
-                    state
-                });
+            let state = if let Some(existing) = existing {
+                dom_ownership::local(scope, existing)
+            } else {
+                let state = v8::Object::new(scope);
+                let Some(stored) = dom_ownership::helper_object(scope, state) else {
+                    return;
+                };
+                DOM.with(|dom| dom.borrow_mut().as_mut().unwrap().basics_state = Some(stored));
+                state
+            };
             rv.set(state.into());
         }
         "move" if matches!(kind, 1 | 9 | 11) => {

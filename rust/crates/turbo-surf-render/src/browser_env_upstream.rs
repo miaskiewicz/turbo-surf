@@ -13,6 +13,8 @@
 
 #[path = "cssom_parser.rs"]
 mod cssom_parser;
+#[path = "dom_ownership.rs"]
+mod dom_ownership;
 
 #[path = "collection_records.rs"]
 mod collection_records;
@@ -24,12 +26,22 @@ mod event_brands;
 mod event_handlers;
 #[path = "event_listeners.rs"]
 mod event_listeners;
+#[path = "script_state.rs"]
+mod script_state;
+pub use script_state::{
+    prepare_script, script_document, script_state, set_document_resource_active, PreparedScript,
+    ScriptState,
+};
+
+#[path = "mutation_observers.rs"]
+mod mutation_observers;
 pub use event_brands::{
     is_native_abort_object, is_native_event, is_native_event_target, native_event_record,
     native_event_target_has_listener, register_native_event_target,
     set_native_event_target_observer, NativeEventTargetObserver,
 };
 pub use event_listeners::capture_window_event_interfaces;
+pub use mutation_observers::{install_mutation_consumer, remove_mutation_consumer};
 
 /// Capture the trusted host timer after the runtime has installed its scheduler.
 /// Guest code cannot install or replace this private lifecycle capability.
@@ -37,9 +49,23 @@ pub fn capture_popover_scheduler(scope: &mut v8::PinScope) {
     html_popover::capture_scheduler(scope);
 }
 
+pub fn clear_context_capabilities(scope: &mut v8::PinScope) {
+    let contexts = DOM_CONTEXTS
+        .try_with(|contexts| contexts.borrow().values().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for context in contexts {
+        if let Some(context) = context.to_local(scope) {
+            context.remove_slot::<EventRecordAccessor>();
+            context.remove_slot::<HostEventDispatcher>();
+            event_listeners::clear_context(context);
+            range_contents::clear_context(context);
+        }
+    }
+}
 pub fn clear_interface_records(isolate: &mut v8::Isolate) {
     collection_records::clear(isolate);
     range_live::clear(isolate);
+    mutation_observers::clear(isolate);
 }
 
 /// Access a host-created interface record in the isolate's private ephemeron registry.
@@ -324,17 +350,21 @@ pub fn dump_missing() {
 struct DomState {
     tree: Tree,
     /// handle → JS node object, for identity (`el === el`).
-    cache: HashMap<Handle, v8::Global<v8::Object>>,
+    cache: HashMap<Handle, v8::Weak<v8::Object>>,
     /// shared element object template (internal_field_count = 2).
     el_template: v8::Global<v8::ObjectTemplate>,
     shadow_modes: HashMap<Handle, String>,
     nonces: HashMap<Handle, String>,
-    basics_state: Option<v8::Global<v8::Object>>,
-    control_clone: Option<v8::Global<v8::Function>>,
+    scripts: HashMap<Handle, ScriptState>,
+    resource_active: bool,
+    basics_state: Option<v8::Weak<v8::Object>>,
+    control_clone: Option<v8::Weak<v8::Function>>,
     css_policy: css_policy::PolicyState,
     event_handlers: event_handlers::State,
     popover: html_popover::State,
     browsing_context: bool,
+    ownership: Option<dom_ownership::Graph>,
+    ownership_dirty: bool,
 }
 
 thread_local! {
@@ -350,7 +380,7 @@ struct DomContextId(u64);
 #[derive(Default)]
 struct SavedDom {
     dom: Option<DomState>,
-    styles: HashMap<Handle, v8::Global<v8::Object>>,
+    styles: HashMap<Handle, v8::Weak<v8::Object>>,
     listeners: HashMap<(Handle, String), Vec<event_listeners::Listener>>,
     active: Option<Handle>,
 }
@@ -359,7 +389,7 @@ thread_local! {
     static DOM_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NEXT_DOM_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
     static OTHER_DOMS: RefCell<HashMap<u64, SavedDom>> = RefCell::new(HashMap::new());
-    static DOM_CONTEXTS: RefCell<HashMap<u64, v8::Global<v8::Context>>> = RefCell::new(HashMap::new());
+    static DOM_CONTEXTS: RefCell<HashMap<u64, v8::Weak<v8::Context>>> = RefCell::new(HashMap::new());
 }
 
 fn take_dom() -> SavedDom {
@@ -482,6 +512,8 @@ pub fn parse_html_document<'s>(
     let template = v8::Global::new(scope, template);
     DOM.with(|dom| {
         *dom.borrow_mut() = Some(DomState {
+            scripts: script_state::initial(&tree),
+            resource_active: false,
             nonces: initial_nonces(&tree),
             tree,
             cache: HashMap::new(),
@@ -493,10 +525,13 @@ pub fn parse_html_document<'s>(
             event_handlers: Default::default(),
             popover: Default::default(),
             browsing_context: false,
+            ownership: None,
+            ownership_dirty: true,
         })
     });
+    script_state::initialize_inert();
     let context = scope.get_current_context();
-    let context = v8::Global::new(scope, context);
+    let context = v8::Weak::new(scope, context);
     DOM_CONTEXTS.with(|contexts| {
         contexts.borrow_mut().insert(id, context);
     });
@@ -633,6 +668,7 @@ pub fn import_document_node<'s>(
     let clone = wrap(scope, node);
     copy_control_state(scope, source_node, clone, deep);
     document_basics::copy_nonces(scope, source_node, clone, deep);
+    script_state::copy(scope, source_node, clone, deep);
     Ok(clone)
 }
 
@@ -653,7 +689,7 @@ fn copy_control_state<'s>(
     let Some(function) = function else {
         return;
     };
-    let function = v8::Local::new(scope, function);
+    let function = dom_ownership::local(scope, function);
     let Some(context) = function.get_creation_context(scope) else {
         return;
     };
@@ -769,7 +805,7 @@ fn current_node_projector<'s>(
 ) -> Option<v8::Local<'s, v8::Function>> {
     let root = with_tree(Tree::root)?;
     let document = DOM.with(|dom| dom.borrow().as_ref()?.cache.get(&root).cloned())?;
-    let document = v8::Local::new(scope, &document);
+    let document = document.to_local(scope)?;
     let key = node_projector_key(scope)?;
     document
         .get_private(scope, key)
@@ -815,34 +851,61 @@ fn capture_node_projector(scope: &mut v8::PinScope) {
     let Some(document) = DOM.with(|dom| dom.borrow().as_ref()?.cache.get(&root).cloned()) else {
         return;
     };
-    let document = v8::Local::new(scope, &document);
+    let Some(document) = document.to_local(scope) else {
+        return;
+    };
     set_node_projector(scope, document, function);
 }
 
 /// Wrap a handle as a JS node object (cached for identity).
 fn wrap<'s>(scope: &mut v8::PinScope<'s, '_>, handle: Handle) -> v8::Local<'s, v8::Object> {
-    if scope.is_execution_terminating() {
-        return v8::Object::new(scope);
+    let caught = std::pin::pin!(v8::TryCatch::new(scope));
+    let scope = &mut caught.init();
+    let object = wrap_inner(scope, handle);
+    if scope.has_caught() {
+        // Weak localization may materialize an interrupt before projection.
+        // Never publish the partially initialized wrapper into the identity cache.
+        DOM.with(|state| {
+            if let Some(state) = state.borrow_mut().as_mut() {
+                state.cache.remove(&handle);
+                state.ownership_dirty = true;
+                if let Some(graph) = &state.ownership {
+                    graph.borrow_mut().invalidate_wrapper(handle.raw());
+                }
+            }
+        });
+        scope.rethrow();
     }
-    if let Some(g) = DOM.with(|d| {
-        d.borrow()
-            .as_ref()
-            .and_then(|s| s.cache.get(&handle).cloned())
+    object
+}
+fn wrap_inner<'s>(scope: &mut v8::PinScope<'s, '_>, handle: Handle) -> v8::Local<'s, v8::Object> {
+    script_state::observe(handle);
+    if scope.is_execution_terminating() {
+        let context = scope.get_current_context();
+        return context.global(scope);
+    }
+    if let Some(object) = DOM.with(|d| {
+        d.borrow().as_ref().and_then(|state| {
+            state
+                .cache
+                .get(&handle)
+                .and_then(|weak| weak.to_local(scope))
+        })
     }) {
-        return v8::Local::new(scope, &g);
+        return object;
     }
     let owner = DOM_CONTEXTS.with(|d| d.borrow().get(&DOM_ID.with(|id| id.get())).cloned());
     let context = owner
         .as_ref()
-        .map(|owner| v8::Local::new(scope, owner))
+        .map(|owner| dom_ownership::local(scope, owner))
         .unwrap_or_else(|| scope.get_current_context());
     let scope = &mut v8::ContextScope::new(scope, context);
     let tmpl_g = DOM.with(|d| d.borrow().as_ref().unwrap().el_template.clone());
-    let tmpl = v8::Local::new(scope, &tmpl_g);
+    let tmpl = dom_ownership::local(scope, &tmpl_g);
     let Some(obj) = tmpl.new_instance(scope) else {
-        // V8 already has an exception or termination pending. The callback's
-        // result is discarded; do not turn a guest interruption into a Rust panic.
-        return v8::Object::new(scope);
+        // Preserve the pending guest exception/termination without a Rust panic.
+        let context = scope.get_current_context();
+        return context.global(scope);
     };
     let h = v8::Integer::new_from_unsigned(scope, handle.raw());
     obj.set_internal_field(0, h.into());
@@ -887,12 +950,13 @@ fn wrap<'s>(scope: &mut v8::PinScope<'s, '_>, handle: Handle) -> v8::Local<'s, v
     if scope.is_execution_terminating() {
         return obj;
     }
-    let g = v8::Global::new(scope, obj);
+    let g = v8::Weak::new(scope, obj);
     DOM.with(|d| {
         if let Some(s) = d.borrow_mut().as_mut() {
             s.cache.insert(handle, g);
         }
     });
+    dom_ownership::observe(scope, handle, obj);
     // Projection runs after caching, since accessors such as ownerDocument and
     // childNodes may synchronously wrap this node again.
     if let Some(function) = projector {
@@ -968,7 +1032,20 @@ fn with_tree<R>(f: impl FnOnce(&Tree) -> R) -> Option<R> {
     DOM.with(|d| d.borrow().as_ref().map(|s| f(&s.tree)))
 }
 fn with_tree_mut<R>(f: impl FnOnce(&mut Tree) -> R) -> Option<R> {
-    DOM.with(|d| d.borrow_mut().as_mut().map(|s| f(&mut s.tree)))
+    let recording = mutation_observers::recording();
+    DOM.with(|d| {
+        d.borrow_mut().as_mut().map(|s| {
+            if mutation_observers::suppressed() {
+                s.tree.stop_recording();
+            } else if recording {
+                s.tree.start_recording();
+            } else {
+                s.tree.stop_recording();
+            }
+            s.ownership_dirty = true;
+            f(&mut s.tree)
+        })
+    })
 }
 
 // ---- element methods -------------------------------------------------------------------------
@@ -1509,7 +1586,7 @@ fn el_replace_children<'s>(
         return;
     };
     let removed = with_tree(|tree| tree.children(h)).unwrap_or_default();
-    dom_mutations::insert_inputs(scope, h, &nodes, None, &removed);
+    dom_mutations::replace_inputs(scope, h, &nodes, &removed);
 }
 fn el_insert_adjacent_element<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -1626,7 +1703,19 @@ fn el_insert_adjacent_html<'s>(
     with_tree_mut(|tree| tree.insert_adjacent_html(target, &position, &html));
     if let Some((parent, index, previous_count)) = location {
         let count = with_tree(|tree| tree.children(parent).len()).unwrap_or(previous_count);
-        range_live::inserting(scope, parent, index, count.saturating_sub(previous_count));
+        let added = count.saturating_sub(previous_count);
+        for child in with_tree(|tree| {
+            tree.children(parent)
+                .into_iter()
+                .skip(index)
+                .take(added)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+        {
+            script_state::parsed(child, true);
+        }
+        range_live::inserting(scope, parent, index, added);
     }
 }
 fn el_toggle_attribute<'s>(
@@ -2462,6 +2551,9 @@ fn set_inner_html(
     html_popover::disconnect(scope, h, false);
     range_live::replacing_children(scope, h);
     with_tree_mut(|t| t.set_inner_html(h, &html));
+    for child in with_tree(|tree| tree.children(h)).unwrap_or_default() {
+        script_state::parsed(child, true);
+    }
     css_policy::invalidate_sheet(h);
 }
 fn get_outer_html(
@@ -2524,12 +2616,19 @@ fn set_outer_html(
     });
     if let Some((index, previous_count)) = position {
         let count = with_tree(|tree| tree.children(parent).len()).unwrap_or(previous_count - 1);
-        range_live::inserting(
-            scope,
-            parent,
-            index,
-            count.saturating_add(1).saturating_sub(previous_count),
-        );
+        let added = count.saturating_add(1).saturating_sub(previous_count);
+        for child in with_tree(|tree| {
+            tree.children(parent)
+                .into_iter()
+                .skip(index)
+                .take(added)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+        {
+            script_state::parsed(child, true);
+        }
+        range_live::inserting(scope, parent, index, added);
     }
 }
 
@@ -3012,6 +3111,9 @@ fn el_clone_node<'s>(
     let deep = args.get(0).boolean_value(scope);
     if let Some(new_h) = with_tree_mut(|t| clone_subtree(t, h, deep)) {
         document_basics::clone_nonces(h, new_h, deep);
+        let source = wrap(scope, h);
+        let clone = wrap(scope, new_h);
+        script_state::copy(scope, source, clone, deep);
         let node = wrap(scope, new_h);
         // Carry over the source's JS prototype so a cloned control element keeps its interface
         // accessors (type/value/checked/selected). createElement applies these protos, but cloneNode
@@ -3587,9 +3689,9 @@ fn listener_options<'s>(
     .unwrap_or(false);
     event_listeners::options(scope, args, remove, top)
 }
-fn el_add_event_listener(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_add_event_listener<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
@@ -3610,7 +3712,7 @@ fn el_add_event_listener(
     let passive = get_bool_prop(scope, options, "passive");
     let signal = get_prop(scope, options, "signal")
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
-        .map(|value| v8::Global::new(scope, value));
+        .map(|value| v8::Weak::new(scope, value));
     if signal
         .as_ref()
         .is_some_and(|signal| event_listeners::aborted(scope, signal))
@@ -3623,14 +3725,21 @@ fn el_add_event_listener(
         let list = listeners.entry((node, ty.clone())).or_default();
         list.retain(|listener| !listener.removed.get());
         list.iter().any(|listener| {
-            listener.capture == capture && v8::Local::new(scope, &listener.callback).eq(&callback)
+            listener.capture == capture
+                && dom_ownership::local(scope, &listener.callback).eq(&callback)
         })
     });
     if duplicate {
         return;
     }
+    let signal_local = signal.as_ref().and_then(|signal| signal.to_local(scope));
+    let Some(id) = event_listeners::own_listener(scope, args.this(), callback, signal_local) else {
+        return;
+    };
     let mut listener = event_listeners::Listener {
-        callback: v8::Global::new(scope, callback),
+        callback: v8::Weak::new(scope, callback),
+        id,
+        node: v8::Weak::new(scope, args.this()),
         capture,
         once,
         passive,
@@ -3671,7 +3780,7 @@ fn el_remove_event_listener(
         if let Some(list) = listeners.borrow_mut().get_mut(&(node, ty)) {
             list.retain(|listener| {
                 let matching = listener.capture == capture
-                    && v8::Local::new(scope, &listener.callback).eq(&callback);
+                    && dom_ownership::local(scope, &listener.callback).eq(&callback);
                 if matching {
                     listener.removed.set(true);
                     removed.push(listener.clone());
@@ -3686,8 +3795,8 @@ fn el_remove_event_listener(
     }
 }
 
-struct EventRecordAccessor(v8::Global<v8::Function>);
-struct HostEventDispatcher(v8::Global<v8::Function>);
+struct EventRecordAccessor(v8::Weak<v8::Function>);
+struct HostEventDispatcher(v8::Weak<v8::Function>);
 
 fn event_record<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -3695,7 +3804,7 @@ fn event_record<'s>(
 ) -> Option<v8::Local<'s, v8::Object>> {
     let context = event.get_creation_context(scope)?;
     let accessor = context.get_slot::<EventRecordAccessor>()?;
-    let function = v8::Local::new(scope, &accessor.0);
+    let function = dom_ownership::local(scope, &accessor.0);
     let receiver = v8::undefined(scope).into();
     v8::Local::<v8::Object>::try_from(function.call(scope, receiver, &[event.into()])?).ok()
 }
@@ -3749,7 +3858,7 @@ pub fn dispatch_host_event(
         }
     } else if let Some(context) = target.get_creation_context(scope) {
         if let Some(dispatcher) = context.get_slot::<HostEventDispatcher>() {
-            let function = v8::Local::new(scope, &dispatcher.0);
+            let function = dom_ownership::local(scope, &dispatcher.0);
             let receiver = v8::undefined(scope).into();
             function.call(scope, receiver, &[event.into(), target.into()]);
         }
@@ -3934,6 +4043,9 @@ fn el_dispatch_event(
                     listener.removed.set(true);
                     continue;
                 }
+                let Some(callback) = listener.callback.to_local(scope) else {
+                    continue;
+                };
                 if listener.once {
                     listener.removed.set(true);
                     LISTENERS.with(|listeners| {
@@ -3947,7 +4059,6 @@ fn el_dispatch_event(
                 }
                 let passive = v8::Boolean::new(scope, listener.passive);
                 set_prop(scope, record, "passive", passive.into());
-                let callback = v8::Local::new(scope, &listener.callback);
                 let scope = std::pin::pin!(v8::TryCatch::new(scope));
                 let scope = &mut scope.init();
                 if let Ok(function) = v8::Local::<v8::Function>::try_from(callback) {
@@ -4038,7 +4149,10 @@ enum CheckKind {
 fn checkable_kind(h: Handle) -> Option<CheckKind> {
     with_tree(|t| {
         if t.node_type_id(h) != 1
-            || t.tag_name(h).unwrap_or_default().to_ascii_uppercase() != "INPUT"
+            || !t
+                .tag_name(h)
+                .unwrap_or_default()
+                .eq_ignore_ascii_case("INPUT")
         {
             return None;
         }
@@ -4446,7 +4560,7 @@ fn get_owner_document(
 
 thread_local! {
     /// per-element `style` object (a plain JS object React reads/writes); cleared per file.
-    static STYLE: RefCell<HashMap<Handle, v8::Global<v8::Object>>> = RefCell::new(HashMap::new());
+    static STYLE: RefCell<HashMap<Handle, v8::Weak<v8::Object>>> = RefCell::new(HashMap::new());
 }
 
 /// Inline declarations are cached by native node and use the context's shared
@@ -4467,8 +4581,8 @@ fn get_style(
     let Some(h) = handle_of(scope, receiver) else {
         return;
     };
-    if let Some(g) = STYLE.with(|s| s.borrow().get(&h).cloned()) {
-        rv.set(v8::Local::new(scope, &g).into());
+    if let Some(object) = STYLE.with(|s| s.borrow().get(&h).and_then(|weak| weak.to_local(scope))) {
+        rv.set(object.into());
         return;
     }
     let global = context.global(scope);
@@ -4494,7 +4608,8 @@ fn get_style(
     else {
         return;
     };
-    let saved = v8::Global::new(scope, declaration);
+    dom_ownership::link_style(scope, node, declaration);
+    let saved = v8::Weak::new(scope, declaration);
     STYLE.with(|s| {
         s.borrow_mut().insert(h, saved);
     });
@@ -4665,14 +4780,77 @@ fn method_arity(name: &str) -> i32 {
     }
 }
 
-fn method_template<'s>(
+fn ownership_callback<'s, 'i, F>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    args: v8::FunctionCallbackArguments<'s>,
+    rv: v8::ReturnValue<'s>,
+) where
+    F: v8::MapFnTo<v8::FunctionCallback>
+        + for<'a, 'b> Fn(
+            &mut v8::PinScope<'a, 'b>,
+            v8::FunctionCallbackArguments<'a>,
+            v8::ReturnValue<'a>,
+        ),
+{
+    let caught = std::pin::pin!(v8::TryCatch::new(scope));
+    let scope = &mut caught.init();
+    // Source documents can lose their last node edge during adoption. Keep
+    // their actual wrappers/realms alive through private record projection.
+    let _owners = dom_ownership::pin_callback_owners(
+        scope,
+        args.this(),
+        (0..args.length()).map(|index| args.get(index)),
+    );
+    if scope.has_terminated() {
+        scope.rethrow();
+        return;
+    }
+    if scope.is_execution_terminating() {
+        return;
+    }
+    F::get()(scope, args, rv);
+    if scope.has_terminated() {
+        scope.rethrow();
+        return;
+    }
+    if scope.is_execution_terminating() {
+        return;
+    }
+    let exception = scope.exception();
+    if exception.is_some() {
+        scope.reset();
+    }
+    mutation_observers::flush(scope);
+    if scope.has_terminated() || scope.is_execution_terminating() {
+        scope.rethrow();
+        return;
+    }
+    dom_ownership::reconcile_all(scope);
+    if scope.has_terminated() {
+        scope.rethrow();
+        return;
+    }
+    if let Some(exception) = exception {
+        scope.throw_exception(exception);
+        scope.rethrow();
+    }
+}
+fn method_template<'s, F>(
     scope: &mut v8::PinScope<'s, '_>,
     name: &str,
-    f: impl v8::MapFnTo<v8::FunctionCallback>,
-) -> v8::Local<'s, v8::FunctionTemplate> {
+    _f: F,
+) -> v8::Local<'s, v8::FunctionTemplate>
+where
+    F: v8::MapFnTo<v8::FunctionCallback>
+        + for<'a, 'i> Fn(
+            &mut v8::PinScope<'a, 'i>,
+            v8::FunctionCallbackArguments<'a>,
+            v8::ReturnValue<'a>,
+        ),
+{
     // DOM operations are callable methods, not constructors. Enforce that in
     // V8 itself rather than removing a property from a constructible function.
-    let template = v8::FunctionTemplate::builder(f)
+    let template = v8::FunctionTemplate::builder(ownership_callback::<F>)
         .constructor_behavior(v8::ConstructorBehavior::Throw)
         .length(method_arity(name))
         .build(scope);
@@ -4682,12 +4860,15 @@ fn method_template<'s>(
     template
 }
 
-fn bind_method(
-    scope: &mut v8::PinScope,
-    obj: v8::Local<v8::Object>,
-    name: &str,
-    f: impl v8::MapFnTo<v8::FunctionCallback>,
-) {
+fn bind_method<F>(scope: &mut v8::PinScope, obj: v8::Local<v8::Object>, name: &str, f: F)
+where
+    F: v8::MapFnTo<v8::FunctionCallback>
+        + for<'a, 'i> Fn(
+            &mut v8::PinScope<'a, 'i>,
+            v8::FunctionCallbackArguments<'a>,
+            v8::ReturnValue<'a>,
+        ),
+{
     let tmpl = method_template(scope, name, f);
     let func = tmpl.get_function(scope).unwrap();
     let key = v8::String::new(scope, name).unwrap();
@@ -4696,12 +4877,15 @@ fn bind_method(
 }
 
 /// Set a method (FunctionTemplate) on an object template.
-fn tmpl_method(
-    scope: &mut v8::PinScope,
-    tmpl: v8::Local<v8::ObjectTemplate>,
-    name: &str,
-    f: impl v8::MapFnTo<v8::FunctionCallback>,
-) {
+fn tmpl_method<F>(scope: &mut v8::PinScope, tmpl: v8::Local<v8::ObjectTemplate>, name: &str, f: F)
+where
+    F: v8::MapFnTo<v8::FunctionCallback>
+        + for<'a, 'i> Fn(
+            &mut v8::PinScope<'a, 'i>,
+            v8::FunctionCallbackArguments<'a>,
+            v8::ReturnValue<'a>,
+        ),
+{
     let ft = method_template(scope, name, f);
     let key = v8::String::new(scope, name).unwrap();
     tmpl.set(key.into(), ft.into());
@@ -4717,15 +4901,77 @@ fn tmpl_getter(
     tmpl.set_accessor(key.into(), g);
 }
 
-fn tmpl_accessor(
+fn ownership_setter<'s, 'i, S>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    name: v8::Local<'s, v8::Name>,
+    value: v8::Local<'s, v8::Value>,
+    args: v8::PropertyCallbackArguments<'s>,
+    rv: v8::ReturnValue<()>,
+) where
+    S: v8::MapFnTo<v8::AccessorNameSetterCallback>
+        + for<'a, 'b> Fn(
+            &mut v8::PinScope<'a, 'b>,
+            v8::Local<'a, v8::Name>,
+            v8::Local<'a, v8::Value>,
+            v8::PropertyCallbackArguments<'a>,
+            v8::ReturnValue<()>,
+        ),
+{
+    let caught = std::pin::pin!(v8::TryCatch::new(scope));
+    let scope = &mut caught.init();
+    let _owners = dom_ownership::pin_callback_owners(scope, args.holder(), [value]);
+    if scope.has_terminated() {
+        scope.rethrow();
+        return;
+    }
+    if scope.is_execution_terminating() {
+        return;
+    }
+    S::get()(scope, name, value, args, rv);
+    if scope.has_terminated() {
+        scope.rethrow();
+        return;
+    }
+    if scope.is_execution_terminating() {
+        return;
+    }
+    let exception = scope.exception();
+    if exception.is_some() {
+        scope.reset();
+    }
+    mutation_observers::flush(scope);
+    if scope.has_terminated() || scope.is_execution_terminating() {
+        scope.rethrow();
+        return;
+    }
+    dom_ownership::reconcile_all(scope);
+    if scope.has_terminated() {
+        scope.rethrow();
+        return;
+    }
+    if let Some(exception) = exception {
+        scope.throw_exception(exception);
+        scope.rethrow();
+    }
+}
+fn tmpl_accessor<S>(
     scope: &mut v8::PinScope,
     tmpl: v8::Local<v8::ObjectTemplate>,
     name: &str,
     g: impl v8::MapFnTo<v8::AccessorNameGetterCallback>,
-    s: impl v8::MapFnTo<v8::AccessorNameSetterCallback>,
-) {
+    _s: S,
+) where
+    S: v8::MapFnTo<v8::AccessorNameSetterCallback>
+        + for<'a, 'b> Fn(
+            &mut v8::PinScope<'a, 'b>,
+            v8::Local<'a, v8::Name>,
+            v8::Local<'a, v8::Value>,
+            v8::PropertyCallbackArguments<'a>,
+            v8::ReturnValue<()>,
+        ),
+{
     let key = v8::String::new(scope, name).unwrap();
-    tmpl.set_accessor_with_setter(key.into(), g, s);
+    tmpl.set_accessor_with_setter(key.into(), g, ownership_setter::<S>);
 }
 
 /// Build the shared element template (methods + accessors).
@@ -4975,7 +5221,7 @@ fn dom_accessor_dispatch(
     };
     let scope = &mut v8::ContextScope::new(scope, context);
     let template = DOM.with(|d| d.borrow().as_ref().unwrap().el_template.clone());
-    let template = v8::Local::new(scope, template);
+    let template = dom_ownership::local(scope, template);
     let raw = template.new_instance(scope).unwrap();
     let handle = v8::Integer::new_from_unsigned(scope, handle.raw());
     raw.set_internal_field(0, handle.into());
@@ -5517,6 +5763,8 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
     };
     DOM.with(|d| {
         *d.borrow_mut() = Some(DomState {
+            scripts: script_state::initial(&tree),
+            resource_active: true,
             nonces: initial_nonces(&tree),
             tree,
             cache: HashMap::new(),
@@ -5528,11 +5776,13 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
             event_handlers: Default::default(),
             popover: Default::default(),
             browsing_context: true,
+            ownership: None,
+            ownership_dirty: true,
         });
     });
 
     let context = scope.get_current_context();
-    let global = v8::Global::new(scope, context);
+    let global = v8::Weak::new(scope, context);
     DOM_CONTEXTS.with(|d| {
         d.borrow_mut().insert(DOM_ID.with(|id| id.get()), global);
     });
@@ -5588,7 +5838,9 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
             .get(scope, key.into())
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         {
-            let function = v8::Global::new(scope, function);
+            let Some(function) = dom_ownership::helper_function(scope, function) else {
+                return;
+            };
             DOM.with(|dom| dom.borrow_mut().as_mut().unwrap().control_clone = Some(function));
         }
     }
@@ -5603,6 +5855,8 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
     run_js(scope, include_str!("document_basics.js"));
     capture_node_projector(scope);
     dom_implementation::install(scope);
+    mutation_observers::install(scope);
+    script_state::install(scope);
     range_contents::install(scope);
     bind_method(scope, global, "__htmlTextNative", html_text::dispatch);
     run_js(scope, include_str!("html_text.js"));
@@ -5614,7 +5868,9 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
         .get(scope, key.into())
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     {
-        let accessor = v8::Global::new(scope, accessor);
+        let Some(accessor) = dom_ownership::helper_function(scope, accessor) else {
+            return;
+        };
         scope
             .get_current_context()
             .set_slot(std::rc::Rc::new(EventRecordAccessor(accessor)));
@@ -5625,7 +5881,9 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
         .get(scope, key.into())
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     {
-        let dispatcher = v8::Global::new(scope, dispatcher);
+        let Some(dispatcher) = dom_ownership::helper_function(scope, dispatcher) else {
+            return;
+        };
         scope
             .get_current_context()
             .set_slot(std::rc::Rc::new(HostEventDispatcher(dispatcher)));
@@ -5679,6 +5937,9 @@ fn bind_document(scope: &mut v8::PinScope) {
     }
 
     let global = scope.get_current_context().global(scope);
+    let name = v8::String::new(scope, "turbo-dom.ownership.window-document").unwrap();
+    let owner = v8::Private::for_api(scope, Some(name));
+    global.set_private(scope, owner, document.into());
     let key = v8::String::new(scope, "document").unwrap();
     global.set(scope, key.into(), document.into());
     // window = globalThis
@@ -5715,6 +5976,26 @@ mod range_contents;
 #[path = "range_live.rs"]
 mod range_live;
 
+/// Reclaim native tree records only after their actual owner Document is collected.
+/// Call at a host execution/GC boundary; this never clears a retained document.
+pub fn sweep_collected_documents() -> usize {
+    dom_ownership::sweep_collected()
+}
+#[cfg(test)]
+pub fn native_listener_subscription_count_for_testing() -> usize {
+    event_listeners::subscription_count()
+}
+#[cfg(test)]
+pub fn native_document_count_for_testing() -> usize {
+    OTHER_DOMS.with(|states| {
+        states
+            .borrow()
+            .values()
+            .filter(|state| state.dom.is_some())
+            .count()
+    }) + DOM.with(|state| usize::from(state.borrow().is_some()))
+}
+
 /// Reset the per-thread DOM (call between test files when reusing an isolate).
 pub fn reset() {
     // An embedding's cached runtime may be destroyed after a binding TLS cell.
@@ -5725,6 +6006,7 @@ pub fn reset() {
     let _ = NEXT_DOM_ID.try_with(|d| d.set(1));
     let _ = STYLE.try_with(|s| s.borrow_mut().clear());
     let _ = LISTENERS.try_with(|s| s.borrow_mut().clear());
+    event_listeners::reset_node_subscriptions();
     let _ = ACTIVE.try_with(|a| *a.borrow_mut() = None);
     if log_enabled() {
         dump_missing();
@@ -5793,7 +6075,7 @@ mod tests {
             let script = v8::Script::compile(child_scope, code, None).unwrap();
             v8::Global::new(child_scope, script.run(child_scope).unwrap())
         };
-        let foreign = v8::Local::new(scope, foreign);
+        let foreign = dom_ownership::local(scope, foreign);
         let key = v8::String::new(scope, "foreignRange").unwrap();
         scope
             .get_current_context()
@@ -5995,7 +6277,7 @@ mod tests {
             let value = script.run(child_scope).unwrap();
             v8::Global::new(child_scope, value)
         };
-        let value = v8::Local::new(scope, child_collection);
+        let value = dom_ownership::local(scope, child_collection);
         let key = v8::String::new(scope, "childCollection").unwrap();
         scope
             .get_current_context()
@@ -6872,7 +7154,7 @@ mod tests {
         let second = v8::Context::new(scope, Default::default());
         let scope = &mut v8::ContextScope::new(scope, second);
         install(scope);
-        let sheet = v8::Local::new(scope, retained);
+        let sheet = dom_ownership::local(scope, retained);
         let key = v8::String::new(scope, "foreignSheet").unwrap();
         second.global(scope).set(scope, key.into(), sheet);
         let document = wrap(scope, with_tree(Tree::root).unwrap());
@@ -7263,3 +7545,10 @@ mod css_adoption_tests;
 #[cfg(test)]
 #[path = "dom_implementation_tests.rs"]
 mod dom_implementation_tests;
+#[cfg(test)]
+#[path = "mutation_observers_tests.rs"]
+mod mutation_observers_tests;
+
+#[cfg(test)]
+#[path = "ownership_guard_tests.rs"]
+mod ownership_guard_tests;

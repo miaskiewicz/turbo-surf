@@ -437,3 +437,24 @@ normalization, moves and adoption. The fixture retains the exact collector hash;
 canonical Rust tests also check cross-realm behavior, hostile public getters and
 actual garbage collection. Remaining native mutation seams and layout geometry
 are listed in `PARITY-GAPS.md`.
+
+## Native retention diagnostics
+
+The authored iframe GC regression compares actual weak-object liveness against
+Chrome. To capture a native failure's root paths without changing its oracle:
+
+```sh
+cd rust
+TURBO_SURF_GC_HEAP_SNAPSHOT=/tmp/frame.heapsnapshot cargo test -p turbo-surf-render --test frame_gc_contracts -- --test-threads=1
+cd ..
+python3 harness/detection/heap-retainers.py /tmp/frame.heapsnapshot
+```
+
+The host diagnostic writes a snapshot only if the release comparison fails. The
+analyzer starts at objects marked by `__nativeLifecycleDiagnostic`, excludes weak
+edges and conditional WeakMap pair edges, and omits WeakRef job retention by
+default. Use `--include-kept-objects` to inspect that temporary root separately.
+Shortest unconditional paths identify strong native roots; they do not completely
+model ephemeron reachability. The removed-iframe initializer regression was traced
+through the main Window's private initializer to the last child Document. Heap
+snapshots remain local; they can contain page memory.

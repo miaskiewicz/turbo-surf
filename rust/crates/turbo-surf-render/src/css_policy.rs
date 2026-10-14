@@ -4,7 +4,7 @@ use turbo_dom_parser::rtdom::cascade::StylePolicy;
 
 #[derive(Default)]
 pub(super) struct PolicyState {
-    callback: Option<v8::Global<v8::Function>>,
+    callback: Option<v8::Weak<v8::Function>>,
     sheets: HashMap<Handle, (String, bool)>,
     inline: HashMap<Handle, Inline>,
     cascade: Option<(u64, StylePolicy)>,
@@ -29,7 +29,7 @@ fn authorize(
     let Some(callback) = callback else {
         return true;
     };
-    let callback = v8::Local::new(scope, callback);
+    let callback = dom_ownership::local(scope, callback);
     let root = with_tree(Tree::root).unwrap();
     let document = wrap(scope, root);
     let element = wrap(scope, node);
@@ -157,7 +157,9 @@ pub(super) fn invalidate_sheet(node: Handle) {
     });
 }
 pub fn install(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
-    let callback = v8::Global::new(scope, callback);
+    let Some(callback) = dom_ownership::helper_function(scope, callback) else {
+        return;
+    };
     DOM.with(|dom| {
         dom.borrow_mut().as_mut().unwrap().css_policy = PolicyState {
             callback: Some(callback),

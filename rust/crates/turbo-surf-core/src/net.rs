@@ -743,6 +743,13 @@ async fn follow_manually_response(
                     });
                 }
                 if let Some(context) = opts.context.as_mut() {
+                    if let Some(value) = list_header(&res, "referrer-policy") {
+                        if let Some(policy) =
+                            crate::referrer_policy::ReferrerPolicy::from_header(&value)
+                        {
+                            context.referrer_policy = policy;
+                        }
+                    }
                     context.follow_redirect(&hop.url, &next.url);
                 }
                 hop = next;

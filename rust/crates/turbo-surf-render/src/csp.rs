@@ -209,6 +209,7 @@ fn matches_source(source: &str, document: &str, target: &str, redirected: bool) 
 pub struct DocumentPolicy {
     pub header: Policy,
     pub active: Policy,
+    pub referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
     metas: Vec<(usize, String)>,
     next_meta: usize,
 }
@@ -254,7 +255,17 @@ impl DocumentPolicy {
                 }
             }
         }
+        let referrer_header = headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("referrer-policy"))
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
         Self {
+            referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy::from_header(
+                &referrer_header,
+            )
+            .unwrap_or_default(),
             header: active.clone(),
             active,
             metas,

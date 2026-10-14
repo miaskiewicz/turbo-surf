@@ -45,6 +45,7 @@ pub struct RequestContext {
     pub source: Option<String>,
     /// A stylesheet resource can supply a referrer distinct from its document origin.
     pub referrer: Option<String>,
+    pub referrer_policy: crate::referrer_policy::ReferrerPolicy,
     pub top_level_source: Option<String>,
     /// Opaque or cross-site embedding ancestors make the cookie site opaque.
     pub cookie_site_is_opaque: bool,
@@ -70,6 +71,7 @@ impl RequestContext {
             mode: RequestMode::Navigate,
             source,
             referrer: None,
+            referrer_policy: Default::default(),
             top_level_source: None,
             cookie_site_is_opaque: false,
             user_activation,
@@ -86,6 +88,7 @@ impl RequestContext {
             mode,
             source: Some(source.to_string()),
             referrer: None,
+            referrer_policy: Default::default(),
             top_level_source: None,
             cookie_site_is_opaque: false,
             user_activation: false,
@@ -135,6 +138,18 @@ impl RequestContext {
                 && self.mode == RequestMode::Navigate
                 && self.destination == Destination::Document
                 && matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
+    }
+
+    pub fn apply_referrer_policy_headers(&mut self, headers: &[(String, String)]) {
+        let value = headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("referrer-policy"))
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        if let Some(policy) = crate::referrer_policy::ReferrerPolicy::from_header(&value) {
+            self.referrer_policy = policy;
+        }
     }
 
     /// Carry Fetch's origin taint and largest site relationship through a chain.
@@ -236,8 +251,9 @@ impl RequestContext {
             h.insert("upgrade-insecure-requests".into(), "1".into());
         }
         if let Some(source) = self.source.as_deref() {
-            if let Some(referer) =
-                strict_origin_when_cross_origin(self.referrer.as_deref().unwrap_or(source), target)
+            if let Some(referer) = self
+                .referrer_policy
+                .referrer(self.referrer.as_deref().unwrap_or(source), target)
             {
                 h.insert("referer".into(), referer);
             }
@@ -279,22 +295,6 @@ pub fn same_site(source: &str, target: &str) -> bool {
             || psl::domain_str(source_host)
                 .zip(psl::domain_str(target_host))
                 .is_some_and(|(a, b)| a == b))
-}
-
-fn strict_origin_when_cross_origin(source: &str, target: &str) -> Option<String> {
-    let mut source_url = Url::parse(source).ok()?;
-    let target_url = Url::parse(target).ok()?;
-    if source_url.scheme() == "https" && target_url.scheme() != "https" {
-        return None;
-    }
-    source_url.set_fragment(None);
-    let _ = source_url.set_username("");
-    let _ = source_url.set_password(None);
-    if same_origin(source, target) {
-        Some(source_url.to_string())
-    } else {
-        origin(source).map(|origin| format!("{origin}/"))
-    }
 }
 
 pub fn trustworthy(url: &str) -> bool {

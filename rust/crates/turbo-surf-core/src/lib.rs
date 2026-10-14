@@ -27,6 +27,7 @@ mod http_trace;
 pub mod measure;
 pub mod net;
 pub mod recaptcha;
+pub mod referrer_policy;
 pub mod request_context;
 pub mod robots;
 pub mod sorry;

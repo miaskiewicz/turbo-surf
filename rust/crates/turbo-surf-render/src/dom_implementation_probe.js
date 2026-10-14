@@ -56,7 +56,7 @@
   try { retained.adoptedStyleSheets = [sheet]; output.foreignSheet = null; }
   catch(error) { output.foreignSheet = error.name; }
   const define = Object.defineProperty, get = Object.getOwnPropertyDescriptor, apply = Reflect.apply;
-  const intrinsics = [[RegExp.prototype, "test"], [String.prototype, "split"], [String.prototype, "includes"], [Array.prototype, "some"], [globalThis, "Map"], [Object, "defineProperty"]];
+  const intrinsics = [[RegExp.prototype, "test"], [RegExp.prototype, "exec"], [String.prototype, "split"], [String.prototype, "includes"], [Array.prototype, "some"], [globalThis, "Map"], [Object, "defineProperty"]];
   const descriptors = [];
   for (let index = 0; index < intrinsics.length; index++) define(descriptors, index, { value: get(intrinsics[index][0], intrinsics[index][1]), configurable: true });
   let hooks = 0, protectedHTML, protectedXML, protectedType, failure;

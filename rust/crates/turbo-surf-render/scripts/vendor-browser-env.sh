@@ -70,6 +70,12 @@ git -C "$repo" show HEAD:src/dom_mutations.rs > "$dest/dom_mutations.rs"
 for file in dom_adoption_probe.js dom_adoption_chrome155.json dom_projection_tests.rs dom_variadic_errors_probe.js dom_variadic_errors_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
+for file in script_state.rs script_preparation_probe.js script_preparation_chrome155.json; do
+  git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
+done
+for file in dom_ownership.rs realm_ownership.rs ownership_guard_tests.rs mutation_observers.rs mutation_observers.js mutation_observers_tests.rs mutation_observers_probe.js mutation_observers_chrome155.json; do
+  git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
+done
 git -C "$repo" show HEAD:src/browser_sanitizer_default.json > "$dest/browser_sanitizer_default.json"
 git -C "$repo" show HEAD:src/browser_env.rs | sed 's#^//!#//#' > "$dest/browser_env_upstream.rs"
 

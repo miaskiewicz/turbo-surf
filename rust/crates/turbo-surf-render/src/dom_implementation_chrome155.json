@@ -1,10 +1,11 @@
 {
   "browser": "Chrome/155.0.8059.79",
   "v8": "15.5.35.23",
-  "recordedAt": "2026-10-14T02:15:24.062Z",
+  "recordedAt": "2026-10-14T04:21:08.504Z",
   "fixture": "dom-implementation-probe.js",
   "effectiveExtensionFlags": [
-    "--disable-extensions"
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages"
   ],
   "result": {
     "stable": true,

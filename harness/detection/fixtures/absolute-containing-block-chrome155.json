@@ -1,0 +1,42 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "recordedAt": "2026-10-14T02:52:15.728Z",
+  "fixture": "absolute-containing-block-probe.js",
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages"
+  ],
+  "result": [
+    {
+      "name": "pixels",
+      "parent": [0, 0, 114, 94],
+      "child": [122, 92, 30, 20]
+    },
+    {
+      "name": "percent",
+      "parent": [0, 0, 114, 94],
+      "child": [57, 47, 55, 45]
+    },
+    {
+      "name": "inset",
+      "parent": [0, 0, 114, 94],
+      "child": [2, 2, 110, 90]
+    },
+    {
+      "name": "asymmetric",
+      "parent": [0, 0, 132, 102],
+      "child": [68, 49, 60, 47]
+    },
+    {
+      "name": "borderbox",
+      "parent": [0, 0, 100, 80],
+      "child": [2, 2, 96, 76]
+    },
+    {
+      "name": "autoheight",
+      "parent": [0, 0, 114, 94],
+      "child": [57, 47, 55, 45]
+    }
+  ]
+}

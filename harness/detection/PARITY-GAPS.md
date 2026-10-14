@@ -12,22 +12,24 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
 
 ## Current integration checkpoint (2026-10-14)
 
-The member counts above are historical measurements and have not been recomputed
-for the current local source. Canonical Range content operations, advanced offline
-audio and native Window/MessagePort transfers are now integrated locally. The
-new full default/native 155 gates and rebuilt paired inventory are pending. Full
-end-of-work validation is deferred while items 1–4 and 6–7 are implemented; focused
-behavior checks continue. The latest
-integrated follow-up passes 73 focused Rust and 40 harness tests; the prior batch
-passed 848 default workspace tests plus strict Clippy/format. The
-published turbo-dom 0.5.3 consumer passes 35 focused adoption, frame ownership,
-transfer and teardown contracts. The
-native independent document factories and XML local-name/default-namespace helpers
-are integrated locally (117 canonical/37 affected Surf contracts pass). The
-newest layout control uses actual Chrome 155.0.8059.79 / V8 15.5.35.23; earlier
-controls and the development SDK use 155.0.8059.40 / 15.5.35.20. This patch mismatch
-remains explicit. A saved oracle is evidence for its exact authored behavior,
-not complete browser parity or a verified live SERP.
+The member counts above are historical and have not been recomputed for current
+source. Canonical binding `7088ce6` passes 134 focused contracts on default SDK
+149.3.0 and Surf's default SDK 150.4.0. The current Surf checkpoint passes 56
+focused document, GC, geometry, referrer, host-budget and transfer contracts plus
+strict Clippy and format checks. Earlier tests are historical evidence, not a full
+gate for current source. Full default/native155 gates, rebuilt addon/shim/E2E,
+paired inventory and native Google acceptance remain pending.
+
+Real weak ownership, actual MutationObserver notification microtasks and native
+script-preparation flags are integrated. Genuine geometry covers the subset in
+[LIVE-GEOMETRY.md](./LIVE-GEOMETRY.md). Detached storage reclamation is verified
+published in turbo-dom 0.5.4; its consumer integration is in progress. Text/caret
+provenance is under review in turbo-html2pdf PR #20. Resource lifecycle integration
+is being tested separately. Broader DOM/security/fetch/storage work remains open.
+
+The current installed Chrome control is 155.0.8059.79 / V8 15.5.35.23; the
+experimental native155 engine is 15.5.35.20-rusty. Its ownership changes remain
+unvalidated. A saved oracle establishes only its authored behavior.
 
 ## Active scope and deferred audio
 
@@ -150,20 +152,20 @@ is bounded; it is not a census of every browser interface.
 |---|---|---|
 | DOMTokenList | Stable identity, private brand, indexed/live tokens, mutation/error contracts; `part` | Canonical cached/live implementation passes offline mutation/brand contracts; fresh native 155 pair has zero differences for the saved probe |
 | ARIA element relationships | ID resolution, tree scope, explicit element assignment, attribute clearing, frozen returned sequences | Scoped/private canonical state implemented and tested; fresh native 155 pair has zero differences for the saved probe |
-| Layout and hit testing | Real CSS box rectangles, client/scroll/offset geometry, caret/element hit testing | DOM compatibility rectangles do not use the existing native screenshot layout. The [source audit and required seam](./LAYOUT.md) identify lost inline/text provenance, overflow/scroll state and frame metrics; native text measurement cannot supply those boxes |
+| Layout and hit testing | Real CSS box rectangles, client/scroll/offset geometry, caret/element hit testing | Published core0.3.5 live-tree/CSSOM snapshots now drive DOMRect/client/offset/element scrolling and point-hit geometry;17 V8 controls pass. Text/caret/Range, full stacking/scrolling, mixedSVG document snapshots, font/image lifecycle and fractional LayoutUnit arithmetic remain open; see [current bounds](./LIVE-GEOMETRY.md) |
 | Rendered text | Complete layout-dependent wrapping/line-box behavior beyond native cascade text flow | Canonical visibility/whitespace/break/table/details/setter contracts implemented; fresh native 155 pair has zero differences for the saved probe |
 | Shadow/custom elements | Slots and assigned nodes, ElementInternals, scoped registries, complete upgrade lifecycle | Partial shadow isolation only |
 | CSS parsing/layout | Complete grammar/cascade, Typed OM, animation timelines and transitions | Measured stylesheet policy controls pass; complete CSS behavior is open |
 | Live stylesheet installation | Explain Google's jc/lc reports during actual execution; compare live ownership and rule state | Minimal authored injection tests pass; reusable CSS diagnostics saved |
-| Observers | Real Mutation/Resize/Intersection/Performance observer queues and lifecycle | Existing compatibility implementations are synthetic |
+| Observers | Real Mutation/Resize/Intersection/Performance observer queues and lifecycle | Native MutationObserver semantic records, microtask delivery, options/old values/transients and a private postconnection consumer are integrated. Full mutation lifecycle and Resize/Intersection/Performance queues remain open |
 | Browser lifecycle/resources | Complete parsing/resource scheduling, frame navigation, media and native worker lifecycles | Tested subset only; native workers unsupported |
 | Frames/security | Complete WindowProxy/DOM policies in production SDK, opaque/sandbox navigation behavior | Stronger native proxy profile is experimental; default SDK coverage partial |
 | CSP | strict-dynamic, report-only/reports/violations, navigation/form/worker/media directives | Enforced supported script/style directives tested; remaining directives open |
 | Related resource policies | SRI, Trusted Types, mixed content, CORP/COEP/COOP, permissions policy, Critical-CH | SRI raw-byte/strongest/opaque/tampering, blocked stylesheet ownership and iframe errors pass native tests. CORP per-hop origin/site/header policy and active mixed-content admission are implemented; paired full-resource audit pending. COEP/COOP, passive image upgrades, Permissions/Integrity Policy and additional directives remain open |
-| Fetch lifecycle | Cancellation, native cache/integrity/keepalive/referrer-policy effects, streaming, preflight cache | Some properties reflect without implementing native effects |
+| Fetch lifecycle | Cancellation, native cache/integrity/keepalive/referrer-policy effects, streaming, preflight cache | All eight referrer policies affect actual request and redirect headers;33 authored Chrome request cases and focused native controls pass. Streaming, cancellation, cache/integrity/keepalive and preflight-cache effects remain open |
 | Cookies/privacy/storage | Complete storage-access, partitioning, third-party browser policy/private-token APIs | HttpOnly/SameSite/host-only/default-path/prefix checks pass; broader policy open |
 | HTML/XML parsing | XML documents, custom sanitizer configuration, full template behavior, lossless unpaired UTF-16 at Rust boundary | Supported native HTML/Attr/PI/import/adopt subset tested; bf2a0ef plus four Surf contracts cover cross-document identity/realms, fragment overlap, variadic errors, genuine frame retirement and repeated-bootstrap traversal |
-| Structured clone | Complete web-interface serialization and transfer lists | Native V8 clone, genuine ArrayBuffer/resizable-buffer transfers, DOMException, private Rust-only CryptoKey snapshots, borrowed realms, User Timing, Window/MessagePort delivery and genuine interface rejection have saved Chrome controls. Current integrated transfer24/clone17 contracts pass. Endpoint weak anchors, reservations and queued native material enforce admission before ownership commit; retired context registries, timer roots and Window queues have six lifecycle contracts. Full realm/node GC, DOMRect integration, Blob/File, SAB exposure and wider serialization remain open |
+| Structured clone | Complete web-interface serialization and transfer lists | Native V8 clone, genuine ArrayBuffer/resizable-buffer transfers, DOMException, private Rust-only CryptoKey snapshots, borrowed realms, User Timing, Window/MessagePort delivery and genuine interface rejection have saved Chrome controls. Current integrated transfer24/clone17 contracts pass. Endpoint weak anchors, reservations and queued native material enforce admission before ownership commit; retired context registries, timer roots and Window queues have six lifecycle contracts. Weak native ownership/cppgc tracing and private DOMRect snapshots are integrated; full native155 ownership and detached-node collection integration, Blob/File, SAB exposure and wider serialization remain open |
 | BroadcastChannel | Shared cross-realm/tab/browser-session delivery and lifecycle | Local asynchronous delivery/brands tested |
 | Range | Mutation-adjusted boundaries and actual geometry | Canonical bf2a0ef implements content operations and private weak live boundaries through text edits/splits, insertion/removal/replacement, normalization, moves/adoption, adjacent HTML, outerHTML and innerText/outerText. Independent Chrome controls cover removal versus text-merge semantics. 133 Rust and 63 JS canonical tests pass; source is vendored locally. Geometry, broader parsing mutation seams and lossless unpaired UTF-16 remain incomplete |
 | Canvas/media | Offscreen transfer, captureStream, audio/media synthesis and media lifecycle | Metal pixels match shared probe. Genuine bounded native offline audio now computes independent Chrome ARM64 PCM/hash controls, with private parameter/buffer ownership and trusted lifecycle tests; scheduled sources, automation and five effects are integrated locally after 32 exact authored ARM64 PCM controls and 474 native155 renderer/MCP tests in the isolated candidate. The current combined gate is pending; realtime, feedback, parameter-signal connections, custom waves, oversampling, suspend/resume and multichannel beyond two remain unsupported. Other media APIs remain incomplete |
@@ -175,7 +177,7 @@ is bounded; it is not a census of every browser interface.
 | Classic script errors | Preserve original exceptions, trusted Window reporting and fetched-script load success; mute no-CORS cross-origin reports | Current default main/iframe and CORS controls pass; fresh Chrome155 authored fixture saved. Genuine155 paired audit pending; Window onerror registry and wider error handling in progress |
 | Element event propagation | Include actual Window in native node propagation path with capture/phase/stop/composedPath semantics | Canonical bf2a0ef passes 133 Rust and 63 JS tests, including private generic/Window/Node/Signal collection regressions. Generic EventTarget and AbortSignal listener/handler records are private; direct-target registration order follows fresh Chrome155 controls. Surf integration removes duplicate manual callbacks/DCL and public abort stubs; the earlier integrated native155 gate passed; six current event contracts pass; full default/native gates remain pending. Timeout/any, full composed-shadow retargeting and listener exception reporting remain open |
 | Live search | Fresh consent+query+retry flow without imported Chrome cookies | Chrome consent control returns7; native verified SERP still unresolved |
-| Publishing | Clean registry consumers need compatible published DOM and transport APIs; verify per-platform artifacts | turbo-dom 0.5.2 published and selected; unpublished transport APIs, distributable hardened crypto provider and per-platform Surf artifacts remain unresolved |
+| Publishing | Clean registry consumers need compatible published DOM and transport APIs; verify per-platform artifacts | turbo-dom 0.5.3 selected;0.5.4 detached storage published and verified from PR10, consumer integration in progress; unpublished transport APIs, distributable hardened crypto provider and per-platform Surf artifacts remain unresolved |
 
 ## Closure record
 

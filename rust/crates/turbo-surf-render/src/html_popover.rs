@@ -8,10 +8,11 @@ struct Entry {
 }
 #[derive(Clone)]
 struct Pending {
-    target: v8::Global<v8::Object>,
+    target: v8::Weak<v8::Object>,
+    record: v8::Weak<v8::Object>,
     old: bool,
     new: bool,
-    source: Option<v8::Global<v8::Object>>,
+    source: Option<v8::Weak<v8::Object>>,
     task: u64,
 }
 #[derive(Default)]
@@ -20,8 +21,8 @@ pub(super) struct State {
     open: Vec<Entry>,
     pending: HashMap<Handle, Pending>,
     busy: std::collections::HashSet<Handle>,
-    constructor: Option<v8::Global<v8::Function>>,
-    scheduler: Option<v8::Global<v8::Function>>,
+    constructor: Option<v8::Weak<v8::Function>>,
+    scheduler: Option<v8::Weak<v8::Function>>,
     next_task: u64,
 }
 fn mode(tree: &Tree, node: Handle) -> Option<String> {
@@ -85,7 +86,7 @@ fn event_target<'s>(
     source: Option<v8::Local<'s, v8::Object>>,
 ) -> Option<bool> {
     let constructor = DOM.with(|dom| dom.borrow().as_ref()?.popover.constructor.clone())?;
-    let constructor = v8::Local::new(scope, &constructor);
+    let constructor = dom_ownership::local(scope, &constructor);
     let init = v8::Object::new(scope);
     let old_value = v8::String::new(scope, if old { "open" } else { "closed" }).unwrap();
     let new_value = v8::String::new(scope, if new { "open" } else { "closed" }).unwrap();
@@ -131,8 +132,10 @@ fn flush(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8:
         let source = pending
             .source
             .as_ref()
-            .map(|source| v8::Local::new(scope, source));
-        let target = v8::Local::new(scope, &pending.target);
+            .map(|source| dom_ownership::local(scope, source));
+        let Some(target) = pending.target.to_local(scope) else {
+            return;
+        };
         event_target(scope, target, "toggle", pending.old, pending.new, source);
     }
 }
@@ -143,9 +146,28 @@ fn queue<'s>(
     new: bool,
     source: Option<v8::Local<'s, v8::Object>>,
 ) {
-    let source = source.map(|source| v8::Global::new(scope, source));
     let target = wrap(scope, node);
-    let target = v8::Global::new(scope, target);
+    let old_record = DOM.with(|dom| {
+        dom.borrow()
+            .as_ref()
+            .and_then(|dom| dom.popover.pending.get(&node))
+            .and_then(|pending| pending.record.to_local(scope))
+    });
+    let record = old_record.unwrap_or_else(|| {
+        let record = v8::Object::new(scope);
+        let null = v8::null(scope);
+        record.set_prototype(scope, null.into());
+        record
+    });
+    let key = v8::String::new(scope, "target").unwrap();
+    record.create_data_property(scope, key.into(), target.into());
+    let key = v8::String::new(scope, "source").unwrap();
+    let source_value = source
+        .map(|source| source.into())
+        .unwrap_or_else(|| v8::undefined(scope).into());
+    record.create_data_property(scope, key.into(), source_value);
+    let source = source.map(|source| v8::Weak::new(scope, source));
+    let target = v8::Weak::new(scope, target);
     let scheduled = DOM.with(|dom| {
         let mut dom = dom.borrow_mut();
         let state = &mut dom.as_mut()?.popover;
@@ -160,6 +182,7 @@ fn queue<'s>(
             node,
             Pending {
                 target,
+                record: v8::Weak::new(scope, record),
                 old,
                 new,
                 source,
@@ -171,13 +194,13 @@ fn queue<'s>(
     let Some((scheduler, task)) = scheduled else {
         return;
     };
-    let data = v8::Array::new(scope, 3);
     let owner = v8::Number::new(scope, DOM_ID.with(|id| id.get()) as f64);
     let handle = v8::Integer::new_from_unsigned(scope, node.raw());
     let task = v8::Number::new(scope, task as f64);
-    data.set_index(scope, 0, owner.into());
-    data.set_index(scope, 1, handle.into());
-    data.set_index(scope, 2, task.into());
+    let data = v8::Array::new_with_elements(
+        scope,
+        &[owner.into(), handle.into(), task.into(), record.into()],
+    );
     let Some(function) = v8::FunctionTemplate::builder(flush)
         .data(data.into())
         .constructor_behavior(v8::ConstructorBehavior::Throw)
@@ -186,7 +209,7 @@ fn queue<'s>(
     else {
         return;
     };
-    let scheduler = v8::Local::new(scope, &scheduler);
+    let scheduler = dom_ownership::local(scope, &scheduler);
     let receiver = v8::undefined(scope);
     let delay = v8::Integer::new(scope, 0);
     scheduler.call(scope, receiver.into(), &[function.into(), delay.into()]);
@@ -436,7 +459,9 @@ pub(super) fn install(scope: &mut v8::PinScope) {
         .get(scope, key.into())
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     {
-        let constructor = v8::Global::new(scope, constructor);
+        let Some(constructor) = dom_ownership::helper_function(scope, constructor) else {
+            return;
+        };
         DOM.with(|dom| {
             let mut dom = dom.borrow_mut();
             let state = &mut dom.as_mut().unwrap().popover;
@@ -460,7 +485,9 @@ pub(super) fn capture_scheduler(scope: &mut v8::PinScope) {
         .get(scope, key.into())
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     {
-        let scheduler = v8::Global::new(scope, scheduler);
+        let Some(scheduler) = dom_ownership::helper_function(scope, scheduler) else {
+            return;
+        };
         DOM.with(|dom| dom.borrow_mut().as_mut().unwrap().popover.scheduler = Some(scheduler));
     }
 }

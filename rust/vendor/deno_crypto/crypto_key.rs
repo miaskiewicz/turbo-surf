@@ -42,26 +42,29 @@ pub struct CryptoKey {
   key_type: CryptoKeyType,
   extractable: bool,
   /// The frozen-array of `KeyUsage` strings returned by the `usages` getter.
-  /// Stored as `v8::Global` so the getter satisfies `SameObject` per spec.
-  usages: v8::Global<v8::Value>,
+  /// Traced with its cppgc owner while preserving `SameObject` per spec.
+  usages: v8::TracedReference<v8::Value>,
   /// The algorithm dictionary returned by the `algorithm` getter (also
   /// `SameObject`).
-  algorithm: v8::Global<v8::Value>,
+  algorithm: v8::TracedReference<v8::Value>,
   /// Opaque, JS-side wrapper carrying a cppgc-tracked
   /// [`crate::key_store::CryptoKeyHandle`] on its `cppgc` property. Held by
   /// reference so two `CryptoKey`s representing the two halves of a key pair
   /// can share the same underlying key material.
-  handle: v8::Global<v8::Value>,
+  handle: v8::TracedReference<v8::Value>,
 }
 
 impl WebIdlInterfaceConverter for CryptoKey {
   const NAME: &'static str = "CryptoKey";
 }
 
-// SAFETY: All v8 values are stored in `v8::Global`, which is its own
-// strong root for V8's GC; cppgc has no Rust-side fields to trace.
+// SAFETY: every JavaScript reference is visited with its native cppgc owner.
 unsafe impl GarbageCollected for CryptoKey {
-  fn trace(&self, _visitor: &mut v8::cppgc::Visitor) {}
+  fn trace(&self, visitor: &mut v8::cppgc::Visitor) {
+    visitor.trace(&self.usages);
+    visitor.trace(&self.algorithm);
+    visitor.trace(&self.handle);
+  }
 
   fn get_name(&self) -> &'static CStr {
     c"CryptoKey"
@@ -90,19 +93,19 @@ impl CryptoKey {
   }
 
   #[getter]
-  fn usages<'s>(
-    &self,
-    scope: &mut v8::PinScope<'s, '_>,
-  ) -> v8::Local<'s, v8::Value> {
-    v8::Local::new(scope, &self.usages)
+  fn usages<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
+    self
+      .usages
+      .get(scope)
+      .expect("live cppgc owner traces its values")
   }
 
   #[getter]
-  fn algorithm<'s>(
-    &self,
-    scope: &mut v8::PinScope<'s, '_>,
-  ) -> v8::Local<'s, v8::Value> {
-    v8::Local::new(scope, &self.algorithm)
+  fn algorithm<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
+    self
+      .algorithm
+      .get(scope)
+      .expect("live cppgc owner traces its values")
   }
 
   /// Internal `CryptoKey.exportNodeMaterial(key)` — used by the
@@ -146,14 +149,7 @@ impl CryptoKey {
     extractable: bool,
     #[webidl] usages: Vec<String>,
   ) -> Result<v8::Local<'s, v8::Object>, crate::CryptoError> {
-    crate::node_interop::import_sync(
-      scope,
-      format,
-      key_data,
-      algorithm,
-      extractable,
-      usages,
-    )
+    crate::node_interop::import_sync(scope, format, key_data, algorithm, extractable, usages)
   }
 }
 
@@ -174,17 +170,13 @@ impl CryptoKey {
   /// Returns `None` if the slot doesn't expose a string-coercible `name`,
   /// which on a spec-conformant `CryptoKey` cannot happen (the prototype
   /// `algorithm` getter always yields a frozen object with a string `name`).
-  pub fn algorithm_name<'s>(
-    &self,
-    scope: &mut v8::PinScope<'s, '_>,
-  ) -> Option<String> {
-    let alg = v8::Local::new(scope, &self.algorithm);
+  pub fn algorithm_name<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<String> {
+    let alg = self
+      .algorithm
+      .get(scope)
+      .expect("live cppgc owner traces its values");
     let obj = v8::Local::<v8::Object>::try_from(alg).ok()?;
-    let key = v8::String::new_from_one_byte(
-      scope,
-      b"name",
-      v8::NewStringType::Internalized,
-    )?;
+    let key = v8::String::new_from_one_byte(scope, b"name", v8::NewStringType::Internalized)?;
     let val = obj.get(scope, key.into())?;
     let s = val.to_string(scope)?;
     Some(s.to_rust_string_lossy(scope))
@@ -194,11 +186,7 @@ impl CryptoKey {
   /// to enforce the "valid usage" InvalidAccessError throw on every method
   /// that takes a key. Returns `false` if the slot isn't an array (which
   /// can't happen on a spec-conformant instance).
-  pub fn has_usage<'s>(
-    &self,
-    scope: &mut v8::PinScope<'s, '_>,
-    usage: &str,
-  ) -> bool {
+  pub fn has_usage<'s>(&self, scope: &mut v8::PinScope<'s, '_>, usage: &str) -> bool {
     let Some(usages) = self.usages_as_vec(scope) else {
       return false;
     };
@@ -212,11 +200,11 @@ impl CryptoKey {
   /// Rust, off the v8 stack.
   ///
   /// [`SubtleKey`]: crate::subtle_key::SubtleKey
-  pub fn usages_as_vec<'s>(
-    &self,
-    scope: &mut v8::PinScope<'s, '_>,
-  ) -> Option<Vec<String>> {
-    let usages = v8::Local::new(scope, &self.usages);
+  pub fn usages_as_vec<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<Vec<String>> {
+    let usages = self
+      .usages
+      .get(scope)
+      .expect("live cppgc owner traces its values");
     let arr = v8::Local::<v8::Array>::try_from(usages).ok()?;
     let len = arr.length();
     let mut out = Vec::with_capacity(len as usize);
@@ -235,7 +223,10 @@ impl CryptoKey {
     &self,
     scope: &mut v8::PinScope<'s, '_>,
   ) -> Option<v8::Local<'s, v8::Object>> {
-    let alg = v8::Local::new(scope, &self.algorithm);
+    let alg = self
+      .algorithm
+      .get(scope)
+      .expect("live cppgc owner traces its values");
     v8::Local::<v8::Object>::try_from(alg).ok()
   }
 
@@ -248,13 +239,12 @@ impl CryptoKey {
     &self,
     scope: &mut v8::PinScope<'s, '_>,
   ) -> Option<UnsafePtr<CryptoKeyHandle>> {
-    let handle = v8::Local::new(scope, &self.handle);
+    let handle = self
+      .handle
+      .get(scope)
+      .expect("live cppgc owner traces its values");
     let obj = v8::Local::<v8::Object>::try_from(handle).ok()?;
-    let key = v8::String::new_from_one_byte(
-      scope,
-      b"cppgc",
-      v8::NewStringType::Internalized,
-    )?;
+    let key = v8::String::new_from_one_byte(scope, b"cppgc", v8::NewStringType::Internalized)?;
     let cppgc_val = obj.get(scope, key.into())?;
     try_unwrap_cppgc_object::<CryptoKeyHandle>(scope, cppgc_val)
   }
@@ -274,9 +264,9 @@ impl CryptoKey {
     Self {
       key_type,
       extractable,
-      usages: v8::Global::new(scope, usages),
-      algorithm: v8::Global::new(scope, algorithm),
-      handle: v8::Global::new(scope, handle),
+      usages: v8::TracedReference::new(scope, usages),
+      algorithm: v8::TracedReference::new(scope, algorithm),
+      handle: v8::TracedReference::new(scope, handle),
     }
   }
 }

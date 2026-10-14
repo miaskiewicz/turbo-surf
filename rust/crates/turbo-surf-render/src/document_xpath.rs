@@ -158,7 +158,7 @@ fn dispatch(
         let owner = dom_id_of(scope, object);
         let context = DOM_CONTEXTS.with(|contexts| contexts.borrow().get(&owner).cloned());
         if let Some(context) = context {
-            let context = v8::Local::new(scope, &context);
+            let context = dom_ownership::local(scope, &context);
             let scope = &mut v8::ContextScope::new(scope, context);
             let global = context.global(scope);
             let key = record_key(scope, "interfaces");
@@ -257,9 +257,14 @@ mod tests {
         if result.is_none() {
             panic!(
                 "XPath fixture: {:?}",
-                scope
-                    .exception()
-                    .map(|error| error.to_rust_string_lossy(scope))
+                scope.exception().map(|error| {
+                    let object = error.to_object(scope).unwrap();
+                    let key = v8::String::new(scope, "stack").unwrap();
+                    object
+                        .get(scope, key.into())
+                        .unwrap()
+                        .to_rust_string_lossy(scope)
+                })
             );
         }
         assert!(result.unwrap().is_true());

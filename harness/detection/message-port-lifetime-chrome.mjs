@@ -22,7 +22,7 @@ const pageServer = createHttpServer((_request, response) => {
 });
 let chrome, socket, connection;
 const killOwnedChrome = (signal) => {
-  if (!chrome?.pid) return;
+  if (!chrome?.pid || chrome.exitCode !== null || chrome.signalCode !== null) return;
   try {
     // detached:true gives this task its own process group; never kill by name.
     process.kill(-chrome.pid, signal);
@@ -202,7 +202,7 @@ try {
       socket?.close();
     } finally {
       killOwnedChrome("SIGTERM");
-      if (chrome?.pid && chrome.exitCode === null)
+      if (chrome?.pid && chrome.exitCode === null && chrome.signalCode === null)
         await Promise.race([new Promise((resolve) => chrome.once("exit", resolve)), pause(5000)]);
       killOwnedChrome("SIGKILL");
       await closeServer(server);

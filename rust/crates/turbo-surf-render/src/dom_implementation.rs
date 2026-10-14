@@ -72,7 +72,12 @@ fn initializer_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s,
     Some(v8::Private::for_api(scope, Some(name)))
 }
 pub fn set_initializer(scope: &mut v8::PinScope, function: v8::Local<v8::Function>) -> bool {
-    let global = scope.get_current_context().global(scope);
+    // Shared embedder ops can execute in their own creation realm. The trusted
+    // initializer belongs to the document realm that created the callback.
+    let Some(owner) = function.get_creation_context(scope) else {
+        return false;
+    };
+    let global = owner.global(scope);
     initializer_key(scope)
         .is_some_and(|key| global.set_private(scope, key, function.into()) == Some(true))
 }

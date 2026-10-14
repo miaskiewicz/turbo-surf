@@ -1,12 +1,12 @@
 //! Private phased Window dispatch and listener option capabilities.
 use super::*;
 
-struct WindowPhases(v8::Global<v8::Function>);
-struct ListenerParser(v8::Global<v8::Function>);
-struct SignalReader(v8::Global<v8::Function>);
-struct WindowInterfaces(v8::Global<v8::Function>);
-struct SignalSubscription(v8::Global<v8::Function>);
-struct ErrorGetters(Vec<v8::Global<v8::Function>>);
+struct WindowPhases(v8::Weak<v8::Function>);
+struct ListenerParser(v8::Weak<v8::Function>);
+struct SignalReader(v8::Weak<v8::Function>);
+struct WindowInterfaces(v8::Weak<v8::Function>);
+struct SignalSubscription(v8::Weak<v8::Function>);
+struct ErrorGetters(Vec<v8::Weak<v8::Function>>);
 fn records(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue) {
     let operation = args.get(0).to_rust_string_lossy(scope);
     let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
@@ -20,8 +20,8 @@ fn records(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv
         let Ok(hook) = v8::Local::<v8::Function>::try_from(args.get(2)) else {
             return;
         };
-        let signal = v8::Global::new(scope, object);
-        let hook = v8::Global::new(scope, hook);
+        let signal = v8::Weak::new(scope, object);
+        let hook = v8::Weak::new(scope, hook);
         subscription(scope, &signal, &hook, args.get(3).is_true());
         return;
     }
@@ -32,7 +32,7 @@ fn records(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv
         let Some(reader) = context.get_slot::<SignalReader>() else {
             return;
         };
-        let reader = v8::Local::new(scope, &reader.0);
+        let reader = dom_ownership::local(scope, &reader.0);
         let receiver = v8::undefined(scope).into();
         if let Some(value) = reader.call(scope, receiver, &[object.into()]) {
             rv.set(value);
@@ -53,7 +53,7 @@ fn records(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv
         let scope = &mut scope.init();
         let mut values = Vec::with_capacity(5);
         for getter in &getters.0 {
-            let getter = v8::Local::new(scope, getter);
+            let getter = dom_ownership::local(scope, getter);
             let Some(value) = getter.call(scope, object.into(), &[]) else {
                 return;
             };
@@ -100,7 +100,9 @@ pub(super) fn install(scope: &mut v8::PinScope) {
             .get(scope, key.into())
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         {
-            let function = v8::Global::new(scope, function);
+            let Some(function) = dom_ownership::helper_function(scope, function) else {
+                return;
+            };
             let context = scope.get_current_context();
             match family {
                 0 => {
@@ -127,7 +129,7 @@ pub(super) fn install(scope: &mut v8::PinScope) {
 fn owner<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Context>> {
     let owner = DOM_CONTEXTS
         .with(|contexts| contexts.borrow().get(&DOM_ID.with(|id| id.get())).cloned())?;
-    Some(v8::Local::new(scope, &owner))
+    Some(dom_ownership::local(scope, &owner))
 }
 pub(super) fn window<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
     if !DOM.with(|dom| {
@@ -146,7 +148,7 @@ pub(super) fn phase(scope: &mut v8::PinScope, event: v8::Local<v8::Object>, capt
     let Some(dispatcher) = context.get_slot::<WindowPhases>() else {
         return;
     };
-    let function = v8::Local::new(scope, &dispatcher.0);
+    let function = dom_ownership::local(scope, &dispatcher.0);
     let flag = v8::Boolean::new(scope, capture);
     let receiver = v8::undefined(scope).into();
     function.call(scope, receiver, &[event.into(), flag.into()]);
@@ -159,7 +161,7 @@ pub(super) fn options<'s>(
 ) -> Option<v8::Local<'s, v8::Object>> {
     let context = scope.get_current_context();
     let parser = context.get_slot::<ListenerParser>()?;
-    let function = v8::Local::new(scope, &parser.0);
+    let function = dom_ownership::local(scope, &parser.0);
     let remove = v8::Boolean::new(scope, remove);
     let passive = v8::Boolean::new(scope, passive);
     let receiver = v8::undefined(scope).into();
@@ -177,15 +179,17 @@ pub(super) fn options<'s>(
         )?
         .to_object(scope)
 }
-pub(super) fn aborted(scope: &mut v8::PinScope, signal: &v8::Global<v8::Object>) -> bool {
-    let signal = v8::Local::new(scope, signal);
+pub(super) fn aborted(scope: &mut v8::PinScope, signal: &v8::Weak<v8::Object>) -> bool {
+    let Some(signal) = signal.to_local(scope) else {
+        return true;
+    };
     let context = signal
         .get_creation_context(scope)
         .unwrap_or_else(|| scope.get_current_context());
     let Some(reader) = context.get_slot::<SignalReader>() else {
         return true;
     };
-    let function = v8::Local::new(scope, &reader.0);
+    let function = dom_ownership::local(scope, &reader.0);
     let receiver = v8::undefined(scope).into();
     function
         .call(scope, receiver, &[signal.into()])
@@ -194,12 +198,17 @@ pub(super) fn aborted(scope: &mut v8::PinScope, signal: &v8::Global<v8::Object>)
 
 /// Capture trusted post-bootstrap interface getters without exposing a page setter.
 pub fn capture_window_event_interfaces(scope: &mut v8::PinScope) {
+    let owner = scope
+        .get_current_context()
+        .get_slot::<DomContextId>()
+        .map_or(0, |id| id.0);
+    let _owner = DomScope::enter(owner);
     range_contents::capture_interfaces(scope);
     let context = scope.get_current_context();
     let Some(updater) = context.get_slot::<WindowInterfaces>() else {
         return;
     };
-    let function = v8::Local::new(scope, &updater.0);
+    let function = dom_ownership::local(scope, &updater.0);
     let global = context.global(scope);
     let values = v8::Object::new(scope);
     let key = v8::String::new(scope, "DOMException").unwrap();
@@ -252,7 +261,10 @@ pub fn capture_window_event_interfaces(scope: &mut v8::PinScope) {
                 functions.push(value);
                 if interface == "ErrorEvent" {
                     let function = v8::Local::<v8::Function>::try_from(value).unwrap();
-                    getters.push(v8::Global::new(scope, function));
+                    let Some(function) = dom_ownership::helper_function(scope, function) else {
+                        return;
+                    };
+                    getters.push(function);
                 }
             } else {
                 functions.push(v8::undefined(scope).into());
@@ -270,35 +282,78 @@ pub fn capture_window_event_interfaces(scope: &mut v8::PinScope) {
 
 #[derive(Clone)]
 pub(super) struct Listener {
-    pub callback: v8::Global<v8::Object>,
+    pub callback: v8::Weak<v8::Object>,
+    pub id: u32,
+    pub node: v8::Weak<v8::Object>,
     pub capture: bool,
     pub once: bool,
     pub passive: bool,
-    pub signal: Option<v8::Global<v8::Object>>,
+    pub signal: Option<v8::Weak<v8::Object>>,
     pub removed: std::rc::Rc<std::cell::Cell<bool>>,
-    pub abort_hook: Option<v8::Global<v8::Function>>,
+    pub abort_hook: Option<v8::Weak<v8::Function>>,
 }
-
 fn subscription(
     scope: &mut v8::PinScope,
-    signal: &v8::Global<v8::Object>,
-    hook: &v8::Global<v8::Function>,
+    signal: &v8::Weak<v8::Object>,
+    hook: &v8::Weak<v8::Function>,
     add: bool,
 ) {
-    let signal = v8::Local::new(scope, signal);
+    let Some(signal) = signal.to_local(scope) else {
+        return;
+    };
     let Some(context) = signal.get_creation_context(scope) else {
         return;
     };
     let Some(dispatcher) = context.get_slot::<SignalSubscription>() else {
         return;
     };
-    let function = v8::Local::new(scope, &dispatcher.0);
-    let hook = v8::Local::new(scope, hook);
+    let Some(function) = dispatcher.0.to_local(scope) else {
+        return;
+    };
+    let Some(hook) = hook.to_local(scope) else {
+        return;
+    };
     let flag = v8::Boolean::new(scope, add);
     let receiver = v8::undefined(scope).into();
     function.call(scope, receiver, &[signal.into(), hook.into(), flag.into()]);
 }
+thread_local! {
+    static NODE_SUBSCRIPTIONS: RefCell<HashMap<u32,v8::Weak<v8::Object>>> = RefCell::new(HashMap::new());
+    static NEXT_LISTENER: std::cell::Cell<u32> = const { std::cell::Cell::new(1) };
+}
+pub(super) fn reset_node_subscriptions() {
+    let _ = NODE_SUBSCRIPTIONS.try_with(|state| state.borrow_mut().clear());
+}
+pub(super) fn own_listener<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+    callback: v8::Local<'s, v8::Object>,
+    signal: Option<v8::Local<'s, v8::Object>>,
+) -> Option<u32> {
+    let id = NEXT_LISTENER.with(|counter| {
+        let id = counter.get();
+        counter.set(id.checked_add(1)?);
+        Some(id)
+    })?;
+    let record = v8::Object::new(scope);
+    let null = v8::null(scope);
+    record.set_prototype(scope, null.into())?;
+    let key = v8::String::new(scope, "callback")?;
+    record.create_data_property(scope, key.into(), callback.into())?;
+    if let Some(signal) = signal {
+        let key = v8::String::new(scope, "signal")?;
+        record.create_data_property(scope, key.into(), signal.into())?;
+    }
+    dom_ownership::retain_listener(scope, node, id, record)?;
+    Some(id)
+}
 pub(super) fn detach(scope: &mut v8::PinScope, listener: &Listener) {
+    NODE_SUBSCRIPTIONS.with(|state| {
+        state.borrow_mut().remove(&listener.id);
+    });
+    if let Some(node) = listener.node.to_local(scope) {
+        dom_ownership::release_listener(scope, node, listener.id);
+    }
     if let (Some(signal), Some(hook)) = (&listener.signal, &listener.abort_hook) {
         subscription(scope, signal, hook, false);
     }
@@ -308,42 +363,34 @@ fn abort_listener(
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
-    let Ok(data) = v8::Local::<v8::Array>::try_from(args.data()) else {
+    let Some(id) = args.data().uint32_value(scope) else {
         return;
     };
-    let Some(node) = data
-        .get_index(scope, 0)
-        .and_then(|value| value.to_object(scope))
-    else {
+    let node = NODE_SUBSCRIPTIONS.with(|state| {
+        state
+            .borrow()
+            .get(&id)
+            .and_then(|node| node.to_local(scope))
+    });
+    let Some(node) = node else {
+        NODE_SUBSCRIPTIONS.with(|state| {
+            state.borrow_mut().remove(&id);
+        });
         return;
     };
     let _dom = DomScope::for_object(scope, node);
-    let Some(handle) = handle_of(scope, node) else {
-        return;
-    };
-    let Some(kind) = data
-        .get_index(scope, 1)
-        .map(|value| value.to_rust_string_lossy(scope))
-    else {
-        return;
-    };
-    let Some(callback) = data.get_index(scope, 2) else {
-        return;
-    };
-    let capture = data
-        .get_index(scope, 3)
-        .is_some_and(|value| value.is_true());
-    let removed = LISTENERS.with(|listeners| {
+    let removed = LISTENERS.with(|state| {
+        let mut state = state.borrow_mut();
         let mut removed = Vec::new();
-        if let Some(list) = listeners.borrow_mut().get_mut(&(handle, kind)) {
+        for list in state.values_mut() {
             list.retain(|listener| {
-                let matched = listener.capture == capture
-                    && v8::Local::new(scope, &listener.callback).strict_equals(callback);
-                if matched {
+                if listener.id == id {
                     listener.removed.set(true);
                     removed.push(listener.clone());
+                    false
+                } else {
+                    true
                 }
-                !matched
             });
         }
         removed
@@ -355,30 +402,77 @@ fn abort_listener(
 pub(super) fn attach(
     scope: &mut v8::PinScope,
     node: v8::Local<v8::Object>,
-    kind: &str,
+    _kind: &str,
     listener: &mut Listener,
 ) {
     let Some(signal) = &listener.signal else {
         return;
     };
-    let Some(kind) = v8::String::new(scope, kind) else {
+    let Some(signal_object) = signal.to_local(scope) else {
         return;
     };
-    let callback = v8::Local::new(scope, &listener.callback);
-    let capture = v8::Boolean::new(scope, listener.capture);
-    let data = v8::Array::new_with_elements(
-        scope,
-        &[node.into(), kind.into(), callback.into(), capture.into()],
-    );
+    let Some(context) = signal_object.get_creation_context(scope) else {
+        return;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let data = v8::Integer::new_from_unsigned(scope, listener.id);
     let Some(hook) = v8::Function::builder(abort_listener)
         .data(data.into())
         .build(scope)
     else {
         return;
     };
-    let hook = v8::Global::new(scope, hook);
+    NODE_SUBSCRIPTIONS.with(|state| {
+        state
+            .borrow_mut()
+            .insert(listener.id, v8::Weak::new(scope, node));
+    });
+    let hook = v8::Weak::new(scope, hook);
     subscription(scope, signal, &hook, true);
     listener.abort_hook = Some(hook);
+}
+
+pub(super) fn clear_context(context: v8::Local<v8::Context>) {
+    context.remove_slot::<WindowPhases>();
+    context.remove_slot::<ListenerParser>();
+    context.remove_slot::<SignalReader>();
+    context.remove_slot::<WindowInterfaces>();
+    context.remove_slot::<SignalSubscription>();
+    context.remove_slot::<ErrorGetters>();
+}
+pub(super) fn sweep_collected_listeners(scope: &mut v8::PinScope) {
+    fn remove_dead(
+        listeners: &mut HashMap<(Handle, String), Vec<Listener>>,
+        removed: &mut Vec<Listener>,
+    ) {
+        listeners.retain(|_, list| {
+            list.retain(|listener| {
+                if listener.node.is_empty() {
+                    listener.removed.set(true);
+                    removed.push(listener.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            !list.is_empty()
+        });
+    }
+    let mut removed = Vec::new();
+    LISTENERS.with(|state| remove_dead(&mut state.borrow_mut(), &mut removed));
+    OTHER_DOMS.with(|states| {
+        for state in states.borrow_mut().values_mut() {
+            remove_dead(&mut state.listeners, &mut removed);
+        }
+    });
+    for listener in removed {
+        detach(scope, &listener);
+    }
+    NODE_SUBSCRIPTIONS.with(|state| state.borrow_mut().retain(|_, node| !node.is_empty()));
+}
+#[cfg(test)]
+pub(super) fn subscription_count() -> usize {
+    NODE_SUBSCRIPTIONS.with(|state| state.borrow().len())
 }
 
 #[cfg(test)]

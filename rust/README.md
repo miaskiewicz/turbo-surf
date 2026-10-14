@@ -7,9 +7,10 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
-workspace now resolves the published `turbo-dom` 0.5.3 crate, including PR #8's
-additive fragment/document APIs and compact ordinary-node/attribute storage.
-The release tag is on merge commit `87c2077`; registry artifacts were verified.
+workspace now resolves the published `turbo-dom` 0.5.3 crate, including native mutation-event support,
+fragment/document APIs and compact ordinary-node/attribute storage.
+The 0.5.3 release tag is on PR #9 merge commit `8112bbf`; registry artifacts were verified.
+The additive reclamation API is published in 0.5.4; consumer integration is in progress.
 
 ## Crates
 
@@ -28,6 +29,12 @@ The release tag is on merge commit `87c2077`; registry artifacts were verified.
 `cargo test --workspace` runs the offline engine suite. Required gates also include
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
 the root npm test command checks versions, the addon/shim and detection harness too.
+
+The render tier consumes published `turbo-html2pdf-core 0.3.5` for native live-tree
+box geometry, transforms, element scroll metrics and point-hit regions. It reads
+private actual CSSOM state without guest getters or HTML rewriting. Supported
+contracts and remaining inline/caret/scroll/layout limits are recorded in
+[LIVE-GEOMETRY.md](../harness/detection/LIVE-GEOMETRY.md).
 
 ## Tier 1 — `turbo-surf-core`
 

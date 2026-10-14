@@ -25,6 +25,10 @@ The [Deno MIT license](deno_crypto/LICENSE.md) is retained.
   rooted by a queue. Delivery builds fresh receiver-realm native key state; queue
   admission includes the owned material bytes. The host-only `NativeKeySnapshot`
   API has private fields and does not install a page-accessible exporter.
+- Crypto/SubtleCrypto and CryptoKey algorithm/usages/handle edges use actual
+  cppgc traced references. Their native owners preserve identity while live and
+  release whole iframe realms when collected, instead of creating strong Rust
+  Global roots.
 - Deprecated AWS-LC ML-DSA aliases use the corresponding stable APIs; this keeps
   the local path dependency warning-free with the locked provider version.
 

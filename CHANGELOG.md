@@ -2,6 +2,36 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Replace native wrapper/helper/context roots with weak lookups and private V8
+  Document/subtree ownership; trace real cppgc crypto edges. A genuine heap trace
+  identified and fixed both a main Window initializer retaining the last child
+  Document and ownership maps allocated in a child realm. Observer draining no
+  longer marks unchanged ownership graphs dirty.
+  Reusable native heap snapshots/root-path analysis support retention regressions.
+- Apply a hash-verified Rusty V8 150.4.0 Rust ownership teardown patch, preserving
+  the real engine/native archive identity and upstream licenses. Reproduction uses
+  owned source rather than changing Cargo's shared package cache. Canonical 149.3.0
+  uses the equivalent tested fix. Native155 validation remains separate.
+- Deliver native MutationObserver batches through a real V8 microtask, with private
+  branded records/lists, options, old values and transient removed subtrees. Add a
+  trusted Document-private postconnection consumer and scalar script preparation
+  state. Broader observer/resource execution integration remains in progress.
+- Connect published turbo-html2pdf-core 0.3.5 live-tree snapshots to DOMRect, native
+  client/offset metrics, element scrolling and point-hit geometry. The paired
+  authored Chrome controls cover this subset; text/caret/Range, mixed SVG pages,
+  fractional LayoutUnit arithmetic and broader layout remain explicitly open.
+- Preserve iframe budget interruption across fallible private helper/capability
+  registration, with retry/session-recovery regressions. The current canonical
+  cohort passes 134 contracts on both default SDKs; focused Surf GC, geometry,
+  referrer, messaging, crypto/event and host-input checks pass. Full gates,
+  current API inventory/artifacts and native Google acceptance remain pending.
+
+- Apply all eight standard referrer policies to native request headers, document
+  defaults, explicit Request/fetch overrides and redirect response policies.
+  Referrers strip credentials/fragments, reduce long URLs and obey trustworthy
+  downgrade/origin rules. An authored Chrome155 loopback collector records 33
+  request cases; native policy contracts cover the actual outgoing headers.
+
 - Window events use native capture/target/bubble paths, private listener records,
   once/passive/signal options and real handler ordering/onerror arguments. Final
   realm constructors are captured privately after bootstrap. Obsolete public
@@ -30,6 +60,9 @@
   in npm, standalone artifacts, the render crate and Python package, with a
   synchronized notice check in the release and test gates.
 
+- Refresh source-pinned authored frame, geometry and actual GC controls after
+  formatting; complete fresh Chrome results are unchanged. Chrome collectors
+  avoid signaling a process group after its child has already exited.
 - Fresh-cookie Chrome/native harness with baseline and instrumented controls, JS-interface
   argument/result samples and stacks, request payloads, response bodies, optional native/Chrome
   debugger script inventory, process failure artifacts, comparison output and build hashes.
@@ -212,6 +245,13 @@
   match the saved control; browser observer registrations/queues remain in progress.
 - Complete Chrome API/security/layout parity is not claimed. Final release gates and
   fresh Google evidence are recorded in FINDINGS.
+- Consume published turbo-html2pdf-core 0.3.5 in render and raster. Native live-tree
+  snapshots and private CSSOM exports provide real block/replaced rectangles,
+  transforms, client/offset/scroll metrics and point-hit regions, with branded
+  per-realm rectangle interfaces and private scalar cloning. Authored controls cover
+  the supported subset; fragmented inline/text/caret, full stacking contexts, root/
+  RTL scrolling, composed shadow layout and fractional LayoutUnit behavior remain
+  open. See [the measured scope](harness/detection/LIVE-GEOMETRY.md).
 
 **Correction to historical Google conclusions (2026-10-09):** the entries below record
 what was observed/assumed at the time, not universal Google requirements. A fresh Chrome

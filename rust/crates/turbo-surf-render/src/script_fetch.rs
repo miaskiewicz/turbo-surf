@@ -101,6 +101,7 @@ pub async fn fetch(
         if !same_origin(&target, &next) {
             headers.retain(|name, _| !name.eq_ignore_ascii_case("authorization"));
         }
+        context.apply_referrer_policy_headers(&response.headers);
         context.follow_redirect(&target, &next);
         target = next;
         redirected = true;

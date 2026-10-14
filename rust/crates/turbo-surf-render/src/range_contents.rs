@@ -1,7 +1,7 @@
 //! Private Range accessor installation; all tree operations use captured DOM methods.
 
-struct RangeAccessor(v8::Global<v8::Function>);
-struct RangeExceptionUpdater(v8::Global<v8::Function>);
+struct RangeAccessor(v8::Weak<v8::Function>);
+struct RangeExceptionUpdater(v8::Weak<v8::Function>);
 
 pub(super) fn capture(scope: &mut v8::PinScope) {
     let global = scope.get_current_context().global(scope);
@@ -14,7 +14,9 @@ pub(super) fn capture(scope: &mut v8::PinScope) {
     else {
         return;
     };
-    let accessor = v8::Global::new(scope, function);
+    let Some(accessor) = super::dom_ownership::helper_function(scope, function) else {
+        return;
+    };
     scope
         .get_current_context()
         .set_slot(std::rc::Rc::new(RangeAccessor(accessor)));
@@ -24,7 +26,7 @@ pub(super) fn install(scope: &mut v8::PinScope) {
     let Some(accessor) = scope.get_current_context().get_slot::<RangeAccessor>() else {
         return;
     };
-    let accessor = v8::Local::new(scope, &accessor.0);
+    let accessor = super::dom_ownership::local(scope, &accessor.0);
     let global = scope.get_current_context().global(scope);
     let Some(name) = v8::String::new(scope, "ts") else {
         return;
@@ -49,12 +51,19 @@ pub(super) fn install(scope: &mut v8::PinScope) {
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     {
+        let marker = v8::Function::new(scope, super::script_state::contextual_fragment).unwrap();
         let receiver = v8::undefined(scope);
         if let Some(updater) = initializer
-            .call(scope, receiver.into(), &[accessor.into(), factory])
+            .call(
+                scope,
+                receiver.into(),
+                &[accessor.into(), factory, marker.into()],
+            )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         {
-            let updater = v8::Global::new(scope, updater);
+            let Some(updater) = super::dom_ownership::helper_function(scope, updater) else {
+                return;
+            };
             scope
                 .get_current_context()
                 .set_slot(std::rc::Rc::new(RangeExceptionUpdater(updater)));
@@ -69,7 +78,7 @@ pub(super) fn capture_interfaces(scope: &mut v8::PinScope) {
     else {
         return;
     };
-    let function = v8::Local::new(scope, &updater.0);
+    let function = super::dom_ownership::local(scope, &updater.0);
     let global = scope.get_current_context().global(scope);
     let Some(name) = v8::String::new(scope, "DOMException") else {
         return;
@@ -78,6 +87,11 @@ pub(super) fn capture_interfaces(scope: &mut v8::PinScope) {
         let receiver = v8::undefined(scope);
         function.call(scope, receiver.into(), &[constructor]);
     }
+}
+
+pub(super) fn clear_context(context: v8::Local<v8::Context>) {
+    context.remove_slot::<RangeAccessor>();
+    context.remove_slot::<RangeExceptionUpdater>();
 }
 
 #[cfg(test)]

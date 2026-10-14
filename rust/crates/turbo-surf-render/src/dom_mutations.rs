@@ -96,6 +96,17 @@ pub(super) fn insert(
     reference: Option<Handle>,
     remove: &[Handle],
 ) -> bool {
+    insert_mode(scope, parent, incoming, reference, remove, false)
+}
+
+fn insert_mode(
+    scope: &mut v8::PinScope,
+    parent: Handle,
+    incoming: &[Handle],
+    reference: Option<Handle>,
+    remove: &[Handle],
+    replace_all: bool,
+) -> bool {
     let Some(result) = with_tree(|tree| plan(tree, parent, incoming, reference, remove)) else {
         return false;
     };
@@ -115,32 +126,54 @@ pub(super) fn insert(
             html_popover::disconnect(scope, node, true);
         }
     }
-    for node in plan.remove {
-        if !plan.nodes.contains(&node) {
-            range_live::removing(scope, node);
-            with_tree_mut(|tree| tree.remove_child(parent, node));
-        }
-    }
     // Detach the complete sequence before insertion, as the DOM insertion algorithm does.
     for &node in &plan.nodes {
         if let Some(old_parent) = with_tree(|tree| tree.parent(node)).flatten() {
+            if replace_all && old_parent == parent {
+                continue;
+            }
             range_live::removing(scope, node);
             with_tree_mut(|tree| tree.remove_child(old_parent, node));
         }
     }
-    let index = with_tree(|tree| {
-        let children = tree.children(parent);
-        plan.reference
-            .and_then(|reference| children.iter().position(|&node| node == reference))
-            .unwrap_or(children.len())
+    let removed = with_tree(|tree| {
+        plan.remove
+            .iter()
+            .copied()
+            .filter(|node| tree.parent(*node) == Some(parent))
+            .collect::<Vec<_>>()
     })
-    .unwrap_or(0);
-    range_live::inserting(scope, parent, index, plan.nodes.len());
-    with_tree_mut(|tree| {
-        for node in plan.nodes {
-            tree.insert_before(parent, node, plan.reference);
+    .unwrap_or_default();
+    let previous = with_tree(|tree| {
+        if let Some(first) = removed.first() {
+            tree.previous_sibling(*first)
+        } else if let Some(reference) = plan.reference {
+            tree.previous_sibling(reference)
+        } else {
+            tree.children(parent).last().copied()
         }
+    })
+    .flatten();
+    mutation_observers::quiet(scope, |scope| {
+        for &node in &removed {
+            range_live::removing(scope, node);
+            with_tree_mut(|tree| tree.remove_child(parent, node));
+        }
+        let index = with_tree(|tree| {
+            let children = tree.children(parent);
+            plan.reference
+                .and_then(|reference| children.iter().position(|&node| node == reference))
+                .unwrap_or(children.len())
+        })
+        .unwrap_or(0);
+        range_live::inserting(scope, parent, index, plan.nodes.len());
+        with_tree_mut(|tree| {
+            for &node in &plan.nodes {
+                tree.insert_before(parent, node, plan.reference);
+            }
+        });
     });
+    mutation_observers::child_list(scope, parent, plan.nodes, removed, previous, plan.reference);
     true
 }
 
@@ -296,8 +329,23 @@ fn detach_input<'s>(
         html_popover::disconnect(scope, handle, true);
         range_live::removing(scope, handle);
         with_tree_mut(|tree| tree.remove_child(parent, handle));
+        mutation_observers::flush(scope);
     }
     Some(())
+}
+
+fn drain_fragment(scope: &mut v8::PinScope, node: &NodeView) {
+    let _source = DomScope::for_object(scope, node.object);
+    let parent = node.identity.1;
+    let children = with_tree(|tree| tree.children(parent)).unwrap_or_default();
+    mutation_observers::quiet(scope, |scope| {
+        for &child in &children {
+            html_popover::disconnect(scope, child, true);
+            range_live::removing(scope, child);
+            with_tree_mut(|tree| tree.remove_child(parent, child));
+        }
+    });
+    mutation_observers::child_list(scope, parent, Vec::new(), children, None, None);
 }
 
 /// Chrome155 drains fragments during conversion, then detaches multi-node
@@ -313,8 +361,8 @@ pub(super) fn convert_variadic<'s>(
             Incoming::Node(object) => {
                 let node = view(scope, *object)?;
                 if node.kind == 11 {
+                    drain_fragment(scope, &node);
                     for child in node.children {
-                        detach_input(scope, child.object)?;
                         nodes.push(Incoming::Node(child.object));
                     }
                 } else {
@@ -491,6 +539,26 @@ pub(super) fn insert_inputs<'s>(
     reference: Option<Handle>,
     remove: &[Handle],
 ) -> bool {
+    insert_inputs_mode(scope, parent, incoming, reference, remove, false)
+}
+
+pub(super) fn replace_inputs<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: Handle,
+    incoming: &[Incoming<'s>],
+    remove: &[Handle],
+) -> bool {
+    insert_inputs_mode(scope, parent, incoming, None, remove, true)
+}
+
+fn insert_inputs_mode<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    parent: Handle,
+    incoming: &[Incoming<'s>],
+    reference: Option<Handle>,
+    remove: &[Handle],
+    replace_all: bool,
+) -> bool {
     let owner = DOM_ID.with(|id| id.get());
     let Some(prepared) = prepare(scope, incoming) else {
         return false;
@@ -513,6 +581,13 @@ pub(super) fn insert_inputs<'s>(
     };
     let root = with_tree(|tree| tree.root()).unwrap();
     let document = wrap(scope, root);
+    for input in &prepared {
+        if let Prepared::Node(node) = input {
+            if node.kind == 11 {
+                drain_fragment(scope, node);
+            }
+        }
+    }
     // Fragment/ShadowRoot containers stay in their original document. Adopt
     // exactly the expanded children, preserving the container's native identity.
     for input in &planned {
@@ -542,7 +617,7 @@ pub(super) fn insert_inputs<'s>(
             }
         }
     }
-    insert(scope, parent, &handles, reference, remove)
+    insert_mode(scope, parent, &handles, reference, remove, replace_all)
 }
 
 #[cfg(test)]

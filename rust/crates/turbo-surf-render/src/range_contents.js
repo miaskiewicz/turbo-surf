@@ -1,8 +1,9 @@
-(function (record, make) {
+(function (record, make, markContextualFragment) {
   "use strict";
   let Exception = DOMException;
   const LocalRange = Range,
     TypeErrorClass = TypeError,
+    StringClass = String,
     define = Object.defineProperty,
     apply = Reflect.apply,
     getDescriptor = Object.getOwnPropertyDescriptor,
@@ -295,6 +296,19 @@
     const container = parent(node);
     return !container || (compare(container, index(node), this.endContainer, this.endOffset) < 0 &&
       compare(container, index(node) + 1, this.startContainer, this.startOffset) > 0);
+  });
+  const createElement = descriptor(Document.prototype, "createElement").value;
+  const innerHTML = descriptor(Element.prototype, "innerHTML").set;
+  method("createContextualFragment", 1, function (html) {
+    required(arguments, 1);
+    const container = apply(createElement, this.document, ["div"]);
+    if (typeof html === "symbol") throw new TypeErrorClass("Cannot convert a Symbol to a string");
+    apply(innerHTML, container, [StringClass(html)]);
+    const result = apply(fragment, this.document, []);
+    let child;
+    while ((child = first(container))) apply(append, result, [child]);
+    markContextualFragment(result);
+    return result;
   });
   method("cloneContents", 0, function () { return contents(this, "clone"); });
   method("extractContents", 0, function () { return contents(this, "extract"); });

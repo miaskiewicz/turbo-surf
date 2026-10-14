@@ -190,62 +190,189 @@
 +  })?;
 +  Ok(snapshot.restore(scope))
 +}
+--- a/crypto.rs
++++ b/crypto.rs
+@@ -52 +52 @@
+-  /// Stored as a `v8::Global` so the getter returns the same identity
++  /// Traced with its cppgc owner so the getter returns the same identity
+@@ -54 +54 @@
+-  subtle: v8::Global<v8::Value>,
++  subtle: v8::TracedReference<v8::Value>,
+@@ -61,2 +61 @@
+-// SAFETY: the `subtle` field is a `v8::Global` whose backing object is owned
+-// by V8 itself; no Rust-side roots that need cppgc tracing.
++// SAFETY: every JavaScript reference is visited with its native cppgc owner.
+@@ -64 +63,3 @@
+-  fn trace(&self, _visitor: &mut v8::cppgc::Visitor) {}
++  fn trace(&self, visitor: &mut v8::cppgc::Visitor) {
++    visitor.trace(&self.subtle);
++  }
+@@ -88,4 +89 @@
+-  fn create(
+-    scope: &mut v8::PinScope<'_, '_>,
+-    subtle: v8::Local<v8::Value>,
+-  ) -> Crypto {
++  fn create(scope: &mut v8::PinScope<'_, '_>, subtle: v8::Local<v8::Value>) -> Crypto {
+@@ -93 +91 @@
+-      subtle: v8::Global::new(scope, subtle),
++      subtle: v8::TracedReference::new(scope, subtle),
+@@ -98,5 +96,5 @@
+-  fn subtle<'s>(
+-    &self,
+-    scope: &mut v8::PinScope<'s, '_>,
+-  ) -> v8::Local<'s, v8::Value> {
+-    v8::Local::new(scope, &self.subtle)
++  fn subtle<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
++    self
++      .subtle
++      .get(scope)
++      .expect("live cppgc owner traces its values")
+--- a/crypto_key.rs
++++ b/crypto_key.rs
+@@ -45,2 +45,2 @@
+-  /// Stored as `v8::Global` so the getter satisfies `SameObject` per spec.
+-  usages: v8::Global<v8::Value>,
++  /// Traced with its cppgc owner while preserving `SameObject` per spec.
++  usages: v8::TracedReference<v8::Value>,
+@@ -49 +49 @@
+-  algorithm: v8::Global<v8::Value>,
++  algorithm: v8::TracedReference<v8::Value>,
+@@ -54 +54 @@
+-  handle: v8::Global<v8::Value>,
++  handle: v8::TracedReference<v8::Value>,
+@@ -61,2 +61 @@
+-// SAFETY: All v8 values are stored in `v8::Global`, which is its own
+-// strong root for V8's GC; cppgc has no Rust-side fields to trace.
++// SAFETY: every JavaScript reference is visited with its native cppgc owner.
+@@ -64 +63,5 @@
+-  fn trace(&self, _visitor: &mut v8::cppgc::Visitor) {}
++  fn trace(&self, visitor: &mut v8::cppgc::Visitor) {
++    visitor.trace(&self.usages);
++    visitor.trace(&self.algorithm);
++    visitor.trace(&self.handle);
++  }
+@@ -93,13 +96,13 @@
+-  fn usages<'s>(
+-    &self,
+-    scope: &mut v8::PinScope<'s, '_>,
+-  ) -> v8::Local<'s, v8::Value> {
+-    v8::Local::new(scope, &self.usages)
+-  }
+-
+-  #[getter]
+-  fn algorithm<'s>(
+-    &self,
+-    scope: &mut v8::PinScope<'s, '_>,
+-  ) -> v8::Local<'s, v8::Value> {
+-    v8::Local::new(scope, &self.algorithm)
++  fn usages<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
++    self
++      .usages
++      .get(scope)
++      .expect("live cppgc owner traces its values")
++  }
++
++  #[getter]
++  fn algorithm<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
++    self
++      .algorithm
++      .get(scope)
++      .expect("live cppgc owner traces its values")
+@@ -149,8 +152 @@
+-    crate::node_interop::import_sync(
+-      scope,
+-      format,
+-      key_data,
+-      algorithm,
+-      extractable,
+-      usages,
+-    )
++    crate::node_interop::import_sync(scope, format, key_data, algorithm, extractable, usages)
+@@ -177,5 +173,5 @@
+-  pub fn algorithm_name<'s>(
+-    &self,
+-    scope: &mut v8::PinScope<'s, '_>,
+-  ) -> Option<String> {
+-    let alg = v8::Local::new(scope, &self.algorithm);
++  pub fn algorithm_name<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<String> {
++    let alg = self
++      .algorithm
++      .get(scope)
++      .expect("live cppgc owner traces its values");
+@@ -183,5 +179 @@
+-    let key = v8::String::new_from_one_byte(
+-      scope,
+-      b"name",
+-      v8::NewStringType::Internalized,
+-    )?;
++    let key = v8::String::new_from_one_byte(scope, b"name", v8::NewStringType::Internalized)?;
+@@ -197,5 +189 @@
+-  pub fn has_usage<'s>(
+-    &self,
+-    scope: &mut v8::PinScope<'s, '_>,
+-    usage: &str,
+-  ) -> bool {
++  pub fn has_usage<'s>(&self, scope: &mut v8::PinScope<'s, '_>, usage: &str) -> bool {
+@@ -215,5 +203,5 @@
+-  pub fn usages_as_vec<'s>(
+-    &self,
+-    scope: &mut v8::PinScope<'s, '_>,
+-  ) -> Option<Vec<String>> {
+-    let usages = v8::Local::new(scope, &self.usages);
++  pub fn usages_as_vec<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<Vec<String>> {
++    let usages = self
++      .usages
++      .get(scope)
++      .expect("live cppgc owner traces its values");
+@@ -238 +226,4 @@
+-    let alg = v8::Local::new(scope, &self.algorithm);
++    let alg = self
++      .algorithm
++      .get(scope)
++      .expect("live cppgc owner traces its values");
+@@ -251 +242,4 @@
+-    let handle = v8::Local::new(scope, &self.handle);
++    let handle = self
++      .handle
++      .get(scope)
++      .expect("live cppgc owner traces its values");
+@@ -253,5 +247 @@
+-    let key = v8::String::new_from_one_byte(
+-      scope,
+-      b"cppgc",
+-      v8::NewStringType::Internalized,
+-    )?;
++    let key = v8::String::new_from_one_byte(scope, b"cppgc", v8::NewStringType::Internalized)?;
+@@ -277,3 +267,3 @@
+-      usages: v8::Global::new(scope, usages),
+-      algorithm: v8::Global::new(scope, algorithm),
+-      handle: v8::Global::new(scope, handle),
++      usages: v8::TracedReference::new(scope, usages),
++      algorithm: v8::TracedReference::new(scope, algorithm),
++      handle: v8::TracedReference::new(scope, handle),
 --- a/lib.rs
 +++ b/lib.rs
-@@ -49,6 +49,10 @@
- mod algorithm;
- mod crypto;
- mod crypto_key;
+@@ -51,0 +52,4 @@
 +mod clone_key;
 +pub use crate::clone_key::{
 +  NativeKeySnapshot, clone_key, is_crypto_key, is_crypto_object,
 +};
- mod decrypt;
- mod digest;
- mod ed25519;
 --- a/make_key.rs
 +++ b/make_key.rs
-@@ -132,7 +132,7 @@
-       .set_integrity_level(scope, v8::IntegrityLevel::Frozen)
-       .unwrap();
-     let key = one_byte_internalized(scope, b"hash");
+@@ -135 +135 @@
 -    obj.set(scope, key.into(), hash_obj.into());
 +    obj.create_data_property(scope, key.into(), hash_obj.into());
-   }
-   if let Some(ref curve) = dict.named_curve {
-     set_string(scope, obj, b"namedCurve", curve);
-@@ -149,7 +149,7 @@
-     };
-     let u8 = v8::Uint8Array::new(scope, backing, 0, pe.len()).unwrap();
-     let key = one_byte_internalized(scope, b"publicExponent");
+@@ -152 +152 @@
 -    obj.set(scope, key.into(), u8.into());
 +    obj.create_data_property(scope, key.into(), u8.into());
-   }
-   obj
-     .set_integrity_level(scope, v8::IntegrityLevel::Frozen)
-@@ -165,7 +165,8 @@
-   let arr = v8::Array::new(scope, len as i32);
-   for (i, u) in usages.iter().enumerate() {
-     let s = v8::String::new(scope, u).unwrap();
+@@ -168 +168,2 @@
 -    arr.set_index(scope, i as u32, s.into());
 +    let index = v8::String::new(scope, &i.to_string()).unwrap();
 +    arr.create_data_property(scope, index.into(), s.into());
-   }
-   let obj: v8::Local<v8::Object> = arr.into();
-   obj
-@@ -181,7 +182,7 @@
-   let handle = make_cppgc_object(scope, CryptoKeyHandle::from_raw(data));
-   let wrapper = v8::Object::new(scope);
-   let key = one_byte_internalized(scope, b"cppgc");
+@@ -184 +185 @@
 -  wrapper.set(scope, key.into(), handle.into());
 +  wrapper.create_data_property(scope, key.into(), handle.into());
-   wrapper
- }
- 
-@@ -199,15 +200,14 @@
-   alg: AlgorithmDict,
-   data: RawKeyData,
- ) -> v8::Local<'s, v8::Object> {
+@@ -202,9 +203,8 @@
 -  let key_data_jsval = key_data_to_jsval(scope, &data);
 -  let host_object_snapshot = build_host_object_snapshot(
 -    scope,
@@ -263,110 +390,50 @@
 +    );
 +    (key_data, snapshot)
 +  });
-   let handle = build_handle_object(scope, data);
-   let algorithm_obj = build_algorithm_object(scope, &alg);
-   let usages_arr = build_usages_array(scope, usages);
-@@ -221,7 +221,9 @@
-     handle.into(),
-   );
-   let obj = make_cppgc_object(scope, crypto_key);
+@@ -224 +224,3 @@
 -  stamp_symbols(scope, obj, key_data_jsval, host_object_snapshot);
 +  if let Some((key_data, snapshot)) = stamped_data {
 +    stamp_symbols(scope, obj, key_data, snapshot);
 +  }
-   obj
- }
- 
-@@ -309,27 +311,27 @@
-   let obj = v8::Object::new(scope);
-   let type_key = one_byte_internalized(scope, b"type");
-   let type_val = v8::String::new(scope, "CryptoKey").unwrap();
+@@ -312 +314 @@
 -  obj.set(scope, type_key.into(), type_val.into());
 +  obj.create_data_property(scope, type_key.into(), type_val.into());
- 
-   let key_type_key = one_byte_internalized(scope, b"keyType");
-   let key_type_val = v8::String::new(scope, key_type_str(key_type)).unwrap();
+@@ -316 +318 @@
 -  obj.set(scope, key_type_key.into(), key_type_val.into());
 +  obj.create_data_property(scope, key_type_key.into(), key_type_val.into());
- 
-   let ext_key = one_byte_internalized(scope, b"extractable");
-   let ext_val = v8::Boolean::new(scope, extractable);
+@@ -320 +322 @@
 -  obj.set(scope, ext_key.into(), ext_val.into());
 +  obj.create_data_property(scope, ext_key.into(), ext_val.into());
- 
-   let usages_key = one_byte_internalized(scope, b"usages");
-   let usages_val = build_usages_array(scope, usages);
+@@ -324 +326 @@
 -  obj.set(scope, usages_key.into(), usages_val.into());
 +  obj.create_data_property(scope, usages_key.into(), usages_val.into());
- 
-   let alg_key = one_byte_internalized(scope, b"algorithm");
-   let alg_val = build_algorithm_object(scope, alg);
+@@ -328 +330 @@
 -  obj.set(scope, alg_key.into(), alg_val.into());
 +  obj.create_data_property(scope, alg_key.into(), alg_val.into());
- 
-   let kd_key = one_byte_internalized(scope, b"keyData");
-   let kd_val = key_data_to_jsval(scope, data);
+@@ -332 +334 @@
 -  obj.set(scope, kd_key.into(), kd_val);
 +  obj.create_data_property(scope, kd_key.into(), kd_val);
- 
-   obj.into()
- }
-@@ -374,11 +376,11 @@
-       let obj = v8::Object::new(scope);
-       let pk_key = one_byte_internalized(scope, b"privateKey");
-       let pk_arr = u8a(scope, private_key);
+@@ -377 +379 @@
 -      obj.set(scope, pk_key.into(), pk_arr.into());
 +      obj.create_data_property(scope, pk_key.into(), pk_arr.into());
-       if let Some(seed) = seed {
-         let seed_key = one_byte_internalized(scope, b"seed");
-         let seed_arr = u8a(scope, seed);
+@@ -381 +383 @@
 -        obj.set(scope, seed_key.into(), seed_arr.into());
 +        obj.create_data_property(scope, seed_key.into(), seed_arr.into());
-       }
-       obj.into()
-     }
-@@ -393,7 +395,7 @@
-   let obj = v8::Object::new(scope);
-   let type_key = one_byte_internalized(scope, b"type");
-   let type_val = v8::String::new(scope, kind).unwrap();
+@@ -396 +398 @@
 -  obj.set(scope, type_key.into(), type_val.into());
 +  obj.create_data_property(scope, type_key.into(), type_val.into());
-   let data_key = one_byte_internalized(scope, b"data");
-   let backing = if bytes.is_empty() {
-     v8::ArrayBuffer::new(scope, 0)
-@@ -405,7 +407,7 @@
-     v8::ArrayBuffer::with_backing_store(scope, &bs)
-   };
-   let data_arr = v8::Uint8Array::new(scope, backing, 0, bytes.len()).unwrap();
+@@ -408 +410 @@
 -  obj.set(scope, data_key.into(), data_arr.into());
 +  obj.create_data_property(scope, data_key.into(), data_arr.into());
-   obj.into()
- }
- 
-@@ -417,7 +419,7 @@
- ) {
-   let k = one_byte_internalized(scope, field);
-   let v = v8::String::new(scope, value).unwrap();
+@@ -420 +422 @@
 -  obj.set(scope, k.into(), v.into());
 +  obj.create_data_property(scope, k.into(), v.into());
- }
- 
- fn set_u32<'s>(
-@@ -428,7 +430,7 @@
- ) {
-   let k = one_byte_internalized(scope, field);
-   let n = v8::Number::new(scope, value as f64);
+@@ -431 +433 @@
 -  obj.set(scope, k.into(), n.into());
 +  obj.create_data_property(scope, k.into(), n.into());
- }
- 
- fn one_byte_internalized<'s>(
 --- a/mldsa.rs
 +++ b/mldsa.rs
-@@ -2,15 +2,15 @@
- 
- use aws_lc_rs::signature::KeyPair;
- use aws_lc_rs::signature::UnparsedPublicKey;
+@@ -5,9 +5,9 @@
 -use aws_lc_rs::unstable::signature::ML_DSA_44;
 -use aws_lc_rs::unstable::signature::ML_DSA_44_SIGNING;
 -use aws_lc_rs::unstable::signature::ML_DSA_65;
@@ -385,125 +452,56 @@
 +use aws_lc_rs::signature::PqdsaKeyPair;
 +use aws_lc_rs::signature::PqdsaSigningAlgorithm;
 +use aws_lc_rs::signature::PqdsaVerificationAlgorithm;
- use spki::der::Encode;
- use spki::der::asn1::BitString;
- 
-@@ -324,7 +324,7 @@
-   let p = params(variant)?;
-   let key_pair = PqdsaKeyPair::from_seed(p.signing, seed)
-     .map_err(|_| MlDsaError::InvalidKeyData)?;
+@@ -327 +327 @@
 -  let pkcs8 = key_pair.to_pkcs8().map_err(|_| MlDsaError::FailedExport)?;
 +  let pkcs8 = key_pair.to_pkcs8v1().map_err(|_| MlDsaError::FailedExport)?;
-   Ok(pkcs8.as_ref().to_vec())
- }
- 
-@@ -395,7 +395,7 @@
-   fn as_raw_bytes_vec(&self) -> Result<Vec<u8>, ()>;
- }
- 
+@@ -398 +398 @@
 -impl AsRawBytesVec for aws_lc_rs::unstable::signature::PqdsaPrivateKey<'_> {
 +impl AsRawBytesVec for aws_lc_rs::signature::PqdsaPrivateKey<'_> {
-   fn as_raw_bytes_vec(&self) -> Result<Vec<u8>, ()> {
-     use aws_lc_rs::encoding::AsRawBytes;
-     let raw = self.as_raw_bytes().map_err(|_| ())?;
 --- a/node_interop.rs
 +++ b/node_interop.rs
-@@ -81,7 +81,7 @@
-   let obj = v8::Object::new(scope);
-   let tk = v8::String::new(scope, "type").unwrap();
-   let tv = v8::String::new(scope, mat.key_type).unwrap();
+@@ -84 +84 @@
 -  obj.set(scope, tk.into(), tv.into());
 +  obj.create_data_property(scope, tk.into(), tv.into());
-   let dk = v8::String::new(scope, "data").unwrap();
-   let backing = if mat.data.is_empty() {
-     v8::ArrayBuffer::new(scope, 0)
-@@ -93,7 +93,7 @@
-     v8::ArrayBuffer::with_backing_store(scope, &bs)
-   };
-   let u8 = v8::Uint8Array::new(scope, backing, 0, mat.data.len()).unwrap();
+@@ -96 +96 @@
 -  obj.set(scope, dk.into(), u8.into());
 +  obj.create_data_property(scope, dk.into(), u8.into());
-   Ok(obj.into())
- }
- 
 --- a/subtle_encapsulate.rs
 +++ b/subtle_encapsulate.rs
-@@ -89,14 +89,14 @@
-       v8::NewStringType::Internalized,
-     )
-     .ok_or_else(|| JsErrorBox::type_error("ciphertext key"))?;
+@@ -92 +92 @@
 -    obj.set(scope, key.into(), ciphertext.into());
 +    obj.create_data_property(scope, key.into(), ciphertext.into());
-     let key = v8::String::new_from_one_byte(
-       scope,
-       b"sharedKey",
-       v8::NewStringType::Internalized,
-     )
-     .ok_or_else(|| JsErrorBox::type_error("sharedKey key"))?;
+@@ -99 +99 @@
 -    obj.set(scope, key.into(), shared_key.into());
 +    obj.create_data_property(scope, key.into(), shared_key.into());
-     Ok(obj.into())
-   }
- }
 --- a/subtle_encapsulate_key.rs
 +++ b/subtle_encapsulate_key.rs
-@@ -46,14 +46,14 @@
-       v8::NewStringType::Internalized,
-     )
-     .ok_or_else(|| JsErrorBox::type_error("ciphertext"))?;
+@@ -49 +49 @@
 -    obj.set(scope, key1.into(), ciphertext.into());
 +    obj.create_data_property(scope, key1.into(), ciphertext.into());
-     let key2 = v8::String::new_from_one_byte(
-       scope,
-       b"sharedKey",
-       v8::NewStringType::Internalized,
-     )
-     .ok_or_else(|| JsErrorBox::type_error("sharedKey"))?;
+@@ -56 +56 @@
 -    obj.set(scope, key2.into(), self.shared_key.into());
 +    obj.create_data_property(scope, key2.into(), self.shared_key.into());
-     Ok(obj.into())
-   }
- }
 --- a/subtle_export_key.rs
 +++ b/subtle_export_key.rs
-@@ -208,13 +208,14 @@
-   let arr = v8::Array::new(scope, jwk.key_ops.len() as i32);
-   for (i, op) in jwk.key_ops.iter().enumerate() {
-     let s = v8::String::new(scope, op).unwrap();
+@@ -211 +211,2 @@
 -    arr.set_index(scope, i as u32, s.into());
 +    let index = v8::String::new(scope, &i.to_string()).unwrap();
 +    arr.create_data_property(scope, index.into(), s.into());
-   }
-   let key_ops_key = key_intern(scope, b"key_ops");
+@@ -214 +215 @@
 -  obj.set(scope, key_ops_key.into(), arr.into());
 +  obj.create_data_property(scope, key_ops_key.into(), arr.into());
-   let ext_key = key_intern(scope, b"ext");
-   let ext_val = v8::Boolean::new(scope, jwk.ext);
+@@ -217 +218 @@
 -  obj.set(scope, ext_key.into(), ext_val.into());
 +  obj.create_data_property(scope, ext_key.into(), ext_val.into());
-   obj
- }
- 
-@@ -226,7 +227,7 @@
- ) {
-   let key = key_intern(scope, field);
-   let v = v8::String::new(scope, value).unwrap();
+@@ -229 +230 @@
 -  obj.set(scope, key.into(), v.into());
 +  obj.create_data_property(scope, key.into(), v.into());
- }
- 
- fn key_intern<'s>(
 --- a/subtle_generate_key.rs
 +++ b/subtle_generate_key.rs
-@@ -288,9 +288,9 @@
-         );
-         let obj = v8::Object::new(scope);
-         let pub_k = v8::String::new(scope, "publicKey").unwrap();
+@@ -291 +291 @@
 -        obj.set(scope, pub_k.into(), pub_key.into());
 +        obj.create_data_property(scope, pub_k.into(), pub_key.into());
-         let priv_k = v8::String::new(scope, "privateKey").unwrap();
+@@ -293 +293 @@
 -        obj.set(scope, priv_k.into(), priv_key.into());
 +        obj.create_data_property(scope, priv_k.into(), priv_key.into());
-         Ok(obj.into())
-       }
-     }

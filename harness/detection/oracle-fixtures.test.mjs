@@ -46,3 +46,18 @@ test("iframe ownership controls retain their exact measured collectors", () => {
   assert.match(fixture.browserVersion, /^Chrome\/155\./);
   assert.ok(fixture.ownership && fixture.adoption && fixture.baseResolution);
 });
+
+test("native microtask controls retain their measured probe and fresh Chrome collector", () => {
+  const collector = readFileSync(new URL("./authored-dom-chrome.mjs", import.meta.url));
+  for (const name of ["microtask-order", "microtask-frame"]) {
+    const fixture = JSON.parse(
+      readFileSync(new URL(`./fixtures/${name}-chrome155.json`, import.meta.url), "utf8"),
+    );
+    const probe = readFileSync(new URL(`./${name}-probe.js`, import.meta.url));
+    assert.equal(createHash("sha256").update(probe).digest("hex"), fixture.probeSha256, name);
+    assert.equal(createHash("sha256").update(collector).digest("hex"), fixture.collectorSha256);
+    assert.deepEqual(fixture.errors, []);
+    assert.equal(fixture.browser, "Chrome/155.0.8059.79");
+    assert.equal(fixture.v8, "15.5.35.23");
+  }
+});

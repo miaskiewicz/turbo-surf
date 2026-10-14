@@ -2,6 +2,13 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Replace the timer-based queueMicrotask stub with genuine V8 jobs and a native
+  Window method. Source-pinned Chrome155 controls cover Promise/observer/timer
+  ordering, callable proxies, receiver brands, descriptors and removed-frame
+  callback realms. Trusted Window error reporting preserves later jobs; runaway
+  jobs honor the native watchdog. Four focused contracts pass on defaultSDK150
+  and genuineV815.5.35.23. Broader lifecycle coverage remains pending.
+
 - Add a host-only composed-tree identity seam for native layout, reading actual
   closed-root/manual assignments without guest getters. Four slot contracts pass
   on both defaultSDK150 and genuineV815.5.35.23, including retained-edge cleanup.
@@ -24,6 +31,8 @@
   default Location getters use private receiver records and native-shaped functions.
   Controls cover own srcdoc Location descriptors and live base reads after public
   attribute/query poisoning.
+- Enforce response CSP frame-ancestors and legacy X-Frame-Options before committing iframe bytes, consulting each actual native ancestor origin. Intersect CSP headers, ignore default-src/report-only for ancestor admission, replace XFO when enforced ancestor policy exists, and preserve measured legacy invalid/conflicting-header behavior. Credentialless does not bypass explicit framing restrictions. Source-verified Chrome155 controls cover40 direct embedding cases and8 real ancestor trees;35 focused default SDK contracts pass. Violation events/reporting remain pending.
+
 - Correct Permissions query dictionary conversion and asynchronous failure timing, subtype read order, accepted descriptor labels/states, cross-realm Promise/status ownership and the interface's actual Object prototype parent. Add fresh normal Chrome155 controls for descriptor/property-read behavior and two-level policy inheritance;42 focused policy/API/Window tests pass in the isolated default SDK checkpoint. OS permission prompts and popup group transitions remain unsupported.
 
 - Preserve the measured Chrome155 feature enumeration order and wildcard/default-port origin policies. Expose real branded PermissionStatus EventTargets with original descriptor/constructor identity and change-handler behavior. Reflect the current iframe container policy separately from its committed child policy; dynamic allow changes retain the child admission snapshot. Fresh authored controls cover12 origin policies, actual status brands/events and4 dynamic iframe cases; deeper frames, popup groups and complete permission effects remain pending.

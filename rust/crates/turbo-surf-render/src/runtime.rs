@@ -17,6 +17,10 @@
 #[path = "window_proxy.rs"]
 mod window_proxy;
 
+#[path = "microtask_queue.rs"]
+mod microtask_queue;
+use microtask_queue::op_install_microtask_queue;
+
 #[path = "resource_lifecycle.rs"]
 mod resource_lifecycle;
 use resource_lifecycle::{
@@ -3007,6 +3011,25 @@ fn op_frame_set_document<'s>(
     let credentialless =
         crate::browser_env::node_attribute(scope, host, "credentialless").is_some();
     let embedding_blocked = document.as_ref().is_some_and(|document| {
+        let mut ancestors = Vec::new();
+        let mut context = parent;
+        loop {
+            if ancestors.len() > 12 || context.get_slot::<FrameRetired>().is_some() {
+                return true;
+            }
+            ancestors.push(window_origin(scope, context));
+            let Some(link) = context.get_slot::<FrameParent>() else {
+                break;
+            };
+            let Some(owner) = link.0.to_local(scope) else {
+                return true;
+            };
+            context = owner;
+        }
+        if !crate::resource_policy::ancestors_allowed(&document.url, &document.headers, &ancestors)
+        {
+            return true;
+        }
         let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
             return false;
         };
@@ -4464,6 +4487,7 @@ deno_core::extension!(
         op_storage_id,
         op_dispatch_host_event,
         op_event_callback,
+        op_install_microtask_queue,
         op_frame_cookie_get,
         op_document_location_url,
         op_frame_request_partition,
@@ -5114,13 +5138,9 @@ globalThis.requestAnimationFrame = (fn) => {
   return id;
 };
 globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };
-// Route queueMicrotask through the virtual timer queue (NOT a real V8 microtask).
-// The "correct" Promise.resolve().then is unbounded — a reactivity lib that
-// re-schedules a flush each microtask spins V8's microtask queue forever, which the
-// render budget's terminate-execution can't cleanly interrupt (orphan CPU). The
-// timer queue is bounded by the hydration pump's timer budget, so a runaway loop
-// fails fast instead of leaking. (Such an app doesn't converge headlessly anyway.)
-globalThis.queueMicrotask = (fn) => globalThis.setTimeout(fn, 0);
+// Native V8 jobs share the real Promise/observer microtask checkpoint and the
+// host watchdog. Their callbacks retain private realm ownership until delivery.
+ops.op_install_microtask_queue();
 __G.runTimers = (max = 100000) => {
   let n = 0;
   while (__timers.length && n < max) {

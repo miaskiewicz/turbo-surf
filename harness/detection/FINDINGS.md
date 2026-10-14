@@ -1,4 +1,4 @@
-# Google detection audit — 2026-10-09; follow-up 2026-10-10
+# Google detection audit — 2026-10-09; follow-up 2026-10-14
 
 Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
@@ -7,11 +7,20 @@ its retry. Chrome oracle cookies were never reused in native tests.
 ## Local integration checkpoint — 2026-10-14
 
 Native Google acceptance remains unverified. The current canonical binding is
-re-vendored from turbo-test `95f04c4` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25));
-it passes 161 focused contracts in canonical Rusty V8 149.3.0 and in Surf's default
-Rusty V8 150.4.0 configuration and the genuine155.20 engine on SDK152.2.0. These SDK versions identify the actual dependencies,
-not the Chrome 155 target profile. Full default/native155 gates and current addon,
-shim/E2E, prototype inventory and Google artifacts remain pending.
+re-vendored from turbo-test `2b4094f` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25)).
+The canonical slot checkpoint passes165 contracts in Rusty V8149.3.0; four
+subsequent private composed-tree controls pass in Surf's defaultV8150.4.0 and
+genuineV815.5.35.23. The integrated slot/isolation/messaging checkpoint passes264
+contracts on both Surf engines, followed by42 API/policy/Window controls on each.
+The current native SDK matches installed Chrome155.0.8059.79's V8 source pin;
+the earlier155.20/SDK152 results below are historical checkpoints. Full gates,
+rebuilt addon/shim/E2E, prototype inventory and fresh Google artifacts remain pending.
+
+queueMicrotask now uses actual V8 jobs rather than virtual timers. Fresh Chrome
+controls preserve Promise/observer/timer ordering, function/receiver brands,
+callable proxies and removed-frame callback realms. Exceptions dispatch trusted
+Window errors without losing later jobs, and self-rescheduling jobs remain bounded
+by the native watchdog. Four contracts pass on both default and genuine155.23.
 
 The new authored element-interface matrix records 723 cases in real Chrome155,
 including all preserved SVG observations. Native HTML/null-namespace interface
@@ -20,9 +29,9 @@ and namespace-aware borrowed control brands. The canonical control passes;
 SVGScriptElement and SVGImageElement projection/resource support are still gaps,
 so the tested interface subset is not full SVG or custom-element lifecycle parity.
 The mapping follows the [HTML element-interface algorithm](https://html.spec.whatwg.org/multipage/dom.html#elements-in-the-dom)
-and independently recorded behavior. Both canonical and default native cohorts
-passed 135 contracts before storage/isolation/color work; the current integrated
-cohort passes 161, including meta reflection, cached-thread teardown and token-list
+and independently recorded behavior. Earlier canonical and default native cohorts
+passed135 contracts before storage/isolation/color work, then161 including meta
+reflection, cached-thread teardown and token-list
 PutForwards behavior. The new six actual PageSession contracts cover independent identities,
 interleaved/concurrent polls, both close orders, real pending-fetch cancellation,
 cached/stateless evaluation and per-isolate observer queues. Inspector teardown
@@ -966,3 +975,9 @@ This isolated batch passes31 focused default SDK150 policy/resource/Window/lifec
 The reusable permissions-query control measures asynchronous errors for missing/invalid descriptors and wrong receivers, accepted/rejected queried names, result labels, push options, inherited subtype dictionary read order, original getter exception identity and cross-realm Promise/status ownership. Actual Chrome Permissions inherits Object rather than EventTarget; PermissionStatus separately inherits the authentic EventTarget. Native private query records now permit genuine foreign-realm receivers while rejecting fake/proxied receivers and use captured Promise/error intrinsics. These states describe the declared fresh profile; OS permission prompts and operations are not implemented.
 
 The policy-deep controls exercise twelve real two-level document trees: ancestor denials cannot be re-enabled below them, cross-origin feature delegation remains subject to each ancestor, child response policies intersect, and denied isolation stays denied across descendants. All completed fresh Chrome controls have zero errors and source/case/collector hashes. The final isolated checkpoint passes42 defaultSDK150 policy/API/Window contracts and strict affected Clippy. An early5s deep-case budget failure was followed by stage tracing and three passing completed runs; it does not establish a general iframe timing bound. Integrated native155 remains separately required. Exploratory descriptors mutating their subtype name during conversion did not settle in the normal Chrome collector; no completed control or parity claim is made for that path.
+
+## Response ancestor admission checkpoint — 2026-10-14
+
+Native iframe document admission now enforces response CSP frame-ancestors and X-Frame-Options before authenticated response bytes reach the new document. It reads every genuine native parent context/origin, fails closed for retired/missing ancestors and uses a bounded context walk. Enforced frame-ancestors headers intersect and replace legacy framing fields; default-src and report-only headers do not supply this directive. Credentialless exemption for COEP does not exempt framing restrictions. Blocked documents use the existing opaque, script-disabled admission state.
+
+Fresh normal Chrome155.0.8059.79/V8.23 controls cover40 direct cases: self/wildcard/scheme/explicit origins, source path behavior, duplicate/header intersections, report-only non-enforcement, legacy invalid/conflicting tokens, and credentialless denial. Eight real two-level trees prove same-origin with the immediate parent is insufficient when a grandparent is foreign. Regression tests verify exact source/case/collector/child hashes, zero collector errors and complete case counts before comparing results. The isolated defaultSDK150 batch passes35 focused policy/resource/Window/frame contracts and strict affected Clippy. Genuine native155 integrated validation remains required. CSP violation events/reporting, CSP sandbox, full form/navigation policy and popup transitions remain pending.

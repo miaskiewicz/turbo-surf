@@ -1,0 +1,156 @@
+{
+  "childProbeSha256": "4e609187ec1e36eccb0a0d6dfd56e9fa7c7274e4d4fee5a2259607b922ec1594",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "179f775d00eb7235e70e12f540c47b8502f686477bcb828f7cad7acf0a7a8d3c",
+  "probeSha256": "1bf56e9b2cfeb8abc59bdd80a51ee88bf37695aae9f7f6b087d05d464a655a17",
+  "collectorSha256": "2f756218434de82602041af7d0beab1c9147863510f771b20cfa7d006a4ee220",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, true, true],
+        "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "data": {
+            "depth": 2,
+            "isolated": false,
+            "allowed": [true, true, true, true],
+            "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+            "permission": "prompt"
+          },
+          "accessible": true
+        }
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, false, false, false],
+        "lists": [[], [], [], []],
+        "permission": "denied",
+        "child": {
+          "data": null,
+          "accessible": false
+        }
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, false, false, false],
+        "lists": [[], [], [], []],
+        "permission": "denied",
+        "child": {
+          "data": {
+            "depth": 2,
+            "isolated": false,
+            "allowed": [false, false, false, false],
+            "lists": [[], [], [], []],
+            "permission": "denied"
+          },
+          "accessible": true
+        }
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, false, false, false],
+        "lists": [[], [], [], []],
+        "permission": "denied",
+        "child": {
+          "data": null,
+          "accessible": false
+        }
+      }
+    },
+    {
+      "id": "4",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, false, false, false],
+        "lists": [[], [], [], []],
+        "permission": "denied",
+        "child": {
+          "data": {
+            "depth": 2,
+            "isolated": false,
+            "allowed": [false, false, false, false],
+            "lists": [[], [], [], []],
+            "permission": "denied"
+          },
+          "accessible": true
+        }
+      }
+    },
+    {
+      "id": "5",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, false, false, false],
+        "lists": [[], [], [], []],
+        "permission": "denied",
+        "child": {
+          "data": null,
+          "accessible": false
+        }
+      }
+    },
+    {
+      "id": "6",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, true, true],
+        "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "data": null,
+          "accessible": false
+        }
+      }
+    },
+    {
+      "id": "7",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, false, false, false],
+        "lists": [[], [], [], []],
+        "permission": "denied",
+        "child": {
+          "data": {
+            "depth": 2,
+            "isolated": false,
+            "allowed": [false, false, false, false],
+            "lists": [[], [], [], []],
+            "permission": "denied"
+          },
+          "accessible": false
+        }
+      }
+    }
+  ]
+}

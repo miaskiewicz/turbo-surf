@@ -75,6 +75,22 @@ impl Policy {
             })
         })
     }
+    pub fn has_frame_ancestors(&self) -> bool {
+        self.policies
+            .iter()
+            .any(|policy| policy.contains_key("frame-ancestors"))
+    }
+    pub fn allows_ancestors(&self, ancestors: &[String]) -> bool {
+        self.policies.iter().all(|policy| {
+            policy.get("frame-ancestors").is_none_or(|sources| {
+                ancestors.iter().all(|ancestor| {
+                    sources
+                        .iter()
+                        .any(|source| matches_source(source, &self.origin, ancestor, false))
+                })
+            })
+        })
+    }
     pub fn allows_inline(&self, kind: &str, text: &str, nonce: &str) -> bool {
         let hash = |algorithm: &str, bytes: Vec<u8>| {
             format!(
@@ -110,6 +126,7 @@ impl Policy {
     pub fn unsupported(&self) -> Vec<String> {
         const SUPPORTED: &[&str] = &[
             "base-uri",
+            "frame-ancestors",
             "default-src",
             "script-src",
             "script-src-elem",

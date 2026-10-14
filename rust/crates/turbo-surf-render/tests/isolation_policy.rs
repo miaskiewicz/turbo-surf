@@ -1,6 +1,36 @@
 use serde_json::Value;
 use turbo_surf_render::PageSession;
 
+fn verify_control_sources(
+    control: &Value,
+    cases: &[u8],
+    probe: &[u8],
+    collector: &[u8],
+    child: &[u8],
+) {
+    use sha2::Digest;
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(control["browser"], "Chrome/155.0.8059.79");
+    assert_eq!(control["v8"], "15.5.35.23");
+    for (key, bytes) in [
+        ("casesSha256", cases),
+        ("probeSha256", probe),
+        ("collectorSha256", collector),
+        ("childProbeSha256", child),
+    ] {
+        assert_eq!(
+            control[key],
+            format!("{:x}", sha2::Sha256::digest(bytes)),
+            "stale control: {key}"
+        );
+    }
+    let values: Value = serde_json::from_slice(cases).unwrap();
+    assert_eq!(
+        values.as_array().unwrap().len(),
+        control["result"].as_array().unwrap().len()
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn unisolated_shared_memory_matches_authored_chrome() {
     let mut page = PageSession::open_with_response_headers(
@@ -173,8 +203,17 @@ async fn frame_server(
                     .1
                     .parse::<usize>()
                     .unwrap();
+                let fields = if url
+                    .query_pairs()
+                    .any(|(name, value)| name == "depth" && value == "2")
+                    && cases[index]["leafHeaders"].is_array()
+                {
+                    &cases[index]["leafHeaders"]
+                } else {
+                    &cases[index]["childHeaders"]
+                };
                 let headers: Vec<(String, String)> =
-                    serde_json::from_value(cases[index]["childHeaders"].clone()).unwrap();
+                    serde_json::from_value(fields.clone()).unwrap();
                 let headers = headers
                     .iter()
                     .map(|(name, value)| format!("{name}: {value}\r\n"))
@@ -616,4 +655,116 @@ async fn permissions_query_dictionary_errors_and_actual_interface_match_chrome()
     ))
     .unwrap();
     assert_eq!(actual, control["result"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn response_ancestor_and_legacy_frame_policies_match_chrome() {
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-ancestors-cases.json"
+    ))
+    .unwrap();
+    let controls: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-ancestors-chrome155.json"
+    ))
+    .unwrap();
+    verify_control_sources(
+        &controls,
+        include_bytes!("../../../../harness/detection/fixtures/policy-ancestors-cases.json"),
+        include_bytes!("../../../../harness/detection/policy-frame-probe.js"),
+        include_bytes!("../../../../harness/detection/policy-frame-chrome.mjs"),
+        include_bytes!("../../../../harness/detection/policy-frame-child.js"),
+    );
+    let (origin, server) = frame_server(
+        cases.clone(),
+        include_str!("../../../../harness/detection/policy-frame-child.js"),
+    )
+    .await;
+    for (index, (case, control)) in cases
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(controls["result"].as_array().unwrap())
+        .enumerate()
+    {
+        let headers: Vec<(String, String)> =
+            serde_json::from_value(case["headers"].clone()).unwrap();
+        let html = format!(
+            "<!doctype html><script>globalThis.__policyFrameCase={case}</script><body></body>"
+        );
+        let mut page = PageSession::open_with_response_headers(
+            &html,
+            &format!("{origin}/?case={index}"),
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &headers,
+        )
+        .await
+        .unwrap();
+        let probe = include_str!("../../../../harness/detection/policy-frame-probe.js")
+            .trim()
+            .trim_end_matches(';');
+        let raw = page.eval_json_expression(probe).await.unwrap();
+        let actual: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(actual, control["result"], "case {}: {case}", case["id"]);
+    }
+    server.abort();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ancestor_response_policies_check_each_actual_parent_origin() {
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-ancestor-tree-cases.json"
+    ))
+    .unwrap();
+    let controls: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-ancestor-tree-chrome155.json"
+    ))
+    .unwrap();
+    verify_control_sources(
+        &controls,
+        include_bytes!("../../../../harness/detection/fixtures/policy-ancestor-tree-cases.json"),
+        include_bytes!("../../../../harness/detection/policy-deep-probe.js"),
+        include_bytes!("../../../../harness/detection/policy-ancestors-chrome.mjs"),
+        include_bytes!("../../../../harness/detection/policy-ancestor-tree-child.js"),
+    );
+    let (origin, server) = frame_server(
+        cases.clone(),
+        include_str!("../../../../harness/detection/policy-ancestor-tree-child.js"),
+    )
+    .await;
+    for (index, (case, control)) in cases
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(controls["result"].as_array().unwrap())
+        .enumerate()
+    {
+        let headers: Vec<(String, String)> =
+            serde_json::from_value(case["headers"].clone()).unwrap();
+        let html = format!(
+            "<!doctype html><script>globalThis.__policyFrameCase={case}</script><body></body>"
+        );
+        let mut page = PageSession::open_with_response_headers(
+            &html,
+            &format!("{origin}/?case={index}"),
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &headers,
+        )
+        .await
+        .unwrap();
+        let probe = include_str!("../../../../harness/detection/policy-deep-probe.js")
+            .trim()
+            .trim_end_matches(';');
+        let raw = page.eval_json_expression(probe).await.unwrap();
+        let actual: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(actual, control["result"], "case {}: {case}", case["id"]);
+    }
+    server.abort();
 }

@@ -91,3 +91,7 @@ PermissionStatus records are per-document private ephemeron entries retaining th
 ### Permission query realm ownership
 
 The Permissions instance owns its original query closure through the native interface ephemeron record. A borrowed query delegates only through that private genuine receiver record; its Promise and PermissionStatus belong to the receiver's original realm, as observed in Chrome. Wrong receivers reject with the method realm's captured Promise and TypeError. No native scalar DOM handle is added. Descriptor conversion exceptions preserve the original thrown object and are delivered through the returned Promise.
+
+### Ancestor response admission
+
+Ancestor checks borrow genuine parent contexts only during the synchronous document commit and retain only copied origin strings for policy evaluation. They add no native queued DOM handles or V8 context Globals. The existing replacement/retirement machinery owns the admitted or blocked document. Checks occur before the credentialless COEP exception; explicit framing restrictions apply to both normal and credentialless frames.

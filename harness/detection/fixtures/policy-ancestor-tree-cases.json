@@ -1,0 +1,86 @@
+[
+  {
+    "id": "0",
+    "headers": [],
+    "childHeaders": [],
+    "leafHeaders": [["Content-Security-Policy", "frame-ancestors 'self'"]],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": false,
+    "innerCross": false
+  },
+  {
+    "id": "1",
+    "headers": [],
+    "childHeaders": [],
+    "leafHeaders": [["Content-Security-Policy", "frame-ancestors 'self'"]],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": true,
+    "innerCross": false
+  },
+  {
+    "id": "2",
+    "headers": [],
+    "childHeaders": [],
+    "leafHeaders": [["Content-Security-Policy", "frame-ancestors *"]],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": true,
+    "innerCross": false
+  },
+  {
+    "id": "3",
+    "headers": [],
+    "childHeaders": [],
+    "leafHeaders": [["Content-Security-Policy", "frame-ancestors http://localhost:*"]],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": true,
+    "innerCross": false
+  },
+  {
+    "id": "4",
+    "headers": [],
+    "childHeaders": [],
+    "leafHeaders": [
+      ["Content-Security-Policy", "frame-ancestors http://127.0.0.1:* http://localhost:*"]
+    ],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": true,
+    "innerCross": false
+  },
+  {
+    "id": "5",
+    "headers": [],
+    "childHeaders": [],
+    "leafHeaders": [["X-Frame-Options", "SAMEORIGIN"]],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": true,
+    "innerCross": false
+  },
+  {
+    "id": "6",
+    "headers": [],
+    "childHeaders": [],
+    "leafHeaders": [["X-Frame-Options", "DENY"]],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": false,
+    "innerCross": false
+  },
+  {
+    "id": "7",
+    "headers": [],
+    "childHeaders": [],
+    "leafHeaders": [
+      ["Content-Security-Policy", "frame-ancestors http://127.0.0.1:* http://localhost:*"]
+    ],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": true,
+    "innerCross": true
+  }
+]

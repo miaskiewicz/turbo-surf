@@ -68,6 +68,18 @@ and localhost fixtures rather than the Chrome process.
 Other options: `--binary PATH`, `--query TEXT`, `--selector CSS`, `--wait MS`,
 `--width PX`, `--height PX`, `--dismiss-selector CSS`, `--page-budget MS`,
 `--capture-timeout MS`
+
+Native microtask controls use the same fresh normal Chrome collector:
+
+```bash
+node harness/detection/authored-dom-chrome.mjs harness/detection/microtask-order-probe.js harness/detection/fixtures/microtask-order-chrome155.json
+node harness/detection/authored-dom-chrome.mjs harness/detection/microtask-frame-probe.js harness/detection/fixtures/microtask-frame-chrome155.json
+cd rust
+cargo test -p turbo-surf-render --test microtask_contracts
+```
+
+The offline contracts compare queue ordering and iframe retirement with the saved
+controls, and verify trusted exception delivery and watchdog recovery.
 (Chrome wall-time dwell; native drains its existing lifecycle/virtual-timer pump).
 `--steps` is a JSON array replacing default interactions. Supported steps are
 `{move:{selector}}`, `{click:selector}`, `{focus:selector}`, `{type:text}`,
@@ -542,3 +554,12 @@ node harness/detection/policy-frame-chrome.mjs harness/detection/fixtures/policy
 ```
 
 The offline `isolation_policy` tests compare actual PageSession outputs to these saved controls. Permission query covers conversion/error timing, property read order, genuine cross-realm receivers and result ownership. Descendant controls cover two real frame levels and twelve header/container/origin combinations. This coverage does not certify popup transitions, OS permission prompts or complete browser lifecycle parity.
+
+### Response ancestor controls
+
+```sh
+node harness/detection/policy-frame-chrome.mjs harness/detection/fixtures/policy-ancestors-cases.json harness/detection/policy-frame-probe.js harness/detection/fixtures/policy-ancestors-chrome155.json
+node harness/detection/policy-ancestors-chrome.mjs harness/detection/fixtures/policy-ancestor-tree-cases.json harness/detection/policy-deep-probe.js harness/detection/fixtures/policy-ancestor-tree-chrome155.json harness/detection/policy-ancestor-tree-child.js
+```
+
+The descendant collector selects authenticated leaf response headers independently of the middle frame. Offline regressions verify source hashes and case counts before testing actual native iframe admission. Violation reporting and full navigation policy are separate unfinished behavior.

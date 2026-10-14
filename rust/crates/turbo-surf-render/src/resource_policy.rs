@@ -90,6 +90,37 @@ pub fn embedder_allowed(
     }
 }
 
+/// Response-only ancestor policies intersect; CSP replaces legacy XFO when declared.
+pub fn ancestors_allowed(url: &str, headers: &[(String, String)], ancestors: &[String]) -> bool {
+    let policies = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("content-security-policy"))
+        .map(|(_, value)| value.clone());
+    let policy = crate::csp::Policy::new(url, policies);
+    if policy.has_frame_ancestors() {
+        return policy.allows_ancestors(ancestors);
+    }
+    let values = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("x-frame-options"))
+        .flat_map(|(_, value)| value.split(','))
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    let mut same = false;
+    let mut unknown = false;
+    for value in values {
+        if value.eq_ignore_ascii_case("deny") {
+            return false;
+        }
+        if value.eq_ignore_ascii_case("sameorigin") {
+            same = true;
+        } else {
+            unknown = true;
+        }
+    }
+    !same || !unknown && ancestors.iter().all(|ancestor| same_origin(url, ancestor))
+}
+
 fn corp_same_site(source: &str, target: &str) -> bool {
     let (Ok(source_url), Ok(mut target_url)) = (url::Url::parse(source), url::Url::parse(target))
     else {

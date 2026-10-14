@@ -1,0 +1,114 @@
+[
+  {
+    "id": "0",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "1",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": false,
+    "credentialless": false,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "2",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "3",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": false,
+    "credentialless": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "4",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "5",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "credentialless": false,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "6",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "7",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "credentialless": true,
+    "allow": "cross-origin-isolated"
+  }
+]

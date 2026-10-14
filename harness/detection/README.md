@@ -518,3 +518,27 @@ The saved controls distinguish parser insertion, compound fragment insertion,
 policy changes after accepted base freezing, HTML namespace/head membership and
 retained inactive documents. See [RESOURCE-LIFECYCLE.md](./RESOURCE-LIFECYCLE.md)
 for genuine task roots and the metadata-only retirement consumer.
+
+### Authored isolation, permissions and credentialless controls
+
+The reusable header collector executes each saved response-header case in a fresh normal Chrome profile. The frame collector runs identical source-pinned child programs; its optional fourth argument selects the child program. Native replay is in `tests/isolation_policy.rs` and requires only localhost.
+
+```bash
+node harness/detection/policy-header-chrome.mjs harness/detection/fixtures/isolation-cases.json harness/detection/isolation-probe.js harness/detection/fixtures/isolation-chrome155.json
+node harness/detection/policy-frame-chrome.mjs harness/detection/fixtures/policy-frame-cases.json harness/detection/policy-frame-probe.js harness/detection/fixtures/policy-frame-chrome155.json
+node harness/detection/policy-frame-chrome.mjs harness/detection/fixtures/policy-shared-cases.json harness/detection/policy-shared-probe.js harness/detection/fixtures/policy-shared-chrome155.json harness/detection/policy-shared-child.js
+node harness/detection/policy-frame-chrome.mjs harness/detection/fixtures/policy-credentialless-cases.json harness/detection/policy-credentialless-probe.js harness/detection/fixtures/policy-credentialless-chrome155.json harness/detection/policy-credentialless-child.js
+```
+
+Controls cover native isolation capability, real iframe admission and delegation, shared backing-store deliveries/messageerror, and actual credentialless navigation/fetch cookies with local/session storage separation. They do not establish popup browsing-group separation, every controlled API, complete dynamic/deep policy or Google acceptance.
+
+### Permission descriptors and descendant policies
+
+The authored collectors use fresh normal Chrome profiles against localhost. Rebuild the source-pinned controls with:
+
+```sh
+node harness/detection/authored-dom-chrome.mjs harness/detection/permissions-query-probe.js harness/detection/fixtures/permissions-query-chrome155.json
+node harness/detection/policy-frame-chrome.mjs harness/detection/fixtures/policy-deep-cases.json harness/detection/policy-deep-probe.js harness/detection/fixtures/policy-deep-chrome155.json harness/detection/policy-deep-child.js
+```
+
+The offline `isolation_policy` tests compare actual PageSession outputs to these saved controls. Permission query covers conversion/error timing, property read order, genuine cross-realm receivers and result ownership. Descendant controls cover two real frame levels and twelve header/container/origin combinations. This coverage does not certify popup transitions, OS permission prompts or complete browser lifecycle parity.

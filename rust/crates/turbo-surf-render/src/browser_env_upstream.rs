@@ -108,6 +108,23 @@ mod element_relations;
 mod html_popover;
 #[path = "html_text.rs"]
 mod html_text;
+#[path = "shadow_slots.rs"]
+mod shadow_slots;
+
+/// Host-only composed identities for native layout. This seam does not expose
+/// closed roots or private assignment records to guest JavaScript.
+pub fn host_composed_children<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+) -> Option<Vec<v8::Local<'s, v8::Object>>> {
+    shadow_slots::composed_children(scope, node)
+}
+pub fn host_composed_parent<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    shadow_slots::composed_parent(scope, node)
+}
 
 pub fn node_nonce(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) -> Option<String> {
     document_basics::nonce(scope, node)
@@ -1113,6 +1130,24 @@ fn el_attach_shadow(
         scope.throw_exception(error);
         return;
     }
+    let key = v8::String::new(scope, "slotAssignment").unwrap();
+    let Some(value) = options.get(scope, key.into()) else {
+        return;
+    };
+    let assignment = if value.is_undefined() {
+        "named".to_string()
+    } else {
+        let Some(value) = value.to_string(scope) else {
+            return;
+        };
+        value.to_rust_string_lossy(scope)
+    };
+    if assignment != "named" && assignment != "manual" {
+        let text = v8::String::new(scope, "Invalid slotAssignment").unwrap();
+        let error = v8::Exception::type_error(scope, text);
+        scope.throw_exception(error);
+        return;
+    }
     let allowed = with_tree(|tree| {
         let tag = tree.local_name(host).unwrap_or("");
         tree.namespace_id(host) == 0
@@ -1159,6 +1194,7 @@ fn el_attach_shadow(
             .insert(root, mode)
     });
     let node = wrap(scope, root);
+    shadow_slots::configure(scope, node, assignment == "manual");
     rv.set(node.into());
 }
 
@@ -5212,6 +5248,7 @@ fn dom_accessor_dispatch(
                     "DocumentType" => kind == 10,
                     "HTMLElement" => kind == 1 && tree.namespace_id(h) == 0,
                     "CharacterData" => matches!(kind, 3 | 4 | 7 | 8),
+                    "Text" => matches!(kind, 3 | 4),
                     "Document" => kind == 9,
                     "DocumentFragment" => kind == 11,
                     "ShadowRoot" => kind == 11 && tree.is_shadow_root(h),
@@ -5893,6 +5930,7 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
     capture_node_projector(scope);
     dom_implementation::install(scope);
     mutation_observers::install(scope);
+    shadow_slots::install(scope);
     script_state::install(scope);
     range_contents::install(scope);
     bind_method(scope, global, "__htmlTextNative", html_text::dispatch);
@@ -7568,6 +7606,10 @@ mod tests {
 }
 
 #[cfg(test)]
+#[path = "shadow_slots_tests.rs"]
+mod shadow_slots_tests;
+
+#[cfg(test)]
 #[path = "frame_tokens_tests.rs"]
 mod frame_tokens_tests;
 
@@ -7597,3 +7639,7 @@ mod mutation_observers_tests;
 #[cfg(test)]
 #[path = "ownership_guard_tests.rs"]
 mod ownership_guard_tests;
+
+#[cfg(test)]
+#[path = "iframe_credentialless_tests.rs"]
+mod iframe_credentialless_tests;

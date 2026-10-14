@@ -28,6 +28,7 @@ mod live_layout_metrics;
 mod live_layout_scroll;
 mod live_stylesheets;
 mod message_ports;
+mod permissions_policy;
 mod probe;
 mod resource_policy;
 mod runtime;

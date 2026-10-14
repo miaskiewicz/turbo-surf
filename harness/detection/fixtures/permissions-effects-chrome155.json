@@ -1,0 +1,52 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "59052ed303a200bdbdd3055dcc3663afd50f568cade7aa10170b02524461c2a8",
+  "probeSha256": "f02fc464584d6b0c024d4b11be0dc7b4b74f2dfe37ce2ee60b28ca1edcdf4a00",
+  "collectorSha256": "d258e82d4b79e3752baa6d87b5eb6b76773d0ed881ab387d74d541c4d969ab64",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": [
+        ["geolocation", "denied"],
+        ["camera", "denied"],
+        ["microphone", "denied"],
+        ["midi", "denied"],
+        ["clipboard-read", "denied"],
+        ["clipboard-write", "denied"]
+      ]
+    },
+    {
+      "id": "1",
+      "result": [
+        ["geolocation", "denied"],
+        ["camera", "prompt"],
+        ["microphone", "denied"],
+        ["midi", "prompt"],
+        ["clipboard-read", "prompt"],
+        ["clipboard-write", "granted"]
+      ]
+    },
+    {
+      "id": "2",
+      "result": [
+        ["geolocation", "denied"],
+        ["camera", "prompt"],
+        ["microphone", "prompt"],
+        ["midi", "prompt"],
+        ["clipboard-read", "denied"],
+        ["clipboard-write", "denied"]
+      ]
+    }
+  ]
+}

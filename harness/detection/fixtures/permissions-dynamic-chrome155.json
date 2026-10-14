@@ -1,0 +1,256 @@
+{
+  "childProbeSha256": "1a21086776019eb2c532e59b071b2d565539ec740b521d2c60e9531891a58f41",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "99a4e54d2282255941bd6267e3fa334d3f2da820410979003ed9c5463f17e4f4",
+  "probeSha256": "46f922f69f637b3f3d4f210ffb7308a49d434d23138e24e2c3b40a8eee633523",
+  "collectorSha256": "bbef884769808001478fbe0e7a8ca639c10f7177b8acc4a03a0a3e5ba65ef9a3",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "same": true,
+        "identity": false,
+        "rows": [
+          {
+            "stage": "initial",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "wildcard",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "self",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "none",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "removed",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "same": true,
+        "identity": false,
+        "rows": [
+          {
+            "stage": "initial",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "wildcard",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "self",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "none",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "removed",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "same": true,
+        "identity": false,
+        "rows": [
+          {
+            "stage": "initial",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "wildcard",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "self",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "none",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "removed",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "same": true,
+        "identity": false,
+        "rows": [
+          {
+            "stage": "initial",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "wildcard",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "self",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "none",
+            "frame": false,
+            "frameList": [],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          },
+          {
+            "stage": "removed",
+            "frame": true,
+            "frameList": ["<origin>"],
+            "child": false,
+            "childList": [],
+            "oldStatus": "denied",
+            "newStatus": "denied",
+            "changes": 0
+          }
+        ]
+      }
+    }
+  ]
+}

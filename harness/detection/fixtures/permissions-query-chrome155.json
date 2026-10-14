@@ -1,0 +1,470 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "0adc6f95297086aaa4ae3f1f5fc3d6c3360312efbcf5d9a9aedbecf0c0b8a1ae",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "rows": [
+      {
+        "label": "missing",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "undefined",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "null",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "number",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "string",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "empty",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "invalid",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "symbol",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "geolocation",
+        "result": {
+          "name": "geolocation",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "pushMissing",
+        "result": {
+          "error": "NotSupportedError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "pushFalse",
+        "result": {
+          "error": "NotSupportedError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "pushTrue",
+        "result": {
+          "name": "notifications",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "midiSysex",
+        "result": {
+          "name": "midi",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "storage",
+        "result": {
+          "name": "durable_storage",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "background",
+        "result": {
+          "name": "background_sync",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "display",
+        "result": {
+          "name": "display_capture",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "name:accessibility-events",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:accelerometer",
+        "result": {
+          "name": "sensors",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:ambient-light-sensor",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:background-fetch",
+        "result": {
+          "name": "background_fetch",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:bluetooth",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:captured-surface-control",
+        "result": {
+          "name": "captured-surface-control",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "name:display-capture",
+        "result": {
+          "name": "display_capture",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "name:gyroscope",
+        "result": {
+          "name": "sensors",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:idle-detection",
+        "result": {
+          "name": "idle_detection",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "name:local-fonts",
+        "result": {
+          "name": "local_fonts",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "name:magnetometer",
+        "result": {
+          "name": "sensors",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:nfc",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:payment-handler",
+        "result": {
+          "name": "payment_handler",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:periodic-background-sync",
+        "result": {
+          "name": "periodic_background_sync",
+          "state": "denied"
+        }
+      },
+      {
+        "label": "name:screen-wake-lock",
+        "result": {
+          "name": "screen_wake_lock",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:speaker-selection",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:storage-access",
+        "result": {
+          "name": "storage-access",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:top-level-storage-access",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:window-management",
+        "result": {
+          "name": "window-management",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "name:window-placement",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:xr-spatial-tracking",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:clipboard-write",
+        "result": {
+          "name": "clipboard_write",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:clipboard-read",
+        "result": {
+          "name": "clipboard_read",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "name:web-printing",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:hand-tracking",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:keyboard-lock",
+        "result": {
+          "name": "keyboard-lock",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:pointer-lock",
+        "result": {
+          "name": "pointer-lock",
+          "state": "granted"
+        }
+      },
+      {
+        "label": "name:fullscreen",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:sensors",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:protected-media-identifier",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "name:local-network-access",
+        "result": {
+          "name": "local-network-access",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "name:loopback-network",
+        "result": {
+          "name": "loopback-network",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "plain",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "nullThis",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "proxy",
+        "result": {
+          "error": "TypeError",
+          "phase": "await"
+        }
+      },
+      {
+        "label": "conversion:geolocation",
+        "result": {
+          "name": "geolocation",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "conversion:midi",
+        "result": {
+          "name": "midi",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "conversion:camera",
+        "result": {
+          "name": "video_capture",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "conversion:push",
+        "result": {
+          "name": "notifications",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "conversion:clipboard-read",
+        "result": {
+          "name": "clipboard_read",
+          "state": "prompt"
+        }
+      },
+      {
+        "label": "conversion:clipboard-write",
+        "result": {
+          "name": "clipboard_write",
+          "state": "granted"
+        }
+      }
+    ],
+    "conversions": [
+      {
+        "name": "geolocation",
+        "reads": ["name"]
+      },
+      {
+        "name": "midi",
+        "reads": ["name", "name", "sysex"]
+      },
+      {
+        "name": "camera",
+        "reads": ["name", "name", "panTiltZoom"]
+      },
+      {
+        "name": "push",
+        "reads": ["name", "name", "userVisibleOnly"]
+      },
+      {
+        "name": "clipboard-read",
+        "reads": ["name", "name", "allowWithoutGesture", "allowWithoutSanitization"]
+      },
+      {
+        "name": "clipboard-write",
+        "reads": ["name", "name", "allowWithoutGesture", "allowWithoutSanitization"]
+      }
+    ],
+    "realms": [
+      {
+        "label": "parentToChild",
+        "parentPromise": false,
+        "parentStatus": false,
+        "childStatus": true,
+        "name": "geolocation",
+        "state": "prompt"
+      },
+      {
+        "label": "childToParent",
+        "parentPromise": true,
+        "parentStatus": true,
+        "childStatus": false,
+        "name": "geolocation",
+        "state": "prompt"
+      }
+    ],
+    "getterError": true,
+    "same": true,
+    "parent": false,
+    "constructorParent": false,
+    "own": [],
+    "events": 0,
+    "eventError": "TypeError"
+  }
+}

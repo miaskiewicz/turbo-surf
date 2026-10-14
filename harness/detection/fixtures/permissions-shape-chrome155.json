@@ -1,0 +1,555 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "c1844a42a3d60257092dbd4b78db5f0fa43cac4f2b53ff2cf44e9d400f229c2c",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "brand": "[object PermissionsPolicy]",
+    "constructor": "PermissionsPolicy",
+    "globals": {
+      "PermissionsPolicy": "function",
+      "FeaturePolicy": "function",
+      "alias": true
+    },
+    "features": [
+      "accelerometer",
+      "aria-notify",
+      "autoplay",
+      "bluetooth",
+      "browsing-topics",
+      "camera",
+      "captured-surface-control",
+      "ch-device-memory",
+      "ch-downlink",
+      "ch-dpr",
+      "ch-ect",
+      "ch-prefers-color-scheme",
+      "ch-prefers-reduced-motion",
+      "ch-prefers-reduced-transparency",
+      "ch-rtt",
+      "ch-save-data",
+      "ch-ua",
+      "ch-ua-arch",
+      "ch-ua-bitness",
+      "ch-ua-form-factors",
+      "ch-ua-full-version",
+      "ch-ua-full-version-list",
+      "ch-ua-high-entropy-values",
+      "ch-ua-mobile",
+      "ch-ua-model",
+      "ch-ua-platform",
+      "ch-ua-platform-version",
+      "ch-ua-wow64",
+      "ch-viewport-height",
+      "ch-viewport-width",
+      "ch-width",
+      "clipboard-read",
+      "clipboard-write",
+      "compute-pressure",
+      "cross-origin-isolated",
+      "deferred-fetch",
+      "deferred-fetch-minimal",
+      "digital-credentials-create",
+      "digital-credentials-get",
+      "display-capture",
+      "encrypted-media",
+      "fullscreen",
+      "gamepad",
+      "geolocation",
+      "gyroscope",
+      "hid",
+      "identity-credentials-get",
+      "idle-detection",
+      "interest-cohort",
+      "keyboard-map",
+      "language-detector",
+      "language-model",
+      "local-fonts",
+      "local-network",
+      "local-network-access",
+      "loopback-network",
+      "magnetometer",
+      "media-playback-while-not-visible",
+      "microphone",
+      "midi",
+      "on-device-speech-recognition",
+      "otp-credentials",
+      "payment",
+      "picture-in-picture",
+      "private-state-token-issuance",
+      "private-state-token-redemption",
+      "publickey-credentials-create",
+      "publickey-credentials-get",
+      "screen-wake-lock",
+      "serial",
+      "speaker-selection",
+      "storage-access",
+      "summarizer",
+      "sync-xhr",
+      "translator",
+      "unload",
+      "usb",
+      "window-management",
+      "xr-spatial-tracking"
+    ],
+    "defaults": [
+      {
+        "name": "accelerometer",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "aria-notify",
+        "list": ["*"]
+      },
+      {
+        "name": "autoplay",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "bluetooth",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "browsing-topics",
+        "list": ["*"]
+      },
+      {
+        "name": "camera",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "captured-surface-control",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-device-memory",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-downlink",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-dpr",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-ect",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-prefers-color-scheme",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-prefers-reduced-motion",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-prefers-reduced-transparency",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-rtt",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-save-data",
+        "list": ["*"]
+      },
+      {
+        "name": "ch-ua",
+        "list": ["*"]
+      },
+      {
+        "name": "ch-ua-arch",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-ua-bitness",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-ua-form-factors",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-ua-full-version",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-ua-full-version-list",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-ua-high-entropy-values",
+        "list": ["*"]
+      },
+      {
+        "name": "ch-ua-mobile",
+        "list": ["*"]
+      },
+      {
+        "name": "ch-ua-model",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-ua-platform",
+        "list": ["*"]
+      },
+      {
+        "name": "ch-ua-platform-version",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-ua-wow64",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-viewport-height",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-viewport-width",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "ch-width",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "clipboard-read",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "clipboard-write",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "compute-pressure",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "cross-origin-isolated",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "deferred-fetch",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "deferred-fetch-minimal",
+        "list": ["*"]
+      },
+      {
+        "name": "digital-credentials-create",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "digital-credentials-get",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "display-capture",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "encrypted-media",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "fullscreen",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "gamepad",
+        "list": ["*"]
+      },
+      {
+        "name": "geolocation",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "gyroscope",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "hid",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "identity-credentials-get",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "idle-detection",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "interest-cohort",
+        "list": ["*"]
+      },
+      {
+        "name": "keyboard-map",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "language-detector",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "language-model",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "local-fonts",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "local-network",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "local-network-access",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "loopback-network",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "magnetometer",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "media-playback-while-not-visible",
+        "list": ["*"]
+      },
+      {
+        "name": "microphone",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "midi",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "on-device-speech-recognition",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "otp-credentials",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "payment",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "picture-in-picture",
+        "list": ["*"]
+      },
+      {
+        "name": "private-state-token-issuance",
+        "list": ["*"]
+      },
+      {
+        "name": "private-state-token-redemption",
+        "list": ["*"]
+      },
+      {
+        "name": "publickey-credentials-create",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "publickey-credentials-get",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "screen-wake-lock",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "serial",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "speaker-selection",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "storage-access",
+        "list": ["*"]
+      },
+      {
+        "name": "summarizer",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "sync-xhr",
+        "list": ["*"]
+      },
+      {
+        "name": "translator",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "unload",
+        "list": ["*"]
+      },
+      {
+        "name": "usb",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "window-management",
+        "list": ["<origin>"]
+      },
+      {
+        "name": "xr-spatial-tracking",
+        "list": ["<origin>"]
+      }
+    ],
+    "allowed": [
+      "accelerometer",
+      "aria-notify",
+      "autoplay",
+      "bluetooth",
+      "browsing-topics",
+      "camera",
+      "captured-surface-control",
+      "ch-device-memory",
+      "ch-downlink",
+      "ch-dpr",
+      "ch-ect",
+      "ch-prefers-color-scheme",
+      "ch-prefers-reduced-motion",
+      "ch-prefers-reduced-transparency",
+      "ch-rtt",
+      "ch-save-data",
+      "ch-ua",
+      "ch-ua-arch",
+      "ch-ua-bitness",
+      "ch-ua-form-factors",
+      "ch-ua-full-version",
+      "ch-ua-full-version-list",
+      "ch-ua-high-entropy-values",
+      "ch-ua-mobile",
+      "ch-ua-model",
+      "ch-ua-platform",
+      "ch-ua-platform-version",
+      "ch-ua-wow64",
+      "ch-viewport-height",
+      "ch-viewport-width",
+      "ch-width",
+      "clipboard-read",
+      "clipboard-write",
+      "compute-pressure",
+      "cross-origin-isolated",
+      "deferred-fetch",
+      "deferred-fetch-minimal",
+      "digital-credentials-create",
+      "digital-credentials-get",
+      "display-capture",
+      "encrypted-media",
+      "fullscreen",
+      "gamepad",
+      "geolocation",
+      "gyroscope",
+      "hid",
+      "identity-credentials-get",
+      "idle-detection",
+      "interest-cohort",
+      "keyboard-map",
+      "language-detector",
+      "language-model",
+      "local-fonts",
+      "local-network",
+      "local-network-access",
+      "loopback-network",
+      "magnetometer",
+      "media-playback-while-not-visible",
+      "microphone",
+      "midi",
+      "on-device-speech-recognition",
+      "otp-credentials",
+      "payment",
+      "picture-in-picture",
+      "private-state-token-issuance",
+      "private-state-token-redemption",
+      "publickey-credentials-create",
+      "publickey-credentials-get",
+      "screen-wake-lock",
+      "serial",
+      "speaker-selection",
+      "storage-access",
+      "summarizer",
+      "sync-xhr",
+      "translator",
+      "unload",
+      "usb",
+      "window-management",
+      "xr-spatial-tracking"
+    ],
+    "geolocation": ["<origin>"],
+    "unknown": [],
+    "shapes": [
+      {
+        "name": "allowsFeature",
+        "length": 1,
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "prototype": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "allowedFeatures",
+        "length": 0,
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "prototype": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "features",
+        "length": 0,
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "prototype": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "getAllowlistForFeature",
+        "length": 1,
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "prototype": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      }
+    ],
+    "descriptor": {
+      "enumerable": true,
+      "configurable": true,
+      "setter": "undefined"
+    },
+    "wasmShared": {
+      "brand": "[object SharedArrayBuffer]",
+      "bytes": 65536
+    },
+    "wasmClone": "DataCloneError"
+  }
+}

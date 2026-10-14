@@ -38,9 +38,10 @@ fn op_surf_is_window(scope: &mut v8::PinScope, value: v8::Local<v8::Value>) -> b
 
 #[derive(Default)]
 struct CloneHandles {
+    local_clone: bool,
     objects: RefCell<Vec<NativeSnapshot>>,
     transfers: RefCell<Vec<v8::SharedRef<v8::BackingStore>>>,
-    shared: RefCell<Vec<v8::SharedRef<v8::BackingStore>>>,
+    shared: RefCell<Vec<SharedSnapshot>>,
     wasm: RefCell<Vec<v8::CompiledWasmModule>>,
     ports: RefCell<Vec<crate::message_ports::PortTransfer>>,
     port_objects: RefCell<Vec<v8::Global<v8::Object>>>,
@@ -50,6 +51,12 @@ impl Drop for CloneHandles {
     fn drop(&mut self) {
         crate::message_ports::discard_transfers(std::mem::take(self.ports.get_mut()));
     }
+}
+
+struct SharedSnapshot {
+    store: v8::SharedRef<v8::BackingStore>,
+    identity: Option<(u32, String)>,
+    budget_bytes: usize,
 }
 
 struct Delegate(Rc<CloneHandles>);
@@ -124,6 +131,13 @@ impl CloneSnapshot {
             .borrow()
             .iter()
             .map(|store| store.byte_length())
+            .chain(
+                self.handles
+                    .shared
+                    .borrow()
+                    .iter()
+                    .map(|snapshot| snapshot.budget_bytes),
+            )
             .chain(
                 self.handles
                     .objects
@@ -256,12 +270,22 @@ impl v8::ValueSerializerImpl for Delegate {
 
     fn get_shared_array_buffer_id<'s, 'i>(
         &self,
-        _: &mut v8::PinScope<'s, 'i>,
+        scope: &mut v8::PinScope<'s, 'i>,
         buffer: v8::Local<'s, v8::SharedArrayBuffer>,
     ) -> Option<u32> {
+        if !self.0.local_clone && !crate::runtime::shared_memory_allowed(scope) {
+            let message =
+                v8::String::new(scope, "Shared memory requires cross-origin isolation").unwrap();
+            self.throw_data_clone_error(scope, message);
+            return None;
+        }
         let mut stores = self.0.shared.borrow_mut();
         let index = u32::try_from(stores.len()).ok()?;
-        stores.push(buffer.get_backing_store());
+        stores.push(SharedSnapshot {
+            budget_bytes: buffer.byte_length(),
+            store: buffer.get_backing_store(),
+            identity: crate::runtime::shared_memory_identity(scope),
+        });
         Some(index)
     }
 
@@ -339,8 +363,24 @@ impl v8::ValueDeserializerImpl for Delegate {
         scope: &mut v8::PinScope<'s, 'i>,
         index: u32,
     ) -> Option<v8::Local<'s, v8::SharedArrayBuffer>> {
-        let store = self.0.shared.borrow().get(index as usize)?.clone();
-        Some(v8::SharedArrayBuffer::with_backing_store(scope, &store))
+        if !crate::runtime::shared_memory_allowed(scope) {
+            let message =
+                v8::String::new(scope, "Shared memory requires cross-origin isolation").unwrap();
+            self.throw_data_clone_error(scope, message);
+            return None;
+        }
+        let stores = self.0.shared.borrow();
+        let snapshot = stores.get(index as usize)?;
+        if snapshot.identity != crate::runtime::shared_memory_identity(scope) {
+            let message =
+                v8::String::new(scope, "Shared memory cannot cross agent clusters").unwrap();
+            self.throw_data_clone_error(scope, message);
+            return None;
+        }
+        Some(v8::SharedArrayBuffer::with_backing_store(
+            scope,
+            &snapshot.store,
+        ))
     }
 
     fn get_wasm_module_from_id<'s, 'i>(
@@ -472,6 +512,16 @@ pub(crate) fn prepare_transfer<'s>(
     transfer: Option<v8::Local<'s, v8::Value>>,
     sender: Option<v8::Local<v8::Object>>,
 ) -> Result<PreparedClone<'s>, JsErrorBox> {
+    prepare_transfer_with_mode(scope, value, transfer, sender, false)
+}
+
+fn prepare_transfer_with_mode<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: v8::Local<'s, v8::Value>,
+    transfer: Option<v8::Local<'s, v8::Value>>,
+    sender: Option<v8::Local<v8::Object>>,
+    local_clone: bool,
+) -> Result<PreparedClone<'s>, JsErrorBox> {
     let (buffers, ports) = validate_transfers(scope, transfer)?;
     if sender.is_some_and(|sender| {
         ports
@@ -484,7 +534,9 @@ pub(crate) fn prepare_transfer<'s>(
         ));
     }
     let context = scope.get_current_context();
-    let handles = Rc::new(CloneHandles::default());
+    let mut handles = CloneHandles::default();
+    handles.local_clone = local_clone;
+    let handles = Rc::new(handles);
     handles.ports.borrow_mut().extend_from_slice(&ports);
     let serializer = v8::ValueSerializer::new(scope, Box::new(Delegate(handles.clone())));
     for (index, buffer) in buffers.iter().enumerate() {
@@ -526,15 +578,6 @@ pub(crate) fn prepare_transfer<'s>(
         buffers,
     })
 }
-pub(crate) fn serialize_transfer<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    value: v8::Local<'s, v8::Value>,
-    transfer: Option<v8::Local<'s, v8::Value>>,
-    sender: Option<v8::Local<v8::Object>>,
-) -> Result<CloneSnapshot, JsErrorBox> {
-    prepare_transfer(scope, value, transfer, sender)?.commit(scope)
-}
-
 pub(crate) fn deserialize<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     snapshot: &CloneSnapshot,
@@ -574,6 +617,37 @@ pub(crate) fn deserialize_with_transfers<'s>(
         .ok_or_else(failed)
 }
 
+pub(crate) struct MessageClone<'s> {
+    pub value: v8::Local<'s, v8::Value>,
+    pub ports: Vec<v8::Local<'s, v8::Object>>,
+    pub failed: bool,
+}
+pub(crate) fn deserialize_message<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    snapshot: &CloneSnapshot,
+) -> Result<MessageClone<'s>, JsErrorBox> {
+    v8::tc_scope!(let scope,scope);
+    match deserialize_with_transfers(scope, snapshot) {
+        Ok((value, ports)) => Ok(MessageClone {
+            value,
+            ports,
+            failed: false,
+        }),
+        Err(error) if scope.has_terminated() => {
+            scope.rethrow();
+            Err(error)
+        }
+        Err(_) => {
+            scope.reset();
+            Ok(MessageClone {
+                value: v8::null(scope).into(),
+                ports: Vec::new(),
+                failed: true,
+            })
+        }
+    }
+}
+
 #[op2(reentrant)]
 fn op_surf_structured_clone<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -586,7 +660,10 @@ fn op_surf_structured_clone<'s>(
         .ok_or_else(|| JsErrorBox::type_error("Invalid clone realm"))?;
     let scope = &mut v8::ContextScope::new(scope, context);
     v8::tc_scope!(let scope, scope);
-    let result = serialize_transfer(scope, value, transfer, None)
+    // Local cloning completes transfers before deserialization rejects forbidden
+    // shared memory; messaging rejects during serialization instead.
+    let result = prepare_transfer_with_mode(scope, value, transfer, None, true)
+        .and_then(|prepared| prepared.commit(scope))
         .and_then(|snapshot| deserialize(scope, &snapshot));
     if scope.has_caught() || scope.has_terminated() {
         scope.rethrow();

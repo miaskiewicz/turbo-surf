@@ -33,7 +33,14 @@ pub(super) fn put_isolation_state(state: IsolationState) {
     SUPPRESSED.with(|rows| *rows.borrow_mut() = state.suppressed);
 }
 pub(super) fn recording() -> bool {
-    ENABLED.with(std::cell::Cell::get) || script_state::recording()
+    ENABLED.with(std::cell::Cell::get)
+        || script_state::recording()
+        || DOM.with(|state| {
+            state
+                .borrow()
+                .as_ref()
+                .is_some_and(|state| !state.shadow_modes.is_empty())
+        })
 }
 
 pub(super) fn suppressed() -> bool {
@@ -115,6 +122,7 @@ pub(super) fn child_list(
         })
         .unwrap_or_default();
     let native_event = event;
+    shadow_slots::mutation(scope, &native_event);
     let event = payload(scope, &native_event);
     for observer in observers {
         if let Some(queue) = function(scope, observer, "queue") {
@@ -227,12 +235,16 @@ fn consume(scope: &mut v8::PinScope, event: v8::Local<v8::Object>) {
 }
 
 fn deliver(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
-    let registry = registry(scope);
-    registry.notification.borrow_mut().take();
+    registry(scope).notification.borrow_mut().take();
     let Ok(pending) = v8::Local::<v8::Array>::try_from(args.data()) else {
         return;
     };
+    let private = key(scope, "signal-slots");
+    let slots = pending
+        .get_private(scope, private)
+        .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok());
     let count = pending.length();
+    let slot_count = slots.map_or(0, |slots| slots.length());
     for index in 0..count {
         let Some(observer) = pending
             .get_index(scope, index)
@@ -243,54 +255,91 @@ fn deliver(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v
         let Some(notify) = function(scope, observer, "notify") else {
             continue;
         };
-        // Reporting one callback's exception must not discard later observers.
         v8::tc_scope!(let catch, scope);
         catch.set_verbose(true);
         let receiver = v8::undefined(catch);
         notify.call(catch, receiver.into(), &[]);
         if catch.is_execution_terminating() {
-            break;
+            return;
+        }
+    }
+    if let Some(slots) = slots {
+        for index in 0..slot_count {
+            let Some(slot) = slots
+                .get_index(scope, index)
+                .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+            else {
+                continue;
+            };
+            v8::tc_scope!(let catch, scope);
+            catch.set_verbose(true);
+            shadow_slots::fire(catch, slot);
+            if catch.is_execution_terminating() {
+                return;
+            }
         }
     }
 }
-
-fn schedule(scope: &mut v8::PinScope, observer: v8::Local<v8::Object>) {
+fn notification<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Array>> {
     let registry = registry(scope);
-    let current = registry
+    let private = key(scope, "pending");
+    if let Some(current) = registry
         .notification
         .borrow()
         .as_ref()
-        .and_then(|weak| weak.to_local(scope));
-    if let Some(current) = current {
-        let private = key(scope, "pending");
+        .and_then(|weak| weak.to_local(scope))
+    {
         if let Some(pending) = current
             .get_private(scope, private)
             .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
         {
-            for index in 0..pending.length() {
-                if pending
-                    .get_index(scope, index)
-                    .is_some_and(|value| value.strict_equals(observer.into()))
-                {
-                    return;
-                }
-            }
-            let index = v8::String::new(scope, &pending.length().to_string()).unwrap();
-            pending.create_data_property(scope, index.into(), observer.into());
-            return;
+            return Some(pending);
         }
     }
-    let pending = v8::Array::new_with_elements(scope, &[observer.into()]);
-    let Some(notification) = v8::Function::builder(deliver)
+    let pending = v8::Array::new(scope, 0);
+    let notification = v8::Function::builder(deliver)
         .data(pending.into())
-        .build(scope)
-    else {
-        return;
-    };
-    let private = key(scope, "pending");
+        .build(scope)?;
     notification.set_private(scope, private, pending.into());
     *registry.notification.borrow_mut() = Some(v8::Weak::new(scope, notification));
     scope.enqueue_microtask(notification);
+    Some(pending)
+}
+fn append_unique(
+    scope: &mut v8::PinScope,
+    pending: v8::Local<v8::Array>,
+    object: v8::Local<v8::Object>,
+) {
+    for index in 0..pending.length() {
+        if pending
+            .get_index(scope, index)
+            .is_some_and(|value| value.strict_equals(object.into()))
+        {
+            return;
+        }
+    }
+    let index = v8::String::new(scope, &pending.length().to_string()).unwrap();
+    pending.create_data_property(scope, index.into(), object.into());
+}
+fn schedule(scope: &mut v8::PinScope, observer: v8::Local<v8::Object>) {
+    if let Some(pending) = notification(scope) {
+        append_unique(scope, pending, observer);
+    }
+}
+pub(super) fn signal_slot(scope: &mut v8::PinScope, slot: v8::Local<v8::Object>) {
+    let Some(pending) = notification(scope) else {
+        return;
+    };
+    let private = key(scope, "signal-slots");
+    let slots = pending
+        .get_private(scope, private)
+        .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+        .unwrap_or_else(|| {
+            let slots = v8::Array::new(scope, 0);
+            pending.set_private(scope, private, slots.into());
+            slots
+        });
+    append_unique(scope, slots, slot);
 }
 
 fn anchor(
@@ -459,6 +508,7 @@ pub(super) fn flush(scope: &mut v8::PinScope) {
             })
             .unwrap_or_default();
         for native_event in events {
+            shadow_slots::mutation(scope, &native_event);
             let event = payload(scope, &native_event);
             for observer in &observers {
                 if let Some(queue) = function(scope, *observer, "queue") {

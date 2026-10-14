@@ -1,7 +1,7 @@
 {
   "browser": "Chrome/155.0.8059.79",
   "v8": "15.5.35.23",
-  "probeSha256": "f74c11afb89ab8ce145bd03b3bf5abc307902a8af793c89ca552a46b4b0ea50d",
+  "probeSha256": "72eeb553683dd007f1644117d7d5f9c5a8c33288641a0741e11959694aef5c54",
   "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
   "flags": [
     "--remote-debugging-port=0",
@@ -14,6 +14,7 @@
   ],
   "errors": [],
   "result": {
+    "reentrantOrder": ["observer", "slot:0", "promise", "observer", "slot:0"],
     "rows": [
       {
         "name": "named-initial",
@@ -61,6 +62,13 @@
         "name": "outside",
         "nodes": [],
         "flat": []
+      },
+      {
+        "name": "light-slot-kept",
+        "nodes": [["light-slot"], []],
+        "flat": [["light-slot"], []],
+        "elements": [["light-slot"], []],
+        "assigned": ["light-receiver"]
       },
       {
         "name": "closed",
@@ -117,6 +125,27 @@
         "flat": [[], ["foreign"]],
         "elements": [[], ["foreign"]],
         "assigned": [null, null, null, "manual2"]
+      },
+      {
+        "name": "foreign-source-assigned",
+        "nodes": [["foreign-child"]],
+        "flat": [["foreign-child"]],
+        "elements": [["foreign-child"]],
+        "assigned": ["foreign-slot"]
+      },
+      {
+        "name": "foreign-steal-before-adoption",
+        "nodes": [[], []],
+        "flat": [[], []],
+        "elements": [[], []],
+        "assigned": [null]
+      },
+      {
+        "name": "foreign-steal-after-adoption",
+        "nodes": [[], ["foreign-child"]],
+        "flat": [[], ["foreign-child"]],
+        "elements": [[], ["foreign-child"]],
+        "assigned": ["manual2"]
       },
       {
         "name": "named-assign",

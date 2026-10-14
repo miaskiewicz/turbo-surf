@@ -1,0 +1,22 @@
+[
+  {
+    "id": "0",
+    "headers": [],
+    "childHeaders": []
+  },
+  {
+    "id": "1",
+    "headers": [["Permissions-Policy", "geolocation=()"]],
+    "childHeaders": []
+  },
+  {
+    "id": "2",
+    "headers": [["Permissions-Policy", "geolocation=(self)"]],
+    "childHeaders": []
+  },
+  {
+    "id": "3",
+    "headers": [],
+    "childHeaders": [["Permissions-Policy", "geolocation=()"]]
+  }
+]

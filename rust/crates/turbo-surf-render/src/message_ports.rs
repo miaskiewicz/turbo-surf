@@ -708,7 +708,11 @@ fn op_port_deliver(
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("Port owner unavailable"))?;
     let scope = &mut v8::ContextScope::new(scope, context);
-    let (value, ports) = crate::crypto_clone::deserialize_with_transfers(scope, &data)?;
+    let crate::crypto_clone::MessageClone {
+        value,
+        ports,
+        failed,
+    } = crate::crypto_clone::deserialize_message(scope, &data)?;
     let values = ports
         .into_iter()
         .map(|port| port.into())
@@ -719,7 +723,12 @@ fn op_port_deliver(
         .ok_or_else(|| JsErrorBox::generic("Port event adapter unavailable"))?;
     let dispatch = crate::context_ownership::local(scope, &adapter.dispatch);
     let receiver = v8::undefined(scope).into();
-    dispatch.call(scope, receiver, &[object.into(), value, ports_array.into()]);
+    let failed = v8::Boolean::new(scope, failed);
+    dispatch.call(
+        scope,
+        receiver,
+        &[object.into(), value, ports_array.into(), failed.into()],
+    );
     schedule(scope, &endpoint);
     Ok(())
 }

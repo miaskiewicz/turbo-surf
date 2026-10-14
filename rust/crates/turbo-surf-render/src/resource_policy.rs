@@ -44,6 +44,21 @@ impl EmbedderPolicy {
     }
 }
 
+pub fn isolated_opener(headers: &[(String, String)]) -> bool {
+    crate::fetch_cors::header(headers, "cross-origin-opener-policy")
+        .and_then(|value| {
+            sfv::Parser::new(value)
+                .with_version(sfv::Version::Rfc8941)
+                .parse::<sfv::Item>()
+                .ok()
+        })
+        .is_some_and(|item| {
+            item.bare_item
+                .as_token()
+                .is_some_and(|token| token.as_str() == "same-origin")
+        })
+}
+
 #[cfg(test)]
 pub fn corp_allowed(context: &RequestContext, target: &str, headers: &[(String, String)]) -> bool {
     embedder_allowed(EmbedderPolicy::UnsafeNone, context, target, headers)

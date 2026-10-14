@@ -902,9 +902,8 @@ separate native regression poisons public tree hooks and confirms zero reads.
 Canonical HTMLMetaElement reflection now updates native attributes instead of
 creating ordinary properties; its normal Chrome descriptor/brand/conversion
 control and 159-binding cohort pass. These are bounded default SDK150 checks;
-final integrated native155/workspace validation remains separate. Form-action,
-SecurityPolicyViolationEvent/reporting, COOP/isolation/embedding compatibility,
-permissions policy and broader parser/CSP resource scheduling remain open.
+The later merged current-engine checkpoint validates native155 below.
+Form-action, reporting and broader parser/CSP resource scheduling remain open.
 
 ### Current engine and mutation-policy follow-up
 
@@ -929,4 +928,41 @@ Fresh Chrome shadow-slot controls now record named/manual assignment, stealing,
 foreign-node adoption, fallback flattening, closed-root assignedSlot visibility,
 failed conversion and native descriptors/receiver brands. Slotchange coalesces
 after MutationObserver callbacks and before the later Promise reaction. The
-authored probe/control are reusable; native slot implementation remains in progress.
+authored probe/control are reusable. Native named/manual distribution, closed-root
+visibility, fallback flattening and notification order now pass the control,
+including foreign-document stealing/adoption and reentrant observer mutations.
+Real collection confirms clearing manual assignment releases the old slot edge.
+A4096-level fallback walk uses an iterative native traversal. The complete
+canonical cohort passes165 contracts. The combined renderer checkpoint passes264
+contracts on defaultSDK150 and actualV815.5.35.23. Shadow composed layout, custom-element
+lifecycle and broader scheduling remain open.
+The native isolation checkpoint below covers the measured COOP/COEP and
+Permissions Policy paths; its new merged native155 validation is pending.
+
+## Native isolation, policy and credentialless partition checkpoint — 2026-10-14
+
+A native private capability now determines isolated shared memory from actual secure navigation, a valid same-origin COOP response, compatible COEP and inherited Permissions Policy. Guest crossOriginIsolated or SharedArrayBuffer assignments cannot grant it. The measured42 top-level header cases and79 iframe cases match fresh normal Chrome155 controls. Incompatible child COEP blocks the committed embedded document, and cross-origin admission requires CORP or a genuine credentialless iframe. Containers delegate foreign self-default features through native attributes; ancestor/header denial cannot be undone by a child.
+
+Eight controls exercise real shared memory delivery. Same-origin isolated frames, including credentialless siblings, share actual backing stores. Foreign agent-cluster receivers report trusted asynchronous messageerror events; an unisolated sender rejects serialization. Native snapshots carry group/origin ownership and include fixed admitted shared-memory bytes in queue accounting, retaining transfer failure atomicity and stable accounting after shared WASM growth. Ordinary unisolated documents still allocate shared WebAssembly memory but cannot clone/message it. Local structuredClone rejects at deserialization after a regular ArrayBuffer transfer has completed, matching Chrome.
+
+Credentialless navigations use an actual private cookie jar. Set-Cookie, document.cookie, fetch, images, modules and local/session storage use the same top-document nonce, so credentialless siblings share their private state while normal frames retain the ordinary state. The source-pinned control measures initial navigation headers, real subsequent fetch headers, response cookie ingestion and storage separation. Native owner teardown reclaims the partition's storage areas. No browser cookies are imported. Policy records and backing stores contain no queued unwrapped DOM node handles.
+
+The79-feature PermissionsPolicy interface has actual native document brands, descriptors and response-header parsing; FeaturePolicy aliases its constructor. Native permission queries report denied for disabled policies and clipboard operations reject disabled access. The3 effect controls correct the stale midi default to prompt. This does not implement a browser permission prompt, OS clipboard or every controlled API.
+
+These are tested defaultSDK150 contracts and normalChrome155/V815.5.35.23 observations. Final merged/native155 gates and live Google validation remain separate. COOP popup browsing-context-group separation, reporting, wildcard-origin/dynamic/deep policy cases, client-hint delegation, additional controlled APIs, broader storage partitioning/access, CSP form-action/Trusted Types and wider parser/resource lifecycle remain pending.
+
+## Retained Window queue admission checkpoint — 2026-10-14
+
+Retained native cross-context Window snapshots are bounded by count and actual fixed snapshot bytes (4096/64MiB defaults). Admission runs after payload getters but before native transfers commit. Recursive getters cannot overrun the current queue; a rejected snapshot preserves ArrayBuffer and MessagePort ownership. A retired or origin-mismatched receiver still completes specified transfers and discards delivery without consuming queue capacity. Actual shared backing-store bytes count toward admission and remain fixed after WASM growth; delivery releases them. Four deterministic host-budget regressions plus the existing messaging/isolation/frame cohort pass. Same-context Window deliveries retain the existing private V8 timer/event path; this is not a claim that every browser task queue or scheduling behavior is complete.
+
+## Permission status and container policy checkpoint — 2026-10-14
+
+Fresh normal Chrome155.0.8059.79 / V8 15.5.35.23 controls measure the unsorted79-feature enumeration order,12 wildcard/default-port/duplicate origin policies, PermissionStatus receiver and prototype brands, constructor identity, own descriptors and change-event dispatch. Native permission query results now inherit an authentic EventTarget and retain private document-owned records. Fake/proxied receivers cannot read them. Dynamic iframe featurePolicy reflects its current allow attribute and source origin without rewriting the policy captured when its child document committed; four header/delegation controls cover this distinction.
+
+This isolated batch passes31 focused default SDK150 policy/resource/Window/lifecycle contracts and strict affected Clippy. It adds no queued native DOM handles: permission status and iframe interface records retain genuine document/element wrappers through ordinary private V8 edges, with existing native ownership accounting. Genuine native155 integrated validation remains separate. Deep descendants, popup group transitions, automatic permission changes, complete OS-controlled permission effects and wider CSP/fetch/storage remain open.
+
+## Permission descriptors and descendant admission checkpoint — 2026-10-14
+
+The reusable permissions-query control measures asynchronous errors for missing/invalid descriptors and wrong receivers, accepted/rejected queried names, result labels, push options, inherited subtype dictionary read order, original getter exception identity and cross-realm Promise/status ownership. Actual Chrome Permissions inherits Object rather than EventTarget; PermissionStatus separately inherits the authentic EventTarget. Native private query records now permit genuine foreign-realm receivers while rejecting fake/proxied receivers and use captured Promise/error intrinsics. These states describe the declared fresh profile; OS permission prompts and operations are not implemented.
+
+The policy-deep controls exercise twelve real two-level document trees: ancestor denials cannot be re-enabled below them, cross-origin feature delegation remains subject to each ancestor, child response policies intersect, and denied isolation stays denied across descendants. All completed fresh Chrome controls have zero errors and source/case/collector hashes. The final isolated checkpoint passes42 defaultSDK150 policy/API/Window contracts and strict affected Clippy. An early5s deep-case budget failure was followed by stage tracing and three passing completed runs; it does not establish a general iframe timing bound. Integrated native155 remains separately required. Exploratory descriptors mutating their subtype name during conversion did not settle in the normal Chrome collector; no completed control or parity claim is made for that path.

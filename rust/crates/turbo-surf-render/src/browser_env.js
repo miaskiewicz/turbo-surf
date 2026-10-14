@@ -2031,6 +2031,13 @@ if(typeof __ns.makeNativeFunction==='function'){
         get:__ns.makeNativeFunction(function(){checkMeta(this);return metaApply(metaGetAttribute,this,[attribute])||'';},'get '+name,0),
         set:__ns.makeNativeFunction(function(value){checkMeta(this);if(typeof value==='symbol')throw new metaTypeError('Cannot convert a Symbol to a string');metaApply(metaSetAttribute,this,[attribute,metaString(value)]);},'set '+name,1)});
     });
+    var iframeRemoveAttribute=elementProto.removeAttribute;
+    function checkIframe(receiver){
+      if(metaApply(getLocalTag,receiver,[])!=='iframe'||metaApply(getNamespace,receiver,[])!=='http://www.w3.org/1999/xhtml')throw new metaTypeError('Illegal invocation');
+    }
+    Object.defineProperty(prototypes.HTMLIFrameElement,'credentialless',{configurable:true,enumerable:true,
+      get:__ns.makeNativeFunction(function(){checkIframe(this);return metaApply(metaGetAttribute,this,['credentialless'])!==null;},'get credentialless',0),
+      set:__ns.makeNativeFunction(function(value){checkIframe(this);if(value)metaApply(metaSetAttribute,this,['credentialless','']);else metaApply(iframeRemoveAttribute,this,['credentialless']);},'set credentialless',1)});
     ['title','lang','accessKey'].forEach(function(name){reflectAttribute('HTMLElement',name,name.toLowerCase(),false);});
     var ariaNames='Atomic AutoComplete BrailleLabel BrailleRoleDescription Busy Checked ColCount ColIndex ColIndexText ColSpan Current Description Disabled Expanded HasPopup Hidden Invalid KeyShortcuts Label Level Live Modal MultiLine MultiSelectable Orientation Placeholder PosInSet Pressed ReadOnly Relevant Required RoleDescription RowCount RowIndex RowIndexText RowSpan Selected SetSize Sort ValueMax ValueMin ValueNow ValueText'.split(' ');
     ariaNames.forEach(function(name){reflectAttribute('Element','aria'+name,'aria-'+name.toLowerCase(),true);});

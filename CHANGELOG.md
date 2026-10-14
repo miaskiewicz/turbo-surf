@@ -2,12 +2,38 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Add a host-only composed-tree identity seam for native layout, reading actual
+  closed-root/manual assignments without guest getters. Four slot contracts pass
+  on both defaultSDK150 and genuineV815.5.35.23, including retained-edge cleanup.
+  Merged API/permissions/messaging controls pass42 tests on both engines. These
+  focused certifications retain the broader264-test native/default checkpoint;
+  full final gates, geometry integration, remaining DOM/security/fetch work and
+  fresh Google acceptance remain pending.
+
+- Re-vendor committed native shadow-slot distribution, manual assignment and
+  trusted notification ordering. Native V8 collection verifies cleared manual
+  edges do not retain old slots; an iterative4096-level fallback regression avoids
+  native recursion. Source-pinned Chrome controls cover foreign adoption/stealing,
+  light slot elements, closed roots, failed conversion and reentrant observers.
+  The combined native slot/isolation/messaging checkpoint passes264 tests on both
+  the default engine and genuine current15.5.35.23; full final gates remain open.
+
 - Run freshly queued native scripts before advancing delayed virtual timers after
   an event-loop poll. A two-frame source-pinned Chrome control exposed a false
   opaque-frame timeout. Read native Location state privately during frame bootstrap;
   default Location getters use private receiver records and native-shaped functions.
   Controls cover own srcdoc Location descriptors and live base reads after public
   attribute/query poisoning.
+- Correct Permissions query dictionary conversion and asynchronous failure timing, subtype read order, accepted descriptor labels/states, cross-realm Promise/status ownership and the interface's actual Object prototype parent. Add fresh normal Chrome155 controls for descriptor/property-read behavior and two-level policy inheritance;42 focused policy/API/Window tests pass in the isolated default SDK checkpoint. OS permission prompts and popup group transitions remain unsupported.
+
+- Preserve the measured Chrome155 feature enumeration order and wildcard/default-port origin policies. Expose real branded PermissionStatus EventTargets with original descriptor/constructor identity and change-handler behavior. Reflect the current iframe container policy separately from its committed child policy; dynamic allow changes retain the child admission snapshot. Fresh authored controls cover12 origin policies, actual status brands/events and4 dynamic iframe cases; deeper frames, popup groups and complete permission effects remain pending.
+
+- Bound retained cross-context Window messages to4096 snapshots/64MiB by default. Admission checks actual fixed snapshot bytes after payload getters and before ArrayBuffer/MessagePort ownership commits, including recursive enqueue, retired receivers and origin filtering. Host-only controls permit deterministic small-limit regressions without exposing budget switches to page JS.
+
+- Enforce native COOP/COEP/Permissions Policy isolation capability and iframe embedding/CORP admission, including measured credentialless exceptions. Inherit actual iframe feature delegation; reject shared-memory delivery across native agent clusters with trusted asynchronous messageerror events. Keep credentialless cookie, fetch/image/module and local/session storage in a real ephemeral top-document partition, shared by credentialless siblings and reclaimed on native owner teardown. Native permission queries and clipboard operations honor denied policies. Reusable fresh Chrome controls cover42 top-header,79 embedding/delegation,8 actual SAB-delivery cases and credentialless network/storage behavior; full popup, dynamic/deep policy and wider CSP coverage remain pending.
+
+- Enforce the native unisolated shared-memory clone/message restrictions while retaining shared WebAssembly allocation; transferred ArrayBuffer failure timing matches the fresh Chrome control. Expose a genuinely branded PermissionsPolicy/FeaturePolicy interface with response-header parsing and measured Chrome 155 feature defaults. The subsequent isolation checkpoint adds capability, delegation and embedding enforcement.
+
 - Freeze document base URLs at authentic native mutation boundaries, enforcing
   CSP base-uri without default-src fallback. Dynamic head CSP metas intersect
   policies on insertion/content/http-equiv changes; parsed metas activate before
@@ -20,7 +46,7 @@
   Genuine thread-exit regressions preserve isolate-owned cleanup and normal peer
   activation. Add iframe sandbox DOMTokenList with live attributes, authentic
   brands, token support and PutForwards behavior against a fresh Chrome155 control.
-  The combined canonical binding cohort passes 161 contracts.
+  The sandbox checkpoint passed161 canonical contracts; the later slot cohort adds coverage.
 
 - Reflect HTMLMetaElement name/httpEquiv/content/media/scheme through genuine
   native attributes with exact receiver brands, conversion and descriptors against

@@ -63,3 +63,31 @@ import maps/speculation rules, async adoption/navigation races, full script stac
 source parity, complete CSS cascade/color-scheme, and wider resource cancellation
 and scheduling. Passing this checkpoint does not establish Google clearance or
 complete browser parity.
+
+### Shared memory and Permissions Policy controls
+
+The default document now hides the SharedArrayBuffer constructor but permits shared WebAssembly allocation. Local cloning rejects shared memory during deserialization, after regular ArrayBuffer transfers have completed. Window/MessagePort messaging rejects shared memory during serialization. Private native capability checks prevent forged public flags or constructors from granting sharing. The authored `shared-memory-unisolated-probe.js` records this distinction in fresh normal Chrome.
+
+The PermissionsPolicy interface has private native document ownership, genuine receiver checks and Chrome 155 descriptors; FeaturePolicy aliases its constructor. The response-header parser uses RFC 8941 and preserves the measured known-feature defaults and explicit origin lists. The 21 authored header controls include unknown tokens, denied lists, foreign origins, duplicate directives, and invalid structured-field syntax. This batch covers top-level policy reflection; iframe inheritance/delegation, enforced feature effects and positive isolation/embedding remain pending. Native policy records contain strings and booleans; they queue no native DOM handles and require no additional NativeNodePin.
+
+### Native isolation and credentialless state
+
+The subsequent isolation batch enforces actual COOP/COEP header parsing, iframe embedding and inherited Permissions Policy before enabling shared memory. Native group/origin snapshot ownership controls deserialization; Window and MessagePort failures dispatch messageerror asynchronously. Shared snapshots account fixed admitted backing-store bytes, so WASM growth cannot over-release another queued message's accounting. Capability and origin records contain native scalars/strings and queue no DOM handles.
+
+Credentialless iframe navigation derives a private partition from its actual owning document and genuine boolean attribute. The partition owns a CookieJar and backing local/session storage nonce; descendant resource requests reuse it. Credentialless sibling frames share it, ordinary frames retain the default jar/storage, and native partition teardown reclaims only its storage areas. Network snapshots retain the partition through pending work as an Rc containing Rust state; no NativeNodePin is required.
+
+Reusable controls: isolation-probe/policy-header-chrome (42 headers), policy-frame-chrome with policy-frame-probe/policy-frame-child (79 iframe cases), policy-shared-probe/policy-shared-child (8 actual shared deliveries), policy-credentialless-probe/policy-credentialless-child (cookie/storage partition), and permissions-effects-probe (3 actual denied query sets). The header/frame collectors create fresh normal Chrome profiles and save source/case/collector hashes. Optional fourth child-source argument selects the exact child program for shared/credentialless runs. Full browser policies remain partial as recorded in FINDINGS.md.
+
+### Retained Window message queue limits
+
+The native cross-context Window snapshot queue has a4096-message/64MiB default capacity. A captured payload can enqueue recursively or retire its destination while serializing. Admission checks the actual current queue after those getters and before native ownership commits, with no guest callback between check and commit. Failure preserves ordinary ArrayBuffer and MessagePort ownership. Retired/origin-mismatched receivers still complete specified transfers and discard delivery without consuming capacity. Fixed shared snapshot accounting remains stable after shared WASM growth. Host-only test setters are not exposed to page JS.
+
+This bounds the retained native cross-context snapshots; same-context Window deliveries still use the existing private V8 timer/event path. No new queued DOM scalar handles or NativeNodePin are introduced. The queue's existing genuine context Globals and native clone roots retain task ownership and are released by delivery/retirement.
+
+### Permission interface lifetime and mutable containers
+
+PermissionStatus records are per-document private ephemeron entries retaining the authentic owner Document. They inherit a real EventTarget; registered user listeners and onchange handlers use the existing V8-owned event target mechanism. Iframe featurePolicy records retain their genuine host element and query native attributes with captured owner/base accessors. No native integer DOM handles are queued or retained by these records. Changing the current container allow attribute updates its reflected policy; the committed child policy remains the independently captured native header/delegation snapshot. Native155 integrated certification and deeper navigation/lifecycle behavior remain separate.
+
+### Permission query realm ownership
+
+The Permissions instance owns its original query closure through the native interface ephemeron record. A borrowed query delegates only through that private genuine receiver record; its Promise and PermissionStatus belong to the receiver's original realm, as observed in Chrome. Wrong receivers reject with the method realm's captured Promise and TypeError. No native scalar DOM handle is added. Descriptor conversion exceptions preserve the original thrown object and are delivered through the returned Promise.

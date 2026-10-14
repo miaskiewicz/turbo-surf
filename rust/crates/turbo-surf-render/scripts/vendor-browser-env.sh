@@ -43,7 +43,7 @@ git -C "$repo" show HEAD:src/event_listeners.js > "$dest/event_listeners.js"
 for file in range_contents.rs range_contents.js range_probe.js range_chrome155.json range_live.rs range_live_probe.js range_live_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
-for file in html_meta_tests.rs html_meta_probe.js html_meta_chrome155.json css_live_tests.rs css_live_probe.js css_live_chrome155.json computed_color_probe.js computed_color_chrome155.json css_adoption_tests.rs css_adoption_probe.js css_adoption_ownership_probe.js css_adoption_chrome155.json css_adoption_ownership_chrome155.json; do
+for file in shadow_slots.rs shadow_slots.js shadow_slots_tests.rs shadow_slots_probe.js shadow_slots_chrome155.json frame_tokens_tests.rs frame_tokens_probe.js frame_tokens_chrome155.json iframe_credentialless_tests.rs iframe_credentialless_probe.js iframe_credentialless_chrome155.json html_meta_tests.rs html_meta_probe.js html_meta_chrome155.json css_live_tests.rs css_live_probe.js css_live_chrome155.json computed_color_probe.js computed_color_chrome155.json css_adoption_tests.rs css_adoption_probe.js css_adoption_ownership_probe.js css_adoption_chrome155.json css_adoption_ownership_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
 git -C "$repo" show HEAD:src/html_documents.rs > "$dest/html_documents.rs"

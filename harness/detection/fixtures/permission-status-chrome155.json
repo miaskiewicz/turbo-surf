@@ -1,0 +1,135 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "cf8833b6c017628d4bdc1e19c3b4b5202716584ebefb265ac2f5e2bce323c38c",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "records": [
+      {
+        "requested": "geolocation",
+        "name": "geolocation",
+        "state": "prompt",
+        "brand": "[object PermissionStatus]",
+        "ownKeys": [],
+        "target": true,
+        "constructor": "PermissionStatus",
+        "constructorIdentity": true
+      },
+      {
+        "requested": "camera",
+        "name": "video_capture",
+        "state": "prompt",
+        "brand": "[object PermissionStatus]",
+        "ownKeys": [],
+        "target": true,
+        "constructor": "PermissionStatus",
+        "constructorIdentity": true
+      },
+      {
+        "requested": "microphone",
+        "name": "audio_capture",
+        "state": "prompt",
+        "brand": "[object PermissionStatus]",
+        "ownKeys": [],
+        "target": true,
+        "constructor": "PermissionStatus",
+        "constructorIdentity": true
+      },
+      {
+        "requested": "midi",
+        "name": "midi",
+        "state": "prompt",
+        "brand": "[object PermissionStatus]",
+        "ownKeys": [],
+        "target": true,
+        "constructor": "PermissionStatus",
+        "constructorIdentity": true
+      },
+      {
+        "requested": "clipboard-read",
+        "name": "clipboard_read",
+        "state": "prompt",
+        "brand": "[object PermissionStatus]",
+        "ownKeys": [],
+        "target": true,
+        "constructor": "PermissionStatus",
+        "constructorIdentity": true
+      },
+      {
+        "requested": "clipboard-write",
+        "name": "clipboard_write",
+        "state": "granted",
+        "brand": "[object PermissionStatus]",
+        "ownKeys": [],
+        "target": true,
+        "constructor": "PermissionStatus",
+        "constructorIdentity": true
+      },
+      {
+        "requested": "notifications",
+        "name": "notifications",
+        "state": "prompt",
+        "brand": "[object PermissionStatus]",
+        "ownKeys": [],
+        "target": true,
+        "constructor": "PermissionStatus",
+        "constructorIdentity": true
+      }
+    ],
+    "prototype": ["name", "state", "onchange", "constructor"],
+    "parent": true,
+    "constructorParent": true,
+    "members": [
+      {
+        "key": "name",
+        "enumerable": true,
+        "configurable": true,
+        "getName": "get name",
+        "getLength": 0,
+        "getPrototype": false,
+        "setName": null,
+        "setLength": null,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "key": "state",
+        "enumerable": true,
+        "configurable": true,
+        "getName": "get state",
+        "getLength": 0,
+        "getPrototype": false,
+        "setName": null,
+        "setLength": null,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "key": "onchange",
+        "enumerable": true,
+        "configurable": true,
+        "getName": "get onchange",
+        "getLength": 0,
+        "getPrototype": false,
+        "setName": "set onchange",
+        "setLength": 1,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      }
+    ],
+    "newError": "TypeError",
+    "initialHandler": null,
+    "dispatch": true,
+    "events": [["listener", true, false], ["handler", true, "change"]],
+    "numberHandler": null,
+    "objectHandler": "object",
+    "finalHandler": null
+  }
+}

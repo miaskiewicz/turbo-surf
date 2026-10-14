@@ -75,6 +75,16 @@
   outside.id = "outside";
   outside.append(document.createTextNode("outside fallback"));
   rows.push({ name: "outside", nodes: nodes(outside), flat: nodes(outside, true) });
+  const lightSlotHost = document.createElement("div"),
+    lightSlot = document.createElement("slot");
+  lightSlot.id = "light-slot";
+  lightSlot.append(document.createTextNode("must not flatten"));
+  lightSlotHost.append(lightSlot);
+  const lightRoot = lightSlotHost.attachShadow({ mode: "open" }),
+    lightReceiver = document.createElement("slot");
+  lightReceiver.id = "light-receiver";
+  lightRoot.append(lightReceiver);
+  snapshot("light-slot-kept", [lightReceiver, lightSlot], [lightSlot]);
   const closedHost = document.createElement("div"),
     closedChild = document.createElement("b");
   closedChild.id = "closed-child";
@@ -112,6 +122,21 @@
   snapshot("manual-foreign-after", [second], [foreign]);
   first.assign();
   snapshot("manual-clear", [first, second], [m1, m2, mt, foreign]);
+  const foreignDocument = document.implementation.createHTMLDocument(),
+    foreignHost = foreignDocument.createElement("div"),
+    foreignRoot = foreignHost.attachShadow({ mode: "open", slotAssignment: "manual" }),
+    foreignSlot = foreignDocument.createElement("slot"),
+    foreignChild = foreignDocument.createElement("b");
+  foreignSlot.id = "foreign-slot";
+  foreignChild.id = "foreign-child";
+  foreignRoot.append(foreignSlot);
+  foreignHost.append(foreignChild);
+  foreignSlot.assign(foreignChild);
+  snapshot("foreign-source-assigned", [foreignSlot], [foreignChild]);
+  second.assign(foreignChild);
+  snapshot("foreign-steal-before-adoption", [foreignSlot, second], [foreignChild]);
+  manualHost.append(foreignChild);
+  snapshot("foreign-steal-after-adoption", [foreignSlot, second], [foreignChild]);
   const invalidAssignment = capture(() =>
     document.createElement("div").attachShadow({ mode: "open", slotAssignment: "invalid" }),
   );
@@ -166,7 +191,25 @@
   };
   await Promise.resolve();
   host.remove();
+  const reentrantOrder = [],
+    reentrantHost = document.createElement("div"),
+    reentrantRoot = reentrantHost.attachShadow({ mode: "open" }),
+    reentrantSlot = document.createElement("slot"),
+    reentrantChild = document.createElement("b");
+  reentrantRoot.append(reentrantSlot);
+  reentrantSlot.addEventListener("slotchange", () =>
+    reentrantOrder.push("slot:" + reentrantSlot.assignedNodes().length),
+  );
+  new MutationObserver(() => {
+    reentrantOrder.push("observer");
+    if (reentrantChild.slot !== "away") reentrantChild.slot = "away";
+  }).observe(reentrantHost, { childList: true, subtree: true, attributes: true });
+  reentrantHost.append(reentrantChild);
+  Promise.resolve().then(() => reentrantOrder.push("promise"));
+  await Promise.resolve();
+  await Promise.resolve();
   return {
+    reentrantOrder,
     rows,
     mutationOrder,
     badAssign,

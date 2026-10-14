@@ -213,8 +213,11 @@ let __portTransferSequence, __hostPortMessage;
   define(globalThis, "MessageChannel", { value: Channel, writable: true, configurable: true });
   ops.op_port_install_adapter(
     create,
-    (port, data, ports) =>
-      ops.op_dispatch_host_event(__hostPortMessage("message", data, ports), port),
+    (port, data, ports, failed) =>
+      ops.op_dispatch_host_event(
+        __hostPortMessage(failed ? "messageerror" : "message", data, ports),
+        port,
+      ),
     (port) => schedule(() => ops.op_port_deliver(port), 0),
   );
 }

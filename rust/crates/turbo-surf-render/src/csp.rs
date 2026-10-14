@@ -221,6 +221,7 @@ pub struct DocumentPolicy {
     pub initial_base: Policy,
     pub referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
     pub embedder_policy: crate::resource_policy::EmbedderPolicy,
+    pub permissions_policy: crate::permissions_policy::PermissionsPolicy,
     metas: Vec<(usize, String)>,
     next_meta: usize,
 }
@@ -304,6 +305,12 @@ impl DocumentPolicy {
             )
             .unwrap_or_default(),
             embedder_policy: crate::resource_policy::EmbedderPolicy::from_headers(headers),
+            permissions_policy: crate::permissions_policy::PermissionsPolicy::from_headers(
+                &url::Url::parse(base)
+                    .map(|url| url.origin().ascii_serialization())
+                    .unwrap_or_else(|_| "null".into()),
+                headers,
+            ),
             header: active.clone(),
             initial_base,
             active,

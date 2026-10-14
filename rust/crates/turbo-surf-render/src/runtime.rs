@@ -8,10 +8,10 @@
 //! the fetched page parsed in ([`install_dom`]) → run the page script → drain the
 //! event loop + virtual timers → serialize the hydrated tree back to HTML.
 //!
-//! The binding stores V8 `Global` handles in thread-locals; they MUST be cleared
-//! (`browser_env::reset()`) while the isolate is still alive, before the runtime
-//! drops — otherwise a later drop on a dead isolate crashes. Every entry point
-//! resets on the way out.
+//! Each isolate owns its native DOM world and private V8 ownership graph. Scoped
+//! activation selects that world only while host operations or Future polls run.
+//! Isolate-owned cleanup disposes native handles before V8 invalidation, including
+//! cached runtimes and independent sessions; an entry point never resets its peer.
 
 #[cfg(turbo_surf_native_proxy)]
 #[path = "window_proxy.rs"]
@@ -131,7 +131,13 @@ fn register_frame_modules(scope: &mut v8::PinScope, base: &str) -> Result<(), Js
         top_level_source: state.borrow::<Base>().0.clone(),
         cookie_site_is_opaque,
         opaque_origin,
-        jar: state.borrow::<Jar>().clone(),
+        jar: context
+            .get_slot::<CspHandle>()
+            .and_then(|handle| handle.partition.clone())
+            .map_or_else(
+                || state.borrow::<Jar>().clone(),
+                |partition| partition.jar.clone(),
+            ),
         ua: state.borrow::<Ua>().0.clone(),
         client_hints: state.borrow::<ClientHints>().clone(),
         inline_sources: state.borrow::<InlineModules>().clone(),
@@ -184,6 +190,7 @@ struct InlineModule {
 #[derive(Clone)]
 struct CspHandle {
     id: u32,
+    partition: Option<Rc<CredentiallessPartition>>,
     policy: Rc<RefCell<crate::csp::DocumentPolicy>>,
 }
 impl CspHandle {
@@ -192,12 +199,90 @@ impl CspHandle {
         static NEXT: AtomicU32 = AtomicU32::new(1);
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
+            partition: None,
             policy: Rc::new(RefCell::new(crate::csp::DocumentPolicy::new(
                 base, headers, html,
             ))),
         }
     }
 }
+struct CredentiallessPartition {
+    id: u32,
+    jar: Jar,
+    storage: BrowserStorage,
+}
+impl Drop for CredentiallessPartition {
+    fn drop(&mut self) {
+        let Ok(mut areas) = self.storage.0.lock() else {
+            return;
+        };
+        let ids = areas
+            .by_origin
+            .iter()
+            .filter_map(|((partition, _, _), id)| (*partition == self.id).then_some(*id))
+            .collect::<Vec<_>>();
+        areas
+            .by_origin
+            .retain(|(partition, _, _), _| *partition != self.id);
+        for id in ids {
+            areas.values.remove(&id);
+        }
+    }
+}
+#[derive(Default)]
+struct CredentiallessPartitions(std::collections::BTreeMap<u32, Rc<CredentiallessPartition>>);
+fn frame_partition(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    parent: v8::Local<v8::Context>,
+    host: v8::Local<v8::Object>,
+) -> Option<Rc<CredentiallessPartition>> {
+    if let Some(partition) = parent
+        .get_slot::<CspHandle>()
+        .and_then(|handle| handle.partition.clone())
+    {
+        return Some(partition);
+    }
+    crate::browser_env::node_attribute(scope, host, "credentialless")?;
+    let id = parent
+        .get_slot::<SharedMemoryCapability>()
+        .map(|capability| capability.group)
+        .or_else(|| parent.get_slot::<CspHandle>().map(|handle| handle.id))?;
+    if !state.has::<CredentiallessPartitions>() {
+        state.put(CredentiallessPartitions::default());
+    }
+    if !state.has::<BrowserStorage>() {
+        state.put(BrowserStorage::default());
+    }
+    let storage = state.borrow::<BrowserStorage>().clone();
+    Some(
+        state
+            .borrow_mut::<CredentiallessPartitions>()
+            .0
+            .entry(id)
+            .or_insert_with(|| {
+                Rc::new(CredentiallessPartition {
+                    id,
+                    jar: Rc::new(RefCell::new(CookieJar::new())),
+                    storage,
+                })
+            })
+            .clone(),
+    )
+}
+#[op2(fast)]
+fn op_frame_request_partition(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    document: v8::Local<v8::Object>,
+    host: v8::Local<v8::Object>,
+) -> u32 {
+    document
+        .get_creation_context(scope)
+        .and_then(|parent| frame_partition(scope, state, parent, host))
+        .map_or(0, |partition| partition.id)
+}
+
 #[derive(Default)]
 struct CspContexts(std::collections::HashMap<u32, CspHandle>);
 #[op2(fast)]
@@ -207,6 +292,93 @@ fn op_csp_context(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> 
         .and_then(|context| context.get_slot::<CspHandle>())
         .map_or(0, |handle| handle.id)
 }
+#[op2]
+#[serde]
+fn op_permissions_policy(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    #[string] name: &str,
+    #[string] target: &str,
+    action: u32,
+) -> serde_json::Value {
+    let Some(context) = document.get_creation_context(scope) else {
+        return serde_json::Value::Null;
+    };
+    let origin = window_origin(scope, context);
+    let policy = context
+        .get_slot::<CspHandle>()
+        .map(|handle| handle.policy.borrow().permissions_policy.clone())
+        .unwrap_or_default();
+    permissions_policy_result(&policy, &origin, name, target, action)
+}
+
+fn permissions_policy_result(
+    policy: &crate::permissions_policy::PermissionsPolicy,
+    origin: &str,
+    name: &str,
+    target: &str,
+    action: u32,
+) -> serde_json::Value {
+    match action {
+        0 => serde_json::json!(crate::permissions_policy::PermissionsPolicy::features()),
+        1 => serde_json::json!(policy.allowlist(name, origin)),
+        2 => serde_json::json!(policy.allows(
+            name,
+            origin,
+            if target.is_empty() { origin } else { target }
+        )),
+        3 => serde_json::json!(crate::permissions_policy::PermissionsPolicy::features()
+            .into_iter()
+            .filter(|name| policy.allows(name, origin, origin))
+            .collect::<Vec<_>>()),
+        4 => serde_json::json!(
+            crate::permissions_policy::PermissionsPolicy::features().contains(&name)
+        ),
+        _ => serde_json::Value::Null,
+    }
+}
+#[op2]
+#[serde]
+fn op_iframe_permissions_policy(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    host: v8::Local<v8::Object>,
+    #[string] base: &str,
+    #[string] name: &str,
+    #[string] target: &str,
+    action: u32,
+) -> serde_json::Value {
+    let Some(parent) = document.get_creation_context(scope) else {
+        return serde_json::Value::Null;
+    };
+    let parent_origin = window_origin(scope, parent);
+    let src = crate::browser_env::node_attribute(scope, host, "src").unwrap_or_default();
+    let inherited = crate::browser_env::node_attribute(scope, host, "srcdoc").is_some()
+        || src.is_empty()
+        || src == "about:blank";
+    let source_origin = if inherited {
+        parent_origin.clone()
+    } else {
+        resolve(base, &src)
+            .and_then(|url| url::Url::parse(&url).ok())
+            .map_or("null".into(), |url| url.origin().ascii_serialization())
+    };
+    let parent_policy = parent
+        .get_slot::<CspHandle>()
+        .map(|handle| handle.policy.borrow().permissions_policy.clone())
+        .unwrap_or_default();
+    let allow = crate::browser_env::node_attribute(scope, host, "allow").unwrap_or_default();
+    let mut policy = crate::permissions_policy::PermissionsPolicy::default();
+    policy.inherit(
+        &parent_policy,
+        &parent_origin,
+        &source_origin,
+        &source_origin,
+        &allow,
+    );
+    permissions_policy_result(&policy, &source_origin, name, target, action)
+}
+
 #[op2]
 #[string]
 fn op_csp_base_url(
@@ -1386,6 +1558,20 @@ async fn op_fetch(
             .get(&(id as u32))
             .cloned()
     });
+    let partition = init
+        .get("partition")
+        .and_then(|value| value.as_u64())
+        .and_then(|id| {
+            state
+                .borrow()
+                .try_borrow::<CredentiallessPartitions>()
+                .and_then(|partitions| partitions.0.get(&(id as u32)))
+                .cloned()
+        })
+        .or_else(|| csp.as_ref().and_then(|handle| handle.partition.clone()));
+    let jar_rc = partition
+        .as_ref()
+        .map_or(jar_rc, |partition| partition.jar.clone());
     let referrer_policy = init
         .get("referrerPolicy")
         .and_then(|value| value.as_str())
@@ -1439,6 +1625,7 @@ async fn op_fetch(
         frames.documents.insert(
             id,
             FrameDocument {
+                partition: partition.clone(),
                 url: target.clone(),
                 html: body.clone(),
                 headers: Vec::new(),
@@ -1639,6 +1826,7 @@ async fn op_fetch(
                 frames.documents.insert(
                     id,
                     FrameDocument {
+                        partition: partition.clone(),
                         url: r.final_url.clone(),
                         html: r.html.clone(),
                         headers: r.headers.clone(),
@@ -1754,6 +1942,13 @@ async fn op_load_image(
             state.borrow::<ClientHints>().clone(),
         )
     };
+    let jar = state
+        .borrow()
+        .borrow::<CspContexts>()
+        .0
+        .get(&csp)
+        .and_then(|handle| handle.partition.as_ref())
+        .map_or(jar.clone(), |partition| partition.jar.clone());
     let source = if source.is_empty() { base } else { source };
     let target = resolve(&source, &url).unwrap_or(url);
     let (policy, embedder_policy) = state
@@ -1919,18 +2114,32 @@ fn op_set_host_capabilities(scope: &mut v8::PinScope, record: v8::Local<v8::Obje
 }
 struct FrameRetired;
 
+struct WindowMessageLimits {
+    max_messages: usize,
+    max_bytes: usize,
+}
+impl Default for WindowMessageLimits {
+    fn default() -> Self {
+        Self {
+            max_messages: 4096,
+            max_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
 #[derive(Default)]
 struct FrameContexts {
     init_script: String,
     contexts: Vec<v8::Global<v8::Context>>,
     core: Option<v8::Global<v8::Value>>,
     messages: std::collections::VecDeque<WindowMessage>,
+    message_limits: WindowMessageLimits,
     next_document: u32,
     documents: std::collections::HashMap<u32, FrameDocument>,
     next_script: u32,
     scripts: std::collections::HashMap<u32, FrameScriptResponse>,
 }
 struct FrameDocument {
+    partition: Option<Rc<CredentiallessPartition>>,
     url: String,
     html: String,
     headers: Vec<(String, String)>,
@@ -2422,6 +2631,36 @@ fn secure_context(scope: &mut v8::PinScope) -> bool {
     secure_context_for(scope, context)
 }
 
+// Guest metadata cannot grant shared memory. Navigation/agent-cluster policies
+// must install this private capability before isolated sharing is supported.
+#[derive(Clone)]
+struct SharedMemoryCapability {
+    allowed: bool,
+    group: u32,
+    origin: String,
+}
+pub(crate) fn shared_memory_allowed(scope: &mut v8::PinScope) -> bool {
+    scope
+        .get_current_context()
+        .get_slot::<SharedMemoryCapability>()
+        .is_some_and(|capability| capability.allowed)
+}
+pub(crate) fn shared_memory_identity(scope: &mut v8::PinScope) -> Option<(u32, String)> {
+    let capability = scope
+        .get_current_context()
+        .get_slot::<SharedMemoryCapability>()?;
+    capability
+        .allowed
+        .then(|| (capability.group, capability.origin.clone()))
+}
+#[op2(fast)]
+fn op_shared_memory_allowed(scope: &mut v8::PinScope) -> bool {
+    scope
+        .get_entered_or_microtask_context()
+        .get_slot::<SharedMemoryCapability>()
+        .is_some_and(|capability| capability.allowed)
+}
+
 struct SecureContext(bool);
 fn secure_context_for<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -2570,6 +2809,23 @@ fn op_window_post_message<'s>(
     queue_window_message(scope, window, message, target_origin, transfer)
 }
 
+fn admit_window_snapshot(scope: &mut v8::PinScope, size: usize) -> Result<(), JsErrorBox> {
+    let state = JsRuntime::op_state_from(scope);
+    let state = state.borrow();
+    let frames = state.borrow::<FrameContexts>();
+    let bytes = frames.messages.iter().fold(0usize, |sum, message| {
+        sum.saturating_add(message.data.size_bytes())
+    });
+    if frames.messages.len() >= frames.message_limits.max_messages
+        || bytes.saturating_add(size) > frames.message_limits.max_bytes
+    {
+        return Err(JsErrorBox::range_error(
+            "Native Window message queue budget exceeded",
+        ));
+    }
+    Ok(())
+}
+
 fn queue_window_message<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
@@ -2604,16 +2860,25 @@ fn queue_window_message<'s>(
     let data = {
         let scope = &mut v8::ContextScope::new(scope, source);
         v8::tc_scope!(let scope, scope);
-        let result = crate::crypto_clone::serialize_transfer(scope, message, transfer, None);
+        let result = crate::crypto_clone::prepare_transfer(scope, message, transfer, None);
         if scope.has_caught() || scope.has_terminated() {
             scope.rethrow();
             return Ok(());
         }
-        result?
+        let prepared = result?;
+        // Guest getters may enqueue recursively or retire/navigate the receiver.
+        // Validate current capacity after them, before native ownership commits.
+        if source != target
+            && target.get_slot::<FrameRetired>().is_none()
+            && expected.matches(scope, target)
+        {
+            admit_window_snapshot(scope, prepared.size_bytes())?;
+        }
+        prepared.commit(scope)?
     };
     // Structured serialization/transfer precedes the inactive-target check.
     // A payload getter can retire the destination while serialization runs.
-    if target.get_slot::<FrameRetired>().is_some() {
+    if target.get_slot::<FrameRetired>().is_some() || !expected.matches(scope, target) {
         return Ok(());
     }
     if source == target {
@@ -2621,7 +2886,11 @@ fn queue_window_message<'s>(
         if !expected.matches(scope, target) {
             return Ok(());
         }
-        let (cloned, ports) = crate::crypto_clone::deserialize_with_transfers(scope, &data)?;
+        let crate::crypto_clone::MessageClone {
+            value: cloned,
+            ports,
+            failed,
+        } = crate::crypto_clone::deserialize_message(scope, &data)?;
         let port_values = ports
             .into_iter()
             .map(|port| port.into())
@@ -2629,6 +2898,7 @@ fn queue_window_message<'s>(
         let port_array = v8::Array::new_with_elements(scope, &port_values);
         let origin = v8::String::new(scope, &origin).unwrap();
         let source_window = source.global(scope);
+        let failed = v8::Boolean::new(scope, failed);
         // Queue the JS timer immediately for synchronous run_with_dom callers;
         // listener delivery remains asynchronous and sees an actual clone.
         call_frame_helper(
@@ -2639,6 +2909,7 @@ fn queue_window_message<'s>(
                 source_window.into(),
                 origin.into(),
                 port_array.into(),
+                failed.into(),
             ],
         )
         .ok_or_else(|| JsErrorBox::generic("message dispatch unavailable"))?;
@@ -2733,6 +3004,36 @@ fn op_frame_set_document<'s>(
         replaced = Some(previous);
     }
     let mut sandbox = FrameSandbox::from_host(scope, parent, host);
+    let credentialless =
+        crate::browser_env::node_attribute(scope, host, "credentialless").is_some();
+    let embedding_blocked = document.as_ref().is_some_and(|document| {
+        let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
+            return false;
+        };
+        let policy = parent_policy.policy.borrow().embedder_policy;
+        if policy == crate::resource_policy::EmbedderPolicy::UnsafeNone || credentialless {
+            return false;
+        }
+        let mut request = turbo_surf_core::request_context::RequestContext::resource(
+            &window_origin(scope, parent),
+            turbo_surf_core::request_context::Destination::Iframe,
+            turbo_surf_core::request_context::RequestMode::NoCors,
+        );
+        request.opaque_origin = window_is_opaque(scope, parent);
+        crate::resource_policy::EmbedderPolicy::from_headers(&document.headers)
+            == crate::resource_policy::EmbedderPolicy::UnsafeNone
+            || !crate::resource_policy::embedder_allowed(
+                policy,
+                &request,
+                &document.url,
+                &document.headers,
+            )
+    });
+    if embedding_blocked {
+        sandbox.opaque = true;
+        sandbox.origin_restricted = true;
+        sandbox.scripts_blocked = true;
+    }
     let data_document = document
         .as_ref()
         .is_some_and(|document| document.url.starts_with("data:"));
@@ -2786,10 +3087,14 @@ fn op_frame_set_document<'s>(
             .unwrap_or(url)
             .to_string(),
     )));
-    let html = document
-        .as_ref()
-        .map_or(html, |document| document.html.as_str());
-    let csp = if let Some(document) = &document {
+    let html = if embedding_blocked {
+        "<!doctype html><html><head></head><body></body></html>"
+    } else {
+        document
+            .as_ref()
+            .map_or(html, |document| document.html.as_str())
+    };
+    let mut csp = if let Some(document) = &document {
         CspHandle::new(url, &document.headers, html)
     } else {
         let handle = CspHandle::new(url, &[], html);
@@ -2804,6 +3109,43 @@ fn op_frame_set_document<'s>(
         }
         handle
     };
+    let state = JsRuntime::op_state_from(scope);
+    csp.partition = document
+        .as_ref()
+        .and_then(|document| document.partition.clone())
+        .or_else(|| frame_partition(scope, &mut state.borrow_mut(), parent, host));
+    if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
+        let parent_origin = window_origin(scope, parent);
+        let child_origin = window_origin(scope, context);
+        let allow = crate::browser_env::node_attribute(scope, host, "allow").unwrap_or_default();
+        csp.policy.borrow_mut().permissions_policy.inherit(
+            &parent_policy.policy.borrow().permissions_policy,
+            &parent_origin,
+            &child_origin,
+            &child_origin,
+            &allow,
+        );
+    }
+    let child_origin = window_origin(scope, context);
+    let allowed = !sandbox.opaque
+        && !embedding_blocked
+        && secure_context_for(scope, context)
+        && parent
+            .get_slot::<SharedMemoryCapability>()
+            .is_some_and(|capability| capability.allowed)
+        && csp.policy.borrow().permissions_policy.allows(
+            "cross-origin-isolated",
+            &child_origin,
+            &child_origin,
+        );
+    let group = parent
+        .get_slot::<SharedMemoryCapability>()
+        .map_or(csp.id, |capability| capability.group);
+    context.set_slot(Rc::new(SharedMemoryCapability {
+        allowed,
+        group,
+        origin: child_origin,
+    }));
     let initial_base = csp.policy.borrow().initial_base.clone();
     context.set_slot(Rc::new(csp.clone()));
     JsRuntime::op_state_from(scope)
@@ -3283,6 +3625,9 @@ fn allocate_frame<'s>(
             .ok_or_else(|| JsErrorBox::generic("Frame parent ownership interrupted"))?,
     )));
     context.set_security_token(token);
+    if let Some(capability) = parent.get_slot::<SharedMemoryCapability>() {
+        context.set_slot(Rc::new((*capability).clone()));
+    }
     // deno_core's isolate-wide Promise/import callbacks use these public slots.
     // Borrow the main realm's allocation; child contexts never own/decrement it.
     for slot in [
@@ -3299,7 +3644,8 @@ fn allocate_frame<'s>(
     if initialize {
         let scope = &mut v8::ContextScope::new(scope, context);
         if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
-            let csp = CspHandle::new("about:blank", &[], "");
+            let mut csp = CspHandle::new("about:blank", &[], "");
+            csp.partition = parent_policy.partition.clone();
             let inherited = parent_policy.policy.borrow().current().clone();
             {
                 let mut policy = csp.policy.borrow_mut();
@@ -3308,6 +3654,8 @@ fn allocate_frame<'s>(
                 policy.active = inherited;
                 policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
                 policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
+                policy.permissions_policy =
+                    parent_policy.policy.borrow().permissions_policy.clone();
             }
             context.set_slot(Rc::new(csp.clone()));
             JsRuntime::op_state_from(scope)
@@ -3801,10 +4149,16 @@ fn op_frame_cookie_get(
         .and_then(|context| context.get_slot::<FrameDocumentUrl>())
         .map(|url| url.0.clone())
         .unwrap_or_else(|| state.borrow::<Base>().0.clone());
-    state
-        .borrow::<Jar>()
-        .borrow()
-        .document_cookie(&url, cookie_now())
+    let jar = document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<CspHandle>())
+        .and_then(|handle| handle.partition.clone())
+        .map_or_else(
+            || state.borrow::<Jar>().clone(),
+            |partition| partition.jar.clone(),
+        );
+    let value = jar.borrow().document_cookie(&url, cookie_now());
+    value
 }
 
 #[op2(fast)]
@@ -3819,16 +4173,21 @@ fn op_frame_cookie_set(
         .and_then(|context| context.get_slot::<FrameDocumentUrl>())
         .map(|url| url.0.clone())
         .unwrap_or_else(|| state.borrow::<Base>().0.clone());
-    state
-        .borrow::<Jar>()
-        .borrow_mut()
-        .set_from_document(&url, line, cookie_now());
+    let jar = document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<CspHandle>())
+        .and_then(|handle| handle.partition.clone())
+        .map_or_else(
+            || state.borrow::<Jar>().clone(),
+            |partition| partition.jar.clone(),
+        );
+    jar.borrow_mut().set_from_document(&url, line, cookie_now());
 }
 
 #[derive(Default)]
 struct StorageAreas {
     next: u32,
-    by_origin: std::collections::BTreeMap<(String, bool), u32>,
+    by_origin: std::collections::BTreeMap<(u32, String, bool), u32>,
     values: std::collections::BTreeMap<u32, Vec<(String, String)>>,
 }
 
@@ -3856,6 +4215,10 @@ fn op_storage_area(
         ));
     }
     let origin = window_origin(scope, context);
+    let partition = context
+        .get_slot::<CspHandle>()
+        .and_then(|handle| handle.partition.clone())
+        .map_or(0, |partition| partition.id);
     if !state.has::<BrowserStorage>() {
         state.put(BrowserStorage::default());
     }
@@ -3864,7 +4227,7 @@ fn op_storage_area(
         .0
         .lock()
         .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?;
-    if let Some(id) = areas.by_origin.get(&(origin.clone(), session)) {
+    if let Some(id) = areas.by_origin.get(&(partition, origin.clone(), session)) {
         return Ok(*id);
     }
     areas.next = areas
@@ -3872,7 +4235,7 @@ fn op_storage_area(
         .checked_add(1)
         .ok_or_else(|| JsErrorBox::range_error("Too many storage areas"))?;
     let id = areas.next;
-    areas.by_origin.insert((origin, session), id);
+    areas.by_origin.insert((partition, origin, session), id);
     areas.values.insert(id, Vec::new());
     Ok(id)
 }
@@ -4103,6 +4466,7 @@ deno_core::extension!(
         op_event_callback,
         op_frame_cookie_get,
         op_document_location_url,
+        op_frame_request_partition,
         op_document_request_url,
         op_document_request_source,
         op_frame_owner_metadata,
@@ -4131,12 +4495,15 @@ deno_core::extension!(
         op_browser_brands,
         op_browser_device_memory,
         op_is_secure_context,
+        op_shared_memory_allowed,
         op_now_perf,
         op_now_epoch,
         op_inline_module,
         op_module_credentials,
         op_csp_context,
         op_csp_base_url,
+        op_permissions_policy,
+        op_iframe_permissions_policy,
         op_csp_meta,
         op_csp_finish_parser,
         op_csp_inline,
@@ -4182,6 +4549,7 @@ const ENV_BOOTSTRAP: &str = concat!(
 const ops = __core.ops;
 const __print = __core.print;
 ops.op_capture_runtime_core(__core);
+if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
 const __NS = Symbol.for("ts");
 const __G = globalThis[__NS] || (Object.defineProperty(globalThis, __NS, { value: {}, configurable: true, enumerable: false, writable: false }), globalThis[__NS]);
 const __hostEvent=globalThis.Event;
@@ -4390,34 +4758,49 @@ const __navData = {
   }),
   // In-memory clipboard: an app that writeText()s a value (e.g. a copy-link button)
   // and reads it back round-trips, with no OS clipboard.
-  clipboard: (() => { let v = ""; return { writeText: async (t) => { v = String(t == null ? "" : t); }, readText: async () => v }; })(),
-  // Permissions API — real Chrome always exposes `navigator.permissions.query`; its
-  // absence (a thrown TypeError on `navigator.permissions.query`) is a headless tell
-  // BotGuard/reCAPTCHA-class collectors read directly. Return a spec-shaped
-  // PermissionStatus (an EventTarget-ish with `state`/`name`/`onchange`) with the
-  // default states a fresh Chrome profile reports: most permissions 'prompt', and the
-  // headless-detector special case `notifications` → 'denied' iff Notification.permission
-  // is 'denied' (real Chrome couples them; a mismatch is itself a tell).
+  clipboard: (() => {
+    let v = "";
+    const ErrorType = globalThis.DOMException;
+    const check = name => {if (!ops.op_permissions_policy(__document,name,"",2)) throw new ErrorType("Clipboard access is disabled by Permissions Policy","NotAllowedError");};
+    return {writeText:async t => {check("clipboard-write");v=String(t == null ? "" : t);},readText:async () => {check("clipboard-read");return v;}};
+  })(),
+  // Descriptor conversion rejects through the returned Promise, including
+  // getters and enum failures, as measured in the normal Chrome control.
   permissions: (() => {
-    const status = (name, state) => ({
-      name, state, onchange: null,
-      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
-    });
-    const DEFAULTS = { geolocation: "prompt", notifications: "prompt", push: "prompt",
-      "persistent-storage": "prompt", "background-sync": "granted", midi: "granted",
-      camera: "prompt", microphone: "prompt", "clipboard-read": "prompt", "clipboard-write": "granted" };
+    const defaults = { __proto__:null, geolocation:"prompt", notifications:"prompt", push:"prompt",
+      "persistent-storage":"prompt", "background-sync":"granted", midi:"prompt",
+      camera:"prompt", microphone:"prompt", "clipboard-read":"prompt", "clipboard-write":"granted",
+      accelerometer:"granted", gyroscope:"granted", magnetometer:"granted", "background-fetch":"granted",
+      "captured-surface-control":"prompt", "display-capture":"prompt", "idle-detection":"prompt",
+      "local-fonts":"prompt", "payment-handler":"granted", "periodic-background-sync":"denied",
+      "screen-wake-lock":"granted", "storage-access":"granted", "window-management":"prompt",
+      "keyboard-lock":"granted", "pointer-lock":"granted", "local-network-access":"prompt", "loopback-network":"prompt" };
+    const subtypes = {__proto__:null,push:true,midi:true,camera:true,"clipboard-read":true,"clipboard-write":true};
+    const has = Object.prototype.hasOwnProperty, apply=Reflect.apply, string=String,
+      ErrorType=TypeError, Exception=DOMException;
     return {
-      query: (desc) => {
-        const name = desc && desc.name ? String(desc.name) : "";
-        let state = Object.prototype.hasOwnProperty.call(DEFAULTS, name) ? DEFAULTS[name] : "prompt";
-        // Couple notifications to Notification.permission the way Chrome does.
-        try {
-          if (name === "notifications" && globalThis.Notification && globalThis.Notification.permission) {
-            state = globalThis.Notification.permission === "denied" ? "denied"
-              : globalThis.Notification.permission === "granted" ? "granted" : "prompt";
-          }
-        } catch (e) {}
-        return Promise.resolve(status(name, state));
+      query: async (descriptor) => {
+        if (descriptor === null || descriptor === undefined ||
+          (typeof descriptor !== "object" && typeof descriptor !== "function"))
+          throw new ErrorType("Permission descriptor must be a dictionary");
+        const rawName=descriptor.name;
+        if(rawName===undefined || typeof rawName==="symbol")throw new ErrorType("Permission name is required");
+        const name=string(rawName);
+        if(!apply(has,defaults,[name]))throw new ErrorType("Invalid PermissionName");
+        if(apply(has,subtypes,[name])) {
+          const repeated=descriptor.name;
+          if(repeated===undefined || typeof repeated==="symbol" || !apply(has,defaults,[string(repeated)]))
+            throw new ErrorType("Invalid PermissionName");
+        }
+        if(name==="push" && !descriptor.userVisibleOnly)throw new Exception("Push requires userVisibleOnly", "NotSupportedError");
+        // Reading subtype members runs the original dictionary conversion even
+        // where this native engine supplies only the measured permission state.
+        if(name==="midi")void !!descriptor.sysex;
+        if(name==="camera")void !!descriptor.panTiltZoom;
+        if(name==="clipboard-read" || name==="clipboard-write") {
+          void !!descriptor.allowWithoutGesture; void !!descriptor.allowWithoutSanitization;
+        }
+        return __createPermissionStatus(name,defaults[name]);
       },
     };
   })(),
@@ -4815,6 +5198,10 @@ __G.setCurrentScript = value => {const previous=__documentRuntimeState.currentSc
 ops.op_set_host_capabilities({setCurrentScript:__G.setCurrentScript});
 __defineDocumentAccessor("fonts", state => state.fonts);
 __defineDocumentAccessor("currentScript", state => state.currentScript);
+"##,
+    include_str!("permissions_policy.js"),
+    include_str!("permission_status.js"),
+    r##"
 
 // Parsed HTML documents share the caller's interfaces but own an independent
 // native Tree. No bootstrap, script execution, or resource loader is installed.
@@ -5553,11 +5940,11 @@ __G.windowView = (target) => {
   return view;
 };
 const __hostMessageEvent=globalThis.MessageEvent, __hostMessageSchedule=globalThis.setTimeout;
-const __deliverWindowMessage = (message, sender, origin, ports) => {
+const __deliverWindowMessage = (message, sender, origin, ports, failed) => {
   "use strict";
   const source = __G.windowView(sender);
   __hostMessageSchedule(() => {
-    const event = __hostPortMessage("message", message, ports, source, origin);
+    const event = __hostPortMessage(failed ? "messageerror" : "message", message, ports, source, origin);
     ops.op_event_trust(event, -1);
     ops.op_dispatch_host_event(event, globalThis);
   }, 0);
@@ -6150,6 +6537,7 @@ __defineDocumentAccessor("URL", state => state.inactive ? state.url : state.fram
 __defineDocumentAccessor("documentURI", state => state.inactive ? state.url : state.frame ? state.frame.location : state.window.location.href);
 "##,
     include_str!("document_base.js"),
+    include_str!("iframe_permissions_policy.js"),
     r##"
 (() => {
   const d = globalThis.document;
@@ -7323,7 +7711,7 @@ __G.domSig = () => {
       else {
         const url = record.navigationURL || resolveFrameUrl(el);
         if (url && url !== "about:blank") {
-          const response = await ops.op_fetch(url, __stringify({__proto__:null,destination: "iframe", source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)}));
+          const response = await ops.op_fetch(url, __stringify({__proto__:null,destination: "iframe", partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)}));
           if (record.epoch !== epoch || !frameConnected(el)) return;
           html = response.body || ""; responseId = response.frame_document || 0;
           frameUrl = response.final_url || url;
@@ -8497,13 +8885,19 @@ __G.domSig = () => {
     const permissions = G.navigator && G.navigator.permissions, query = permissions && permissions.query;
     if (!permissions || typeof query !== "function") return;
     function Permissions() {throw new TypeError("Illegal constructor");}
-    const proto = Object.create(G.EventTarget.prototype);
+    const proto = Object.create(Object.prototype);
     Object.defineProperty(proto, "constructor", {value: Permissions, configurable: true, writable: true});
     Permissions.prototype = proto; Object.defineProperty(Permissions, "prototype", {writable: false});
     tag(proto, "Permissions");mark(Permissions, "Permissions");
+    const ErrorType = G.TypeError, apply = Reflect.apply,
+      promiseReject = G.Promise.reject, PromiseType=G.Promise,
+      records=__interfaceMap("Permissions.query");
+    records.set(permissions,query);
     const method = ({query(descriptor) {
-      if (this !== permissions || !arguments.length) return Promise.reject(new TypeError("Illegal invocation"));
-      return query.call(permissions, descriptor);
+      const implementation=records.get(this);
+      if (!implementation || !arguments.length)
+        return apply(promiseReject,PromiseType,[new ErrorType("Illegal invocation")]);
+      return apply(implementation, this, [descriptor]);
     }}).query;
     mark(method, "query");
     Object.defineProperty(proto, "query", {value: method, enumerable: true, writable: true, configurable: true});
@@ -8767,7 +9161,7 @@ __G.domSig = () => {
     for (const n of ON) { if (n && !(n in G)) { try { Object.defineProperty(G, n, { value: null, writable: true, enumerable: true, configurable: true }); } catch (e) {} } }
     const bar = () => ({ visible: true });
     const misc = {
-      closed: false, length: 0, name: "", opener: null, status: "", crossOriginIsolated: false,
+      closed: false, length: 0, name: "", opener: null, status: "", crossOriginIsolated: ops.op_shared_memory_allowed(),
       isSecureContext: ops.op_is_secure_context(), originAgentCluster: true, offscreenBuffering: true, credentialless: false,
       origin: (G.location && G.location.origin) || "https://www.google.com", clientInformation: G.navigator,
       locationbar: bar(), menubar: bar(), personalbar: bar(), scrollbars: bar(), statusbar: bar(), toolbar: bar(),
@@ -8808,7 +9202,6 @@ __G.domSig = () => {
       if(descriptor && descriptor.writable)Object.defineProperty(ctor,"prototype",{writable:false});
     }
     Object.setPrototypeOf(G.Performance,G.EventTarget);
-    Object.setPrototypeOf(G.Permissions,G.EventTarget);
     Object.setPrototypeOf(G.DOMException,Function.prototype);
     tag(G.Request.prototype,"Request");tag(G.Response.prototype,"Response");
   });
@@ -8835,7 +9228,7 @@ __G.domSig = () => {
   // private state, subclass new.target and the original exception behavior.
   if (typeof factory === "function") {
     const replacements = new Map();
-    const constructors = ["Date", "DOMParser", "Navigator", "Performance", "Permissions", "Storage", "Headers",
+    const constructors = ["Date", "DOMParser", "Navigator", "Performance", "Permissions", "PermissionsPolicy", "PermissionStatus", "Storage", "Headers",
       "Request", "Response", "URL", "URLSearchParams", "DOMException", "MessageEvent", "ErrorEvent",
       "Event", "CustomEvent", "SubmitEvent", "UIEvent", "MouseEvent", "KeyboardEvent", "InputEvent", "FocusEvent", "PointerEvent", "WheelEvent", "MessageChannel", "MessagePort", "BroadcastChannel",
       "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",
@@ -9126,6 +9519,19 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
                 .0
                 .clone();
             *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
+            let origin = window_origin(&mut scope, context);
+            let policy = csp.policy.borrow();
+            let allowed = trustworthy_url(base)
+                && crate::resource_policy::isolated_opener(&headers)
+                && policy.embedder_policy != crate::resource_policy::EmbedderPolicy::UnsafeNone
+                && policy
+                    .permissions_policy
+                    .allows("cross-origin-isolated", &origin, &origin);
+            context.set_slot(Rc::new(SharedMemoryCapability {
+                allowed,
+                group: csp.id,
+                origin,
+            }));
         }
         #[cfg(turbo_surf_native_proxy)]
         window_proxy::seed_location(&mut scope, base);
@@ -9384,7 +9790,11 @@ fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(),
     }
     let source = v8::Local::new(scope, item.source);
     let source_window = source.global(scope);
-    let (data, ports) = crate::crypto_clone::deserialize_with_transfers(scope, &item.data)
+    let crate::crypto_clone::MessageClone {
+        value: data,
+        ports,
+        failed,
+    } = crate::crypto_clone::deserialize_message(scope, &item.data)
         .map_err(|error| error.to_string())?;
     let port_values = ports
         .into_iter()
@@ -9392,10 +9802,17 @@ fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(),
         .collect::<Vec<_>>();
     let port_array = v8::Array::new_with_elements(scope, &port_values);
     let origin = v8::String::new(scope, &item.origin).unwrap();
+    let failed = v8::Boolean::new(scope, failed);
     call_frame_helper(
         scope,
         "deliverWindowMessage",
-        &[data, source_window.into(), origin.into(), port_array.into()],
+        &[
+            data,
+            source_window.into(),
+            origin.into(),
+            port_array.into(),
+            failed.into(),
+        ],
     )
     .ok_or("message dispatch failed")?;
     Ok(())
@@ -11168,6 +11585,17 @@ impl PageSession {
     }
 
     #[doc(hidden)]
+    pub fn set_window_message_limits_for_testing(&mut self, max_messages: usize, max_bytes: usize) {
+        self.rt
+            .op_state()
+            .borrow_mut()
+            .borrow_mut::<FrameContexts>()
+            .message_limits = WindowMessageLimits {
+            max_messages,
+            max_bytes,
+        };
+    }
+    #[doc(hidden)]
     pub fn set_message_port_limits_for_testing(&mut self, max_messages: usize, max_bytes: usize) {
         let _activation = self.rt.activation_key().enter();
         deno_core::scope!(scope, self.rt);
@@ -11281,5 +11709,42 @@ fn budget_msg(e: &str, budget_ms: u64) -> String {
         format!("render budget exceeded ({budget_ms}ms)")
     } else {
         e.to_string()
+    }
+}
+
+#[cfg(test)]
+mod credentialless_partition_tests {
+    use super::*;
+
+    #[test]
+    fn expired_credentialless_partition_reclaims_only_its_storage_areas() {
+        let storage = BrowserStorage::default();
+        {
+            let mut areas = storage.0.lock().unwrap();
+            areas
+                .by_origin
+                .insert((0, "https://origin.test".into(), false), 1);
+            areas
+                .by_origin
+                .insert((42, "https://origin.test".into(), false), 2);
+            areas
+                .by_origin
+                .insert((42, "https://origin.test".into(), true), 3);
+            for id in 1..=3 {
+                areas
+                    .values
+                    .insert(id, vec![("key".into(), "value".into())]);
+            }
+        }
+        let partition = CredentiallessPartition {
+            id: 42,
+            jar: Rc::new(RefCell::new(CookieJar::new())),
+            storage: storage.clone(),
+        };
+        drop(partition);
+        let areas = storage.0.lock().unwrap();
+        assert_eq!(areas.by_origin.len(), 1);
+        assert_eq!(areas.values.len(), 1);
+        assert!(areas.values.contains_key(&1));
     }
 }

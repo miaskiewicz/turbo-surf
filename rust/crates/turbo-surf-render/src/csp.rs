@@ -75,6 +75,22 @@ impl Policy {
             })
         })
     }
+    pub fn sandbox_restrictions(&self) -> Option<(bool, bool)> {
+        let mut restrictions = None;
+        for policy in &self.policies {
+            if let Some(tokens) = policy.get("sandbox") {
+                let scripts = !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-scripts"));
+                let origin = !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-same-origin"));
+                let (prior_scripts, prior_origin) = restrictions.unwrap_or((false, false));
+                restrictions = Some((scripts || prior_scripts, origin || prior_origin));
+            }
+        }
+        restrictions
+    }
     pub fn has_frame_ancestors(&self) -> bool {
         self.policies
             .iter()

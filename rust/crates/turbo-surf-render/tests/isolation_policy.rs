@@ -768,3 +768,250 @@ async fn ancestor_response_policies_check_each_actual_parent_origin() {
     }
     server.abort();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn response_sandbox_script_origin_and_storage_flags_match_chrome() {
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-sandbox-cases.json"
+    ))
+    .unwrap();
+    let controls: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-sandbox-chrome155.json"
+    ))
+    .unwrap();
+    verify_control_sources(
+        &controls,
+        include_bytes!("../../../../harness/detection/fixtures/policy-sandbox-cases.json"),
+        include_bytes!("../../../../harness/detection/policy-sandbox-probe.js"),
+        include_bytes!("../../../../harness/detection/policy-frame-chrome.mjs"),
+        include_bytes!("../../../../harness/detection/policy-sandbox-child.js"),
+    );
+    let (origin, server) = frame_server(
+        cases.clone(),
+        include_str!("../../../../harness/detection/policy-sandbox-child.js"),
+    )
+    .await;
+    for (index, (case, control)) in cases
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(controls["result"].as_array().unwrap())
+        .enumerate()
+    {
+        let headers: Vec<(String, String)> =
+            serde_json::from_value(case["headers"].clone()).unwrap();
+        let html = format!(
+            "<!doctype html><script>globalThis.__policyFrameCase={case}</script><body></body>"
+        );
+        let mut page = PageSession::open_with_response_headers(
+            &html,
+            &format!("{origin}/?case={index}"),
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &headers,
+        )
+        .await
+        .unwrap();
+        let probe = include_str!("../../../../harness/detection/policy-sandbox-probe.js")
+            .trim()
+            .trim_end_matches(';');
+        let raw = page.eval_json_expression(probe).await.unwrap();
+        let actual: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(actual, control["result"], "case {}: {case}", case["id"]);
+    }
+    server.abort();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn top_response_sandbox_disables_guest_scripts_and_opaque_storage() {
+    use sha2::Digest;
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-sandbox-top-cases.json"
+    ))
+    .unwrap();
+    let controls: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-sandbox-top-chrome155.json"
+    ))
+    .unwrap();
+    assert_eq!(controls["errors"], serde_json::json!([]));
+    assert_eq!(
+        controls["casesSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/fixtures/policy-sandbox-top-cases.json"
+            ))
+        )
+    );
+    assert_eq!(
+        controls["probeSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/policy-sandbox-top-probe.js"
+            ))
+        )
+    );
+    assert_eq!(
+        controls["collectorSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/policy-header-chrome.mjs"
+            ))
+        )
+    );
+    assert_eq!(
+        cases.as_array().unwrap().len(),
+        controls["result"].as_array().unwrap().len()
+    );
+    for (case, control) in cases
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(controls["result"].as_array().unwrap())
+    {
+        let headers: Vec<(String, String)> =
+            serde_json::from_value(case["headers"].clone()).unwrap();
+        let mut page = PageSession::open_with_response_headers(
+            "<!doctype html><body></body>",
+            "http://127.0.0.1:12345/",
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &headers,
+        )
+        .await
+        .unwrap();
+        let probe = include_str!("../../../../harness/detection/policy-sandbox-top-probe.js")
+            .trim()
+            .trim_end_matches(';');
+        let raw = page.eval_json_expression(probe).await.unwrap();
+        let actual: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(actual, control["result"], "case {}: {case}", case["id"]);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn top_sandbox_module_requests_use_authentic_opaque_origin_and_cookie_site() {
+    use sha2::Digest;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-sandbox-module-cases.json"
+    ))
+    .unwrap();
+    let controls: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/policy-sandbox-module-chrome155.json"
+    ))
+    .unwrap();
+    assert_eq!(controls["errors"], serde_json::json!([]));
+    assert_eq!(
+        controls["casesSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/fixtures/policy-sandbox-module-cases.json"
+            ))
+        )
+    );
+    assert_eq!(
+        controls["probeSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/policy-sandbox-module-probe.js"
+            ))
+        )
+    );
+    assert_eq!(
+        controls["collectorSha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(include_bytes!(
+                "../../../../harness/detection/policy-sandbox-module-chrome.mjs"
+            ))
+        )
+    );
+    assert_eq!(
+        cases.as_array().unwrap().len(),
+        controls["result"].as_array().unwrap().len()
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut bytes = Vec::new();
+                loop {
+                    let mut chunk = [0; 1024];
+                    let count = socket.read(&mut chunk).await.unwrap();
+                    if count == 0 {
+                        return;
+                    }
+                    bytes.extend_from_slice(&chunk[..count]);
+                    if bytes.windows(4).any(|chunk| chunk == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request = String::from_utf8_lossy(&bytes);
+                let field = |name: &str| {
+                    request
+                        .lines()
+                        .find_map(|line| {
+                            line.split_once(':')
+                                .filter(|(key, _)| key.eq_ignore_ascii_case(name))
+                                .map(|(_, value)| value.trim())
+                        })
+                        .unwrap_or("")
+                };
+                let body = format!(
+                    "export const observed={};",
+                    serde_json::json!({"origin":field("origin"),"cookie":field("cookie")})
+                );
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\nAccess-Control-Allow-Origin: null\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            });
+        }
+    });
+    for (index, (case, control)) in cases
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(controls["result"].as_array().unwrap())
+        .enumerate()
+    {
+        let headers: Vec<(String, String)> =
+            serde_json::from_value(case["headers"].clone()).unwrap();
+        let mut jar = turbo_surf_core::cookies::CookieJar::new();
+        jar.set_from_response(
+            &origin,
+            &["sandboxTransport=1;Path=/;SameSite=Lax".to_string()],
+            0.0,
+        );
+        let cookies = jar.storage_state();
+        let mut page = PageSession::open_with_response_headers(
+            "<!doctype html><body></body>",
+            &format!("{origin}/?case={index}"),
+            &cookies,
+            "",
+            5000,
+            "",
+            Default::default(),
+            &headers,
+        )
+        .await
+        .unwrap();
+        let probe = include_str!("../../../../harness/detection/policy-sandbox-module-probe.js")
+            .trim()
+            .trim_end_matches(';');
+        let raw = page.eval_json_expression(probe).await.unwrap();
+        let actual: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(actual, control["result"], "case {}: {case}", case["id"]);
+    }
+    server.abort();
+}

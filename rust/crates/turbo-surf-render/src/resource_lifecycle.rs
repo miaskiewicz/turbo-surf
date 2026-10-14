@@ -94,39 +94,51 @@ pub(super) fn op_retire_resource_document(
 }
 
 #[op2(reentrant)]
-#[string]
-pub(super) fn op_prepare_resource_script(
-    scope: &mut v8::PinScope,
+pub(super) fn op_prepare_resource_script<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<v8::Object>,
     element: v8::Local<v8::Object>,
-) -> Result<String, JsErrorBox> {
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
     let Some(context) = document.get_creation_context(scope) else {
-        return Ok(String::new());
+        return Ok(v8::null(scope).into());
     };
     if context.get_slot::<FrameRetired>().is_some()
         || context
             .get_slot::<FrameSandbox>()
             .is_some_and(|flags| flags.scripts_blocked)
     {
-        return Ok(String::new());
+        return Ok(v8::null(scope).into());
     }
     owner_context(scope, document)?;
     let Some(owner) = crate::browser_env::script_document(scope, element) else {
-        return Ok(String::new());
+        return Ok(v8::null(scope).into());
     };
     if owner != document {
-        return Ok(String::new());
+        return Ok(v8::null(scope).into());
     }
     let Some(script) = crate::browser_env::prepare_script(scope, element) else {
-        return Ok(String::new());
+        return Ok(v8::null(scope).into());
     };
-    // JSON text avoids guest setters during serde_v8 object conversion.
-    Ok(
-        serde_json::json!({"source":script.source,"src":script.src,"kind":script.kind,
+    // Parse only scalar metadata natively; source remains an original V8 string.
+    // Neither JSON parsing nor data-property creation invokes guest setters.
+    let metadata = serde_json::json!({"src":script.src,"kind":script.kind,
         "asynchronous":script.asynchronous,"parserInserted":script.parser_inserted,
         "attributes":script.attributes,"inShadowTree":script.in_shadow_tree})
-        .to_string(),
-    )
+    .to_string();
+    let json = v8::String::new(scope, &metadata)
+        .ok_or_else(|| JsErrorBox::generic("script metadata allocation failed"))?;
+    let prepared = v8::json::parse(scope, json)
+        .and_then(|value| value.to_object(scope))
+        .ok_or_else(|| JsErrorBox::generic("script metadata unavailable"))?;
+    let source =
+        v8::String::new_from_two_byte(scope, &script.source_units, v8::NewStringType::Normal)
+            .ok_or_else(|| JsErrorBox::generic("script source allocation failed"))?;
+    let name = v8::String::new(scope, "source")
+        .ok_or_else(|| JsErrorBox::generic("script property allocation failed"))?;
+    if prepared.create_data_property(scope, name.into(), source.into()) != Some(true) {
+        return Err(JsErrorBox::generic("script source installation failed"));
+    }
+    Ok(prepared.into())
 }
 
 #[op2(nofast, reentrant)]
@@ -134,7 +146,7 @@ pub(super) fn op_execute_inline_script<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
     element: v8::Local<'s, v8::Object>,
-    #[string] code: &str,
+    code: v8::Local<'s, v8::String>,
     #[string] source_url: &str,
     in_shadow_tree: bool,
 ) -> Result<bool, JsErrorBox> {
@@ -142,8 +154,6 @@ pub(super) fn op_execute_inline_script<'s>(
     let scope = &mut v8::ContextScope::new(scope, context);
     let catcher = std::pin::pin!(v8::TryCatch::new(scope));
     let scope = &mut catcher.init();
-    let code = v8::String::new(scope, code)
-        .ok_or_else(|| JsErrorBox::generic("script source allocation failed"))?;
     let resource = v8::String::new(scope, source_url)
         .ok_or_else(|| JsErrorBox::generic("script URL allocation failed"))?;
     let origin = v8::ScriptOrigin::new(

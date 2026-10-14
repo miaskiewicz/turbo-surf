@@ -23,6 +23,8 @@ impl Default for ScriptState {
 #[derive(Debug)]
 pub struct PreparedScript {
     pub source: String,
+    /// Original inline source units for direct V8 compilation.
+    pub source_units: Vec<u16>,
     pub src: Option<String>,
     pub kind: String,
     pub asynchronous: bool,
@@ -58,9 +60,10 @@ pub(super) fn recording() -> bool {
 
 pub(super) fn initial(tree: &Tree) -> HashMap<Handle, ScriptState> {
     let mut states = HashMap::new();
-    fn walk(tree: &Tree, node: Handle, template: bool, states: &mut HashMap<Handle, ScriptState>) {
-        let template =
-            template || tree.node_type_id(node) == 1 && tree.local_name(node) == Some("template");
+    let mut pending = vec![(tree.root(), false)];
+    while let Some((node, inherited_template)) = pending.pop() {
+        let template = inherited_template
+            || tree.node_type_id(node) == 1 && tree.local_name(node) == Some("template");
         if script(tree, node) {
             states.insert(
                 node,
@@ -76,11 +79,13 @@ pub(super) fn initial(tree: &Tree) -> HashMap<Handle, ScriptState> {
                 },
             );
         }
-        for child in tree.children(node) {
-            walk(tree, child, template, states);
-        }
+        pending.extend(
+            tree.children(node)
+                .into_iter()
+                .rev()
+                .map(|child| (child, template)),
+        );
     }
-    walk(tree, tree.root(), false, &mut states);
     states
 }
 
@@ -181,12 +186,13 @@ fn prepared(handle: Handle, claim_active: bool) -> Option<PreparedScript> {
             state.force_async = true;
         }
         let src = tree.get_attribute(handle, "src").map(str::to_owned);
-        let source = tree
+        let source_units = tree
             .children(handle)
             .into_iter()
             .filter(|node| matches!(tree.node_type_id(*node), 3 | 4))
-            .map(|node| tree.node_value(node).unwrap_or_default())
-            .collect::<String>();
+            .flat_map(|node| tree.node_value_utf16(node).unwrap_or_default())
+            .collect::<Vec<_>>();
+        let source = String::from_utf16_lossy(&source_units);
         if src.is_none() && source.is_empty() || !is_connected(tree, handle) {
             return None;
         }
@@ -251,6 +257,7 @@ fn prepared(handle: Handle, claim_active: bool) -> Option<PreparedScript> {
         let asynchronous = state.force_async || tree.has_attribute(handle, "async");
         Some(PreparedScript {
             source,
+            source_units,
             src,
             kind,
             asynchronous,
@@ -271,24 +278,22 @@ pub fn prepare_script(
     prepared(handle, true)
 }
 
-fn subtree(node: Handle) -> Vec<Handle> {
-    fn walk(tree: &Tree, node: Handle, out: &mut Vec<Handle>) {
+fn script_subtree(tree: &Tree, node: Handle) -> Vec<Handle> {
+    let mut scripts = Vec::new();
+    let mut pending = vec![node];
+    while let Some(node) = pending.pop() {
         if script(tree, node) {
-            out.push(node);
-        }
-        for child in tree.children(node) {
-            walk(tree, child, out);
+            scripts.push(node);
         }
         if let Some(shadow) = tree.shadow_root(node) {
-            walk(tree, shadow, out);
+            pending.push(shadow);
         }
+        pending.extend(tree.children(node).into_iter().rev());
     }
-    with_tree(|tree| {
-        let mut nodes = Vec::new();
-        walk(tree, node, &mut nodes);
-        nodes
-    })
-    .unwrap_or_default()
+    scripts
+}
+fn subtree(node: Handle) -> Vec<Handle> {
+    with_tree(|tree| script_subtree(tree, node)).unwrap_or_default()
 }
 
 pub(super) fn parsed(node: Handle, inert: bool) {
@@ -357,27 +362,29 @@ pub(super) fn inactive_mutation(event: &MutationEvent) {
     }
 }
 
+fn flatten_script_copy(tree: &Tree, node: Handle, deep: bool, out: &mut Vec<Handle>) {
+    let mut pending = vec![node];
+    while let Some(node) = pending.pop() {
+        out.push(node);
+        if deep {
+            pending.extend(tree.children(node).into_iter().rev());
+        }
+    }
+}
+
 pub(super) fn copy(
     scope: &mut v8::PinScope,
     source: v8::Local<v8::Object>,
     target: v8::Local<v8::Object>,
     deep: bool,
 ) {
-    fn flatten(tree: &Tree, node: Handle, deep: bool, out: &mut Vec<Handle>) {
-        out.push(node);
-        if deep {
-            for child in tree.children(node) {
-                flatten(tree, child, true, out);
-            }
-        }
-    }
     let values = {
         let _owner = DomScope::for_object(scope, source);
         let Some(handle) = handle_of(scope, source) else {
             return;
         };
         let mut nodes = Vec::new();
-        with_tree(|tree| flatten(tree, handle, deep, &mut nodes));
+        with_tree(|tree| flatten_script_copy(tree, handle, deep, &mut nodes));
         DOM.with(|dom| {
             let dom = dom.borrow();
             let dom = dom.as_ref().unwrap();
@@ -404,7 +411,7 @@ pub(super) fn copy(
         return;
     };
     let mut nodes = Vec::new();
-    with_tree(|tree| flatten(tree, handle, deep, &mut nodes));
+    with_tree(|tree| flatten_script_copy(tree, handle, deep, &mut nodes));
     DOM.with(|dom| {
         let mut dom = dom.borrow_mut();
         let dom = dom.as_mut().unwrap();
@@ -734,6 +741,29 @@ mod tests {
     }
 
     #[test]
+    fn script_text_reflection_matches_independent_chrome_source_control() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("script_text_chrome155.json")).unwrap();
+        check(&format!("(()=>{{const actual={},expected={};const sorted=value=>Array.isArray(value)?value.map(sorted):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,sorted(value[key])])):value;if(JSON.stringify(sorted(actual))!==JSON.stringify(sorted(expected)))throw Error(JSON.stringify(actual));return true}})()", include_str!("script_text_probe.js"), fixture["result"]), false);
+    }
+
+    #[test]
+    fn script_text_setter_prepares_actual_native_source_and_preserves_failure_atomicity() {
+        check(
+            r#"(()=>{
+          globalThis.signals=[];const s=document.createElement('script');s.text='signals.push("text")';document.head.append(s);if(signals.join(',')!=='text')throw Error('text source not executed');
+          const empty=document.createElement('script');document.head.append(empty);empty.text='signals.push("connected")';if(signals.join(',')!=='text,connected')throw Error('connected setter did not prepare');
+          const range=document.createRange();range.selectNodeContents(s.firstChild);let mutations=[];const observer=new MutationObserver(records=>mutations.push(...records));observer.observe(s,{childList:true});
+          const old=s.firstChild;try{s.text=Symbol()}catch(e){if(e.name!=='TypeError')throw e}if(s.firstChild!==old||range.toString()!==old.data||observer.takeRecords().length)throw Error('failed conversion changed native tree');
+          s.text='replacement';const record=observer.takeRecords();if(record.length!==1||record[0].removedNodes[0]!==old||record[0].addedNodes[0]!==s.firstChild||range.startContainer!==s||range.startOffset!==0||range.endOffset!==0)throw Error('native range or observer seam');
+          if(signals.join(',')!=='text,connected')throw Error('already-started script re-executed');
+          return true;
+        })()"#,
+            true,
+        );
+    }
+
+    #[test]
     fn document_private_consumer_runs_inline_script_postconnection_synchronously() {
         check(
             r#"(()=>{
@@ -749,4 +779,62 @@ mod tests {
             true,
         );
     }
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::*;
+    #[test]
+    fn deep_script_preparation_scans_preserve_template_flags_and_order() {
+        std::thread::Builder::new().stack_size(512*1024).spawn(|| {
+            let source=format!("{}<script>A</script><template><script>B</script></template><script>C</script>{}","<div>".repeat(8192),"</div>".repeat(8192));
+            let tree=Tree::parse(&source);
+            let ordered=script_subtree(&tree,tree.root());
+            assert_eq!(ordered.iter().map(|node| tree.text_content(*node)).collect::<Vec<_>>(),["A","B","C"]);
+            let states=initial(&tree);
+            assert!(states[&ordered[0]].parser_inserted);
+            assert!(!states[&ordered[1]].parser_inserted);
+            assert!(states[&ordered[2]].parser_inserted);
+            let mut all=Vec::new();flatten_script_copy(&tree,tree.root(),true,&mut all);
+            assert_eq!(all.into_iter().filter(|node| script(&tree,*node)).collect::<Vec<_>>(),ordered);
+            let mut shallow=Vec::new();flatten_script_copy(&tree,tree.root(),false,&mut shallow);
+            assert_eq!(shallow,vec![tree.root()]);
+        }).unwrap().join().unwrap();
+    }
+}
+
+fn text_type_error(scope: &mut v8::PinScope) {
+    if let Some(message) = v8::String::new(scope, "Illegal invocation") {
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+    }
+}
+fn text(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let _dom = DomScope::for_object(scope, args.this());
+    let Some(node) = handle_of(scope, args.this()) else {
+        return text_type_error(scope);
+    };
+    if !with_tree(|tree| script(tree, node)).unwrap_or(false) {
+        return text_type_error(scope);
+    }
+    let units = with_tree(|tree| {
+        tree.children(node)
+            .into_iter()
+            .filter(|child| matches!(tree.node_type_id(*child), 3 | 4))
+            .flat_map(|child| tree.node_value_utf16(child).unwrap_or_default())
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+    if let Some(value) = v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal) {
+        result.set(value.into());
+    }
+}
+pub(super) fn install_text(scope: &mut v8::PinScope) {
+    let global = scope.get_current_context().global(scope);
+    bind_method(scope, global, "__scriptTextNative", text);
+    run_js(scope, include_str!("script_text.js"));
 }

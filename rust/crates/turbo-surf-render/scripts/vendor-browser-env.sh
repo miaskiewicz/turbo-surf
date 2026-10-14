@@ -76,6 +76,12 @@ done
 for file in script_state.rs script_preparation_probe.js script_preparation_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
+for file in script_text.js script_text_probe.js script_text_chrome155.json; do
+  git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
+done
+for file in utf16_contract_tests.rs utf16_probe.js utf16_chrome155.json utf16_bom_probe.js utf16_bom_chrome155.json utf16_handlers_probe.js utf16_handlers_chrome155.json utf16_lookups_probe.js utf16_lookups_chrome155.json utf16_metadata_probe.js utf16_metadata_chrome155.json utf16_names_probe.js utf16_names_chrome155.json utf16_parser_probe.js utf16_parser_chrome155.json; do
+  git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
+done
 for file in dom_ownership.rs realm_ownership.rs storage_ownership.rs dom_isolation.rs ownership_guard_tests.rs mutation_observers.rs mutation_observers.js mutation_observers_tests.rs mutation_observers_probe.js mutation_observers_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done

@@ -170,6 +170,7 @@ def main():
     (root / 'tests').mkdir(exist_ok=True)
     install_platform_artifacts(root, profile, args.cache)
     shutil.copyfile(HERE / 'native_window_proxy.rs', root / 'tests/native_window_proxy.rs')
+    shutil.copyfile(HERE / 'native_module_units.rs', root / 'tests/native_module_units.rs')
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root / 'v8-exact/v8', text=True).strip()
     if revision != profile['engineRevision']:
         raise SystemExit('Engine checkout does not match the pinned revision')

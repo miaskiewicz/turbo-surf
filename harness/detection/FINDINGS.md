@@ -7,14 +7,30 @@ its retry. Chrome oracle cookies were never reused in native tests.
 ## Local integration checkpoint — 2026-10-14
 
 Native Google acceptance remains unverified. The current canonical binding is
-re-vendored from turbo-test `2b4094f` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25)).
-The canonical slot checkpoint passes165 contracts in Rusty V8149.3.0; four
+re-vendored from turbo-test `dfaff47` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25)).
+The canonical UTF-16/script-text checkpoint passes179 contracts in Rusty V8149.3.0.
+The earlier slot checkpoint passed165 contracts; four
 subsequent private composed-tree controls pass in Surf's defaultV8150.4.0 and
 genuineV815.5.35.23. The integrated slot/isolation/messaging checkpoint passes264
 contracts on both Surf engines, followed by42 API/policy/Window controls on each.
+The subsequent full renderer library checkpoint passes222 contracts on both
+engines, with ten source/script/microtask contracts on genuine155.23. Strict
+affected checks pass on both; all42 offline harness tests pass.
 The current native SDK matches installed Chrome155.0.8059.79's V8 source pin;
 the earlier155.20/SDK152 results below are historical checkpoints. Full gates,
 rebuilt addon/shim/E2E, prototype inventory and fresh Google artifacts remain pending.
+
+Published turbo-dom0.5.5 preserves original DOMString payloads, names, namespace
+identity and parsing through the native binding. Inline classics, handlers,
+srcdoc/frame source and immutable inline-module snapshots retain original units.
+The SDK loader uses actual two-byte V8 strings; original source/location/cache
+identity and independent module maps pass its native proof. The33-contract
+genuine155.23 source/iframe/sandbox/microtask cohort passes. Default SDK150 has
+guarded frame/module tests, so its pass count does not certify those native cases.
+Fresh Chrome confirms successful inline modules do not emit load; the regression
+awaits actual execution and compares source units, import.meta.url and events.
+HTMLScriptElement.text now uses native child text and preparation; associated
+inert template documents, custom-element lifecycle and Trusted Types remain open.
 
 queueMicrotask now uses actual V8 jobs rather than virtual timers. Fresh Chrome
 controls preserve Promise/observer/timer ordering, function/receiver brands,
@@ -981,3 +997,11 @@ The policy-deep controls exercise twelve real two-level document trees: ancestor
 Native iframe document admission now enforces response CSP frame-ancestors and X-Frame-Options before authenticated response bytes reach the new document. It reads every genuine native parent context/origin, fails closed for retired/missing ancestors and uses a bounded context walk. Enforced frame-ancestors headers intersect and replace legacy framing fields; default-src and report-only headers do not supply this directive. Credentialless exemption for COEP does not exempt framing restrictions. Blocked documents use the existing opaque, script-disabled admission state.
 
 Fresh normal Chrome155.0.8059.79/V8.23 controls cover40 direct cases: self/wildcard/scheme/explicit origins, source path behavior, duplicate/header intersections, report-only non-enforcement, legacy invalid/conflicting tokens, and credentialless denial. Eight real two-level trees prove same-origin with the immediate parent is insufficient when a grandparent is foreign. Regression tests verify exact source/case/collector/child hashes, zero collector errors and complete case counts before comparing results. The isolated defaultSDK150 batch passes35 focused policy/resource/Window/frame contracts and strict affected Clippy. Genuine native155 integrated validation remains required. CSP violation events/reporting, CSP sandbox, full form/navigation policy and popup transitions remain pending.
+
+## CSP sandbox script/origin checkpoint — 2026-10-14
+
+Native response CSP sandbox flags now restrict scripts and origins for top and child documents before page code runs. Intersecting response headers and inherited iframe sandbox flags remain distinct from ignored report-only policies. The nominal Location origin stays the response URL origin; global/message origins, cookies and storage use the actual native opaque principal. Opaque document self Permissions Policy is distinct from an explicitly supplied invalid null URL target, and empty opaque allowlist reflection matches the fresh Chrome control. An opaque top document can still be cross-origin isolated under COOP/COEP; the control proves actual shared backing-store cloning rather than trusting the public flag.
+
+The module loader retains only private Rust boolean origin/site cells and snapshots them before each request; it cannot keep the old nominal document origin across a sandboxed installation. Four real module transport controls compare HTTP Origin and Cookie headers. Same-origin CORS script requests carry Origin; sandboxed opaque module requests carry null and omit the normal jar cookie. Thirteen real iframe and nine top-document controls measure script/handler blocking, storage/cookie errors, native principal/message origins, policy reflection and shared-memory behavior. Completed controls have zero errors and exact source hashes. The isolated defaultSDK150 checkpoint passes39 render/script/frame/input contracts plus8 core request-context checks, with strict affected Clippy/fmt; native155 integration remains required.
+
+Full sandbox form, popup, navigation and download flags remain unsupported and the unsupported-directive diagnostic continues to list sandbox honestly. CSP violation events/reporting remain open. This work also exposed the independent missing HTMLScriptElement.text setter: assigning it creates an own data property rather than updating native source/text children, so the appended script does not execute. Its source-pinned script-text control and native mismatch receipt are retained; a canonical fix is being prepared separately.

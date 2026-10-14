@@ -242,7 +242,7 @@ pub(super) fn sibling_mutation<'s>(
 #[derive(Clone)]
 pub(super) enum Incoming<'s> {
     Node(v8::Local<'s, v8::Object>),
-    Text(String),
+    Text(Vec<u16>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -258,7 +258,7 @@ struct NodeView<'s> {
 #[derive(Clone)]
 enum Prepared<'s> {
     Node(NodeView<'s>),
-    Text(String),
+    Text(Vec<u16>),
 }
 impl Prepared<'_> {
     fn kind(&self) -> u8 {
@@ -613,7 +613,7 @@ fn insert_inputs_mode<'s>(
                 handles.push(handle);
             }
             Prepared::Text(text) => {
-                handles.push(with_tree_mut(|tree| tree.create_text_node(&text)).unwrap())
+                handles.push(with_tree_mut(|tree| tree.create_text_node_utf16(&text)).unwrap())
             }
         }
     }

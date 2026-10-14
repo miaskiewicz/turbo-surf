@@ -32,12 +32,12 @@
     }, 0);
   }
   // XML Name uses code-point ranges, rather than HTML's permissive attribute names.
-  const xmlName = /^[:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}][:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}\-\.0-9\u00b7\u0300-\u036f\u203f-\u2040]*$/u;
+  const xmlName = /^[:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\udfff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}][:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\udfff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}\-\.0-9\u00b7\u0300-\u036f\u203f-\u2040]*$/u;
   method(g.Document.prototype, 'createProcessingInstruction', function (target, data) {
     check(this, [9]);
     if (arguments.length < 2) throw new TypeError('createProcessingInstruction requires 2 arguments');
     target = string(target); data = string(data);
-    if (!xmlName.test(target) || data.includes('?>')) throw new g.DOMException('Invalid processing instruction', 'InvalidCharacterError');
+    if (!xmlName.test(target) || /[\ud800-\udfff\ufffd]/u.test(target) || data.includes('?>')) throw new g.DOMException('Invalid processing instruction', 'InvalidCharacterError');
     return native('createPI', this, target, data);
   }, 2);
   method(g.Document.prototype, 'createCDATASection', function (data) {
@@ -50,10 +50,41 @@
   const data = Object.getOwnPropertyDescriptor(g.CharacterData.prototype, 'data');
   property(g.CharacterData.prototype, 'length', function () { check(this, [3, 4, 7, 8]); return data.get.call(this).length; });
   method(g.Node.prototype, 'normalize', function () { type.call(this); native('normalize', this); }, 0);
+  const datasetValues = new WeakMap(), datasetGet=WeakMap.prototype.get, datasetSet=WeakMap.prototype.set;
+  const nativeAttributes = Object.getOwnPropertyDescriptor(g.Element.prototype,'attributes').get;
+  const nativeAttrName = Object.getOwnPropertyDescriptor(g.Attr.prototype,'name').get;
+  const nativeRemoveAttribute = g.Element.prototype.removeAttribute, datasetFactory=ns.makeNamedObject;
+  const datasetReplace=String.prototype.replace, datasetSlice=String.prototype.slice, datasetLower=String.prototype.toLowerCase, datasetUpper=String.prototype.toUpperCase;
+  const datasetTest=RegExp.prototype.test;
+  const propertyToAttribute=name=>'data-'+apply(datasetReplace,name,[/[A-Z]/g,character=>'-'+apply(datasetLower,character,[])]);
+  const attributeToProperty=name=>apply(datasetReplace,apply(datasetSlice,name,[5]),[/-([a-z])/g,(_,character)=>apply(datasetUpper,character,[])]);
+  const dataset=function(){
+    check(this,[1]);let value=apply(datasetGet,datasetValues,[this]);if(value)return value;const owner=this;
+    value=datasetFactory(g.DOMStringMap.prototype,function(operation,key,value){
+      if(operation==='keys'||operation==='indices'){
+        const keys=[],attrs=apply(nativeAttributes,owner,[]);for(let index=0;index<attrs.length;index++){
+          const name=apply(nativeAttrName,attrs[index],[]);if(apply(datasetSlice,name,[0,5])!=='data-'||apply(datasetTest,/[A-Z]/,[name]))continue;
+          const property=attributeToProperty(name);if(operation==='keys')keys[keys.length]=property;else if(apply(datasetTest,/^(0|[1-9][0-9]*)$/,[property])&&+property<4294967295)keys[keys.length]=+property;
+        }return keys;
+      }
+      const attribute=propertyToAttribute(key),current=apply(getAttribute,owner,[attribute]);
+      if(operation==='get')return current===null?undefined:current;
+      if(operation==='has')return current!==null;
+      if(operation==='descriptor')return current===null?undefined:{value:current,writable:true,enumerable:true,configurable:true};
+      if(operation==='delete'){apply(nativeRemoveAttribute,owner,[attribute]);return true;}
+      if(operation==='set'||operation==='define'){
+        if(operation==='define'){if('get'in value||'set'in value)return false;value=value.value;}
+        if(apply(datasetTest,/-[a-z]/,[key]))throw new g.DOMException('Invalid dataset property name','SyntaxError');
+        apply(setAttribute,owner,[attribute,string(value)]);return true;
+      }return undefined;
+    },true,true);
+    apply(datasetSet,datasetValues,[owner,value]);return value;
+  };
+  for(const name of ['HTMLElement','SVGElement'])if(g[name])property(g[name].prototype,'dataset',dataset);
   const uint = value => (+value) >>> 0;
   const character = receiver => { check(receiver, [3, 4, 7, 8]); return apply(data.get, receiver, []); };
   const range = (value, offset) => { if (offset > value.length) throw new g.DOMException('Character-data offset is out of range', 'IndexSizeError'); };
-  // V8 strings use the DOM's UTF-16 offsets; native Tree storage uses UTF-8 bytes.
+  // Character-data offsets and native payloads both retain original UTF-16 units.
   method(g.CharacterData.prototype, 'substringData', function (offset, count) { const value = character(this); if (arguments.length < 2) throw new TypeError('substringData requires 2 arguments'); offset = uint(offset); count = uint(count); range(value, offset); return value.slice(offset, offset + count); }, 2);
   method(g.CharacterData.prototype, 'replaceData', function (offset, count, value) { const current = character(this); if (arguments.length < 3) throw new TypeError('replaceData requires 3 arguments'); offset = uint(offset); count = uint(count); value = string(value); range(current, offset); native('replaceCharacterData', this, offset, count, value); }, 3);
   method(g.CharacterData.prototype, 'insertData', function (offset, value) { const current = character(this); if (arguments.length < 2) throw new TypeError('insertData requires 2 arguments'); offset = uint(offset); value = string(value); range(current, offset); native('replaceCharacterData', this, offset, 0, value); }, 2);

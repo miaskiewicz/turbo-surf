@@ -1,18 +1,21 @@
 use super::*;
-use turbo_dom_parser::rtdom::tree::AttributeData;
 
 /// A nonce is independent of its reflected attribute. Read only native ownership/state.
 pub fn nonce(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) -> Option<String> {
+    nonce_units(scope, node).map(|units| String::from_utf16_lossy(&units))
+}
+pub(super) fn nonce_units(
+    scope: &mut v8::PinScope,
+    node: v8::Local<v8::Object>,
+) -> Option<Vec<u16>> {
     let _dom = DomScope::for_object(scope, node);
     let handle = handle_of(scope, node)?;
     if with_tree(|tree| tree.node_type_id(handle)) != Some(1) {
         return None;
     }
     DOM.with(|dom| dom.borrow().as_ref()?.nonces.get(&handle).cloned())
-        .or_else(|| {
-            with_tree(|tree| tree.get_attribute(handle, "nonce").map(str::to_owned)).flatten()
-        })
-        .or_else(|| Some(String::new()))
+        .or_else(|| with_tree(|tree| tree.get_attribute_utf16(handle, "nonce")).flatten())
+        .or_else(|| Some(Vec::new()))
 }
 
 pub fn clone_nonces(source: Handle, target: Handle, deep: bool) {
@@ -97,11 +100,11 @@ pub fn copy_nonces(
 struct Snapshot {
     old: Handle,
     kind: u8,
-    name: String,
-    namespace: Option<String>,
-    value: String,
-    doctype: Option<(String, String)>,
-    attributes: Vec<(Handle, AttributeData)>,
+    name: Vec<u16>,
+    namespace: Option<Vec<u16>>,
+    value: Vec<u16>,
+    doctype: Option<(Vec<u16>, Vec<u16>)>,
+    attributes: Vec<(Handle, turbo_dom_parser::rtdom::tree::AttributeDataUtf16)>,
     children: Vec<Snapshot>,
     shadow: Option<Box<Snapshot>>,
 }
@@ -114,41 +117,32 @@ fn capture(tree: &mut Tree, node: Handle) -> Result<Snapshot, &'static str> {
         return Err("Adopting template content is unsupported");
     }
     let attributes = tree
-        .attributes_namespaced(node)
+        .attributes_units(node)
         .into_iter()
         .map(|attribute| {
             let handle = tree
-                .attribute_node(node, attribute.namespace.as_deref(), &attribute.local_name)
+                .attribute_node_units(node, attribute.namespace.as_deref(), &attribute.local_name)
                 .unwrap();
             (handle, attribute)
         })
         .collect();
-    let attr = tree.attribute_data(node).cloned();
+    let attr = tree.attribute_data_units(node);
     let doctype = (kind == 10).then(|| {
         (
-            tree.doctype_public_id(node).unwrap_or_default().to_owned(),
-            tree.doctype_system_id(node).unwrap_or_default().to_owned(),
+            tree.doctype_public_id_utf16(node).unwrap_or_default(),
+            tree.doctype_system_id_utf16(node).unwrap_or_default(),
         )
     });
-    let name = if kind == 7 {
-        tree.processing_instruction_target(node)
-            .unwrap_or_default()
-            .to_owned()
-    } else if kind == 10 {
-        tree.doctype_name(node).unwrap_or_default().to_owned()
-    } else {
-        attr.as_ref()
-            .map(|attr| attr.qualified_name.to_string())
-            .unwrap_or_else(|| tree.qualified_name(node).unwrap_or_default().to_owned())
-    };
+    let name = tree
+        .qualified_name_utf16(node)
+        .or_else(|| tree.processing_instruction_target_utf16(node))
+        .or_else(|| tree.doctype_name_utf16(node))
+        .unwrap_or_default();
     let namespace = attr
         .as_ref()
-        .and_then(|attr| attr.namespace.as_ref().map(ToString::to_string))
-        .or_else(|| tree.namespace_uri(node).map(str::to_owned));
-    let value = attr
-        .as_ref()
-        .map(|attr| attr.value.to_string())
-        .unwrap_or_else(|| tree.node_value(node).unwrap_or_default());
+        .and_then(|attr| attr.namespace.clone())
+        .or_else(|| tree.namespace_uri_utf16(node));
+    let value = tree.node_value_utf16(node).unwrap_or_default();
     let children = tree
         .children(node)
         .into_iter()
@@ -178,20 +172,20 @@ fn materialize(
     mapping: &mut Vec<(Handle, Handle)>,
 ) -> Handle {
     let target = supplied.unwrap_or_else(|| match source.kind {
-        2 => tree.create_attribute(source.namespace.as_deref(), &source.name, &source.value),
-        3 => tree.create_text_node(&source.value),
-        7 => tree.create_processing_instruction(&source.name, &source.value),
-        8 => tree.create_comment(&source.value),
+        2 => tree.create_attribute_units(source.namespace.as_deref(), &source.name, &source.value),
+        3 => tree.create_text_node_utf16(&source.value),
+        7 => tree.create_processing_instruction_units(&source.name, &source.value),
+        8 => tree.create_comment_utf16(&source.value),
         10 => {
             let (public_id, system_id) = source.doctype.as_ref().unwrap();
-            tree.create_document_type(&source.name, public_id, system_id)
+            tree.create_document_type_units(&source.name, public_id, system_id)
         }
         11 => tree.create_document_fragment(),
-        _ => tree.create_element_namespace(source.namespace.as_deref(), &source.name),
+        _ => tree.create_element_namespace_units(source.namespace.as_deref(), &source.name),
     });
     mapping.push((source.old, target));
     for (old, attribute) in source.attributes {
-        let node = tree.create_attribute(
+        let node = tree.create_attribute_units(
             attribute.namespace.as_deref(),
             &attribute.qualified_name,
             &attribute.value,
@@ -451,7 +445,9 @@ pub fn dispatch<'s>(
             let Some(count) = args.get(3).uint32_value(scope) else {
                 return;
             };
-            let data = args.get(4).to_rust_string_lossy(scope);
+            let Some(data) = dom_units(scope, args.get(4)) else {
+                return;
+            };
             replace_character_data(scope, handle, offset as usize, count as usize, &data);
         }
         "stamp" => {
@@ -531,20 +527,24 @@ pub fn dispatch<'s>(
             }
         }
         "createPI" if kind == 9 => {
-            let target = args.get(2).to_rust_string_lossy(scope);
-            let data = args.get(3).to_rust_string_lossy(scope);
+            let Some(target) = dom_units(scope, args.get(2)) else {
+                return;
+            };
+            let Some(data) = dom_units(scope, args.get(3)) else {
+                return;
+            };
             let node =
-                with_tree_mut(|tree| tree.create_processing_instruction(&target, &data)).unwrap();
+                with_tree_mut(|tree| tree.create_processing_instruction_units(&target, &data))
+                    .unwrap();
             rv.set(wrap(scope, node).into());
         }
         "piTarget" if kind == 7 => {
             let target = with_tree(|tree| {
-                tree.processing_instruction_target(handle)
+                tree.processing_instruction_target_utf16(handle)
                     .unwrap_or_default()
-                    .to_owned()
             })
             .unwrap();
-            rv.set(v8::String::new(scope, &target).unwrap().into());
+            rv.set(unit_string(scope, &target).into());
         }
         "compatMode" if kind == 9 => {
             let mode = with_tree(|tree| tree.compat_mode()).unwrap_or("BackCompat");
@@ -562,29 +562,27 @@ pub fn dispatch<'s>(
         "doctypeFields" if kind == 10 => {
             let fields = with_tree(|tree| {
                 [
-                    tree.doctype_name(handle).unwrap_or_default().to_owned(),
-                    tree.doctype_public_id(handle)
-                        .unwrap_or_default()
-                        .to_owned(),
-                    tree.doctype_system_id(handle)
-                        .unwrap_or_default()
-                        .to_owned(),
+                    tree.doctype_name_utf16(handle).unwrap_or_default(),
+                    tree.doctype_public_id_utf16(handle).unwrap_or_default(),
+                    tree.doctype_system_id_utf16(handle).unwrap_or_default(),
                 ]
             })
             .unwrap();
             let array = v8::Array::new(scope, 3);
             for (index, value) in fields.iter().enumerate() {
-                let value = v8::String::new(scope, value).unwrap();
+                let value = unit_string(scope, value);
                 array.set_index(scope, index as u32, value.into());
             }
             rv.set(array.into());
         }
         "nonce" if kind == 1 => {
-            let value = nonce(scope, node).unwrap_or_default();
-            rv.set(v8::String::new(scope, &value).unwrap().into());
+            let value = nonce_units(scope, node).unwrap_or_default();
+            rv.set(unit_string(scope, &value).into());
         }
         "setNonce" if kind == 1 => {
-            let value = args.get(2).to_rust_string_lossy(scope);
+            let Some(value) = dom_units(scope, args.get(2)) else {
+                return;
+            };
             DOM.with(|dom| {
                 dom.borrow_mut()
                     .as_mut()

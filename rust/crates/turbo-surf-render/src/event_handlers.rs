@@ -1,13 +1,16 @@
 //! Authored HTML handler bodies are compiled by V8 with native DOM scope extensions.
 use super::*;
+type SourceKey = (Handle, String);
+type SourceValue = Option<Vec<u16>>;
+type AdoptedSource = (SourceKey, SourceValue);
 #[derive(Default)]
 pub(super) struct State {
     policy: Option<v8::Weak<v8::Function>>,
     base: String,
-    sources: HashMap<(Handle, String), Option<String>>,
+    sources: HashMap<SourceKey, SourceValue>,
 }
-fn source(node: Handle, name: &str) -> Option<String> {
-    with_tree(|tree| tree.get_attribute(node, name).map(str::to_owned)).flatten()
+fn source(node: Handle, name: &str) -> Option<Vec<u16>> {
+    with_tree(|tree| tree.get_attribute_utf16(node, name)).flatten()
 }
 fn note(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
     let _dom = DomScope::for_object(scope, args.this());
@@ -86,7 +89,7 @@ pub(super) fn refresh(scope: &mut v8::PinScope, node: Handle, name: &str) {
         if let Some(policy) = policy {
             let callback = dom_ownership::local(scope, policy);
             let kind = v8::String::new(scope, "script-src-attr").unwrap();
-            let code = v8::String::new(scope, &text).unwrap();
+            let code = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal)?;
             let receiver = v8::undefined(scope);
             if !callback
                 .call(
@@ -99,7 +102,7 @@ pub(super) fn refresh(scope: &mut v8::PinScope, node: Handle, name: &str) {
                 return None;
             }
         }
-        let code = v8::String::new(scope, &text).unwrap();
+        let code = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal)?;
         let resource = v8::String::new(
             scope,
             if base.is_empty() {
@@ -206,9 +209,7 @@ pub(super) fn install(
 
 /// Keep the native source marker with an adopted node. Losing this marker makes
 /// the destination's first refresh overwrite a previously assigned on* callback.
-pub(super) fn take_adopted_sources(
-    mapping: &[(Handle, Handle)],
-) -> Vec<((Handle, String), Option<String>)> {
+pub(super) fn take_adopted_sources(mapping: &[(Handle, Handle)]) -> Vec<AdoptedSource> {
     let mapping = mapping.iter().copied().collect::<HashMap<_, _>>();
     DOM.with(|dom| {
         let mut dom = dom.borrow_mut();
@@ -226,7 +227,7 @@ pub(super) fn take_adopted_sources(
             .collect()
     })
 }
-pub(super) fn restore_adopted_sources(sources: Vec<((Handle, String), Option<String>)>) {
+pub(super) fn restore_adopted_sources(sources: Vec<AdoptedSource>) {
     DOM.with(|dom| {
         dom.borrow_mut()
             .as_mut()

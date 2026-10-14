@@ -20,17 +20,24 @@
        if let Some(formatted) = formatted
 --- a/modules/map.rs
 +++ b/modules/map.rs
-@@ -843,7 +843,8 @@
+@@ -843,8 +843,14 @@
        is_internal_module_specifier(name.as_str())
          .then(|| LoadingInternalModulesGuard::new(self));
  
 -    let name_str = name.v8_string(scope).unwrap();
+-    let source_str = source.v8_string(scope).unwrap();
 +    let source_url = self.loader.borrow().module_source_url(name.as_str());
 +    let name_str = v8::String::new(scope, &source_url).unwrap();
-     let source_str = source.v8_string(scope).unwrap();
++    let source_units = self.loader.borrow().module_source_code_units(name.as_str());
++    let source_str = if let Some(units) = source_units {
++      v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal)
++    } else {
++      source.v8_string(scope).ok()
++    }.ok_or_else(|| ModuleError::Core(JsErrorBox::type_error("module source allocation failed").into()))?;
      let host_defined_options = self
        .loader
-@@ -1740,7 +1741,7 @@
+       .borrow()
+@@ -1740,7 +1746,7 @@
        .get_handle(module_id)
        .expect("ModuleInfo not found");
  
@@ -1475,7 +1482,7 @@
      // `queueMicrotask` in `01_core.js`.
 --- a/modules/loaders.rs
 +++ b/modules/loaders.rs
-@@ -108,6 +108,14 @@
+@@ -108,6 +108,24 @@
      false
    }
  
@@ -1487,10 +1494,20 @@
 +    specifier.to_string()
 +  }
 +
++  /// Retains an authoritative DOMString source snapshot for JavaScript modules.
++  /// The resolved module-map key identifies the source; returning None preserves
++  /// ordinary byte/UTF8 loaders. The owned immutable units are passed directly
++  /// to V8, including unpaired surrogates, without rewriting source positions.
++  /// Embedders must retain the same snapshot throughout graph loading and code
++  /// cache production; each isolate still owns its independent compiled map.
++  fn module_source_code_units(&self, _specifier: &str) -> Option<std::sync::Arc<[u16]>> {
++    None
++  }
++
    /// Override to customize the behavior of `import.meta.resolve` resolution.
    ///
    /// The default implementation calls `self.resolve()`.
-@@ -167,6 +175,21 @@
+@@ -167,6 +185,21 @@
    ///
    /// It's not required to implement this method.
    fn finish_load(&self) {}
@@ -1512,12 +1529,16 @@
  
    /// Called when new v8 code cache is available for this module. Implementors
    /// can store the provided code cache for future executions of the same module.
-@@ -742,6 +765,25 @@
+@@ -742,6 +775,29 @@
      self.loader.finish_load();
    }
  
 +  fn module_source_url(&self, specifier: &str) -> String {
 +    self.loader.module_source_url(specifier)
++  }
++
++  fn module_source_code_units(&self, specifier: &str) -> Option<std::sync::Arc<[u16]>> {
++    self.loader.module_source_code_units(specifier)
 +  }
 +
 +  fn module_graph_ready(

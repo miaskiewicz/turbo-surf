@@ -130,7 +130,7 @@ pub fn node_nonce(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) -> Opti
     document_basics::nonce(scope, node)
 }
 pub fn hide_node_nonce(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) {
-    let Some(value) = node_nonce(scope, node) else {
+    let Some(value) = document_basics::nonce_units(scope, node) else {
         return;
     };
     let _dom = DomScope::for_object(scope, node);
@@ -150,13 +150,13 @@ pub fn hide_node_nonce(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) {
         }
     });
 }
-fn initial_nonces(tree: &Tree) -> HashMap<Handle, String> {
+fn initial_nonces(tree: &Tree) -> HashMap<Handle, Vec<u16>> {
     tree.query_selector_all("[nonce]")
         .iter()
         .copied()
         .filter_map(|handle| {
-            tree.get_attribute(handle, "nonce")
-                .map(|value| (handle, value.to_owned()))
+            tree.get_attribute_utf16(handle, "nonce")
+                .map(|value| (handle, value))
         })
         .collect()
 }
@@ -165,9 +165,23 @@ pub fn update_node_nonce(scope: &mut v8::PinScope, node: v8::Local<v8::Object>, 
     if let Some(handle) = handle_of(scope, node) {
         DOM.with(|dom| {
             if let Some(state) = dom.borrow_mut().as_mut() {
-                state.nonces.insert(handle, value.to_owned());
+                state.nonces.insert(handle, value.encode_utf16().collect());
             }
         });
+    }
+}
+pub fn update_node_nonce_units(
+    scope: &mut v8::PinScope,
+    node: v8::Local<v8::Object>,
+    value: &[u16],
+) {
+    let _dom = DomScope::for_object(scope, node);
+    if let Some(handle) = handle_of(scope, node) {
+        DOM.with(|dom| {
+            if let Some(state) = dom.borrow_mut().as_mut() {
+                state.nonces.insert(handle, value.to_vec());
+            }
+        })
     }
 }
 
@@ -177,7 +191,7 @@ mod html_documents;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use turbo_dom_parser::rtdom::tree::{AttributeData, Handle, Tree};
+use turbo_dom_parser::rtdom::tree::{AttributeDataUtf16, Handle, Tree};
 use turbo_dom_parser::rtdom::NodeRef;
 
 /// The all-Rust DOM (rtdom) is now the ONLY DOM environment — the JS turbo-dom bootstrap
@@ -380,7 +394,7 @@ struct DomState {
     /// shared element object template (internal_field_count = 2).
     el_template: v8::Global<v8::ObjectTemplate>,
     shadow_modes: HashMap<Handle, String>,
-    nonces: HashMap<Handle, String>,
+    nonces: HashMap<Handle, Vec<u16>>,
     scripts: HashMap<Handle, ScriptState>,
     resource_active: bool,
     basics_state: Option<v8::Weak<v8::Object>>,
@@ -473,6 +487,12 @@ impl Drop for DomScope {
 /// Install an independent native document in the current V8 context. The caller's
 /// document stays live, and callbacks route by their receiver's creation context.
 pub fn install_independent_html(scope: &mut v8::PinScope, html: &str) {
+    install_independent_tree(scope, Tree::parse(html));
+}
+pub fn install_independent_html_units(scope: &mut v8::PinScope, units: &[u16]) {
+    install_independent_tree(scope, Tree::parse_utf16(units));
+}
+fn install_independent_tree(scope: &mut v8::PinScope, tree: Tree) {
     dom_isolation::install(scope);
     let context = scope.get_current_context();
     let id = context
@@ -488,7 +508,7 @@ pub fn install_independent_html(scope: &mut v8::PinScope, html: &str) {
             id
         });
     let _dom = DomScope::enter(id);
-    install_with_html(scope, html);
+    install_with_tree(scope, tree);
 }
 
 fn dom_id_of(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) -> u64 {
@@ -512,6 +532,21 @@ pub fn parse_html_document<'s>(
     html: &str,
     sanitize: bool,
 ) -> v8::Local<'s, v8::Object> {
+    parse_html_tree(scope, Tree::parse(html), sanitize)
+}
+/// Parse an original DOM string into native unit-backed payloads.
+pub fn parse_html_document_units<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    units: &[u16],
+    sanitize: bool,
+) -> v8::Local<'s, v8::Object> {
+    parse_html_tree(scope, Tree::parse_utf16(units), sanitize)
+}
+fn parse_html_tree<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut tree: Tree,
+    sanitize: bool,
+) -> v8::Local<'s, v8::Object> {
     let id = NEXT_DOM_ID.with(|next| {
         let id = next.get();
         next.set(id + 1);
@@ -531,7 +566,6 @@ pub fn parse_html_document<'s>(
         (clone, current_node_projector(scope))
     };
     let _dom = DomScope::enter(id);
-    let mut tree = Tree::parse(html);
     if sanitize {
         html_documents::sanitize(&mut tree);
     }
@@ -610,12 +644,12 @@ pub fn import_document_node<'s>(
     let source_node = node;
     struct Snapshot {
         kind: u8,
-        name: String,
-        value: String,
-        public_id: String,
-        system_id: String,
-        namespace: Option<String>,
-        attributes: Vec<AttributeData>,
+        name: Vec<u16>,
+        value: Vec<u16>,
+        public_id: Vec<u16>,
+        system_id: Vec<u16>,
+        namespace: Option<Vec<u16>>,
+        attributes: Vec<AttributeDataUtf16>,
         children: Vec<Snapshot>,
     }
     fn capture(tree: &Tree, node: Handle, deep: bool) -> Result<Snapshot, &'static str> {
@@ -626,19 +660,18 @@ pub fn import_document_node<'s>(
         if kind == 1 && tree.local_name(node) == Some("template") {
             return Err("Importing template content is unsupported");
         }
-        let attributes = tree.attributes_namespaced(node);
+        let attributes = tree.attributes_units(node);
         Ok(Snapshot {
             kind,
             name: tree
-                .qualified_name(node)
-                .or_else(|| tree.doctype_name(node))
-                .or_else(|| tree.processing_instruction_target(node))
-                .unwrap_or_default()
-                .to_string(),
-            value: tree.node_value(node).unwrap_or_default(),
-            public_id: tree.doctype_public_id(node).unwrap_or_default().to_owned(),
-            system_id: tree.doctype_system_id(node).unwrap_or_default().to_owned(),
-            namespace: tree.namespace_uri(node).map(str::to_owned),
+                .qualified_name_utf16(node)
+                .or_else(|| tree.doctype_name_utf16(node))
+                .or_else(|| tree.processing_instruction_target_utf16(node))
+                .unwrap_or_default(),
+            value: tree.node_value_utf16(node).unwrap_or_default(),
+            public_id: tree.doctype_public_id_utf16(node).unwrap_or_default(),
+            system_id: tree.doctype_system_id_utf16(node).unwrap_or_default(),
+            namespace: tree.namespace_uri_utf16(node),
             attributes,
             children: if deep {
                 tree.children(node)
@@ -652,22 +685,24 @@ pub fn import_document_node<'s>(
     }
     fn materialize(tree: &mut Tree, snapshot: Snapshot) -> Handle {
         let node = match snapshot.kind {
-            2 => tree.create_attribute(
+            2 => tree.create_attribute_units(
                 snapshot.namespace.as_deref(),
                 &snapshot.name,
                 &snapshot.value,
             ),
-            3 => tree.create_text_node(&snapshot.value),
-            7 => tree.create_processing_instruction(&snapshot.name, &snapshot.value),
-            8 => tree.create_comment(&snapshot.value),
-            10 => {
-                tree.create_document_type(&snapshot.name, &snapshot.public_id, &snapshot.system_id)
-            }
+            3 => tree.create_text_node_utf16(&snapshot.value),
+            7 => tree.create_processing_instruction_units(&snapshot.name, &snapshot.value),
+            8 => tree.create_comment_utf16(&snapshot.value),
+            10 => tree.create_document_type_units(
+                &snapshot.name,
+                &snapshot.public_id,
+                &snapshot.system_id,
+            ),
             11 => tree.create_document_fragment(),
-            _ => tree.create_element_namespace(snapshot.namespace.as_deref(), &snapshot.name),
+            _ => tree.create_element_namespace_units(snapshot.namespace.as_deref(), &snapshot.name),
         };
         for attribute in snapshot.attributes {
-            tree.set_attribute_ns(
+            tree.set_attribute_ns_units(
                 node,
                 attribute.namespace.as_deref(),
                 &attribute.qualified_name,
@@ -1026,6 +1061,29 @@ fn arg_str(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments, i: i3
     args.get(i).to_rust_string_lossy(scope)
 }
 
+fn dom_units<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: v8::Local<v8::Value>,
+) -> Option<Vec<u16>> {
+    if value.is_symbol() {
+        let message = v8::String::new(scope, "Cannot convert a Symbol to a string").unwrap();
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+        return None;
+    }
+    let value = value.to_string(scope)?;
+    Some(string_code_units(scope, value))
+}
+/// Extract actual V8 DOM string units without a scalar conversion.
+pub fn string_code_units(scope: &v8::PinScope, value: v8::Local<v8::String>) -> Vec<u16> {
+    let mut units = vec![0; value.length()];
+    value.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+    units
+}
+fn unit_string<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v8::String> {
+    v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal).unwrap()
+}
+
 /// Resolve argument `i` to a node handle, or `None` for null/undefined/non-node. CRITICAL: guards
 /// `to_object()`, which THROWS "Cannot convert undefined or null to object" on null/undefined — and
 /// `insertBefore(node, null)` / `removeChild`-style calls pass that constantly (emotion/react-dom).
@@ -1344,13 +1402,7 @@ fn arg_usize(
     args.get(i).uint32_value(scope).map(|value| value as usize)
 }
 fn character_units(node: Handle) -> Vec<u16> {
-    with_tree(|tree| {
-        tree.node_value(node)
-            .unwrap_or_default()
-            .encode_utf16()
-            .collect()
-    })
-    .unwrap_or_default()
+    with_tree(|tree| tree.node_value_utf16(node).unwrap_or_default()).unwrap_or_default()
 }
 fn checked_character_offset(scope: &mut v8::PinScope, node: Handle, offset: usize) -> bool {
     if offset > character_units(node).len() {
@@ -1369,17 +1421,17 @@ fn replace_character_data(
     node: Handle,
     offset: usize,
     count: usize,
-    data: &str,
+    data: &[u16],
 ) {
     let mut units = character_units(node);
     if !checked_character_offset(scope, node, offset) {
         return;
     }
     let count = count.min(units.len() - offset);
-    let inserted: Vec<_> = data.encode_utf16().collect();
+    let inserted = data.to_vec();
     range_live::replacing_data(scope, node, offset, count, inserted.len());
     units.splice(offset..offset + count, inserted);
-    with_tree_mut(|tree| tree.set_text_content(node, &String::from_utf16_lossy(&units)));
+    with_tree_mut(|tree| tree.set_text_content_utf16(node, &units));
 }
 fn el_insert_data(
     scope: &mut v8::PinScope,
@@ -1393,7 +1445,9 @@ fn el_insert_data(
     let Some(off) = arg_usize(scope, &args, 0) else {
         return;
     };
-    let data = arg_str(scope, &args, 1);
+    let Some(data) = dom_units(scope, args.get(1)) else {
+        return;
+    };
     replace_character_data(scope, h, off, 0, &data);
 }
 fn el_delete_data(
@@ -1411,7 +1465,7 @@ fn el_delete_data(
     let Some(count) = arg_usize(scope, &args, 1) else {
         return;
     };
-    replace_character_data(scope, h, off, count, "");
+    replace_character_data(scope, h, off, count, &[]);
 }
 fn el_append_data(
     scope: &mut v8::PinScope,
@@ -1422,7 +1476,9 @@ fn el_append_data(
     let Some(h) = receiver_handle(scope, &args, &[3, 4, 7, 8]) else {
         return;
     };
-    let data = arg_str(scope, &args, 0);
+    let Some(data) = dom_units(scope, args.get(0)) else {
+        return;
+    };
     let offset = character_units(h).len();
     replace_character_data(scope, h, offset, 0, &data);
 }
@@ -1441,7 +1497,9 @@ fn el_replace_data(
     let Some(count) = arg_usize(scope, &args, 1) else {
         return;
     };
-    let data = arg_str(scope, &args, 2);
+    let Some(data) = dom_units(scope, args.get(2)) else {
+        return;
+    };
     replace_character_data(scope, h, off, count, &data);
 }
 fn el_substring_data(
@@ -1487,8 +1545,8 @@ fn el_split_text(
     }
     let units = character_units(h);
     let Some(new_h) = with_tree_mut(|tree| {
-        tree.set_text_content(h, &String::from_utf16_lossy(&units[..off]));
-        let next = tree.create_text_node(&String::from_utf16_lossy(&units[off..]));
+        tree.set_text_content_utf16(h, &units[..off]);
+        let next = tree.create_text_node_utf16(&units[off..]);
         if let Some(parent) = tree.parent(h) {
             let reference = tree.next_sibling(h);
             tree.insert_before(parent, next, reference);
@@ -1570,7 +1628,7 @@ fn resolve_nodes<'s>(
                 continue;
             }
         }
-        out.push(dom_mutations::Incoming::Text(dom_string(scope, value)?));
+        out.push(dom_mutations::Incoming::Text(dom_units(scope, value)?));
     }
     Some(out)
 }
@@ -1706,7 +1764,7 @@ fn el_insert_adjacent_html<'s>(
     let Some(position) = dom_string(scope, args.get(0)) else {
         return;
     };
-    let Some(html) = dom_string(scope, args.get(1)) else {
+    let Some(html) = dom_units(scope, args.get(1)) else {
         return;
     };
     let position = position.to_ascii_lowercase();
@@ -1747,7 +1805,7 @@ fn el_insert_adjacent_html<'s>(
     })
     .flatten();
     // These nodes are freshly parsed, so they cannot contain an existing ancestor.
-    with_tree_mut(|tree| tree.insert_adjacent_html(target, &position, &html));
+    with_tree_mut(|tree| tree.insert_adjacent_html_utf16(target, &position, &html));
     if let Some((parent, index, previous_count)) = location {
         let count = with_tree(|tree| tree.children(parent).len()).unwrap_or(previous_count);
         let added = count.saturating_sub(previous_count);
@@ -1774,17 +1832,33 @@ fn el_toggle_attribute<'s>(
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
-    let name = arg_str(scope, &args, 0).to_ascii_lowercase();
+    let Some(mut units) = dom_units(scope, args.get(0)) else {
+        return;
+    };
+    if with_tree(|tree| tree.namespace_id(h) == 0).unwrap_or(false) {
+        lower_ascii_units(&mut units);
+    }
+    let name = String::from_utf16_lossy(&units);
     let force = if args.length() > 1 && !args.get(1).is_undefined() {
         Some(args.get(1).boolean_value(scope))
     } else {
         None
     };
-    let previous = with_tree(|t| t.has_attribute(h, &name)).unwrap_or(false);
+    let previous = with_tree(|t| t.get_attribute_units(h, &units).is_some()).unwrap_or(false);
     if name == "popover" && previous && force != Some(true) {
         html_popover::attribute_change(scope, h, None);
     }
-    let present = with_tree_mut(|t| t.toggle_attribute(h, &name, force)).unwrap_or(false);
+    let present = with_tree_mut(|t| {
+        let present = t.get_attribute_units(h, &units).is_some();
+        let want = force.unwrap_or(!present);
+        if want && !present {
+            t.set_attribute_units(h, &units, &[]);
+        } else if !want && present {
+            t.remove_attribute_units(h, &units);
+        }
+        want
+    })
+    .unwrap_or(false);
     if previous != present {
         element_relations::attribute_changed(scope, args.this(), &name);
     }
@@ -1804,15 +1878,22 @@ fn dom_string<'s>(
         .to_string(scope)
         .map(|value| value.to_rust_string_lossy(scope))
 }
-fn namespace_argument<'s, 'i>(
+fn namespace_units_argument<'s, 'i>(
     scope: &mut v8::PinScope<'s, 'i>,
     args: &v8::FunctionCallbackArguments<'s>,
-) -> Option<Option<String>> {
+) -> Option<Option<Vec<u16>>> {
     let value = args.get(0);
     if value.is_null_or_undefined() {
         return Some(None);
     }
-    dom_string(scope, value).map(|value| (!value.is_empty()).then_some(value))
+    dom_units(scope, value).map(|value| (!value.is_empty()).then_some(value))
+}
+fn lower_ascii_units(units: &mut [u16]) {
+    for unit in units {
+        if (65..=90).contains(unit) {
+            *unit += 32;
+        }
+    }
 }
 fn require_arguments(
     scope: &mut v8::PinScope,
@@ -1884,14 +1965,16 @@ fn el_get_attribute_ns<'s, 'i>(
     if !require_arguments(scope, &args, 2) {
         return;
     }
-    let Some(namespace) = namespace_argument(scope, &args) else {
+    let Some(namespace) = namespace_units_argument(scope, &args) else {
         return;
     };
-    let Some(local) = dom_string(scope, args.get(1)) else {
+    let Some(local) = dom_units(scope, args.get(1)) else {
         return;
     };
-    match with_tree(|tree| tree.get_attribute_ns(node, namespace.as_deref(), &local)).flatten() {
-        Some(value) => rv.set(v8::String::new(scope, &value).unwrap().into()),
+    match with_tree(|tree| tree.get_attribute_ns_units(node, namespace.as_deref(), &local))
+        .flatten()
+    {
+        Some(value) => rv.set(unit_string(scope, &value).into()),
         None => rv.set(v8::null(scope).into()),
     }
 }
@@ -1907,15 +1990,15 @@ fn el_has_attribute_ns<'s, 'i>(
     if !require_arguments(scope, &args, 2) {
         return;
     }
-    let Some(namespace) = namespace_argument(scope, &args) else {
+    let Some(namespace) = namespace_units_argument(scope, &args) else {
         return;
     };
-    let Some(local) = dom_string(scope, args.get(1)) else {
+    let Some(local) = dom_units(scope, args.get(1)) else {
         return;
     };
     rv.set_bool(
         with_tree(|tree| {
-            tree.get_attribute_ns(node, namespace.as_deref(), &local)
+            tree.get_attribute_ns_units(node, namespace.as_deref(), &local)
                 .is_some()
         })
         .unwrap_or(false),
@@ -1933,23 +2016,34 @@ fn el_set_attribute_ns<'s, 'i>(
     if !require_arguments(scope, &args, 3) {
         return;
     }
-    let Some(namespace) = namespace_argument(scope, &args) else {
+    let Some(namespace) = namespace_units_argument(scope, &args) else {
         return;
     };
-    let Some(qualified) = dom_string(scope, args.get(1)) else {
+    let Some(qualified) = dom_units(scope, args.get(1)) else {
         return;
     };
-    let Some(value) = dom_string(scope, args.get(2)) else {
+    let Some(units) = dom_units(scope, args.get(2)) else {
         return;
     };
-    if let Err(error) = validate_namespace_name(namespace.as_deref(), &qualified, true) {
+    let value = String::from_utf16_lossy(&units);
+    if let Err(error) = validate_namespace_name(
+        namespace
+            .as_deref()
+            .map(String::from_utf16_lossy)
+            .as_deref(),
+        &String::from_utf16_lossy(&qualified),
+        true,
+    ) {
         throw_dom_error(scope, error, "Invalid namespace or qualified name");
         return;
     }
-    if namespace.is_none() && qualified == "popover" {
+    if namespace.is_none() && qualified == "popover".encode_utf16().collect::<Vec<_>>() {
         html_popover::attribute_change(scope, node, Some(&value));
     }
-    with_tree_mut(|tree| tree.set_attribute_ns(node, namespace.as_deref(), &qualified, &value));
+    with_tree_mut(|tree| {
+        tree.set_attribute_ns_units(node, namespace.as_deref(), &qualified, &units)
+    });
+    let qualified = String::from_utf16_lossy(&qualified);
     if namespace.is_none() {
         event_handlers::changed(scope, node, &qualified);
         element_relations::attribute_changed(scope, args.this(), &qualified);
@@ -1958,7 +2052,7 @@ fn el_set_attribute_ns<'s, 'i>(
         css_policy::attribute_changed(scope, node);
     }
     if namespace.is_none() && qualified == "nonce" {
-        update_node_nonce(scope, args.this(), &value);
+        update_node_nonce_units(scope, args.this(), &units);
     }
 }
 fn el_remove_attribute_ns<'s, 'i>(
@@ -1973,16 +2067,17 @@ fn el_remove_attribute_ns<'s, 'i>(
     if !require_arguments(scope, &args, 2) {
         return;
     }
-    let Some(namespace) = namespace_argument(scope, &args) else {
+    let Some(namespace) = namespace_units_argument(scope, &args) else {
         return;
     };
-    let Some(local) = dom_string(scope, args.get(1)) else {
+    let Some(local) = dom_units(scope, args.get(1)) else {
         return;
     };
-    if namespace.is_none() && local == "popover" {
+    if namespace.is_none() && local == "popover".encode_utf16().collect::<Vec<_>>() {
         html_popover::attribute_change(scope, node, None);
     }
-    with_tree_mut(|tree| tree.remove_attribute_ns(node, namespace.as_deref(), &local));
+    with_tree_mut(|tree| tree.remove_attribute_ns_units(node, namespace.as_deref(), &local));
+    let local = String::from_utf16_lossy(&local);
     if namespace.is_none() {
         event_handlers::changed(scope, node, &local);
         element_relations::attribute_changed(scope, args.this(), &local);
@@ -2032,21 +2127,25 @@ fn el_set_attribute<'s>(
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
-    let name = arg_str(scope, &args, 0);
-    let value = arg_str(scope, &args, 1);
+    let Some(mut name) = dom_units(scope, args.get(0)) else {
+        return;
+    };
+    let Some(units) = dom_units(scope, args.get(1)) else {
+        return;
+    };
+    let value = String::from_utf16_lossy(&units);
     // HTML setAttribute lowercases the qualified name (React calls setAttribute('colSpan', …); jsdom
     // stores 'colspan'). Lowercase for HTML-namespace elements only (ns 0); SVG (ns 1) keeps camelCase
     // attrs like viewBox.
     let is_html = with_tree(|t| t.namespace_id(h) == 0).unwrap_or(true);
-    let key = if is_html {
-        name.to_ascii_lowercase()
-    } else {
-        name.clone()
-    };
+    if is_html {
+        lower_ascii_units(&mut name);
+    }
+    let key = String::from_utf16_lossy(&name);
     if key == "popover" {
         html_popover::attribute_change(scope, h, Some(&value));
     }
-    with_tree_mut(|t| t.set_attribute(h, &key, &value));
+    with_tree_mut(|t| t.set_attribute_units(h, &name, &units));
     event_handlers::changed(scope, h, &key);
     element_relations::attribute_changed(scope, args.this(), &key);
     if key == "style" {
@@ -2058,7 +2157,7 @@ fn el_set_attribute<'s>(
                 .as_mut()
                 .unwrap()
                 .nonces
-                .insert(h, value.clone());
+                .insert(h, units.clone());
         });
     }
 
@@ -2097,19 +2196,27 @@ fn attr_get(t: &Tree, h: Handle, name: &str) -> Option<String> {
     None
 }
 
-fn el_get_attribute(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_get_attribute<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
-    let name = arg_str(scope, &args, 0);
-    let val = with_tree(|t| attr_get(t, h, &name)).flatten();
+    let Some(mut name) = dom_units(scope, args.get(0)) else {
+        return;
+    };
+    let val = with_tree(|t| {
+        if t.namespace_id(h) == 0 {
+            lower_ascii_units(&mut name);
+        }
+        t.get_attribute_units(h, &name)
+    })
+    .flatten();
     match val {
-        Some(s) => rv.set(v8::String::new(scope, &s).unwrap().into()),
+        Some(s) => rv.set(unit_string(scope, &s).into()),
         None => rv.set(v8::null(scope).into()),
     }
 }
@@ -2131,21 +2238,21 @@ fn el_get_attribute_node<'s, 'i>(
     if !require_arguments(scope, &args, 1) {
         return;
     }
-    let Some(mut name) = dom_string(scope, args.get(0)) else {
+    let Some(mut name) = dom_units(scope, args.get(0)) else {
         return;
     };
     if with_tree(|tree| tree.namespace_id(owner) == 0).unwrap_or(false) {
-        name.make_ascii_lowercase();
+        lower_ascii_units(&mut name);
     }
     let data = with_tree(|tree| {
-        tree.attributes_namespaced(owner)
+        tree.attributes_units(owner)
             .into_iter()
             .find(|attribute| attribute.qualified_name == name)
     })
     .flatten();
     let node = data.and_then(|data| {
         with_tree_mut(|tree| {
-            tree.attribute_node(owner, data.namespace.as_deref(), &data.local_name)
+            tree.attribute_node_units(owner, data.namespace.as_deref(), &data.local_name)
         })
         .flatten()
     });
@@ -2163,14 +2270,14 @@ fn el_get_attribute_node_ns<'s, 'i>(
     if !require_arguments(scope, &args, 2) {
         return;
     }
-    let Some(namespace) = namespace_argument(scope, &args) else {
+    let Some(namespace) = namespace_units_argument(scope, &args) else {
         return;
     };
-    let Some(local) = dom_string(scope, args.get(1)) else {
+    let Some(local) = dom_units(scope, args.get(1)) else {
         return;
     };
-    let node =
-        with_tree_mut(|tree| tree.attribute_node(owner, namespace.as_deref(), &local)).flatten();
+    let node = with_tree_mut(|tree| tree.attribute_node_units(owner, namespace.as_deref(), &local))
+        .flatten();
     rv.set(wrap_opt(scope, node));
 }
 fn el_set_attribute_node<'s, 'i>(
@@ -2336,11 +2443,11 @@ fn sync_attr_nonce(scope: &mut v8::PinScope, owner: v8::Local<v8::Object>, attri
     if let Some(value) = with_tree(|tree| {
         tree.attribute_data(attribute)
             .filter(|data| data.namespace.is_none() && data.local_name == "nonce")
-            .map(|data| data.value.to_string())
+            .map(|_| tree.node_value_utf16(attribute).unwrap_or_default())
     })
     .flatten()
     {
-        update_node_nonce(scope, owner, &value);
+        update_node_nonce_units(scope, owner, &value);
     }
 }
 fn doc_create_attribute<'s, 'i>(
@@ -2352,22 +2459,20 @@ fn doc_create_attribute<'s, 'i>(
     if receiver_handle(scope, &args, &[9]).is_none() || !require_arguments(scope, &args, 1) {
         return;
     }
-    let Some(mut name) = dom_string(scope, args.get(0)) else {
+    let Some(mut name) = dom_units(scope, args.get(0)) else {
         return;
     };
     if name.is_empty()
-        || name.chars().any(|c| {
-            matches!(
-                c,
-                '\0' | '\t' | '\n' | '\x0C' | '\r' | ' ' | '/' | '=' | '>'
-            )
-        })
+        || name
+            .iter()
+            .copied()
+            .any(|c| matches!(c, 0 | 9 | 10 | 12 | 13 | 32 | 47 | 61 | 62))
     {
         throw_dom_error(scope, "InvalidCharacterError", "Invalid attribute name");
         return;
     }
-    name.make_ascii_lowercase();
-    if let Some(node) = with_tree_mut(|tree| tree.create_attribute(None, &name, "")) {
+    lower_ascii_units(&mut name);
+    if let Some(node) = with_tree_mut(|tree| tree.create_attribute_units(None, &name, &[])) {
         let object = wrap(scope, node);
         rv.set(object.into());
     }
@@ -2381,17 +2486,25 @@ fn doc_create_attribute_ns<'s, 'i>(
     if receiver_handle(scope, &args, &[9]).is_none() || !require_arguments(scope, &args, 2) {
         return;
     }
-    let Some(namespace) = namespace_argument(scope, &args) else {
+    let Some(namespace) = namespace_units_argument(scope, &args) else {
         return;
     };
-    let Some(name) = dom_string(scope, args.get(1)) else {
+    let Some(name) = dom_units(scope, args.get(1)) else {
         return;
     };
-    if let Err(error) = validate_namespace_name(namespace.as_deref(), &name, true) {
+    if let Err(error) = validate_namespace_name(
+        namespace
+            .as_deref()
+            .map(String::from_utf16_lossy)
+            .as_deref(),
+        &String::from_utf16_lossy(&name),
+        true,
+    ) {
         throw_dom_error(scope, error, "Invalid namespace or qualified name");
         return;
     }
-    if let Some(node) = with_tree_mut(|tree| tree.create_attribute(namespace.as_deref(), &name, ""))
+    if let Some(node) =
+        with_tree_mut(|tree| tree.create_attribute_units(namespace.as_deref(), &name, &[]))
     {
         let object = wrap(scope, node);
         rv.set(object.into());
@@ -2463,11 +2576,11 @@ fn set_attr_value<'s, 'i, T>(
     let Some(node) = handle_of(scope, args.holder()) else {
         return;
     };
-    let Some(value) = dom_string(scope, value) else {
+    let Some(value) = dom_units(scope, value) else {
         return;
     };
-    html_popover::attribute_node_change(scope, node, Some(&value));
-    with_tree_mut(|tree| tree.set_attribute_value(node, &value));
+    html_popover::attribute_node_change(scope, node, Some(&String::from_utf16_lossy(&value)));
+    with_tree_mut(|tree| tree.set_attribute_value_utf16(node, &value));
     if let Some(owner) = with_tree(|tree| tree.attribute_owner(node)).flatten() {
         let owner = wrap(scope, owner);
         sync_attr_nonce(scope, owner, node);
@@ -2492,23 +2605,26 @@ fn set_attr_value<'s, 'i, T>(
     }
 }
 
-fn el_has_attribute(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_has_attribute<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
-    let name = arg_str(scope, &args, 0);
-    let lower = name.to_ascii_lowercase();
+    let Some(mut name) = dom_units(scope, args.get(0)) else {
+        return;
+    };
     let has = with_tree(|t| {
-        t.has_attribute(h, &name)
-            || (t.namespace_id(h) == 0 && lower != name && t.has_attribute(h, &lower))
+        if t.namespace_id(h) == 0 {
+            lower_ascii_units(&mut name);
+        }
+        t.get_attribute_units(h, &name).is_some()
     })
     .unwrap_or(false);
-    rv.set(v8::Boolean::new(scope, has).into());
+    rv.set_bool(has);
 }
 
 fn el_remove_attribute<'s>(
@@ -2520,25 +2636,27 @@ fn el_remove_attribute<'s>(
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
-    let name = arg_str(scope, &args, 0);
-    let lower = name.to_ascii_lowercase();
+    let Some(mut name) = dom_units(scope, args.get(0)) else {
+        return;
+    };
+    if with_tree(|t| t.namespace_id(h) == 0).unwrap_or(false) {
+        lower_ascii_units(&mut name);
+    }
+    let lower = String::from_utf16_lossy(&name);
     if lower == "nonce" {
         DOM.with(|dom| {
             dom.borrow_mut()
                 .as_mut()
                 .unwrap()
                 .nonces
-                .insert(h, String::new());
+                .insert(h, Vec::new());
         });
     }
     if lower == "popover" {
         html_popover::attribute_change(scope, h, None);
     }
     with_tree_mut(|t| {
-        t.remove_attribute(h, &name);
-        if lower != name {
-            t.remove_attribute(h, &lower);
-        }
+        t.remove_attribute_units(h, &name);
     });
     event_handlers::changed(scope, h, &lower);
     element_relations::attribute_changed(scope, args.this(), &lower);
@@ -2547,22 +2665,43 @@ fn el_remove_attribute<'s>(
     }
 }
 
+fn selector_argument<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments<'s>,
+    node: Handle,
+) -> Option<(String, Vec<u16>, bool)> {
+    let units = dom_units(scope, args.get(0))?;
+    let scalar = String::from_utf16_lossy(&units);
+    let transformed = html_popover::selector(scope, node, &scalar)?;
+    let original = if transformed == scalar {
+        units
+    } else {
+        transformed.encode_utf16().collect()
+    };
+    let unit_path = String::from_utf16(&original).is_err() || original.contains(&92);
+    Some((transformed, original, unit_path))
+}
 /// element-scoped querySelector via NodeRef.
-fn el_query_selector(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_query_selector<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(h) = receiver_handle(scope, &args, &[1, 11]) else {
         return;
     };
-    let sel = arg_str(scope, &args, 0);
-    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+    let Some((sel, units, unit_path)) = selector_argument(scope, &args, h) else {
         return;
     };
-    let found =
-        with_tree(|t| NodeRef::new(t, h).query_selector(&sel).map(|n| n.handle())).flatten();
+    let found = with_tree(|t| {
+        if unit_path {
+            t.query_selector_all_from_units(h, &units).first().copied()
+        } else {
+            NodeRef::new(t, h).query_selector(&sel).map(|n| n.handle())
+        }
+    })
+    .flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
@@ -2579,9 +2718,9 @@ fn get_inner_html(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_inner(t, h))
+    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_inner_utf16(t, h))
         .unwrap_or_default();
-    rv.set(v8::String::new(scope, &html).unwrap().into());
+    rv.set(unit_string(scope, &html).into());
 }
 fn set_inner_html(
     scope: &mut v8::PinScope,
@@ -2594,10 +2733,12 @@ fn set_inner_html(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let html = value.to_rust_string_lossy(scope);
+    let Some(html) = dom_units(scope, value) else {
+        return;
+    };
     html_popover::disconnect(scope, h, false);
     range_live::replacing_children(scope, h);
-    with_tree_mut(|t| t.set_inner_html(h, &html));
+    with_tree_mut(|t| t.set_inner_html_utf16(h, &html));
     for child in with_tree(|tree| tree.children(h)).unwrap_or_default() {
         script_state::parsed(child, true);
     }
@@ -2613,9 +2754,9 @@ fn get_outer_html(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_outer(t, h))
+    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_outer_utf16(t, h))
         .unwrap_or_default();
-    rv.set(v8::String::new(scope, &html).unwrap().into());
+    rv.set(unit_string(scope, &html).into());
 }
 
 fn set_outer_html(
@@ -2646,7 +2787,9 @@ fn set_outer_html(
         );
         return;
     }
-    let html = value.to_rust_string_lossy(scope);
+    let Some(html) = dom_units(scope, value) else {
+        return;
+    };
     html_popover::disconnect(scope, node, true);
     let position = with_tree(|tree| {
         let children = tree.children(parent);
@@ -2658,7 +2801,7 @@ fn set_outer_html(
     .flatten();
     range_live::removing(scope, node);
     with_tree_mut(|tree| {
-        tree.insert_adjacent_html(node, "beforebegin", &html);
+        tree.insert_adjacent_html_utf16(node, "beforebegin", &html);
         tree.remove_child(parent, node);
     });
     if let Some((index, previous_count)) = position {
@@ -2749,9 +2892,9 @@ fn get_namespace_uri(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let namespace = with_tree(|tree| tree.namespace_uri(h).map(str::to_owned)).flatten();
+    let namespace = with_tree(|tree| tree.namespace_uri_utf16(h)).flatten();
     match namespace {
-        Some(namespace) => rv.set(v8::String::new(scope, &namespace).unwrap().into()),
+        Some(namespace) => rv.set(unit_string(scope, &namespace).into()),
         None => rv.set(v8::null(scope).into()),
     }
 }
@@ -2764,9 +2907,9 @@ fn get_prefix(
 ) {
     let _dom = DomScope::for_object(scope, args.holder());
     let prefix = handle_of(scope, args.holder())
-        .and_then(|h| with_tree(|tree| tree.prefix(h).map(str::to_owned)).flatten());
+        .and_then(|h| with_tree(|tree| tree.prefix_utf16(h)).flatten());
     match prefix {
-        Some(prefix) => rv.set(v8::String::new(scope, &prefix).unwrap().into()),
+        Some(prefix) => rv.set(unit_string(scope, &prefix).into()),
         None => rv.set(v8::null(scope).into()),
     }
 }
@@ -3011,18 +3154,25 @@ fn doc_create_element_ns<'s, 'i>(
     if !require_arguments(scope, &args, 2) {
         return;
     }
-    let Some(namespace) = namespace_argument(scope, &args) else {
+    let Some(namespace) = namespace_units_argument(scope, &args) else {
         return;
     };
-    let Some(qualified) = dom_string(scope, args.get(1)) else {
+    let Some(qualified) = dom_units(scope, args.get(1)) else {
         return;
     };
-    if let Err(error) = validate_namespace_name(namespace.as_deref(), &qualified, false) {
+    if let Err(error) = validate_namespace_name(
+        namespace
+            .as_deref()
+            .map(String::from_utf16_lossy)
+            .as_deref(),
+        &String::from_utf16_lossy(&qualified),
+        false,
+    ) {
         throw_dom_error(scope, error, "Invalid namespace or qualified name");
         return;
     }
     let made =
-        with_tree_mut(|tree| tree.create_element_namespace(namespace.as_deref(), &qualified));
+        with_tree_mut(|tree| tree.create_element_namespace_units(namespace.as_deref(), &qualified));
     if let Some(h) = made {
         let node = wrap(scope, h);
         rv.set(node.into());
@@ -3051,8 +3201,10 @@ fn doc_create_comment(
     if receiver_handle(scope, &args, &[9]).is_none() {
         return;
     }
-    let data = arg_str(scope, &args, 0);
-    if let Some(h) = with_tree_mut(|t| t.create_comment(&data)) {
+    let Some(data) = dom_units(scope, args.get(0)) else {
+        return;
+    };
+    if let Some(h) = with_tree_mut(|t| t.create_comment_utf16(&data)) {
         let node = wrap(scope, h);
         rv.set(node.into());
     }
@@ -3063,32 +3215,38 @@ fn clone_subtree(t: &mut Tree, h: Handle, deep: bool) -> Handle {
     let nt = t.node_type_id(h);
     let new_h = match nt {
         2 => {
-            let data = t.attribute_data(h).unwrap().clone();
-            t.create_attribute(data.namespace.as_deref(), &data.qualified_name, &data.value)
+            let data = t.attribute_data_units(h).unwrap();
+            t.create_attribute_units(
+                data.namespace.as_deref(),
+                &data.qualified_name,
+                &t.node_value_utf16(h).unwrap_or_default(),
+            )
         }
-        3 => t.create_text_node(&t.node_value(h).unwrap_or_default()),
+        3 => t.create_text_node_utf16(&t.node_value_utf16(h).unwrap_or_default()),
         7 => {
-            let target = t
-                .processing_instruction_target(h)
-                .unwrap_or_default()
-                .to_owned();
-            t.create_processing_instruction(&target, &t.node_value(h).unwrap_or_default())
+            let target = t.processing_instruction_target_utf16(h).unwrap_or_default();
+            t.create_processing_instruction_units(
+                &target,
+                &t.node_value_utf16(h).unwrap_or_default(),
+            )
         }
-        8 => t.create_comment(&t.node_value(h).unwrap_or_default()),
+        8 => t.create_comment_utf16(&t.node_value_utf16(h).unwrap_or_default()),
         10 => {
-            let name = t.doctype_name(h).unwrap_or_default().to_owned();
-            let public = t.doctype_public_id(h).unwrap_or_default().to_owned();
-            let system = t.doctype_system_id(h).unwrap_or_default().to_owned();
-            t.create_document_type(&name, &public, &system)
+            let name = t.doctype_name_utf16(h).unwrap_or_default();
+            let public = t.doctype_public_id_utf16(h).unwrap_or_default();
+            let system = t.doctype_system_id_utf16(h).unwrap_or_default();
+            t.create_document_type_units(&name, &public, &system)
         }
         11 => t.create_document_fragment(),
         _ => {
-            let tag = t.qualified_name(h).unwrap_or("div").to_owned();
-            let namespace = t.namespace_uri(h).map(str::to_owned);
-            let attributes = t.attributes_namespaced(h);
-            let e = t.create_element_namespace(namespace.as_deref(), &tag);
+            let tag = t
+                .qualified_name_utf16(h)
+                .unwrap_or_else(|| "div".encode_utf16().collect());
+            let namespace = t.namespace_uri_utf16(h);
+            let attributes = t.attributes_units(h);
+            let e = t.create_element_namespace_units(namespace.as_deref(), &tag);
             for attribute in attributes {
-                t.set_attribute_ns(
+                t.set_attribute_ns_units(
                     e,
                     attribute.namespace.as_deref(),
                     &attribute.qualified_name,
@@ -3242,10 +3400,12 @@ fn get_attributes(
         return;
     };
     let attrs = with_tree_mut(|tree| {
-        let records = tree.attributes_namespaced(h);
+        let records = tree.attributes_units(h);
         records
             .into_iter()
-            .filter_map(|data| tree.attribute_node(h, data.namespace.as_deref(), &data.local_name))
+            .filter_map(|data| {
+                tree.attribute_node_units(h, data.namespace.as_deref(), &data.local_name)
+            })
             .collect::<Vec<_>>()
     })
     .unwrap_or_default();
@@ -3267,49 +3427,59 @@ fn get_dataset(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let attrs = with_tree(|t| t.attributes(h)).unwrap_or_default();
+    let attrs = with_tree(|tree| tree.attributes_units(h)).unwrap_or_default();
     let o = v8::Object::new(scope);
-    for (k, v) in attrs {
-        if let Some(rest) = k.strip_prefix("data-") {
-            // kebab → camelCase
-            let mut camel = String::new();
-            let mut up = false;
-            for ch in rest.chars() {
-                if ch == '-' {
-                    up = true;
-                } else if up {
-                    camel.extend(ch.to_uppercase());
-                    up = false;
+    for attribute in attrs {
+        if let Some(rest) = attribute
+            .qualified_name
+            .strip_prefix(&[100, 97, 116, 97, 45])
+        {
+            let mut camel = Vec::new();
+            let mut index = 0;
+            while index < rest.len() {
+                if rest[index] == 45
+                    && rest
+                        .get(index + 1)
+                        .is_some_and(|unit| (97..=122).contains(unit))
+                {
+                    camel.push(rest[index + 1] - 32);
+                    index += 2;
                 } else {
-                    camel.push(ch);
+                    camel.push(rest[index]);
+                    index += 1;
                 }
             }
-            let key = v8::String::new(scope, &camel).unwrap();
-            let val = v8::String::new(scope, &v).unwrap();
-            o.set(scope, key.into(), val.into());
+            let key = unit_string(scope, &camel);
+            let value = unit_string(scope, &attribute.value);
+            o.set(scope, key.into(), value.into());
         }
     }
     rv.set(o.into());
 }
 
 /// `closest(selector)` → nearest ancestor (incl. self) that matches, or null.
-fn el_closest(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_closest<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
-    let sel = arg_str(scope, &args, 0);
-    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+    let Some((sel, units, unit_path)) = selector_argument(scope, &args, h) else {
         return;
     };
     let found = with_tree(|t| {
         let mut cur = Some(h);
         while let Some(c) = cur {
-            if t.node_type_id(c) == 1 && t.matches(c, &sel) {
+            if t.node_type_id(c) == 1
+                && if unit_path {
+                    t.matches_units(c, &units)
+                } else {
+                    t.matches(c, &sel)
+                }
+            {
                 return Some(c);
             }
             cur = NodeRef::new(t, c).parent().map(|p| p.handle());
@@ -3321,20 +3491,26 @@ fn el_closest(
     rv.set(v);
 }
 
-fn el_matches(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_matches<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
-    let sel = arg_str(scope, &args, 0);
-    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+    let Some((sel, units, unit_path)) = selector_argument(scope, &args, h) else {
         return;
     };
-    let m = with_tree(|t| t.matches(h, &sel)).unwrap_or(false);
+    let m = with_tree(|t| {
+        if unit_path {
+            t.matches_units(h, &units)
+        } else {
+            t.matches(h, &sel)
+        }
+    })
+    .unwrap_or(false);
     rv.set(v8::Boolean::new(scope, m).into());
 }
 
@@ -3419,25 +3595,28 @@ fn nodelist_named_item(
     rv.set_null();
 }
 
-fn el_query_selector_all(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_query_selector_all<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(h) = receiver_handle(scope, &args, &[1, 11]) else {
         return;
     };
-    let sel = arg_str(scope, &args, 0);
-    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+    let Some((sel, units, unit_path)) = selector_argument(scope, &args, h) else {
         return;
     };
     let handles = with_tree(|t| {
-        NodeRef::new(t, h)
-            .query_selector_all(&sel)
-            .into_iter()
-            .map(|n| n.handle())
-            .collect::<Vec<_>>()
+        if unit_path {
+            t.query_selector_all_from_units(h, &units).to_vec()
+        } else {
+            NodeRef::new(t, h)
+                .query_selector_all(&sel)
+                .into_iter()
+                .map(|n| n.handle())
+                .collect::<Vec<_>>()
+        }
     })
     .unwrap_or_default();
     let arr = node_array(scope, handles);
@@ -3460,8 +3639,10 @@ fn get_tag_name(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let tag = with_tree(|t| t.tag_name(h)).flatten().unwrap_or_default();
-    rv.set(v8::String::new(scope, &tag).unwrap().into());
+    let tag = with_tree(|t| t.tag_name_utf16(h))
+        .flatten()
+        .unwrap_or_default();
+    rv.set(unit_string(scope, &tag).into());
 }
 
 fn get_text_content(
@@ -3474,8 +3655,8 @@ fn get_text_content(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let txt = with_tree(|t| t.text_content(h)).unwrap_or_default();
-    rv.set(v8::String::new(scope, &txt).unwrap().into());
+    let txt = with_tree(|t| t.text_content_utf16(h)).unwrap_or_default();
+    rv.set(unit_string(scope, &txt).into());
 }
 
 fn set_text_content(
@@ -3489,21 +3670,18 @@ fn set_text_content(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let txt = value.to_rust_string_lossy(scope);
+    let Some(units) = dom_units(scope, value) else {
+        return;
+    };
+    let txt = String::from_utf16_lossy(&units);
     html_popover::attribute_node_change(scope, h, Some(&txt));
     html_popover::disconnect(scope, h, false);
     if with_tree(|tree| matches!(tree.node_type_id(h), 3 | 4 | 7 | 8)).unwrap_or(false) {
-        range_live::replacing_data(
-            scope,
-            h,
-            0,
-            character_units(h).len(),
-            txt.encode_utf16().count(),
-        );
+        range_live::replacing_data(scope, h, 0, character_units(h).len(), units.len());
     } else {
         range_live::replacing_children(scope, h);
     }
-    with_tree_mut(|t| t.set_text_content(h, &txt));
+    with_tree_mut(|t| t.set_text_content_utf16(h, &units));
     element_relations::attribute_node_changed(scope, h);
     css_policy::invalidate_sheet(h);
 }
@@ -3518,10 +3696,10 @@ fn get_id(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let id = with_tree(|t| t.get_attribute(h, "id").map(|s| s.to_string()))
+    let id = with_tree(|t| t.get_attribute_utf16(h, "id"))
         .flatten()
         .unwrap_or_default();
-    rv.set(v8::String::new(scope, &id).unwrap().into());
+    rv.set(unit_string(scope, &id).into());
 }
 
 fn set_id(
@@ -3535,8 +3713,10 @@ fn set_id(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let v = value.to_rust_string_lossy(scope);
-    with_tree_mut(|t| t.set_attribute(h, "id", &v));
+    let Some(v) = dom_units(scope, value) else {
+        return;
+    };
+    with_tree_mut(|t| t.set_attribute_utf16(h, "id", &v));
 }
 
 fn get_class_name(
@@ -3549,10 +3729,10 @@ fn get_class_name(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let c = with_tree(|t| t.get_attribute(h, "class").map(|s| s.to_string()))
+    let c = with_tree(|t| t.get_attribute_utf16(h, "class"))
         .flatten()
         .unwrap_or_default();
-    rv.set(v8::String::new(scope, &c).unwrap().into());
+    rv.set(unit_string(scope, &c).into());
 }
 
 fn set_class_name(
@@ -3566,8 +3746,10 @@ fn set_class_name(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let v = value.to_rust_string_lossy(scope);
-    with_tree_mut(|t| t.set_attribute(h, "class", &v));
+    let Some(v) = dom_units(scope, value) else {
+        return;
+    };
+    with_tree_mut(|t| t.set_attribute_utf16(h, "class", &v));
 }
 
 // `element.contentEditable` IDL property — reflects the `contenteditable` content attribute as the
@@ -4459,8 +4641,10 @@ fn get_node_data(
     };
     let nt = with_tree(|t| t.node_type_id(h)).unwrap_or(1);
     if matches!(nt, 2 | 3 | 7 | 8) {
-        let data = with_tree(|t| t.node_value(h)).flatten().unwrap_or_default();
-        rv.set(v8::String::new(scope, &data).unwrap().into());
+        let data = with_tree(|t| t.node_value_utf16(h))
+            .flatten()
+            .unwrap_or_default();
+        rv.set(unit_string(scope, &data).into());
     } else {
         rv.set(v8::null(scope).into());
     }
@@ -4480,22 +4664,16 @@ fn set_node_data(
         return;
     }
     let data = if value.is_null() && name.to_rust_string_lossy(scope) == "nodeValue" {
-        String::new()
+        Vec::new()
     } else {
         let Some(value) = value.to_string(scope) else {
             return;
         };
-        value.to_rust_string_lossy(scope)
+        dom_units(scope, value.into()).unwrap()
     };
-    html_popover::attribute_node_change(scope, h, Some(&data));
-    range_live::replacing_data(
-        scope,
-        h,
-        0,
-        character_units(h).len(),
-        data.encode_utf16().count(),
-    );
-    with_tree_mut(|t| t.set_text_content(h, &data));
+    html_popover::attribute_node_change(scope, h, Some(&String::from_utf16_lossy(&data)));
+    range_live::replacing_data(scope, h, 0, character_units(h).len(), data.len());
+    with_tree_mut(|t| t.set_text_content_utf16(h, &data));
     element_relations::attribute_node_changed(scope, h);
 }
 
@@ -4511,8 +4689,8 @@ fn get_local_name(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    match with_tree(|t| t.local_name(h).map(str::to_owned)).flatten() {
-        Some(ln) => rv.set(v8::String::new(scope, &ln).unwrap().into()),
+    match with_tree(|t| t.local_name_utf16(h)).flatten() {
+        Some(ln) => rv.set(unit_string(scope, &ln).into()),
         None => rv.set(v8::null(scope).into()),
     }
 }
@@ -4527,6 +4705,18 @@ fn get_node_name(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
+    if let Some(units) = with_tree(|tree| match tree.node_type_id(h) {
+        1 => tree.tag_name_utf16(h),
+        2 => tree.qualified_name_utf16(h),
+        7 => tree.processing_instruction_target_utf16(h),
+        10 => tree.doctype_name_utf16(h),
+        _ => None,
+    })
+    .flatten()
+    {
+        rv.set(unit_string(scope, &units).into());
+        return;
+    }
     let (nt, tag) = with_tree(|t| (t.node_type_id(h), t.tag_name(h))).unwrap_or((1, None));
     let name = match nt {
         2 => with_tree(|tree| tree.qualified_name(h).unwrap_or_default().to_owned())
@@ -4674,7 +4864,9 @@ fn doc_create_element<'s>(
     if receiver_handle(scope, &args, &[9]).is_none() {
         return;
     }
-    let tag = arg_str(scope, &args, 0);
+    let Some(tag) = dom_units(scope, args.get(0)) else {
+        return;
+    };
     let xml = dom_implementation::is_xml_document(scope, args.this());
     let namespace = dom_implementation::default_element_namespace(scope, args.this());
     let Some(h) = with_tree_mut(|tree| {
@@ -4684,9 +4876,9 @@ fn doc_create_element<'s>(
             } else {
                 turbo_dom_parser::rtdom::tree::Namespace::Other
             };
-            tree.create_element_ns(&tag, namespace)
+            tree.create_element_ns_units(&tag, namespace)
         } else {
-            tree.create_element(&tag)
+            tree.create_element_units(&tag)
         }
     }) else {
         return;
@@ -4704,62 +4896,83 @@ fn doc_create_text_node(
     if receiver_handle(scope, &args, &[9]).is_none() {
         return;
     }
-    let data = arg_str(scope, &args, 0);
-    let Some(h) = with_tree_mut(|t| t.create_text_node(&data)) else {
+    let Some(data) = dom_units(scope, args.get(0)) else {
+        return;
+    };
+    let Some(h) = with_tree_mut(|t| t.create_text_node_utf16(&data)) else {
         return;
     };
     let node = wrap(scope, h);
     rv.set(node.into());
 }
 
-fn doc_get_element_by_id(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn doc_get_element_by_id<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     if receiver_handle(scope, &args, &[9]).is_none() {
         return;
     }
-    let id = arg_str(scope, &args, 0);
-    let found = with_tree(|t| t.get_element_by_id(&id)).flatten();
+    let Some(id) = dom_units(scope, args.get(0)) else {
+        return;
+    };
+    let found = with_tree(|t| {
+        String::from_utf16(&id).map_or_else(
+            |_| t.get_element_by_id_units(&id),
+            |id| t.get_element_by_id(&id),
+        )
+    })
+    .flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
 
-fn doc_query_selector(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn doc_query_selector<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(h) = receiver_handle(scope, &args, &[9]) else {
         return;
     };
-    let sel = arg_str(scope, &args, 0);
-    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+    let Some((sel, units, unit_path)) = selector_argument(scope, &args, h) else {
         return;
     };
-    let found = with_tree(|t| t.query_selector(&sel)).flatten();
+    let found = with_tree(|t| {
+        if unit_path {
+            t.query_selector_units(&units)
+        } else {
+            t.query_selector(&sel)
+        }
+    })
+    .flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
 }
 
-fn doc_query_selector_all(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn doc_query_selector_all<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(h) = receiver_handle(scope, &args, &[9]) else {
         return;
     };
-    let sel = arg_str(scope, &args, 0);
-    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+    let Some((sel, units, unit_path)) = selector_argument(scope, &args, h) else {
         return;
     };
-    let handles: Vec<Handle> =
-        with_tree(|t| t.query_selector_all(&sel).to_vec()).unwrap_or_default();
+    let handles: Vec<Handle> = with_tree(|t| {
+        if unit_path {
+            t.query_selector_all_units(&units).to_vec()
+        } else {
+            t.query_selector_all(&sel).to_vec()
+        }
+    })
+    .unwrap_or_default();
     let arr = node_array(scope, handles);
     bind_method(scope, arr.into(), "item", nodelist_item);
     bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
@@ -5756,10 +5969,12 @@ fn make_native_named_object(
             .enumerator(named_enumerator)
             .definer(named_definer)
             .data(args.get(1))
-            .flags(
+            .flags(if args.get(3).is_true() {
+                v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS
+            } else {
                 v8::PropertyHandlerFlags::NON_MASKING
-                    | v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS,
-            ),
+                    | v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS
+            }),
     );
     if args.get(2).is_true() {
         template.set_indexed_property_handler(
@@ -5813,6 +6028,9 @@ pub fn install(scope: &mut v8::PinScope) {
 }
 
 pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
+    install_with_tree(scope, Tree::parse(html));
+}
+fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     dom_isolation::install(scope);
     // A replacement document is seeded before its new bootstrap probes native
     // methods. Projecting with the previous bootstrap here would delete those
@@ -5830,7 +6048,6 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
     STYLE.with(|s| s.borrow_mut().clear());
     LISTENERS.with(|s| s.borrow_mut().clear());
     ACTIVE.with(|s| *s.borrow_mut() = None);
-    let tree = Tree::parse(html);
     let el_template = {
         let t = build_el_template(scope);
         v8::Global::new(scope, t)
@@ -5895,6 +6112,7 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
     css_policy::register(scope);
     event_handlers::register(scope);
     run_js(scope, BOOTSTRAP);
+    script_state::install_text(scope);
     capture_node_projector(scope);
     let exception_name = v8::String::new(scope, "DOMException").unwrap();
     if let Some(constructor) = global.get(scope, exception_name.into()) {
@@ -7643,3 +7861,7 @@ mod ownership_guard_tests;
 #[cfg(test)]
 #[path = "iframe_credentialless_tests.rs"]
 mod iframe_credentialless_tests;
+
+#[cfg(test)]
+#[path = "utf16_contract_tests.rs"]
+mod utf16_contract_tests;

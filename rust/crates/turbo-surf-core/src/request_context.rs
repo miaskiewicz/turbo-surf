@@ -275,10 +275,13 @@ impl RequestContext {
             {
                 h.insert("referer".into(), referer);
             }
-            // Fetch's CORS flag adds Origin on cross-origin requests; other
-            // requests add it for unsafe methods, including same-origin POSTs.
+            // CORS script requests carry Origin even on the same URL origin;
+            // ordinary fetch adds it cross-origin or for unsafe methods.
             if (self.mode == RequestMode::Cors
-                && (self.opaque_origin || self.origin_tainted || !same_origin(source, target)))
+                && (self.destination == Destination::Script
+                    || self.opaque_origin
+                    || self.origin_tainted
+                    || !same_origin(source, target)))
                 || !matches!(method, "GET" | "HEAD")
             {
                 if self.opaque_origin || self.origin_tainted {

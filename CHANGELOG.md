@@ -2,6 +2,23 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Consume verified published turbo-dom 0.5.5 and re-vendor original DOMString
+  storage, names, parsing, mutation records, handlers and prepared script sources.
+  Inline module snapshots preserve native code units through an additive SDK
+  loader callback; module maps, source locations and original-unit cache reuse
+  pass independent genuine155.23 proofs. Srcdoc/frame compilation retains units.
+  The merged binding passes179 standalone contracts. A33-contract genuine155.23
+  source/sandbox/frame/microtask checkpoint passes; default SDK's guarded native
+  frame/module cases do not establish their native lifecycle coverage.
+  The subsequent full renderer library checkpoint passes222 tests on each engine,
+  with genuine source/script tests, affected strict checks and42 offline harness
+  controls passing. Final full-workspace/addon/shim/E2E gates remain pending.
+  Template ownership, custom elements and broader parsing/lifecycle remain open.
+- Implement HTMLScriptElement.text using native direct child Text/CDATA units and
+  native replacement/preparation, preserving Range, observer and started-script
+  state. Fresh Chrome controls cover descriptors, receiver brands, coercion and
+  actual execution. Trusted Types enforcement remains pending.
+
 - Replace the timer-based queueMicrotask stub with genuine V8 jobs and a native
   Window method. Source-pinned Chrome155 controls cover Promise/observer/timer
   ordering, callable proxies, receiver brands, descriptors and removed-frame
@@ -31,6 +48,9 @@
   default Location getters use private receiver records and native-shaped functions.
   Controls cover own srcdoc Location descriptors and live base reads after public
   attribute/query poisoning.
+
+- Apply authentic response CSP sandbox script/origin restrictions to top and child documents; intersect header policies and inherited iframe flags, preserving nominal Location origins while cookies/storage and message origins use the actual opaque principal. Preserve opaque self Permissions Policy separately from explicit null URL targets. Native module requests track current origin/cookie-site state; CORS scripts now send Origin even on the same URL origin, matching fresh Chrome. Controls cover13 child,9 top and4 real module transport cases, including an opaque isolated top document sharing its actual SAB backing store. Full sandbox form/popup/navigation flags and reporting remain pending.
+
 - Enforce response CSP frame-ancestors and legacy X-Frame-Options before committing iframe bytes, consulting each actual native ancestor origin. Intersect CSP headers, ignore default-src/report-only for ancestor admission, replace XFO when enforced ancestor policy exists, and preserve measured legacy invalid/conflicting-header behavior. Credentialless does not bypass explicit framing restrictions. Source-verified Chrome155 controls cover40 direct embedding cases and8 real ancestor trees;35 focused default SDK contracts pass. Violation events/reporting remain pending.
 
 - Correct Permissions query dictionary conversion and asynchronous failure timing, subtype read order, accepted descriptor labels/states, cross-realm Promise/status ownership and the interface's actual Object prototype parent. Add fresh normal Chrome155 controls for descriptor/property-read behavior and two-level policy inheritance;42 focused policy/API/Window tests pass in the isolated default SDK checkpoint. OS permission prompts and popup group transitions remain unsupported.

@@ -118,6 +118,12 @@ with (root/'native-window-proxy.log').open('w') as log:
 if process.returncode:
     sys.exit(f'Native WindowProxy regressions failed; inspect {root / "native-window-proxy.log"}')
 record['nativeWindowProxyTests']='passed'
+with (root/'native-module-units.log').open('w') as log:
+    process=subprocess.run(['cargo','test','--manifest-path',str(root/'Cargo.toml'),'--test','native_module_units','--','--nocapture'],env=environment,stdout=log,stderr=subprocess.STDOUT)
+if process.returncode:
+    sys.exit(f'Native module unit regressions failed; inspect {root / "native-module-units.log"}')
+record['nativeModuleUnitsTests']='passed'
+
 (root/'validated.json').write_text(json.dumps(record,indent=2)+'\n')
 print(record['nativeVersionLine'])
 if args.surf:

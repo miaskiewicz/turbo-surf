@@ -177,7 +177,7 @@ pub(super) fn normalize(scope: &mut v8::PinScope, root: Handle) {
                 node = with_tree(|tree| tree.next_sibling(current)).flatten();
                 continue;
             }
-            let mut text = with_tree(|tree| tree.node_value(current))
+            let mut text = with_tree(|tree| tree.node_value_utf16(current))
                 .flatten()
                 .unwrap_or_default();
             if text.is_empty() {
@@ -193,14 +193,14 @@ pub(super) fn normalize(scope: &mut v8::PinScope, root: Handle) {
                 if with_tree(|tree| tree.node_type_id(next)) != Some(3) {
                     break;
                 }
-                let length = text.encode_utf16().count();
-                text.push_str(
-                    &with_tree(|tree| tree.node_value(next))
+                let length = text.len();
+                text.extend(
+                    with_tree(|tree| tree.node_value_utf16(next))
                         .flatten()
                         .unwrap_or_default(),
                 );
                 merging_text(scope, current, next, length);
-                with_tree_mut(|tree| tree.set_text_content(current, &text));
+                with_tree_mut(|tree| tree.set_text_content_utf16(current, &text));
                 removing(scope, next);
                 with_tree_mut(|tree| tree.remove_child(parent, next));
             }

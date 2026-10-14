@@ -26,7 +26,7 @@ deno_error = "=0.7.1"
 # V8 backend uses official rusty_v8 150.4; mixing in a second native V8 library
 # would make the DOM handles incompatible with the runtime's context.
 v8 = { package = "deno_v8", version = "=0.4.0" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.4" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.5" }
 # Public live-tree snapshots preserve source provenance without HTML serialization.
 turbo-html2pdf-core = "0.3.5"
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)

@@ -80,6 +80,18 @@ cargo test -p turbo-surf-render --test microtask_contracts
 
 The offline contracts compare queue ordering and iframe retirement with the saved
 controls, and verify trusted exception delivery and watchdog recovery.
+
+Original inline module source units and event behavior have a separate control:
+
+```bash
+node harness/detection/authored-dom-chrome.mjs harness/detection/dom-utf16-module-probe.js harness/detection/fixtures/dom-utf16-module-chrome155.json
+cd rust
+cargo test -p turbo-surf-render --test dom_utf16 --test dom_utf16_frames --test script_text
+```
+
+The native155 SDK runs the real frame/module cases; those cases return early on
+the default SDK. Successful inline modules are observed through their actual body
+execution, because normal Chrome does not fire load for successful inline scripts.
 (Chrome wall-time dwell; native drains its existing lifecycle/virtual-timer pump).
 `--steps` is a JSON array replacing default interactions. Supported steps are
 `{move:{selector}}`, `{click:selector}`, `{focus:selector}`, `{type:text}`,
@@ -563,3 +575,13 @@ node harness/detection/policy-ancestors-chrome.mjs harness/detection/fixtures/po
 ```
 
 The descendant collector selects authenticated leaf response headers independently of the middle frame. Offline regressions verify source hashes and case counts before testing actual native iframe admission. Violation reporting and full navigation policy are separate unfinished behavior.
+
+### CSP sandbox controls
+
+```sh
+node harness/detection/policy-frame-chrome.mjs harness/detection/fixtures/policy-sandbox-cases.json harness/detection/policy-sandbox-probe.js harness/detection/fixtures/policy-sandbox-chrome155.json harness/detection/policy-sandbox-child.js
+node harness/detection/policy-header-chrome.mjs harness/detection/fixtures/policy-sandbox-top-cases.json harness/detection/policy-sandbox-top-probe.js harness/detection/fixtures/policy-sandbox-top-chrome155.json
+node harness/detection/policy-sandbox-module-chrome.mjs harness/detection/fixtures/policy-sandbox-module-cases.json harness/detection/policy-sandbox-module-probe.js harness/detection/fixtures/policy-sandbox-module-chrome155.json
+```
+
+The module collector returns the actual server-observed Origin and Cookie fields from an ES module; it seeds only its own localhost cookie. The top control proves genuine shared backing-store behavior in the opaque isolated case. The script-text probe separately records an open reflected script-source setter gap. Full sandbox navigation/form/popup behavior and reporting are not certified by these controls.

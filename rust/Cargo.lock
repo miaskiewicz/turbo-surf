@@ -5807,11 +5807,12 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.5.4"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a19d0539455688b29840e73da3ff78f5f4c42fa116cd10c53e18fbf0538662f7"
+checksum = "03ff9551d0f9d44b9f6e2e7eda4e3a926fe6ff01f795f7638d81151f518f602f"
 dependencies = [
  "html5ever",
+ "log",
  "markup5ever_rcdom",
  "rustc-hash 2.1.2",
  "smallvec",

@@ -504,12 +504,23 @@ pub(super) fn flush(scope: &mut v8::PinScope) {
             .with(|dom| {
                 dom.borrow_mut()
                     .as_mut()
-                    .map(|state| state.tree.take_mutation_events())
+                    .map(|state| state.tree.take_mutation_events_utf16())
             })
             .unwrap_or_default();
         for native_event in events {
-            shadow_slots::mutation(scope, &native_event);
-            let event = payload(scope, &native_event);
+            shadow_slots::mutation(scope, &native_event.event);
+            let event = payload(scope, &native_event.event);
+            for (name, units) in [
+                ("oldValue", &native_event.old_value),
+                ("attributeName", &native_event.attribute_name),
+                ("attributeNamespace", &native_event.attribute_namespace),
+            ] {
+                let value = match units {
+                    Some(units) => unit_string(scope, units).into(),
+                    None => v8::null(scope).into(),
+                };
+                set_prop(scope, event, name, value);
+            }
             for observer in &observers {
                 if let Some(queue) = function(scope, *observer, "queue") {
                     let receiver = v8::undefined(scope);
@@ -517,7 +528,7 @@ pub(super) fn flush(scope: &mut v8::PinScope) {
                 }
             }
             consume(scope, event);
-            script_state::inactive_mutation(&native_event);
+            script_state::inactive_mutation(&native_event.event);
         }
     }
 }

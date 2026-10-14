@@ -164,26 +164,26 @@ impl PermissionsPolicy {
                 .or_insert_with(|| words.collect::<Vec<_>>());
         }
         for (name, wildcard) in FEATURES {
-            let parent_enabled = parent.allows(name, parent_origin, parent_origin);
+            let parent_enabled = parent.allows_self(name, parent_origin);
             let declared_allows = parent.declared.get(*name).is_none_or(|list| {
                 list.iter()
                     .any(|origin| origin == "*" || matches_origin(origin, child_origin))
             });
-            let container_allows =
-                container
-                    .get(name)
-                    .map_or(*wildcard || parent_origin == child_origin, |tokens| {
-                        if tokens.is_empty() {
-                            return source_origin == child_origin;
-                        }
-                        tokens.iter().any(|token| match *token {
-                            "*" => true,
-                            "'self'" => parent_origin == child_origin,
-                            "'src'" => source_origin == child_origin,
-                            "'none'" => false,
-                            origin => matches_origin(origin, child_origin),
-                        })
-                    });
+            let container_allows = container.get(name).map_or(
+                *wildcard || parent_origin != "null" && parent_origin == child_origin,
+                |tokens| {
+                    if tokens.is_empty() {
+                        return source_origin != "null" && source_origin == child_origin;
+                    }
+                    tokens.iter().any(|token| match *token {
+                        "*" => true,
+                        "'self'" => parent_origin != "null" && parent_origin == child_origin,
+                        "'src'" => source_origin != "null" && source_origin == child_origin,
+                        "'none'" => false,
+                        origin => matches_origin(origin, child_origin),
+                    })
+                },
+            );
             if !parent_enabled || !declared_allows || !container_allows {
                 self.inherited_denials.insert((*name).to_string());
             }
@@ -191,6 +191,19 @@ impl PermissionsPolicy {
     }
     pub fn features() -> Vec<&'static str> {
         FEATURES.iter().map(|(name, _)| *name).collect()
+    }
+    pub fn allows_self(&self, name: &str, origin: &str) -> bool {
+        if self.inherited_denials.contains(name)
+            || !FEATURES.iter().any(|(feature, _)| *feature == name)
+        {
+            return false;
+        }
+        if origin != "null" {
+            return self.allows(name, origin, origin);
+        }
+        self.declared
+            .get(name)
+            .is_none_or(|list| list.iter().any(|source| source == "*" || source == "null"))
     }
     pub fn allowlist(&self, name: &str, origin: &str) -> Vec<String> {
         if self.inherited_denials.contains(name) {
@@ -203,6 +216,9 @@ impl PermissionsPolicy {
             .get(name)
             .cloned()
             .unwrap_or_else(|| vec![if *wildcard { "*".into() } else { origin.into() }])
+            .into_iter()
+            .filter(|source| source != "null")
+            .collect()
     }
     pub fn allows(&self, name: &str, document_origin: &str, target: &str) -> bool {
         if parse_origin(target).is_none() {

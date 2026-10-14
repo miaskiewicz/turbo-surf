@@ -1,0 +1,47 @@
+[
+  {
+    "id": "0",
+    "headers": []
+  },
+  {
+    "id": "1",
+    "headers": [["Content-Security-Policy", "sandbox"]]
+  },
+  {
+    "id": "2",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts"]]
+  },
+  {
+    "id": "3",
+    "headers": [["Content-Security-Policy", "sandbox allow-same-origin"]]
+  },
+  {
+    "id": "4",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]]
+  },
+  {
+    "id": "5",
+    "headers": [
+      ["Content-Security-Policy", "sandbox allow-scripts"],
+      ["Content-Security-Policy", "sandbox allow-same-origin"]
+    ]
+  },
+  {
+    "id": "6",
+    "headers": [["Content-Security-Policy-Report-Only", "sandbox"]]
+  },
+  {
+    "id": "7",
+    "headers": [
+      ["Content-Security-Policy", "sandbox allow-scripts allow-same-origin; script-src 'none'"]
+    ]
+  },
+  {
+    "id": "8",
+    "headers": [
+      ["Content-Security-Policy", "sandbox allow-scripts"],
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  }
+]

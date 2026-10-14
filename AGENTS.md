@@ -38,8 +38,9 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   `src/mutation_observers{.rs,.js}`, its tests/probe/Chrome control
   and `src/frame_tokens_tests.rs`, `src/frame_tokens_probe.js`, `src/frame_tokens_chrome155.json`
   and `src/script_state.rs`, its preparation probe/Chrome control,
-  `src/shadow_slots{.rs,.js}`, its tests/probe/Chrome control, and iframe
-  credentialless tests/probe/Chrome control
+  `src/shadow_slots{.rs,.js}`, its tests/probe/Chrome control, iframe
+  credentialless tests/probe/Chrome control, and `src/utf16_contract_tests.rs`
+  with its `src/utf16_*` probes/controls and `src/script_text*.js`/Chrome control
   — re-vendor from turbo-test's committed HEAD via
   `rust/crates/turbo-surf-render/scripts/vendor-browser-env.sh`.
 

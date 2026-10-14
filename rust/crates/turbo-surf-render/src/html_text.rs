@@ -5,7 +5,7 @@ use turbo_dom_parser::rtdom::cascade::{computed_style_with_policy, StylePolicy};
 
 #[derive(Default)]
 struct TextOutput {
-    text: String,
+    text: Vec<u16>,
     breaks: usize,
     space: bool,
 }
@@ -17,20 +17,20 @@ impl TextOutput {
     fn pending(&mut self) {
         if !self.text.is_empty() {
             for _ in 0..self.breaks {
-                self.text.push('\n');
+                self.text.push(10);
             }
-            if self.space && !self.text.ends_with(['\n', '\t']) {
-                self.text.push(' ');
+            if self.space && !self.text.last().is_some_and(|unit| matches!(unit, 10 | 9)) {
+                self.text.push(32);
             }
         }
         self.breaks = 0;
         self.space = false;
     }
-    fn normal(&mut self, value: &str, preserve_lines: bool) {
-        for character in value.chars() {
-            if preserve_lines && character == '\n' {
+    fn normal(&mut self, value: &[u16], preserve_lines: bool) {
+        for &character in value {
+            if preserve_lines && character == 10 {
                 self.forced('\n');
-            } else if matches!(character, '\t' | '\n' | '\r' | '\u{c}' | ' ') {
+            } else if matches!(character, 9 | 10 | 13 | 12 | 32) {
                 self.space = true;
             } else {
                 self.pending();
@@ -38,17 +38,18 @@ impl TextOutput {
             }
         }
     }
-    fn preserved(&mut self, value: &str) {
+    fn preserved(&mut self, value: &[u16]) {
         if value.is_empty() {
             return;
         }
         self.pending();
-        self.text.push_str(value);
+        self.text.extend_from_slice(value);
     }
     fn forced(&mut self, value: char) {
         self.space = false;
         self.pending();
-        self.text.push(value);
+        let mut buffer = [0; 2];
+        self.text.extend_from_slice(value.encode_utf16(&mut buffer));
     }
 }
 fn parent(tree: &Tree, node: Handle) -> Option<Handle> {
@@ -125,6 +126,23 @@ fn whitespace(tree: &Tree, mut node: Handle, style: &HashMap<String, String>) ->
     }
     "normal".into()
 }
+fn transform(units: &[u16], upper: bool) -> Vec<u16> {
+    let mut out = Vec::new();
+    for character in std::char::decode_utf16(units.iter().copied()) {
+        match character {
+            Ok(character) => {
+                let text = if upper {
+                    character.to_uppercase().collect::<String>()
+                } else {
+                    character.to_lowercase().collect::<String>()
+                };
+                out.extend(text.encode_utf16());
+            }
+            Err(error) => out.push(error.unpaired_surrogate()),
+        }
+    }
+    out
+}
 fn collect(tree: &Tree, node: Handle, policy: &StylePolicy, out: &mut TextOutput) {
     let style = computed_style_with_policy(tree, node, policy);
     let kind = tree.node_type_id(node);
@@ -142,10 +160,10 @@ fn collect(tree: &Tree, node: Handle, policy: &StylePolicy, out: &mut TextOutput
         ) {
             return;
         }
-        let mut text = tree.node_value(node).unwrap_or_default();
+        let mut text = tree.node_value_utf16(node).unwrap_or_default();
         match style.get("text-transform").map(String::as_str) {
-            Some("uppercase") => text = text.to_uppercase(),
-            Some("lowercase") => text = text.to_lowercase(),
+            Some("uppercase") => text = transform(&text, true),
+            Some("lowercase") => text = transform(&text, false),
             _ => {}
         }
         match whitespace(tree, owner, &style).as_str() {
@@ -209,9 +227,9 @@ fn collect(tree: &Tree, node: Handle, policy: &StylePolicy, out: &mut TextOutput
 fn display_for_cell(tree: &Tree, node: Handle, style: &HashMap<String, String>) -> bool {
     display(tree, node, style) == "table-cell"
 }
-fn inner_text(tree: &Tree, node: Handle, policy: &StylePolicy) -> String {
+fn inner_text(tree: &Tree, node: Handle, policy: &StylePolicy) -> Vec<u16> {
     if !rendered(tree, node, policy) {
-        return tree.text_content(node);
+        return tree.text_content_utf16(node);
     }
     let mut out = TextOutput::default();
     for child in tree.children(node) {
@@ -219,20 +237,32 @@ fn inner_text(tree: &Tree, node: Handle, policy: &StylePolicy) -> String {
     }
     out.text
 }
-fn replacement(tree: &mut Tree, text: &str) -> Vec<Handle> {
-    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+fn replacement(tree: &mut Tree, text: &[u16]) -> Vec<Handle> {
+    let mut normalized = Vec::new();
+    let mut input = text.iter().copied().peekable();
+    while let Some(unit) = input.next() {
+        if unit == 13 {
+            normalized.push(10);
+            if input.peek() == Some(&10) {
+                input.next();
+            }
+        } else {
+            normalized.push(unit)
+        }
+    }
+    let text = normalized;
     let mut nodes = Vec::new();
-    for (index, line) in text.split('\n').enumerate() {
+    for (index, line) in text.split(|&unit| unit == 10).enumerate() {
         if index > 0 {
             nodes.push(tree.create_element("br"));
         }
         if !line.is_empty() {
-            nodes.push(tree.create_text_node(line));
+            nodes.push(tree.create_text_node_utf16(line));
         }
     }
     nodes
 }
-fn set_inner(tree: &mut Tree, node: Handle, text: &str) {
+fn set_inner(tree: &mut Tree, node: Handle, text: &[u16]) {
     let nodes = replacement(tree, text);
     tree.replace_children(node, &nodes);
 }
@@ -240,28 +270,22 @@ fn merge_text(scope: &mut v8::PinScope, first: Handle, second: Handle) {
     let Some((parent, mut value, suffix)) = with_tree(|tree| {
         Some((
             tree.parent(second)?,
-            tree.node_value(first)?,
-            tree.node_value(second)?,
+            tree.node_value_utf16(first)?,
+            tree.node_value_utf16(second)?,
         ))
     })
     .flatten() else {
         return;
     };
-    range_live::replacing_data(
-        scope,
-        first,
-        value.encode_utf16().count(),
-        0,
-        suffix.encode_utf16().count(),
-    );
-    value.push_str(&suffix);
+    range_live::replacing_data(scope, first, value.len(), 0, suffix.len());
+    value.extend(suffix);
     range_live::removing(scope, second);
     with_tree_mut(|tree| {
-        tree.set_node_value(first, &value);
+        tree.set_text_content_utf16(first, &value);
         tree.remove_child(parent, second);
     });
 }
-fn set_outer(scope: &mut v8::PinScope, node: Handle, text: &str) -> Result<(), &'static str> {
+fn set_outer(scope: &mut v8::PinScope, node: Handle, text: &[u16]) -> Result<(), &'static str> {
     let Some((parent, previous, next)) = with_tree(|tree| {
         Some((
             tree.parent(node)?,
@@ -329,16 +353,20 @@ pub fn dispatch(
         "read" => {
             let policy = css_policy::cascade_policy(scope);
             let value = with_tree(|tree| inner_text(tree, node, &policy)).unwrap();
-            rv.set(v8::String::new(scope, &value).unwrap().into());
+            rv.set(unit_string(scope, &value).into());
         }
         "inner" => {
-            let value = args.get(2).to_rust_string_lossy(scope);
+            let Some(value) = dom_units(scope, args.get(2)) else {
+                return;
+            };
             html_popover::disconnect(scope, node, false);
             range_live::replacing_children(scope, node);
             with_tree_mut(|tree| set_inner(tree, node, &value));
         }
         "outer" => {
-            let value = args.get(2).to_rust_string_lossy(scope);
+            let Some(value) = dom_units(scope, args.get(2)) else {
+                return;
+            };
             if with_tree(|tree| tree.parent(node).is_some()).unwrap_or(false) {
                 html_popover::disconnect(scope, node, true);
             }

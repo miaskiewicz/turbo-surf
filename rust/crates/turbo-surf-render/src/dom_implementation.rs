@@ -187,19 +187,19 @@ fn invoke<'s>(
         if content.to_rust_string_lossy(scope) == "text/html" {
             return Some(v8::undefined(scope).into());
         }
-        let name = with_tree(|tree| tree.qualified_name(handle).map(str::to_owned)).flatten()?;
-        return key(scope, &name).map(Into::into);
+        let name = with_tree(|tree| tree.qualified_name_utf16(handle)).flatten()?;
+        return Some(unit_string(scope, &name).into());
     }
     let owner = document(scope, receiver)?;
     if operation == "check" {
         return Some(v8::undefined(scope).into());
     }
     if operation == "doctype" {
-        let name = args.get(2).to_rust_string_lossy(scope);
-        let public = args.get(3).to_rust_string_lossy(scope);
-        let system = args.get(4).to_rust_string_lossy(scope);
+        let name = dom_units(scope, args.get(2))?;
+        let public = dom_units(scope, args.get(3))?;
+        let system = dom_units(scope, args.get(4))?;
         let _dom = DomScope::for_object(scope, owner);
-        let node = with_tree_mut(|tree| tree.create_document_type(&name, &public, &system))?;
+        let node = with_tree_mut(|tree| tree.create_document_type_units(&name, &public, &system))?;
         return Some(wrap(scope, node).into());
     }
     let doc = parse_html_document(
@@ -209,12 +209,12 @@ fn invoke<'s>(
     );
     if operation == "html" {
         if args.get(2).boolean_value(scope) {
-            let title = args.get(3).to_rust_string_lossy(scope);
+            let title = dom_units(scope, args.get(3))?;
             let _dom = DomScope::for_object(scope, doc);
             with_tree_mut(|tree| {
                 let head = tree.query_selector("head")?;
                 let element = tree.create_element("title");
-                let text = tree.create_text_node(&title);
+                let text = tree.create_text_node_utf16(&title);
                 tree.append_child(element, text);
                 tree.append_child(head, element);
                 Some(())
@@ -227,8 +227,12 @@ fn invoke<'s>(
     if operation != "xml" {
         return None;
     }
-    let namespace = (!args.get(2).is_null()).then(|| args.get(2).to_rust_string_lossy(scope));
-    let qualified = args.get(3).to_rust_string_lossy(scope);
+    let namespace = if args.get(2).is_null() {
+        None
+    } else {
+        Some(dom_units(scope, args.get(2))?)
+    };
+    let qualified = dom_units(scope, args.get(3))?;
     {
         let _dom = DomScope::for_object(scope, doc);
         with_tree_mut(|tree| {
@@ -256,11 +260,15 @@ fn invoke<'s>(
         let _dom = DomScope::for_object(scope, doc);
         with_tree_mut(|tree| {
             let root = tree.root();
-            let node = tree.create_element_namespace(namespace.as_deref(), &qualified);
+            let node = tree.create_element_namespace_units(namespace.as_deref(), &qualified);
             tree.append_child(root, node);
         })?;
     }
-    let content = match namespace.as_deref() {
+    let content = match namespace
+        .as_deref()
+        .map(String::from_utf16_lossy)
+        .as_deref()
+    {
         Some("http://www.w3.org/1999/xhtml") => "application/xhtml+xml",
         Some("http://www.w3.org/2000/svg") => "image/svg+xml",
         _ => "application/xml",

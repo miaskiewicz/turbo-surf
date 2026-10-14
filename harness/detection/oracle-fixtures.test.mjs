@@ -47,9 +47,9 @@ test("iframe ownership controls retain their exact measured collectors", () => {
   assert.ok(fixture.ownership && fixture.adoption && fixture.baseResolution);
 });
 
-test("native microtask controls retain their measured probe and fresh Chrome collector", () => {
+test("native microtask and module controls retain their measured probe and Chrome collector", () => {
   const collector = readFileSync(new URL("./authored-dom-chrome.mjs", import.meta.url));
-  for (const name of ["microtask-order", "microtask-frame"]) {
+  for (const name of ["microtask-order", "microtask-frame", "dom-utf16-module"]) {
     const fixture = JSON.parse(
       readFileSync(new URL(`./fixtures/${name}-chrome155.json`, import.meta.url), "utf8"),
     );

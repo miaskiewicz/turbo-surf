@@ -1,0 +1,18 @@
+[
+  {
+    "id": "0",
+    "headers": []
+  },
+  {
+    "id": "1",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts"]]
+  },
+  {
+    "id": "2",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]]
+  },
+  {
+    "id": "3",
+    "headers": [["Content-Security-Policy-Report-Only", "sandbox"]]
+  }
+]

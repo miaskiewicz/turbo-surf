@@ -1,0 +1,244 @@
+{
+  "childProbeSha256": "1070ca71c766149afb92bbacacd793693383f8ba6192146c30df809d2c5b62c7",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "b7641794450cdbc2f00c6213b4cdabcd22ef7d2796233d2dfc913e86089bff67",
+  "probeSha256": "2b2eabe2d97b94ccfc817fe0833669f00b6e1729bb7e48b70627b53472b224bb",
+  "collectorSha256": "bbef884769808001478fbe0e7a8ca639c10f7177b8acc4a03a0a3e5ba65ef9a3",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "<127.0.0.1>",
+          "locationOrigin": "<127.0.0.1>",
+          "secure": true,
+          "isolated": false,
+          "cookie": null,
+          "storage": null,
+          "senderOrigin": "<127.0.0.1>"
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "null",
+          "locationOrigin": "<127.0.0.1>",
+          "secure": true,
+          "isolated": false,
+          "cookie": "SecurityError",
+          "storage": "SecurityError",
+          "senderOrigin": "null"
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": null,
+        "accessible": true
+      }
+    },
+    {
+      "id": "4",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "<127.0.0.1>",
+          "locationOrigin": "<127.0.0.1>",
+          "secure": true,
+          "isolated": false,
+          "cookie": null,
+          "storage": null,
+          "senderOrigin": "<127.0.0.1>"
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "5",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "<127.0.0.1>",
+          "locationOrigin": "<127.0.0.1>",
+          "secure": true,
+          "isolated": false,
+          "cookie": null,
+          "storage": null,
+          "senderOrigin": "<127.0.0.1>"
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "6",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "null",
+          "locationOrigin": "<127.0.0.1>",
+          "secure": true,
+          "isolated": false,
+          "cookie": "SecurityError",
+          "storage": "SecurityError",
+          "senderOrigin": "null"
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "7",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "<127.0.0.1>",
+          "locationOrigin": "<127.0.0.1>",
+          "secure": true,
+          "isolated": false,
+          "cookie": null,
+          "storage": null,
+          "senderOrigin": "<127.0.0.1>"
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "8",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "9",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "null",
+          "locationOrigin": "<127.0.0.1>",
+          "secure": true,
+          "isolated": false,
+          "cookie": "SecurityError",
+          "storage": "SecurityError",
+          "senderOrigin": "null"
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "10",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": null,
+        "accessible": true
+      }
+    },
+    {
+      "id": "11",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "<127.0.0.1>",
+          "locationOrigin": "<127.0.0.1>",
+          "secure": true,
+          "isolated": false,
+          "cookie": null,
+          "storage": null,
+          "senderOrigin": "<127.0.0.1>"
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "12",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "origin": "null",
+          "locationOrigin": "<localhost>",
+          "secure": true,
+          "isolated": false,
+          "cookie": "SecurityError",
+          "storage": "SecurityError",
+          "senderOrigin": "null"
+        },
+        "accessible": false
+      }
+    }
+  ]
+}

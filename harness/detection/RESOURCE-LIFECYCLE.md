@@ -95,3 +95,7 @@ The Permissions instance owns its original query closure through the native inte
 ### Ancestor response admission
 
 Ancestor checks borrow genuine parent contexts only during the synchronous document commit and retain only copied origin strings for policy evaluation. They add no native queued DOM handles or V8 context Globals. The existing replacement/retirement machinery owns the admitted or blocked document. Checks occur before the credentialless COEP exception; explicit framing restrictions apply to both normal and credentialless frames.
+
+### Sandbox origin and module request state
+
+CSP sandbox enforcement uses native context flags and security tokens before document script preparation. Top module origin/site state uses shared Rust Cell booleans, with no queued DOM handles or context Globals; each request snapshots their current values. Child loaders capture their native flags after admission. Script-disabled documents retain their native tree without preparing page scripts; normal retirement and ownership cleanup still applies. The remaining sandbox form/navigation/popup flags are explicitly unsupported.

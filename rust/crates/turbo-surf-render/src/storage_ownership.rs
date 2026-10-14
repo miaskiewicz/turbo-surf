@@ -476,7 +476,7 @@ mod contracts {
                     .as_mut()
                     .unwrap()
                     .nonces
-                    .insert(node, "secret".into())
+                    .insert(node, "secret".encode_utf16().collect())
             });
             let before = with_tree(Tree::storage_stats).unwrap();
             {

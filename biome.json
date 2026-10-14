@@ -73,7 +73,11 @@
       ".sidecar/**",
       "**/.chrome-profile/**",
       "harness/detection/artifacts/**",
-      ".native-builds/**"
+      ".native-builds/**",
+      "rust/crates/turbo-surf-render/src/utf16_*.js",
+      "rust/crates/turbo-surf-render/src/utf16_*.json",
+      "rust/crates/turbo-surf-render/src/script_text*.js",
+      "rust/crates/turbo-surf-render/src/script_text*.json"
     ]
   }
 }

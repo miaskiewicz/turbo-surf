@@ -6,7 +6,7 @@
   const string=value=>{if(typeof value==='symbol')throw new TypeErrorValue('Cannot convert a Symbol value to a string');return StringValue(value);};
   const type=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
   const namespaceXML='http://www.w3.org/XML/1998/namespace',namespaceXMLNS='http://www.w3.org/2000/xmlns/';
-  const xmlName=/^[:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}][:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}\-.0-9\u00b7\u0300-\u036f\u203f-\u2040]*$/u;
+  const xmlName=/^[:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\udfff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}][:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\udfff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}\-.0-9\u00b7\u0300-\u036f\u203f-\u2040]*$/u;
   define(xmlName,'exec',{__proto__:null,value:regexExec});
   function qualified(namespace,name) {
     if(!apply(regexTest,xmlName,[name]))throw new Exception('Invalid element name','InvalidCharacterError');

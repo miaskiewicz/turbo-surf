@@ -3,6 +3,7 @@ name="turbo-surf-v8-sdk-experiment"
 version="0.0.0"
 edition="2024"
 [dependencies]
+deno_error="=0.7.1"
 deno_core="=0.412.0"
 tokio={version="1",features=["rt-multi-thread","macros"]}
 [patch.crates-io]

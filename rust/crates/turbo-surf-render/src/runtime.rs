@@ -133,8 +133,7 @@ fn register_frame_modules(scope: &mut v8::PinScope, base: &str) -> Result<(), Js
             .get_slot::<FrameDocumentUrl>()
             .map_or_else(|| state.borrow::<Base>().0.clone(), |url| url.0.clone()),
         top_level_source: state.borrow::<Base>().0.clone(),
-        cookie_site_is_opaque,
-        opaque_origin,
+        origins: Rc::new(ModuleOrigins::new(opaque_origin, cookie_site_is_opaque)),
         jar: context
             .get_slot::<CspHandle>()
             .and_then(|handle| handle.partition.clone())
@@ -170,8 +169,7 @@ struct NetModuleLoader {
     base: String,
     source: String,
     top_level_source: String,
-    cookie_site_is_opaque: bool,
-    opaque_origin: bool,
+    origins: Rc<ModuleOrigins>,
     jar: Jar,
     ua: String,
     client_hints: ClientHints,
@@ -182,10 +180,26 @@ struct NetModuleLoader {
     module_stages: ModuleStages,
 }
 
+#[derive(Default)]
+struct ModuleOrigins {
+    opaque: std::cell::Cell<bool>,
+    cookie_site_opaque: std::cell::Cell<bool>,
+}
+impl ModuleOrigins {
+    fn new(opaque: bool, cookie_site_opaque: bool) -> Self {
+        Self {
+            opaque: std::cell::Cell::new(opaque),
+            cookie_site_opaque: std::cell::Cell::new(cookie_site_opaque),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct InlineModules(Rc<RefCell<std::collections::HashMap<String, InlineModule>>>);
 struct InlineModule {
     code: String,
+    #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
+    code_units: std::sync::Arc<[u16]>,
     base: String,
     #[cfg_attr(not(turbo_surf_native_proxy), allow(dead_code))]
     source: String,
@@ -326,14 +340,14 @@ fn permissions_policy_result(
     match action {
         0 => serde_json::json!(crate::permissions_policy::PermissionsPolicy::features()),
         1 => serde_json::json!(policy.allowlist(name, origin)),
-        2 => serde_json::json!(policy.allows(
-            name,
-            origin,
-            if target.is_empty() { origin } else { target }
-        )),
+        2 => serde_json::json!(if target.is_empty() {
+            policy.allows_self(name, origin)
+        } else {
+            policy.allows(name, origin, target)
+        }),
         3 => serde_json::json!(crate::permissions_policy::PermissionsPolicy::features()
             .into_iter()
-            .filter(|name| policy.allows(name, origin, origin))
+            .filter(|name| policy.allows_self(name, origin))
             .collect::<Vec<_>>()),
         4 => serde_json::json!(
             crate::permissions_policy::PermissionsPolicy::features().contains(&name)
@@ -691,11 +705,14 @@ fn op_module_staging_enabled() -> bool {
 #[op2]
 #[string]
 fn op_inline_module(
+    scope: &mut v8::PinScope,
     state: &mut OpState,
-    #[string] code: String,
+    code: v8::Local<v8::String>,
     #[string] base: &str,
     #[string] source: String,
 ) -> String {
+    let code_units = crate::browser_env::string_code_units(scope, code);
+    let code = String::from_utf16_lossy(&code_units);
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let specifier = format!(
@@ -707,6 +724,7 @@ fn op_inline_module(
         specifier.clone(),
         InlineModule {
             code,
+            code_units: code_units.into(),
             base: base.to_string(),
             source,
         },
@@ -723,6 +741,15 @@ impl ModuleLoader for NetModuleLoader {
             .get(specifier)
             .map(|source| source.source.clone())
             .unwrap_or_else(|| specifier.to_string())
+    }
+
+    #[cfg(turbo_surf_native_proxy)]
+    fn module_source_code_units(&self, specifier: &str) -> Option<std::sync::Arc<[u16]>> {
+        self.inline_sources
+            .0
+            .borrow()
+            .get(specifier)
+            .map(|source| source.code_units.clone())
     }
 
     #[cfg(turbo_surf_native_proxy)]
@@ -814,8 +841,8 @@ impl ModuleLoader for NetModuleLoader {
         let ua = self.ua.clone();
         let base = self.source.clone();
         let top_level_source = self.top_level_source.clone();
-        let cookie_site_is_opaque = self.cookie_site_is_opaque;
-        let opaque_origin = self.opaque_origin;
+        let cookie_site_is_opaque = self.origins.cookie_site_opaque.get();
+        let opaque_origin = self.origins.opaque.get();
         let client_hints = self.client_hints.clone();
         ModuleLoadResponse::Async(Box::pin(async move {
             let mut local = jar.borrow().fork_for_request();
@@ -951,7 +978,7 @@ struct NetworkLog(std::collections::VecDeque<serde_json::Value>);
 struct ClassicScriptJob {
     resolver: v8::Global<v8::PromiseResolver>,
     source: String,
-    code: String,
+    code: Vec<u16>,
     context: v8::Global<v8::Context>,
     waiter_context: v8::Global<v8::Context>,
     document: v8::Global<v8::Object>,
@@ -971,13 +998,15 @@ fn op_queue_classic_script<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &mut OpState,
     window: v8::Local<'s, v8::Object>,
-    #[string] code: String,
+    code: v8::Local<'s, v8::String>,
     #[string] source: String,
     inline: bool,
     muted_errors: bool,
     element: v8::Local<'s, v8::Object>,
     in_shadow_tree: bool,
 ) -> Result<v8::Local<'s, v8::Promise>, JsErrorBox> {
+    let code_units = crate::browser_env::string_code_units(scope, code);
+    let code = String::from_utf16_lossy(&code_units);
     let context = window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("script context unavailable"))?;
@@ -1021,12 +1050,15 @@ fn op_queue_classic_script<'s>(
                 .unwrap_or("")
                 .encode_utf16()
                 .count();
-            format!("{}{}{}", "\n".repeat(lines), " ".repeat(column), code)
+            let mut located = vec![10; lines];
+            located.extend(std::iter::repeat_n(32, column));
+            located.extend(code_units);
+            located
         } else {
-            code
+            code_units
         }
     } else {
-        code
+        code_units
     };
     queue.jobs.push_back(ClassicScriptJob {
         resolver: v8::Global::new(scope, resolver),
@@ -2058,6 +2090,13 @@ struct FrameSandbox {
     origin_restricted: bool,
 }
 impl FrameSandbox {
+    fn apply_csp(&mut self, policy: &crate::csp::Policy) {
+        if let Some((scripts, origin)) = policy.sandbox_restrictions() {
+            self.scripts_blocked |= scripts;
+            self.opaque |= origin;
+            self.origin_restricted |= origin;
+        }
+    }
     fn from_host(
         scope: &mut v8::PinScope,
         parent: v8::Local<v8::Context>,
@@ -2220,6 +2259,8 @@ struct FrameScriptSpec {
     index: usize,
     src: Option<String>,
     code: String,
+    #[serde(skip)]
+    code_units: Vec<u16>,
     source: String,
     line: usize,
     column: usize,
@@ -2230,7 +2271,7 @@ struct FrameScriptSpec {
     integrity: String,
 }
 struct FrameScriptPolicy {
-    inline: Vec<String>,
+    inline: Vec<Vec<u16>>,
     external: std::collections::HashSet<String>,
     scripts: Vec<FrameScriptSpec>,
     base: String,
@@ -2301,8 +2342,9 @@ fn script_source_bodies(html: &str) -> Vec<(usize, usize)> {
 }
 
 impl FrameScriptPolicy {
-    fn from_html(html: &str, url: &str, base_policy: &crate::csp::Policy) -> Self {
-        let tree = turbo_dom_parser::rtdom::tree::Tree::parse(html);
+    fn from_html_units(units: &[u16], url: &str, base_policy: &crate::csp::Policy) -> Self {
+        let html = String::from_utf16_lossy(units);
+        let tree = turbo_dom_parser::rtdom::tree::Tree::parse_utf16(units);
         let base = tree
             .query_selector_all("base[href]")
             .iter()
@@ -2323,7 +2365,8 @@ impl FrameScriptPolicy {
         let mut external = std::collections::HashSet::new();
         let mut scripts = Vec::new();
         for (index, &node) in tree.query_selector_all("script").iter().enumerate() {
-            let code = tree.text_content(node);
+            let code_units = tree.text_content_utf16(node);
+            let code = String::from_utf16_lossy(&code_units);
             let location = bodies
                 .iter()
                 .enumerate()
@@ -2373,7 +2416,7 @@ impl FrameScriptPolicy {
                 if let Some(src) = &src {
                     external.insert(src.clone());
                 } else {
-                    inline.push(code.clone());
+                    inline.push(code_units.clone());
                 }
             }
             let prefix = location.map_or("", |offset| &normalized[..offset]);
@@ -2381,6 +2424,7 @@ impl FrameScriptPolicy {
                 index,
                 src,
                 code,
+                code_units,
                 source: url.to_string(),
                 line: prefix.bytes().filter(|c| *c == b'\n').count(),
                 column: prefix
@@ -2409,18 +2453,38 @@ impl FrameScriptPolicy {
 }
 
 #[op2]
-#[serde]
-fn op_frame_scripts(
-    scope: &mut v8::PinScope,
-    window: v8::Local<v8::Object>,
-) -> Result<Vec<FrameScriptSpec>, JsErrorBox> {
+fn op_frame_scripts<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Array>, JsErrorBox> {
     let context = window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
     let policy = context
         .get_slot::<FrameScriptPolicy>()
         .ok_or_else(|| JsErrorBox::generic("frame script policy unavailable"))?;
-    Ok(policy.scripts.clone())
+    let metadata = serde_json::to_string(&policy.scripts)
+        .map_err(|error| JsErrorBox::generic(error.to_string()))?;
+    let source = v8::String::new(scope, &metadata)
+        .ok_or_else(|| JsErrorBox::generic("frame script metadata allocation failed"))?;
+    let scripts = v8::json::parse(scope, source)
+        .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+        .ok_or_else(|| JsErrorBox::generic("frame script metadata unavailable"))?;
+    let key = v8::String::new(scope, "code")
+        .ok_or_else(|| JsErrorBox::generic("frame script source key allocation failed"))?;
+    for (index, script) in policy.scripts.iter().enumerate() {
+        let object = scripts
+            .get_index(scope, index as u32)
+            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+            .ok_or_else(|| JsErrorBox::generic("frame script metadata record unavailable"))?;
+        let code =
+            v8::String::new_from_two_byte(scope, &script.code_units, v8::NewStringType::Normal)
+                .ok_or_else(|| JsErrorBox::generic("frame script source allocation failed"))?;
+        if object.create_data_property(scope, key.into(), code.into()) != Some(true) {
+            return Err(JsErrorBox::generic("frame script source snapshot failed"));
+        }
+    }
+    Ok(scripts)
 }
 
 struct WindowMessage {
@@ -2940,10 +3004,11 @@ fn op_frame_set_document<'s>(
     window: v8::Local<'s, v8::Object>,
     parent_window: v8::Local<'s, v8::Object>,
     host: v8::Local<'s, v8::Object>,
-    #[string] html: &str,
+    html: v8::Local<'s, v8::String>,
     #[string] metadata: &str,
     response_id: u32,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
+    let supplied_units = crate::browser_env::string_code_units(scope, html);
     let mut context = window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("iframe context unavailable"))?;
@@ -3008,6 +3073,17 @@ fn op_frame_set_document<'s>(
         replaced = Some(previous);
     }
     let mut sandbox = FrameSandbox::from_host(scope, parent, host);
+    if let Some(document) = &document {
+        let policy = crate::csp::Policy::new(
+            &document.url,
+            document
+                .headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("content-security-policy"))
+                .map(|(_, value)| value.clone()),
+        );
+        sandbox.apply_csp(&policy);
+    }
     let credentialless =
         crate::browser_env::node_attribute(scope, host, "credentialless").is_some();
     let embedding_blocked = document.as_ref().is_some_and(|document| {
@@ -3110,17 +3186,20 @@ fn op_frame_set_document<'s>(
             .unwrap_or(url)
             .to_string(),
     )));
-    let html = if embedding_blocked {
+    let html_units = if embedding_blocked {
         "<!doctype html><html><head></head><body></body></html>"
+            .encode_utf16()
+            .collect::<Vec<_>>()
     } else {
-        document
-            .as_ref()
-            .map_or(html, |document| document.html.as_str())
+        document.as_ref().map_or(supplied_units, |document| {
+            document.html.encode_utf16().collect()
+        })
     };
+    let html = String::from_utf16_lossy(&html_units);
     let mut csp = if let Some(document) = &document {
-        CspHandle::new(url, &document.headers, html)
+        CspHandle::new(url, &document.headers, &html)
     } else {
-        let handle = CspHandle::new(url, &[], html);
+        let handle = CspHandle::new(url, &[], &html);
         if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
             let inherited = parent_policy.policy.borrow().current().clone();
             let mut policy = handle.policy.borrow_mut();
@@ -3140,6 +3219,13 @@ fn op_frame_set_document<'s>(
     if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
         let parent_origin = window_origin(scope, parent);
         let child_origin = window_origin(scope, context);
+        if let Some(document) = &document {
+            csp.policy.borrow_mut().permissions_policy =
+                crate::permissions_policy::PermissionsPolicy::from_headers(
+                    &child_origin,
+                    &document.headers,
+                );
+        }
         let allow = crate::browser_env::node_attribute(scope, host, "allow").unwrap_or_default();
         csp.policy.borrow_mut().permissions_policy.inherit(
             &parent_policy.policy.borrow().permissions_policy,
@@ -3176,7 +3262,7 @@ fn op_frame_set_document<'s>(
         .borrow_mut::<CspContexts>()
         .0
         .insert(csp.id, csp);
-    let mut policy = FrameScriptPolicy::from_html(html, url, &initial_base);
+    let mut policy = FrameScriptPolicy::from_html_units(&html_units, url, &initial_base);
     let source = metadata
         .get("location")
         .and_then(|value| value.as_str())
@@ -3204,7 +3290,7 @@ fn op_frame_set_document<'s>(
     let scope = &mut v8::ContextScope::new(scope, context);
     #[cfg(turbo_surf_native_proxy)]
     register_frame_modules(scope, &document_base)?;
-    crate::browser_env::install_independent_html(scope, html);
+    crate::browser_env::install_independent_html_units(scope, &html_units);
     install_css_authorization(scope);
     #[cfg(turbo_surf_native_proxy)]
     window_proxy::install_document(scope);
@@ -3841,11 +3927,12 @@ fn op_queue_frame_script<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &mut OpState,
     window: v8::Local<'s, v8::Object>,
-    #[string] mut code: String,
+    source: v8::Local<'s, v8::String>,
     #[string] mut source_url: String,
     response_id: u32,
     script_index: u32,
 ) -> Result<v8::Local<'s, v8::Promise>, JsErrorBox> {
+    let mut code = crate::browser_env::string_code_units(scope, source);
     let caller = v8::Global::new(scope, scope.get_entered_or_microtask_context());
     let caller_local = v8::Local::new(scope, &caller);
     let context = window
@@ -3891,14 +3978,14 @@ fn op_queue_frame_script<'s>(
                     "frame script URL is not authorized by its document",
                 ));
             }
-            code = response.code;
+            code = response.code.encode_utf16().collect();
             source_url = response.url;
         } else {
-            let candidate = code.replace("\r\n", "\n");
+            let candidate = normalized_frame_source(&code);
             if !policy
                 .inline
                 .iter()
-                .any(|trusted| trusted.replace("\r\n", "\n").trim_start() == candidate.trim_start())
+                .any(|trusted| normalized_frame_source(trusted) == candidate)
             {
                 return Err(JsErrorBox::generic(
                     "frame script body is not authorized by its document",
@@ -3939,6 +4026,25 @@ fn op_queue_frame_script<'s>(
         element,
     });
     Ok(promise)
+}
+
+fn normalized_frame_source(units: &[u16]) -> Vec<u16> {
+    let mut source = Vec::with_capacity(units.len());
+    let mut previous_cr = false;
+    for &unit in units {
+        if unit == 10 && previous_cr {
+            previous_cr = false;
+            continue;
+        }
+        previous_cr = unit == 13;
+        source.push(if previous_cr { 10 } else { unit });
+    }
+    let start = source
+        .iter()
+        .take_while(|&&unit| char::from_u32(u32::from(unit)).is_some_and(char::is_whitespace))
+        .count();
+    source.drain(..start);
+    source
 }
 
 fn frame_document_url(scope: &mut v8::PinScope, state: &OpState) -> String {
@@ -4030,10 +4136,11 @@ fn op_set_inert_document_initializer(
 #[op2(reentrant)]
 fn op_parse_html_document<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    #[string] html: &str,
+    html: v8::Local<v8::String>,
     sanitize: bool,
 ) -> v8::Local<'s, v8::Object> {
-    crate::browser_env::parse_html_document(scope, html, sanitize)
+    let units = crate::browser_env::string_code_units(scope, html);
+    crate::browser_env::parse_html_document_units(scope, &units, sanitize)
 }
 
 #[op2(reentrant)]
@@ -7018,8 +7125,7 @@ function __resourceScriptAttributes(prepared) {
   return attributes;
 }
 function __prepareResourceScript(el) {
-  const raw = ops.op_prepare_resource_script(__document, el);
-  return raw ? __resourceJSONParse(raw) : null;
+  return ops.op_prepare_resource_script(__document, el);
 }
 __G.execScriptEl = async function (el, preparation = null, executionGate = null) {
   if (!el || !ops.op_document_scripts_allowed(__document)) return;
@@ -9391,6 +9497,10 @@ fn make_runtime_with_hints(
     }));
     let inline_sources = InlineModules::default();
     let module_credentials = ModuleCredentials::default();
+    let module_origins = Rc::new(ModuleOrigins::new(
+        turbo_surf_core::request_context::origin(base).is_none(),
+        turbo_surf_core::request_context::origin(base).is_none(),
+    ));
     let csp = CspHandle::new(base, &[], "");
     #[cfg(turbo_surf_native_proxy)]
     let module_stages = ModuleStages::default();
@@ -9436,8 +9546,7 @@ fn make_runtime_with_hints(
             base: base.to_string(),
             source: base.to_string(),
             top_level_source: base.to_string(),
-            cookie_site_is_opaque: turbo_surf_core::request_context::origin(base).is_none(),
-            opaque_origin: turbo_surf_core::request_context::origin(base).is_none(),
+            origins: module_origins.clone(),
             jar: jar.clone(),
             ua: ua.to_string(),
             client_hints: client_hints.clone(),
@@ -9460,6 +9569,7 @@ fn make_runtime_with_hints(
         deno_core::scope!(scope, &mut rt);
         let context = scope.get_current_context();
         context.set_slot(Rc::new(module_credentials));
+        context.set_slot(module_origins);
         context.set_slot(Rc::new(csp.clone()));
         let global = context.global(scope);
         let name = v8::String::new(scope, "Deno").unwrap();
@@ -9539,14 +9649,34 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
                 .0
                 .clone();
             *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
+            context.remove_slot::<FrameSandbox>();
+            if csp.policy.borrow().header.sandbox_restrictions().is_some() {
+                let mut flags = FrameSandbox {
+                    opaque: !context.get_security_token(&scope).is_string(),
+                    ..Default::default()
+                };
+                flags.apply_csp(&csp.policy.borrow().header);
+                if flags.origin_restricted {
+                    context.use_default_security_token();
+                }
+                context.set_slot(Rc::new(flags));
+            }
+            if let Some(origins) = context.get_slot::<ModuleOrigins>() {
+                origins.opaque.set(window_is_opaque(&mut scope, context));
+                origins
+                    .cookie_site_opaque
+                    .set(frame_cookie_site_is_opaque(&mut scope, context));
+            }
             let origin = window_origin(&mut scope, context);
+            csp.policy.borrow_mut().permissions_policy =
+                crate::permissions_policy::PermissionsPolicy::from_headers(&origin, &headers);
             let policy = csp.policy.borrow();
             let allowed = trustworthy_url(base)
                 && crate::resource_policy::isolated_opener(&headers)
                 && policy.embedder_policy != crate::resource_policy::EmbedderPolicy::UnsafeNone
                 && policy
                     .permissions_policy
-                    .allows("cross-origin-isolated", &origin, &origin);
+                    .allows_self("cross-origin-isolated", &origin);
             context.set_slot(Rc::new(SharedMemoryCapability {
                 allowed,
                 group: csp.id,
@@ -9561,7 +9691,12 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
     let origin = ModuleSpecifier::parse(base)
         .map(|url| url.origin().ascii_serialization())
         .unwrap_or_else(|_| "null".to_string());
-    rt.execute_script("<location>", format!("location.href = {base:?}; location.origin = {origin:?}; globalThis.origin = {origin:?}"))
+    let actual_origin = {
+        deno_core::scope!(scope, rt);
+        let context = scope.get_current_context();
+        window_origin(scope, context)
+    };
+    rt.execute_script("<location>", format!("location.href = {base:?}; location.origin = {origin:?}; globalThis.origin = {actual_origin:?}"))
         .map_err(|e| e.to_string())?;
     {
         deno_core::scope!(scope, rt);
@@ -9728,7 +9863,7 @@ fn execute_frame_script(
     rt: &mut JsRuntime,
     context: v8::Global<v8::Context>,
     source_url: &str,
-    code: &str,
+    code: &[u16],
 ) -> Result<(), ClassicScriptFailure> {
     let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
     let mut scope = scope.init();
@@ -9741,7 +9876,7 @@ fn execute_frame_script(
     let mut scope = v8::ContextScope::new(&mut scope, context);
     let scope = std::pin::pin!(v8::TryCatch::new(&mut scope));
     let scope = &mut scope.init();
-    let source = v8::String::new(scope, code)
+    let source = v8::String::new_from_two_byte(scope, code, v8::NewStringType::Normal)
         .ok_or_else(|| ClassicScriptFailure::host("script source allocation failed"))?;
     let resource = v8::String::new(scope, source_url)
         .ok_or_else(|| ClassicScriptFailure::host("script URL allocation failed"))?;

@@ -50,6 +50,9 @@ git -C "$repo" show HEAD:src/html_documents.rs > "$dest/html_documents.rs"
 git -C "$repo" show HEAD:src/document_basics.rs > "$dest/document_basics.rs"
 git -C "$repo" show HEAD:src/collection_records.rs > "$dest/collection_records.rs"
 git -C "$repo" show HEAD:src/document_basics.js > "$dest/document_basics.js"
+for file in dom_implementation.rs dom_implementation.js dom_implementation_tests.rs dom_implementation_probe.js dom_implementation_chrome155.json xml_factory_elements_probe.js xml_factory_elements_chrome155.json; do
+  git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
+done
 git -C "$repo" show HEAD:src/document_xpath.rs > "$dest/document_xpath.rs"
 git -C "$repo" show HEAD:src/document_xpath.js > "$dest/document_xpath.js"
 mkdir -p "$dest/xpath_provider"

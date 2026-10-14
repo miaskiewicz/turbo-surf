@@ -295,7 +295,8 @@
   property(g.Document.prototype, 'webkitIsFullScreen', function () { check(this, [9]); return this.fullscreenElement != null; });
   const project = ns.projectNativeNode, projectSetPrototype = Object.setPrototypeOf;
   ns.projectNativeNode = function (node) { project(node); if (apply(type, node, []) === 10) projectSetPrototype(node, documentTypeProto); return node; };
-  void g.document.doctype;
+  const projectedDoctype = g.document.doctype;
+  if (projectedDoctype) ns.projectNativeNode(projectedDoctype);
   const handlerNames = 'abort animationcancel animationend animationiteration animationstart auxclick beforecopy beforecut beforeinput beforematch beforepaste beforetoggle beforexrselect blur cancel canplay canplaythrough change click close command contentvisibilityautostatechange contextlost contextmenu contextrestored copy cuechange cut dblclick drag dragend dragenter dragleave dragover dragstart drop durationchange emptied ended error focus formdata freeze fullscreenchange fullscreenerror gotpointercapture input invalid keydown keypress keyup load loadeddata loadedmetadata loadstart lostpointercapture mousedown mouseenter mouseleave mousemove mouseout mouseover mouseup mousewheel paste pause play playing pointercancel pointerdown pointerenter pointerleave pointerlockchange pointerlockerror pointermove pointerout pointerover pointerrawupdate pointerup prerenderingchange progress ratechange readystatechange reset resize resume scroll scrollend scrollsnapchange scrollsnapchanging search securitypolicyviolation seeked seeking select selectionchange selectstart slotchange stalled submit suspend timeupdate toggle transitioncancel transitionend transitionrun transitionstart visibilitychange volumechange waiting webkitanimationend webkitanimationiteration webkitanimationstart webkitfullscreenchange webkitfullscreenerror webkittransitionend wheel'.split(' ');
   for (const event of handlerNames) {
     const name = 'on' + event;

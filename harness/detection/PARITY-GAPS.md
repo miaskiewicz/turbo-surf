@@ -22,6 +22,8 @@ integrated follow-up passes 73 focused Rust and 40 harness tests; the prior batc
 passed 848 default workspace tests plus strict Clippy/format. The
 published turbo-dom 0.5.3 consumer passes 35 focused adoption, frame ownership,
 transfer and teardown contracts. The
+native independent document factories and XML local-name/default-namespace helpers
+are integrated locally (117 canonical/37 affected Surf contracts pass). The
 newest layout control uses actual Chrome 155.0.8059.79 / V8 15.5.35.23; earlier
 controls and the development SDK use 155.0.8059.40 / 15.5.35.20. This patch mismatch
 remains explicit. A saved oracle is evidence for its exact authored behavior,

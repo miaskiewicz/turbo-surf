@@ -14,6 +14,7 @@ test("authored loopback controls can explicitly disable extensions", () => {
   for (const url of ["http://localhost:1234/", "http://127.0.0.1:1234/", "http://[::1]:1234/"])
     assert.deepEqual(chromeExtensionArgs({ url, disableExtensions: true }), [
       "--disable-extensions",
+      "--disable-component-extensions-with-background-pages",
     ]);
 });
 

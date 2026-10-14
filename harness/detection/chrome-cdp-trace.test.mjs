@@ -79,7 +79,10 @@ test(
       });
       const trace = JSON.parse(readFileSync(join(directory, "trace.json"), "utf8"));
       assert.equal(code, 0, JSON.stringify({ errors: trace.errors, logs }));
-      assert.deepEqual(trace.effectiveExtensionFlags, ["--disable-extensions"]);
+      assert.deepEqual(trace.effectiveExtensionFlags, [
+        "--disable-extensions",
+        "--disable-component-extensions-with-background-pages",
+      ]);
       assert.equal(
         trace.pages[0].environment.webdriver,
         false,

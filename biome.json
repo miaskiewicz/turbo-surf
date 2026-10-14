@@ -19,6 +19,11 @@
   },
   "files": {
     "ignore": [
+      "rust/crates/turbo-surf-render/src/xml_factory_elements_probe.js",
+      "rust/crates/turbo-surf-render/src/xml_factory_elements_chrome155.json",
+      "rust/crates/turbo-surf-render/src/dom_implementation.js",
+      "rust/crates/turbo-surf-render/src/dom_implementation_probe.js",
+      "rust/crates/turbo-surf-render/src/dom_implementation_chrome155.json",
       "rust/vendor/**",
       "rust/crates/turbo-surf-render/src/document_xpath.js",
       "rust/crates/turbo-surf-render/src/event_listeners.js",

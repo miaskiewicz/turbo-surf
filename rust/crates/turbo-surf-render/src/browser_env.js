@@ -2083,7 +2083,7 @@ if(typeof __ns.makeNativeFunction==='function'){
         if(namespace==='http://www.w3.org/2000/svg'){
           var localStart=0;for(var index=0;index<tag.length;index++)if(tag[index]===':')localStart=index+1;
           name=projectionApply(projectionSlice,tag,[localStart])==='svg'?'SVGSVGElement':'SVGElement';
-        }else name=namespace==='http://www.w3.org/1999/xhtml'?(tags[projectionApply(projectionUpper,tag,[])]||'HTMLElement'):'Element';
+        }else name=namespace==='http://www.w3.org/1999/xhtml'?(projectionApply(projectionHasOwn,tags,[projectionApply(projectionUpper,tag,[])])?tags[projectionApply(projectionUpper,tag,[])]:'HTMLElement'):'Element';
       }else name=type===11&&projectionApply(isShadowRoot,obj,[])?'ShadowRoot':({2:'Attr',10:'DocumentType',3:'Text',4:'CDATASection',7:'ProcessingInstruction',8:'Comment',9:'HTMLDocument',11:'DocumentFragment'})[type]||'Node';
       projectionSetPrototype(obj,prototypes[name]);
       projectionApply(projectionAdd,projected,[obj]);

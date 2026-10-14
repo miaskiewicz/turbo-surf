@@ -3348,6 +3348,20 @@ fn op_document_cookie_allowed(scope: &mut v8::PinScope, document: v8::Local<v8::
         .is_some_and(|context| !window_is_opaque(scope, context))
 }
 
+#[op2(fast)]
+fn op_set_inert_document_initializer(
+    scope: &mut v8::PinScope,
+    function: v8::Local<v8::Function>,
+) -> Result<(), JsErrorBox> {
+    if crate::browser_env::set_inert_document_initializer(scope, function) {
+        Ok(())
+    } else {
+        Err(JsErrorBox::generic(
+            "Inert document initializer installation interrupted",
+        ))
+    }
+}
+
 #[op2(reentrant)]
 fn op_parse_html_document<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -3360,7 +3374,7 @@ fn op_parse_html_document<'s>(
 #[op2(reentrant)]
 fn op_document_create_element<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    document: v8::Local<v8::Object>,
+    document: v8::Local<'s, v8::Object>,
     #[string] tag: &str,
 ) -> Result<v8::Local<'s, v8::Object>, JsErrorBox> {
     crate::browser_env::create_document_element(scope, document, tag)
@@ -3776,6 +3790,7 @@ deno_core::extension!(
         op_document_has_active_window,
         op_document_cookie_allowed,
         op_parse_html_document,
+        op_set_inert_document_initializer,
         op_document_create_element,
         op_document_import_node,
         op_frame_cookie_set,
@@ -4421,6 +4436,14 @@ __G.runTimers = (max = 100000) => {
 const __document = globalThis.document;
 const __documentType = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
 const __documentApply = Reflect.apply;
+const __DocumentMemberMap=Map,__DocumentMemberForEach=Map.prototype.forEach,__DocumentMemberGet=Map.prototype.get,__DocumentMemberSet=Map.prototype.set,__DocumentMemberDefine=Object.defineProperty;
+const __newDocumentMembers=(source)=> {
+  const result=new __DocumentMemberMap();
+  if(source)__documentApply(__DocumentMemberForEach,source,[(value,key)=>__documentApply(__DocumentMemberSet,result,[key,value])]);
+  __DocumentMemberDefine(result,"get",{__proto__:null,value:key=>__documentApply(__DocumentMemberGet,result,[key])});
+  __DocumentMemberDefine(result,"set",{__proto__:null,value:(key,value)=>__documentApply(__DocumentMemberSet,result,[key,value])});
+  return result;
+};
 const __parsedDocumentStates = __interfaceMap("Document.parsed");
 const __documentRuntimeState = {__proto__:null,document: __document, window: globalThis, frame: null, referrer: "", createElement: null, readyState: "complete", currentScript: null, fonts: __document.fonts, handlers: new Map()};
 const __documentState = (receiver) => {
@@ -4470,16 +4493,20 @@ const __parseDocument = (input, sanitize, options = undefined, documentURL = "ab
     throw new DOMException("Custom sanitizers for parsed documents are unsupported", "NotSupportedError");
   if (options?.sanitizer === "default") sanitize=true;
   const doc=ops.op_parse_html_document(String(input),sanitize);
-  const state={document:doc,window:null,frame:null,url:documentURL,inactive:true,referrer:"",readyState:"complete",currentScript:null,
-    fonts:__documentRuntimeState.fonts,handlers:new Map(),members:new Map(__documentRuntimeState.members),
+  return __registerInertDocument(doc,documentURL,"text/html");
+};
+const __registerInertDocument = (doc,documentURL,contentType) => {
+  const state={__proto__:null,document:doc,window:null,frame:null,url:documentURL,inactive:true,referrer:"",readyState:"complete",currentScript:null,
+    fonts:__documentRuntimeState.fonts,handlers:__newDocumentMembers(),members:__newDocumentMembers(__documentRuntimeState.members),
     readCookie:()=>"",writeCookie:()=>{},createElement:tag=>ops.op_document_create_element(doc,tag)};
-  state.members.set("contentType",{value:"text/html"});
+  state.members.set("contentType",{value:contentType});
   state.members.set("hidden",{value:true});state.members.set("visibilityState",{value:"hidden"});
-  state.members.set("adoptedStyleSheets",{value:[]});
   __parsedDocumentStates.set(doc,state);
-  Object.defineProperty(doc,"location",{get:__documentFunction(function(){__documentState(this);return null;},"get location",0),enumerable:true,configurable:false});
+  __DocumentMemberDefine(doc,"location",{__proto__:null,get:__documentFunction(function(){__documentState(this);return null;},"get location",0),enumerable:true,configurable:false});
   return doc;
 };
+ops.op_set_inert_document_initializer(__registerInertDocument);
+
 const __domParserInstances=new WeakSet();
 class DOMParser {
   constructor(){__domParserInstances.add(this);}
@@ -8103,7 +8130,7 @@ __G.domSig = () => {
 
   // Keep creation-context delegates private: a retained Document must not resolve
   // these through a WindowProxy that may already point at a newer navigation.
-  __documentRuntimeState.members = new Map();
+  __documentRuntimeState.members = __newDocumentMembers();
   for (const name of ["close", "open", "write", "writeln", "createEvent", "createNodeIterator", "createRange", "createTreeWalker", "elementFromPoint", "elementsFromPoint", "getSelection", "hasFocus", "implementation", "adoptedStyleSheets", "styleSheets", "contentType", "hidden", "visibilityState", "fullscreenElement"]) {
     const descriptor = Object.getOwnPropertyDescriptor(__document, name);
     if (!descriptor || descriptor.configurable === false) continue;

@@ -10,7 +10,7 @@ This checkpoint does not establish native Google acceptance. The previous defaul
 batch passed 848 workspace tests with strict Clippy and formatting. More recent
 local changes require a new full default/native build and paired inventory.
 
-Canonical DOM/CSS/Range code is now re-vendored from turbo-test `d3f44f0`
+Canonical DOM/CSS/Range code is now re-vendored from turbo-test `9f5a1f1`
 ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25)). The preceding full canonical
 checkpoint passes 133 Rust library and 63 npm tests; the latest stylesheet-adoption
 follow-up passes two new controls plus seven live-CSS and one repeated-bootstrap
@@ -34,6 +34,19 @@ checks are deferred until implementation items 1–4 and 6–7 finish; focused c
 continue as each change lands. The interim default workspace attempt compiled all
 targets but could not complete localhost core tests under its filesystem/network
 sandbox; it is not a completed full gate.
+
+Native document factories are now integrated locally with genuine independent
+Trees, opaque DOMImplementation receivers, constructors and doctype identity.
+XML element creation preserves case/default namespaces and keeps colon local names
+distinct from qualified createElementNS names. The canonical cohort passes 117
+tests; 37 affected Surf API, factory, adoption, frame and teardown contracts pass.
+XML parsing/CDATA, lossless UTF-16 and broader lifecycle behavior remain open.
+
+The latest private projection follow-up passes 119 canonical binding contracts and
+43 affected Surf API, factory, adoption, frame-ownership and host-input budget
+contracts. Native wrapping reads its trusted projector from the owner Document,
+avoiding page-replaced constructor/public namespace getters and inherited tag-map
+entries. Interrupted wrapping does not cache an unprojected object.
 
 Endpoint GC and queued Rust-only key snapshots are integrated. Removed Window
 messages still serialize valid transfers before discarding delivery; getter-driven

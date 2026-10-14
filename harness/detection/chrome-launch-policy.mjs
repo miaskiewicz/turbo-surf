@@ -4,5 +4,5 @@ export function chromeExtensionArgs(config) {
   const host = new URL(config.url).hostname;
   if (!["localhost", "127.0.0.1", "[::1]"].includes(host))
     throw new TypeError("disableExtensions is restricted to authored localhost controls");
-  return ["--disable-extensions"];
+  return ["--disable-extensions", "--disable-component-extensions-with-background-pages"];
 }

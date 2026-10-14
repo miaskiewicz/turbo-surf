@@ -170,13 +170,28 @@
   explicit close and thread exit. Regression controls cover live Range records in
   parent/iframe contexts, cached document replacement and both TLS initialization
   orders; the latest combined gates remain pending.
+- Explicit localhost Chrome controls disable component-extension background pages
+  as well as ordinary extensions, preventing forced unrelated service workers from
+  interrupting an authored control. Launch flags remain recorded and the zero-error
+  capture gate remains strict.
 - Consume the verified published turbo-dom 0.5.3 dependency across Rust consumers;
   its mutation-time ancestry, namespace and sibling metadata supports the remaining
   native observer integration.
 - Prevent first-time native node wrapping from consulting page-replaced Function,
   WeakSet, Object, Array and String methods; the canonical binding cohort passes
   114 focused tests on turbo-dom 0.5.3.
-- Canonical DOM/CSS/Range sources are re-vendored from turbo-test d3f44f0. The
+- Add genuine independent HTML/XML document factories and native constructor/doctype
+  ownership. Private inert-document runtime state resists page-replaced builtins;
+  XML element case, default namespaces and colon local names match saved Chrome
+  controls across HTML/XML/XHTML/SVG documents. The canonical cohort passes 117
+  tests and 37 affected Surf API/factory/adoption/frame/teardown contracts pass.
+  XML parsing, CDATA and broader document behavior remain incomplete.
+- Store the native node projector privately on its Document, avoiding page-defined
+  constructor/public projector getters and inherited tag-map entries. Interrupted
+  wrapping never caches an unprojected object. The canonical cohort passes 119
+  contracts; 43 affected Surf API, factory, adoption, ownership and host-input
+  budget contracts pass after re-vendoring.
+- Canonical DOM/CSS/Range sources are re-vendored from turbo-test 9f5a1f1. The
   preceding full checkpoint passes 133 Rust and 63 npm tests; the adoption follow-up
   passes two new controls and eight related regressions. Cross-document insertion preserves original wrapper
   realms and identity; Chrome-compatible variadic conversion drains fragments,

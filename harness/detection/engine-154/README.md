@@ -45,3 +45,9 @@ An earlier isolated final-test hang remains unclassified; the repeated passing
 runs do not establish that the intermittent hang was fixed.
 
 The shared helpers also support the pinned [Chrome 155 profile](../engine-155/README.md). `prepare.py --profile 155` selects its manifest; the build helper derives the engine requirement from prepared provenance. The 154 profile and its existing artifacts remain available for regression comparisons.
+
+Surf commands use a private manifest/lock workspace beneath the selected ignored
+SDK destination, with current source/fixtures linked from the repository. Cargo's
+experimental SDK resolution cannot overwrite the production lockfile. The
+`engine-workspace.test.mjs` offline gate verifies actual workspace resolution and
+preserves source/manifest updates without resetting the profile-owned lock.

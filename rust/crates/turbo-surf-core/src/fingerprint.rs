@@ -85,7 +85,7 @@ pub struct Profile {
     pub chrome_major: u16,
     /// Full build version for high-entropy UA-CH (`fullVersionList` /
     /// `uaFullVersion`), from the per-version [`crate::browser`] registry, e.g.
-    /// `"155.0.8059.40"`. The UA string stays reduced to `<major>.0.0.0`.
+    /// `"155.0.8059.79"`. The UA string stays reduced to `<major>.0.0.0`.
     pub full_version: &'static str,
     /// Top-level navigation header ORDER for this Chrome version (a fingerprint),
     /// from the [`crate::browser`] registry — Chrome reorders it across releases.
@@ -356,7 +356,7 @@ mod tests {
             brand_header(155, "155", false),
             "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\""
         );
-        assert_eq!(brand_header(155, "155.0.8059.40", true), "\"Google Chrome\";v=\"155.0.8059.40\", \"Chromium\";v=\"155.0.8059.40\", \"Not(A:Brand\";v=\"24.0.0.0\"");
+        assert_eq!(brand_header(155, "155.0.8059.79", true), "\"Google Chrome\";v=\"155.0.8059.79\", \"Chromium\";v=\"155.0.8059.79\", \"Not(A:Brand\";v=\"24.0.0.0\"");
         assert_eq!(
             brand_header(154, "154", false),
             "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\""

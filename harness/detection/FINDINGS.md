@@ -7,9 +7,9 @@ its retry. Chrome oracle cookies were never reused in native tests.
 ## Local integration checkpoint — 2026-10-14
 
 Native Google acceptance remains unverified. The current canonical binding is
-re-vendored from turbo-test `4ce3012` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25));
-it passes 158 focused contracts in canonical Rusty V8 149.3.0 and in Surf's default
-Rusty V8 150.4.0 configuration. These SDK versions identify the actual dependencies,
+re-vendored from turbo-test `95f04c4` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25));
+it passes 161 focused contracts in canonical Rusty V8 149.3.0 and in Surf's default
+Rusty V8 150.4.0 configuration and the genuine155.20 engine on SDK152.2.0. These SDK versions identify the actual dependencies,
 not the Chrome 155 target profile. Full default/native155 gates and current addon,
 shim/E2E, prototype inventory and Google artifacts remain pending.
 
@@ -21,13 +21,20 @@ SVGScriptElement and SVGImageElement projection/resource support are still gaps,
 so the tested interface subset is not full SVG or custom-element lifecycle parity.
 The mapping follows the [HTML element-interface algorithm](https://html.spec.whatwg.org/multipage/dom.html#elements-in-the-dom)
 and independently recorded behavior. Both canonical and default native cohorts
-passed 135 contracts at the previous checkpoint; the current integrated cohort
-passes 158. The new six actual PageSession contracts cover independent identities,
+passed 135 contracts before storage/isolation/color work; the current integrated
+cohort passes 161, including meta reflection, cached-thread teardown and token-list
+PutForwards behavior. The new six actual PageSession contracts cover independent identities,
 interleaved/concurrent polls, both close orders, real pending-fetch cancellation,
 cached/stateless evaluation and per-isolate observer queues. Inspector teardown
 with two live sessions also passes. The refreshed 48-contract session, tracing,
 frame GC/lifetime, host-input and message-transfer cohort passes strict affected
 Clippy. These focused results do not replace the final workspace gates.
+
+Cached runtime disposal also survives the real thread-exit order where binding
+TLS cells disappear first. Iframe sandbox lists preserve live native attributes,
+receiver brands, supported tokens and SameObject identity. PutForwards uses
+ordinary assignment: own value setters run and nonwritable own values leave the
+attribute untouched, matching the saved Chrome155 control.
 
 The runtime parks each persistent V8 isolate between operations and enters it for
 one future poll at a time, restoring the caller before asynchronous suspension.
@@ -44,7 +51,8 @@ retained payload) and at most 256 Documents. Budget rejection is recorded privat
 and does not fail page work. No forced GC is introduced. Two genuine storage
 contracts reclaim detached nodes/payloads while preserving retained Range/subtree
 identity and independent sessions; the refreshed focused runtime cohort passes 50
-contracts. Resource task-root integration and native155 certification remain open.
+contracts. The merged native155 session/storage and resource cohorts pass focused
+controls; final full-workspace/lifecycle certification remains open.
 
 Integrated and tested behavior includes real document factories and private node
 projection, native cross-document insertion and live Range boundaries, live CSSOM
@@ -76,7 +84,8 @@ guest code running during termination cleanup. Parser wrapper arrays release whe
 their lifecycle work finishes. COEP/CORP controls cover require-corp/credentialless,
 redirect cookie admission, DOM resources and inherited srcdoc policy. The integrated
 default resource/script/error/input/frame/session/storage cohort passes 35 focused
-contracts and strict affected Clippy; merged native155 resource reruns remain pending.
+contracts and strict affected Clippy; the merged genuine155 resource cohort passes 27 contracts, including modules,
+COEP, scripts, integrity, frame GC and actual session/storage integration.
 See [RESOURCE-LIFECYCLE.md](./RESOURCE-LIFECYCLE.md) for bounds and genuine task-root
 inventory. Parser reentry, SVG scripts, import maps and speculation rules remain open. Broader
 observer lifecycle, Intersection/Resize queues, slots and custom elements remain.
@@ -100,14 +109,24 @@ caught an iframe bootstrap allocation abort; private capability publication is n
 fallible and interruption recovery passes. Strict Clippy passes the affected core/
 render libraries and GC/geometry/referrer/input/transfer test targets.
 
-Still open: merged native155 resource/storage certification,
+Still open: full final native155/default release gates,
 full geometry and DOM lifecycle/parsing/lossless UTF-16, remaining CSP/COOP/COEP/
 permissions policy, fetch streaming/cancellation/cache and partitioned storage/access.
 The public storage API is integrated from verified published turbo-dom 0.5.4; final
-merged native155 resource/storage validation remains pending. Text provenance APIs remain under review
+focused default and native155 resource/storage validation passes; broader policy
+and full final gates remain pending. Text provenance APIs remain under review
 in turbo-html2pdf PR #20. The
 historical missing-own-member count is **94**, not a current measurement. The prior
 848-test workspace gate is historical and does not certify these changes.
+
+Current default HTTP/high-entropy JS profile fields use Chrome155.0.8059.79;
+older Chrome controls retain their original captured version. The additional
+source profile pins the official installed-release V8 revision
+`d89479ac5446a374c55a35be19b5a23437558d99` / 15.5.35.23. Its independent
+native compilation is in progress and is not yet certified. Experimental Cargo
+commands resolve copied manifests/private locks with current source links; real
+Cargo regressions verify production lock preservation and source/manifest updates.
+The detection harness now passes 41 offline contracts.
 
 The experimental native155 engine is 15.5.35.20-rusty; the current installed Chrome
 oracle is 155.0.8059.79 / V8 15.5.35.23. The merged native155 ownership/session/storage cohort now passes 39 focused

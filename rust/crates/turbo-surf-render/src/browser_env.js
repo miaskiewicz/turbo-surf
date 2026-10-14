@@ -2020,6 +2020,17 @@ if(typeof __ns.makeNativeFunction==='function'){
         get:__ns.makeNativeFunction(function(){check.call(this);var value=this.getAttribute(attribute);return nullable?value:value||'';},'get '+name,0),
         set:__ns.makeNativeFunction(function(value){check.call(this);if(nullable&&value==null){this.removeAttribute(attribute);return;}if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');this.setAttribute(attribute,String(value));},'set '+name,1)});
     }
+    var metaApply=Reflect.apply,metaString=String,metaTypeError=TypeError;
+    var metaGetAttribute=elementProto.getAttribute,metaSetAttribute=elementProto.setAttribute;
+    function checkMeta(receiver){
+      if(metaApply(getLocalTag,receiver,[])!=='meta'||metaApply(getNamespace,receiver,[])!=='http://www.w3.org/1999/xhtml')throw new metaTypeError('Illegal invocation');
+    }
+    [['name','name'],['httpEquiv','http-equiv'],['content','content'],['media','media'],['scheme','scheme']].forEach(function(pair){
+      var name=pair[0],attribute=pair[1];
+      Object.defineProperty(prototypes.HTMLMetaElement,name,{configurable:true,enumerable:true,
+        get:__ns.makeNativeFunction(function(){checkMeta(this);return metaApply(metaGetAttribute,this,[attribute])||'';},'get '+name,0),
+        set:__ns.makeNativeFunction(function(value){checkMeta(this);if(typeof value==='symbol')throw new metaTypeError('Cannot convert a Symbol to a string');metaApply(metaSetAttribute,this,[attribute,metaString(value)]);},'set '+name,1)});
+    });
     ['title','lang','accessKey'].forEach(function(name){reflectAttribute('HTMLElement',name,name.toLowerCase(),false);});
     var ariaNames='Atomic AutoComplete BrailleLabel BrailleRoleDescription Busy Checked ColCount ColIndex ColIndexText ColSpan Current Description Disabled Expanded HasPopup Hidden Invalid KeyShortcuts Label Level Live Modal MultiLine MultiSelectable Orientation Placeholder PosInSet Pressed ReadOnly Relevant Required RoleDescription RowCount RowIndex RowIndexText RowSpan Selected SetSize Sort ValueMax ValueMin ValueNow ValueText'.split(' ');
     ariaNames.forEach(function(name){reflectAttribute('Element','aria'+name,'aria-'+name.toLowerCase(),true);});

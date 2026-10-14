@@ -54,3 +54,27 @@ preparation patches reverse-verify with zero fuzz against their exact postimages
 Strict affected owned-code Clippy passes; the inherited Deno dependency reports
 its existing TcpStream::set_linger deprecation. This focused checkpoint does not
 certify the full workspace, rebuilt addon or fresh Google outcome.
+
+The additional `profiles/155-8059.79.json` pin follows the current installed
+Chrome's official DEPS (`d89479ac5446a374c55a35be19b5a23437558d99`) and V8
+15.5.35.23 version header. Build it in a separate destination:
+
+```sh
+python3 harness/detection/engine-155/prepare.py .native-builds/sdk155-8059.79 --profile-file harness/detection/engine-154/profiles/155-8059.79.json
+python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 2
+```
+
+Preparation and compilation are not certification; only the verified native
+version/archive/bindings and passing smoke/runtime controls establish success.
+The older 155.0.8059.40 profile and artifact remain preserved. The helper passes
+the verified engine version to the render build, which admits only the two
+committed native155 versions and checks the actual engine at runtime.
+
+Experimental Surf commands now copy Cargo manifests into a private SDK workspace
+and link current source/fixtures there. Cargo resolves its profile lock in that
+workspace, preserving the production lock even on cancellation or failed builds.
+Each SDK owns its separate Cargo resolution.
+Offline regressions exercise actual Cargo workspace resolution, source/manifest
+updates, plugin/member arguments and rejection of outside manifests. Keep the
+source stable during a single build; freeze the resulting binary before paired
+captures, as the detection harness already does.

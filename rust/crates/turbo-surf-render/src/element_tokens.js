@@ -2,8 +2,11 @@
   const g = globalThis, ns = g[Symbol.for('ts')];
   const getRecord = g.__getCollectionRecord, setRecord = g.__setCollectionRecord;
   const make = ns.makeNativeFunction, named = ns.makeNamedObject;
-  const hasOwn=Function.prototype.call.bind(Object.prototype.hasOwnProperty),create=Object.create,define=Object.defineProperty;
+  const hasOwn=Function.prototype.call.bind(Object.prototype.hasOwnProperty),create=Object.create,define=Object.defineProperty,set=Reflect.set,lower=Function.prototype.call.bind(String.prototype.toLowerCase);
   const tag = Object.getOwnPropertyDescriptor(g.Element.prototype, 'tagName').get;
+  const iframe = ns.domAccessor('nodeType',false,'HTML:iframe');
+  const sandboxTokens = new Set(['allow-downloads','allow-forms','allow-modals','allow-orientation-lock','allow-pointer-lock','allow-popups','allow-popups-to-escape-sandbox','allow-presentation','allow-same-origin','allow-scripts','allow-storage-access-by-user-activation','allow-top-navigation','allow-top-navigation-by-user-activation','allow-same-site-none-cookies']);
+  const supportedSandboxToken = Function.prototype.call.bind(Set.prototype.has,sandboxTokens);
   const getAttribute = g.Element.prototype.getAttribute, setAttribute = g.Element.prototype.setAttribute;
   const string = value => { if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol to a string'); return String(value); };
   const split = value => Array.from(new Set(value.split(/[\t\n\f\r ]+/).filter(Boolean)));
@@ -26,17 +29,17 @@
   method('remove',0,function(){const removed=Array.from(arguments,token);update(this,tokens(this).filter(value=>!removed.includes(value)));});
   method('toggle',1,function(value,force){value=token(value);const values=tokens(this),index=values.indexOf(value),present=index>=0;const enabled=arguments.length>1?!!force:!present;if(enabled&&!present){values.push(value);update(this,values);}else if(!enabled&&present){values.splice(index,1);update(this,values);}return enabled;});
   method('replace',2,function(oldValue,newValue){oldValue=token(oldValue);newValue=token(newValue);const values=tokens(this),index=values.indexOf(oldValue);if(index<0)return false;const replacement=values.indexOf(newValue);if(replacement>=0){if(replacement>index){values.splice(replacement,1);values[index]=newValue;}else if(replacement!==index)values.splice(index,1);}else values[index]=newValue;update(this,values);return true;});
-  method('supports',1,function(value){string(value);throw new TypeError('This attribute has no supported tokens');});
+  method('supports',1,function(value){value=string(value);if(record(this).attribute==='sandbox')return supportedSandboxToken(lower(value));throw new TypeError('This attribute has no supported tokens');});
   method('forEach',1,function(callback,thisArg){if(typeof callback!=='function')throw new TypeError('The callback is not callable');for(let index=0;index<tokens(this).length;index++)callback.call(thisArg,tokens(this)[index],index,this);});
   method('toString',0,function(){return raw(this);});
   for (const name of ['entries','keys','values']) Object.defineProperty(proto,name,{value:Array.prototype[name],writable:true,enumerable:true,configurable:true});
   Object.defineProperty(proto,Symbol.iterator,{value:proto.values,writable:true,configurable:true});
   Object.defineProperty(proto,'length',{get:make(function(){return tokens(this).length;},'get length',0),enumerable:true,configurable:true});
   Object.defineProperty(proto,'value',{get:make(function(){return raw(this);},'get value',0),set:make(function(value){const state=record(this);setAttribute.call(state.owner,state.attribute,string(value));},'set value',1),enumerable:true,configurable:true});
-  for (const [name,attribute] of [['classList','class'],['part','part']]) {
-    const read = function(){tag.call(this);let shared=getRecord(this);if(!shared){shared=create(null);shared.kind='Element';setRecord(this,shared);}if(!hasOwn(shared,'tokenLists'))define(shared,'tokenLists',{value:create(null),writable:true});const cache=shared.tokenLists;if(cache[attribute])return cache[attribute];const owner=this;
+  for (const [owner,name,attribute,check] of [[g.Element.prototype,'classList','class',tag],[g.Element.prototype,'part','part',tag],[g.HTMLIFrameElement.prototype,'sandbox','sandbox',iframe]]) {
+    const read = function(){check.call(this);let shared=getRecord(this);if(!shared){shared=create(null);shared.kind='Element';setRecord(this,shared);}if(!hasOwn(shared,'tokenLists'))define(shared,'tokenLists',{value:create(null),writable:true});const cache=shared.tokenLists;if(cache[attribute])return cache[attribute];const owner=this;
       const list=named(proto,function(operation,key){const values=tokens(list),index=/^(0|[1-9]\d*)$/.test(key)?Number(key):null,exists=index!==null&&index<values.length;if(operation==='indices')return values.map((_,i)=>i);if(operation==='keys')return [];if(operation==='get')return exists?values[index]:undefined;if(operation==='has')return exists;if(operation==='descriptor')return exists?{value:values[index],writable:false,enumerable:true,configurable:true}:undefined;if(operation==='set'||operation==='define')return exists?true:undefined;if(operation==='delete')return exists?false:undefined;},true);
       const state=create(null);state.kind='DOMTokenList';state.owner=owner;state.attribute=attribute;setRecord(list,state);cache[attribute]=list;return list;};
-    Object.defineProperty(g.Element.prototype,name,{get:make(read,'get '+name,0),set:make(function(value){Object.getOwnPropertyDescriptor(proto,'value').set.call(read.call(this),value);},'set '+name,1),enumerable:true,configurable:true});
+    Object.defineProperty(owner,name,{get:make(read,'get '+name,0),set:make(function(value){const list=read.call(this);set(list,'value',value,list);},'set '+name,1),enumerable:true,configurable:true});
   }
 })();

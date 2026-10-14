@@ -2,6 +2,23 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Dispose cached runtimes safely after native DOM thread-local cells are destroyed.
+  Genuine thread-exit regressions preserve isolate-owned cleanup and normal peer
+  activation. Add iframe sandbox DOMTokenList with live attributes, authentic
+  brands, token support and PutForwards behavior against a fresh Chrome155 control.
+  The combined canonical binding cohort passes 161 contracts.
+
+- Reflect HTMLMetaElement name/httpEquiv/content/media/scheme through genuine
+  native attributes with exact receiver brands, conversion and descriptors against
+  a fresh Chrome155 control. This enables authentic mutation-time CSP processing;
+  frozen base/live-meta policy integration is still in progress.
+- Isolate experimental SDK Cargo manifests/locks from the production workspace.
+  Actual offline Cargo regressions cover lock preservation, current source/version
+  updates and member/plugin argument handling. Add the official source pin for
+  installed Chrome155.0.8059.79 / V8 15.5.35.23 and align current HTTP/JS
+  full-version defaults with that oracle while preserving the older155
+  profile; compilation and merged certification of the new engine are in progress.
+
 - Native155 WindowProxy/Location/context slots use weak lookups and actual lexical
   private ownership. Per-caller weak method caches preserve function identity and
   intended retained targets without permanently rooting removed callers/frames.

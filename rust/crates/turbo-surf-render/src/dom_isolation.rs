@@ -12,7 +12,7 @@ struct Slot(Rc<World>);
 impl Drop for Slot {
     fn drop(&mut self) {
         self.0.disposed.set(true);
-        if selected(&self.0) {
+        if thread_available() && selected(&self.0) {
             let data = Data::take();
             CURRENT.with(|current| *current.borrow_mut() = None);
             drop(data);
@@ -71,18 +71,40 @@ impl Data {
         MISSING.with(|rows| *rows.borrow_mut() = self.missing);
     }
 }
+fn thread_available() -> bool {
+    CURRENT.try_with(|_| ()).is_ok()
+        && DOM.try_with(|_| ()).is_ok()
+        && OTHER_DOMS.try_with(|_| ()).is_ok()
+        && DOM_CONTEXTS.try_with(|_| ()).is_ok()
+        && STYLE.try_with(|_| ()).is_ok()
+        && LISTENERS.try_with(|_| ()).is_ok()
+        && ACTIVE.try_with(|_| ()).is_ok()
+        && MISSING.try_with(|_| ()).is_ok()
+        && event_listeners::isolation_available()
+        && mutation_observers::isolation_available()
+}
 fn current() -> Option<Rc<World>> {
-    CURRENT.with(|current| current.borrow().as_ref()?.upgrade())
+    CURRENT
+        .try_with(|current| current.borrow().as_ref()?.upgrade())
+        .ok()
+        .flatten()
 }
 fn selected(world: &Rc<World>) -> bool {
-    CURRENT.with(|current| {
-        current
-            .borrow()
-            .as_ref()
-            .is_some_and(|active| active.as_ptr() == Rc::as_ptr(world))
-    })
+    CURRENT
+        .try_with(|current| {
+            current
+                .borrow()
+                .as_ref()
+                .is_some_and(|active| active.as_ptr() == Rc::as_ptr(world))
+        })
+        .unwrap_or(false)
 }
 fn select(next: Option<Rc<World>>) {
+    // A cached runtime can outlive the binding's TLS cells at thread exit.
+    // Its isolate-owned saved world still drops before V8 handle invalidation.
+    if !thread_available() {
+        return;
+    }
     if let Some(next) = &next {
         if selected(next) {
             return;
@@ -126,6 +148,13 @@ pub struct NativeDomScope {
     previous_document: u64,
 }
 pub fn activate_isolate(isolate: &v8::Isolate) -> NativeDomScope {
+    if !thread_available() {
+        return NativeDomScope {
+            previous: None,
+            selected: None,
+            previous_document: 0,
+        };
+    }
     let selected = isolate.get_slot::<Slot>().map(|slot| slot.0.clone());
     let previous = current();
     if let Some(selected) = &selected {
@@ -194,6 +223,22 @@ mod contracts {
                 (*self.isolate).exit();
             }
         }
+    }
+    thread_local! {
+        static CACHED: RefCell<Option<Runtime>> = const { RefCell::new(None) };
+    }
+    #[test]
+    fn cached_native_world_disposes_after_binding_thread_local_cells() {
+        tests::init_v8();
+        std::thread::spawn(|| {
+            CACHED.with(|cached| {
+                let mut runtime = Runtime::new("thread owner");
+                assert_eq!(runtime.eval("document.body.textContent"), "thread owner");
+                *cached.borrow_mut() = Some(runtime);
+            });
+        })
+        .join()
+        .unwrap();
     }
     struct Runtime {
         isolate: Option<v8::OwnedIsolate>,

@@ -83,7 +83,7 @@ const HEADER_ORDER_153: &[&str] = &[
 pub const RELEASES: &[ChromeRelease] = &[
     ChromeRelease {
         major: 155,
-        full_version: "155.0.8059.40",
+        full_version: "155.0.8059.79",
         // Real localhost H2 capture on 2026-10-13 restores the classic order.
         header_order: HEADER_ORDER_153,
         navigation_accept: ACCEPT_155,

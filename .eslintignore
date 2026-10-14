@@ -43,3 +43,7 @@ rust/crates/turbo-surf-render/src/html_popover.js
 .native-builds/**
 rust/crates/turbo-surf-render/src/element_interface_probe.js
 rust/crates/turbo-surf-render/src/element_interface_chrome155.json
+rust/crates/turbo-surf-render/src/html_meta_probe.js
+rust/crates/turbo-surf-render/src/html_meta_chrome155.json
+rust/crates/turbo-surf-render/src/frame_tokens_probe.js
+rust/crates/turbo-surf-render/src/frame_tokens_chrome155.json

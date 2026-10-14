@@ -19,6 +19,9 @@ pub(super) struct IsolationState {
     enabled: bool,
     suppressed: HashMap<u64, usize>,
 }
+pub(super) fn isolation_available() -> bool {
+    SUPPRESSED.try_with(|_| ()).is_ok()
+}
 pub(super) fn take_isolation_state() -> IsolationState {
     IsolationState {
         enabled: ENABLED.with(|value| value.replace(false)),

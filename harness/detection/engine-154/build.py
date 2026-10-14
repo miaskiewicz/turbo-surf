@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 from prepare import verify_engine, verify_engine_patch
+from surf_workspace import prepare_workspace, cargo_arguments
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('destination',type=Path)
@@ -122,6 +123,10 @@ print(record['nativeVersionLine'])
 if args.surf:
     # Reuse this engine's object cache; keep production Cargo manifests intact.
     environment['TURBO_SURF_ENGINE']=engine_major
+    environment['TURBO_SURF_ENGINE_VERSION']=record['nativeVersionLine'].removeprefix('V8 ')
     # External Cargo plugins (notably clippy) only forward arguments after the
     # subcommand to their inner Cargo invocation. Keep the profile there.
-    sys.exit(subprocess.call(['cargo',args.surf[0],'--config',str(root/'cargo-config.toml'),*args.surf[1:]],env=environment))
+    source=Path(__file__).resolve().parents[3]
+    workspace=prepare_workspace(source,root/'surf-workspace')
+    arguments=cargo_arguments(args.surf,source,workspace)
+    sys.exit(subprocess.call(['cargo',arguments[0],'--config',str(root/'cargo-config.toml'),*arguments[1:]],env=environment))

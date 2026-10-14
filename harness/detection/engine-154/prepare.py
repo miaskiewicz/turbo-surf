@@ -111,10 +111,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('destination', type=Path)
     parser.add_argument('--profile', choices=['154', '155'], default='154')
+    parser.add_argument('--profile-file', type=Path, help='Use an additional revision-pinned profile with the selected Chrome major')
     parser.add_argument('--cache', type=Path, default=Path.home() / '.cache' / 'turbo-surf-engine')
     parser.add_argument('--adopt', action='store_true', help='Verify and record an existing prepared experiment')
     args = parser.parse_args()
-    profile = profile_for(args.profile)
+    profile = json.loads(args.profile_file.read_text()) if args.profile_file else profile_for(args.profile)
+    if profile['chromeMajor'] != int(args.profile):
+        raise ValueError('Engine profile major mismatch')
     root = args.destination.resolve()
     args.cache.mkdir(parents=True, exist_ok=True)
     if not args.adopt:

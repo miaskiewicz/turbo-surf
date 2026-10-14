@@ -4163,7 +4163,7 @@ const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || []
 // the UA string carries. Default matches turbo-surf-core's browser registry default
 // release; a caller rotating to a non-default major should pass fullVersion too (the
 // session pushes it from the wire profile so both layers stay coherent).
-const __fullVersion = String(__pick("fullVersion", "155.0.8059.40"));
+const __fullVersion = String(__pick("fullVersion", "155.0.8059.79"));
 const __brands=JSON.parse(ops.op_browser_brands(Number(__major), __major, false));
 const __fullBrands=JSON.parse(ops.op_browser_brands(Number(__major), __fullVersion, true));
 // Chrome ships exactly these five PDF-viewer plugins, all aliased to the internal

@@ -326,6 +326,9 @@ pub(super) struct IsolationState {
     subscriptions: HashMap<u32, v8::Weak<v8::Object>>,
     next_listener: u32,
 }
+pub(super) fn isolation_available() -> bool {
+    NODE_SUBSCRIPTIONS.try_with(|_| ()).is_ok()
+}
 pub(super) fn take_isolation_state() -> IsolationState {
     IsolationState {
         subscriptions: NODE_SUBSCRIPTIONS.with(|rows| std::mem::take(&mut *rows.borrow_mut())),

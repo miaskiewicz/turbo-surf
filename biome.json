@@ -37,6 +37,8 @@
       "rust/crates/turbo-surf-render/src/range_contents.js",
       "rust/crates/turbo-surf-render/src/css_live_probe.js",
       "rust/crates/turbo-surf-render/src/css_live_chrome155.json",
+      "rust/crates/turbo-surf-render/src/computed_color_probe.js",
+      "rust/crates/turbo-surf-render/src/computed_color_chrome155.json",
       "rust/crates/turbo-surf-render/src/css_adoption_probe.js",
       "rust/crates/turbo-surf-render/src/css_adoption_ownership_probe.js",
       "rust/crates/turbo-surf-render/src/css_adoption_chrome155.json",

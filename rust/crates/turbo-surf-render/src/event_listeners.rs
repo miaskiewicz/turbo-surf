@@ -321,6 +321,21 @@ thread_local! {
     static NODE_SUBSCRIPTIONS: RefCell<HashMap<u32,v8::Weak<v8::Object>>> = RefCell::new(HashMap::new());
     static NEXT_LISTENER: std::cell::Cell<u32> = const { std::cell::Cell::new(1) };
 }
+#[derive(Default)]
+pub(super) struct IsolationState {
+    subscriptions: HashMap<u32, v8::Weak<v8::Object>>,
+    next_listener: u32,
+}
+pub(super) fn take_isolation_state() -> IsolationState {
+    IsolationState {
+        subscriptions: NODE_SUBSCRIPTIONS.with(|rows| std::mem::take(&mut *rows.borrow_mut())),
+        next_listener: NEXT_LISTENER.with(|next| next.replace(1)),
+    }
+}
+pub(super) fn put_isolation_state(state: IsolationState) {
+    NODE_SUBSCRIPTIONS.with(|rows| *rows.borrow_mut() = state.subscriptions);
+    NEXT_LISTENER.with(|next| next.set(state.next_listener.max(1)));
+}
 pub(super) fn reset_node_subscriptions() {
     let _ = NODE_SUBSCRIPTIONS.try_with(|state| state.borrow_mut().clear());
 }

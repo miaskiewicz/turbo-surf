@@ -301,3 +301,10 @@ pub(super) fn register(scope: &mut v8::PinScope) {
     bind_method(scope, global, "__writeAppliedInlineStyle", write_inline);
     bind_method(scope, global, "__isInlineSheetAllowed", read_sheet);
 }
+impl PolicyState {
+    pub(super) fn sweep_storage(&mut self, tree: &Tree) {
+        self.sheets.retain(|node, _| tree.is_live(*node));
+        self.inline.retain(|node, _| tree.is_live(*node));
+        self.cascade = None;
+    }
+}

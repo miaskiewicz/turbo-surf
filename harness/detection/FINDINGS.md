@@ -7,8 +7,8 @@ its retry. Chrome oracle cookies were never reused in native tests.
 ## Local integration checkpoint — 2026-10-14
 
 Native Google acceptance remains unverified. The current canonical binding is
-re-vendored from turbo-test `e1e3d4c` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25));
-it passes 135 focused contracts in canonical Rusty V8 149.3.0 and in Surf's default
+re-vendored from turbo-test `4ce3012` ([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25));
+it passes 158 focused contracts in canonical Rusty V8 149.3.0 and in Surf's default
 Rusty V8 150.4.0 configuration. These SDK versions identify the actual dependencies,
 not the Chrome 155 target profile. Full default/native155 gates and current addon,
 shim/E2E, prototype inventory and Google artifacts remain pending.
@@ -21,8 +21,24 @@ SVGScriptElement and SVGImageElement projection/resource support are still gaps,
 so the tested interface subset is not full SVG or custom-element lifecycle parity.
 The mapping follows the [HTML element-interface algorithm](https://html.spec.whatwg.org/multipage/dom.html#elements-in-the-dom)
 and independently recorded behavior. Both canonical and default native cohorts
-pass135 contracts; nine host-input/termination contracts and strict affected
-render/core Clippy also pass.
+passed 135 contracts at the previous checkpoint; the current integrated cohort
+passes 158. The new six actual PageSession contracts cover independent identities,
+interleaved/concurrent polls, both close orders, real pending-fetch cancellation,
+cached/stateless evaluation and per-isolate observer queues. Inspector teardown
+with two live sessions also passes. The refreshed 48-contract session, tracing,
+frame GC/lifetime, host-input and message-transfer cohort passes strict affected
+Clippy. These focused results do not replace the final workspace gates.
+
+The runtime parks each persistent V8 isolate between operations and enters it for
+one future poll at a time, restoring the caller before asynchronous suspension.
+Native document/listener/observer/CSS/focus state belongs to its actual isolate.
+Synchronous expression completion now runs a real V8 microtask checkpoint before
+returning; the previous completion shortcut stranded MutationObserver delivery.
+The public turbo-dom 0.5.4 bounded storage collector is integrated with real weak
+wrapper roots and genuine host-job node pins. Thirteen storage and eight isolation
+contracts cover retention, collection budgets, teardown and cold installation.
+Collection remains explicit; automatic host-boundary scheduling and queued native
+handle pinning still require consumer integration.
 
 Integrated and tested behavior includes real document factories and private node
 projection, native cross-document insertion and live Range boundaries, live CSSOM
@@ -69,10 +85,11 @@ caught an iframe bootstrap allocation abort; private capability publication is n
 fallible and interruption recovery passes. Strict Clippy passes the affected core/
 render libraries and GC/geometry/referrer/input/transfer test targets.
 
-Still open: detached native storage reclamation integration, full geometry and DOM
-lifecycle/parsing/lossless UTF-16, remaining CSP/COOP/COEP/permissions policy, fetch
-streaming/cancellation/cache and partitioned storage/access. The additive detached-storage API is verified published in turbo-dom 0.5.4;
-consumer integration remains pending. Text provenance APIs remain under review
+Still open: automatic bounded native storage collection and queued-task pinning,
+full geometry and DOM lifecycle/parsing/lossless UTF-16, remaining CSP/COOP/COEP/
+permissions policy, fetch streaming/cancellation/cache and partitioned storage/access.
+The public storage API is integrated from verified published turbo-dom 0.5.4; final
+runtime scheduling remains pending. Text provenance APIs remain under review
 in turbo-html2pdf PR #20. The
 historical missing-own-member count is **94**, not a current measurement. The prior
 848-test workspace gate is historical and does not certify these changes.

@@ -43,7 +43,7 @@ git -C "$repo" show HEAD:src/event_listeners.js > "$dest/event_listeners.js"
 for file in range_contents.rs range_contents.js range_probe.js range_chrome155.json range_live.rs range_live_probe.js range_live_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
-for file in css_live_tests.rs css_live_probe.js css_live_chrome155.json css_adoption_tests.rs css_adoption_probe.js css_adoption_ownership_probe.js css_adoption_chrome155.json css_adoption_ownership_chrome155.json; do
+for file in css_live_tests.rs css_live_probe.js css_live_chrome155.json computed_color_probe.js computed_color_chrome155.json css_adoption_tests.rs css_adoption_probe.js css_adoption_ownership_probe.js css_adoption_chrome155.json css_adoption_ownership_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
 git -C "$repo" show HEAD:src/html_documents.rs > "$dest/html_documents.rs"
@@ -73,7 +73,7 @@ done
 for file in script_state.rs script_preparation_probe.js script_preparation_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
-for file in dom_ownership.rs realm_ownership.rs ownership_guard_tests.rs mutation_observers.rs mutation_observers.js mutation_observers_tests.rs mutation_observers_probe.js mutation_observers_chrome155.json; do
+for file in dom_ownership.rs realm_ownership.rs storage_ownership.rs dom_isolation.rs ownership_guard_tests.rs mutation_observers.rs mutation_observers.js mutation_observers_tests.rs mutation_observers_probe.js mutation_observers_chrome155.json; do
   git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
 done
 git -C "$repo" show HEAD:src/browser_sanitizer_default.json > "$dest/browser_sanitizer_default.json"

@@ -13,8 +13,14 @@
 
 #[path = "cssom_parser.rs"]
 mod cssom_parser;
+#[path = "dom_isolation.rs"]
+mod dom_isolation;
 #[path = "dom_ownership.rs"]
 mod dom_ownership;
+pub use dom_isolation::{activate_isolate, reset_isolate, NativeDomScope};
+#[path = "storage_ownership.rs"]
+mod storage_ownership;
+pub use storage_ownership::{collect_native_storage, NativeNodePin, NativeStorageReport};
 
 #[path = "collection_records.rs"]
 mod collection_records;
@@ -50,6 +56,7 @@ pub fn capture_popover_scheduler(scope: &mut v8::PinScope) {
 }
 
 pub fn clear_context_capabilities(scope: &mut v8::PinScope) {
+    let _isolate = activate_isolate(scope);
     let contexts = DOM_CONTEXTS
         .try_with(|contexts| contexts.borrow().values().cloned().collect::<Vec<_>>())
         .unwrap_or_default();
@@ -63,6 +70,8 @@ pub fn clear_context_capabilities(scope: &mut v8::PinScope) {
     }
 }
 pub fn clear_interface_records(isolate: &mut v8::Isolate) {
+    let _native = activate_isolate(isolate);
+    storage_ownership::clear(isolate);
     collection_records::clear(isolate);
     range_live::clear(isolate);
     mutation_observers::clear(isolate);
@@ -447,6 +456,7 @@ impl Drop for DomScope {
 /// Install an independent native document in the current V8 context. The caller's
 /// document stays live, and callbacks route by their receiver's creation context.
 pub fn install_independent_html(scope: &mut v8::PinScope, html: &str) {
+    dom_isolation::install(scope);
     let context = scope.get_current_context();
     let id = context
         .get_slot::<DomContextId>()
@@ -1498,9 +1508,10 @@ fn el_cascade_prop(
     let name = arg_str(scope, &args, 0);
     let policy = css_policy::cascade_policy(scope);
     let val = with_tree(|t| {
-        turbo_dom_parser::rtdom::cascade::computed_style_with_policy(t, h, &policy)
-            .get(&name)
-            .cloned()
+        let computed = turbo_dom_parser::rtdom::cascade::computed_style_with_policy(t, h, &policy);
+        Some(turbo_dom_parser::rtdom::cascade::get_property_value(
+            &computed, &name,
+        ))
     })
     .flatten()
     .unwrap_or_default();
@@ -5732,9 +5743,28 @@ fn make_native_named_object(
     }
 }
 
+fn normalize_computed_color(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let value = arg_str(scope, &args, 0);
+    let normalized =
+        turbo_dom_parser::rtdom::color::canonicalize_color(&value, true).unwrap_or(value);
+    if let Some(value) = v8::String::new(scope, &normalized) {
+        rv.set(value.into());
+    }
+}
+
 pub fn register_css_parser(scope: &mut v8::PinScope) {
     let global = scope.get_current_context().global(scope);
     bind_method(scope, global, "__parseCssNative", parse_css_native);
+    bind_method(
+        scope,
+        global,
+        "__normalizeComputedColor",
+        normalize_computed_color,
+    );
 }
 
 /// Install `window`/`document` + the DOM onto `globalThis` for the current context.
@@ -5746,6 +5776,7 @@ pub fn install(scope: &mut v8::PinScope) {
 }
 
 pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
+    dom_isolation::install(scope);
     // A replacement document is seeded before its new bootstrap probes native
     // methods. Projecting with the previous bootstrap here would delete those
     // raw own methods before their replacement prototypes have been constructed.
@@ -7117,7 +7148,7 @@ mod tests {
         let source=v8::String::new(scope,r#"(()=>{const a=document.getElementById('a'),early=document.getElementById('early'),late=document.getElementById('late');
             const initial=early.sheet!==null && late.sheet===null && document.styleSheets.length===1 && a.getAttribute('style')==='color:blue' && a.style.color==='';
             early.remove();a.style.color='green';const cssom=a.style.color==='green' && a.getAttribute('style')==='color: green;';
-            a.setAttribute('style','color:red');const blocked=a.style.color==='green' && a.getAttribute('style')==='color:red' && getComputedStyle(a).color==='green';
+            a.setAttribute('style','color:red');const blocked=a.style.color==='green' && a.getAttribute('style')==='color:red' && getComputedStyle(a).color==='rgb(0, 128, 0)';
             const inherited=globalThis[Symbol.for('ts')].cascadeProp.call(document.getElementById('child'),'color')==='rgb(0, 128, 0)';
             a.removeAttribute('style');const removed=a.style.color==='';
             const privateHooks=typeof globalThis.__writeAppliedInlineStyle==='undefined' && !globalThis[Symbol.for('ts')].attachLinkedStyleSheet && !globalThis[Symbol.for('ts')].readStyleSheetRules;

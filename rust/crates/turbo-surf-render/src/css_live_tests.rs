@@ -182,3 +182,33 @@ fn private_css_export_enforces_its_actual_serialized_text_budget() {
     );
     assert_eq!(value, "RangeError:Live stylesheet text budget exceeded");
 }
+
+#[test]
+fn native_computed_color_resolves_initial_inherited_keywords_and_live_declarations() {
+    let actual = run(
+        "<!doctype html><body></body>",
+        &format!(
+            "JSON.stringify({})",
+            include_str!("computed_color_probe.js")
+                .trim()
+                .trim_end_matches(';')
+        ),
+    );
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("computed_color_chrome155.json")).unwrap();
+    assert_eq!(actual, expected["result"]);
+}
+
+#[test]
+fn native_computed_color_keeps_linked_sheet_values_and_inherits_without_guest_global_reads() {
+    let actual=run("<!doctype html><head><link id=link rel=stylesheet href=/authored.css></head><body><div id=parent><span id=child></span></div></body>",r#"(()=>{
+      __cssTestHost.attachLinked(document.getElementById('link'),'#parent { color: green }','http://localhost/authored.css',false);
+      const parent=document.getElementById('parent'),child=document.getElementById('child');
+      const read=getComputedStyle;globalThis.getComputedStyle=()=>{throw Error('guest global must not be consulted')};
+      return JSON.stringify({parent:read(parent).color,child:read(child).color,private:typeof __normalizeComputedColor});
+    })()"#);
+    assert_eq!(
+        actual,
+        serde_json::json!({"parent":"rgb(0, 128, 0)","child":"rgb(0, 128, 0)","private":"undefined"})
+    );
+}

@@ -7,10 +7,15 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
-workspace now resolves the published `turbo-dom` 0.5.3 crate, including native mutation-event support,
-fragment/document APIs and compact ordinary-node/attribute storage.
-The 0.5.3 release tag is on PR #9 merge commit `8112bbf`; registry artifacts were verified.
-The additive reclamation API is published in 0.5.4; consumer integration is in progress.
+workspace now resolves published `turbo-dom` 0.5.4, including native mutation
+batches, fragment/document APIs and bounded storage collection. Its release tag
+identifies PR #10 merge commit `181ed8996e7ddc9561b72ed234f0aeacc2ccc871`;
+the npm metadata, release workflow and official crate archive hash were verified.
+The canonical binding consumes collection through the public API with genuine
+weak wrapper roots and native job pins. Collection remains explicit; automatic
+host-boundary scheduling is still in progress. Native DOM state is isolate-owned;
+PageSessions enter their V8 isolate and native world for each future poll, then
+restore the caller before yielding.
 
 ## Crates
 

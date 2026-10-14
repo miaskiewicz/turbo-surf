@@ -15,7 +15,17 @@ async fn debugger_inventory_captures_real_eval_function_and_child_sources() {
         .await
         .unwrap();
     assert_eq!(page.eval("globalThis.__RESULT=JSON.stringify([dynamicValue,functionValue,document.querySelector('iframe').contentWindow.childValue])").await.unwrap(), "[42,73,19]");
+    let mut peer = PageSession::open("<body>peer", "https://peer.test/", "", "", 5000)
+        .await
+        .unwrap();
     page.close();
+    assert_eq!(
+        peer.eval_expression("document.body.textContent")
+            .await
+            .unwrap(),
+        "peer"
+    );
+    peer.close();
     std::env::remove_var("TURBO_SURF_JS_TRACE");
     let inventory: Value =
         serde_json::from_slice(&std::fs::read(directory.join("isolate-0/inventory.json")).unwrap())

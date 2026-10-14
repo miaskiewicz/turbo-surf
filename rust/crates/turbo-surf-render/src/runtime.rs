@@ -35,7 +35,25 @@ use turbo_surf_core::url::resolve;
 // Clear private handles before deno_core begins isolate disposal, including error
 // exits and thread-local runtimes. Weak registry callbacks can otherwise outlive
 // their Rust records during the isolate's own slot teardown.
-struct OwnedRuntime(JsRuntime);
+#[path = "runtime_activation.rs"]
+mod runtime_activation;
+use runtime_activation::ActivationKey;
+
+struct OwnedRuntime(JsRuntime, bool, ActivationKey);
+
+impl OwnedRuntime {
+    fn park(&mut self) {
+        if !self.1 {
+            // Balance rusty_v8's constructor entry before a session can yield.
+            unsafe { self.0.v8_isolate().exit() };
+            self.1 = true;
+        }
+    }
+
+    fn activation_key(&self) -> ActivationKey {
+        self.2
+    }
+}
 
 impl std::ops::Deref for OwnedRuntime {
     type Target = JsRuntime;
@@ -52,6 +70,12 @@ impl std::ops::DerefMut for OwnedRuntime {
 
 impl Drop for OwnedRuntime {
     fn drop(&mut self) {
+        if self.1 {
+            // OwnedIsolate::drop balances its constructor entry. A parked
+            // session restores that entry for cleanup and underlying disposal.
+            unsafe { self.0.v8_isolate().enter() };
+        }
+        let _native = crate::browser_env::activate_isolate(self.0.v8_isolate());
         {
             deno_core::scope!(scope, self.0);
             crate::browser_env::clear_context_capabilities(scope);
@@ -70,7 +94,7 @@ impl Drop for OwnedRuntime {
                 }
             }
         }
-        crate::browser_env::reset();
+        crate::browser_env::reset_isolate(self.0.v8_isolate());
         crate::browser_env::clear_interface_records(self.0.v8_isolate());
         crate::message_ports::clear(&mut self.0);
     }
@@ -8902,7 +8926,8 @@ fn make_runtime_with_hints(
     state.put::<Ua>(Ua(ua.to_string()));
     state.put::<ClientHints>(client_hints);
     drop(state);
-    OwnedRuntime(rt)
+    let key = ActivationKey::new(rt.v8_isolate());
+    OwnedRuntime(rt, false, key)
 }
 
 /// Graft the native DOM binding onto the runtime's context (parsing `html` into the
@@ -9042,20 +9067,23 @@ pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
     EVAL_RT.with(|cell| {
         let mut slot = cell.borrow_mut();
         if slot.as_ref().is_none_or(|(_, installed)| installed != html) {
-            if let Some((mut previous, _)) = slot.take() {
-                crate::browser_env::reset();
-                crate::browser_env::clear_interface_records(previous.v8_isolate());
+            if let Some((previous, _)) = slot.take() {
                 drop(previous);
             }
             let mut rt = make_runtime("about:blank", "", "");
-            if let Err(error) = install_dom(&mut rt, html, "about:blank") {
-                crate::browser_env::reset();
-                crate::browser_env::clear_interface_records(rt.v8_isolate());
-                return Err(error);
+            {
+                let _activation = rt.activation_key().enter();
+                if let Err(error) = install_dom(&mut rt, html, "about:blank") {
+                    crate::browser_env::reset_isolate(rt.v8_isolate());
+                    crate::browser_env::clear_interface_records(rt.v8_isolate());
+                    return Err(error);
+                }
             }
+            rt.park();
             *slot = Some((rt, html.to_string()));
         }
         let (rt, _) = slot.as_mut().expect("eval runtime present");
+        let _activation = rt.activation_key().enter();
         let global = rt
             .execute_script(page_script_name("about:blank"), script.to_string())
             .map_err(|e| e.to_string())?;
@@ -9069,8 +9097,9 @@ pub fn run_with_dom(html: &str, script: &str) -> Result<String, String> {
 pub fn render_html(html: &str, script: &str) -> Result<String, String> {
     let _task_context = sync_task_runtime().enter();
     let mut rt = make_runtime("about:blank", "", "");
+    let _activation = rt.activation_key().enter();
     let out = run_sync(&mut rt, html, script);
-    crate::browser_env::reset();
+    crate::browser_env::reset_isolate(rt.v8_isolate());
     out
 }
 
@@ -9216,6 +9245,12 @@ async fn drain_event_loop_until_completion(
     completion: Option<&v8::Global<v8::Value>>,
 ) -> Result<(), String> {
     let mut frame_timer_budget = 200000u32;
+    // Even a synchronous result ends a script job. Observer and Promise
+    // microtasks must run before the operation-completion shortcut can return.
+    rt.v8_isolate().perform_microtask_checkpoint();
+    if rt.v8_isolate().is_execution_terminating() {
+        return Err("Microtask execution was interrupted".into());
+    }
     loop {
         // Operation completion is independent of unrelated timers, fetches and scripts.
         // The native Promise stays private, so guest code cannot forge this gate.
@@ -9496,7 +9531,10 @@ pub async fn render_page_with_budget(
         }
     });
 
-    let result = run_async(&mut rt, html, base, script).await;
+    rt.park();
+    let key = rt.activation_key();
+    let result = key.during(run_async(&mut rt, html, base, script)).await;
+    let _activation = key.enter();
     done.store(true, Ordering::Relaxed);
     let _ = watchdog.join();
     let out = if exceeded.load(Ordering::Relaxed) {
@@ -9504,7 +9542,7 @@ pub async fn render_page_with_budget(
     } else {
         result.map_err(|e| budget_msg(&e, budget_ms))
     };
-    crate::browser_env::reset();
+    crate::browser_env::reset_isolate(rt.v8_isolate());
     out
 }
 
@@ -9626,7 +9664,10 @@ pub async fn render_capture_cookies_with_request_state(
         }
     });
 
-    let result = run_async(&mut rt, html, base, script).await;
+    rt.park();
+    let key = rt.activation_key();
+    let result = key.during(run_async(&mut rt, html, base, script)).await;
+    let _activation = key.enter();
     done.store(true, Ordering::Relaxed);
     let _ = watchdog.join();
     // Read the earned cookies out of the shared jar regardless of run outcome.
@@ -9638,7 +9679,7 @@ pub async fn render_capture_cookies_with_request_state(
         out
     };
     let doc = result.map_err(|e| budget_msg(&e, budget_ms));
-    crate::browser_env::reset();
+    crate::browser_env::reset_isolate(rt.v8_isolate());
     Ok((doc?, storage))
 }
 
@@ -10081,9 +10122,17 @@ pub async fn render_hydrate_with_budget(
     budget_ms: u64,
 ) -> Result<String, String> {
     let mut rt = make_runtime(base, cookies, ua);
-    prepare_hydration(&mut rt, html, base)?;
+    {
+        let _activation = rt.activation_key().enter();
+        prepare_hydration(&mut rt, html, base)?;
+    }
     let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
-    let result = hydrate_installed_document(&mut rt, base, "").await;
+    rt.park();
+    let key = rt.activation_key();
+    let result = key
+        .during(hydrate_installed_document(&mut rt, base, ""))
+        .await;
+    let _activation = key.enter();
     drop(watchdog);
     // Best-effort on a budget-exceed: a dev-mode SPA (Next `next dev`) can loop past the
     // budget without ever reaching idle, yet the partial DOM rendered so far is exactly
@@ -10091,7 +10140,7 @@ pub async fn render_hydrate_with_budget(
     // clear the terminate state so the isolate is usable, then return the reached DOM
     // instead of discarding it. Genuine non-budget errors (install/parse) still propagate.
     let out = best_effort_on_budget(&mut rt, result, budget_ms);
-    crate::browser_env::reset();
+    crate::browser_env::reset_isolate(rt.v8_isolate());
     out
 }
 
@@ -10148,24 +10197,28 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
     });
-    let result = async {
-        install_dom(&mut rt, html, base)?;
-        rt.execute_script("<script>", script.to_string())
-            .map_err(|e| e.to_string())?;
-        drain_event_loop(&mut rt).await?;
-        rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
-            .map_err(|e| e.to_string())?;
-        drain_event_loop(&mut rt).await?;
-        let g = rt
-            .execute_script("<result>", "String(globalThis.__RESULT || '')")
-            .map_err(|e| e.to_string())?;
-        read_string(&mut rt, g)
-    }
-    .await;
+    rt.park();
+    let key = rt.activation_key();
+    let result = key
+        .during(async {
+            install_dom(&mut rt, html, base)?;
+            rt.execute_script("<script>", script.to_string())
+                .map_err(|e| e.to_string())?;
+            drain_event_loop(&mut rt).await?;
+            rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
+                .map_err(|e| e.to_string())?;
+            drain_event_loop(&mut rt).await?;
+            let g = rt
+                .execute_script("<result>", "String(globalThis.__RESULT || '')")
+                .map_err(|e| e.to_string())?;
+            read_string(&mut rt, g)
+        })
+        .await;
+    let _activation = key.enter();
     done.store(true, Ordering::Relaxed);
     let _ = watchdog.join();
     let out = result.map_err(|e| budget_msg(&e, DEFAULT_RENDER_BUDGET_MS));
-    crate::browser_env::reset();
+    crate::browser_env::reset_isolate(rt.v8_isolate());
     out
 }
 
@@ -10182,7 +10235,7 @@ fn prepare_hydration(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), S
         Ok(())
     });
     if result.is_err() {
-        crate::browser_env::reset();
+        crate::browser_env::reset_isolate(rt.v8_isolate());
         crate::browser_env::clear_interface_records(rt.v8_isolate());
     }
     result
@@ -10592,16 +10645,25 @@ impl PageSession {
             .init_script = init_script.to_owned();
         rt.op_state().borrow_mut().put(storage);
         rt.op_state().borrow_mut().borrow_mut::<ResponseHeaders>().0 = response_headers.to_vec();
-        prepare_hydration(&mut rt, html, base)?;
+        {
+            let _activation = rt.activation_key().enter();
+            prepare_hydration(&mut rt, html, base)?;
+        }
         let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
         let exceeded = watchdog.exceeded.clone();
-        let result = hydrate_installed_document(&mut rt, base, init_script).await;
+        rt.park();
+        let key = rt.activation_key();
+        let result = key
+            .during(hydrate_installed_document(&mut rt, base, init_script))
+            .await;
         drop(watchdog);
         if let Some(inventory) = &mut script_inventory {
+            let _activation = key.enter();
             inventory.flush();
         }
         let budget_exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
         let mut unsupported_csp = {
+            let _activation = rt.activation_key().enter();
             let context = rt.main_context();
             let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
             let scope = &mut scope.init();
@@ -10653,7 +10715,8 @@ impl PageSession {
                 })
             }
             Err(e) => {
-                crate::browser_env::reset();
+                let _activation = rt.activation_key().enter();
+                crate::browser_env::reset_isolate(rt.v8_isolate());
                 Err(e)
             }
         }
@@ -10664,6 +10727,11 @@ impl PageSession {
     /// `String(globalThis.__RESULT || '')` — scripts that need to return a value stash
     /// it there.
     pub async fn eval(&mut self, script: &str) -> Result<String, String> {
+        let key = self.rt.activation_key();
+        key.during(self.eval_active(script)).await
+    }
+
+    async fn eval_active(&mut self, script: &str) -> Result<String, String> {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
         let drained = {
@@ -10705,6 +10773,16 @@ impl PageSession {
     }
 
     async fn eval_expression_result(
+        &mut self,
+        expression: &str,
+        json: bool,
+    ) -> Result<String, String> {
+        let key = self.rt.activation_key();
+        key.during(self.eval_expression_active(expression, json))
+            .await
+    }
+
+    async fn eval_expression_active(
         &mut self,
         expression: &str,
         json: bool,
@@ -10752,6 +10830,11 @@ impl PageSession {
     /// Guest dispatchEvent still creates untrusted input; this entry point is
     /// available only to the Rust session owner. Supports the harness step schema.
     pub async fn input(&mut self, steps: &serde_json::Value) -> Result<(), String> {
+        let key = self.rt.activation_key();
+        key.during(self.input_active(steps)).await
+    }
+
+    async fn input_active(&mut self, steps: &serde_json::Value) -> Result<(), String> {
         if self.closed {
             return Err("Page session is closed".into());
         }
@@ -10817,6 +10900,7 @@ impl PageSession {
     /// Host-only retention diagnostics; never installed on the guest global.
     #[doc(hidden)]
     pub fn native_heap_snapshot_for_testing(&mut self) -> Vec<u8> {
+        let _activation = self.rt.activation_key().enter();
         let mut snapshot = Vec::new();
         self.rt.v8_isolate().take_heap_snapshot(|chunk| {
             snapshot.extend_from_slice(chunk);
@@ -10828,6 +10912,7 @@ impl PageSession {
     /// Host-only deterministic collection for native lifecycle contract tests.
     #[doc(hidden)]
     pub fn collect_message_port_garbage_for_testing(&mut self) {
+        let _activation = self.rt.activation_key().enter();
         {
             deno_core::scope!(scope, &mut self.rt);
             crate::message_ports::sweep(scope);
@@ -10843,6 +10928,7 @@ impl PageSession {
 
     #[doc(hidden)]
     pub fn frame_lifecycle_diagnostics_for_testing(&mut self) -> serde_json::Value {
+        let _activation = self.rt.activation_key().enter();
         deno_core::scope!(scope, self.rt);
         let state = JsRuntime::op_state_from(scope);
         let state = state.borrow();
@@ -10861,11 +10947,13 @@ impl PageSession {
 
     #[doc(hidden)]
     pub fn set_message_port_limits_for_testing(&mut self, max_messages: usize, max_bytes: usize) {
+        let _activation = self.rt.activation_key().enter();
         deno_core::scope!(scope, self.rt);
         crate::message_ports::set_limits(scope, max_messages, max_bytes);
     }
     #[doc(hidden)]
     pub fn message_port_diagnostics_for_testing(&mut self) -> serde_json::Value {
+        let _activation = self.rt.activation_key().enter();
         deno_core::scope!(scope, self.rt);
         crate::message_ports::diagnostics(scope)
     }
@@ -10880,6 +10968,7 @@ impl PageSession {
 
     /// Snapshot the opt-in interface tracer inside each active native child context.
     pub fn frame_interface_snapshots(&mut self) -> Vec<serde_json::Value> {
+        let _activation = self.rt.activation_key().enter();
         let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), self.budget_ms);
         let contexts = self
             .rt
@@ -10935,6 +11024,7 @@ impl PageSession {
 
     /// Serialize the CURRENT live DOM to HTML (no reset — the page stays alive).
     pub fn serialize(&self) -> String {
+        let _activation = self.rt.activation_key().enter();
         crate::browser_env::document_html()
     }
 
@@ -10950,18 +11040,16 @@ impl PageSession {
 
     /// Tear down: reset the binding while the isolate is still alive, then drop it.
     pub fn close(mut self) {
+        let _activation = self.rt.activation_key().enter();
         self.script_inventory.take();
         self.closed = true;
-        crate::browser_env::reset();
     }
 }
 
 impl Drop for PageSession {
     fn drop(&mut self) {
+        let _activation = self.rt.activation_key().enter();
         self.script_inventory.take();
-        if !self.closed {
-            crate::browser_env::reset();
-        }
     }
 }
 

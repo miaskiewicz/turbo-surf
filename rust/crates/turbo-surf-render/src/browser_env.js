@@ -1,6 +1,7 @@
 (function(){
   var g = globalThis;
   var compatibilityElementPrototype;
+  var normalizeComputedColor=g.__normalizeComputedColor;delete g.__normalizeComputedColor;
   var prepareInlineHandler=g.__prepareInlineHandler,noteInlineHandler=g.__noteInlineHandler;delete g.__prepareInlineHandler;delete g.__noteInlineHandler;
   var collectionGet=g.__getCollectionRecord,collectionSet=g.__setCollectionRecord;
   var appliedInlineRead=g.__readAppliedInlineStyle,appliedInlineWrite=g.__writeAppliedInlineStyle,inlineSheetAllowed=g.__isInlineSheetAllowed;
@@ -79,7 +80,7 @@
   // getComputedStyle reflects the element's inline style object (React writes el.style.X), so
   // jest-dom toHaveStyle (computedStyle[prop] / getPropertyValue(prop)) and toBeVisible (display/
   // visibility/opacity) read real values. No cascade — inline styles only, which covers these tests.
-  if (typeof g.getComputedStyle === 'undefined') g.getComputedStyle = function(el){
+  if (typeof g.getComputedStyle === 'undefined') g.getComputedStyle = function computeStyle(el){
     var camel = function(p){ return p.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); }); };
     var decl = { getPropertyValue: function(p){ var v = this[p]; if (v == null) v = this[camel(p)]; return v == null ? '' : String(v); }, getPropertyPriority: function(){ return ''; }, length: 0 };
     // Minimal cascade: merge declarations from every injected stylesheet rule whose selector matches
@@ -122,6 +123,20 @@
     // overlay inline style (own props React/components set: background, height, display, ...)
     var st = el && __ns.makeInlineStyleDeclaration(el);
     if (st) { var inline=declarationText(declarationRecord(st));cssParts(inline,';').forEach(function(part){var colon=part.indexOf(':');if(colon>0)setProp(part.slice(0,colon),part.slice(colon+1).trim().replace(/\s*!important$/,''));}); }
+    // Native cascade resolves authored inheritance; CSS-wide keywords and the
+    // CanvasText initial value still require computed-value resolution here.
+    var color = decl.color || '';
+    if (!color) { try { color = __ns.cascadeProp.call(el, 'color'); } catch(e) {} }
+    var colorKeyword = String(color || '').toLowerCase();
+    if (colorKeyword === 'initial' || colorKeyword === 'canvastext') color = 'rgb(0, 0, 0)';
+    else if (!color || colorKeyword === 'inherit' || colorKeyword === 'unset' || colorKeyword === 'currentcolor') {
+      var colorParent = null;
+      try { colorParent = __ns.domAccessor('parentElement',false,'Node').call(el); } catch(e) {}
+      color = colorParent ? computeStyle(colorParent).color : 'rgb(0, 0, 0)';
+    }
+    var connected = false;
+    try { connected = __ns.domAccessor('isConnected',false,'Node').call(el); } catch(e) {}
+    setProp('color', connected ? normalizeComputedColor(color) : '');
     if (decl.display == null) decl.display = '';
     // `visibility` is INHERITED: a child with no explicit visibility takes the parent's computed
     // value. testing-library / dom-accessibility-api rely on this — they treat an element as

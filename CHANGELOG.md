@@ -2,6 +2,20 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Consume verified published turbo-dom 0.5.4 and re-vendor canonical native
+  per-isolate DOM state, bounded storage collection and genuine host-job node pins.
+  Dropping/resetting a session preserves its peers. Collection remains explicit;
+  automatic host-boundary scheduling and queued-task integration are in progress.
+- Park persistent V8 isolates between operations and asynchronous polls. Scoped
+  runtime activation restores both V8 and the native document world before yielding,
+  including cancellation, concurrent opening, cached/stateless evaluation and
+  inspector teardown. Complete the native microtask checkpoint before returning
+  synchronous expression results so observer deliveries do not remain stranded.
+- Resolve computed colors through public native cascade serialization and private
+  linked-sheet values, including inheritance, CSS-wide keywords, currentColor and
+  live/disconnected declarations against a source-pinned Chrome 155 control.
+  Full system-color/color-scheme and variables/layer cascade parity remains open.
+
 - Choose HTML element interfaces by exact native namespace/local name, preserving
   uppercase XML-created unknown elements, valid custom names and legacy aliases.
   Borrowed control getters/methods validate native namespace/local-name brands.

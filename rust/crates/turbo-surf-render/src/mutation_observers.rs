@@ -14,6 +14,21 @@ thread_local! {
     static SUPPRESSED: RefCell<HashMap<u64, usize>> = RefCell::new(HashMap::new());
 }
 
+#[derive(Default)]
+pub(super) struct IsolationState {
+    enabled: bool,
+    suppressed: HashMap<u64, usize>,
+}
+pub(super) fn take_isolation_state() -> IsolationState {
+    IsolationState {
+        enabled: ENABLED.with(|value| value.replace(false)),
+        suppressed: SUPPRESSED.with(|rows| std::mem::take(&mut *rows.borrow_mut())),
+    }
+}
+pub(super) fn put_isolation_state(state: IsolationState) {
+    ENABLED.with(|value| value.set(state.enabled));
+    SUPPRESSED.with(|rows| *rows.borrow_mut() = state.suppressed);
+}
 pub(super) fn recording() -> bool {
     ENABLED.with(std::cell::Cell::get) || script_state::recording()
 }

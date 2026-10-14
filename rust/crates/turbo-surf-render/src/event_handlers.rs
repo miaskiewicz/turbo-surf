@@ -236,3 +236,8 @@ pub(super) fn restore_adopted_sources(sources: Vec<((Handle, String), Option<Str
             .extend(sources)
     });
 }
+impl State {
+    pub(super) fn sweep_storage(&mut self, tree: &Tree) {
+        self.sources.retain(|(node, _), _| tree.is_live(*node));
+    }
+}

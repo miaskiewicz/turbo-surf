@@ -607,6 +607,14 @@ pub(super) fn selector(scope: &mut v8::PinScope, anchor: Handle, source: &str) -
     Some(result)
 }
 
+impl State {
+    pub(super) fn sweep_storage(&mut self, tree: &Tree) {
+        self.open.retain(|entry| tree.is_live(entry.node));
+        self.pending.retain(|node, _| tree.is_live(*node));
+        self.busy.retain(|node| tree.is_live(*node));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -18,8 +18,10 @@ and their private dependency overrides are not integrated or registry-release pr
 2. **Layout / Range / caret:** integrate the pending geometry consumer and finish
    scrolling, point hit testing and caret coverage. The producer candidate addresses
    fractional layout and paint transforms, including ordinary rotated elements.
-   Original lone-surrogate glyph shaping still differs from replacing units with
-   U+FFFD, and image/font/SVG/resource coverage remains incomplete.
+   The isolated original-unit/CoreText candidate now matches all 26 mixed-text
+   Range controls and 12 additional font/size controls; full producer gates and
+   production integration remain pending. Image/font/SVG/resource coverage is
+   still incomplete.
 3. **Template ownership:** integrate the real associated inert-document candidate
    through the production page runtime. The merged isolated binding passes 188 standalone
    contracts; the unpublished additive backend seam passed independent review and

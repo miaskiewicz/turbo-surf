@@ -166,36 +166,19 @@ fn cross_message<'s>(
         scope.throw_exception(error);
         return;
     }
-    let transfer = args.get(2);
-    if !transfer.is_undefined() && !transfer.is_null() {
-        if let Some(transfer) = transfer.to_object(scope) {
-            let key = v8::String::new(scope, "length").unwrap();
-            if transfer
-                .get(scope, key.into())
-                .and_then(|value| value.uint32_value(scope))
-                .unwrap_or(0)
-                > 0
-            {
-                named_exception(
-                    scope,
-                    "Message transfers are not supported by the native frame bridge",
-                    "DataCloneError",
-                );
-                return;
-            }
-        }
-    }
-    let target = v8::Local::<v8::Object>::try_from(args.data()).unwrap();
-    let origin = if args.get(1).is_undefined() {
-        "/".to_string()
-    } else {
-        args.get(1).to_rust_string_lossy(scope)
+    let Ok(target) = v8::Local::<v8::Object>::try_from(args.data()) else {
+        return;
     };
-    if let Err(error) = queue_window_message(scope, target, args.get(0), &origin) {
-        let message = v8::String::new(scope, &error.to_string()).unwrap();
-        let error = v8::Exception::type_error(scope, message);
-        scope.throw_exception(error);
-    }
+    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let source = v8::Local::new(scope, source);
+    let scope = &mut v8::ContextScope::new(scope, source);
+    // Reuse the source realm's private Web IDL/serialization capability; target
+    // origin filtering still happens after cloning and ownership detachment.
+    let _ = call_frame_helper(
+        scope,
+        "postWindowMessage",
+        &[target.into(), args.get(0), args.get(1), args.get(2)],
+    );
 }
 
 fn harmless_window_action(

@@ -1,0 +1,27 @@
+{
+  "collectedAt": "2026-10-14T01:20:49.003Z",
+  "browserVersion": "Chrome/155.0.8059.79",
+  "browserV8Version": "15.5.35.23",
+  "effectiveExtensionFlags": ["--disable-extensions"],
+  "collectorSha256": "4215ceaee4dea856ae2db83ed81a4c740bde3cf5b1a06908ee6d79a09b0e44a9",
+  "result": {
+    "documentAppend": ["HierarchyRequestError", true, true, 0, true, true, true, "retained"],
+    "documentPrepend": ["HierarchyRequestError", true, true, 0, true, true, true, "retained"],
+    "documentReplaceChildren": [
+      "HierarchyRequestError",
+      true,
+      true,
+      0,
+      true,
+      true,
+      true,
+      "retained"
+    ],
+    "rootBefore": ["HierarchyRequestError", true, true, 0, true, true, true, "retained"],
+    "rootAfter": ["HierarchyRequestError", true, true, 0, true, true, true, "retained"],
+    "rootReplaceWith": ["HierarchyRequestError", true, true, 0, true, true, true, "retained"],
+    "singleAppend": ["HierarchyRequestError", false, true, 1, false, false, false, "retained"],
+    "invalidWebIDL": ["TypeError", false, true, 1, false, false, false, "retained"],
+    "oneChildFragment": ["HierarchyRequestError", true, true, 0, true, true, true, "retained"]
+  }
+}

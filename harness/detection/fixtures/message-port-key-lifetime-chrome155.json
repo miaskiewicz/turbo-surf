@@ -1,0 +1,48 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "first": [
+    {
+      "name": "expando",
+      "alive": [false, false, false],
+      "hooks": 0
+    },
+    {
+      "name": "prototype",
+      "alive": [false, false, false],
+      "hooks": 0
+    },
+    {
+      "name": "metadata-accessors",
+      "alive": [false, false, false],
+      "hooks": 0
+    },
+    {
+      "name": "hybrid-expando",
+      "alive": [false, false, false],
+      "hooks": 0
+    }
+  ],
+  "afterRelease": [
+    {
+      "name": "expando",
+      "alive": [false, false, false],
+      "hooks": 0
+    },
+    {
+      "name": "prototype",
+      "alive": [false, false, false],
+      "hooks": 0
+    },
+    {
+      "name": "metadata-accessors",
+      "alive": [false, false, false],
+      "hooks": 0
+    },
+    {
+      "name": "hybrid-expando",
+      "alive": [false, false, false],
+      "hooks": 0
+    }
+  ]
+}

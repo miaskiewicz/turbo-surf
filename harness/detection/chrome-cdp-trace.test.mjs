@@ -55,6 +55,7 @@ test(
           steps: [{ focus: "#q" }, { type: "a 1" }],
           successSelector: "body[data-ready]",
           interfaces: true,
+          disableExtensions: true,
           debugger: true,
           waitMs: 100,
           interfaceScript: fileURLToPath(new URL("./interface-trace.js", import.meta.url)),
@@ -78,6 +79,7 @@ test(
       });
       const trace = JSON.parse(readFileSync(join(directory, "trace.json"), "utf8"));
       assert.equal(code, 0, JSON.stringify({ errors: trace.errors, logs }));
+      assert.deepEqual(trace.effectiveExtensionFlags, ["--disable-extensions"]);
       assert.equal(
         trace.pages[0].environment.webdriver,
         false,

@@ -1,6 +1,75 @@
 //! Event/exception contracts measured against the uninstrumented Chrome oracle.
 use turbo_surf_render::{run_with_dom, PageSession};
 
+#[tokio::test(flavor = "current_thread")]
+async fn private_event_ownership_matches_chrome_without_inherited_page_hooks() {
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/event-ownership-chrome155.json"
+    ))
+    .unwrap();
+    let source = format!(
+        "globalThis.__RESULT=JSON.stringify({})",
+        include_str!("../../../../harness/detection/event-ownership-probe.js")
+            .trim()
+            .trim_end_matches(';')
+    );
+    let result = turbo_surf_render::eval_async(
+        "<!doctype html><body>Authored event ownership control</body>",
+        "https://events.test/",
+        &source,
+    )
+    .await
+    .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(actual, expected["result"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn integrated_abort_signals_keep_private_brands_and_remove_window_and_node_listeners() {
+    let mut page = PageSession::open(
+        "<body><button>control</button></body>",
+        "https://events.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&page.eval_expression(r#"(()=>{
+      const rows=[],node=document.querySelector('button'),controller=new AbortController();
+      const signal=controller.signal;
+      signal.addEventListener('abort',event=>rows.push(['abort',event.isTrusted,event.target===signal,event instanceof Event]),{once:true});
+      const fn=()=>rows.push('callback');
+      for(const target of [node,window])target.addEventListener('bounded',fn,{signal});
+      controller.abort(0);controller.abort('replacement');
+      for(const target of [node,window]){target.dispatchEvent(new Event('bounded'));target.addEventListener('bounded',fn);target.dispatchEvent(new Event('bounded'));target.removeEventListener('bounded',fn);}
+      let reason='missing';try{signal.throwIfAborted()}catch(error){reason=error}
+      const LocalException=DOMException,LocalController=AbortController;
+      globalThis.DOMException=function(){throw new Error('guest constructor')};
+      const defaultController=new LocalController();defaultController.abort();
+      globalThis.DOMException=LocalException;
+      let hooks=0,fakeError;try{window.addEventListener('fake',()=>{},{signal:{get aborted(){hooks++;return false}}})}catch(error){fakeError=error.name}
+      return JSON.stringify({rows,reason,aborted:signal.aborted,stable:controller.signal===signal,
+        private:Reflect.ownKeys(signal),brand:signal instanceof AbortSignal,
+        defaultReason:defaultController.signal.reason instanceof LocalException,
+        defaultName:defaultController.signal.reason.name,defaultCode:defaultController.signal.reason.code,
+        fakeError,hooks});
+    })()"#).await.unwrap()).unwrap();
+    assert_eq!(
+        value["rows"],
+        serde_json::json!([["abort", true, true, true], "callback", "callback"])
+    );
+    assert_eq!(value["reason"], 0);
+    for field in ["aborted", "stable", "brand", "defaultReason"] {
+        assert_eq!(value[field], true, "{value}");
+    }
+    assert_eq!(value["private"], serde_json::json!([]));
+    assert_eq!(value["defaultName"], "AbortError");
+    assert_eq!(value["defaultCode"], 20);
+    assert_eq!(value["fakeError"], "TypeError");
+    assert_eq!(value["hooks"], 0);
+}
+
 #[test]
 fn dom_exception_has_private_enumerable_branded_accessors() {
     let result = run_with_dom("<body></body>", r#"(() => {

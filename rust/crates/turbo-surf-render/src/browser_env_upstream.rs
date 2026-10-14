@@ -18,11 +18,28 @@ mod cssom_parser;
 mod collection_records;
 #[path = "css_policy.rs"]
 mod css_policy;
+#[path = "event_brands.rs"]
+mod event_brands;
 #[path = "event_handlers.rs"]
 mod event_handlers;
+#[path = "event_listeners.rs"]
+mod event_listeners;
+pub use event_brands::{
+    is_native_abort_object, is_native_event, is_native_event_target, native_event_record,
+    native_event_target_has_listener, register_native_event_target,
+    set_native_event_target_observer, NativeEventTargetObserver,
+};
+pub use event_listeners::capture_window_event_interfaces;
+
+/// Capture the trusted host timer after the runtime has installed its scheduler.
+/// Guest code cannot install or replace this private lifecycle capability.
+pub fn capture_popover_scheduler(scope: &mut v8::PinScope) {
+    html_popover::capture_scheduler(scope);
+}
 
 pub fn clear_interface_records(isolate: &mut v8::Isolate) {
     collection_records::clear(isolate);
+    range_live::clear(isolate);
 }
 
 /// Access a host-created interface record in the isolate's private ephemeron registry.
@@ -42,10 +59,15 @@ pub fn set_interface_record<'s>(
 
 #[path = "document_basics.rs"]
 mod document_basics;
+#[path = "document_xpath.rs"]
+mod document_xpath;
+pub use document_xpath::is_native_xpath_object;
 #[path = "dom_mutations.rs"]
 mod dom_mutations;
 #[path = "element_relations.rs"]
 mod element_relations;
+#[path = "html_popover.rs"]
+mod html_popover;
 #[path = "html_text.rs"]
 mod html_text;
 
@@ -280,7 +302,9 @@ fn passthrough_setter<T>(
 
 /// Print + clear the accumulated missing-access log (call between files when debugging).
 pub fn dump_missing() {
-    let mut items: Vec<(String, u64)> = MISSING.with(|m| m.borrow_mut().drain().collect());
+    let mut items: Vec<(String, u64)> = MISSING
+        .try_with(|m| m.borrow_mut().drain().collect())
+        .unwrap_or_default();
     if items.is_empty() {
         return;
     }
@@ -306,6 +330,8 @@ struct DomState {
     control_clone: Option<v8::Global<v8::Function>>,
     css_policy: css_policy::PolicyState,
     event_handlers: event_handlers::State,
+    popover: html_popover::State,
+    browsing_context: bool,
 }
 
 thread_local! {
@@ -322,7 +348,7 @@ struct DomContextId(u64);
 struct SavedDom {
     dom: Option<DomState>,
     styles: HashMap<Handle, v8::Global<v8::Object>>,
-    listeners: HashMap<(Handle, String), Vec<(v8::Global<v8::Function>, bool)>>,
+    listeners: HashMap<(Handle, String), Vec<event_listeners::Listener>>,
     active: Option<Handle>,
 }
 
@@ -461,6 +487,8 @@ pub fn parse_html_document<'s>(
             control_clone,
             css_policy: Default::default(),
             event_handlers: Default::default(),
+            popover: Default::default(),
+            browsing_context: false,
         })
     });
     let context = scope.get_current_context();
@@ -787,6 +815,18 @@ fn wrap<'s>(scope: &mut v8::PinScope<'s, '_>, handle: Handle) -> v8::Local<'s, v
     obj
 }
 
+/// Build native node sequences without consulting guest array prototypes.
+fn node_array<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    handles: impl IntoIterator<Item = Handle>,
+) -> v8::Local<'s, v8::Array> {
+    let values = handles
+        .into_iter()
+        .map(|handle| wrap(scope, handle).into())
+        .collect::<Vec<_>>();
+    v8::Array::new_with_elements(scope, &values)
+}
+
 /// Wrap `Option<Handle>` as object-or-null.
 fn wrap_opt<'s>(scope: &mut v8::PinScope<'s, '_>, h: Option<Handle>) -> v8::Local<'s, v8::Value> {
     match h {
@@ -1012,33 +1052,33 @@ fn get_is_shadow_root(
     rv.set_bool(is_shadow);
 }
 
-fn el_append_child(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_append_child<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(parent) = receiver_handle(scope, &args, &[]) else {
         return;
     };
-    let Some(child) = dom_mutations::node_argument(scope, &args, 0) else {
+    let Some(child) = dom_mutations::incoming_node(scope, &args, 0) else {
         return;
     };
-    if dom_mutations::insert(scope, parent, &[child], None, &[]) {
+    if dom_mutations::insert_inputs(scope, parent, &[child], None, &[]) {
         rv.set(args.get(0));
     }
 }
 
-fn el_remove_child(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_remove_child<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(parent) = receiver_handle(scope, &args, &[]) else {
         return;
     };
-    let Some(child) = dom_mutations::node_argument(scope, &args, 0) else {
+    let Some(child) = dom_mutations::reference_argument(scope, &args, 0) else {
         return;
     };
     if with_tree(|tree| tree.parent(child) != Some(parent)).unwrap_or(true) {
@@ -1049,39 +1089,78 @@ fn el_remove_child(
         );
         return;
     }
+    html_popover::disconnect(scope, child, true);
+    range_live::removing(scope, child);
     with_tree_mut(|tree| tree.remove_child(parent, child));
     rv.set(args.get(0));
 }
 
-fn el_replace_child(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_replace_child<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
     let Some(parent) = receiver_handle(scope, &args, &[]) else {
         return;
     };
-    let Some(child) = dom_mutations::node_argument(scope, &args, 0) else {
+    let Some(child) = dom_mutations::incoming_node(scope, &args, 0) else {
         return;
     };
-    let Some(old) = dom_mutations::node_argument(scope, &args, 1) else {
+    let Some(old) = dom_mutations::reference_argument(scope, &args, 1) else {
         return;
     };
     let reference = with_tree(|tree| tree.next_sibling(old)).flatten();
-    if dom_mutations::insert(scope, parent, &[child], reference, &[old]) {
+    if dom_mutations::insert_inputs(scope, parent, &[child], reference, &[old]) {
         rv.set(args.get(1));
     }
 }
 
 // ---- CharacterData methods (text/comment nodes) ----------------------------------------------
-fn arg_usize(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments, i: i32) -> usize {
-    let n = args.get(i).integer_value(scope).unwrap_or(0);
-    if n < 0 {
-        0
+fn arg_usize(
+    scope: &mut v8::PinScope,
+    args: &v8::FunctionCallbackArguments,
+    i: i32,
+) -> Option<usize> {
+    args.get(i).uint32_value(scope).map(|value| value as usize)
+}
+fn character_units(node: Handle) -> Vec<u16> {
+    with_tree(|tree| {
+        tree.node_value(node)
+            .unwrap_or_default()
+            .encode_utf16()
+            .collect()
+    })
+    .unwrap_or_default()
+}
+fn checked_character_offset(scope: &mut v8::PinScope, node: Handle, offset: usize) -> bool {
+    if offset > character_units(node).len() {
+        throw_dom_error(
+            scope,
+            "IndexSizeError",
+            "CharacterData offset exceeds its length",
+        );
+        false
     } else {
-        n as usize
+        true
     }
+}
+fn replace_character_data(
+    scope: &mut v8::PinScope,
+    node: Handle,
+    offset: usize,
+    count: usize,
+    data: &str,
+) {
+    let mut units = character_units(node);
+    if !checked_character_offset(scope, node, offset) {
+        return;
+    }
+    let count = count.min(units.len() - offset);
+    let inserted: Vec<_> = data.encode_utf16().collect();
+    range_live::replacing_data(scope, node, offset, count, inserted.len());
+    units.splice(offset..offset + count, inserted);
+    with_tree_mut(|tree| tree.set_text_content(node, &String::from_utf16_lossy(&units)));
 }
 fn el_insert_data(
     scope: &mut v8::PinScope,
@@ -1089,12 +1168,14 @@ fn el_insert_data(
     _rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    let Some(h) = receiver_handle(scope, &args, &[3, 4, 8]) else {
+    let Some(h) = receiver_handle(scope, &args, &[3, 4, 7, 8]) else {
         return;
     };
-    let off = arg_usize(scope, &args, 0);
+    let Some(off) = arg_usize(scope, &args, 0) else {
+        return;
+    };
     let data = arg_str(scope, &args, 1);
-    with_tree_mut(|t| t.insert_data(h, off, &data));
+    replace_character_data(scope, h, off, 0, &data);
 }
 fn el_delete_data(
     scope: &mut v8::PinScope,
@@ -1102,12 +1183,16 @@ fn el_delete_data(
     _rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    let Some(h) = receiver_handle(scope, &args, &[3, 4, 8]) else {
+    let Some(h) = receiver_handle(scope, &args, &[3, 4, 7, 8]) else {
         return;
     };
-    let off = arg_usize(scope, &args, 0);
-    let count = arg_usize(scope, &args, 1);
-    with_tree_mut(|t| t.delete_data(h, off, count));
+    let Some(off) = arg_usize(scope, &args, 0) else {
+        return;
+    };
+    let Some(count) = arg_usize(scope, &args, 1) else {
+        return;
+    };
+    replace_character_data(scope, h, off, count, "");
 }
 fn el_append_data(
     scope: &mut v8::PinScope,
@@ -1115,11 +1200,12 @@ fn el_append_data(
     _rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    let Some(h) = receiver_handle(scope, &args, &[3, 4, 8]) else {
+    let Some(h) = receiver_handle(scope, &args, &[3, 4, 7, 8]) else {
         return;
     };
     let data = arg_str(scope, &args, 0);
-    with_tree_mut(|t| t.append_data(h, &data));
+    let offset = character_units(h).len();
+    replace_character_data(scope, h, offset, 0, &data);
 }
 fn el_replace_data(
     scope: &mut v8::PinScope,
@@ -1127,13 +1213,17 @@ fn el_replace_data(
     _rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    let Some(h) = receiver_handle(scope, &args, &[3, 4, 8]) else {
+    let Some(h) = receiver_handle(scope, &args, &[3, 4, 7, 8]) else {
         return;
     };
-    let off = arg_usize(scope, &args, 0);
-    let count = arg_usize(scope, &args, 1);
+    let Some(off) = arg_usize(scope, &args, 0) else {
+        return;
+    };
+    let Some(count) = arg_usize(scope, &args, 1) else {
+        return;
+    };
     let data = arg_str(scope, &args, 2);
-    with_tree_mut(|t| t.replace_data(h, off, count, &data));
+    replace_character_data(scope, h, off, count, &data);
 }
 fn el_substring_data(
     scope: &mut v8::PinScope,
@@ -1141,13 +1231,25 @@ fn el_substring_data(
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    let Some(h) = receiver_handle(scope, &args, &[3, 4, 8]) else {
+    let Some(h) = receiver_handle(scope, &args, &[3, 4, 7, 8]) else {
         return;
     };
-    let off = arg_usize(scope, &args, 0);
-    let count = arg_usize(scope, &args, 1);
-    let s = with_tree(|t| t.substring_data(h, off, count)).unwrap_or_default();
-    rv.set(v8::String::new(scope, &s).unwrap().into());
+    let Some(off) = arg_usize(scope, &args, 0) else {
+        return;
+    };
+    let Some(count) = arg_usize(scope, &args, 1) else {
+        return;
+    };
+    if !checked_character_offset(scope, h, off) {
+        return;
+    }
+    let units = character_units(h);
+    let end = off.saturating_add(count).min(units.len());
+    rv.set(
+        v8::String::new_from_two_byte(scope, &units[off..end], v8::NewStringType::Normal)
+            .unwrap()
+            .into(),
+    );
 }
 fn el_split_text(
     scope: &mut v8::PinScope,
@@ -1158,10 +1260,25 @@ fn el_split_text(
     let Some(h) = receiver_handle(scope, &args, &[3, 4]) else {
         return;
     };
-    let off = arg_usize(scope, &args, 0);
-    let Some(new_h) = with_tree_mut(|t| t.split_text(h, off)) else {
+    let Some(off) = arg_usize(scope, &args, 0) else {
         return;
     };
+    if !checked_character_offset(scope, h, off) {
+        return;
+    }
+    let units = character_units(h);
+    let Some(new_h) = with_tree_mut(|tree| {
+        tree.set_text_content(h, &String::from_utf16_lossy(&units[..off]));
+        let next = tree.create_text_node(&String::from_utf16_lossy(&units[off..]));
+        if let Some(parent) = tree.parent(h) {
+            let reference = tree.next_sibling(h);
+            tree.insert_before(parent, next, reference);
+        }
+        next
+    }) else {
+        return;
+    };
+    range_live::splitting(scope, h, new_h, off);
     let node = wrap(scope, new_h);
     rv.set(node.into());
 }
@@ -1217,36 +1334,23 @@ fn el_cascade_prop(
     rv.set(v8::String::new(scope, &val).unwrap().into());
 }
 
-// Resolve a run of variadic (Node | string) arguments [start..] into handles, turning bare strings
-// into text nodes (per the ChildNode/ParentNode spec). Used by before/after/replaceWith/etc.
+// Convert all WebIDL Node/string arguments before native sequence conversion has effects.
 fn resolve_nodes<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::FunctionCallbackArguments<'s>,
     start: i32,
-) -> Option<Vec<Handle>> {
+) -> Option<Vec<dom_mutations::Incoming<'s>>> {
     let mut out = Vec::new();
-    for i in start..args.length() {
-        let value = args.get(i);
+    for index in start..args.length() {
+        let value = args.get(index);
         if value.is_object() {
             let object = value.to_object(scope)?;
             if handle_of(scope, object).is_some() {
-                // Adoption uses the same owner check as appendChild. Equal raw
-                // handles from two independent trees must never alias here.
-                let node = arg_handle(scope, args, i)?;
-                if with_tree(|tree| tree.is_shadow_root(node)).unwrap_or(false) {
-                    throw_dom_error(
-                        scope,
-                        "HierarchyRequestError",
-                        "A shadow root cannot be inserted",
-                    );
-                    return None;
-                }
-                out.push(node);
+                out.push(dom_mutations::Incoming::Node(object));
                 continue;
             }
         }
-        let text = dom_string(scope, value)?;
-        out.push(with_tree_mut(|tree| tree.create_text_node(&text))?);
+        out.push(dom_mutations::Incoming::Text(dom_string(scope, value)?));
     }
     Some(out)
 }
@@ -1305,8 +1409,11 @@ fn el_replace_children<'s>(
     let Some(nodes) = resolve_nodes(scope, &args, 0) else {
         return;
     };
+    let Some(nodes) = dom_mutations::convert_variadic(scope, &nodes) else {
+        return;
+    };
     let removed = with_tree(|tree| tree.children(h)).unwrap_or_default();
-    dom_mutations::insert(scope, h, &nodes, None, &removed);
+    dom_mutations::insert_inputs(scope, h, &nodes, None, &removed);
 }
 fn el_insert_adjacent_element<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -1323,10 +1430,17 @@ fn el_insert_adjacent_element<'s>(
     let Some(position) = dom_string(scope, args.get(0)) else {
         return;
     };
-    let Some(element) = dom_mutations::node_argument(scope, &args, 1) else {
+    let Some(element) = dom_mutations::incoming_node(scope, &args, 1) else {
         return;
     };
-    if with_tree(|tree| tree.node_type_id(element) != 1).unwrap_or(true) {
+    let dom_mutations::Incoming::Node(object) = &element else {
+        return;
+    };
+    let kind = {
+        let _source = DomScope::for_object(scope, *object);
+        handle_of(scope, *object).and_then(|node| with_tree(|tree| tree.node_type_id(node)))
+    };
+    if kind != Some(1) {
         let text = v8::String::new(scope, "The argument must be an Element").unwrap();
         let error = v8::Exception::type_error(scope, text);
         scope.throw_exception(error);
@@ -1353,7 +1467,7 @@ fn el_insert_adjacent_element<'s>(
         rv.set(v8::null(scope).into());
         return;
     };
-    if dom_mutations::insert(scope, parent, &[element], reference, &[]) {
+    if dom_mutations::insert_inputs(scope, parent, &[element], reference, &[]) {
         rv.set(args.get(1));
     }
 }
@@ -1397,8 +1511,27 @@ fn el_insert_adjacent_html<'s>(
         );
         return;
     }
+    let location = with_tree(|tree| {
+        let parent = match position.as_str() {
+            "beforebegin" | "afterend" => tree.parent(target)?,
+            _ => target,
+        };
+        let children = tree.children(parent);
+        let index = match position.as_str() {
+            "beforebegin" => children.iter().position(|&node| node == target)?,
+            "afterend" => children.iter().position(|&node| node == target)? + 1,
+            "afterbegin" => 0,
+            _ => children.len(),
+        };
+        Some((parent, index, children.len()))
+    })
+    .flatten();
     // These nodes are freshly parsed, so they cannot contain an existing ancestor.
     with_tree_mut(|tree| tree.insert_adjacent_html(target, &position, &html));
+    if let Some((parent, index, previous_count)) = location {
+        let count = with_tree(|tree| tree.children(parent).len()).unwrap_or(previous_count);
+        range_live::inserting(scope, parent, index, count.saturating_sub(previous_count));
+    }
 }
 fn el_toggle_attribute<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -1416,6 +1549,9 @@ fn el_toggle_attribute<'s>(
         None
     };
     let previous = with_tree(|t| t.has_attribute(h, &name)).unwrap_or(false);
+    if name == "popover" && previous && force != Some(true) {
+        html_popover::attribute_change(scope, h, None);
+    }
     let present = with_tree_mut(|t| t.toggle_attribute(h, &name, force)).unwrap_or(false);
     if previous != present {
         element_relations::attribute_changed(scope, args.this(), &name);
@@ -1578,6 +1714,9 @@ fn el_set_attribute_ns<'s, 'i>(
         throw_dom_error(scope, error, "Invalid namespace or qualified name");
         return;
     }
+    if namespace.is_none() && qualified == "popover" {
+        html_popover::attribute_change(scope, node, Some(&value));
+    }
     with_tree_mut(|tree| tree.set_attribute_ns(node, namespace.as_deref(), &qualified, &value));
     if namespace.is_none() {
         event_handlers::changed(scope, node, &qualified);
@@ -1608,6 +1747,9 @@ fn el_remove_attribute_ns<'s, 'i>(
     let Some(local) = dom_string(scope, args.get(1)) else {
         return;
     };
+    if namespace.is_none() && local == "popover" {
+        html_popover::attribute_change(scope, node, None);
+    }
     with_tree_mut(|tree| tree.remove_attribute_ns(node, namespace.as_deref(), &local));
     if namespace.is_none() {
         event_handlers::changed(scope, node, &local);
@@ -1621,9 +1763,9 @@ fn el_remove_attribute_ns<'s, 'i>(
     }
 }
 
-fn el_insert_before(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+fn el_insert_before<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
@@ -1633,18 +1775,18 @@ fn el_insert_before(
     if !require_arguments(scope, &args, 2) {
         return;
     }
-    let Some(child) = dom_mutations::node_argument(scope, &args, 0) else {
+    let Some(child) = dom_mutations::incoming_node(scope, &args, 0) else {
         return;
     };
     let reference = if args.get(1).is_null_or_undefined() {
         None
     } else {
-        let Some(reference) = dom_mutations::node_argument(scope, &args, 1) else {
+        let Some(reference) = dom_mutations::reference_argument(scope, &args, 1) else {
             return;
         };
         Some(reference)
     };
-    if dom_mutations::insert(scope, parent, &[child], reference, &[]) {
+    if dom_mutations::insert_inputs(scope, parent, &[child], reference, &[]) {
         rv.set(args.get(0));
     }
 }
@@ -1669,6 +1811,9 @@ fn el_set_attribute<'s>(
     } else {
         name.clone()
     };
+    if key == "popover" {
+        html_popover::attribute_change(scope, h, Some(&value));
+    }
     with_tree_mut(|t| t.set_attribute(h, &key, &value));
     event_handlers::changed(scope, h, &key);
     element_relations::attribute_changed(scope, args.this(), &key);
@@ -1846,6 +1991,15 @@ fn el_set_attribute_node<'s, 'i>(
     let Some(node) = handle_of(scope, attribute) else {
         return;
     };
+    if let Some(value) = with_tree(|tree| {
+        tree.attribute_data(node)
+            .filter(|data| data.namespace.is_none() && data.local_name == "popover")
+            .map(|data| data.value.clone())
+    })
+    .flatten()
+    {
+        html_popover::attribute_change(scope, owner, Some(&value));
+    }
     match with_tree_mut(|tree| tree.set_attribute_node(owner, node)) {
         Some(Ok(replaced)) => {
             sync_attr_nonce(scope, args.this(), node);
@@ -1900,6 +2054,15 @@ fn el_remove_attribute_node<'s, 'i>(
         attr_type_error(scope, "An Attr node is required");
         return;
     };
+    if with_tree(|tree| tree.attribute_owner(node) != Some(owner)).unwrap_or(true) {
+        throw_dom_error(
+            scope,
+            "NotFoundError",
+            "The attribute does not belong to this element",
+        );
+        return;
+    }
+    html_popover::attribute_node_change(scope, node, None);
     let aria_name = with_tree(|tree| {
         tree.attribute_data(node)
             .filter(|data| data.namespace.is_none())
@@ -2071,6 +2234,7 @@ fn set_attr_value<'s, 'i, T>(
     let Some(value) = dom_string(scope, value) else {
         return;
     };
+    html_popover::attribute_node_change(scope, node, Some(&value));
     with_tree_mut(|tree| tree.set_attribute_value(node, &value));
     if let Some(owner) = with_tree(|tree| tree.attribute_owner(node)).flatten() {
         let owner = wrap(scope, owner);
@@ -2135,6 +2299,9 @@ fn el_remove_attribute<'s>(
                 .insert(h, String::new());
         });
     }
+    if lower == "popover" {
+        html_popover::attribute_change(scope, h, None);
+    }
     with_tree_mut(|t| {
         t.remove_attribute(h, &name);
         if lower != name {
@@ -2159,6 +2326,9 @@ fn el_query_selector(
         return;
     };
     let sel = arg_str(scope, &args, 0);
+    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+        return;
+    };
     let found =
         with_tree(|t| NodeRef::new(t, h).query_selector(&sel).map(|n| n.handle())).flatten();
     let v = wrap_opt(scope, found);
@@ -2193,6 +2363,8 @@ fn set_inner_html(
         return;
     };
     let html = value.to_rust_string_lossy(scope);
+    html_popover::disconnect(scope, h, false);
+    range_live::replacing_children(scope, h);
     with_tree_mut(|t| t.set_inner_html(h, &html));
     css_policy::invalidate_sheet(h);
 }
@@ -2240,10 +2412,29 @@ fn set_outer_html(
         return;
     }
     let html = value.to_rust_string_lossy(scope);
+    html_popover::disconnect(scope, node, true);
+    let position = with_tree(|tree| {
+        let children = tree.children(parent);
+        children
+            .iter()
+            .position(|&child| child == node)
+            .map(|index| (index, children.len()))
+    })
+    .flatten();
+    range_live::removing(scope, node);
     with_tree_mut(|tree| {
         tree.insert_adjacent_html(node, "beforebegin", &html);
         tree.remove_child(parent, node);
     });
+    if let Some((index, previous_count)) = position {
+        let count = with_tree(|tree| tree.children(parent).len()).unwrap_or(previous_count - 1);
+        range_live::inserting(
+            scope,
+            parent,
+            index,
+            count.saturating_add(1).saturating_sub(previous_count),
+        );
+    }
 }
 
 /// `children` = element-only child nodes (HTMLCollection-ish array).
@@ -2264,11 +2455,7 @@ fn get_children(
             .collect()
     })
     .unwrap_or_default();
-    let arr = v8::Array::new(scope, kids.len() as i32);
-    for (i, k) in kids.into_iter().enumerate() {
-        let node = wrap(scope, k);
-        arr.set_index(scope, i as u32, node.into());
-    }
+    let arr = node_array(scope, kids);
     bind_method(scope, arr.into(), "item", nodelist_item);
     bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
@@ -2445,7 +2632,23 @@ fn el_click(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
-    dispatch_synthetic(scope, h, "click", true, true);
+    let name = v8::String::new(scope, "turbo-dom.click.active").unwrap();
+    let key = v8::Private::for_api(scope, Some(name));
+    let receiver = args.this();
+    if receiver
+        .get_private(scope, key)
+        .is_some_and(|value| value.is_true())
+    {
+        return;
+    }
+    let active = v8::Boolean::new(scope, true);
+    receiver.set_private(scope, key, active.into());
+    if let Some(context) = receiver.get_creation_context(scope) {
+        let context_scope = &mut v8::ContextScope::new(scope, context);
+        dispatch_synthetic_with_trust(context_scope, h, "click", true, true, false);
+    }
+    let inactive = v8::Boolean::new(scope, false);
+    receiver.set_private(scope, key, inactive.into());
 }
 fn el_scroll_into_view(
     scope: &mut v8::PinScope,
@@ -2526,12 +2729,15 @@ fn parent_insert<'s>(
     let Some(nodes) = resolve_nodes(scope, args, 0) else {
         return;
     };
+    let Some(nodes) = dom_mutations::convert_variadic(scope, &nodes) else {
+        return;
+    };
     let reference = if prepend {
         with_tree(|tree| tree.first_child(parent)).flatten()
     } else {
         None
     };
-    dom_mutations::insert(scope, parent, &nodes, reference, &[]);
+    dom_mutations::insert_inputs(scope, parent, &nodes, reference, &[]);
 }
 fn el_remove_self(
     scope: &mut v8::PinScope,
@@ -2544,6 +2750,8 @@ fn el_remove_self(
     };
     let parent = with_tree(|t| NodeRef::new(t, h).parent().map(|p| p.handle())).flatten();
     if let Some(p) = parent {
+        html_popover::disconnect(scope, h, true);
+        range_live::removing(scope, h);
         with_tree_mut(|t| t.remove_child(p, h));
     }
 }
@@ -2796,11 +3004,7 @@ fn get_attributes(
             .collect::<Vec<_>>()
     })
     .unwrap_or_default();
-    let arr = v8::Array::new(scope, attrs.len() as i32);
-    for (index, node) in attrs.into_iter().enumerate() {
-        let object = wrap(scope, node);
-        arr.set_index(scope, index as u32, object.into());
-    }
+    let arr = node_array(scope, attrs);
     // NamedNodeMap accessors (`attributes.item(i)` / `attributes.namedItem(name)`).
     bind_method(scope, arr.into(), "item", nodelist_item);
     bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
@@ -2854,6 +3058,9 @@ fn el_closest(
         return;
     };
     let sel = arg_str(scope, &args, 0);
+    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+        return;
+    };
     let found = with_tree(|t| {
         let mut cur = Some(h);
         while let Some(c) = cur {
@@ -2879,6 +3086,9 @@ fn el_matches(
         return;
     };
     let sel = arg_str(scope, &args, 0);
+    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+        return;
+    };
     let m = with_tree(|t| t.matches(h, &sel)).unwrap_or(false);
     rv.set(v8::Boolean::new(scope, m).into());
 }
@@ -2974,6 +3184,9 @@ fn el_query_selector_all(
         return;
     };
     let sel = arg_str(scope, &args, 0);
+    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+        return;
+    };
     let handles = with_tree(|t| {
         NodeRef::new(t, h)
             .query_selector_all(&sel)
@@ -2982,11 +3195,7 @@ fn el_query_selector_all(
             .collect::<Vec<_>>()
     })
     .unwrap_or_default();
-    let arr = v8::Array::new(scope, handles.len() as i32);
-    for (i, hh) in handles.into_iter().enumerate() {
-        let node = wrap(scope, hh);
-        arr.set_index(scope, i as u32, node.into());
-    }
+    let arr = node_array(scope, handles);
     bind_method(scope, arr.into(), "item", nodelist_item);
     bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
@@ -3036,6 +3245,19 @@ fn set_text_content(
         return;
     };
     let txt = value.to_rust_string_lossy(scope);
+    html_popover::attribute_node_change(scope, h, Some(&txt));
+    html_popover::disconnect(scope, h, false);
+    if with_tree(|tree| matches!(tree.node_type_id(h), 3 | 4 | 7 | 8)).unwrap_or(false) {
+        range_live::replacing_data(
+            scope,
+            h,
+            0,
+            character_units(h).len(),
+            txt.encode_utf16().count(),
+        );
+    } else {
+        range_live::replacing_children(scope, h);
+    }
     with_tree_mut(|t| t.set_text_content(h, &txt));
     element_relations::attribute_node_changed(scope, h);
     css_policy::invalidate_sheet(h);
@@ -3238,72 +3460,134 @@ fn get_next_sibling(
 
 thread_local! {
     /// (node handle, event type) → registered JS listeners (function, capture-phase flag).
-    static LISTENERS: RefCell<HashMap<(Handle, String), Vec<(v8::Global<v8::Function>, bool)>>> = RefCell::new(HashMap::new());
+    static LISTENERS: RefCell<HashMap<(Handle, String), Vec<event_listeners::Listener>>> = RefCell::new(HashMap::new());
 }
 
-/// useCapture from the 3rd addEventListener arg (boolean, or `{capture: true}` options object).
-fn arg_capture(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments) -> bool {
-    let v = args.get(2);
-    if v.is_boolean() {
-        return v.boolean_value(scope);
-    }
-    // 2-arg addEventListener leaves arg 2 undefined; to_object() on null/undefined THROWS
-    // ("Cannot convert undefined or null to object"). Guard before converting.
-    if v.is_null_or_undefined() {
-        return false;
-    }
-    if let Some(o) = v.to_object(scope) {
-        if let Some(k) = v8::String::new(scope, "capture") {
-            if let Some(c) = o.get(scope, k.into()) {
-                return c.boolean_value(scope);
-            }
-        }
-    }
-    false
+fn get_prop<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<v8::Object>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let key = v8::String::new(scope, name)?;
+    object.get(scope, key.into())
 }
-
+fn listener_options<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments,
+    remove: bool,
+) -> Option<v8::Local<'s, v8::Object>> {
+    if args.length() < 2 {
+        let message =
+            v8::String::new(scope, "Event listener registration requires 2 arguments").unwrap();
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+        return None;
+    }
+    let top = with_tree(|tree| {
+        handle_of(scope, args.this()).is_some_and(|node| {
+            tree.node_type_id(node) == 9 || tree.local_name(node) == Some("body")
+        })
+    })
+    .unwrap_or(false);
+    event_listeners::options(scope, args, remove, top)
+}
 fn el_add_event_listener(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    let Some(h) = receiver_handle(scope, &args, &[]) else {
+    let Some(node) = receiver_handle(scope, &args, &[]) else {
         return;
     };
-    let ty = arg_str(scope, &args, 0);
-    let Some(f) = v8::Local::<v8::Function>::try_from(args.get(1)).ok() else {
+    let Some(options) = listener_options(scope, &args, false) else {
         return;
     };
-    event_handlers::refresh(scope, h, &format!("on{ty}"));
-    let capture = arg_capture(scope, &args);
-    let g = v8::Global::new(scope, f);
-    LISTENERS.with(|m| {
-        m.borrow_mut()
-            .entry((h, ty))
+    let ty = get_str_prop(scope, options, "type").unwrap_or_default();
+    let Some(callback) = get_prop(scope, options, "callback")
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+    else {
+        return;
+    };
+    let capture = get_bool_prop(scope, options, "capture");
+    let once = get_bool_prop(scope, options, "once");
+    let passive = get_bool_prop(scope, options, "passive");
+    let signal = get_prop(scope, options, "signal")
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+        .map(|value| v8::Global::new(scope, value));
+    if signal
+        .as_ref()
+        .is_some_and(|signal| event_listeners::aborted(scope, signal))
+    {
+        return;
+    }
+    event_handlers::refresh(scope, node, &format!("on{ty}"));
+    let duplicate = LISTENERS.with(|listeners| {
+        let mut listeners = listeners.borrow_mut();
+        let list = listeners.entry((node, ty.clone())).or_default();
+        list.retain(|listener| !listener.removed.get());
+        list.iter().any(|listener| {
+            listener.capture == capture && v8::Local::new(scope, &listener.callback).eq(&callback)
+        })
+    });
+    if duplicate {
+        return;
+    }
+    let mut listener = event_listeners::Listener {
+        callback: v8::Global::new(scope, callback),
+        capture,
+        once,
+        passive,
+        signal,
+        removed: std::rc::Rc::new(std::cell::Cell::new(false)),
+        abort_hook: None,
+    };
+    event_listeners::attach(scope, args.this(), &ty, &mut listener);
+    LISTENERS.with(|listeners| {
+        listeners
+            .borrow_mut()
+            .entry((node, ty))
             .or_default()
-            .push((g, capture))
+            .push(listener)
     });
 }
-
 fn el_remove_event_listener(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    let Some(h) = receiver_handle(scope, &args, &[]) else {
+    let Some(node) = receiver_handle(scope, &args, &[]) else {
         return;
     };
-    let ty = arg_str(scope, &args, 0);
-    let Some(f) = v8::Local::<v8::Function>::try_from(args.get(1)).ok() else {
+    let Some(options) = listener_options(scope, &args, true) else {
         return;
     };
-    LISTENERS.with(|m| {
-        if let Some(v) = m.borrow_mut().get_mut(&(h, ty)) {
-            v.retain(|(g, _)| !v8::Local::new(scope, g).eq(&f));
+    let ty = get_str_prop(scope, options, "type").unwrap_or_default();
+    let Some(callback) = get_prop(scope, options, "callback")
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+    else {
+        return;
+    };
+    let capture = get_bool_prop(scope, options, "capture");
+    let removed = LISTENERS.with(|listeners| {
+        let mut removed = Vec::new();
+        if let Some(list) = listeners.borrow_mut().get_mut(&(node, ty)) {
+            list.retain(|listener| {
+                let matching = listener.capture == capture
+                    && v8::Local::new(scope, &listener.callback).eq(&callback);
+                if matching {
+                    listener.removed.set(true);
+                    removed.push(listener.clone());
+                }
+                !matching
+            });
         }
+        removed
     });
+    for listener in removed {
+        event_listeners::detach(scope, &listener);
+    }
 }
 
 struct EventRecordAccessor(v8::Global<v8::Function>);
@@ -3393,9 +3677,13 @@ pub fn event_callback_state(
     } else {
         v8::null(scope).into()
     };
-    let path = v8::Array::new(scope, i32::from(active));
+    let values = if active {
+        vec![target.into()]
+    } else {
+        Vec::new()
+    };
+    let path = v8::Array::new_with_elements(scope, &values);
     if active {
-        path.set_index(scope, 0, target.into());
         set_prop(scope, record, "target", target.into());
         let trusted = v8::Boolean::new(scope, true);
         set_prop(scope, record, "trusted", trusted.into());
@@ -3422,10 +3710,10 @@ fn el_dispatch_event(
         return;
     };
     let event = args.get(0);
-    if event.is_null_or_undefined() {
-        return;
-    }
-    let Some(event_obj) = event.to_object(scope) else {
+    let Ok(event_obj) = v8::Local::<v8::Object>::try_from(event) else {
+        let message = v8::String::new(scope, "dispatchEvent requires an Event").unwrap();
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
         return;
     };
     let Some(record) = event_record(scope, event_obj) else {
@@ -3436,22 +3724,11 @@ fn el_dispatch_event(
     };
     let ty = get_str_prop(scope, record, "type").unwrap_or_default();
     if ty.is_empty() || get_bool_prop(scope, record, "dispatching") {
-        let message = v8::String::new(
+        throw_dom_error(
             scope,
-            "The event is already being dispatched or uninitialized.",
-        )
-        .unwrap();
-        let name = v8::String::new(scope, "InvalidStateError").unwrap();
-        let global = scope.get_current_context().global(scope);
-        let key = v8::String::new(scope, "DOMException").unwrap();
-        if let Some(ctor) = global
-            .get(scope, key.into())
-            .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
-        {
-            if let Some(error) = ctor.new_instance(scope, &[message.into(), name.into()]) {
-                scope.throw_exception(error.into());
-            }
-        }
+            "InvalidStateError",
+            "The event is already being dispatched or uninitialized",
+        );
         return;
     }
     event_handlers::refresh(scope, target, &format!("on{ty}"));
@@ -3489,12 +3766,25 @@ fn el_dispatch_event(
         cur = with_tree(|t| NodeRef::new(t, c).parent().map(|p| p.handle())).flatten();
     }
 
-    let path = v8::Array::new(scope, (ancestors.len() + 1) as i32);
-    path.set_index(scope, 0, target_node.into());
-    for (index, &handle) in ancestors.iter().enumerate() {
-        let node = wrap(scope, handle);
-        path.set_index(scope, (index + 1) as u32, node.into());
+    let window = if ty != "load"
+        && (ancestors
+            .last()
+            .is_some_and(|node| with_tree(|tree| tree.node_type_id(*node)) == Some(9))
+            || with_tree(|tree| tree.node_type_id(target)) == Some(9))
+    {
+        event_listeners::window(scope)
+    } else {
+        None
+    };
+    let mut values = Vec::with_capacity(ancestors.len() + 2);
+    values.push(target_node.into());
+    for &handle in &ancestors {
+        values.push(wrap(scope, handle).into());
     }
+    if let Some(window) = window {
+        values.push(window.into());
+    }
+    let path = v8::Array::new_with_elements(scope, &values);
     set_prop(scope, record, "path", path.into());
 
     // CAPTURE phase: root → target's parent (capture listeners), then TARGET (both), then BUBBLE:
@@ -3510,10 +3800,10 @@ fn el_dispatch_event(
 
     let fire =
         |scope: &mut v8::PinScope, node_h: Handle, want_capture: bool, at_target: bool| -> bool {
-            if get_bool_prop(scope, record, "stop") {
+            if get_bool_prop(scope, record, "stop") && !at_target {
                 return false;
             }
-            let listeners: Vec<(v8::Global<v8::Function>, bool)> = LISTENERS.with(|m| {
+            let listeners: Vec<event_listeners::Listener> = LISTENERS.with(|m| {
                 m.borrow()
                     .get(&(node_h, ty.clone()))
                     .cloned()
@@ -3532,22 +3822,58 @@ fn el_dispatch_event(
                 },
             );
             set_prop(scope, record, "eventPhase", phase.into());
-            for (g, capture) in listeners {
+            for listener in listeners {
                 // at the target, both capture and bubble listeners fire; elsewhere only the phase's.
-                if !at_target && capture != want_capture {
+                if listener.capture != want_capture || listener.removed.get() {
                     continue;
                 }
                 if get_bool_prop(scope, record, "stopImmediate") {
                     break;
                 }
-                let f = v8::Local::new(scope, &g);
-                let recv: v8::Local<v8::Value> = cur_node.into();
-                f.call(scope, recv, &[event]);
+                if listener
+                    .signal
+                    .as_ref()
+                    .is_some_and(|signal| event_listeners::aborted(scope, signal))
+                {
+                    listener.removed.set(true);
+                    continue;
+                }
+                if listener.once {
+                    listener.removed.set(true);
+                    LISTENERS.with(|listeners| {
+                        if let Some(list) = listeners.borrow_mut().get_mut(&(node_h, ty.clone())) {
+                            list.retain(|entry| {
+                                !std::rc::Rc::ptr_eq(&entry.removed, &listener.removed)
+                            });
+                        }
+                    });
+                    event_listeners::detach(scope, &listener);
+                }
+                let passive = v8::Boolean::new(scope, listener.passive);
+                set_prop(scope, record, "passive", passive.into());
+                let callback = v8::Local::new(scope, &listener.callback);
+                let scope = std::pin::pin!(v8::TryCatch::new(scope));
+                let scope = &mut scope.init();
+                if let Ok(function) = v8::Local::<v8::Function>::try_from(callback) {
+                    function.call(scope, cur_node.into(), &[event]);
+                } else if let Some(function) = get_prop(scope, callback, "handleEvent")
+                    .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+                {
+                    function.call(scope, callback.into(), &[event]);
+                }
+                let passive = v8::Boolean::new(scope, false);
+                set_prop(scope, record, "passive", passive.into());
+                if scope.is_execution_terminating() {
+                    break;
+                }
             }
 
             true
         };
 
+    if window.is_some() {
+        event_listeners::phase(scope, event_obj, true);
+    }
     // capture: root → parent
     for &node_h in capture_path
         .iter()
@@ -3558,12 +3884,18 @@ fn el_dispatch_event(
         }
     }
     // at target (both phases)
-    fire(scope, target, false, true);
+    if !get_bool_prop(scope, record, "stop") {
+        fire(scope, target, true, true);
+        fire(scope, target, false, true);
+    }
     // bubble: parent → root
     for node_h in bubble_path {
         if !fire(scope, node_h, false, false) {
             break;
         }
+    }
+    if window.is_some() && bubbles && !get_bool_prop(scope, record, "stop") {
+        event_listeners::phase(scope, event_obj, false);
     }
     let not_prevented = !get_bool_prop(scope, record, "defaultPrevented");
     let null = v8::null(scope);
@@ -3572,7 +3904,7 @@ fn el_dispatch_event(
     set_prop(scope, record, "currentTarget", null.into());
     set_prop(scope, record, "eventPhase", phase.into());
     set_prop(scope, record, "path", path.into());
-    for key in ["dispatching", "stop", "stopImmediate"] {
+    for key in ["dispatching", "stop", "stopImmediate", "passive"] {
         set_prop(scope, record, key, no.into());
     }
 
@@ -3671,26 +4003,63 @@ fn dispatch_synthetic(
     bubbles: bool,
     cancelable: bool,
 ) {
+    dispatch_synthetic_with_trust(scope, target, ty, bubbles, cancelable, true);
+}
+
+fn dispatch_synthetic_with_trust(
+    scope: &mut v8::PinScope,
+    target: Handle,
+    ty: &str,
+    bubbles: bool,
+    cancelable: bool,
+    host: bool,
+) {
     let global = scope.get_current_context().global(scope);
-    let Some(ctor) = v8::String::new(scope, "Event")
+    let constructor = if ty == "click" {
+        "PointerEvent"
+    } else {
+        "Event"
+    };
+    let Some(ctor) = v8::String::new(scope, constructor)
         .and_then(|k| global.get(scope, k.into()))
         .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
     else {
         return;
     };
     let init = v8::Object::new(scope);
-    for (k, val) in [("bubbles", bubbles), ("cancelable", cancelable)] {
+    for (k, val) in [
+        ("bubbles", bubbles),
+        ("cancelable", cancelable),
+        ("composed", ty == "click"),
+    ] {
         if let Some(key) = v8::String::new(scope, k) {
             let b = v8::Boolean::new(scope, val);
             init.set(scope, key.into(), b.into());
         }
+    }
+    if ty == "click" {
+        let key = v8::String::new(scope, "pointerId").unwrap();
+        let value = v8::Integer::new(scope, -1);
+        init.set(scope, key.into(), value.into());
     }
     let ty_str = v8::String::new(scope, ty).unwrap();
     let Some(ev) = ctor.new_instance(scope, &[ty_str.into(), init.into()]) else {
         return;
     };
     let node = wrap(scope, target);
-    dispatch_host_event(scope, ev, node);
+    if host {
+        dispatch_host_event(scope, ev, node);
+    } else {
+        let flag = v8::Boolean::new(scope, false);
+        if let Some(function) = v8::FunctionTemplate::builder(el_dispatch_event)
+            .data(flag.into())
+            .constructor_behavior(v8::ConstructorBehavior::Throw)
+            .build(scope)
+            .get_function(scope)
+        {
+            function.call(scope, node.into(), &[ev.into()]);
+        }
+    }
 }
 
 // small prop helpers
@@ -3861,6 +4230,14 @@ fn set_node_data(
         };
         value.to_rust_string_lossy(scope)
     };
+    html_popover::attribute_node_change(scope, h, Some(&data));
+    range_live::replacing_data(
+        scope,
+        h,
+        0,
+        character_units(h).len(),
+        data.encode_utf16().count(),
+    );
     with_tree_mut(|t| t.set_text_content(h, &data));
     element_relations::attribute_node_changed(scope, h);
 }
@@ -3925,11 +4302,7 @@ fn get_child_nodes(
         return;
     };
     let kids = with_tree(|t| t.children(h)).unwrap_or_default();
-    let arr = v8::Array::new(scope, kids.len() as i32);
-    for (i, k) in kids.into_iter().enumerate() {
-        let node = wrap(scope, k);
-        arr.set_index(scope, i as u32, node.into());
-    }
+    let arr = node_array(scope, kids);
     bind_method(scope, arr.into(), "item", nodelist_item);
     bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
@@ -4089,10 +4462,13 @@ fn doc_query_selector(
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    if receiver_handle(scope, &args, &[9]).is_none() {
+    let Some(h) = receiver_handle(scope, &args, &[9]) else {
         return;
-    }
+    };
     let sel = arg_str(scope, &args, 0);
+    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+        return;
+    };
     let found = with_tree(|t| t.query_selector(&sel)).flatten();
     let v = wrap_opt(scope, found);
     rv.set(v);
@@ -4104,17 +4480,16 @@ fn doc_query_selector_all(
     mut rv: v8::ReturnValue,
 ) {
     let _dom = DomScope::for_object(scope, args.this());
-    if receiver_handle(scope, &args, &[9]).is_none() {
+    let Some(h) = receiver_handle(scope, &args, &[9]) else {
         return;
-    }
+    };
     let sel = arg_str(scope, &args, 0);
+    let Some(sel) = html_popover::selector(scope, h, &sel) else {
+        return;
+    };
     let handles: Vec<Handle> =
         with_tree(|t| t.query_selector_all(&sel).to_vec()).unwrap_or_default();
-    let arr = v8::Array::new(scope, handles.len() as i32);
-    for (i, hh) in handles.into_iter().enumerate() {
-        let node = wrap(scope, hh);
-        arr.set_index(scope, i as u32, node.into());
-    }
+    let arr = node_array(scope, handles);
     bind_method(scope, arr.into(), "item", nodelist_item);
     bind_method(scope, arr.into(), "namedItem", nodelist_named_item);
     rv.set(arr.into());
@@ -4562,10 +4937,7 @@ fn native_dom_function_dispatch(
         else {
             return;
         };
-        let arguments = v8::Array::new(scope, values.len() as i32);
-        for (index, value) in values.iter().enumerate() {
-            arguments.set_index(scope, index as u32, *value);
-        }
+        let arguments = v8::Array::new_with_elements(scope, &values);
         let receiver = v8::undefined(scope).into();
         if let Some(value) = construct.call(
             scope,
@@ -4579,6 +4951,53 @@ fn native_dom_function_dispatch(
     if let Some(value) = delegate.call(scope, args.this().into(), &values) {
         rv.set(value);
     }
+}
+
+fn native_range_record(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let key_name = v8::String::new(scope, "turbo-dom.Range.record").unwrap();
+    let key = v8::Private::for_api(scope, Some(key_name));
+    let receiver = if args.get(0).is_undefined() && args.get(1).is_object() {
+        let template = v8::ObjectTemplate::new(scope);
+        template.set_internal_field_count(1);
+        let object = template.new_instance(scope).unwrap();
+        if args.get(2).is_object() {
+            object.set_prototype(scope, args.get(2));
+        }
+        Some(object)
+    } else {
+        v8::Local::<v8::Object>::try_from(args.get(0)).ok()
+    };
+    if let Some(receiver) = receiver {
+        if args.length() > 1 && args.get(1).is_object() {
+            let record = args.get(1);
+            receiver.set_private(scope, key, record);
+            if args.get(0).is_undefined() {
+                if let Ok(record) = v8::Local::<v8::Object>::try_from(record) {
+                    range_live::register(scope, record);
+                }
+            }
+            rv.set(if args.get(0).is_undefined() {
+                receiver.into()
+            } else {
+                record
+            });
+            return;
+        }
+        if let Some(record) = receiver
+            .get_private(scope, key)
+            .filter(|value| value.is_object())
+        {
+            rv.set(record);
+            return;
+        }
+    }
+    let message = v8::String::new(scope, "Illegal invocation").unwrap();
+    let error = v8::Exception::type_error(scope, message);
+    scope.throw_exception(error);
 }
 
 // The implementation closure stays in V8's private function data. This is a
@@ -4603,13 +5022,17 @@ fn make_native_dom_function(
     } else {
         args.get(5).boolean_value(scope)
     };
-    let data = v8::Array::new(scope, 4);
-    data.set_index(scope, 0, delegate.into());
-    let flag = v8::Boolean::new(scope, require_new);
-    data.set_index(scope, 1, flag.into());
-    let flag = v8::Boolean::new(scope, class_construct);
-    data.set_index(scope, 2, flag.into());
-    data.set_index(scope, 3, args.data());
+    let require_new = v8::Boolean::new(scope, require_new);
+    let class_construct = v8::Boolean::new(scope, class_construct);
+    let data = v8::Array::new_with_elements(
+        scope,
+        &[
+            delegate.into(),
+            require_new.into(),
+            class_construct.into(),
+            args.data(),
+        ],
+    );
     let template = v8::FunctionTemplate::builder(native_dom_function_dispatch)
         .data(data.into())
         .constructor_behavior(if constructor {
@@ -4994,6 +5417,8 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
             control_clone: None,
             css_policy: Default::default(),
             event_handlers: Default::default(),
+            popover: Default::default(),
+            browsing_context: true,
         });
     });
 
@@ -5031,6 +5456,8 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
     let factory_key = v8::String::new(scope, "__nativeDOMFunction").unwrap();
     global.set(scope, factory_key.into(), factory.into());
     bind_method(scope, global, "__nativeEventRecord", lookup_event_record);
+    bind_method(scope, global, "__nativeRangeRecord", native_range_record);
+    range_contents::capture(scope);
     collection_records::register(scope);
     css_policy::register(scope);
     event_handlers::register(scope);
@@ -5064,9 +5491,12 @@ pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
     run_js(scope, include_str!("element_tokens.js"));
     run_js(scope, include_str!("element_relations.js"));
     run_js(scope, include_str!("document_basics.js"));
+    range_contents::install(scope);
     bind_method(scope, global, "__htmlTextNative", html_text::dispatch);
     run_js(scope, include_str!("html_text.js"));
-    run_js(scope, include_str!("html_popover.js"));
+    html_popover::install(scope);
+    document_xpath::install(scope);
+    event_listeners::install(scope);
     let key = v8::String::new(scope, "__captureEventRecord").unwrap();
     if let Some(accessor) = global
         .get(scope, key.into())
@@ -5168,19 +5598,26 @@ fn run_js(scope: &mut v8::PinScope, src: &str) {
 /// as JS; the Rust side is purely the rtdom↔V8 binding.
 const BOOTSTRAP: &str = include_str!("browser_env.js");
 
+#[path = "range_contents.rs"]
+mod range_contents;
+#[path = "range_live.rs"]
+mod range_live;
+
 /// Reset the per-thread DOM (call between test files when reusing an isolate).
 pub fn reset() {
-    OTHER_DOMS.with(|d| d.borrow_mut().clear());
-    DOM_CONTEXTS.with(|d| d.borrow_mut().clear());
-    DOM_ID.with(|d| d.set(0));
-    NEXT_DOM_ID.with(|d| d.set(1));
-    STYLE.with(|s| s.borrow_mut().clear());
-    LISTENERS.with(|s| s.borrow_mut().clear());
-    ACTIVE.with(|a| *a.borrow_mut() = None);
+    // An embedding's cached runtime may be destroyed after a binding TLS cell.
+    // That cell has already released its handles; clear every cell still alive.
+    let _ = OTHER_DOMS.try_with(|d| d.borrow_mut().clear());
+    let _ = DOM_CONTEXTS.try_with(|d| d.borrow_mut().clear());
+    let _ = DOM_ID.try_with(|d| d.set(0));
+    let _ = NEXT_DOM_ID.try_with(|d| d.set(1));
+    let _ = STYLE.try_with(|s| s.borrow_mut().clear());
+    let _ = LISTENERS.try_with(|s| s.borrow_mut().clear());
+    let _ = ACTIVE.try_with(|a| *a.borrow_mut() = None);
     if log_enabled() {
         dump_missing();
     }
-    DOM.with(|d| *d.borrow_mut() = None);
+    let _ = DOM.try_with(|d| *d.borrow_mut() = None);
 }
 
 #[cfg(test)]
@@ -5195,6 +5632,132 @@ mod tests {
             v8::V8::initialize_platform(platform);
             v8::V8::initialize();
         });
+    }
+
+    #[test]
+    fn native_range_clones_preserve_boundaries_without_exposing_or_forging_records() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_with_html(scope, "<body><p id=target>abcdef</p></body>");
+        let code = v8::String::new(scope, r#"(()=>{
+          const range=document.createRange(),text=document.getElementById('target').firstChild;
+          if(range.startContainer!==document||range.endContainer!==document||range.startOffset!==0||Object.keys(range).length)throw Error('initial range');
+          range.setStart(text,1);range.setEnd(text,4);
+          const clone=range.cloneRange();
+          if(clone===range||Object.getPrototypeOf(clone)!==Range.prototype||clone.startContainer!==text||clone.endContainer!==text||clone.startOffset!==1||clone.endOffset!==4||String(clone)!=='bcd')throw Error('cloned range');
+          clone.collapse(true);if(!clone.collapsed||range.collapsed||range.endOffset!==4)throw Error('independent boundaries');
+          clone.startOffset=5;if(clone.startOffset!==1)throw Error('readonly boundary');
+          if(Object.prototype.toString.call(clone)!=='[object Range]'||!Function.prototype.toString.call(Range.prototype.cloneRange).includes('[native code]'))throw Error('native shape');
+          let errors=0;for(const value of [{},Object.create(Range.prototype)])try{Range.prototype.cloneRange.call(value);}catch(e){if(e.name==='TypeError')errors++;}
+          if(errors!==2||'__nativeRangeRecord'in globalThis)throw Error('private range brand');
+          return 'ok';
+        })()"#).unwrap();
+        let catch = std::pin::pin!(v8::TryCatch::new(scope));
+        let catch = &mut catch.init();
+        let script = v8::Script::compile(catch, code, None).unwrap();
+        let value = script.run(catch).unwrap_or_else(|| {
+            panic!("{}", catch.exception().unwrap().to_rust_string_lossy(catch))
+        });
+        assert_eq!(value.to_rust_string_lossy(catch), "ok");
+        reset();
+    }
+
+    #[test]
+    fn borrowed_range_clone_uses_method_realm_and_preserves_foreign_document_boundaries() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let parent = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, parent);
+        install_with_html(scope, "<body><p>parent</p></body>");
+        let child = v8::Context::new(scope, Default::default());
+        let foreign = {
+            let child_scope = &mut v8::ContextScope::new(scope, child);
+            install_with_html(child_scope, "<body><p>foreign</p></body>");
+            let code=v8::String::new(child_scope,"(()=>{const range=document.createRange();range.selectNodeContents(document.querySelector('p').firstChild);return range;})()").unwrap();
+            let script = v8::Script::compile(child_scope, code, None).unwrap();
+            v8::Global::new(child_scope, script.run(child_scope).unwrap())
+        };
+        let foreign = v8::Local::new(scope, foreign);
+        let key = v8::String::new(scope, "foreignRange").unwrap();
+        scope
+            .get_current_context()
+            .global(scope)
+            .set(scope, key.into(), foreign);
+        let code=v8::String::new(scope,r#"(()=>{
+          const clone=Range.prototype.cloneRange.call(foreignRange);
+          if(Object.getPrototypeOf(clone)!==Range.prototype||Object.getPrototypeOf(foreignRange)===Range.prototype||clone.startContainer!==foreignRange.startContainer||String(clone)!=='foreign')throw Error('borrowed range ownership');
+          const fragment=clone.createContextualFragment('<b>child</b>');
+          if(fragment.ownerDocument!==foreignRange.startContainer.ownerDocument||fragment.firstChild.ownerDocument!==fragment.ownerDocument)throw Error('associated document');
+          clone.collapse(true);if(foreignRange.collapsed||!clone.collapsed)throw Error('foreign independent boundaries');
+          return 'ok';
+        })()"#).unwrap();
+        let catch = std::pin::pin!(v8::TryCatch::new(scope));
+        let catch = &mut catch.init();
+        let script = v8::Script::compile(catch, code, None).unwrap();
+        let value = script.run(catch).unwrap_or_else(|| {
+            panic!("{}", catch.exception().unwrap().to_rust_string_lossy(catch))
+        });
+        assert_eq!(value.to_rust_string_lossy(catch), "ok");
+        reset();
+    }
+
+    #[test]
+    fn native_media_queries_validate_receivers_without_advertising_unavailable_decoders() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install(scope);
+        let code=v8::String::new(scope,r#"(()=>{
+          const video=document.createElement('video'),audio=new Audio();
+          if(Object.getPrototypeOf(audio)!==HTMLAudioElement.prototype||Audio.prototype!==HTMLAudioElement.prototype||Object.prototype.toString.call(audio)!=='[object HTMLAudioElement]')throw Error('Audio ownership');
+          if(typeof video.canPlayType!=='function'||video.canPlayType.length!==1||!Function.prototype.toString.call(video.canPlayType).includes('[native code]'))throw Error('media native function');
+          let conversions=0;const type={toString(){conversions++;return 'audio/wav';}};
+          if(audio.canPlayType(type)!==''||conversions!==1||video.canPlayType('video/mp4; codecs="avc1.42E01E"')!==''||video.canPlayType('unsupported/type')!=='')throw Error('unsupported codec query');
+          let errors=0;for(const fn of [()=>video.canPlayType(),()=>video.canPlayType(Symbol()),()=>HTMLMediaElement.prototype.canPlayType.call({},'audio/wav'),()=>HTMLMediaElement.prototype.canPlayType.call(document.createElement('div'),'audio/wav')])try{fn();}catch(e){if(e.name==='TypeError')errors++;}
+          if(errors!==4)throw Error('media receiver/conversion');
+          return 'ok';
+        })()"#).unwrap();
+        let catch = std::pin::pin!(v8::TryCatch::new(scope));
+        let catch = &mut catch.init();
+        let script = v8::Script::compile(catch, code, None).unwrap();
+        let value = script.run(catch).unwrap_or_else(|| {
+            panic!("{}", catch.exception().unwrap().to_rust_string_lossy(catch))
+        });
+        assert_eq!(value.to_rust_string_lossy(catch), "ok");
+        reset();
+    }
+
+    #[test]
+    fn native_click_prevents_recursive_activation_and_preserves_cancelable_untrusted_dispatch() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_with_html(scope, "<body><a id=link href='#target'>link</a></body>");
+        let code=v8::String::new(scope,r#"(()=>{
+          const element=document.getElementById('link');let calls=0,trusted;
+          element.addEventListener('click',event=>{calls++;trusted=event.isTrusted;event.preventDefault();if(!event.bubbles||!event.cancelable)throw Error('click flags');element.click();});
+          const result=HTMLElement.prototype.click.call(element);
+          if(result!==undefined||calls!==1||trusted!==false)throw Error('recursive click activation');
+          let failed=false;try{HTMLElement.prototype.click.call({});}catch(e){failed=e.name==='TypeError';}
+          if(!failed)throw Error('click receiver brand');
+          return 'ok';
+        })()"#).unwrap();
+        let catch = std::pin::pin!(v8::TryCatch::new(scope));
+        let catch = &mut catch.init();
+        let script = v8::Script::compile(catch, code, None).unwrap();
+        let value = script.run(catch).unwrap_or_else(|| {
+            panic!("{}", catch.exception().unwrap().to_rust_string_lossy(catch))
+        });
+        assert_eq!(value.to_rust_string_lossy(catch), "ok");
+        reset();
     }
 
     #[test]
@@ -6063,15 +6626,16 @@ mod tests {
             nested = child.document.getElementById('only-child').textContent;
           });
           node.dispatchEvent(new Event('probe'));
-          let adoptionRejected = false;
-          try { document.body.replaceChildren(node); } catch(error) { adoptionRejected = /Cross-document node adoption/.test(error.message); }
-          if (!adoptionRejected || document.getElementById('only-parent').textContent !== 'updated'
-              || node.ownerDocument !== child.document) throw new Error('variadic adoption aliased another document');
+          const ownNode=document.getElementById('only-parent');
+          document.body.replaceChildren(node);
+          if (node.ownerDocument !== document || document.body.firstChild !== node
+              || child.document.getElementById('only-child') !== null || ownNode.parentNode !== null)
+            throw new Error('variadic adoption lost native node identity');
           const separateApis = child.document.createElement.constructor === child.Function
             && child.Event !== Event && child.HTMLElement !== HTMLElement;
-          JSON.stringify([independent, node.ownerDocument === child.document,
+          JSON.stringify([independent, node.ownerDocument === document,
             node.getAttribute('data-touched'), nested,
-            document.getElementById('only-parent').textContent, separateApis]);
+            ownNode.textContent, separateApis]);
         "#,
         )
         .unwrap();
@@ -6465,7 +7029,7 @@ mod tests {
           let duplicate=false,invalid=false,insertion=false,clone=false;
           try{hidden.attachShadow({mode:'open'})}catch(e){duplicate=e.name==='NotSupportedError'}
           try{Element.prototype.attachShadow.call({},{mode:'open'})}catch(e){invalid=e instanceof TypeError}
-          try{host.appendChild(root)}catch(e){insertion=e.name==='HierarchyRequestError'}
+          insertion=host.appendChild(root)===root && root.childNodes.length===0 && secret.parentNode===host && root.host===host && root.ownerDocument===document;
           try{root.cloneNode(true)}catch(e){clone=e.name==='NotSupportedError'}
           JSON.stringify({branded,boundary,modes,duplicate,invalid,insertion,clone})
         "#).unwrap();
@@ -6571,3 +7135,15 @@ mod tests {
         reset();
     }
 }
+
+#[cfg(test)]
+#[path = "css_live_tests.rs"]
+mod css_live_tests;
+
+#[cfg(test)]
+#[path = "dom_projection_tests.rs"]
+mod dom_projection_tests;
+
+#[cfg(test)]
+#[path = "css_adoption_tests.rs"]
+mod css_adoption_tests;

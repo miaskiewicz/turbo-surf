@@ -237,7 +237,7 @@ cp .env.example .env
 npx turbo-surf-mcp
 ```
 
-That's it. With no `.env` you get the Chrome fingerprint (clears most sites);
+That's it. With no `.env` you get the default Chrome identity and transport profile;
 set one `TURBO_SURF_SOLVER` to also clear challenge walls.
 
 ### Configuration reference
@@ -380,6 +380,15 @@ GREASE, ML-DSA44/65/87, and exact public trust-anchor IDs against a local Chrome
 154.0.8037.98 capture. The former empty trust-anchor patch is superseded by upstream
 support. Workspace patches do not propagate to library consumers, so publishing
 remains blocked until these APIs are published or a distributable fork is reviewed.
+
+Native WebCrypto uses a reproducibly hardened Deno provider and genuine Rust
+X-Wing keys for Chrome 155's `MLKEM768-X25519`. Key permissions and private native
+cloning have adversarial regression coverage; the covered localhost algorithm
+queries and KEM roundtrips match Chrome 155. The provider patch also needs a
+distributable dependency before a crates.io release. See the
+[provider provenance](rust/vendor/DENO_CRYPTO.md) and the
+[itemized browser parity backlog](harness/detection/PARITY-GAPS.md) for remaining
+behavior and validation limits.
 
 The default render tier uses `deno_core` 0.412.0 and `deno_v8` 0.4.0 with
 [the `v8` 150.4.0 binding](https://docs.rs/crate/deno_v8/0.4.0/source/Cargo.toml)

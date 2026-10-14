@@ -1,5 +1,6 @@
 (function(){
   var g = globalThis;
+  var compatibilityElementPrototype;
   var prepareInlineHandler=g.__prepareInlineHandler,noteInlineHandler=g.__noteInlineHandler;delete g.__prepareInlineHandler;delete g.__noteInlineHandler;
   var collectionGet=g.__getCollectionRecord,collectionSet=g.__setCollectionRecord;
   var appliedInlineRead=g.__readAppliedInlineStyle,appliedInlineWrite=g.__writeAppliedInlineStyle,inlineSheetAllowed=g.__isInlineSheetAllowed;
@@ -10,7 +11,7 @@
   // not as `__*` string globals. Reachable from every realm via globalThis[Symbol.for('ts')].
   var __ns = g[Symbol.for('ts')] || (Object.defineProperty(g, Symbol.for('ts'), { value: {}, configurable: true, enumerable: false }), g[Symbol.for('ts')]);
   if (typeof g.__parseCssNative === 'function') { __ns.parseCssNative = g.__parseCssNative; delete g.__parseCssNative; }
-  var cssNativeParse=__ns.parseCssNative,cssSetPrototype=Object.setPrototypeOf;
+  var cssNativeParse=__ns.parseCssNative,cssSetPrototype=Object.setPrototypeOf,cssApply=Reflect.apply,cssMapGet=Function.prototype.call.bind(Map.prototype.get),cssTagUpper=Function.prototype.call.bind(String.prototype.toUpperCase);
   if (typeof g.__domAccessor === 'function') { __ns.domAccessor = g.__domAccessor; delete g.__domAccessor; }
   if (typeof g.__nativeDOMFunction === 'function') { __ns.makeNativeFunction = g.__nativeDOMFunction; delete g.__nativeDOMFunction; }
   if (typeof g.__nativeNamedObject === 'function') { __ns.makeNamedObject = g.__nativeNamedObject; delete g.__nativeNamedObject; }
@@ -186,6 +187,12 @@
   var getEventRecord = WeakMap.prototype.get.bind(eventRecords);
   var setEventRecord = WeakMap.prototype.set.bind(eventRecords);
   var eventClockOrigin = Date.now();
+  var eventDefineProperty = Object.defineProperty;
+  function copyEventPath(path) {
+    var result = [];
+    for (var index=0; index<path.length; index++) eventDefineProperty(result,index,{__proto__:null,value:path[index],writable:true,configurable:true,enumerable:true});
+    return result;
+  }
   var nativeEventRecord = g.__nativeEventRecord;
   delete g.__nativeEventRecord;
   function eventRecord(event) {
@@ -204,10 +211,10 @@
       if (!arguments.length) throw new TypeError('Event requires a type');
       if (init != null && typeof init !== 'object' && typeof init !== 'function') throw new TypeError('EventInit must be a dictionary');
       init = init || {};
-      var state = {type:eventString(type), bubbles:!!init.bubbles, cancelable:!!init.cancelable,
+      var state = {__proto__:null,type:eventString(type), bubbles:!!init.bubbles, cancelable:!!init.cancelable,
         composed:!!init.composed, defaultPrevented:false, target:null, currentTarget:null,
         stop:false, stopImmediate:false, eventPhase:0, timeStamp:g.performance&&typeof g.performance.now==='function'?g.performance.now():Date.now()-eventClockOrigin,
-        trusted:false, dispatching:false, path:[]};
+        trusted:false, dispatching:false, passive:false, path:[]};
       setEventRecord(this,state);
       var get = ({get isTrusted(){return eventRecord(this).trusted;}});
       var trustedGetter=Object.getOwnPropertyDescriptor(get,'isTrusted').get;
@@ -226,13 +233,13 @@
       eventMember(name,{get:getter});
     });
     eventMember('srcElement',{get:Object.getOwnPropertyDescriptor({get srcElement(){return eventRecord(this).target;}},'srcElement').get});
-    eventMember('returnValue',Object.getOwnPropertyDescriptor({get returnValue(){return !eventRecord(this).defaultPrevented;},set returnValue(value){var state=eventRecord(this);if(!value&&state.cancelable)state.defaultPrevented=true;}},'returnValue'));
+    eventMember('returnValue',Object.getOwnPropertyDescriptor({get returnValue(){return !eventRecord(this).defaultPrevented;},set returnValue(value){var state=eventRecord(this);if(!value&&state.cancelable&&!state.passive)state.defaultPrevented=true;}},'returnValue'));
     eventMember('cancelBubble',Object.getOwnPropertyDescriptor({get cancelBubble(){return eventRecord(this).stop;},set cancelBubble(value){var state=eventRecord(this);if(value)state.stop=true;}},'cancelBubble'));
     var methods={
-      preventDefault(){var state=eventRecord(this);if(state.cancelable)state.defaultPrevented=true;},
+      preventDefault(){var state=eventRecord(this);if(state.cancelable&&!state.passive)state.defaultPrevented=true;},
       stopPropagation(){eventRecord(this).stop=true;},
       stopImmediatePropagation(){var state=eventRecord(this);state.stop=true;state.stopImmediate=true;},
-      composedPath(){return eventRecord(this).path.slice();},
+      composedPath(){return copyEventPath(eventRecord(this).path);},
       initEvent(type,bubbles=false,cancelable=false){
         var state=eventRecord(this);if(!arguments.length)throw new TypeError('A type is required');if(state.dispatching)return;
         state.type=eventString(type);state.bubbles=!!bubbles;state.cancelable=!!cancelable;
@@ -592,15 +599,15 @@ if(typeof __ns.makeNativeFunction==='function'){
   function cssString(value){if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);}
   function cssPropertyName(name){if(name==='cssFloat')return 'float';return String(name).replace(/[A-Z]/g,function(c){return '-'+c.toLowerCase();}).replace(/^webkit-/,'-webkit-');}
   function knownProperty(name){if(!cssPropertyCache.has(name))cssPropertyCache.set(name,typeof cssNativeParse==='function'&&cssNativeParse(name,true));return cssPropertyCache.get(name);}
-  function declarationText(record){return record.names.map(function(name){var value=record.values.get(name);return name+': '+value.text+(value.priority?' !important':'')+';';}).join(' ');}
+  function declarationText(record){var text='';for(var index=0;index<record.names.length;index++){var name=record.names[index],value=cssMapGet(record.values,name);if(index)text+=' ';text+=name+': '+value.text+(value.priority?' !important':'')+';';}return text;}
   __ns.readDeclarationText=function(style){return declarationText(declarationRecord(style));};
   function colorText(name,text){if(!/(?:^color$|color$)/.test(name))return text;var match=/^#([\da-f]{3}|[\da-f]{6})$/i.exec(text);if(!match)return text;var hex=match[1];if(hex.length===3)hex=hex.replace(/./g,function(c){return c+c;});return 'rgb('+parseInt(hex.slice(0,2),16)+', '+parseInt(hex.slice(2,4),16)+', '+parseInt(hex.slice(4,6),16)+')';}
   function storeDeclaration(record,name,text,priority){if(!record.values.has(name))record.names.push(name);record.values.set(name,{text:colorText(name,text),priority:priority||''});}
-  function parseDeclaration(record,text){record.names=[];record.values=new Map();var parsed=typeof cssNativeParse==='function'?cssNativeParse('x { '+text+' }'):'x { '+text+' }';var body=parsed.slice(parsed.indexOf('{')+1,parsed.lastIndexOf('}'));cssParts(body,';').forEach(function(part){var index=part.indexOf(':');if(index<1)return;var name=part.slice(0,index).trim();if(!name.startsWith('--')&&!knownProperty(name))return;var value=part.slice(index+1).trim(),important=/\s*!important\s*$/i.test(value);if(important)value=value.replace(/\s*!important\s*$/i,'').trim();var previous=record.values.get(name);if(previous&&previous.priority&&!important)return;storeDeclaration(record,name,value,important?'important':'');});}
+  function parseDeclaration(record,text){record.names=[];record.values=new Map();var selector=record.fontFace?'@font-face':'x',parsed=typeof cssNativeParse==='function'?cssNativeParse(selector+' { '+text+' }'):selector+' { '+text+' }';var body=parsed.slice(parsed.indexOf('{')+1,parsed.lastIndexOf('}'));cssParts(body,';').forEach(function(part){var index=part.indexOf(':');if(index<1)return;var name=part.slice(0,index).trim();if(!record.fontFace&&!name.startsWith('--')&&!knownProperty(name))return;var value=part.slice(index+1).trim(),important=/\s*!important\s*$/i.test(value);if(important)value=value.replace(/\s*!important\s*$/i,'').trim();var previous=record.values.get(name);if(previous&&previous.priority&&!important)return;storeDeclaration(record,name,value,important?'important':'');});}
   function writableDeclaration(record){if(record.readOnly)throw new g.DOMException('The declaration is read-only','NoModificationAllowedError');}
   function commitDeclaration(record){if(record.owner){record.source=declarationText(record);appliedInlineWrite.call(record.owner,record.source);}}
   function removeDeclaration(record,name){var previous=record.values.get(name);if(!previous)return '';record.values.delete(name);record.names.splice(record.names.indexOf(name),1);commitDeclaration(record);return previous.text;}
-  function setDeclaration(record,name,value,priority){writableDeclaration(record);name=cssString(name);value=value===null?'':cssString(value);priority=priority==null?'':cssString(priority).toLowerCase();if(!value){removeDeclaration(record,name);return;}if(priority&&priority!=='important'||!name.startsWith('--')&&!knownProperty(name))return;var parsed={names:[],values:new Map()};parseDeclaration(parsed,name+': '+value+(priority?' !important':'')+';');var accepted=parsed.values.get(name);if(!accepted)return;storeDeclaration(record,name,accepted.text,accepted.priority);commitDeclaration(record);}
+  function setDeclaration(record,name,value,priority){writableDeclaration(record);name=cssString(name);value=value===null?'':cssString(value);priority=priority==null?'':cssString(priority).toLowerCase();if(!value){removeDeclaration(record,name);return;}if(priority&&priority!=='important'||!record.fontFace&&!name.startsWith('--')&&!knownProperty(name))return;var parsed={names:[],values:new Map(),fontFace:record.fontFace};parseDeclaration(parsed,name+': '+value+(priority?' !important':'')+';');var accepted=parsed.values.get(name);if(!accepted&&record.fontFace&&knownProperty(name)){parsed.fontFace=false;parseDeclaration(parsed,name+': '+value+(priority?' !important':'')+';');accepted=parsed.values.get(name);}if(!accepted)return;storeDeclaration(record,name,accepted.text,accepted.priority);commitDeclaration(record);}
   var declarationConstructor=__ns.makeNativeFunction(function(){throw new TypeError('Illegal constructor');},'CSSStyleDeclaration',0,true);
   declarationConstructor.prototype={};Object.defineProperty(declarationConstructor.prototype,'constructor',{value:declarationConstructor,writable:true,configurable:true});Object.defineProperty(declarationConstructor.prototype,Symbol.toStringTag,{value:'CSSStyleDeclaration',configurable:true});Object.defineProperty(declarationConstructor,'prototype',{writable:false});Object.defineProperty(g,'CSSStyleDeclaration',{value:declarationConstructor,writable:true,configurable:true,enumerable:false});
   var declarationPrototype=declarationConstructor.prototype;
@@ -612,8 +619,8 @@ if(typeof __ns.makeNativeFunction==='function'){
   var declarationMethods={getPropertyValue:function(name){if(!arguments.length)throw new TypeError('getPropertyValue requires 1 argument');var record=declarationRecord(this),value=record.values.get(cssString(name));return value?value.text:'';},getPropertyPriority:function(name){if(!arguments.length)throw new TypeError('getPropertyPriority requires 1 argument');var value=declarationRecord(this).values.get(cssString(name));return value?value.priority:'';},setProperty:function(name,value,priority){if(arguments.length<2)throw new TypeError('setProperty requires 2 arguments');setDeclaration(declarationRecord(this),name,value,priority);},removeProperty:function(name){if(!arguments.length)throw new TypeError('removeProperty requires 1 argument');var record=declarationRecord(this);writableDeclaration(record);return removeDeclaration(record,cssString(name));},item:function(index){if(!arguments.length)throw new TypeError('item requires 1 argument');return declarationRecord(this).names[Number(index)>>>0]||'';}};
   Object.keys(declarationMethods).forEach(function(name){Object.defineProperty(declarationPrototype,name,{value:__ns.makeNativeFunction(declarationMethods[name],name,name==='setProperty'?2:1),writable:true,enumerable:true,configurable:true});});
   Object.defineProperty(declarationPrototype,Symbol.iterator,{value:Array.prototype.values,writable:true,configurable:true});
-  function declarationProperty(name){if(typeof name!=='string'||name.startsWith('--'))return null;var cssName=cssPropertyName(name);return knownProperty(cssName)?cssName:null;}
-  var cssDeclaration=function(text,owner,parentRule,readOnly){var target=Object.create(declarationPrototype),record={names:[],values:new Map(),owner:owner||null,parentRule:parentRule||null,source:String(text||''),readOnly:!!readOnly},proxy;parseDeclaration(record,record.source);proxy=new Proxy(target,{get:function(obj,key,receiver){var index=cssIndex(key);if(index>=0)return declarationRecord(proxy).names[index];if(Reflect.has(obj,key))return Reflect.get(obj,key,receiver);var name=declarationProperty(key),value=name&&declarationRecord(proxy).values.get(name);return name?value?value.text:'':undefined;},set:function(obj,key,value,receiver){if(cssIndex(key)>=0)return false;if(Reflect.has(obj,key))return Reflect.set(obj,key,value,receiver);var name=declarationProperty(key);if(name){setDeclaration(declarationRecord(proxy),name,value,'');return true;}return Reflect.set(obj,key,value,receiver);},has:function(obj,key){return cssIndex(key)>=0?cssIndex(key)<declarationRecord(proxy).names.length:Reflect.has(obj,key)||!!declarationProperty(key);},ownKeys:function(){return declarationRecord(proxy).names.map(function(_,i){return String(i);}).concat(Reflect.ownKeys(target));},getOwnPropertyDescriptor:function(obj,key){var index=cssIndex(key),names=declarationRecord(proxy).names;if(index>=0&&index<names.length)return {value:names[index],writable:false,enumerable:true,configurable:true};var descriptor=Reflect.getOwnPropertyDescriptor(obj,key);if(descriptor)return descriptor;if(Reflect.has(declarationPrototype,key))return undefined;var name=declarationProperty(key),value=name&&declarationRecord(proxy).values.get(name);return name?{value:value?value.text:'',writable:true,enumerable:true,configurable:true}:undefined;},deleteProperty:function(obj,key){return cssIndex(key)<0&&Reflect.deleteProperty(obj,key);}});declarationRecords.set(proxy,record);return proxy;};
+  function declarationProperty(name,record){if(typeof name!=='string'||name.startsWith('--'))return null;var cssName=cssPropertyName(name);return knownProperty(cssName)||record&&record.fontFace&&['src','font-display','unicode-range','size-adjust','ascent-override','descent-override','line-gap-override'].indexOf(cssName)>=0?cssName:null;}
+  var cssDeclaration=function(text,owner,parentRule,readOnly,fontFace){var target=Object.create(declarationPrototype),record={__proto__:null,fontFace:!!fontFace,refresh:null,names:[],values:new Map(),owner:owner||null,parentRule:parentRule||null,source:String(text||''),readOnly:!!readOnly},proxy;parseDeclaration(record,record.source);proxy=new Proxy(target,{get:function(obj,key,receiver){var index=cssIndex(key);if(index>=0)return declarationRecord(proxy).names[index];if(Reflect.has(obj,key))return Reflect.get(obj,key,receiver);var name=declarationProperty(key,record),value=name&&declarationRecord(proxy).values.get(name);return name?value?value.text:'':undefined;},set:function(obj,key,value,receiver){if(cssIndex(key)>=0)return false;if(Reflect.has(obj,key))return Reflect.set(obj,key,value,receiver);var name=declarationProperty(key,record);if(name){setDeclaration(declarationRecord(proxy),name,value,'');return true;}return Reflect.set(obj,key,value,receiver);},has:function(obj,key){return cssIndex(key)>=0?cssIndex(key)<declarationRecord(proxy).names.length:Reflect.has(obj,key)||!!declarationProperty(key,record);},ownKeys:function(){return declarationRecord(proxy).names.map(function(_,i){return String(i);}).concat(Reflect.ownKeys(target));},getOwnPropertyDescriptor:function(obj,key){var index=cssIndex(key),names=declarationRecord(proxy).names;if(index>=0&&index<names.length)return {value:names[index],writable:false,enumerable:true,configurable:true};var descriptor=Reflect.getOwnPropertyDescriptor(obj,key);if(descriptor)return descriptor;if(Reflect.has(declarationPrototype,key))return undefined;var name=declarationProperty(key,record),value=name&&declarationRecord(proxy).values.get(name);return name?{value:value?value.text:'',writable:true,enumerable:true,configurable:true}:undefined;},deleteProperty:function(obj,key){return cssIndex(key)<0&&Reflect.deleteProperty(obj,key);}});declarationRecords.set(proxy,record);return proxy;};
   var inlineDeclarationReceiver=__ns.domAccessor('nodeType',false,'Element');
   __ns.makeInlineStyleDeclaration=function(element){inlineDeclarationReceiver.call(element);var style=inlineDeclarations.get(element);if(!style){style=cssDeclaration(appliedInlineRead.call(element),element);inlineDeclarations.set(element,style);}return style;};
   var computedStyleReader=g.getComputedStyle;
@@ -624,7 +631,7 @@ if(typeof __ns.makeNativeFunction==='function'){
   cssRuleInterface('CSSRule');cssRuleInterface('CSSStyleRule',g.CSSRule.prototype);cssRuleInterface('CSSImportRule',g.CSSRule.prototype);
   function cssRuleMember(owner,name,get,set){var descriptor={enumerable:true,configurable:true,get:__ns.makeNativeFunction(get,'get '+name,0)};if(set)descriptor.set=__ns.makeNativeFunction(set,'set '+name,1);Object.defineProperty(g[owner].prototype,name,descriptor);}
   ['type','parentRule','parentStyleSheet'].forEach(function(name){cssRuleMember('CSSRule',name,function(){return cssRuleRecord(this)[name];});});
-  function cssRuleText(record){if(record.type===1){var text=declarationText(declarationRecord(record.style));return record.selectorText+' {'+(text?' '+text+' ':' ')+'}';}return record.cssText;}
+  function cssRuleText(record){if(record.type===1||record.type===5){var text=declarationText(declarationRecord(record.style));return (record.type===1?record.selectorText:record.prelude)+' {'+(text?' '+text+' ':' ')+'}';}return record.cssText;}
   __ns.readCssRuleText=function(rule){return cssRuleText(cssRuleRecord(rule));};
   cssRuleMember('CSSRule','cssText',function(){return cssRuleText(cssRuleRecord(this));},function(value){cssRuleRecord(this);if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');String(value);});
   cssRuleMember('CSSStyleRule','selectorText',function(){return cssRuleRecord(this,1).selectorText;},function(value){var record=cssRuleRecord(this,1);if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');var parsed=parseCssRules(String(value)+' {}',record.parentStyleSheet,record.parentRule);if(parsed.length===1&&cssRuleRecord(parsed[0]).type===1)record.selectorText=cssRuleRecord(parsed[0],1).selectorText;});
@@ -632,7 +639,7 @@ if(typeof __ns.makeNativeFunction==='function'){
   ['href','media','styleSheet'].forEach(function(name){cssRuleMember('CSSImportRule',name,function(){return cssRuleRecord(this,3)[name];});});
   var cssRuleConstants={STYLE_RULE:1,CHARSET_RULE:2,IMPORT_RULE:3,MEDIA_RULE:4,FONT_FACE_RULE:5,PAGE_RULE:6,KEYFRAMES_RULE:7,KEYFRAME_RULE:8,MARGIN_RULE:9,NAMESPACE_RULE:10,COUNTER_STYLE_RULE:11,SUPPORTS_RULE:12,FONT_FEATURE_VALUES_RULE:14};
   Object.keys(cssRuleConstants).forEach(function(name){[g.CSSRule,g.CSSRule.prototype].forEach(function(owner){Object.defineProperty(owner,name,{value:cssRuleConstants[name],enumerable:true});});});
-  function finishCssRule(rule){var record={};['type','parentRule','parentStyleSheet','cssText','selectorText','href','media','styleSheet'].forEach(function(name){if(Object.hasOwn(rule,name)){record[name]=rule[name];delete rule[name];}});if(record.type===1){record.style=rule.style;delete rule.style;}cssRuleStates.set(rule,record);Object.setPrototypeOf(rule,record.type===1?g.CSSStyleRule.prototype:record.type===3?g.CSSImportRule.prototype:g.CSSRule.prototype);return rule;}
+  function finishCssRule(rule){var record={__proto__:null};['type','parentRule','parentStyleSheet','cssText','selectorText','href','media','styleSheet','prelude'].forEach(function(name){if(Object.hasOwn(rule,name)){record[name]=rule[name];delete rule[name];}});if(rule.style){record.style=rule.style;if(record.type===1)delete rule.style;}if(rule.cssRules)record.cssRules=rule.cssRules;cssRuleStates.set(rule,record);Object.setPrototypeOf(rule,record.type===1?g.CSSStyleRule.prototype:record.type===3?g.CSSImportRule.prototype:g.CSSRule.prototype);return rule;}
   var parseCssRules = function(text, sheet, parent, validated){
     text=String(text);if(!validated&&typeof cssNativeParse==='function')text=cssNativeParse(text);
     var out=cssList(), start=0, depth=0, quote='', escaped=false, comment=false, open=-1;
@@ -647,7 +654,7 @@ if(typeof __ns.makeNativeFunction==='function'){
         if(head){
           var isAt=head[0]==='@',rule={};
           rule.parentStyleSheet=sheet;rule.parentRule=parent||null;
-          if(isAt){rule.type=/^@media\b/i.test(head)?4:/^@supports\b/i.test(head)?12:/^@font-face\b/i.test(head)?5:/^@keyframes\b/i.test(head)?7:0;rule.cssText=head+' { '+body.trim()+' }';if(rule.type===5)rule.style=cssDeclaration(body,null,rule);else rule.cssRules=parseCssRules(body,sheet,rule,true);}
+          if(isAt){rule.prelude=head;rule.type=/^@media\b/i.test(head)?4:/^@supports\b/i.test(head)?12:/^@font-face\b/i.test(head)?5:/^@keyframes\b/i.test(head)?7:0;rule.cssText=head+' { '+body.trim()+' }';if(rule.type===5)rule.style=cssDeclaration(body,null,rule,false,true);else rule.cssRules=parseCssRules(body,sheet,rule,true);}
           else {rule.type=1;rule.selectorText=head.replace(/\s*,\s*/g,', ');rule.style=cssDeclaration(body,null,rule);rule.cssText=head+' { '+body.trim()+' }';}
           cssItems(out).push(finishCssRule(rule));
         }
@@ -661,7 +668,7 @@ if(typeof __ns.makeNativeFunction==='function'){
   };
   var sheetRecords=cssMap('sheet'),mediaRecords=cssMap('media'),elementSheets=cssMap('elementSheet');
   function sheetRecord(sheet){var record=sheetRecords.get(sheet);if(!record)throw new TypeError('Illegal invocation');return record;}
-  function mediaRecord(media){var record=mediaRecords.get(media);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=record.owner.getAttribute('media')||'';if(text!==record.source){record.source=text;record.items=mediaQueries(text);}}return record;}
+  function mediaRecord(media){var record=mediaRecords.get(media);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=sheetNativeAttribute(record.owner,'media')||'';if(text!==record.source){record.source=text;record.items=mediaQueries(text);}}return record;}
   function cssInterface(name,parent,construct){var ctor=__ns.makeNativeFunction(construct||function(){throw new TypeError('Illegal constructor');},name,0,true);ctor.prototype=Object.create(parent?parent.prototype:Object.prototype);Object.defineProperty(ctor.prototype,'constructor',{value:ctor,writable:true,configurable:true});Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});Object.defineProperty(ctor,'prototype',{writable:false});if(parent)Object.setPrototypeOf(ctor,parent);Object.defineProperty(g,name,{value:ctor,writable:true,configurable:true,enumerable:false});return ctor;}
   function cssMember(proto,name,get,set){var descriptor={enumerable:true,configurable:true,get:__ns.makeNativeFunction(get,'get '+name,0)};if(set)descriptor.set=__ns.makeNativeFunction(set,'set '+name,1);Object.defineProperty(proto,name,descriptor);}
   function cssMethod(proto,name,length,method){Object.defineProperty(proto,name,{value:__ns.makeNativeFunction(method,name,length),enumerable:true,writable:true,configurable:true});}
@@ -676,10 +683,10 @@ if(typeof __ns.makeNativeFunction==='function'){
   Object.defineProperty(mediaConstructor.prototype,Symbol.iterator,{value:Array.prototype.values,writable:true,configurable:true});
   function makeMedia(text,owner){var target=Object.create(mediaConstructor.prototype),record={items:mediaQueries(text||''),source:text||'',owner:owner||null},proxy;proxy=new Proxy(target,{get:function(obj,key,receiver){var index=cssIndex(key);return index>=0?mediaRecord(proxy).items[index]:Reflect.get(obj,key,receiver);},has:function(obj,key){var index=cssIndex(key);return index>=0?index<mediaRecord(proxy).items.length:Reflect.has(obj,key);},ownKeys:function(){return mediaRecord(proxy).items.map(function(_,i){return String(i);}).concat(Reflect.ownKeys(target));},getOwnPropertyDescriptor:function(obj,key){var index=cssIndex(key),items=mediaRecord(proxy).items;return index>=0&&index<items.length?{value:items[index],writable:false,enumerable:true,configurable:true}:Reflect.getOwnPropertyDescriptor(obj,key);},set:function(obj,key,value,receiver){return cssIndex(key)<0&&Reflect.set(obj,key,value,receiver);},deleteProperty:function(obj,key){return cssIndex(key)<0&&Reflect.deleteProperty(obj,key);}});mediaRecords.set(proxy,record);return proxy;}
   var styleSheetConstructor=cssInterface('StyleSheet');
-  function newSheetRecord(options){return {rules:cssList(),constructed:true,ownerNode:null,href:null,parentStyleSheet:null,ownerRule:null,title:null,media:makeMedia(options&&options.media!==undefined?options.media:''),disabled:!!(options&&options.disabled),replacing:false,originClean:true};}
+  function newSheetRecord(options){return {rules:cssList(),constructed:true,constructorDocument:d,ownerNode:null,href:null,parentStyleSheet:null,ownerRule:null,title:null,media:makeMedia(options&&options.media!==undefined?options.media:''),disabled:!!(options&&options.disabled),replacing:false,originClean:true};}
   var sheetConstructor=cssInterface('CSSStyleSheet',styleSheetConstructor,function(options){if(options!==null&&options!==undefined&&typeof options!=='object'&&typeof options!=='function')throw new TypeError('CSSStyleSheetInit must be an object');sheetRecords.set(this,newSheetRecord(options));});
   ['href','ownerNode','parentStyleSheet'].forEach(function(name){cssMember(styleSheetConstructor.prototype,name,function(){return sheetRecord(this)[name];});});
-  cssMember(styleSheetConstructor.prototype,'title',function(){var record=sheetRecord(this);return record.ownerNode?record.ownerNode.getAttribute('title')||null:record.title;});
+  cssMember(styleSheetConstructor.prototype,'title',function(){var record=sheetRecord(this);return record.ownerNode?sheetNativeAttribute(record.ownerNode,'title')||null:record.title;});
   cssMember(styleSheetConstructor.prototype,'type',function(){sheetRecord(this);return 'text/css';});
   cssMember(styleSheetConstructor.prototype,'media',function(){return sheetRecord(this).media;},function(value){mediaRecord(sheetRecord(this).media).items=mediaQueries(value);});
   cssMember(styleSheetConstructor.prototype,'disabled',function(){return sheetRecord(this).disabled;},function(value){sheetRecord(this).disabled=!!value;});
@@ -700,16 +707,59 @@ if(typeof __ns.makeNativeFunction==='function'){
   cssMethod(sheetConstructor.prototype,'removeRule',0,function(index){deleteSheetRule(this,index===undefined?0:index);});
   cssMethod(sheetConstructor.prototype,'replaceSync',1,function(text){var record=sheetRecord(this);if(!arguments.length)throw new TypeError('replaceSync requires 1 argument');if(!record.constructed||record.replacing)throw new g.DOMException('The sheet cannot be replaced','NotAllowedError');replaceSheetRules(this,record,text,false);});
   cssMethod(sheetConstructor.prototype,'replace',1,function(text){var record;try{record=sheetRecord(this);if(!arguments.length)throw new TypeError('replace requires 1 argument');if(!record.constructed||record.replacing)throw new g.DOMException('The sheet cannot be replaced','NotAllowedError');replaceSheetRules(this,record,text,false);return Promise.resolve(this);}catch(error){return Promise.reject(error);}});
-  function linkedSheet(el,text,url){var sheet=Object.create(sheetConstructor.prototype),record=newSheetRecord();record.constructed=false;record.ownerNode=el;record.href=url||null;record.title=el.getAttribute('title')||null;record.media=makeMedia(el.getAttribute('media')||'',el);sheetRecords.set(sheet,record);replaceSheetRules(sheet,record,text,true);return sheet;}
-  function detachSheet(sheet){if(sheet){var record=sheetRecord(sheet);if(record.ownerNode)record.title=record.ownerNode.getAttribute('title')||null;mediaRecord(record.media).owner=null;record.ownerNode=null;}}
+  function linkedSheet(el,text,url){var sheet=Object.create(sheetConstructor.prototype),record=newSheetRecord();record.constructed=false;record.ownerNode=el;record.href=url||null;record.title=sheetNativeAttribute(el,'title')||null;record.media=makeMedia(sheetNativeAttribute(el,'media')||'',el);sheetRecords.set(sheet,record);replaceSheetRules(sheet,record,text,true);return sheet;}
+  function detachSheet(sheet){if(sheet){var record=sheetRecord(sheet);if(record.ownerNode)record.title=sheetNativeAttribute(record.ownerNode,'title')||null;mediaRecord(record.media).owner=null;record.ownerNode=null;}}
   function attachLinkedStyleSheet(el,text,url,originClean){var sheet=linkedSheet(el,text,url),old=elementSheets.get(el);sheetRecord(sheet).originClean=originClean!==false;if(old)detachSheet(old.sheet);elementSheets.set(el,{sheet:sheet,text:null});return sheet;};
   function attachImportStyleSheet(rule,sheet,url,text,originClean){var parent=cssRuleRecord(rule,3),record=sheetRecord(sheet);record.constructed=false;record.ownerRule=rule;record.parentStyleSheet=parent.parentStyleSheet;record.href=url||null;record.originClean=originClean!==false;if(text!==undefined)replaceSheetRules(sheet,record,text,true);parent.styleSheet=sheet;};
-  var documentCSSRecord=collectionGet(d)||{kind:'Document'};documentCSSRecord.cssHost={looksLikeCSS:function(text){return !String(text).trim()||!!cssNativeParse(String(text)).trim();},sheet:function(element){return currentSheetGetter.call(element);},readRules:function(sheet){var source=cssItems(sheetRecord(sheet).rules),snapshot=[];cssSetPrototype(snapshot,null);for(var index=0;index<source.length;index++)snapshot[index]=source[index];return snapshot;},readRule:function(rule){var record=cssRuleRecord(rule);return {type:record.type,href:record.href||null};},attachLinked:attachLinkedStyleSheet,attachImport:attachImportStyleSheet};collectionSet(d,documentCSSRecord);
-  // adoptedStyleSheets — must be a real, settable ARRAY (a non-iterable getter or
-  // absent prop both break the read-modify-write spread above).
-  if (!Array.isArray(d.adoptedStyleSheets)) {
-    try { d.adoptedStyleSheets = []; } catch (e) {}
+  // Private live-layout export never reads page properties or invokes public
+  // collection iteration. Imports retain their actual attached sheet graph.
+  function cssHostArray(){var value=[];cssSetPrototype(value,null);return value;}
+  function cssHostMedia(media){var record=mediaRecords.get(media);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=sheetNativeAttribute(record.owner,'media')||'';if(text!==record.source)return cssNativeParse(text,'media');}var result='';for(var i=0;i<record.items.length;i++){if(i)result+=', ';result+=record.items[i];}return result;}
+  function cssHostText(text,budget){budget.bytes-=text.length;if(budget.bytes<0)throw new RangeError('Live stylesheet text budget exceeded');return text;}
+  function cssHostRule(rule,seen,budget){
+    if(--budget.rules<0)throw new RangeError('Live stylesheet rule budget exceeded');
+    var record=cssRuleRecord(rule),output={__proto__:null,type:record.type};
+    if(record.cssRules){output.prelude=cssHostText(record.prelude,budget);output.rules=cssHostRules(record.cssRules,seen,budget);output.cssText=record.prelude+' {';for(var index=0;index<output.rules.length;index++)output.cssText+=' '+output.rules[index].cssText;output.cssText+=' }';}else output.cssText=cssRuleText(record);
+    output.cssText=cssHostText(output.cssText,budget);
+    if(record.type===3){output.href=cssHostText(record.href,budget);output.media=cssHostText(cssHostMedia(record.media),budget);output.styleSheet=record.styleSheet?cssHostSheet(record.styleSheet,seen,budget):null;}
+    return output;
   }
+  function cssHostRules(list,seen,budget){var source=cssItems(list),output=cssHostArray();for(var i=0;i<source.length;i++)output[i]=cssHostRule(source[i],seen,budget);return output;}
+  function cssHostSheet(sheet,seen,budget){
+    for(var i=0;i<seen.length;i++)if(seen[i]===sheet)return {__proto__:null,cycle:true};
+    if(--budget.sheets<0)throw new RangeError('Live stylesheet graph budget exceeded');
+    seen[seen.length]=sheet;
+    var record=sheetRecord(sheet),output={__proto__:null,disabled:record.disabled,media:cssHostText(cssHostMedia(record.media),budget),href:record.href===null?null:cssHostText(record.href,budget),originClean:record.originClean,rules:cssHostRules(record.rules,seen,budget)};
+    seen.length--;return output;
+  }
+  function exportLiveSheet(sheet){return cssHostSheet(sheet,cssHostArray(),{__proto__:null,rules:20000,sheets:1024,bytes:2000000});}
+  var documentCSSRecord=collectionGet(d)||{kind:'Document'};documentCSSRecord.cssHost={exportSheet:exportLiveSheet,looksLikeCSS:function(text){return !String(text).trim()||!!cssNativeParse(String(text)).trim();},sheet:function(element){return cssApply(currentSheetGetter,element,[]);},readRules:function(sheet){var source=cssItems(sheetRecord(sheet).rules),snapshot=[];cssSetPrototype(snapshot,null);for(var index=0;index<source.length;index++)snapshot[index]=source[index];return snapshot;},readRule:function(rule){var record=cssRuleRecord(rule);return {type:record.type,href:record.href||null};},attachLinked:attachLinkedStyleSheet,attachImport:attachImportStyleSheet};collectionSet(d,documentCSSRecord);
+  // ObservableArray adoption has a stable identity and authoritative backing
+  // state. Renderer exports never consult a page-defined document getter.
+  var adoptionStates=cssMap('adoption'),adoptionDocumentCheck=__ns.domAccessor('nodeType',false,'Document'),adoptionNodeCheck=__ns.domAccessor('nodeType',false,'Node'),adoptionShadowCheck=__ns.domAccessor('__isShadowRoot',false,'Node'),adoptionOwner=__ns.domAccessor('ownerDocument',false,'Node'),adoptionDOMException=g.DOMException,adoptionDefine=Reflect.defineProperty,adoptionSet=Reflect.set,adoptionDelete=Reflect.deleteProperty,adoptionOwn=Object.hasOwn,adoptionProxy=Proxy,adoptionFloor=Math.floor;
+  function adoptionRecord(value){var record=sheetRecords.get(value);if(!record)throw new TypeError('The value is not a CSSStyleSheet');return record;}
+  function adoptionDocument(owner){var type=cssApply(adoptionNodeCheck,owner,[]);if(type===9)return owner;if(type===11&&cssApply(adoptionShadowCheck,owner,[]))return cssApply(adoptionOwner,owner,[]);throw new TypeError('Illegal invocation');}
+  function adoptionAllowed(owner,value){var record=adoptionRecord(value);if(!record.constructed||record.constructorDocument!==adoptionDocument(owner))throw new adoptionDOMException('The stylesheet cannot be adopted','NotAllowedError');}
+  function createAdoption(owner){
+    var target=[],state={__proto__:null,target:target,proxy:null};
+    function length(value){var n=+value;if(n<0||n>4294967295||n!==adoptionFloor(n))throw new RangeError('Invalid array length');if(n<target.length)target.length=n;return true;}
+    function index(key,value){adoptionAllowed(owner,value);if(key>target.length)return true;adoptionDefine(target,String(key),{value:value,writable:true,enumerable:true,configurable:true});return true;}
+    state.proxy=new adoptionProxy(target,{
+      preventExtensions:function(){return false;},
+      set:function(target,key,value,receiver){var i=cssIndex(key);if(key==='length')return length(value);return i>=0&&i<4294967295?index(i,value):adoptionSet(target,key,value,receiver);},
+      deleteProperty:function(target,key){var i=cssIndex(key);if(i>=0&&i<target.length){target.length=i;return true;}return adoptionDelete(target,key);},
+      defineProperty:function(target,key,descriptor){var i=cssIndex(key);if(i>=0&&i<4294967295){if(adoptionOwn(descriptor,'get')||adoptionOwn(descriptor,'set')||adoptionOwn(descriptor,'configurable')&&!descriptor.configurable||adoptionOwn(descriptor,'enumerable')&&!descriptor.enumerable||adoptionOwn(descriptor,'writable')&&!descriptor.writable)return false;return adoptionOwn(descriptor,'value')?index(i,descriptor.value):true;}if(key==='length'){if(adoptionOwn(descriptor,'get')||adoptionOwn(descriptor,'set')||adoptionOwn(descriptor,'writable')&&!descriptor.writable)return false;return adoptionOwn(descriptor,'value')?length(descriptor.value):true;}return adoptionDefine(target,key,descriptor);}
+    });
+    return state;
+  }
+  function adoptionState(receiver){adoptionDocument(receiver);var state=adoptionStates.get(receiver);if(!state){state=createAdoption(receiver);adoptionStates.set(receiver,state);}return state;}
+  function readAdoption(){cssApply(adoptionDocumentCheck,this,[]);return adoptionState(this).proxy;}
+  function readShadowAdoption(){if(cssApply(adoptionNodeCheck,this,[])!==11||!cssApply(adoptionShadowCheck,this,[]))throw new TypeError('Illegal invocation');return adoptionState(this).proxy;}
+  function replaceAdoption(input){var state=adoptionState(this),converted=cssHostArray();for(var value of input){adoptionRecord(value);converted[converted.length]=value;}state.target.length=0;for(var i=0;i<converted.length;i++){adoptionAllowed(this,converted[i]);adoptionDefine(state.target,String(i),{value:converted[i],writable:true,enumerable:true,configurable:true});}}
+  var adoptionDescriptor={configurable:true,enumerable:true,get:__ns.makeNativeFunction(readAdoption,'get adoptedStyleSheets',0),set:__ns.makeNativeFunction(function(input){cssApply(adoptionDocumentCheck,this,[]);return cssApply(replaceAdoption,this,[input]);},'set adoptedStyleSheets',1)};
+  var shadowAdoptionDescriptor={configurable:true,enumerable:true,get:__ns.makeNativeFunction(readShadowAdoption,'get adoptedStyleSheets',0),set:__ns.makeNativeFunction(function(input){cssApply(readShadowAdoption,this,[]);return cssApply(replaceAdoption,this,[input]);},'set adoptedStyleSheets',1)};
+  Object.defineProperty(d,'adoptedStyleSheets',adoptionDescriptor);adoptionState(d);
+  documentCSSRecord.cssHost.readAdopted=function(owner){var target=adoptionState(owner||d).target,snapshot=cssHostArray();for(var i=0;i<target.length;i++)snapshot[i]=target[i];return snapshot;};
   // document.title reflects the <title> element's text (jsdom semantics). Ensure a <title> exists in
   // <head> so code that does querySelector('title').textContent = … (usePageMetadata) has a target,
   // and reading document.title returns it.
@@ -760,10 +810,11 @@ if(typeof __ns.makeNativeFunction==='function'){
   // getOwnPropertyDescriptor(element)) AND on the interface .prototype (React's value-tracker reads
   // node.constructor.prototype). No setPrototypeOf — avoids touching the native proto chain.
   var currentSheetGetter;
-  var sheetTagName=__ns.domAccessor('tagName',false,'Element'),sheetConnected=__ns.domAccessor('isConnected',false,'Node');
+  var sheetTagName=__ns.domAccessor('tagName',false,'Element'),sheetConnected=__ns.domAccessor('isConnected',false,'Node'),sheetTextContent=__ns.domAccessor('textContent',false,'Node'),sheetGetAttribute=d.createElement('style').getAttribute;
+  function sheetNativeAttribute(element,name){return cssApply(sheetGetAttribute,element,[name]);}
   (function(){
-    var mkSheet = function(el){return linkedSheet(el,el.textContent||'',null);};
-    var orig = d.createElement.bind(d);
+    var mkSheet = function(el){return linkedSheet(el,cssApply(sheetTextContent,el,[])||'',null);};
+    var orig = d.createElement;
     // value/checked live ONLY on the interface .prototype (NOT own — React's value-tracker bails on
     // node.hasOwnProperty('value')). Each control's actual proto is set to that interface prototype
     // so getPrototypeOf(el) === el.constructor.prototype has the descriptor (React + testing-library).
@@ -818,7 +869,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     var selStartDesc = { configurable: true, get: function(){ return this.__selStart == null ? String(this.value||'').length : this.__selStart; }, set: function(v){ this.__selStart = v; } };
     var selEndDesc = { configurable: true, get: function(){ return this.__selEnd == null ? String(this.value||'').length : this.__selEnd; }, set: function(v){ this.__selEnd = v; } };
     var selDirDesc = { configurable: true, get: function(){ return this.__selDir || 'none'; }, set: function(v){ this.__selDir = v; } };
-    var baseProto = Object.getPrototypeOf(orig('span'));
+    var baseProto = compatibilityElementPrototype = Object.getPrototypeOf(orig.call(d,'span'));
     // Reflected IDL attributes on every element: setting el.src / el.href (script/img/link/a — a DOM
     // property) must show as the content attribute so attribute selectors like script[src*="maps"]
     // and getAttribute('src') see it. (Image() defines its own src with onload; that shadows this.)
@@ -1326,7 +1377,7 @@ if(typeof __ns.makeNativeFunction==='function'){
       cp.getBoundingClientRect = function(){ return { x:0, y:0, top:0, left:0, right:0, bottom:0, width:0, height:0, toJSON:function(){ return this; } }; };
     })();
     d.createElement = ({ createElement(tag){
-      var el = orig(tag); var t = String(tag).toLowerCase();
+      var el = orig.apply(this,arguments); var t = String(el.localName).toLowerCase();
       applyControlProto(el);
       // canvas: drop the own native getBoundingClientRect so it resolves to the (mockable)
       // HTMLCanvasElement.prototype version; getContext/toDataURL/toBlob are on the proto too.
@@ -1358,14 +1409,14 @@ if(typeof __ns.makeNativeFunction==='function'){
       // WITHOUT a descriptor guard (the NON_MASKING interceptor makes every lookup
       // report a descriptor, so a guard would wrongly skip). Caches per element.
       currentSheetGetter=function(){
-          var tag = sheetTagName.call(this);
+          var tag = cssApply(sheetTagName,this,[]);
           if (!tag) return null;
-          tag=String(tag).toUpperCase();if(tag!=='STYLE'&&tag!=='LINK')return null;
+          tag=cssTagUpper(tag);if(tag!=='STYLE'&&tag!=='LINK')return null;
           var cached=elementSheets.get(this);
-          if (!sheetConnected.call(this)) {if(cached)detachSheet(cached.sheet);elementSheets.delete(this);return null;}
+          if (!cssApply(sheetConnected,this,[])) {if(cached)detachSheet(cached.sheet);elementSheets.delete(this);return null;}
           if(tag==='LINK')return cached?cached.sheet:null;
-          if(!inlineSheetAllowed.call(this)){if(cached)detachSheet(cached.sheet);elementSheets.set(this,{sheet:null,text:null});return null;}
-          var text=String(this.textContent||'');
+          if(!cssApply(inlineSheetAllowed,this,[])){if(cached)detachSheet(cached.sheet);elementSheets.set(this,{sheet:null,text:null});return null;}
+          var text=cssApply(sheetTextContent,this,[])||'';
           if (!cached || !cached.sheet || cached.text!==text) {
             if(cached)detachSheet(cached.sheet);
             cached={sheet:mkSheet(this),text:text};elementSheets.set(this,cached);
@@ -1420,10 +1471,16 @@ if(typeof __ns.makeNativeFunction==='function'){
     return 0; // disconnected
   }
   function __commonAncestor(a,b){ var A=__ancestry(a); var n=b; while(n){ if(A.indexOf(n)>=0) return n; n=n.parentNode; } return d; }
-  function Range(){ this.startContainer=d; this.startOffset=0; this.endContainer=d; this.endOffset=0; }
+  var rangeRecord = g.__nativeRangeRecord;
+  delete g.__nativeRangeRecord;
+  function Range(){
+    var state=Object.create(Range.prototype);
+    Object.defineProperties(state,{startContainer:{value:d,writable:true},startOffset:{value:0,writable:true},endContainer:{value:d,writable:true},endOffset:{value:0,writable:true},document:{value:d,writable:true}});
+    rangeRecord(state,state);return rangeRecord(undefined,state,Object.getPrototypeOf(this));
+  }
   Object.defineProperties(Range.prototype, {
-    collapsed:{ get:function(){ return this.startContainer===this.endContainer && this.startOffset===this.endOffset; } },
-    commonAncestorContainer:{ get:function(){ return __commonAncestor(this.startContainer, this.endContainer); } },
+    collapsed:{ configurable:true, enumerable:true, get:function(){ return this.startContainer===this.endContainer && this.startOffset===this.endOffset; } },
+    commonAncestorContainer:{ configurable:true, enumerable:true, get:function(){ return __commonAncestor(this.startContainer, this.endContainer); } },
   });
   Range.prototype.setStart=function(n,o){ this.startContainer=n; this.startOffset=o|0; if(__cmp(this.startContainer,this.startOffset,this.endContainer,this.endOffset)>0){ this.endContainer=n; this.endOffset=o|0; } };
   Range.prototype.setEnd=function(n,o){ this.endContainer=n; this.endOffset=o|0; if(__cmp(this.startContainer,this.startOffset,this.endContainer,this.endOffset)>0){ this.startContainer=n; this.startOffset=o|0; } };
@@ -1434,21 +1491,46 @@ if(typeof __ns.makeNativeFunction==='function'){
   Range.prototype.collapse=function(toStart){ if(toStart){ this.endContainer=this.startContainer; this.endOffset=this.startOffset; } else { this.startContainer=this.endContainer; this.startOffset=this.endOffset; } };
   Range.prototype.selectNode=function(n){ this.setStartBefore(n); this.setEndAfter(n); };
   Range.prototype.selectNodeContents=function(n){ this.startContainer=n; this.startOffset=0; this.endContainer=n; this.endOffset=(n.nodeType===3?(n.data||'').length:(n.childNodes?n.childNodes.length:0)); };
-  Range.prototype.cloneRange=function(){ var r=new Range(); r.startContainer=this.startContainer; r.startOffset=this.startOffset; r.endContainer=this.endContainer; r.endOffset=this.endOffset; return r; };
+  Range.prototype.cloneRange=function(){ var r=new Range(); var state=rangeRecord(r); state.startContainer=this.startContainer; state.startOffset=this.startOffset; state.endContainer=this.endContainer; state.endOffset=this.endOffset; state.document=this.document; return r; };
   Range.prototype.comparePoint=function(n,o){ if(__cmp(n,o,this.startContainer,this.startOffset)<0) return -1; if(__cmp(n,o,this.endContainer,this.endOffset)>0) return 1; return 0; };
   Range.prototype.isPointInRange=function(n,o){ return this.comparePoint(n,o)===0; };
   Range.prototype.compareBoundaryPoints=function(how,other){ return __cmp(this.startContainer,this.startOffset,other.startContainer,other.startOffset); };
   Range.prototype.insertNode=function(node){ var c=this.startContainer, o=this.startOffset; if(c.nodeType===3){ var txt=c.data||''; var after=c.splitText?c.splitText(o):null; c.parentNode.insertBefore(node, after||c.nextSibling); } else { var ref=c.childNodes?c.childNodes[o]:null; c.insertBefore(node, ref||null); } };
   Range.prototype.deleteContents=function(){ if(this.collapsed) return; var sc=this.startContainer; if(sc===this.endContainer && sc.nodeType===3){ var t=sc.data||''; if(sc.deleteData) sc.deleteData(this.startOffset, this.endOffset-this.startOffset); else sc.data=t.slice(0,this.startOffset)+t.slice(this.endOffset); this.endOffset=this.startOffset; this.endContainer=sc; return; } var ca=this.commonAncestorContainer; var kids=ca.childNodes?Array.prototype.slice.call(ca.childNodes):[]; for(var i=0;i<kids.length;i++){ var k=kids[i]; if(this.comparePoint(k,0)===0 && this.comparePoint(k, (k.nodeType===3?(k.data||'').length:(k.childNodes?k.childNodes.length:0)))===0 && k.parentNode){ k.parentNode.removeChild(k); } } this.collapse(true); };
-  Range.prototype.cloneContents=function(){ var f=d.createDocumentFragment(); return f; };
+  Range.prototype.cloneContents=function(){ var f=this.document.createDocumentFragment(); return f; };
   Range.prototype.extractContents=function(){ var f=this.cloneContents(); this.deleteContents(); return f; };
   Range.prototype.surroundContents=function(node){ this.insertNode(node); };
   Range.prototype.getClientRects=function(){ return []; };
   Range.prototype.getBoundingClientRect=function(){ return __zeroRect(); };
-  Range.prototype.createContextualFragment=function(html){ var f=d.createDocumentFragment(); var t=d.createElement('div'); t.innerHTML=html; while(t.firstChild) f.appendChild(t.firstChild); return f; };
+  Range.prototype.createContextualFragment=function(html){ var f=this.document.createDocumentFragment(); var t=this.document.createElement('div'); t.innerHTML=html; while(t.firstChild) f.appendChild(t.firstChild); return f; };
   Range.prototype.detach=function(){};
   Range.prototype.toString=function(){ var sc=this.startContainer; if(sc===this.endContainer && sc.nodeType===3){ return (sc.data||'').slice(this.startOffset, this.endOffset); } return ''; };
-  d.createRange=function(){ var r=new Range(); r.startContainer=d.body||d; r.endContainer=d.body||d; return r; };
+  if (__ns.makeNativeFunction) {
+    var rangeImplementation=Range;
+    Range=__ns.makeNativeFunction(rangeImplementation,'Range',0,true);
+    Range.prototype=rangeImplementation.prototype;
+    Object.defineProperty(Range.prototype,'constructor',{value:Range,writable:true,configurable:true});
+    Object.defineProperty(Range,'prototype',{writable:false});
+  }
+  ['startContainer','startOffset','endContainer','endOffset'].forEach(function(name){
+    var getter=function(){return rangeRecord(this)[name];};
+    if(__ns.makeNativeFunction)getter=__ns.makeNativeFunction(getter,'get '+name,0);
+    Object.defineProperty(Range.prototype,name,{get:getter,enumerable:true,configurable:true});
+  });
+  Object.getOwnPropertyNames(Range.prototype).forEach(function(name){
+    if(name==='constructor')return;
+    var descriptor=Object.getOwnPropertyDescriptor(Range.prototype,name);
+    ['value','get'].forEach(function(kind){
+      var implementation=descriptor[kind];if(typeof implementation!=='function')return;
+      var delegate=function(){return implementation.apply(rangeRecord(this),arguments);};
+      descriptor[kind]=__ns.makeNativeFunction?__ns.makeNativeFunction(delegate,kind==='get'?'get '+name:name,implementation.length):delegate;
+    });
+    descriptor.enumerable=true;descriptor.configurable=true;
+    if('value'in descriptor)descriptor.writable=true;
+    Object.defineProperty(Range.prototype,name,descriptor);
+  });
+  Object.defineProperty(Range.prototype,Symbol.toStringTag,{value:'Range',configurable:true});
+  d.createRange=function(){return new Range();};
   if(g.Range===undefined) g.Range=Range;
   if (!d.getRootNode) d.getRootNode = function(){ return d; };
   // document.write / writeln: parse the written markup and append it to <body>. Real browsers splice
@@ -1666,10 +1748,10 @@ if(typeof __ns.makeNativeFunction==='function'){
     // Wire createElement('iframe') to expose a real contentWindow/contentDocument, built
     // lazily on first access (or when src is set). Kept general so any consumer gets it;
     // the lazy build means an unused iframe costs nothing.
-    var origCreateEl = d.createElement.bind(d);
+    var origCreateEl = d.createElement;
     d.createElement = ({ createElement(tag){
-      var el = origCreateEl(tag);
-      if (el && String(tag).toLowerCase() === 'iframe' && !el.__iframeWired) {
+      var el = origCreateEl.apply(this,arguments);
+      if (el && String(el.localName).toLowerCase() === 'iframe' && !el.__iframeWired) {
         el.__iframeWired = true;
         try {
           Object.defineProperty(el, 'contentWindow', { configurable: true,
@@ -1688,7 +1770,9 @@ if(typeof __ns.makeNativeFunction==='function'){
   // real native getter/setter functions so values stay backed by the same tree.
   (function(){
     if (typeof __ns.domAccessor !== 'function') return;
-    var oldBase=g.HTMLElement.prototype,oldDocument=g.Document.prototype;
+    // Reinstallation keeps read-only constructor prototypes from the previous
+    // document; compatibility descriptors belong to this bootstrap's raw nodes.
+    var oldBase=compatibilityElementPrototype||g.HTMLElement.prototype,oldDocument=g.Document.prototype;
     var nodeConstructors=['Node','Element','HTMLElement','Document','HTMLDocument','CharacterData','Attr','DocumentType','NamedNodeMap','Text','Comment','CDATASection','ProcessingInstruction','DocumentFragment','ShadowRoot','SVGElement','SVGSVGElement'];
     Object.getOwnPropertyNames(g).forEach(function(name){if(/^HTML.*Element$/.test(name)&&typeof g[name]==='function'&&nodeConstructors.indexOf(name)<0)nodeConstructors.push(name);});
     nodeConstructors.forEach(function(name){var previous=g[name];var ctor=__ns.makeNativeFunction(function(){throw new TypeError('Illegal constructor');},name,0,true);ctor.prototype=previous.prototype;Object.defineProperty(g,name,{value:ctor,writable:true,configurable:true,enumerable:false});});
@@ -1744,6 +1828,25 @@ if(typeof __ns.makeNativeFunction==='function'){
       defineInterface(name,htmlProto,proto===oldBase?null:proto);
     });
     ['HTMLAudioElement','HTMLVideoElement'].forEach(function(name){Object.setPrototypeOf(prototypes[name],prototypes.HTMLMediaElement);Object.setPrototypeOf(g[name],g.HTMLMediaElement);});
+    // The native DOM has no HTML-media playback decoder. Query that empty
+    // capability set without claiming codec support from unrelated offline DSP.
+    delete prototypes.HTMLAnchorElement.click;
+    var mediaTypes=new Set();
+    var mediaNode=__ns.domAccessor('nodeType',false,'HTMLElement');
+    Object.defineProperty(prototypes.HTMLMediaElement,'canPlayType',{value:__ns.makeNativeFunction(function(type){
+      mediaNode.call(this);
+      if(this.namespaceURI!=='http://www.w3.org/1999/xhtml'||!['audio','video'].includes(this.localName))throw new TypeError('Illegal invocation');
+      if(arguments.length<1)throw new TypeError("Failed to execute 'canPlayType' on 'HTMLMediaElement': 1 argument required, but only 0 present.");
+      if(typeof type==='symbol')throw new TypeError('Cannot convert a Symbol value to a string');
+      var mime=String(type).split(';',1)[0].trim().toLowerCase();
+      return mediaTypes.has(mime)?'maybe':'';
+    },'canPlayType',1),writable:true,enumerable:true,configurable:true});
+    if(typeof g.Audio==='function'){
+      var audioConstructor=__ns.makeNativeFunction(function(src){var element=d.createElement('audio');if(src!==undefined)element.src=src;return element;},'Audio',0,true,false,false);
+      audioConstructor.prototype=prototypes.HTMLAudioElement;Object.defineProperty(audioConstructor,'prototype',{writable:false});
+      Object.defineProperty(g,'Audio',{value:audioConstructor,writable:true,configurable:true});
+    }
+
     // Keep existing compatibility behavior while separating the base interfaces;
     // the native members below replace these descriptors on their proper owner.
     Reflect.ownKeys(oldBase).forEach(function(key){
@@ -1833,7 +1936,7 @@ if(typeof __ns.makeNativeFunction==='function'){
         if(this===g)return windowCallbacks[name].apply(this,arguments);
         var node=false;try{getType.call(this);node=true;}catch(e){}
         if(node)return native.apply(this,arguments);
-        if(!eventTargets.has(this))throw new TypeError('Illegal invocation');
+        if(__ns.eventTargetNativeBrand?!__ns.eventTargetNativeBrand(this):!eventTargets.has(this))throw new TypeError('Illegal invocation');
         return eventCallbacks[name].apply(this,arguments);
       },name,minimum);
       Object.defineProperty(eventTargetProto,name,{value:method,writable:true,configurable:true,enumerable:true});
@@ -1884,6 +1987,7 @@ if(typeof __ns.makeNativeFunction==='function'){
       });
     }
     projectCompatibility('Document',['getElementsByTagName','getElementsByClassName','getElementsByName'],htmlProto);
+    Object.defineProperty(documentProto,'adoptedStyleSheets',adoptionDescriptor);Object.defineProperty(g.ShadowRoot.prototype,'adoptedStyleSheets',shadowAdoptionDescriptor);delete d.adoptedStyleSheets;
     projectCompatibility('Node',['isEqualNode','isSameNode','lastChild','previousSibling'],htmlProto);
     projectCompatibility('Element',['classList','getClientRects','getElementsByTagName','getElementsByClassName','nextElementSibling','previousElementSibling','requestFullscreen'],htmlProto);
     ['isEqualNode','isSameNode','lastChild','previousSibling','replaceChild','classList','getClientRects','getElementsByTagName','getElementsByClassName','getElementsByName','nextElementSibling','previousElementSibling','requestFullscreen','lastElementChild','cookie','exitFullscreen'].forEach(function(name){delete htmlProto[name];});
@@ -1967,16 +2071,23 @@ if(typeof __ns.makeNativeFunction==='function'){
     Object.assign(tags,{TD:'HTMLTableCellElement',TH:'HTMLTableCellElement',THEAD:'HTMLTableSectionElement',TBODY:'HTMLTableSectionElement',TFOOT:'HTMLTableSectionElement',COLGROUP:'HTMLTableColElement',Q:'HTMLQuoteElement',BLOCKQUOTE:'HTMLQuoteElement'});
     for(var heading=1;heading<=6;heading++)tags['H'+heading]='HTMLHeadingElement';
     var projected=new WeakSet();
+    // First wrapping can happen after page scripts replace the public builtins.
+    var projectionApply=Reflect.apply,projectionSetPrototype=Object.setPrototypeOf;
+    var projectionHasOwn=Object.prototype.hasOwnProperty,projectionHas=WeakSet.prototype.has,projectionAdd=WeakSet.prototype.add;
+    var projectionUpper=String.prototype.toUpperCase,projectionSlice=String.prototype.slice;
     __ns.projectNativeNode=function(obj){
-      if(projected.has(obj))return obj;
-      var type=getType.call(obj),name;
+      if(projectionApply(projectionHas,projected,[obj]))return obj;
+      var type=projectionApply(getType,obj,[]),name;
       if(type===1){
-        var tag=getLocalTag.call(obj),namespace=getNamespace.call(obj);
-        name=namespace==='http://www.w3.org/2000/svg'?(String(tag).split(':').pop()==='svg'?'SVGSVGElement':'SVGElement'):namespace==='http://www.w3.org/1999/xhtml'?(tags[String(tag).toUpperCase()]||'HTMLElement'):'Element';
-      }else name=type===11&&isShadowRoot.call(obj)?'ShadowRoot':({2:'Attr',10:'DocumentType',3:'Text',4:'CDATASection',7:'ProcessingInstruction',8:'Comment',9:'HTMLDocument',11:'DocumentFragment'})[type]||'Node';
-      Object.setPrototypeOf(obj,prototypes[name]);
-      projected.add(obj);
-      nativeKeys.forEach(function(key){if(Object.prototype.hasOwnProperty.call(obj,key))delete obj[key];});
+        var tag=projectionApply(getLocalTag,obj,[]),namespace=projectionApply(getNamespace,obj,[]);
+        if(namespace==='http://www.w3.org/2000/svg'){
+          var localStart=0;for(var index=0;index<tag.length;index++)if(tag[index]===':')localStart=index+1;
+          name=projectionApply(projectionSlice,tag,[localStart])==='svg'?'SVGSVGElement':'SVGElement';
+        }else name=namespace==='http://www.w3.org/1999/xhtml'?(tags[projectionApply(projectionUpper,tag,[])]||'HTMLElement'):'Element';
+      }else name=type===11&&projectionApply(isShadowRoot,obj,[])?'ShadowRoot':({2:'Attr',10:'DocumentType',3:'Text',4:'CDATASection',7:'ProcessingInstruction',8:'Comment',9:'HTMLDocument',11:'DocumentFragment'})[type]||'Node';
+      projectionSetPrototype(obj,prototypes[name]);
+      projectionApply(projectionAdd,projected,[obj]);
+      for(var index=0;index<nativeKeys.length;index++){var key=nativeKeys[index];if(projectionApply(projectionHasOwn,obj,[key]))delete obj[key];}
       return obj;
     };
     __ns.projectNativeNode(d);

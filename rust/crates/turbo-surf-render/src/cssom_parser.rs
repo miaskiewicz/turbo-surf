@@ -9,7 +9,7 @@ use lightningcss::properties::{
     custom::{Token, TokenList, TokenOrValue},
     Property, PropertyId,
 };
-use lightningcss::rules::CssRule;
+use lightningcss::rules::{font_face::FontFaceProperty, CssRule};
 use lightningcss::stylesheet::PrinterOptions;
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 use lightningcss::targets::{Features, Targets};
@@ -53,6 +53,10 @@ fn deferred_value(tokens: &TokenList<'_>) -> bool {
     })
 }
 
+pub(super) fn valid_selector(source: &str) -> bool {
+    valid_rule(&format!("{source} {{ color: red }}"))
+}
+
 fn valid_rule(source: &str) -> bool {
     StyleSheet::parse(source, ParserOptions::default()).is_ok_and(|sheet| {
         !sheet.rules.0.is_empty()
@@ -70,6 +74,7 @@ fn valid_rule(source: &str) -> bool {
 #[derive(Default)]
 struct CssParser {
     keyframes: bool,
+    font_face: bool,
 }
 
 fn consume(input: &mut Parser<'_, '_>) -> String {
@@ -111,6 +116,52 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
     }
 }
 
+// Font descriptors have their own grammar: ordinary property validation drops
+// `src` and wrongly admits layout properties inside @font-face.
+fn font_descriptor(name: &str, value: &str) -> Option<String> {
+    let source = format!("@font-face {{ {name}: {value}; }}");
+    let sheet = StyleSheet::parse(&source, ParserOptions::default()).ok()?;
+    let CssRule::FontFace(rule) = sheet.rules.0.first()? else {
+        return None;
+    };
+    let descriptor = rule.properties.first()?;
+    if !matches!(descriptor, FontFaceProperty::Custom(_)) {
+        return if matches!(descriptor, FontFaceProperty::Source(_)) {
+            descriptor
+                .to_css_string(PrinterOptions::default())
+                .ok()
+                .map(|text| format!("{text};"))
+        } else {
+            Some(format!("{name}: {value};"))
+        };
+    }
+    let mut source = ParserInput::new(value);
+    let mut input = Parser::new(&mut source);
+    let valid = match name {
+        "font-display" => input.expect_ident().is_ok_and(|value| {
+            matches!(
+                value.as_ref(),
+                "auto" | "block" | "swap" | "fallback" | "optional"
+            )
+        }),
+        "size-adjust" | "ascent-override" | "descent-override" | "line-gap-override" => {
+            (name != "size-adjust"
+                && input
+                    .try_parse(|input| input.expect_ident_matching("normal"))
+                    .is_ok())
+                || input.expect_percentage().is_ok_and(|value| value >= 0.0)
+        }
+        "font-feature-settings" | "font-variation-settings" => Property::parse(
+            PropertyId::from(name),
+            &mut input,
+            &ParserOptions::default(),
+        )
+        .is_ok_and(|property| !matches!(property, Property::Unparsed(_) | Property::Custom(_))),
+        _ => false,
+    };
+    (valid && input.expect_exhausted().is_ok()).then(|| format!("{name}: {value};"))
+}
+
 impl<'i> DeclarationParser<'i> for CssParser {
     type Declaration = String;
     type Error = ();
@@ -121,6 +172,11 @@ impl<'i> DeclarationParser<'i> for CssParser {
         _: &ParserState,
     ) -> Result<String, ParseError<'i, ()>> {
         let start = input.position();
+        if self.font_face {
+            let value = consume(input);
+            return font_descriptor(&name.to_ascii_lowercase(), &value)
+                .ok_or_else(|| input.new_custom_error(()));
+        }
         let valid = input.parse_until_before(Delimiter::Bang, |input| {
             let property=Property::parse(
                 PropertyId::from(lightningcss::values::string::CowArcStr::from(name.to_string())),
@@ -192,13 +248,18 @@ impl<'i> AtRuleParser<'i> for CssParser {
                 | "position-try"
                 | "view-transition"
         ) {
-            RuleBodyParser::new(input, self)
+            let mut declarations = CssParser {
+                font_face: name == "font-face",
+                ..Default::default()
+            };
+            RuleBodyParser::new(input, &mut declarations)
                 .filter_map(Result::ok)
                 .collect::<Vec<_>>()
                 .join(" ")
         } else {
             let mut nested = CssParser {
                 keyframes: name == "keyframes" || name.ends_with("-keyframes"),
+                ..Default::default()
             };
             StyleSheetParser::new(input, &mut nested)
                 .filter_map(Result::ok)

@@ -195,3 +195,36 @@ pub(super) fn install(
         refresh(scope, node, &name);
     }
 }
+
+/// Keep the native source marker with an adopted node. Losing this marker makes
+/// the destination's first refresh overwrite a previously assigned on* callback.
+pub(super) fn take_adopted_sources(
+    mapping: &[(Handle, Handle)],
+) -> Vec<((Handle, String), Option<String>)> {
+    let mapping = mapping.iter().copied().collect::<HashMap<_, _>>();
+    DOM.with(|dom| {
+        let mut dom = dom.borrow_mut();
+        let sources = &mut dom.as_mut().unwrap().event_handlers.sources;
+        let keys = sources
+            .keys()
+            .filter(|(node, _)| mapping.contains_key(node))
+            .cloned()
+            .collect::<Vec<_>>();
+        keys.into_iter()
+            .map(|key| {
+                let value = sources.remove(&key).unwrap();
+                ((mapping[&key.0], key.1), value)
+            })
+            .collect()
+    })
+}
+pub(super) fn restore_adopted_sources(sources: Vec<((Handle, String), Option<String>)>) {
+    DOM.with(|dom| {
+        dom.borrow_mut()
+            .as_mut()
+            .unwrap()
+            .event_handlers
+            .sources
+            .extend(sources)
+    });
+}

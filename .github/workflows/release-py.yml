@@ -53,6 +53,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Verify third-party notices
+        run: python scripts/sync-third-party-notices.py --check
+
       - uses: dtolnay/rust-toolchain@1.98.0
 
       # maturin-action builds the wheel from the crate's pyproject.toml. abi3
@@ -77,6 +80,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Verify third-party notices
+        run: python3 scripts/sync-third-party-notices.py --check
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:

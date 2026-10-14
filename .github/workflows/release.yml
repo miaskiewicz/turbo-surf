@@ -45,12 +45,15 @@ jobs:
       - name: Build the MCP binary
         # Pinned upstream Chrome 154 transport already includes real trust anchors.
         run: cargo build --locked --release -p turbo-surf-mcp --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
+      - name: Verify third-party notices
+        run: python3 scripts/sync-third-party-notices.py --check
       - name: Stage platform binary
         shell: bash
         run: |
           mkdir -p out
           cp "rust/target/${{ matrix.target }}/release/turbo-surf-mcp${{ matrix.ext }}" \
              "out/turbo-surf-mcp-${{ matrix.node }}${{ matrix.ext }}"
+          cp LICENSE THIRD_PARTY_NOTICES.md out/
       - uses: actions/upload-artifact@v4
         with:
           name: bin-${{ matrix.node }}

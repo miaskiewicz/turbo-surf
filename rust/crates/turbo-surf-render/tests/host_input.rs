@@ -186,3 +186,118 @@ async fn terminated_guest_initialization_retains_atomic_trusted_input_and_crypto
         "[\"ok\",true]"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn json_collectors_await_values_without_page_serializers_or_result_slots() {
+    let mut page = PageSession::open("<body></body>", "https://collector.test/", "", "", 1000)
+        .await
+        .unwrap();
+    page.eval_expression(r#"(() => {
+      globalThis.collectorHooks=0;
+      JSON.stringify=function(){collectorHooks++;throw new Error('page serializer')};
+      Object.defineProperty(globalThis,'__RESULT',{get(){collectorHooks++;throw new Error('page result slot')},configurable:true});
+      return true;
+    })()"#).await.unwrap();
+    let raw = page
+        .eval_json_expression("Promise.resolve({rows:[1,false,null],nested:{native:true}})")
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({"rows":[1,false,null],"nested":{"native":true}})
+    );
+    assert_eq!(page.eval_json_expression("false").await.unwrap(), "false");
+    assert_eq!(page.eval_json_expression("0").await.unwrap(), "0");
+    assert_eq!(page.eval_json_expression("null").await.unwrap(), "null");
+    assert_eq!(page.eval_expression("collectorHooks").await.unwrap(), "0");
+    let error = page
+        .eval_json_expression("({get value(){throw new Error('authored collector getter')}})")
+        .await
+        .unwrap_err();
+    assert!(error.contains("authored collector getter"), "{error}");
+    assert!(page
+        .eval_json_expression("undefined")
+        .await
+        .unwrap_err()
+        .contains("JSON serializable"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn interrupted_frame_creation_never_exposes_bootstrap_host_capabilities() {
+    let mut page = PageSession::open(
+        "<body><input id=q></body>",
+        "https://budget.test/",
+        "",
+        "",
+        100,
+    )
+    .await
+    .unwrap();
+    let error = page
+        .eval_expression(
+            r#"(() => {
+      globalThis.attemptedFrames=[];
+      globalThis.retainedFrames=[];
+      while(true){
+        const frame=document.createElement('iframe');
+        // Retain the node even when its first bootstrap exhausts the budget.
+        attemptedFrames.push(frame);
+        document.body.appendChild(frame);
+        retainedFrames.push(frame.contentWindow);
+        frame.srcdoc='<body>new document</body>';
+      }
+    })()"#,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.contains("budget"), "{error}");
+    let result: serde_json::Value = serde_json::from_str(
+        &page
+            .eval_expression(
+                r#"JSON.stringify((()=>{
+      const count=attemptedFrames.length,available=window.frames.length;
+      let inspected=0,retired=0,unavailable=count-available,exposed=false;
+      const inspect=frame=>{
+        if(frame===null||frame===undefined)return 'unavailable';
+        try {
+          exposed=exposed || 'Deno' in frame || '__bootstrap' in frame ||
+            frame[Symbol.for('ts.dc')]!==undefined || 'op_set_host_input_driver' in frame;
+          return frame.closed?'retired':'inspected';
+        } catch(error){if(error.name==='SecurityError')return 'retired';throw error;}
+      };
+      // contentWindow could start a new bootstrap; inspect only published realms.
+      for(let index=0;index<available;index++){
+        const state=inspect(window.frames[index]);
+        if(state==='inspected')inspected++;else if(state==='retired')retired++;else unavailable++;
+      }
+      for(const frame of retainedFrames)inspect(frame);
+      return {count,inspected,retired,unavailable,exposed,
+        parent:'Deno' in globalThis || '__bootstrap' in globalThis};
+    })())"#,
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(result["count"].as_u64().unwrap() > 0, "{result}");
+    assert_eq!(
+        result["count"].as_u64().unwrap(),
+        ["inspected", "retired", "unavailable"]
+            .iter()
+            .map(|name| result[name].as_u64().unwrap())
+            .sum::<u64>(),
+        "{result}"
+    );
+    assert_eq!(result["exposed"], false, "{result}");
+    assert_eq!(result["parent"], false, "{result}");
+    page.input(&json!([{"focus":"#q"},{"type":"ok"}]))
+        .await
+        .unwrap();
+    assert_eq!(
+        page.eval_expression("document.querySelector('#q').value")
+            .await
+            .unwrap(),
+        "ok"
+    );
+}

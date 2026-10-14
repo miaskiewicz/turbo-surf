@@ -6,6 +6,11 @@ use turbo_surf_core::request_context::{same_origin, ClientHints, RequestContext,
 
 type ScriptPolicy<'a> = &'a dyn Fn(&str, bool) -> bool;
 
+pub struct ScriptResponse {
+    pub response: FetchResult,
+    pub muted_errors: bool,
+}
+
 pub async fn fetch(
     url: &str,
     mut context: RequestContext,
@@ -13,10 +18,17 @@ pub async fn fetch(
     hints: &ClientHints,
     jar: &mut CookieJar,
     policy: Option<ScriptPolicy<'_>>,
-) -> Result<FetchResult, String> {
+    integrity: &str,
+) -> Result<ScriptResponse, String> {
     let mut target = url.to_string();
     let mut redirected = false;
     for hop in 0..=20 {
+        if !crate::resource_policy::active_mixed_content_allowed(
+            context.source.as_deref().unwrap_or(""),
+            &target,
+        ) {
+            return Err("Script request blocked as active mixed content".into());
+        }
         if policy.is_some_and(|allowed| !allowed(&target, redirected)) {
             return Err("Script blocked by Content Security Policy".into());
         }
@@ -47,6 +59,9 @@ pub async fn fetch(
         )
         .await
         .map_err(|error| error.to_string())?;
+        if !crate::resource_policy::corp_allowed(&context, &target, &response.headers) {
+            return Err("Script response blocked by Cross-Origin-Resource-Policy".into());
+        }
         if context.mode == RequestMode::Cors
             && cross_origin
             && !crate::fetch_cors::allowed(&context, &response.headers)
@@ -57,6 +72,13 @@ pub async fn fetch(
             .then(|| crate::fetch_cors::header(&response.headers, "location"))
             .flatten();
         let Some(location) = location else {
+            if !crate::integrity::matches(
+                &response.body_bytes,
+                integrity,
+                context.mode == RequestMode::Cors || !cross_origin,
+            ) {
+                return Err("Script response failed integrity validation".into());
+            }
             if context.destination == turbo_surf_core::request_context::Destination::Script
                 && nosniff(&response.headers)
                 && !javascript_mime(&response.content_type)
@@ -64,7 +86,10 @@ pub async fn fetch(
                 return Err("Script MIME type is blocked by nosniff".into());
             }
             response.redirected = redirected;
-            return Ok(response);
+            return Ok(ScriptResponse {
+                response,
+                muted_errors: context.mode == RequestMode::NoCors && cross_origin,
+            });
         };
         if hop == 20 {
             return Err("Script redirect limit exceeded".into());

@@ -236,24 +236,57 @@ fn set_inner(tree: &mut Tree, node: Handle, text: &str) {
     let nodes = replacement(tree, text);
     tree.replace_children(node, &nodes);
 }
-fn set_outer(tree: &mut Tree, node: Handle, text: &str) -> Result<(), &'static str> {
-    let Some(parent) = tree.parent(node) else {
+fn merge_text(scope: &mut v8::PinScope, first: Handle, second: Handle) {
+    let Some((parent, mut value, suffix)) = with_tree(|tree| {
+        Some((
+            tree.parent(second)?,
+            tree.node_value(first)?,
+            tree.node_value(second)?,
+        ))
+    })
+    .flatten() else {
+        return;
+    };
+    range_live::replacing_data(
+        scope,
+        first,
+        value.encode_utf16().count(),
+        0,
+        suffix.encode_utf16().count(),
+    );
+    value.push_str(&suffix);
+    range_live::removing(scope, second);
+    with_tree_mut(|tree| {
+        tree.set_node_value(first, &value);
+        tree.remove_child(parent, second);
+    });
+}
+fn set_outer(scope: &mut v8::PinScope, node: Handle, text: &str) -> Result<(), &'static str> {
+    let Some((parent, previous, next)) = with_tree(|tree| {
+        Some((
+            tree.parent(node)?,
+            tree.previous_sibling(node),
+            tree.next_sibling(node),
+        ))
+    })
+    .flatten() else {
         return Err("NoModificationAllowedError");
     };
-    let previous = tree.previous_sibling(node);
-    let next = tree.next_sibling(node);
-    let mut nodes = replacement(tree, text);
-    for child in &nodes {
-        tree.insert_before(parent, *child, Some(node));
+    let mut nodes = with_tree_mut(|tree| replacement(tree, text)).unwrap_or_default();
+    if !dom_mutations::insert(scope, parent, &nodes, Some(node), &[node]) {
+        return Ok(());
     }
-    tree.remove_child(parent, node);
-    if let Some(previous) = previous.filter(|node| tree.node_type_id(*node) == 3) {
-        let following = nodes.first().copied().or(next);
-        if let Some(following) = following.filter(|node| tree.node_type_id(*node) == 3) {
-            let mut value = tree.node_value(previous).unwrap_or_default();
-            value.push_str(&tree.node_value(following).unwrap_or_default());
-            tree.set_node_value(previous, &value);
-            tree.remove_child(parent, following);
+    let is_text = |node| with_tree(|tree| tree.node_type_id(node) == 3).unwrap_or(false);
+    if let Some(previous) = previous.filter(|node| is_text(*node)) {
+        if let Some(following) = nodes
+            .first()
+            .copied()
+            .or(next)
+            .filter(|node| is_text(*node))
+        {
+            // outerText removes adjacent text after appending its data; unlike
+            // normalize, ranges in the removed text collapse to the parent.
+            merge_text(scope, previous, following);
             if !nodes.is_empty() {
                 nodes[0] = previous;
             }
@@ -261,14 +294,11 @@ fn set_outer(tree: &mut Tree, node: Handle, text: &str) -> Result<(), &'static s
     }
     if let (Some(last), Some(next)) = (nodes.last().copied(), next) {
         if last != next
-            && tree.parent(next) == Some(parent)
-            && tree.node_type_id(last) == 3
-            && tree.node_type_id(next) == 3
+            && with_tree(|tree| tree.parent(next) == Some(parent)).unwrap_or(false)
+            && is_text(last)
+            && is_text(next)
         {
-            let mut value = tree.node_value(last).unwrap_or_default();
-            value.push_str(&tree.node_value(next).unwrap_or_default());
-            tree.set_node_value(last, &value);
-            tree.remove_child(parent, next);
+            merge_text(scope, last, next);
         }
     }
     Ok(())
@@ -303,11 +333,16 @@ pub fn dispatch(
         }
         "inner" => {
             let value = args.get(2).to_rust_string_lossy(scope);
+            html_popover::disconnect(scope, node, false);
+            range_live::replacing_children(scope, node);
             with_tree_mut(|tree| set_inner(tree, node, &value));
         }
         "outer" => {
             let value = args.get(2).to_rust_string_lossy(scope);
-            if let Some(Err(error)) = with_tree_mut(|tree| set_outer(tree, node, &value)) {
+            if with_tree(|tree| tree.parent(node).is_some()).unwrap_or(false) {
+                html_popover::disconnect(scope, node, true);
+            }
+            if let Err(error) = set_outer(scope, node, &value) {
                 rv.set(v8::String::new(scope, error).unwrap().into());
             }
         }

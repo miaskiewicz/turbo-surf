@@ -18,6 +18,7 @@ const SNAPSHOT: &str = r#"globalThis.__RESULT = JSON.stringify({
     webdriver:navigator.webdriver,userAgent:navigator.userAgent,
     languages:navigator.languages,language:navigator.language,
     locale:Intl.DateTimeFormat().resolvedOptions().locale,
+    timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timeZoneOffset:new Date().getTimezoneOffset(),
     viewport:{width:innerWidth,height:innerHeight},
     outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,
     screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}
@@ -435,8 +436,12 @@ async fn collect_probes(
         let path = path.as_str().ok_or("probe path must be string")?;
         let source = fs::read_to_string(path)?;
         let script = format!("({})", source.trim().trim_end_matches(';'));
-        let probe = match page.eval_expression(&script).await {
+        let probe = match page.eval_json_expression(&script).await {
             Ok(raw) => match serde_json::from_str::<Value>(&raw) {
+                Ok(Value::String(json)) => match serde_json::from_str::<Value>(&json) {
+                    Ok(result) => json!({"path":path,"result":result}),
+                    Err(e) => json!({"path":path,"error":e.to_string()}),
+                },
                 Ok(result) => json!({"path":path,"result":result}),
                 Err(e) => json!({"path":path,"error":e.to_string()}),
             },

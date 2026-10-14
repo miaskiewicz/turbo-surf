@@ -34,3 +34,6 @@ python-source = "python"
 module-name = "turbo_surf._turbo_surf"
 # Build the stable-ABI (abi3) wheel matching the crate's pyo3 features.
 features = ["pyo3/extension-module"]
+
+# Preserve the compiled audio/provider licenses alongside the installed extension.
+include = [{ path = "python/turbo_surf/THIRD_PARTY_NOTICES.md", format = ["sdist", "wheel"] }]

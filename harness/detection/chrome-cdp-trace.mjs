@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
+import { chromeExtensionArgs } from "./chrome-launch-policy.mjs";
 import { cdpConnection } from "./cdp-connection.mjs";
 import { enrichProtocolHeaders } from "./protocol-headers.mjs";
 
@@ -44,6 +45,7 @@ let chrome,
   domReady = false;
 let stage = "launch",
   chromeStderr = "";
+let effectiveExtensionFlags = [];
 const handlers = new Map();
 const targetSessions = new Map();
 const networkKey = (session, id) => `${session || "browser"}:${id}`;
@@ -88,7 +90,7 @@ async function debugPort() {
 }
 async function snapshot(phase) {
   const state = await evaluate(
-    `JSON.stringify({url:location.href,html:(document.doctype?'<!DOCTYPE '+document.doctype.name+'>':'')+document.documentElement.outerHTML,browserFixture:globalThis.__browserFixture||null,inputState:(()=>{const input=document.querySelector('textarea[name=q],input[name=q]');return {value:input?.value??null,activeTag:document.activeElement?.tagName??null,activeName:document.activeElement?.getAttribute('name')??null,disabled:input?.disabled??null,readOnly:input?.readOnly??null,consentPresent:!!document.querySelector(${JSON.stringify(config.dismissSelector || "#W0wltc")})};})(),results:document.querySelectorAll(${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")}).length,environment:{webdriver:navigator.webdriver,userAgent:navigator.userAgent,languages:navigator.languages,language:navigator.language,locale:Intl.DateTimeFormat().resolvedOptions().locale,viewport:{width:innerWidth,height:innerHeight},outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}},interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})`,
+    `JSON.stringify({url:location.href,html:(document.doctype?'<!DOCTYPE '+document.doctype.name+'>':'')+document.documentElement.outerHTML,browserFixture:globalThis.__browserFixture||null,inputState:(()=>{const input=document.querySelector('textarea[name=q],input[name=q]');return {value:input?.value??null,activeTag:document.activeElement?.tagName??null,activeName:document.activeElement?.getAttribute('name')??null,disabled:input?.disabled??null,readOnly:input?.readOnly??null,consentPresent:!!document.querySelector(${JSON.stringify(config.dismissSelector || "#W0wltc")})};})(),results:document.querySelectorAll(${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")}).length,environment:{webdriver:navigator.webdriver,userAgent:navigator.userAgent,languages:navigator.languages,language:navigator.language,locale:Intl.DateTimeFormat().resolvedOptions().locale,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timeZoneOffset:new Date().getTimezoneOffset(),viewport:{width:innerWidth,height:innerHeight},outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}},interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})`,
   );
   const row = JSON.parse(state),
     html = row.html;
@@ -136,9 +138,12 @@ async function snapshot(phase) {
   pages.push({ phase, ...row, bytes: Buffer.byteLength(html), cookies, childFrames, workers });
 }
 async function point(selector) {
+  // Headed oracle processes may share the desktop with another collector.
+  // Activate this target before trusted input rather than relying on launch focus.
+  await call("Page.bringToFront");
   return JSON.parse(
     await evaluate(
-      `(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node)throw new Error('Input selector is absent');const r=node.getBoundingClientRect();return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2});})()`,
+      `(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node)throw new Error('Input selector is absent');node.scrollIntoView({block:'center',inline:'center'});const r=node.getBoundingClientRect();if(!r.width||!r.height)throw new Error('Input selector has no rendered box');const x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(!hit||!node.contains(hit))throw new Error('Input selector is obscured');return JSON.stringify({x,y});})()`,
     ),
   );
 }
@@ -163,6 +168,7 @@ async function key(key, type, text) {
   });
 }
 try {
+  effectiveExtensionFlags = chromeExtensionArgs(config);
   if (!existsSync(executable) || typeof WebSocket === "undefined")
     throw new Error("Installed Chrome and Node.js 22+ are required");
   const port = await debugPort();
@@ -173,6 +179,7 @@ try {
       `--user-data-dir=${profile}`,
       "--no-first-run",
       "--no-default-browser-check",
+      ...effectiveExtensionFlags,
       `--lang=${config.locale || "en-US"}`,
       `--accept-lang=${(config.languages || ["en-US", "en"]).join(",")}`,
       "about:blank",
@@ -485,12 +492,14 @@ try {
       await call("Input.dispatchMouseEvent", {
         type: "mousePressed",
         button: "left",
+        buttons: 1,
         clickCount: 1,
         ...coordinates,
       });
       await call("Input.dispatchMouseEvent", {
         type: "mouseReleased",
         button: "left",
+        buttons: 0,
         clickCount: 1,
         ...coordinates,
       });
@@ -508,12 +517,14 @@ try {
       await call("Input.dispatchMouseEvent", {
         type: "mousePressed",
         button: "left",
+        buttons: 1,
         clickCount: 1,
         ...coordinates,
       });
       await call("Input.dispatchMouseEvent", {
         type: "mouseReleased",
         button: "left",
+        buttons: 0,
         clickCount: 1,
         ...coordinates,
       });
@@ -563,6 +574,7 @@ try {
         browserVersion,
         browserV8Version,
         executable,
+        effectiveExtensionFlags,
         config,
         pages,
         requests,

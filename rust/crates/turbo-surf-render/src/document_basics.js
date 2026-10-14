@@ -14,8 +14,9 @@
   const hasAttribute = g.Element.prototype.hasAttribute;
   const setAttribute = g.Element.prototype.setAttribute;
   const html = 'http://www.w3.org/1999/xhtml';
-  const string = value => { if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol to a string'); return String(value); };
-  const check = (receiver, allowed) => { if (!allowed.includes(type.call(receiver))) throw new TypeError('Illegal invocation'); };
+  const StringValue = String;
+  const string = value => { if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol to a string'); return StringValue(value); };
+  const check = (receiver, allowed) => { if (!allowed.includes(apply(type, receiver, []))) throw new TypeError('Illegal invocation'); };
   const state = document => native('state', document);
   const property = (proto, name, read, write) => {
     const descriptor = { configurable: true, enumerable: true, get: make(read, 'get ' + name, 0) };
@@ -23,6 +24,13 @@
     Object.defineProperty(proto, name, descriptor);
   };
   const method = (proto, name, delegate, arity) => Object.defineProperty(proto, name, { value: make(delegate, name, arity), writable: true, enumerable: true, configurable: true });
+  const apply = Reflect.apply, ErrorType = TypeError;
+  // HTML's obsolete Document methods explicitly preserve the document and ignore arguments.
+  for (const name of ['clear', 'captureEvents', 'releaseEvents']) {
+    method(g.Document.prototype, name, function () {
+      if (apply(type, this, []) !== 9) throw new ErrorType('Illegal invocation');
+    }, 0);
+  }
   // XML Name uses code-point ranges, rather than HTML's permissive attribute names.
   const xmlName = /^[:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}][:A-Z_a-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02ff\u0370-\u037d\u037f-\u1fff\u200c-\u200d\u2070-\u218f\u2c00-\u2fef\u3001-\ud7ff\uf900-\ufdcf\ufdf0-\ufffd\u{10000}-\u{effff}\-\.0-9\u00b7\u0300-\u036f\u203f-\u2040]*$/u;
   method(g.Document.prototype, 'createProcessingInstruction', function (target, data) {
@@ -41,25 +49,31 @@
   property(g.ProcessingInstruction.prototype, 'target', function () { check(this, [7]); return native('piTarget', this); });
   const data = Object.getOwnPropertyDescriptor(g.CharacterData.prototype, 'data');
   property(g.CharacterData.prototype, 'length', function () { check(this, [3, 4, 7, 8]); return data.get.call(this).length; });
+  method(g.Node.prototype, 'normalize', function () { type.call(this); native('normalize', this); }, 0);
   const uint = value => (+value) >>> 0;
-  const character = receiver => { check(receiver, [3, 4, 7, 8]); return data.get.call(receiver); };
+  const character = receiver => { check(receiver, [3, 4, 7, 8]); return apply(data.get, receiver, []); };
   const range = (value, offset) => { if (offset > value.length) throw new g.DOMException('Character-data offset is out of range', 'IndexSizeError'); };
   // V8 strings use the DOM's UTF-16 offsets; native Tree storage uses UTF-8 bytes.
   method(g.CharacterData.prototype, 'substringData', function (offset, count) { const value = character(this); if (arguments.length < 2) throw new TypeError('substringData requires 2 arguments'); offset = uint(offset); count = uint(count); range(value, offset); return value.slice(offset, offset + count); }, 2);
-  method(g.CharacterData.prototype, 'replaceData', function (offset, count, value) { const current = character(this); if (arguments.length < 3) throw new TypeError('replaceData requires 3 arguments'); offset = uint(offset); count = uint(count); value = string(value); range(current, offset); data.set.call(this, current.slice(0, offset) + value + current.slice(offset + count)); }, 3);
-  method(g.CharacterData.prototype, 'insertData', function (offset, value) { const current = character(this); if (arguments.length < 2) throw new TypeError('insertData requires 2 arguments'); offset = uint(offset); value = string(value); range(current, offset); data.set.call(this, current.slice(0, offset) + value + current.slice(offset)); }, 2);
-  method(g.CharacterData.prototype, 'deleteData', function (offset, count) { const current = character(this); if (arguments.length < 2) throw new TypeError('deleteData requires 2 arguments'); offset = uint(offset); count = uint(count); range(current, offset); data.set.call(this, current.slice(0, offset) + current.slice(offset + count)); }, 2);
-  method(g.CharacterData.prototype, 'appendData', function (value) { const current = character(this); if (!arguments.length) throw new TypeError('appendData requires 1 argument'); data.set.call(this, current + string(value)); }, 1);
+  method(g.CharacterData.prototype, 'replaceData', function (offset, count, value) { const current = character(this); if (arguments.length < 3) throw new TypeError('replaceData requires 3 arguments'); offset = uint(offset); count = uint(count); value = string(value); range(current, offset); native('replaceCharacterData', this, offset, count, value); }, 3);
+  method(g.CharacterData.prototype, 'insertData', function (offset, value) { const current = character(this); if (arguments.length < 2) throw new TypeError('insertData requires 2 arguments'); offset = uint(offset); value = string(value); range(current, offset); native('replaceCharacterData', this, offset, 0, value); }, 2);
+  method(g.CharacterData.prototype, 'deleteData', function (offset, count) { const current = character(this); if (arguments.length < 2) throw new TypeError('deleteData requires 2 arguments'); offset = uint(offset); count = uint(count); range(current, offset); native('replaceCharacterData', this, offset, count, ''); }, 2);
+  method(g.CharacterData.prototype, 'appendData', function (value) { const current = character(this); if (!arguments.length) throw new TypeError('appendData requires 1 argument'); native('replaceCharacterData', this, current.length, 0, string(value)); }, 1);
   for (const name of ['xmlEncoding', 'rootElement']) property(g.Document.prototype, name, function () { check(this, [9]); return null; });
   property(g.Document.prototype, 'xmlStandalone', function () { check(this, [9]); return !!state(this).xmlStandalone; }, function (value) { check(this, [9]); state(this).xmlStandalone = !!value; });
   property(g.Document.prototype, 'xmlVersion', function () { check(this, [9]); return state(this).xmlVersion || null; }, function (value) { check(this, [9]); value = string(value); if (value !== '1.0') throw new g.DOMException('Only XML version 1.0 is supported', 'NotSupportedError'); state(this).xmlVersion = value; });
+  const collectionDefine=Object.defineProperty, collectionApply=Reflect.apply;
+  const collectionMapGet=Map.prototype.get, collectionMapHas=Map.prototype.has, collectionMapSet=Map.prototype.set;
+  const collectionValues=Array.prototype.values, collectionEntries=Array.prototype.entries, collectionKeys=Array.prototype.keys, collectionForEach=Array.prototype.forEach;
+  const collectionOwn=(rows,index,value)=>collectionDefine(rows,index,{__proto__:null,value,writable:true,configurable:true,enumerable:true});
+  const copyRows=(rows,match)=>{const result=[];for(let index=0;index<rows.length;index++){const value=rows[index];if(!match||match(value))collectionOwn(result,result.length,value);}return result;};
   function descendants(receiver, match) {
     const result = [];
     function visit(node) {
       const children = rawChildren.call(node);
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
-        if (type.call(child) === 1 && match(child)) result.push(child);
+        if (type.call(child) === 1 && match(child)) collectionOwn(result,result.length,child);
         visit(child);
       }
     }
@@ -76,28 +90,32 @@
     const record = receiver => { const value = getRecord(receiver); if (!value || value.kind!==name) throw new TypeError('Illegal invocation'); return value.read; };
     property(proto, 'length', function () { return record(this)().length; });
     method(proto, 'item', function (index) { if (!arguments.length) throw new TypeError('item requires 1 argument'); return record(this)()[(+index) >>> 0] || null; }, 1);
-    Object.defineProperty(proto, Symbol.iterator, { value: make(function () { record(this); return Array.prototype.values.call(this); }, 'values', 0), writable: true, configurable: true });
+    Object.defineProperty(proto, Symbol.iterator, { value: make(function () { record(this); return collectionApply(collectionValues,this,[]); }, 'values', 0), writable: true, configurable: true });
     return { proto, record };
   }
   const collection = collectionInterface('HTMLCollection');
   const nodeList = collectionInterface('NodeList');
-  const named = (list, name) => name === '' ? null : list.find(node => getAttribute.call(node, 'id') === name || namespace.call(node) === html && getAttribute.call(node, 'name') === name) || null;
+  const named = (list,name)=>{if(name==='')return null;for(let index=0;index<list.length;index++){const node=list[index];if(getAttribute.call(node,'id')===name||namespace.call(node)===html&&getAttribute.call(node,'name')===name)return node;}return null;};
   method(collection.proto, 'namedItem', function (name) { if (!arguments.length) throw new TypeError('namedItem requires 1 argument'); return named(collection.record(this)(), string(name)); }, 1);
-  for (const name of ['entries', 'keys', 'values']) method(nodeList.proto, name, function () { nodeList.record(this); return Array.prototype[name].call(this); }, 0);
+  for (const [name,implementation] of [['entries',collectionEntries],['keys',collectionKeys],['values',collectionValues]]) method(nodeList.proto,name,function(){nodeList.record(this);return collectionApply(implementation,this,[]);},0);
   Object.defineProperty(nodeList.proto, Symbol.iterator, {value: nodeList.proto.values, writable: true, configurable: true});
-  method(nodeList.proto, 'forEach', function (callback, thisArg) { nodeList.record(this); if (typeof callback !== 'function') throw new TypeError('callback must be a function'); Array.prototype.forEach.call(this, callback, thisArg); }, 1);
+  method(nodeList.proto, 'forEach', function (callback, thisArg) { nodeList.record(this); if (typeof callback !== 'function') throw new TypeError('callback must be a function'); collectionApply(collectionForEach,this,[callback,thisArg]); }, 1);
   function live(list, namedProperties) {
     const proto = namedProperties ? collection.proto : nodeList.proto;
     const object = ns.makeNamedObject(proto, function (operation, key) {
       const rows = list();
       const indexed = /^(0|[1-9][0-9]*)$/.test(key) && Number(key) < 4294967295;
       const supported = indexed ? Number(key) < rows.length : namedProperties && !(key in proto) && named(rows, key) !== null;
-      if (operation === 'indices') return rows.map((_, index) => index);
+      if (operation === 'indices') {const indices=[];for(let index=0;index<rows.length;index++)collectionOwn(indices,index,index);return indices;}
       if (operation === 'keys') {
         const names = [];
-        if (namedProperties) for (const node of rows) {
-          for (const value of [getAttribute.call(node, 'id'), namespace.call(node) === html ? getAttribute.call(node, 'name') : null])
-            if (value && !/^(0|[1-9][0-9]*)$/.test(value) && !(value in proto) && !names.includes(value)) names.push(value);
+        if (namedProperties) for (let index=0;index<rows.length;index++) {
+          const node=rows[index],values=[getAttribute.call(node,'id'),namespace.call(node)===html?getAttribute.call(node,'name'):null];
+          for(let at=0;at<values.length;at++){
+            const value=values[at];let duplicate=false;
+            for(let existing=0;existing<names.length;existing++)if(names[existing]===value){duplicate=true;break;}
+            if(value&&!/^(0|[1-9][0-9]*)$/.test(value)&&!(value in proto)&&!duplicate)collectionOwn(names,names.length,value);
+          }
         }
         return names;
       }
@@ -113,26 +131,26 @@
     setRecord(object,{kind:namedProperties?'HTMLCollection':'NodeList',read:list});
     return object;
   }
-  const caches = new WeakMap();
+  const caches = new WeakMap(), cacheGet=WeakMap.prototype.get.bind(caches),cacheSet=WeakMap.prototype.set.bind(caches);
   function cached(receiver, key, read, namedProperties = true) {
-    let cache = caches.get(receiver);
-    if (!cache) { cache = new Map(); caches.set(receiver, cache); }
-    if (!cache.has(key)) {
+    let cache = cacheGet(receiver);
+    if (!cache) { cache = new Map(); cacheSet(receiver, cache); }
+    if (!collectionApply(collectionMapHas,cache,[key])) {
       let stamp = null, rows = null;
       const current = () => { const next = native('stamp', receiver); if(next !== stamp) { rows = read(); stamp = next; } return rows; };
-      cache.set(key, live(current, namedProperties));
+      collectionApply(collectionMapSet,cache,[key,live(current,namedProperties)]);
     }
-    return cache.get(key);
+    return collectionApply(collectionMapGet,cache,[key]);
   }
   property(g.Node.prototype, 'childNodes', function () {
-    check(this, [1, 3, 7, 8, 9, 10, 11]);
+    check(this, [1, 2, 3, 4, 7, 8, 9, 10, 11]);
     const receiver = this;
-    return cached(receiver, 'childNodes', () => Array.from(rawChildren.call(receiver)), false);
+    return cached(receiver, 'childNodes', () => copyRows(rawChildren.call(receiver)), false);
   });
   for (const owner of ['Element', 'Document', 'DocumentFragment']) property(g[owner].prototype, 'children', function () {
     check(this, owner === 'Element' ? [1] : owner === 'Document' ? [9] : [11]);
     const receiver = this;
-    return cached(receiver, 'children', () => Array.from(rawChildren.call(receiver)).filter(node => type.call(node) === 1));
+    return cached(receiver, 'children', () => copyRows(rawChildren.call(receiver),node=>type.call(node)===1));
   });
   for (const owner of ['Document', 'Element', 'DocumentFragment']) {
     const proto = g[owner].prototype;
@@ -140,7 +158,7 @@
     method(proto, 'querySelectorAll', function (selector) {
       check(this, owner === 'Document' ? [9] : owner === 'Element' ? [1] : [11]);
       if (!arguments.length) throw new TypeError('querySelectorAll requires 1 argument');
-      const rows = Array.from(query.call(this, string(selector)));
+      const rows = copyRows(query.call(this,string(selector)));
       return live(() => rows, false);
     }, 1);
   }
@@ -191,6 +209,20 @@
   for (const name of ['createElement','createAttribute','createAttributeNS']) {
     const descriptor=Object.getOwnPropertyDescriptor(g.document,name);
     if(descriptor){Object.defineProperty(g.Document.prototype,name,{...descriptor,enumerable:true});delete g.document[name];}
+  }
+  const createElement=g.Document.prototype.createElement;
+  method(g.Document.prototype,'createElement',function(name){
+    check(this,[9]);if(!arguments.length)throw new TypeError('createElement requires 1 argument');
+    name=string(name);if(!xmlName.test(name))throw new g.DOMException('Invalid element name','InvalidCharacterError');
+    return apply(createElement,this,[name,arguments[1]]);
+  },1);
+  method(g.Document.prototype,'createNSResolver',function(node){
+    check(this,[9]);if(!arguments.length)throw new TypeError('createNSResolver requires 1 argument');
+    type.call(node);return node;
+  },1);
+  for (const [owner, localName] of [['HTMLScriptElement','script'],['HTMLLinkElement','link']]) {
+    const branded = receiver => { check(receiver,[1]); if(namespace.call(receiver)!==html||receiver.localName!==localName)throw new TypeError('Illegal invocation'); };
+    property(g[owner].prototype,'integrity',function(){branded(this);return getAttribute.call(this,'integrity')||'';},function(value){branded(this);setAttribute.call(this,'integrity',string(value));});
   }
   property(g.Document.prototype, 'documentElement', function () { check(this, [9]); return Array.from(rawChildren.call(this)).find(node => type.call(node) === 1) || null; });
   property(g.Document.prototype, 'head', function () { check(this, [9]); const root=this.documentElement; return root ? Array.from(rawChildren.call(root)).find(node => type.call(node) === 1 && node.localName === 'head' && namespace.call(node) === html) || null : null; });
@@ -261,8 +293,8 @@
     property(g.Document.prototype, alias, function () { check(this, [9]); return this[name]; });
   }
   property(g.Document.prototype, 'webkitIsFullScreen', function () { check(this, [9]); return this.fullscreenElement != null; });
-  const project = ns.projectNativeNode;
-  ns.projectNativeNode = function (node) { project(node); if (type.call(node) === 10) Object.setPrototypeOf(node, documentTypeProto); return node; };
+  const project = ns.projectNativeNode, projectSetPrototype = Object.setPrototypeOf;
+  ns.projectNativeNode = function (node) { project(node); if (apply(type, node, []) === 10) projectSetPrototype(node, documentTypeProto); return node; };
   void g.document.doctype;
   const handlerNames = 'abort animationcancel animationend animationiteration animationstart auxclick beforecopy beforecut beforeinput beforematch beforepaste beforetoggle beforexrselect blur cancel canplay canplaythrough change click close command contentvisibilityautostatechange contextlost contextmenu contextrestored copy cuechange cut dblclick drag dragend dragenter dragleave dragover dragstart drop durationchange emptied ended error focus formdata freeze fullscreenchange fullscreenerror gotpointercapture input invalid keydown keypress keyup load loadeddata loadedmetadata loadstart lostpointercapture mousedown mouseenter mouseleave mousemove mouseout mouseover mouseup mousewheel paste pause play playing pointercancel pointerdown pointerenter pointerleave pointerlockchange pointerlockerror pointermove pointerout pointerover pointerrawupdate pointerup prerenderingchange progress ratechange readystatechange reset resize resume scroll scrollend scrollsnapchange scrollsnapchanging search securitypolicyviolation seeked seeking select selectionchange selectstart slotchange stalled submit suspend timeupdate toggle transitioncancel transitionend transitionrun transitionstart visibilitychange volumechange waiting webkitanimationend webkitanimationiteration webkitanimationstart webkitfullscreenchange webkitfullscreenerror webkittransitionend wheel'.split(' ');
   for (const event of handlerNames) {

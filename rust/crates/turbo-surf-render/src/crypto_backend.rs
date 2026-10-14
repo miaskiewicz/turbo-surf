@@ -3,6 +3,7 @@ use deno_core::Extension;
 
 pub(crate) const BOOTSTRAP: &str = include_str!("crypto_backend.js");
 const ALGORITHMS: &str = include_str!("crypto_algorithms.js");
+const HYBRID: &str = include_str!("crypto_hybrid.js");
 
 pub(crate) fn install<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -27,6 +28,11 @@ pub(crate) fn install<'s>(
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         .ok_or("native WebCrypto algorithm profile failed")?;
+    let hybrid_source = v8::String::new(scope, HYBRID).unwrap();
+    let hybrid_factory = v8::Script::compile(scope, hybrid_source, None)
+        .and_then(|script| script.run(scope))
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+        .ok_or("native WebCrypto hybrid adapter failed")?;
     let source = v8::String::new(scope, BOOTSTRAP).unwrap();
     let result = v8::Script::compile(scope, source, None)
         .and_then(|script| script.run(scope))
@@ -43,6 +49,7 @@ pub(crate) fn install<'s>(
                     factory.into(),
                     secure.into(),
                     algorithm_factory.into(),
+                    hybrid_factory.into(),
                 ],
             )
             .is_some()
@@ -66,5 +73,6 @@ pub(crate) fn extensions() -> Vec<Extension> {
             deno_web::InMemoryBroadcastChannel::default(),
         ),
         deno_crypto::deno_crypto::init(None),
+        crate::crypto_hybrid::extension(),
     ]
 }

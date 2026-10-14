@@ -13,6 +13,12 @@ deno_core = "0.412"
 deno_crypto = "=0.273.0"
 deno_web = "=0.290.0"
 deno_webidl = "=0.259.0"
+# X-Wing uses the same reviewed primitives already pulled in by deno_crypto.
+fips203 = "=0.4.3"
+x25519-dalek = "=2.0.1"
+sha3 = "=0.10.9"
+zeroize = "1"
+subtle = "2"
 # Error type for the ESM ModuleLoader (deno_core's ModuleLoaderError = deno_error::JsErrorBox);
 # pinned to the version deno_core 0.412 resolves so the types unify.
 deno_error = "=0.7.1"
@@ -20,10 +26,11 @@ deno_error = "=0.7.1"
 # V8 backend uses official rusty_v8 150.4; mixing in a second native V8 library
 # would make the DOM handles incompatible with the runtime's context.
 v8 = { package = "deno_v8", version = "=0.4.0" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.2" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.3" }
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
-# fetch backend, so downstream non-binary consumers (the PyO3 wheel) don't drag it in
-# and need a C toolchain. The shipped mcp binary still gets impersonate — it requests
+# fetch backend, so downstream non-binary consumers (the PyO3 wheel) avoid its
+# extra transport build. V8, native crypto and audio still require native toolchains.
+# The shipped mcp binary gets impersonate — it requests
 # `turbo-surf-core/impersonate` explicitly (its own default).
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.4", default-features = false }
 serde = { version = "1", features = ["derive"] }
@@ -31,6 +38,8 @@ serde_json = "1"
 url = "2"
 encoding_rs = "0.8"
 getrandom = "0.4"
+# Chrome 155 Blink uses this exact RustFFT implementation for PeriodicWave.
+rustfft = "=6.4.1"
 # base64-encode raster PNG bytes for the toDataURL op boundary (op returns a base64 string).
 base64 = "0.22"
 # CSP hash-source checks operate on the parser's actual UTF-8 script text.
@@ -46,6 +55,9 @@ async-trait = "0.1"
 # its own current-thread runtime, and returns the token over a oneshot channel — so the
 # engine/solver future stays `Send`. rt/time/net/io-util back deno_core's op_fetch loop.
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "net", "io-util"] }
+
+[build-dependencies]
+cc = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }

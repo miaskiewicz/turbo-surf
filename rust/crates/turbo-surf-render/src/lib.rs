@@ -5,11 +5,22 @@
 //! a real page needs (timers/fetch/URL/crypto/streams/…), and drives the event
 //! loop + hydration pump + execution budget.
 
+mod audio_backend;
+mod audio_buffer;
+mod audio_dsp;
+mod audio_effects;
+mod audio_fft;
+mod audio_timeline;
 mod browser_env;
 mod crypto_backend;
+mod crypto_clone;
+mod crypto_hybrid;
 mod csp;
 mod fetch_cors;
+mod integrity;
+mod message_ports;
 mod probe;
+mod resource_policy;
 mod runtime;
 mod script_fetch;
 mod script_inventory;

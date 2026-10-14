@@ -1,0 +1,47 @@
+{
+  "browserVersion": "Chrome/155.0.8059.40",
+  "collectedAt": "2026-10-13T22:08:45.025Z",
+  "collectorSha256": "0092af582cef6cba83fb8752b45755a6f4a090c6440125cf996dea4ff530ee4a",
+  "result": {
+    "indexSetter": {
+      "hooks": 0,
+      "calls": 5,
+      "aborts": 1,
+      "error": null,
+      "reason": "authored reason",
+      "targetKeys": [],
+      "signalKeys": [],
+      "audioKeys": []
+    },
+    "species": {
+      "hooks": 0,
+      "calls": 5,
+      "aborts": 1,
+      "error": null,
+      "reason": "authored reason",
+      "targetKeys": [],
+      "signalKeys": [],
+      "audioKeys": []
+    },
+    "iterator": {
+      "hooks": 0,
+      "calls": 5,
+      "aborts": 1,
+      "error": null,
+      "reason": "authored reason",
+      "targetKeys": [],
+      "signalKeys": [],
+      "audioKeys": []
+    },
+    "stateSetters": {
+      "hooks": 0,
+      "calls": 5,
+      "aborts": 1,
+      "error": null,
+      "reason": "authored reason",
+      "targetKeys": [],
+      "signalKeys": [],
+      "audioKeys": []
+    }
+  }
+}

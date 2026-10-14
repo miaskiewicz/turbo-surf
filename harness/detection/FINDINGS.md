@@ -4,6 +4,56 @@ Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
+## Local integration checkpoint — 2026-10-14
+
+This checkpoint does not establish native Google acceptance. The previous default
+batch passed 848 workspace tests with strict Clippy and formatting. More recent
+local changes require a new full default/native build and paired inventory.
+
+Canonical DOM/CSS/Range code is now re-vendored from turbo-test `d3f44f0`
+([PR #25](https://github.com/miaskiewicz/turbo-test/pull/25)). The preceding full canonical
+checkpoint passes 133 Rust library and 63 npm tests; the latest stylesheet-adoption
+follow-up passes two new controls plus seven live-CSS and one repeated-bootstrap
+regression. The latest projection/dependency checkpoint passes 114 focused canonical
+binding tests on published turbo-dom 0.5.3. After consuming that release, 35 Surf
+adoption, frame-ownership, transfer and teardown tests pass. Full end-of-work gates will cover the combined source. Cross-document insertions
+preserve wrapper identity and original realms; failed single-node preflight keeps
+inputs intact, while variadic conversion follows Chrome's fragment draining,
+last-duplicate ordering and detachment before insertion errors. Repeated bootstrap
+captures the current raw-node compatibility prototype rather than losing traversal
+members through previous read-only constructor prototypes.
+
+The integrated default follow-up passes 73 focused Rust contracts: 24 transfers,
+17 clones, nine host-input, six events, six frame lifetime, four frame ownership,
+four adoption/conversion and three teardown controls. A transfer fixture had used
+`Window.closed` as storage; its assignment correctly fails with the genuine
+read-only getter, so the fixture now uses an explicit retained-port name. The
+complete detection harness passes 40 tests without skips. These focused gates do
+not replace the full default and genuine V8 155 production gates. Broad native/artifact/release
+checks are deferred until implementation items 1–4 and 6–7 finish; focused checks
+continue as each change lands. The interim default workspace attempt compiled all
+targets but could not complete localhost core tests under its filesystem/network
+sandbox; it is not a completed full gate.
+
+Endpoint GC and queued Rust-only key snapshots are integrated. Removed Window
+messages still serialize valid transfers before discarding delivery; getter-driven
+retirement also discards the final snapshot. Retired host context registries,
+Window-message queues and timer payload roots are released, while retained old
+Documents preserve their DOM methods. Fresh Chrome controls distinguish failed
+variadic insertions that actually detach frames from single-node and WebIDL failures
+that leave live frames unchanged. Actual complete realm/node GC still requires
+traced ownership changes to canonical native caches and callback roots.
+
+The combined build also exposed a genuine V8 teardown abort when an iframe left
+private Range records alive. Private runtime ownership clears binding handles before
+isolate disposal on all return paths, including cached runtime/thread exit and both
+TLS initialization orders. Fresh Google validation remains pending until integrated
+gates, rebuilt artifacts and the current prototype audit finish.
+
+Remaining advanced audio is deferred to [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27) at the user's
+request. The active completion scope covers checklist items 1–4 and 6–11. No
+captured evidence here establishes audio as the cause of Google's rejection.
+
 ## Original audit checkout and execution context
 
 Updated clean local main from `57ce76b` to `origin/main` `e14b35d` (v0.5.3), then
@@ -544,3 +594,134 @@ The corrected frozen CLI SHA-256 is
 `898b3532c20030ac0d68707b19a13cca7d465e034b9c144d7965bbcd5b65e1c1`;
 its private build manifest records source/native-archive hashes and the checkpoint
 scopes. Native Google acceptance and the full API/policy backlog remain open.
+
+
+### October 13, 19:53 UTC — measured follow-up after the pushed checkpoint
+
+PR26 checkpoint `d36521d` passes both Node20 and Node22 CI jobs. Its default and
+genuine155 release addons each pass 83 shim cases (one intentional fixture skip)
+and 20 E2E cases. These binaries predate the following source changes.
+
+The frozen genuine155 CLI `898b3532c20030ac0d68707b19a13cca7d465e034b9c144d7965bbcd5b65e1c1`
+was paired with real Chrome155 on identical authored localhost fixtures. The
+updated API snapshot has four member-array differences containing 94 missing own
+members (42 Document, 39 Element, two Canvas and 11 HTMLElement), down from the
+historical121. The covered token/ARIA and text cases match; popover lifecycle
+methods accounted for the 11 text/popover field differences. No Google requests
+were made by these controls.
+
+Real native X-Wing managed keys now pass the Chrome known-seed vector, imported
+Chrome ciphertext and native-to-Chrome ciphertext controls. The shared collector
+records zero differences across285 operation/name and14 parameter queries, with
+real bits/key roundtrips for ML-KEM-768, ML-KEM-1024 and MLKEM768-X25519. The new
+SDK155 focused gate passes32 cases:12 crypto, four hybrid public, five native
+hybrid, eight host input and three expression cases. This establishes the covered
+crypto contracts, not full WebCrypto or browser parity. CryptoKey clone and hostile
+prototype-property access are under separate audit.
+
+Temporary public Deno/core objects were removed from environment setup. The
+embedder passes core as a private function argument and retains it in native
+context slots. Interruption during iframe churn leaves no exposed bootstrap
+capabilities and usable parent input; this regression passes on both V8 builds.
+
+Canonical popover source at turbo-test `b18f1ed` passes79 library tests. Its shared
+Chrome155 lifecycle result also passes in Surf, including the nine mode pairs. A
+new child-realm scheduler regression fails with missing queued events; the actual
+owner/scheduler seam is being repaired. Focus restoration, external light dismissal,
+stateful cascade and top-layer painting remain separate open behaviors.
+
+Resource integrity now has native SHA256/384/512 response-byte admission work.
+Its initial tests pass raw invalid-UTF8 bytes, tampering, strongest-hash selection,
+unknown tokens and CORS/opaque eligibility. Script/module/style/frame execution
+controls pass byte admission; the integration test also exposed missing Window
+capture propagation of element resource events. Follow-up validation is pending.
+Implementation reference: [official Chrome155 integrity implementation](https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/loader/subresource_integrity.cc),
+[W3C SRI](https://www.w3.org/TR/2016/REC-SRI-20160623/).
+
+There is still no verified fresh native155 Google SERP result and no100% parity
+claim. Full checks and fresh paired controls must cover the final integrated
+source before the next consent/query run.
+
+
+### October 13 follow-up — provider hardening and private clone integration
+
+The adversarial provider regression reproduced a leak of16 raw AES key bytes into
+a page-installed inherited `keyData` setter during non-extractable import. The
+licensed published deno_crypto0.273.0 source is now reproduced from its verified
+archive plus an auditable patch under `rust/vendor`: native data-property writes
+bypass inherited setters, and unregistered JS key snapshots are skipped entirely.
+The fixed regression sees zero setter calls and zero exposed bytes. An inherited
+Array index setter is also covered. See [provider provenance](../../rust/vendor/DENO_CRYPTO.md).
+
+The private V8 clone serializer carries genuine key handles out of band; it never
+exports material, calls page key properties or installs registry-symbol hooks.
+Its covered cases include non-extractability/usages, cyclic graphs, aliases,
+Map/Set/Date/typed bytes, fake keys, poisoned key properties, genuine KEM/Ed keys,
+child realms and MessageChannel payload identity. A fresh Chrome155 control found
+a further borrowed-Window receiver realm mismatch, which is being corrected.
+Native Event rejection is also being integrated through the canonical private
+brand helper rather than public constructors or `instanceof`. Transfer lists and
+complete cross-session messaging remain open.
+
+After the core clone integration, the default focused gate passes60 tests:
+24 API, six crypto isolation/clone,12 crypto, four hybrid, eight host input, two
+popover and four resource-policy tests. The latter cover actual SRI byte admission,
+CORP origin/site/case/duplicate rules and active HTTPS mixed-content blocking with
+loopback exemptions. The child popover scheduler regression now passes following
+canonical `f2c596c`. All35 reusable harness offline tests pass without skips.
+These are focused source gates; the final workspace/native155/release-addon gates
+and final paired measurements still need to run.
+
+The hardened provider is a workspace patch, so registry Surf consumers cannot
+safely fall back to the unpatched provider. A compatible distributable provider
+or upstream fix is an additional crate-publication prerequisite, alongside the
+already-unpublished transport APIs. No Surf release tag has been pushed.
+
+## Additional native lifecycle and resource fixes — 2026-10-13
+
+The classic script pump now retains actual V8 exceptions instead of rebuilding
+Errors from text. Main/child runtime and syntax errors report trusted Window
+ErrorEvents with the original exception identity and realm, native filename/line/
+column, and successful external script `load`. Inline exceptions do not create
+resource-error events. Cross-origin no-CORS error reports are muted using the
+actual final native response context, including redirect taint: `Script error.`,
+null error, empty filename and zero location. CORS-authorized responses retain
+normal reporting. This follows the [HTML classic-script/error algorithms](https://html.spec.whatwg.org/multipage/webappapis.html).
+
+The reusable `classic-script-errors.mjs` two-origin loopback runner has a saved
+normal Chrome155 control in `fixtures/classic-script-errors-chrome155.json`.
+Current default native regressions pass; final rebuilt native155 pairing remains
+pending. Window listener options/onerror and complete browser error reporting are
+separate work, and this does not establish Google acceptance.
+
+SRI regressions now assert that a rejected stylesheet leaves `link.sheet === null`
+and that a rejected iframe script fires exactly one error. Authored resource
+fixtures and their collector cover these outcomes with exact binary response
+bytes, dependencies and policy headers. They do not claim full resource-policy
+or streaming/scheduling coverage. The native audio implementation and its
+explicit bounds are recorded in [AUDIO.md](./AUDIO.md); fixed waveform placeholders
+have been removed.
+
+## Window event integration checkpoint — 2026-10-13
+
+The canonical Window checkpoint `d9801e5` passes 104 Rust and 63 npm tests and
+independent headed Chrome155 phase/option/handler controls. Surf vendors the
+committed code, privately captures final ErrorEvent/AbortSignal interfaces after
+each environment bootstrap, and removes duplicate manual Window callbacks and
+DOMContentLoaded dispatch. Its focused event/lifecycle/input/clone/resource
+cohort passes 38 tests. Subsequent transfer development found an obsolete ENV
+AbortSignal replacement that interferes with genuine signal validation; it is
+removed and a branded signal/default-reason regression has been added, with the
+final constructor capture and integrated rerun pending.
+
+Current default workspace validation passed 810 tests (four generated extension
+doctests ignored), strict Clippy and format. The small Clippy iterator refactor
+was independently revalidated against the three native DSP and seven public
+audio tests. Genuine155 final checks are running; subsequent Abort integration
+repair makes pre-repair results a checkpoint rather than final certification.
+Window/MessagePort transfers and advanced audio scheduling/effects are isolated
+subagent work and are not part of that saved source checkpoint. The current
+49-test focused clone/API/audio/native-DOM cohort passes true AB/RAB detachment,
+private crypto/DOMException graph and User Timing semantics, and actual Blob
+download content. Wider transfer types, browser interface serialization and
+advanced audio behavior remain open until independently integrated and tested.

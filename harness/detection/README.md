@@ -403,3 +403,37 @@ Isolated probes use identical HTML and a shared loopback origin for both runtime
 Fresh Chrome `about:blank` is insecure; comparing its secure-only API enumeration
 with native `https://probe.test/` inflated apparent gaps in older probe artifacts.
 The corrected probe configuration records its fixture bytes/hash and actual URL.
+
+### Resource admission and script errors
+
+`resource-policy.mjs` starts two loopback origins and compares exact raw-byte SRI
+hashes, strongest-digest selection, opaque/CORS admission, CORP header policies,
+script/module/dependency/iframe execution, stylesheet installation and trusted
+resource events. `classic-script-errors.mjs` distinguishes downloaded resources
+from execution errors: exceptions keep their identity and source realm, report
+trusted Window errors, and fetched scripts still fire `load`. Both runners freeze
+the selected executable and record native/Chrome versions and collector hashes.
+
+```bash
+node harness/detection/resource-policy.mjs --run --binary /absolute/path/detection_trace --out /tmp/surf-resource-policies
+node harness/detection/classic-script-errors.mjs --run --binary /absolute/path/detection_trace --out /tmp/surf-script-errors
+```
+
+These are authored localhost controls. They do not establish complete CSP,
+COEP/COOP, mixed-content image upgrades, streaming, or browser scheduling parity.
+[The saved script-error control](./fixtures/classic-script-errors-chrome155.json)
+records normal Chrome 155 behavior without importing its cookies.
+
+Authored localhost controls can set `disableExtensions: true` in their JSON
+configuration. This adds only `--disable-extensions`, rejects non-loopback target
+URLs and records `effectiveExtensionFlags` in the trace. The prototype/API
+comparison and worker/iframe regression use this explicit isolation so installed
+system extensions cannot delay their control targets. Normal live Chrome launches
+keep their default extension behavior.
+
+`range-live-probe.js` and its saved Chrome155.0.8059.79 / V815.5.35.23 fixture
+cover live boundary changes for text, splitting, insertion/removal, replacements,
+normalization, moves and adoption. The fixture retains the exact collector hash;
+canonical Rust tests also check cross-realm behavior, hostile public getters and
+actual garbage collection. Remaining native mutation seams and layout geometry
+are listed in `PARITY-GAPS.md`.

@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { chromeExtensionArgs } from "./chrome-launch-policy.mjs";
+
+test("normal Chrome launch keeps extensions enabled by default", () => {
+  for (const disableExtensions of [undefined, false, "true", "false"])
+    assert.deepEqual(
+      chromeExtensionArgs({ url: "https://www.google.com/", disableExtensions }),
+      [],
+    );
+});
+
+test("authored loopback controls can explicitly disable extensions", () => {
+  for (const url of ["http://localhost:1234/", "http://127.0.0.1:1234/", "http://[::1]:1234/"])
+    assert.deepEqual(chromeExtensionArgs({ url, disableExtensions: true }), [
+      "--disable-extensions",
+    ]);
+});
+
+test("extension isolation refuses remote, lookalike and file controls", () => {
+  for (const url of [
+    "https://www.google.com/",
+    "http://localhost.example/",
+    "file:///tmp/fixture.html",
+  ])
+    assert.throws(
+      () => chromeExtensionArgs({ url, disableExtensions: true }),
+      /authored localhost/,
+    );
+});

@@ -37,17 +37,36 @@ git -C "$repo" show HEAD:src/browser_env.js > "$dest/browser_env.js"
 git -C "$repo" show HEAD:src/cssom_parser.rs > "$dest/cssom_parser.rs"
 git -C "$repo" show HEAD:src/css_policy.rs > "$dest/css_policy.rs"
 git -C "$repo" show HEAD:src/event_handlers.rs > "$dest/event_handlers.rs"
+git -C "$repo" show HEAD:src/event_brands.rs > "$dest/event_brands.rs"
+git -C "$repo" show HEAD:src/event_listeners.rs > "$dest/event_listeners.rs"
+git -C "$repo" show HEAD:src/event_listeners.js > "$dest/event_listeners.js"
+for file in range_contents.rs range_contents.js range_probe.js range_chrome155.json range_live.rs range_live_probe.js range_live_chrome155.json; do
+  git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
+done
+for file in css_live_tests.rs css_live_probe.js css_live_chrome155.json css_adoption_tests.rs css_adoption_probe.js css_adoption_ownership_probe.js css_adoption_chrome155.json css_adoption_ownership_chrome155.json; do
+  git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
+done
 git -C "$repo" show HEAD:src/html_documents.rs > "$dest/html_documents.rs"
 git -C "$repo" show HEAD:src/document_basics.rs > "$dest/document_basics.rs"
 git -C "$repo" show HEAD:src/collection_records.rs > "$dest/collection_records.rs"
 git -C "$repo" show HEAD:src/document_basics.js > "$dest/document_basics.js"
+git -C "$repo" show HEAD:src/document_xpath.rs > "$dest/document_xpath.rs"
+git -C "$repo" show HEAD:src/document_xpath.js > "$dest/document_xpath.js"
+mkdir -p "$dest/xpath_provider"
+for file in xpath.js LICENSE README.md; do
+  git -C "$repo" show "HEAD:src/xpath_provider/$file" > "$dest/xpath_provider/$file"
+done
 git -C "$repo" show HEAD:src/element_tokens.js > "$dest/element_tokens.js"
 git -C "$repo" show HEAD:src/element_relations.js > "$dest/element_relations.js"
 git -C "$repo" show HEAD:src/element_relations.rs > "$dest/element_relations.rs"
 git -C "$repo" show HEAD:src/html_text.rs > "$dest/html_text.rs"
 git -C "$repo" show HEAD:src/html_text.js > "$dest/html_text.js"
 git -C "$repo" show HEAD:src/html_popover.js > "$dest/html_popover.js"
+git -C "$repo" show HEAD:src/html_popover.rs > "$dest/html_popover.rs"
 git -C "$repo" show HEAD:src/dom_mutations.rs > "$dest/dom_mutations.rs"
+for file in dom_adoption_probe.js dom_adoption_chrome155.json dom_projection_tests.rs dom_variadic_errors_probe.js dom_variadic_errors_chrome155.json; do
+  git -C "$repo" show "HEAD:src/$file" > "$dest/$file"
+done
 git -C "$repo" show HEAD:src/browser_sanitizer_default.json > "$dest/browser_sanitizer_default.json"
 git -C "$repo" show HEAD:src/browser_env.rs | sed 's#^//!#//#' > "$dest/browser_env_upstream.rs"
 

@@ -2,7 +2,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { differences } from "./api-shape.mjs";
+import { differences, localFixtureUrl } from "./api-shape.mjs";
+
+test("custom paired fixtures remain local and reject credential-bearing or remote URLs", () => {
+  for (const url of [
+    "http://127.0.0.1:1234/fixture",
+    "http://127.12.3.4/",
+    "https://localhost/",
+    "http://[::1]/",
+  ]) {
+    assert.equal(localFixtureUrl(url), new URL(url).href);
+  }
+  for (const url of [
+    "https://www.google.com/",
+    "http://127.0.0.1.evil/",
+    "http://192.168.1.1/",
+    "http://user:secret@localhost/",
+    "file:///tmp/fixture",
+  ]) {
+    assert.throws(() => localFixtureUrl(url), TypeError);
+  }
+});
 
 test("API differential preserves descriptor paths and absent fields", () => {
   assert.deepEqual(

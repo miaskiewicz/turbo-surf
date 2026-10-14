@@ -1,7 +1,7 @@
 // Called privately during realm bootstrap. Algorithms, key material and brands
 // remain in the official deno_crypto cppgc Rust classes. Public interface
 // prototypes belong to this realm; the shared native factories stay private.
-(function (core, make, secure, algorithmFactory) {
+(function (core, make, secure, algorithmFactory, hybridFactory) {
   "use strict";
   const ops = core.ops;
   const rawCrypto = ops.Crypto,
@@ -60,6 +60,7 @@
     }
   }
   for (const name of [
+    "DataCloneError",
     "DataError",
     "InvalidAccessError",
     "NotSupportedError",
@@ -72,10 +73,16 @@
     if (core.buildCustomError(nativeName, "") === undefined)
       core.registerErrorBuilder(nativeName, (message) => new NativeDOMException(message, name));
   }
+  const hybrid = hybridFactory(ops.NativeHybridKey, backend, apply, NativeDOMException);
+  const nativeKeyGet = (name, key) => hybrid.get(name, key);
   const profile = algorithmFactory(
-    backend.supports,
-    backend.key.type.get,
-    backend.key.algorithm.get,
+    hybrid.supports,
+    function () {
+      return nativeKeyGet("type", this);
+    },
+    function () {
+      return nativeKeyGet("algorithm", this);
+    },
     apply,
     NativeDOMException,
   );
@@ -137,12 +144,28 @@
   });
   function keyState(key) {
     // The native getter proves the cppgc brand before any private record lookup.
-    apply(backend.key.type.get, key, []);
+    nativeKeyGet("type", key);
     let state = get(key);
     if (!state || !own(state, "cryptoMetadata"))
       throw new LocalTypeError("Native key metadata unavailable");
     return state.cryptoMetadata;
   }
+  for (const name of ["type", "extractable"])
+    define(CryptoKey.prototype, name, {
+      get: make(
+        function () {
+          try {
+            return nativeKeyGet(name, this);
+          } catch (error) {
+            throw localError(error);
+          }
+        },
+        "get " + name,
+        0,
+      ),
+      enumerable: true,
+      configurable: true,
+    });
   function copyArray(source) {
     const result = [];
     for (let index = 0; index < source.length; index++)
@@ -178,8 +201,14 @@
     define(CryptoKey.prototype, name, {
       get: make(
         function () {
-          const metadata = keyState(this);
-          return name === "algorithm" ? dictionary(metadata.algorithm) : copyArray(metadata.usages);
+          try {
+            const metadata = keyState(this);
+            return name === "algorithm"
+              ? dictionary(metadata.algorithm)
+              : copyArray(metadata.usages);
+          } catch (error) {
+            throw localError(error);
+          }
         },
         "get " + name,
         0,
@@ -188,12 +217,12 @@
       configurable: true,
     });
   function ownKey(key) {
-    apply(backend.key.type.get, key, []);
+    nativeKeyGet("type", key);
     const state = get(key) || create(null);
     if (!own(state, "cryptoMetadata")) {
       const metadata = create(null);
-      metadata.algorithm = dictionary(apply(backend.key.algorithm.get, key, []));
-      metadata.usages = profile.usages(apply(backend.key.usages.get, key, []));
+      metadata.algorithm = dictionary(nativeKeyGet("algorithm", key));
+      metadata.usages = profile.usages(nativeKeyGet("usages", key));
       setPrototype(metadata.usages, null);
       define(state, "cryptoMetadata", { value: metadata });
       set(key, state);
@@ -207,6 +236,10 @@
     setPrototype(value, bufferPrototype);
     return value;
   }
+  ops.op_install_crypto_clone_adapter(
+    ownKey,
+    (message, name = "DataCloneError") => new NativeDOMException(message, name),
+  );
   function resultKey(name, value) {
     if (name === "generateKey") {
       if (value && own(value, "publicKey"))
@@ -273,7 +306,11 @@
                 throw new LocalTypeError("Illegal invocation");
               if (args.length < arity)
                 throw new LocalTypeError(name + " requires " + arity + " arguments");
-              const value = apply(native, receiver, profile.admit(name, args));
+              const normalized = profile.admit(name, args);
+              const hybridResult = hybrid.handles(name, normalized)
+                ? hybrid.run(name, normalized, receiver)
+                : undefined;
+              const value = hybridResult ? hybridResult.value : apply(native, receiver, normalized);
               const complete = (value) => {
                 try {
                   resolve(owner.result(name, value));
@@ -284,11 +321,13 @@
               // Borrow the captured native then; guest parent Promise prototypes must
               // not substitute a foreign input key as a native operation result.
               if (
-                name === "importKey" ||
-                name === "getPublicKey" ||
-                name === "unwrapKey" ||
-                name === "encapsulateKey" ||
-                name === "decapsulateKey"
+                hybridResult
+                  ? !hybridResult.async
+                  : name === "importKey" ||
+                    name === "getPublicKey" ||
+                    name === "unwrapKey" ||
+                    name === "encapsulateKey" ||
+                    name === "decapsulateKey"
               )
                 complete(value);
               else apply(then, value, [complete, (error) => reject(owner.error(error))]);

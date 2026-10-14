@@ -61,7 +61,8 @@ can't be reused) — only cut a tag when a release is intended.
 ## Notes
 
 - The launcher's `files` allowlist ships `bin/` (the per-platform binaries CI
-  builds), `cli.js`, `index.js`, `LICENSE`, `README.md`, `CHANGELOG.md`. `rust/`,
+  builds), `cli.js`, `index.js`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`,
+  `CHANGELOG.md`. Platform binary artifacts also carry both license files. `rust/`,
   `harness/`, `docs/` are excluded. Verify with `npm pack --dry-run`.
 - `cli.js`/`index.js` resolve `bin/turbo-surf-mcp-<platform>-<arch>` at runtime
   (musl-detected on Linux), with a dev fallback to a local
@@ -92,9 +93,26 @@ packaged crates from a clean consumer project without workspace patches. An npm
 binary built from this workspace and a crates.io library have different dependency
 resolution; successful binary builds do not establish registry compatibility.
 
+The render workspace also patches `deno_crypto` 0.273.0 with the licensed source
+and reproducible hardening patch in [`rust/vendor/DENO_CRYPTO.md`](./rust/vendor/DENO_CRYPTO.md).
+The upstream provider's inherited object setters can expose non-extractable key
+bytes during construction. Registry consumers must resolve a distributable
+hardened provider or an upstream release containing the fix before publishing
+Surf crates; silently falling back to the unpatched registry crate is unsafe.
+Check the source archive/patch with `python3 rust/vendor/update-deno-crypto.py --check`.
+
 The DOM API dependency is now published as turbo-dom 0.5.2 (PR #8, tagged merge
 commit `87c2077`) and no longer needs a workspace Git patch. The transport API
 requirement above still blocks clean crate consumers until compatible registry
 versions or reviewed distributable forks are available. A local
 `npm pack --dry-run` checks the launcher allowlist; it does not verify per-platform
 binaries staged by release CI.
+
+## Native third-party notices
+
+The native audio kernels, XPath provider, RustFFT and hardened crypto provider
+retain their source licenses. `THIRD_PARTY_NOTICES.md` also accompanies the npm
+launcher, standalone platform artifacts and Python extension package. After
+editing the notices, run `python3 scripts/sync-third-party-notices.py` to update
+the render-crate and Python package copies. `--check` runs before release builds
+and in `npm test`; packaging must preserve these notices in the actual archives.

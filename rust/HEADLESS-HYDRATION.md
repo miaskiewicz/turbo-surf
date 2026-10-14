@@ -49,6 +49,18 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 
 **Execution model and remaining gaps:**
 
+- Native WebCrypto uses the hardened licensed Deno provider and genuine X-Wing
+  composition. Non-extractable key material never crosses a page cloning hook;
+  the private V8 serializer carries native key handles out of band. The original
+  inherited-setter leak and graph/permission/realm behavior have regressions.
+  See [`vendor/DENO_CRYPTO.md`](./vendor/DENO_CRYPTO.md) for the reproducible patch.
+- SHA256/384/512 resource integrity is checked against decoded response bytes
+  before fetch/script/module/frame/style consumption. Module entry integrity does
+  not become the hash for imported dependencies. Native CORP and active HTTPS
+  mixed-content checks also run before consumption/contact, including redirects.
+  Passive image upgrades, signature/Integrity-Policy enforcement and complete
+  embedder/worker/navigation policies remain separate gaps.
+
 - Module scripts now run through the deno_core module loader and ESM graph pump
   (`NetModuleLoader` in `runtime.rs`); classic scripts are queued by the script-element
   pump and compiled/executed by the Rust host pump with their document/source URL.
@@ -84,8 +96,10 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   keeping HttpOnly values hidden. srcdoc/blank contexts inherit the owner's origin and
   fetch base.
 - Window messages enforce `targetOrigin` and use V8 structured cloning into the
-  receiver realm, including cycles and Maps. Transfer lists are unsupported and throw
-  `DataCloneError`. The published V8 150 backend uses a limited caller-realm Window view:
+  receiver realm, including cycles and Maps. Native transfer lists move ArrayBuffer
+  backing stores and MessagePort ownership after successful serialization and queue
+  admission. Endpoint garbage-collection liveness and broader retirement controls
+  remain under validation; see [the ownership contract](../harness/detection/MESSAGE-TRANSFERS.md). The published V8 150 backend uses a limited caller-realm Window view:
   protected reads throw `SecurityError`, and replacement creates an isolated context with
   a different `contentWindow` identity. Retained old globals/documents remain isolated
   and callable. The explicit native V8 154 build uses genuine V8 global detach/reuse and
@@ -486,7 +500,7 @@ work* so the next person doesn't re-walk it.
   drains it through the host-only `liveNetworkLog` accessor to emit `page.on('response')` and back a real `waitForResponse`. Tests use
   these to capture API payloads (payroll period, employments lists).
 - **Globals:** `KeyboardEvent` dispatch path, `navigator.clipboard` (in-memory
-  write/read), `structuredClone` (V8 serializer for Date/RegExp/Map/Set/cycles and typed arrays; transfer lists are unsupported). Apps
+  write/read), `structuredClone` (V8 serializer for Date/RegExp/Map/Set/cycles and typed arrays, ArrayBuffer transfers and native MessagePort ownership). Apps
   probe `globalThis.structuredClone.prototype`; absent it threw.
 
 ### Implemented (shim parity)

@@ -43,6 +43,11 @@
       "ML-KEM-512",
       "ML-KEM-768",
       "ML-KEM-1024",
+      "MLKEM768-X25519",
+      "ML-DSA-44",
+      "ML-DSA-65",
+      "ML-DSA-87",
+      "ChaCha20-Poly1305",
       "unknown",
     ])
       supports[operation][algorithm] = await safe(() =>
@@ -114,7 +119,7 @@
     publicArgument: await safe(() => crypto.subtle.getPublicKey(pair.publicKey, [])),
   };
   const kem = {};
-  for (const name of ["ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"]) {
+  for (const name of ["ML-KEM-512", "ML-KEM-768", "ML-KEM-1024", "MLKEM768-X25519"]) {
     try {
       const keys = await crypto.subtle.generateKey(name, false, [
         "encapsulateBits",

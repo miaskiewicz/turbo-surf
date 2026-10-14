@@ -521,6 +521,6 @@ fn structured_clone_preserves_native_types_and_rejects_uncloneable_values() {
     );
     assert_eq!(
         value,
-        serde_json::json!({"cycle":true,"buffer":true,"date":true,"map":true,"integer":true,"function":"DataCloneError","proxy":"DataCloneError","node":"DataCloneError","transfer":"NotSupportedError","attached":true})
+        serde_json::json!({"cycle":true,"buffer":true,"date":true,"map":true,"integer":true,"function":"DataCloneError","proxy":"DataCloneError","node":"DataCloneError","transfer":"","attached":false})
     );
 }

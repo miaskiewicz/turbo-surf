@@ -1,29 +1,26 @@
 {
   "schemaVersion": 1,
-  "measuredAt": "2026-10-13T18:24:24.908Z",
-  "scope": "Same authored localhost fixture; no Google scripts, cookies or private key material. Algorithm support, public key metadata, behavioral roundtrip booleans and public known-answer digests.",
+  "measuredAt": "2026-10-13T19:25:48.567Z",
+  "scope": "Same authored localhost fixture; no Google scripts, cookies or production key material. Algorithm support, public key metadata, behavioral roundtrip booleans and public known-answer digests.",
   "profile": {
     "chrome": "Chrome/155.0.8059.40",
     "chromeV8": "15.5.35.20",
-    "nativeSdk": "default150.4",
+    "nativeV8": "15.5.35.20-rusty",
+    "nativeSdk": "genuine155",
     "denoCrypto": "0.273.0",
     "denoCryptoProvider": "0.53.0",
+    "hybrid": "Native Rust X-Wing over fips203/x25519-dalek/sha3",
     "collector": "webcrypto-probe.js"
   },
   "summary": {
-    "operationNameQueries": 210,
+    "operationNameQueries": 285,
     "parameterQueries": 14,
-    "remainingDifferences": 1,
-    "supportedKemRoundtrips": ["ML-KEM-768", "ML-KEM-1024"],
-    "profileRejectedKem": "ML-KEM-512"
+    "remainingDifferences": 0,
+    "supportedKemRoundtrips": ["ML-KEM-768", "ML-KEM-1024", "MLKEM768-X25519"],
+    "profileRejectedKem": "ML-KEM-512",
+    "bounds": "Measured collector coverage. CryptoKey structured clone and full browser parity are not claimed."
   },
-  "differences": [
-    {
-      "path": ".parameters.hybridKem.value",
-      "chrome": true,
-      "native": false
-    }
-  ],
+  "differences": [],
   "chrome": {
     "supports": {
       "digest": {
@@ -76,6 +73,26 @@
           "value": false
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": false
         },
@@ -137,6 +154,26 @@
           "promise": false,
           "value": true
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": true
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -192,6 +229,26 @@
           "value": true
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": true
         },
@@ -253,6 +310,26 @@
           "promise": false,
           "value": false
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -308,6 +385,26 @@
           "value": false
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": false
         },
@@ -369,6 +466,26 @@
           "promise": false,
           "value": false
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -424,6 +541,26 @@
           "value": false
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": false
         },
@@ -485,6 +622,26 @@
           "promise": false,
           "value": false
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -540,6 +697,26 @@
           "value": false
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": false
         },
@@ -601,6 +778,26 @@
           "promise": false,
           "value": false
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -658,6 +855,26 @@
         "ML-KEM-1024": {
           "promise": false,
           "value": true
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
         },
         "unknown": {
           "promise": false,
@@ -717,6 +934,26 @@
           "promise": false,
           "value": true
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -774,6 +1011,26 @@
         "ML-KEM-1024": {
           "promise": false,
           "value": true
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
         },
         "unknown": {
           "promise": false,
@@ -833,6 +1090,26 @@
           "promise": false,
           "value": true
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -890,6 +1167,26 @@
         "ML-KEM-1024": {
           "promise": false,
           "value": true
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
         },
         "unknown": {
           "promise": false,
@@ -1095,6 +1392,44 @@
         },
         "bitsKeys": ["ciphertext", "sharedKey"],
         "ciphertextBytes": 1568,
+        "secretBytes": 32,
+        "bitsMatch": true,
+        "keyPromise": true,
+        "decapsulatePromise": true,
+        "keyKeys": ["ciphertext", "sharedKey"],
+        "secretKey": {
+          "tag": "[object CryptoKey]",
+          "type": "secret",
+          "extractable": true,
+          "algorithm": {
+            "name": "AES-GCM",
+            "length": 256
+          },
+          "usages": ["encrypt", "decrypt"]
+        },
+        "keyMatch": true
+      },
+      "MLKEM768-X25519": {
+        "privateKey": {
+          "tag": "[object CryptoKey]",
+          "type": "private",
+          "extractable": false,
+          "algorithm": {
+            "name": "MLKEM768-X25519"
+          },
+          "usages": ["decapsulateKey", "decapsulateBits"]
+        },
+        "publicKey": {
+          "tag": "[object CryptoKey]",
+          "type": "public",
+          "extractable": true,
+          "algorithm": {
+            "name": "MLKEM768-X25519"
+          },
+          "usages": ["encapsulateKey", "encapsulateBits"]
+        },
+        "bitsKeys": ["ciphertext", "sharedKey"],
+        "ciphertextBytes": 1120,
         "secretBytes": 32,
         "bitsMatch": true,
         "keyPromise": true,
@@ -1175,6 +1510,26 @@
           "promise": false,
           "value": false
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -1230,6 +1585,26 @@
           "value": true
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": true
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": true
         },
@@ -1291,6 +1666,26 @@
           "promise": false,
           "value": true
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": true
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -1346,6 +1741,26 @@
           "value": false
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": false
         },
@@ -1407,6 +1822,26 @@
           "promise": false,
           "value": false
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -1462,6 +1897,26 @@
           "value": false
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": false
         },
@@ -1523,6 +1978,26 @@
           "promise": false,
           "value": false
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -1578,6 +2053,26 @@
           "value": false
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": false
         },
@@ -1639,6 +2134,26 @@
           "promise": false,
           "value": false
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -1694,6 +2209,26 @@
           "value": false
         },
         "ML-KEM-1024": {
+          "promise": false,
+          "value": false
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
           "promise": false,
           "value": false
         },
@@ -1755,6 +2290,26 @@
           "promise": false,
           "value": true
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": true
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -1812,6 +2367,26 @@
         "ML-KEM-1024": {
           "promise": false,
           "value": true
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
         },
         "unknown": {
           "promise": false,
@@ -1871,6 +2446,26 @@
           "promise": false,
           "value": true
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -1928,6 +2523,26 @@
         "ML-KEM-1024": {
           "promise": false,
           "value": true
+        },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
         },
         "unknown": {
           "promise": false,
@@ -1987,6 +2602,26 @@
           "promise": false,
           "value": true
         },
+        "MLKEM768-X25519": {
+          "promise": false,
+          "value": true
+        },
+        "ML-DSA-44": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-65": {
+          "promise": false,
+          "value": false
+        },
+        "ML-DSA-87": {
+          "promise": false,
+          "value": false
+        },
+        "ChaCha20-Poly1305": {
+          "promise": false,
+          "value": false
+        },
         "unknown": {
           "promise": false,
           "value": false
@@ -2040,7 +2675,7 @@
       },
       "hybridKem": {
         "promise": false,
-        "value": false
+        "value": true
       },
       "chacha": {
         "promise": false,
@@ -2191,6 +2826,44 @@
         },
         "bitsKeys": ["ciphertext", "sharedKey"],
         "ciphertextBytes": 1568,
+        "secretBytes": 32,
+        "bitsMatch": true,
+        "keyPromise": true,
+        "decapsulatePromise": true,
+        "keyKeys": ["ciphertext", "sharedKey"],
+        "secretKey": {
+          "tag": "[object CryptoKey]",
+          "type": "secret",
+          "extractable": true,
+          "algorithm": {
+            "name": "AES-GCM",
+            "length": 256
+          },
+          "usages": ["encrypt", "decrypt"]
+        },
+        "keyMatch": true
+      },
+      "MLKEM768-X25519": {
+        "privateKey": {
+          "tag": "[object CryptoKey]",
+          "type": "private",
+          "extractable": false,
+          "algorithm": {
+            "name": "MLKEM768-X25519"
+          },
+          "usages": ["decapsulateKey", "decapsulateBits"]
+        },
+        "publicKey": {
+          "tag": "[object CryptoKey]",
+          "type": "public",
+          "extractable": true,
+          "algorithm": {
+            "name": "MLKEM768-X25519"
+          },
+          "usages": ["encapsulateKey", "encapsulateBits"]
+        },
+        "bitsKeys": ["ciphertext", "sharedKey"],
+        "ciphertextBytes": 1120,
         "secretBytes": 32,
         "bitsMatch": true,
         "keyPromise": true,

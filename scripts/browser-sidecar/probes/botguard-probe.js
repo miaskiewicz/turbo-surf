@@ -72,9 +72,9 @@
     const p0 = performance.now(),
       d0 = Date.now();
     // busy ~ a few ms
-    let x = 0;
+    let _x = 0;
     const start = performance.now();
-    while (performance.now() - start < 5) x++;
+    while (performance.now() - start < 5) _x++;
     const p1 = performance.now(),
       d1 = Date.now();
     // resolution: smallest non-zero delta between consecutive perf.now()

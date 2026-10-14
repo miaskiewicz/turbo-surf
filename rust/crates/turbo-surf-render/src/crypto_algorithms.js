@@ -9,7 +9,6 @@
   const upper = String.prototype.toUpperCase,
     split = String.prototype.split,
     slice = String.prototype.slice;
-  const push = Array.prototype.push;
   const own = Object.hasOwn;
   const finite = Number.isFinite,
     trunc = Math.trunc;
@@ -67,7 +66,7 @@
   register(["HKDF"], { importKey: "", deriveBits: "hash:hash salt:buffer info:buffer" });
   register(["PBKDF2"], { importKey: "", deriveBits: "hash:hash salt:buffer iterations:u32" });
   register(["SHA-1", "SHA-256", "SHA-384", "SHA-512"], { digest: "" });
-  register(["ML-KEM-768", "ML-KEM-1024"], {
+  register(["ML-KEM-768", "ML-KEM-1024", "MLKEM768-X25519"], {
     generateKey: "",
     importKey: "",
     encapsulate: "",
@@ -279,7 +278,12 @@
     for (let orderIndex = 0; orderIndex < order.length; orderIndex++)
       for (let index = 0; index < values.length; index++)
         if (values[index] === order[orderIndex]) {
-          apply(push, result, [order[orderIndex]]);
+          define(result, StringValue(result.length), {
+            value: order[orderIndex],
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
           break;
         }
     return result;

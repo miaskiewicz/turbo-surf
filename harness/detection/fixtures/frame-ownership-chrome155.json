@@ -1,0 +1,64 @@
+{
+  "browserVersion": "Chrome/155.0.8059.79",
+  "browserV8Version": "15.5.35.23",
+  "collectedAt": "2026-10-14T00:27:31.751Z",
+  "effectiveExtensionFlags": ["--disable-extensions"],
+  "collectors": {
+    "frame-ownership-probe.js": "0466e15cd1295ec43e009176655341540c883c8f9cc05760309f4033c4a9257c",
+    "frame-adoption-probe.js": "2e02276821496e22548d5940b1a9d002e8401fcf9ab6ddef62a568d7d885c8ee",
+    "frame-native-base-probe.js": "1fecd0dc0dc6ed8ec0a97eafbb1f6677ee8ec7df2e03bd75628e9c084fd89d77"
+  },
+  "ownership": {
+    "weakMap": {
+      "hooks": 0,
+      "distinct": true
+    },
+    "hostSet": {
+      "hooks": 0,
+      "distinct": true
+    },
+    "recordSetters": {
+      "hooks": 0,
+      "distinct": true
+    },
+    "interfaceDescriptors": {
+      "hooks": 0,
+      "error": ""
+    },
+    "metadataJSON": {
+      "hooks": 0,
+      "distinct": true
+    },
+    "functionCall": {
+      "hooks": 0,
+      "distinct": true
+    },
+    "namespace": {
+      "hooks": 0,
+      "exposed": [],
+      "distinct": true
+    },
+    "shadowedNode": {
+      "hooks": 0,
+      "distinct": true
+    },
+    "nativeSources": {
+      "hooks": 0,
+      "distinct": true
+    }
+  },
+  "adoption": {
+    "hooks": 0,
+    "owner": true,
+    "distinct": true,
+    "borrowed": true,
+    "retired": true,
+    "frameElement": true
+  },
+  "baseResolution": {
+    "hooksBefore": 0,
+    "resolved": true,
+    "hooks": 0
+  },
+  "captureErrors": []
+}

@@ -210,6 +210,8 @@ try {
             languages: navigator.languages,
             language: navigator.language,
             locale: Intl.DateTimeFormat().resolvedOptions().locale,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            timeZoneOffset: new Date().getTimezoneOffset(),
             viewport: { width: innerWidth, height: innerHeight },
             outerWindow: { width: outerWidth, height: outerHeight },
             deviceScaleFactor: devicePixelRatio,

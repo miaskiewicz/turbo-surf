@@ -7,7 +7,7 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
-workspace now resolves the published `turbo-dom` 0.5.2 crate, including PR #8's
+workspace now resolves the published `turbo-dom` 0.5.3 crate, including PR #8's
 additive fragment/document APIs and compact ordinary-node/attribute storage.
 The release tag is on merge commit `87c2077`; registry artifacts were verified.
 

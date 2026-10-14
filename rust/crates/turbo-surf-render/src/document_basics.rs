@@ -233,11 +233,15 @@ pub fn adopt<'s>(
         if with_tree(|tree| tree.is_shadow_root(source_handle)).unwrap_or(false) {
             return Err("A shadow root cannot be adopted");
         }
+        html_popover::attribute_node_change(scope, source_handle, None);
         with_tree_mut(|tree| capture(tree, source_handle)).ok_or("Node tree unavailable")??
     };
     if source_id == target_id {
         let _source = DomScope::for_object(scope, node);
+        html_popover::attribute_node_change(scope, source_handle, None);
+        html_popover::disconnect(scope, source_handle, true);
         element_relations::attribute_node_changed(scope, source_handle);
+        range_live::removing(scope, source_handle);
         with_tree_mut(|tree| {
             if let Some(owner) = tree.attribute_owner(source_handle) {
                 let _ = tree.remove_attribute_node(owner, source_handle);
@@ -254,9 +258,12 @@ pub fn adopt<'s>(
             .ok_or("Document tree unavailable")?;
         mapping
     };
-    let (cache, styles, listeners, nonces, modes) = {
+    let (cache, styles, listeners, nonces, modes, handlers) = {
         let _source = DomScope::for_object(scope, node);
+        html_popover::attribute_node_change(scope, source_handle, None);
+        html_popover::disconnect(scope, source_handle, true);
         element_relations::attribute_node_changed(scope, source_handle);
+        range_live::removing(scope, source_handle);
         with_tree_mut(|tree| {
             if let Some(owner) = tree.attribute_owner(source_handle) {
                 let _ = tree.remove_attribute_node(owner, source_handle);
@@ -310,9 +317,11 @@ pub fn adopt<'s>(
                 *active = None;
             }
         });
-        (cache, styles, listeners, nonces, modes)
+        let handlers = event_handlers::take_adopted_sources(&mapping);
+        (cache, styles, listeners, nonces, modes, handlers)
     };
     let _target = DomScope::for_object(scope, document);
+    event_handlers::restore_adopted_sources(handlers);
     for (handle, object) in cache {
         let local = v8::Local::new(scope, &object);
         let handle_value = v8::Integer::new_from_unsigned(scope, handle.raw());
@@ -339,13 +348,13 @@ pub fn adopt<'s>(
 }
 
 // Preserve native node identity and embedder state: no JS remove/insert hooks run.
-// Live Range/iterator adjustment and custom-element reactions remain host work.
+// Range adjustment follows pre-remove semantics without running JS node hooks.
 fn move_node(
-    tree: &mut Tree,
+    tree: &Tree,
     parent: Handle,
     node: Handle,
     child: Option<Handle>,
-) -> Result<(), &'static str> {
+) -> Result<Option<Handle>, &'static str> {
     fn root(tree: &Tree, mut node: Handle) -> Handle {
         while let Some(parent) = tree.parent(node).or_else(|| tree.shadow_host(node)) {
             node = parent;
@@ -382,7 +391,9 @@ fn move_node(
             let children = tree.children(parent);
             let reference =
                 child.and_then(|child| children.iter().position(|value| *value == child));
-            if children.iter().any(|child| tree.node_type_id(*child) == 1)
+            if children
+                .iter()
+                .any(|child| *child != node && tree.node_type_id(*child) == 1)
                 || reference.is_some_and(|reference| {
                     children[reference..]
                         .iter()
@@ -393,8 +404,7 @@ fn move_node(
             }
         }
     }
-    tree.insert_before(parent, node, child);
-    Ok(())
+    Ok(child)
 }
 
 pub fn dispatch<'s>(
@@ -412,6 +422,17 @@ pub fn dispatch<'s>(
     };
     let kind = with_tree(|tree| tree.node_type_id(handle)).unwrap_or(0);
     match operation.as_str() {
+        "normalize" => range_live::normalize(scope, handle),
+        "replaceCharacterData" if matches!(kind, 3 | 4 | 7 | 8) => {
+            let Some(offset) = args.get(2).uint32_value(scope) else {
+                return;
+            };
+            let Some(count) = args.get(3).uint32_value(scope) else {
+                return;
+            };
+            let data = args.get(4).to_rust_string_lossy(scope);
+            replace_character_data(scope, handle, offset as usize, count as usize, &data);
+        }
         "stamp" => {
             let stamp =
                 with_tree(|tree| format!("{}:{}", DOM_ID.with(|id| id.get()), tree.version))
@@ -459,8 +480,28 @@ pub fn dispatch<'s>(
                 Some(child_handle)
             };
             if error.is_none() {
-                error = with_tree_mut(|tree| move_node(tree, handle, moved_handle, reference))
-                    .and_then(Result::err);
+                match with_tree(|tree| move_node(tree, handle, moved_handle, reference)) {
+                    Some(Ok(reference)) => {
+                        range_live::removing(scope, moved_handle);
+                        let index = with_tree(|tree| {
+                            let children: Vec<_> = tree
+                                .children(handle)
+                                .into_iter()
+                                .filter(|&child| child != moved_handle)
+                                .collect();
+                            reference
+                                .and_then(|reference| {
+                                    children.iter().position(|&node| node == reference)
+                                })
+                                .unwrap_or(children.len())
+                        })
+                        .unwrap_or(0);
+                        range_live::inserting(scope, handle, index, 1);
+                        with_tree_mut(|tree| tree.insert_before(handle, moved_handle, reference));
+                    }
+                    Some(Err(name)) => error = Some(name),
+                    None => return,
+                }
             }
             if let Some(error) = error {
                 rv.set(v8::String::new(scope, error).unwrap().into());
@@ -561,6 +602,10 @@ mod tests {
             scope,
             "<!DOCTYPE html><html><head></head><body></body></html>",
         );
+        let inert = parse_html_document(scope, "<!doctype html><body>", false);
+        let global = scope.get_current_context().global(scope);
+        let key = v8::String::new(scope, "inertDocument").unwrap();
+        global.set(scope, key.into(), inert.into());
         let scope = std::pin::pin!(v8::TryCatch::new(scope));
         let scope = &mut scope.init();
         let source = v8::String::new(scope, source).unwrap();
@@ -573,6 +618,69 @@ mod tests {
         }
         assert!(result.unwrap().is_true());
         reset();
+    }
+
+    #[test]
+    fn inert_document_factories_preserve_receiver_ownership_and_control_state() {
+        check_script(
+            r#"(()=>{
+          for(const tag of ['div','input','textarea','select','script','link','canvas','iframe']){
+            const node=inertDocument.createElement(tag);node.id='inert-'+tag;
+            if(node.ownerDocument!==inertDocument)throw new Error('wrong factory owner '+tag);
+            inertDocument.body.append(node);
+            if(inertDocument.getElementById(node.id)!==node||document.getElementById(node.id)!==null)throw new Error('factory trees alias');
+          }
+          const input=inertDocument.getElementById('inert-input');input.value='live';input.setAttribute('value','default');
+          if(input.value!=='live'||input.defaultValue!=='default')throw new Error('control wrapper lost');
+          let calls=0;const coerced=inertDocument.createElement({toString(){calls++;return 'span';}});
+          if(calls!==1||coerced.ownerDocument!==inertDocument||coerced.localName!=='span')throw new Error('tag conversion repeated');
+          const borrowed=Document.prototype.createElement.call(inertDocument,'em');
+          if(borrowed.ownerDocument!==inertDocument||borrowed.parentNode!==null)throw new Error('borrowed factory owner');
+          let converted=false,error;try{Document.prototype.createElement.call({}, {toString(){converted=true;return 'div';}})}catch(caught){error=caught.name}
+          if(error!=='TypeError'||converted)throw new Error('brand validation after coercion');
+          for(const [run,wanted] of [[()=>inertDocument.createElement(),'TypeError'],[()=>inertDocument.createElement(Symbol('tag')),'TypeError'],[()=>inertDocument.createElement('bad tag'),'InvalidCharacterError']]){let error;try{run()}catch(caught){error=caught.name}if(error!==wanted)throw new Error('factory validation '+error);}
+          const nodes=[inertDocument.createTextNode('text'),inertDocument.createComment('comment'),inertDocument.createDocumentFragment(),inertDocument.createElementNS('urn:custom','x:node'),inertDocument.createAttribute('data-test'),inertDocument.createAttributeNS('urn:custom','x:value')];
+          if(nodes.some(node=>node.ownerDocument!==inertDocument))throw new Error('other factory ownership');
+          return true;
+        })()"#,
+        );
+    }
+
+    #[test]
+    fn namespace_resolvers_keep_native_node_identity_and_resolution() {
+        check_script(
+            r#"(()=>{
+          const root=inertDocument.documentElement,child=inertDocument.createElementNS('urn:custom','x:node');root.append(child);
+          child.setAttributeNS('http://www.w3.org/2000/xmlns/','xmlns:y','urn:declared');
+          for(const node of [root,child,inertDocument,child.firstChild||inertDocument.createTextNode('text')])if(document.createNSResolver(node)!==node)throw new Error('resolver identity');
+          const resolver=inertDocument.createNSResolver(child);
+          if(resolver.lookupNamespaceURI('x')!=='urn:custom'||resolver.lookupNamespaceURI('y')!=='urn:declared'||document.createNSResolver(root).lookupNamespaceURI(null)!=='http://www.w3.org/1999/xhtml')throw new Error('namespace resolution');
+          let converted=false;for(const action of [()=>document.createNSResolver(),()=>document.createNSResolver(null),()=>document.createNSResolver({toString(){converted=true;return 'node'}}),()=>Document.prototype.createNSResolver.call({},child)]){let error;try{action()}catch(caught){error=caught.name}if(error!=='TypeError'||converted)throw new Error('resolver brand');}
+          return true;
+        })()"#,
+        );
+    }
+
+    #[test]
+    fn integrity_reflection_is_branded_and_updates_the_loader_attribute() {
+        check_script(
+            r#"(()=>{
+          for(const [tag,ctor] of [['script',HTMLScriptElement],['link',HTMLLinkElement]]){
+            const node=inertDocument.createElement(tag),property=Object.getOwnPropertyDescriptor(ctor.prototype,'integrity');
+            if(node.integrity!=='')throw new Error('initial integrity');
+            node.integrity='sha384-example';if(node.getAttribute('integrity')!=='sha384-example')throw new Error('loader attribute missing');
+            node.setAttribute('integrity','sha256-updated');if(node.integrity!=='sha256-updated')throw new Error('attribute reflection');
+            node.integrity=null;if(node.integrity!=='null')throw new Error('DOMString null conversion');
+            let calls=0;node.integrity={toString(){calls++;return 'sha512-once';}};if(calls!==1||node.getAttribute('integrity')!=='sha512-once')throw new Error('conversion repeated');
+            let converted=false;for(const wrong of [{},document.createElement('div'),document.createElementNS('urn:custom',tag)]){
+              let error;try{property.set.call(wrong,{toString(){converted=true;return 'bad';}})}catch(caught){error=caught.name}if(error!=='TypeError'||converted)throw new Error('wrong receiver accepted');
+            }
+            let error;try{node.integrity=Symbol('bad')}catch(caught){error=caught.name}if(error!=='TypeError'||node.integrity!=='sha512-once')throw new Error('symbol conversion mutated attribute');
+            node.removeAttribute('integrity');if(property.get.call(node)!=='')throw new Error('removed integrity');
+          }
+          return true;
+        })()"#,
+        );
     }
 
     #[test]
@@ -603,6 +711,28 @@ mod tests {
           if(JSON.stringify(errors)!==JSON.stringify(['HierarchyRequestError','HierarchyRequestError','NotFoundError','HierarchyRequestError','HierarchyRequestError','HierarchyRequestError','TypeError','TypeError','TypeError']))throw new Error(JSON.stringify(errors));
           if(c.parentNode!==a||a.parentNode!==document.body||b.childNodes.length!==0)throw new Error('invalid move mutated tree');
           const host=document.createElement('div');document.body.append(host);const shadow=host.attachShadow({mode:'open'});try{shadow.moveBefore(host,null);throw new Error('missing')}catch(error){if(error.name!=='HierarchyRequestError')throw error;}
+          return true;
+        })()"#,
+        );
+    }
+
+    #[test]
+    fn obsolete_document_methods_preserve_contents_and_ignore_arguments_with_real_receiver_checks()
+    {
+        check_script(
+            r#"(()=>{
+          inertDocument.body.innerHTML='<p>retained</p>';
+          const before=inertDocument.body.innerHTML;
+          for(const name of ['clear','captureEvents','releaseEvents']){
+            const descriptor=Object.getOwnPropertyDescriptor(Document.prototype,name),fn=descriptor.value;
+            if(fn.name!==name||fn.length!==0||!descriptor.enumerable||!descriptor.configurable||!descriptor.writable||Object.hasOwn(fn,'prototype')||!Function.prototype.toString.call(fn).includes('[native code]'))throw new Error('descriptor '+name);
+            let hooks=0;const ignored={toString(){hooks++;throw new Error('ignored argument')}};
+            if(fn.call(inertDocument,ignored)!==undefined||hooks||inertDocument.body.innerHTML!==before)throw new Error('legacy effects '+name);
+            for(const receiver of [{},null,Object.create(Document.prototype)]){
+              let denied=false;try{fn.call(receiver)}catch(error){denied=error instanceof TypeError}
+              if(!denied)throw new Error('receiver '+name);
+            }
+          }
           return true;
         })()"#,
         );

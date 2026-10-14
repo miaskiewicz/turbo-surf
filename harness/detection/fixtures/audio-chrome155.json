@@ -1,0 +1,195 @@
+{
+  "chromeVersion": "155.0.8059.40",
+  "v8Version": "15.5.35.20",
+  "architecture": "aarch64",
+  "platform": "macOS",
+  "source": "Authored audio-probe.js and audio-ownership-probe.js, independent installed Chrome CDP, fresh isolated profiles",
+  "graphs": {
+    "triangle": {
+      "samples": 44100,
+      "sampleRate": 44100,
+      "channels": 1,
+      "energy": 22761.148351264186,
+      "hash": "9f58dfe3",
+      "stateBefore": "suspended",
+      "stateAfter": "closed",
+      "currentTime": 1.0013605442176872,
+      "promiseBrand": "[object Promise]",
+      "stableChannelView": true,
+      "sourceContext": true,
+      "brands": [
+        "[object OfflineAudioContext]",
+        "[object OscillatorNode]",
+        "[object AudioBuffer]",
+        "[object Float32Array]"
+      ],
+      "pcmSha256": "84b108b728156da1fd14178b77e228c21a3adfa31677abd78497d533a1bac987"
+    },
+    "compressor": {
+      "samples": 44100,
+      "sampleRate": 44100,
+      "channels": 1,
+      "energy": 10873.171624860493,
+      "hash": "a8d73295",
+      "stateBefore": "suspended",
+      "stateAfter": "closed",
+      "currentTime": 1.0013605442176872,
+      "promiseBrand": "[object Promise]",
+      "stableChannelView": true,
+      "sourceContext": true,
+      "brands": [
+        "[object OfflineAudioContext]",
+        "[object AudioBufferSourceNode]",
+        "[object AudioBuffer]",
+        "[object Float32Array]"
+      ],
+      "pcmSha256": "c0cb1587a9da6e3a315a09b3951a33234d244c00d111ca3c6145f60278ae57ee"
+    },
+    "fingerprint": {
+      "samples": 44100,
+      "sampleRate": 44100,
+      "channels": 1,
+      "energy": 10748.964849303837,
+      "hash": "63b6b305",
+      "stateBefore": "suspended",
+      "stateAfter": "closed",
+      "currentTime": 1.0013605442176872,
+      "promiseBrand": "[object Promise]",
+      "stableChannelView": true,
+      "sourceContext": true,
+      "brands": [
+        "[object OfflineAudioContext]",
+        "[object OscillatorNode]",
+        "[object AudioBuffer]",
+        "[object Float32Array]"
+      ],
+      "pcmSha256": "3ef8a960b6869b916572bcfb85569a918a2498f3296a3e935647e4b6f00da0b9"
+    },
+    "sine": {
+      "samples": 44100,
+      "sampleRate": 44100,
+      "channels": 1,
+      "energy": 28074.920971656567,
+      "hash": "fdca1b60",
+      "stateBefore": "suspended",
+      "stateAfter": "closed",
+      "currentTime": 1.0013605442176872,
+      "promiseBrand": "[object Promise]",
+      "stableChannelView": true,
+      "sourceContext": true,
+      "brands": [
+        "[object OfflineAudioContext]",
+        "[object OscillatorNode]",
+        "[object AudioBuffer]",
+        "[object Float32Array]"
+      ],
+      "pcmSha256": "ccb9d61b47ba88903d682b1bb635729ec5b2d29b1e4a17a183b73519d5fffbe5"
+    },
+    "squareGain": {
+      "samples": 44100,
+      "sampleRate": 44100,
+      "channels": 1,
+      "energy": 9303.133724027313,
+      "hash": "2b8170b3",
+      "stateBefore": "suspended",
+      "stateAfter": "closed",
+      "currentTime": 1.0013605442176872,
+      "promiseBrand": "[object Promise]",
+      "stableChannelView": true,
+      "sourceContext": true,
+      "brands": [
+        "[object OfflineAudioContext]",
+        "[object OscillatorNode]",
+        "[object AudioBuffer]",
+        "[object Float32Array]"
+      ],
+      "pcmSha256": "8ad515884b880db0350f33d8497f75c9d350075fe72185c2214188e04e81dbb9"
+    },
+    "alternateCompression": {
+      "samples": 44100,
+      "sampleRate": 44100,
+      "channels": 1,
+      "energy": 18748.730267405343,
+      "hash": "17d003f4",
+      "stateBefore": "suspended",
+      "stateAfter": "closed",
+      "currentTime": 1.0013605442176872,
+      "promiseBrand": "[object Promise]",
+      "stableChannelView": true,
+      "sourceContext": true,
+      "brands": [
+        "[object OfflineAudioContext]",
+        "[object OscillatorNode]",
+        "[object AudioBuffer]",
+        "[object Float32Array]"
+      ],
+      "pcmSha256": "777c8f5afba5ac1d3376216789971820929de7c2ddb4e1fb0476f597e7348e29"
+    }
+  },
+  "contracts": {
+    "withoutNew": {
+      "error": {
+        "name": "TypeError",
+        "message": "Failed to construct 'OfflineAudioContext': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+      }
+    },
+    "zeroChannels": {
+      "error": {
+        "name": "NotSupportedError",
+        "message": "Failed to construct 'OfflineAudioContext': The number of channels provided (0) is outside the range [1, 32]."
+      }
+    },
+    "zeroLength": {
+      "error": {
+        "name": "NotSupportedError",
+        "message": "Failed to construct 'OfflineAudioContext': The number of frames provided (0) is less than the minimum bound (1)."
+      }
+    },
+    "lowSampleRate": {
+      "error": {
+        "name": "NotSupportedError",
+        "message": "Failed to construct 'OfflineAudioContext': The sampleRate provided (1000) is outside the range [3000, 768000]."
+      }
+    },
+    "foreignBufferReceiver": {
+      "error": {
+        "name": "TypeError",
+        "message": "Illegal invocation"
+      }
+    },
+    "repeatedStart": {
+      "error": {
+        "name": "InvalidStateError",
+        "message": "Failed to execute 'startRendering' on 'OfflineAudioContext': cannot call startRendering on an OfflineAudioContext in a stopped state."
+      }
+    },
+    "crossContextConnection": {
+      "error": {
+        "name": "InvalidAccessError",
+        "message": "Failed to execute 'connect' on 'AudioNode': cannot connect to an AudioNode belonging to a different audio context."
+      }
+    }
+  },
+  "ownership": {
+    "shadowResult": 0.5,
+    "iteratorResult": 0.25,
+    "transferError": null,
+    "channelAfterTransferLength": 0,
+    "originalAfterTransferLength": 0,
+    "transferredResult": null,
+    "transferredPCM": 0,
+    "copyPast": null,
+    "events": [
+      ["state", true, "running"],
+      ["ended", true, "running"],
+      ["complete", true, "closed", "[object OfflineAudioCompletionEvent]"],
+      ["state", true, "closed"]
+    ],
+    "params": {
+      "compressor": "k-rate",
+      "buffer": "k-rate",
+      "osc": "a-rate"
+    },
+    "webkitOffline": "undefined"
+  }
+}

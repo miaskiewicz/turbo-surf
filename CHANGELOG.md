@@ -2,6 +2,34 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Window events use native capture/target/bubble paths, private listener records,
+  once/passive/signal options and real handler ordering/onerror arguments. Final
+  realm constructors are captured privately after bootstrap. Obsolete public
+  abort stubs and duplicate Window lifecycle/message callbacks are removed.
+  Generic EventTarget and AbortSignal listener/handler state is also private,
+  with genuine brands and Chrome155 direct-target registration ordering.
+- Document `clear`, `captureEvents` and `releaseEvents` implement the HTML
+  standard's legacy no-effects behavior, with real Document receiver validation,
+  native method descriptors and saved Chrome155 controls.
+- Native structured cloning preserves genuine DOMException and non-extractable
+  CryptoKey identities/permissions across cloned graphs and receiving realms.
+  ArrayBuffer and resizable-buffer ownership transfers detach source views only
+  after validated serialization; User Timing uses the same private clone path.
+  Browser-owned URL/list/Event/EventTarget/Abort/XPath objects reject cloning with their genuine
+  brands, and WebIDL options/iterator conversion follows saved Chrome controls.
+- Blob-backed repeated and detached anchor downloads read actual private bytes
+  instead of an obsolete public field. Regression tests preserve cancellation,
+  recursion guards and untrusted programmatic PointerEvents.
+- Classic script execution errors retain the original exception and realm, report
+  trusted Window errors with V8 locations, and preserve the fetched script's
+  successful `load` event. Inline execution errors do not fabricate element
+  resource failures. Paired authored Chrome controls and main/iframe regressions
+  cover runtime and syntax errors. Cross-origin no-CORS reports use the real
+  response taint to hide exception details; CORS responses keep normal reporting.
+- Distribution includes third-party notices for native audio, XPath and crypto
+  in npm, standalone artifacts, the render crate and Python package, with a
+  synchronized notice check in the release and test gates.
+
 - Fresh-cookie Chrome/native harness with baseline and instrumented controls, JS-interface
   argument/result samples and stacks, request payloads, response bodies, optional native/Chrome
   debugger script inventory, process failure artifacts, comparison output and build hashes.
@@ -74,7 +102,8 @@
   main/child sources; coverage limits and incomplete captures are retained in comparisons.
 - Fixed BroadcastChannel native-target dispatch, observer constructor/static projection and
   writable stylesheet adoption. Structured cloning now uses V8 rather than a JavaScript
-  approximation; transfer lists remain explicitly unsupported.
+  approximation. ArrayBuffer and native Window/MessagePort transfer lists are implemented.
+  Endpoint garbage-collection liveness and full retirement coverage remain under validation.
 - **Chrome 155 profile (2026-10-13):** genuine V8 15.5.35.20-rusty builds from the
   pinned official engine revision; the historical 154 helper remains reproducible.
   Target 155 client hints use Chromium's major-seeded GREASE brands, navigation Accept
@@ -91,11 +120,81 @@
   and algorithm normalization follow measured Chrome 155 support, including rejecting
   ML-KEM-512. Private key metadata and realm-specific Promise/error/result projection
   preserve permissions and iframe isolation; host bootstrap objects stay hidden.
+- Native `MLKEM768-X25519` uses the real X-Wing SHAKE256/ML-KEM/X25519/SHA3
+  composition, managed private keys, raw-seed/raw-public/JWK formats and actual key
+  wrapping. Chrome known-seed and ciphertext interoperability controls pass; the
+  bounded 155 WebCrypto collector has zero differences across 285 operation/name
+  queries, 14 parameter controls and three real KEM roundtrips. Private key cloning preserves real native material and permissions without
+  page hooks. A reproduced inherited-setter material leak in the upstream
+  provider is fixed by a licensed, reproducible native data-property patch;
+  borrowed-realm and genuine Event rejection controls pass the native clone contracts.
+- Environment setup receives the host op table as a private native argument, replacing
+  temporary public Deno/core globals even during interrupted iframe initialization.
+  The new interruption regression passes on both default and genuine 155 V8.
+- Native popover show/hide/toggle state and trusted/coalesced task events are vendored
+  from canonical turbo-test; cancellation, removal/moves, source conversion, namespaces
+  and all nine mode ancestry combinations pass the saved Chrome 155 control. Child
+  scheduler isolation is privately scoped and regression-tested; focus/light-dismiss
+  and top-layer rendering remain separate open behavior.
 - The DOM dependency now resolves published turbo-dom 0.5.2 without a workspace Git
   patch; unpublished transport APIs still block clean crates.io consumers.
 - Consent dismissal is saved in the shared harness and both collectors. Partial native
   captures checkpoint input/navigation state; isolated API probes share a localhost
   fixture rather than comparing secure native pages with insecure Chrome about:blank.
+- Native response-byte SRI SHA256/384/512 validation now enforces strongest-hash
+  selection and CORS/opaque eligibility before fetch/script/module/frame/style
+  consumption. CORP origin/site/header rules and active HTTPS mixed-content
+  blocking have localhost regressions. Passive image upgrades, complete embedder
+  policies and signature/Integrity-Policy enforcement remain separate gaps.
+- Native message delivery reserves queue capacity before invoking payload getters and
+  commits transfers only after serialization and byte-budget admission. Getter failures,
+  nested reservations and late entanglement changes preserve atomic ownership or discard
+  delivery as measured by the saved Chrome control. The integrated follow-up has 24 transfer contracts, including private weak endpoint
+  graphs, pending-task retention and queue-cycle reclamation. Queued keys hold
+  Rust-only native material/metadata/permissions instead of sender JavaScript
+  objects; independent Chrome lifetime controls and post-collection cryptographic
+  operations pass. Full retired-frame reclamation remains separate work.
+- Live Range boundaries now follow native insertion/removal, character-data replacement,
+  splitText, normalization, supported moves and adoption across independent document
+  realms. Records do not retain collected ranges. Chrome 155 controls cover eleven
+  behavior groups; parser/text replacement seams, geometry and unpaired UTF-16 remain open.
+- Canonical live CSSOM reads native stylesheet text without calling page-owned text
+  getters. Retained stylesheet identity, disabled/media state, grouped mutations and
+  typed font-face descriptors have saved Chrome 155 controls. Private stylesheet export
+  supports the upcoming real-layout bridge; broader CSS/layout behavior remains open.
+- Advanced offline audio uses native DSP and real PCM output with checked source pins
+  and licenses. The saved ARM control covers 32 PCM/filter graphs. Realtime playback,
+  feedback, parameter-input signals, wider channel layouts, custom waves and oversampling
+  remain explicit unsupported paths, deferred to [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+- Private binding handles now clear before isolate disposal on success, failure,
+  explicit close and thread exit. Regression controls cover live Range records in
+  parent/iframe contexts, cached document replacement and both TLS initialization
+  orders; the latest combined gates remain pending.
+- Consume the verified published turbo-dom 0.5.3 dependency across Rust consumers;
+  its mutation-time ancestry, namespace and sibling metadata supports the remaining
+  native observer integration.
+- Prevent first-time native node wrapping from consulting page-replaced Function,
+  WeakSet, Object, Array and String methods; the canonical binding cohort passes
+  114 focused tests on turbo-dom 0.5.3.
+- Canonical DOM/CSS/Range sources are re-vendored from turbo-test d3f44f0. The
+  preceding full checkpoint passes 133 Rust and 63 npm tests; the adoption follow-up
+  passes two new controls and eight related regressions. Cross-document insertion preserves original wrapper
+  realms and identity; Chrome-compatible variadic conversion drains fragments,
+  retains the last duplicate and detaches inputs before insertion failures.
+  Repeated document bootstrap retains traversal/equality interface members.
+- Frame retirement clears native context-registry and pending target-message roots
+  plus timer payloads, preserving retained old Document behavior. Removed Window
+  sends still commit valid transfers before discarding delivery. Insertion wrappers
+  inspect native state after failure so genuinely detached frames retire while
+  unchanged single-node/WebIDL failures preserve their browsing contexts.
+- Implement stable ObservableArray stylesheet adoption for genuine Documents and
+  ShadowRoots, with native constructor-document ownership, conversion/error effects,
+  indexed/deletion/descriptor behavior and private backing for renderer exports.
+  Independent Chrome controls preserve behavior despite poisoned public getters.
+- Add a reusable authored Chrome observer-record control with exact source pins;
+  turbo-dom [PR #9](https://github.com/miaskiewicz/turbo-dom/pull/9) provides the
+  additive native mutation-time ancestry/sibling/namespace seam. Its native records
+  match the saved control; browser observer registrations/queues remain in progress.
 - Complete Chrome API/security/layout parity is not claimed. Final release gates and
   fresh Google evidence are recorded in FINDINGS.
 

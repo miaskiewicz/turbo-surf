@@ -101,8 +101,16 @@ historical missing-own-member count is **94**, not a current measurement. The pr
 848-test workspace gate is historical and does not certify these changes.
 
 The experimental native155 engine is 15.5.35.20-rusty; the current installed Chrome
-oracle is 155.0.8059.79 / V8 15.5.35.23. Native155 ownership changes are not yet
-validated. The Chrome 155 target transport uses a pinned official Chrome 154 base
+oracle is 155.0.8059.79 / V8 15.5.35.23. The merged native155 ownership/session/storage cohort now passes 39 focused
+contracts, with strict affected owned-code Clippy. Native WindowProxy/Location
+lookups are weak and their private capabilities belong to the genuine lexical
+JSGlobalObject, independent of proxy navigation. Per-caller weak caches preserve
+cross-origin method identity and retained targets while allowing removed callers
+and targets to collect. The Document getter routes by its genuine Window receiver
+and closed state reflects retirement. A real heap root from Deno's strong module
+context registry was removed; weak contexts preserve module-map lifetime while
+retained. Reproducible SDK152 preparation/teardown patches reverse-verify exactly
+against the pinned native artifact. Full native155 gates remain pending. The Chrome 155 target transport uses a pinned official Chrome 154 base
 recipe with separately measured 155 headers/client hints; that distinction remains
 in trace provenance. Audio is deferred in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27)
 as requested. No captured evidence establishes it as Google's rejection cause.

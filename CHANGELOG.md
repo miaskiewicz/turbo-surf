@@ -2,6 +2,18 @@
 
 ## [0.5.4] — unreleased — browser parity and reusable detection differential
 
+- Native155 WindowProxy/Location/context slots use weak lookups and actual lexical
+  private ownership. Per-caller weak method caches preserve function identity and
+  intended retained targets without permanently rooting removed callers/frames.
+  Native Document getters use the authentic Window receiver and current document;
+  closed state reflects retirement. Four direct ownership/security controls pass.
+- Remove a heap-traced permanent retired-frame root in the experimental Deno
+  module-context registry, while keeping module maps alive for genuinely retained
+  contexts. The reproducible SDK152 teardown patch preserves weak-handle liveness
+  through slot cleanup. The merged genuine155 cohort passes 39 focused contracts,
+  including session/storage integration; strict affected owned code passes Clippy.
+  Full gates and exact V8 patch-version parity with installed Chrome remain open.
+
 - Consume verified published turbo-dom 0.5.4 and re-vendor canonical native
   per-isolate DOM state, bounded storage collection and genuine host-job node pins.
   Dropping/resetting a session preserves its peers. Actual V8 GC notifications

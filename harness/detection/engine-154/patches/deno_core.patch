@@ -303,10 +303,10 @@
  pub type CompiledWasmModuleStore = CrossIsolateStore<v8::CompiledWasmModule>;
 +
 +// An embedder-created context shares the runtime's op driver but owns a module
-+// graph/cache. Keep its map alive until isolate teardown, including retirement,
-+// so V8 callbacks never observe a dangling embedder-data pointer.
++// graph/cache. Keep its map alive while the weak context remains live, including
++// retirement, so V8 callbacks never observe a dangling embedder-data pointer.
 +struct ModuleContext {
-+  context: v8::Global<v8::Context>,
++  context: v8::Weak<v8::Context>,
 +  modules: Rc<ModuleMap>,
 +  active: Cell<bool>,
 +}
@@ -378,7 +378,7 @@
      setup::init_v8(v8_platform, cfg!(test), expose_natives);
    }
  
-@@ -782,6 +784,63 @@
+@@ -782,6 +784,67 @@
      EventLoopPendingState::new_from_scope(scope).is_pending()
    }
  
@@ -398,7 +398,9 @@
 +    let contexts = state.module_contexts.borrow().clone();
 +    if contexts
 +      .iter()
-+      .any(|entry| v8::Local::new(scope, &entry.context) == context)
++      .any(|entry| {
++        entry.context.to_local(scope).is_some_and(|owner| owner == context)
++      })
 +    {
 +      return true;
 +    }
@@ -409,7 +411,7 @@
 +      context_state.exception_state.clone(),
 +      false,
 +    ));
-+    // SAFETY: this allocation is retained by module_contexts until runtime cleanup.
++    // SAFETY: module_contexts retains this allocation while its context is live.
 +    unsafe {
 +      context.set_aligned_pointer_in_embedder_data(
 +        super::jsrealm::MODULE_MAP_SLOT_INDEX,
@@ -420,7 +422,7 @@
 +      .module_contexts
 +      .borrow_mut()
 +      .push(Rc::new(ModuleContext {
-+        context: v8::Global::new(scope, context),
++        context: v8::Weak::new(scope, context),
 +        modules,
 +        active: Cell::new(true),
 +      }));
@@ -432,7 +434,9 @@
 +  pub fn detach_module_context(scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
 +    let state = Self::state_from(scope);
 +    for entry in state.module_contexts.borrow().iter() {
-+      if v8::Local::new(scope, &entry.context) == context && entry.active.replace(false) {
++      if entry.context.to_local(scope).is_some_and(|owner| owner == context)
++        && entry.active.replace(false)
++      {
 +        entry.modules.destroy();
 +        break;
 +      }
@@ -442,7 +446,7 @@
    /// Returns the `OpMetadata` associated with the op `name`.
    /// Note this is linear with respect to the number of ops registered.
    pub fn op_metadata(&self, name: &str) -> Option<OpMetadata> {
-@@ -795,10 +854,7 @@
+@@ -795,10 +858,7 @@
      })
    }
  
@@ -454,7 +458,7 @@
      let _phase_total = startup_phase_begin();
      let init_mode = InitMode::from_options(&options);
      let mut extensions = std::mem::take(&mut options.extensions);
-@@ -809,16 +865,14 @@
+@@ -809,16 +869,14 @@
      // sources. At runtime they stay as static registrations.
      let externalize_lazy_js = will_snapshot;
  
@@ -473,7 +477,7 @@
      startup_phase_end(_phase, "setup_op_state");
  
      // Load the sources and source maps
-@@ -843,9 +897,7 @@
+@@ -843,9 +901,7 @@
        &extensions,
        sidecar_data.as_ref().map(|s| &*s.snapshot_data.extensions),
        externalize_lazy_js,
@@ -484,7 +488,7 @@
      )?;
      startup_phase_end(_phase, "into_sources_and_source_maps");
  
-@@ -866,29 +918,24 @@
+@@ -866,29 +922,24 @@
      // later, after `JsRuntime` is all set up...
      let waker = op_state.waker.clone();
      let op_state = Rc::new(RefCell::new(op_state));
@@ -522,7 +526,7 @@
        waker: waker.clone(),
        foreground_tasks: Default::default(),
        // Some fields are initialized later after isolate is created
-@@ -920,11 +967,8 @@
+@@ -920,11 +971,8 @@
      );
  
      // ...ops are now almost fully set up; let's create a V8 isolate...
@@ -536,7 +540,7 @@
  
      // Capture the extension, op and source counts. `source_count` MUST mirror
      // the number of `v8::OneByteConst` external strings produced by
-@@ -962,11 +1006,7 @@
+@@ -962,11 +1010,7 @@
        isolate_allocations.externalized_sources,
        isolate_allocations.original_sources,
        isolate_allocations.lazy_source_specifiers,
@@ -549,7 +553,7 @@
  
      let external_references = bindings::create_external_references(
        &op_ctxs,
-@@ -1105,8 +1145,7 @@
+@@ -1105,8 +1149,7 @@
          // Capture the refs the deferred upgrade needs NOW, while `Deno.core` is
          // still on the global — it's scrubbed from the public `Deno` after
          // bootstrap, so the post-bootstrap deferred caller can't read them.
@@ -559,7 +563,7 @@
          *context_state.deferred_fast_ops.borrow_mut() = Some((
            v8::Global::new(scope, ops_obj),
            v8::Global::new(scope, stub_fn),
-@@ -1156,10 +1195,9 @@
+@@ -1156,10 +1199,9 @@
  
        let _phase = startup_phase_begin();
        if let Some((snapshotted_data, mut data_store)) = snapshotted_data {
@@ -573,7 +577,7 @@
          module_map.update_with_snapshotted_data(
            scope,
            &mut data_store,
-@@ -1167,8 +1205,7 @@
+@@ -1167,8 +1209,7 @@
          );
  
          if let Some(index) = snapshotted_data.ext_import_meta_proto {
@@ -583,7 +587,7 @@
          }
  
          state_rc
-@@ -1189,14 +1226,8 @@
+@@ -1189,14 +1230,8 @@
  
        if context_state.ext_import_meta_proto.borrow().is_none() {
          let null = v8::null(scope);
@@ -600,7 +604,7 @@
        }
  
        // SAFETY: Set the module map slot in the context
-@@ -1263,18 +1294,13 @@
+@@ -1263,18 +1298,13 @@
        // ) {
        if init_mode == InitMode::New {
          let _phase = startup_phase_begin();
@@ -621,7 +625,7 @@
          startup_phase_end(_phase, "execute_builtin_sources");
        }
  
-@@ -1294,12 +1320,7 @@
+@@ -1294,12 +1324,7 @@
        );
  
        let _phase = startup_phase_begin();
@@ -635,7 +639,7 @@
        startup_phase_end(_phase, "init_extension_js");
      }
  
-@@ -1314,8 +1335,7 @@
+@@ -1314,8 +1339,7 @@
      // that need the raw pointer) and ContextState (for event loop phases).
      if !will_snapshot {
        // SAFETY: zeroed memory is valid for uv_loop_t before uv_loop_init.
@@ -645,7 +649,7 @@
        // SAFETY: uv_loop points to valid zeroed memory.
        unsafe { uv_compat::uv_loop_init(&mut *uv_loop) };
        let loop_ptr: *mut uv_compat::UvLoop = &mut *uv_loop;
-@@ -1336,18 +1356,13 @@
+@@ -1336,18 +1360,13 @@
  
    /// If extensions were initialized with `lazy_init`, they need to be
    /// fully initialized with this method.
@@ -669,7 +673,7 @@
          .into_box(),
        );
      }
-@@ -1360,12 +1375,10 @@
+@@ -1360,12 +1379,10 @@
      {
        if args.name != *expected_name {
          return Err(
@@ -686,7 +690,7 @@
            .into_box(),
          );
        }
-@@ -1382,17 +1395,13 @@
+@@ -1382,17 +1399,13 @@
  
    pub fn set_eval_context_code_cache_cbs(
      &self,
@@ -706,7 +710,7 @@
      *self
        .inner
        .state
-@@ -1574,8 +1583,7 @@
+@@ -1574,8 +1587,7 @@
        modules.push(ModuleSpecifier::parse(&esm.specifier).unwrap());
        sources.push((esm.specifier, esm.code));
      }
@@ -716,7 +720,7 @@
      *module_map.loader.borrow_mut() = ext_loader.clone();
      module_map.set_loading_internal_modules(true);
  
-@@ -1596,33 +1604,22 @@
+@@ -1596,33 +1608,22 @@
              self.v8_isolate(),
              specifier,
              source.code,
@@ -755,7 +759,7 @@
        };
  
        let isolate = self.v8_isolate();
-@@ -1666,10 +1663,7 @@
+@@ -1666,10 +1667,7 @@
      Ok(())
    }
  
@@ -767,7 +771,7 @@
    where
      v8::Local<'s, T>: TryFrom<v8::Local<'s, v8::Value>, Error = v8::DataError>,
    {
-@@ -1698,10 +1692,8 @@
+@@ -1698,10 +1696,8 @@
        let context = realm.context();
        let context_local = v8::Local::new(scope, context);
        let global = context_local.global(scope);
@@ -780,7 +784,7 @@
  
        let event_loop_tick_cb: v8::Local<v8::Function> = bindings::get(
          scope,
-@@ -1709,19 +1701,14 @@
+@@ -1709,19 +1705,14 @@
          EVENT_LOOP_TICK,
          "Deno.core.__eventLoopTick",
        );
@@ -805,7 +809,7 @@
        let handle_rejections_cb: v8::Local<v8::Function> = bindings::get(
          scope,
          core_obj,
-@@ -1763,9 +1750,8 @@
+@@ -1763,9 +1754,8 @@
              // Registry mapping a Wasm module's namespace to its instance
              // exports, shared by all synthetic `.wasm` modules in this realm
              // via `import.meta.wasmInstances`. See `ContextState` for details.
@@ -817,7 +821,7 @@
              wasm_instances_map = weak_map_fn.new_instance(scope, &[]);
            }
          }
-@@ -1786,8 +1772,7 @@
+@@ -1786,8 +1776,7 @@
        // hasTickScheduled without crossing the JS-to-Rust boundary.
        {
          let state_rc = realm.0.state();
@@ -827,7 +831,7 @@
          let backing_store = unsafe {
            v8::ArrayBuffer::new_backing_store_from_ptr(
              tick_info_ptr,
-@@ -1797,15 +1782,10 @@
+@@ -1797,15 +1786,10 @@
            )
          };
          let backing_store_shared = backing_store.make_shared();
@@ -846,7 +850,7 @@
          let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
          set_tick_info_fn.call(scope, undefined, &[tick_info_array.into()]);
          // Clean up the init-only setter from Deno.core
-@@ -1817,8 +1797,7 @@
+@@ -1817,8 +1801,7 @@
        // and pass it to JS via __setImmediateInfo.
        {
          let state_rc = realm.0.state();
@@ -856,7 +860,7 @@
          let imm_byte_len = 3 * std::mem::size_of::<u32>();
          let backing_store = unsafe {
            v8::ArrayBuffer::new_backing_store_from_ptr(
-@@ -1829,8 +1808,7 @@
+@@ -1829,8 +1812,7 @@
            )
          };
          let backing_store_shared = backing_store.make_shared();
@@ -866,7 +870,7 @@
          let imm_info_array = v8::Uint32Array::new(scope, ab, 0, 3).unwrap();
          let set_imm_info_fn: v8::Local<v8::Function> = bindings::get(
            scope,
-@@ -1848,8 +1826,7 @@
+@@ -1848,8 +1830,7 @@
        // and pass it to JS via __setTimerInfo.
        {
          let state_rc = realm.0.state();
@@ -876,7 +880,7 @@
          let timer_byte_len = std::mem::size_of::<i32>();
          let backing_store = unsafe {
            v8::ArrayBuffer::new_backing_store_from_ptr(
-@@ -1860,15 +1837,10 @@
+@@ -1860,15 +1841,10 @@
            )
          };
          let backing_store_shared = backing_store.make_shared();
@@ -895,7 +899,7 @@
          let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
          set_timer_info_fn.call(scope, undefined, &[timer_info_array.into()]);
          let key = SET_TIMER_INFO.v8_string(scope).unwrap();
-@@ -1963,10 +1935,7 @@
+@@ -1963,10 +1939,7 @@
    /// # Safety
    /// `loop_ptr` must be a valid, initialized `uv_loop_t` pointer that
    /// outlives the runtime.
@@ -907,7 +911,7 @@
      let realm = &self.inner.main_realm;
      let context_state = &realm.0.context_state;
      let inner_ptr = unsafe { uv_compat::uv_loop_get_inner_ptr(loop_ptr) };
-@@ -1987,8 +1956,7 @@
+@@ -1987,8 +1960,7 @@
      // Create the check handle for setImmediate.
      // JS controls start/stop/ref/unref via op_immediate_check.
      // SAFETY: loop_ptr is valid per caller contract.
@@ -917,7 +921,7 @@
      *context_state.immediate_check_handle.borrow_mut() = Some(check_handle);
    }
  
-@@ -2038,8 +2006,7 @@
+@@ -2038,8 +2010,7 @@
    pub fn call(
      &mut self,
      function: &v8::Global<v8::Function>,
@@ -927,7 +931,7 @@
      self.call_with_args(function, &[])
    }
  
-@@ -2053,8 +2020,7 @@
+@@ -2053,8 +2024,7 @@
    pub fn scoped_call(
      scope: &mut v8::PinScope,
      function: &v8::Global<v8::Function>,
@@ -937,7 +941,7 @@
      Self::scoped_call_with_args(scope, function, &[])
    }
  
-@@ -2069,8 +2035,7 @@
+@@ -2069,8 +2039,7 @@
      &mut self,
      function: &v8::Global<v8::Function>,
      args: &[v8::Global<v8::Value>],
@@ -947,7 +951,7 @@
      scope!(scope, self);
      Self::scoped_call_with_args(scope, function, args)
    }
-@@ -2086,16 +2051,14 @@
+@@ -2086,16 +2055,14 @@
      scope: &mut v8::PinScope,
      function: &v8::Global<v8::Function>,
      args: &[v8::Global<v8::Value>],
@@ -967,7 +971,7 @@
        for v in args {
          local_args.push(v8::Local::new(scope, v));
        }
-@@ -2105,14 +2068,10 @@
+@@ -2105,14 +2072,10 @@
      if promise.is_none() {
        if scope.is_execution_terminating() {
          let undefined = v8::undefined(scope).into();
@@ -984,7 +988,7 @@
      }
      let promise = promise.unwrap();
      if !promise.is_promise() {
-@@ -2194,8 +2153,7 @@
+@@ -2194,8 +2157,7 @@
    }
  
    pub fn remove_near_heap_limit_callback(&mut self, heap_limit: usize) {
@@ -994,7 +998,7 @@
        self
          .v8_isolate()
          .remove_near_heap_limit_callback(cb, heap_limit);
-@@ -2210,11 +2168,7 @@
+@@ -2210,11 +2172,7 @@
  
      let context = self.main_context();
      let isolate_ptr = unsafe { self.inner.v8_isolate.as_raw_isolate_ptr() };
@@ -1007,7 +1011,7 @@
      let context = v8::Local::new(scope, context);
  
      self.inner.state.has_inspector.set(true);
-@@ -2234,8 +2188,7 @@
+@@ -2234,8 +2192,7 @@
    pub fn resolve(
      &mut self,
      promise: v8::Global<v8::Value>,
@@ -1017,7 +1021,7 @@
      scope!(scope, self);
      Self::scoped_resolve(scope, promise)
    }
-@@ -2247,8 +2200,7 @@
+@@ -2247,8 +2204,7 @@
    pub fn scoped_resolve(
      scope: &mut v8::PinScope,
      promise: v8::Global<v8::Value>,
@@ -1027,7 +1031,7 @@
      let promise = v8::Local::new(scope, promise);
      if !promise.is_promise() {
        return RcPromiseFuture::new(Ok(v8::Global::new(scope, promise)));
-@@ -2329,9 +2281,7 @@
+@@ -2329,9 +2285,7 @@
          if let Poll::Ready(t) = fut.poll_unpin(cx) {
            return Poll::Ready(t.map_err(|e| e.into()));
          }
@@ -1038,7 +1042,7 @@
        }
        Poll::Pending
      })
-@@ -2377,13 +2327,11 @@
+@@ -2377,13 +2331,11 @@
      let has_inspector = self.inner.state.has_inspector.get();
  
      // SAFETY: We know this isolate is valid and non-null at this time
@@ -1054,7 +1058,7 @@
        let mut scope = v8::ContextScope::new(isolate_scope, context);
        self.poll_event_loop_inner(cx, &mut scope, poll_options)
      };
-@@ -2431,8 +2379,7 @@
+@@ -2431,8 +2383,7 @@
      {
        // Drain and run foreground tasks queued by the custom V8 platform.
        // Uses the local Arc shared with the registry — no global map lookup.
@@ -1064,23 +1068,29 @@
        for task in tasks {
          task.run();
        }
-@@ -2474,6 +2421,15 @@
+@@ -2474,6 +2425,21 @@
      // ===== Phase 2: Pending work =====
      // Module progress polling (before ops, matching original ordering)
      modules.poll_progress(cx, scope)?;
++    // A live retained realm still owns its raw module-map pointer. Once its
++    // context is collected, no V8 callback can dereference that pointer.
++    self.inner.state.module_contexts.borrow_mut()
++      .retain(|entry| !entry.context.is_empty());
 +    let module_contexts = self.inner.state.module_contexts.borrow().clone();
 +    for entry in module_contexts {
 +      if !entry.active.get() {
 +        continue;
 +      }
-+      let context = v8::Local::new(scope, &entry.context);
++      let Some(context) = entry.context.to_local(scope) else {
++        continue;
++      };
 +      let child_scope = &mut v8::ContextScope::new(scope, context);
 +      entry.modules.poll_progress(cx, child_scope)?;
 +    }
  
      // 2a. V8 task spawner tasks
      dispatched_ops |= Self::dispatch_task_spawner(cx, scope, context_state);
-@@ -2566,13 +2522,10 @@
+@@ -2566,13 +2532,10 @@
      //   behavior where unrefed handles participate in iterations driven
      //   by other work, but don't start new iterations on their own.
      {
@@ -1097,7 +1107,7 @@
          Self::do_js_run_immediate_callbacks(scope, context_state)?;
          // Drain ticks queued by immediate callbacks so they don't
          // require an extra full event loop iteration.
-@@ -2625,8 +2578,7 @@
+@@ -2625,8 +2588,7 @@
      }
  
      // Evaluate pending state
@@ -1107,7 +1117,7 @@
  
      if !pending_state.is_pending() {
        if has_inspector {
-@@ -2745,9 +2697,7 @@
+@@ -2745,9 +2707,7 @@
            self.inner.state.tla_stall_retries.set(retries);
            if retries > MAX_TLA_STALL_RETRIES {
              self.inner.state.tla_stall_retries.set(0);
@@ -1118,7 +1128,7 @@
            }
            #[allow(
              clippy::print_stderr,
-@@ -2775,9 +2725,7 @@
+@@ -2775,9 +2735,7 @@
        {
          // pass, will be polled again
        } else if realm.modules_idle() {
@@ -1129,7 +1139,7 @@
            self.inner.state.tla_stall_retries.set(0);
            return Poll::Ready(Err(CoreErrorKind::Js(js_error).into_box()));
          } else {
-@@ -2786,9 +2734,7 @@
+@@ -2786,9 +2744,7 @@
            self.inner.state.tla_stall_retries.set(retries);
            if retries > MAX_TLA_STALL_RETRIES {
              self.inner.state.tla_stall_retries.set(0);
@@ -1140,7 +1150,7 @@
            }
            #[allow(
              clippy::print_stderr,
-@@ -2841,9 +2787,8 @@
+@@ -2841,9 +2797,8 @@
  ) -> v8::Local<'s, v8::Context> {
    let context = if has_snapshot {
      // Try to load the 1st index first, embedder may have used 0th for something else (like node:vm).
@@ -1152,7 +1162,7 @@
    } else {
      // Set up the global object template and create context from it.
      let mut global_object_template = v8::ObjectTemplate::new(scope);
-@@ -2882,9 +2827,7 @@
+@@ -2882,9 +2837,7 @@
    }
  
    /// Try to create a new runtime, returning an error if the process fails.
@@ -1163,7 +1173,7 @@
      setup::init_v8(
        options.v8_platform.take(),
        true,
-@@ -2901,10 +2844,8 @@
+@@ -2901,10 +2854,8 @@
    pub fn snapshot(mut self) -> Box<[u8]> {
      // Ensure there are no live inspectors to prevent crashes.
      self.inner.prepare_for_cleanup();
@@ -1176,7 +1186,7 @@
      // `lazy_loaded_*` sources are externalized for the snapshot (so consumed
      // sources bake in as clean external strings), but only the *consumed* ones
      // are actually referenced by snapshotted code. Non-consumed (residual)
-@@ -2914,15 +2855,13 @@
+@@ -2914,15 +2865,13 @@
      // the duplication.
      let consumed: std::collections::HashSet<String> =
        self.consumed_lazy_specifiers().into_iter().collect();
@@ -1194,7 +1204,7 @@
          {
            return &[][..];
          }
-@@ -3046,11 +2985,7 @@
+@@ -3046,11 +2995,7 @@
  
  impl EventLoopPendingState {
    /// Collect event loop state from all the sub-states.
@@ -1207,7 +1217,7 @@
      let num_unrefed_ops = state.unrefed_ops.borrow().len();
      let num_pending_ops = state.pending_ops.len();
      let has_pending_tasks = state.task_spawner_factory.has_pending_tasks();
-@@ -3058,8 +2993,7 @@
+@@ -3058,8 +3003,7 @@
      // there are refed timers (timer_info[0] > 0).
      let has_pending_refed_user_timers = state.user_timer.is_refed();
      let has_pending_dyn_imports = modules.has_pending_dynamic_imports();
@@ -1217,7 +1227,7 @@
      let has_pending_module_evaluation = modules.has_pending_module_evaluation();
      let has_pending_promise_events = !state
        .exception_state
-@@ -3071,19 +3005,16 @@
+@@ -3071,19 +3015,16 @@
          .pending_handled_promise_rejections
          .borrow()
          .is_empty();
@@ -1246,7 +1256,7 @@
        has_pending_ops: has_pending_refed_ops || (num_pending_ops > 0),
        has_pending_refed_ops,
        has_pending_dyn_imports,
-@@ -3096,7 +3027,19 @@
+@@ -3096,7 +3037,19 @@
        has_outstanding_immediates,
        has_pending_timers,
        has_uv_alive_handles,
@@ -1267,7 +1277,7 @@
    }
  
    /// Collect event loop state from all the states stored in the scope.
-@@ -3146,10 +3089,7 @@
+@@ -3146,10 +3099,7 @@
    }
  
    /// Performs an action with the inspector, if we have one
@@ -1279,7 +1289,7 @@
      // Fast path
      if !self.has_inspector.get() {
        return None;
-@@ -3165,10 +3105,7 @@
+@@ -3165,10 +3115,7 @@
  // Related to module loading
  impl JsRuntime {
    #[cfg(test)]
@@ -1291,7 +1301,7 @@
      let isolate = &mut *self.inner.v8_isolate;
      let realm = JsRealm::clone(&self.inner.main_realm);
      jsrealm::context_scope!(scope, realm, isolate);
-@@ -3297,8 +3234,7 @@
+@@ -3297,8 +3244,7 @@
      // `module.registerHooks()` load hooks). For ordinary loads pumping is
      // unnecessary and would run unrelated event-loop work mid-load, so the
      // load is driven on its own instead.
@@ -1301,7 +1311,7 @@
  
      if let Some(code) = code {
        jsrealm::context_scope!(scope, &realm, self.v8_isolate());
-@@ -3315,8 +3251,7 @@
+@@ -3315,8 +3261,7 @@
      }
  
      let mut load = if is_main {
@@ -1311,7 +1321,7 @@
      } else {
        RecursiveModuleLoad::side(
          specifier.to_string(),
-@@ -3403,16 +3338,14 @@
+@@ -3403,16 +3348,14 @@
      v8::tc_scope!(let tc_scope, scope);
  
      let undefined = v8::undefined(tc_scope).into();
@@ -1331,7 +1341,7 @@
        return e;
      }
      Ok(())
-@@ -3476,7 +3409,7 @@
+@@ -3476,7 +3419,7 @@
      v8::tc_scope!(let tc_scope, scope);
  
      let process_timers_cb = context_state.js_process_timers_cb.borrow();
@@ -1340,7 +1350,7 @@
      let now_val = v8::Number::new(tc_scope, now);
      let undefined: v8::Local<v8::Value> = v8::undefined(tc_scope).into();
  
-@@ -3505,9 +3438,7 @@
+@@ -3505,9 +3448,7 @@
    ) -> bool {
      let mut dispatched = false;
      let mut retries = 3;
@@ -1351,7 +1361,7 @@
        dispatched = true;
        for task in tasks {
          task(scope);
-@@ -3537,8 +3468,7 @@
+@@ -3537,8 +3478,7 @@
    ) -> Result<bool, Box<JsError>> {
      const MAX_VEC_SIZE_FOR_OPS: usize = 1024;
  
@@ -1361,7 +1371,7 @@
  
      // Completed async ops as (promiseId, isOk, res) triplets.
      loop {
-@@ -3548,9 +3478,7 @@
+@@ -3548,9 +3488,7 @@
          break;
        }
  
@@ -1372,7 +1382,7 @@
          break;
        };
  
-@@ -3587,7 +3515,7 @@
+@@ -3587,7 +3525,7 @@
      v8::tc_scope!(let tc_scope, scope);
  
      let tick_cb = context_state.js_event_loop_tick_cb.borrow();
@@ -1381,7 +1391,7 @@
      tick_fn.call(tc_scope, undefined, args.as_slice());
  
      if let Some(exception) = tc_scope.exception() {
-@@ -3619,7 +3547,7 @@
+@@ -3619,7 +3557,7 @@
          .borrow()
          .as_ref()
        {
@@ -1390,7 +1400,7 @@
          let args = [
            v8::Local::new(scope, promise).into(),
            v8::Local::new(scope, result),
-@@ -3647,8 +3575,7 @@
+@@ -3647,8 +3585,7 @@
        return Ok(());
      }
  
@@ -1400,7 +1410,7 @@
      let mut rejections = VecDeque::default();
      std::mem::swap(&mut *pending_rejections, &mut rejections);
      drop(pending_rejections);
-@@ -3664,8 +3591,7 @@
+@@ -3664,8 +3601,7 @@
      v8::tc_scope!(let tc_scope, scope);
  
      let handle_rejections_cb = context_state.js_handle_rejections_cb.borrow();
@@ -1410,7 +1420,7 @@
      let undefined: v8::Local<v8::Value> = v8::undefined(tc_scope).into();
      handle_rejections_fn.call(tc_scope, undefined, args.as_slice());
  
-@@ -3693,13 +3619,9 @@
+@@ -3693,13 +3629,9 @@
      scope: &mut v8::PinScope<'s, 'i>,
      context_state: &ContextState,
    ) -> Result<(), Box<JsError>> {
@@ -1426,7 +1436,7 @@
          return Ok(());
        }
      }
-@@ -3712,7 +3634,7 @@
+@@ -3712,7 +3644,7 @@
      v8::tc_scope!(let tc_scope, scope);
  
      let drain_cb = context_state.js_drain_next_tick_and_macrotasks_cb.borrow();
@@ -1435,7 +1445,7 @@
      drain_fn.call(tc_scope, undefined, &[]);
  
      if let Some(exception) = tc_scope.exception() {
-@@ -3727,10 +3649,7 @@
+@@ -3727,10 +3659,7 @@
    files_loaded: &mut Vec<&'static str>,
    source: &ExtensionFileSourceCode,
  ) {

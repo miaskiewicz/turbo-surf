@@ -7,7 +7,10 @@ pub(super) fn origins<'s>(
 ) -> Vec<String> {
     let mut origins = Vec::new();
     while let Some(parent) = context.get_slot::<FrameParent>() {
-        context = v8::Local::new(scope, &parent.0);
+        let Some(parent) = parent.0.to_local(scope) else {
+            break;
+        };
+        context = parent;
         origins.push(window_origin(scope, context));
     }
     origins
@@ -21,7 +24,11 @@ fn state(scope: &mut v8::PinScope, receiver: v8::Local<v8::Object>) -> Option<Rc
         type_error(scope, "Illegal invocation");
         return None;
     };
-    if !v8::Local::new(scope, &state.ancestors).strict_equals(receiver.into()) {
+    if !state
+        .ancestors
+        .to_local(scope)
+        .is_some_and(|ancestors| ancestors.strict_equals(receiver.into()))
+    {
         type_error(scope, "Illegal invocation");
         return None;
     }
@@ -38,7 +45,9 @@ pub(super) fn get(
         return;
     };
     if readable(scope, &state) {
-        result.set(v8::Local::new(scope, &state.ancestors).into());
+        if let Some(ancestors) = state.ancestors.to_local(scope) {
+            result.set(ancestors.into());
+        }
     }
 }
 

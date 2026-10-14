@@ -1,3 +1,6 @@
 # Preserve the exact published MIT XPath provider and license bytes.
 rust/crates/turbo-surf-render/src/xpath_provider/xpath.js -text -whitespace
 rust/crates/turbo-surf-render/src/xpath_provider/LICENSE -text -whitespace
+
+# Unified diffs require a space prefix on empty context lines.
+harness/detection/engine-154/patches/*.patch -whitespace

@@ -26,6 +26,12 @@ async fn shared_chrome_frame_ownership_oracle_preserves_retained_documents_and_c
             .unwrap(),
     )
     .unwrap();
+    if first != oracle["first"] {
+        if let Some(path) = std::env::var_os("TURBO_SURF_GC_HEAP_SNAPSHOT") {
+            page.eval_expression("(()=>{const doc=__portLifetimeState.rows[0].refs[1].deref();if(doc)doc.__nativeLifecycleDiagnostic='native155-removed-document';return 'tagged';})()").await.unwrap();
+            std::fs::write(path, page.native_heap_snapshot_for_testing()).unwrap();
+        }
+    }
     assert_eq!(first, oracle["first"]);
     page.eval_expression("__portLifetimeState.retained=null; 'released'")
         .await

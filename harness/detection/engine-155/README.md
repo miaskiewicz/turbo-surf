@@ -1,6 +1,6 @@
 # Native Chrome 155 engine profile
 
-This profile compiles V8 **15.5.35.20** from the exact engine revision used by the installed **Chrome 155.0.8059.40** oracle. The version comes from the compiled engine; the harness checks its native `V8::get_version()` before accepting an archive or running Surf. It shares the SDK preparation and binding patches with the preserved Chrome 154 profile.
+This preserved profile compiles V8 **15.5.35.20** from the engine revision pinned by **Chrome 155.0.8059.40**. The current installed Chrome oracle is **155.0.8059.79 / V8 15.5.35.23**, so exact patch-version parity remains open. The version comes from the compiled engine; the harness checks its native `V8::get_version()` before accepting an archive or running Surf. It shares the SDK preparation and binding patches with the preserved Chrome 154 profile.
 
 ```sh
 python3 harness/detection/engine-155/prepare.py .native-builds/sdk155
@@ -42,3 +42,15 @@ The wrapper SDK remains the official rusty-v8 `152.2.0`, `deno_v8 0.4.0`, and `d
 Preparation records the profile and reverse-verifies every applied patch; building records the actual version, native archive/binding hashes, source revision and test result in the destination's `validated.json`. Raw diagnostics stay ignored. Preserve the 154 destination for regressions and comparisons.
 
 The 2026-10-13 checkpoint passed 366 renderer/MCP tests with all four features, including 12 WebCrypto, seven host-input and three asynchronous expression contracts. The inherited deno_core extension doctest remains ignored; no application tests were ignored. Strict Clippy passed for both crates and all targets. The frozen detection executable reports native `15.5.35.20-rusty`, stable WindowProxy support and Chrome `155.0.8059.40`; its ignored `frozen/final-build.json` retains executable/source hashes, SDK provenance and gate logs. This checkpoint validates the native engine integration; fresh paired captures establish the page outcome separately.
+
+The October 14 merged checkpoint passes 39 focused genuine155 contracts covering
+frame GC/retirement, Window/Location ownership/security, module lifecycle, host
+budgets and actual session/storage integration. A heap trace found a permanent
+retired context root in the custom Deno module registry; its weak lookup now keeps
+module maps alive only while their actual contexts survive. Per-caller weak
+Window/Location method caches preserve identity and intended retained targets.
+The SDK teardown patch delays handle invalidation until native slot cleanup;
+preparation patches reverse-verify with zero fuzz against their exact postimages.
+Strict affected owned-code Clippy passes; the inherited Deno dependency reports
+its existing TcpStream::set_linger deprecation. This focused checkpoint does not
+certify the full workspace, rebuilt addon or fresh Google outcome.

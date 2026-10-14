@@ -4,10 +4,10 @@ use super::*;
 mod ancestors;
 
 struct State {
-    object: v8::Global<v8::Object>,
-    window: v8::Global<v8::Object>,
+    object: v8::Weak<v8::Object>,
+    window: v8::Weak<v8::Object>,
     url: RefCell<String>,
-    ancestors: v8::Global<v8::Object>,
+    ancestors: v8::Weak<v8::Object>,
     ancestor_origins: Vec<String>,
 }
 
@@ -19,7 +19,9 @@ fn type_error(scope: &mut v8::PinScope, text: &str) {
 
 fn object_state(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) -> Option<Rc<State>> {
     let state = object.get_creation_context(scope)?.get_slot::<State>()?;
-    v8::Local::new(scope, &state.object)
+    state
+        .object
+        .to_local(scope)?
         .strict_equals(object.into())
         .then_some(state)
 }
@@ -32,8 +34,7 @@ pub(super) fn navigate<'s>(
     let Some(text) = value.to_string(scope) else {
         return;
     };
-    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
-    let source = v8::Local::new(scope, source);
+    let source = scope.get_entered_or_microtask_context();
     let Some(target) = window.get_creation_context(scope) else {
         return;
     };
@@ -48,7 +49,10 @@ pub(super) fn navigate<'s>(
         let Some(parent) = ancestor.get_slot::<FrameParent>() else {
             break;
         };
-        ancestor = v8::Local::new(scope, &parent.0);
+        let Some(parent) = parent.0.to_local(scope) else {
+            break;
+        };
+        ancestor = parent;
         allowed = ancestor == source;
     }
     if !allowed {
@@ -94,12 +98,16 @@ pub(super) fn navigate<'s>(
     let Some(parent) = target.get_slot::<FrameParent>() else {
         return;
     };
-    let parent = v8::Local::new(scope, &parent.0);
+    let Some(parent) = parent.0.to_local(scope) else {
+        return;
+    };
     let Some(navigator) = parent.get_slot::<FrameNavigator>() else {
         return;
     };
-    let navigator = v8::Local::new(scope, &navigator.0);
-    let host = v8::Local::new(scope, &host.0);
+    let (Some(navigator), Some(host)) = (navigator.0.to_local(scope), host.0.to_local(scope))
+    else {
+        return;
+    };
     let url = v8::String::new(scope, url.as_str()).unwrap();
     let source_url = v8::String::new(scope, &source_url).unwrap();
     let undefined = v8::undefined(scope);
@@ -138,7 +146,9 @@ pub(super) fn window_get<'s>(
         .get_creation_context(scope)
         .and_then(|context| context.get_slot::<State>())
     {
-        result.set(v8::Local::new(scope, &location.object).into());
+        if let Some(location) = location.object.to_local(scope) {
+            result.set(location.into());
+        }
     }
 }
 
@@ -151,7 +161,9 @@ fn href_set<'s>(
         type_error(scope, "Illegal invocation");
         return;
     };
-    let window = v8::Local::new(scope, &state.window);
+    let Some(window) = state.window.to_local(scope) else {
+        return;
+    };
     navigate(scope, window, args.get(0));
 }
 
@@ -178,16 +190,19 @@ fn reload<'s>(
         return;
     }
     if let Some(state) = object_state(scope, location) {
-        let window = v8::Local::new(scope, &state.window);
+        let Some(window) = state.window.to_local(scope) else {
+            return;
+        };
         let url = v8::String::new(scope, &state.url.borrow()).unwrap();
         navigate(scope, window, url.into());
     }
 }
 
 fn readable(scope: &mut v8::PinScope, state: &State) -> bool {
-    let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
-    let source = v8::Local::new(scope, source);
-    let object = v8::Local::new(scope, &state.object);
+    let source = scope.get_entered_or_microtask_context();
+    let Some(object) = state.object.to_local(scope) else {
+        return false;
+    };
     let allowed = object.get_creation_context(scope).is_some_and(|owner| {
         source
             .get_security_token(scope)
@@ -222,7 +237,11 @@ fn component_get(
         type_error(scope, "Illegal invocation");
         return;
     };
-    if !v8::Local::new(scope, &state.object).strict_equals(args.this().into()) {
+    if !state
+        .object
+        .to_local(scope)
+        .is_some_and(|object| object.strict_equals(args.this().into()))
+    {
         type_error(scope, "Illegal invocation");
         return;
     }
@@ -322,7 +341,9 @@ fn component_set<'s>(
     };
     if valid {
         let value = v8::String::new(scope, url.as_str()).unwrap();
-        let window = v8::Local::new(scope, &state.window);
+        let Some(window) = state.window.to_local(scope) else {
+            return;
+        };
         navigate(scope, window, value.into());
     }
 }
@@ -353,13 +374,18 @@ fn cross_get<'s>(
         if !name.is_symbol() && name.to_rust_string_lossy(scope) == "replace" {
             let location = args.holder();
             result.set(
-                cached_function(
-                    scope,
-                    location,
-                    "replace",
-                    v8::MapFnTo::map_fn_to(replace),
-                    1,
-                )
+                {
+                    let Some(function) = cached_function(
+                        scope,
+                        location,
+                        "replace",
+                        v8::MapFnTo::map_fn_to(replace),
+                        1,
+                    ) else {
+                        return v8::Intercepted::kYes;
+                    };
+                    function
+                }
                 .into(),
             );
         } else if !name.is_symbol() && name.to_rust_string_lossy(scope) == "href" {
@@ -382,7 +408,9 @@ fn cross_set<'s>(
 ) -> v8::Intercepted {
     if !name.is_symbol() && name.to_rust_string_lossy(scope) == "href" {
         if let Some(state) = object_state(scope, args.holder()) {
-            let window = v8::Local::new(scope, &state.window);
+            let Some(window) = state.window.to_local(scope) else {
+                return v8::Intercepted::kYes;
+            };
             navigate(scope, window, value);
             result.set_bool(true);
         }
@@ -449,24 +477,34 @@ fn descriptor<'s>(
     let (key, value): (&str, v8::Local<v8::Value>) = match property.as_str() {
         "href" => (
             "set",
-            cached_function(
-                scope,
-                args.holder(),
-                "set href",
-                v8::MapFnTo::map_fn_to(href_set),
-                1,
-            )
+            {
+                let Some(function) = cached_function(
+                    scope,
+                    args.holder(),
+                    "set href",
+                    v8::MapFnTo::map_fn_to(href_set),
+                    1,
+                ) else {
+                    return v8::Intercepted::kYes;
+                };
+                function
+            }
             .into(),
         ),
         "replace" => (
             "value",
-            cached_function(
-                scope,
-                args.holder(),
-                "replace",
-                v8::MapFnTo::map_fn_to(replace),
-                1,
-            )
+            {
+                let Some(function) = cached_function(
+                    scope,
+                    args.holder(),
+                    "replace",
+                    v8::MapFnTo::map_fn_to(replace),
+                    1,
+                ) else {
+                    return v8::Intercepted::kYes;
+                };
+                function
+            }
             .into(),
         ),
         _ => ("value", v8::undefined(scope).into()),
@@ -513,11 +551,24 @@ pub(super) fn install(scope: &mut v8::PinScope, url: &str) {
     let location = template.new_instance(scope).unwrap();
     let origins = ancestors::origins(scope, context);
     let ancestors = ancestors::install(scope);
+    for (name, value) in [
+        ("location", location.into()),
+        ("location-ancestors", ancestors.into()),
+    ] {
+        if retain_owned(scope, name, value).is_none() {
+            return;
+        }
+    }
+    let name = v8::String::new(scope, "turbo-surf.location-window").unwrap();
+    let key = v8::Private::for_api(scope, Some(name));
+    if location.set_private(scope, key, window.into()) != Some(true) {
+        return;
+    }
     context.set_slot(Rc::new(State {
-        object: v8::Global::new(scope, location),
-        window: v8::Global::new(scope, window),
+        object: v8::Weak::new(scope, location),
+        window: v8::Weak::new(scope, window),
         url: RefCell::new(url.to_string()),
-        ancestors: v8::Global::new(scope, ancestors),
+        ancestors: v8::Weak::new(scope, ancestors),
         ancestor_origins: origins,
     }));
     let object_key = v8::String::new(scope, "Object").unwrap();
@@ -564,20 +615,24 @@ pub(super) fn install(scope: &mut v8::PinScope, url: &str) {
     descriptor.set_configurable(false);
     let name = v8::String::new(scope, "ancestorOrigins").unwrap();
     location.define_property(scope, name.into(), &descriptor);
-    let getter = cached_function(
+    let Some(getter) = cached_function(
         scope,
         location,
         "get href",
         v8::MapFnTo::map_fn_to(href_get),
         0,
-    );
-    let setter = cached_function(
+    ) else {
+        return;
+    };
+    let Some(setter) = cached_function(
         scope,
         location,
         "set href",
         v8::MapFnTo::map_fn_to(href_set),
         1,
-    );
+    ) else {
+        return;
+    };
     let name = v8::String::new(scope, "href").unwrap();
     let mut descriptor = v8::PropertyDescriptor::new_from_get_set(getter.into(), setter.into());
     descriptor.set_enumerable(true);
@@ -636,7 +691,9 @@ pub(super) fn install(scope: &mut v8::PinScope, url: &str) {
         ("replace", v8::MapFnTo::map_fn_to(replace), 1),
         ("toString", v8::MapFnTo::map_fn_to(href_get), 0),
     ] {
-        let function = cached_function(scope, location, name, callback, length);
+        let Some(function) = cached_function(scope, location, name, callback, length) else {
+            return;
+        };
         let name = v8::String::new(scope, name).unwrap();
         location.define_own_property(
             scope,
@@ -645,20 +702,24 @@ pub(super) fn install(scope: &mut v8::PinScope, url: &str) {
             v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_DELETE,
         );
     }
-    let getter = cached_function(
+    let Some(getter) = cached_function(
         scope,
         window,
         "get location",
         v8::MapFnTo::map_fn_to(window_get),
         0,
-    );
-    let setter = cached_function(
+    ) else {
+        return;
+    };
+    let Some(setter) = cached_function(
         scope,
         window,
         "set location",
         v8::MapFnTo::map_fn_to(window_set),
         1,
-    );
+    ) else {
+        return;
+    };
     let name = v8::String::new(scope, "location").unwrap();
     let mut descriptor = v8::PropertyDescriptor::new_from_get_set(getter.into(), setter.into());
     descriptor.set_enumerable(true);
@@ -672,7 +733,7 @@ pub(super) fn get<'s>(
 ) -> Option<v8::Local<'s, v8::Object>> {
     context
         .get_slot::<State>()
-        .map(|state| v8::Local::new(scope, &state.object))
+        .and_then(|state| state.object.to_local(scope))
 }
 
 pub(super) fn installed(scope: &mut v8::PinScope) -> bool {

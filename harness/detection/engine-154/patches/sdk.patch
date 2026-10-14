@@ -2315,15 +2315,48 @@
    fn v8__Isolate__SetUseCounterCallback(
      isolate: *mut RealIsolate,
      callback: UseCounterCallback,
-@@ -1753,6 +1755,11 @@
+@@ -1133,8 +1135,6 @@
+       (*annex_ptr)
+         .global_liveness()
+         .close_deferred_global_resets();
+-      (*annex_ptr).global_liveness().dispose();
+-      (*annex_ptr).isolate_handle.dispose();
      }
-   }
  
+     // Reclaim `create_param_allocations` so the caller can keep it alive
+@@ -1206,6 +1206,12 @@
+     let (annex_ptr, create_param_allocations) =
+       unsafe { self.prepare_annex_for_dispose() };
+     unsafe { Self::run_remaining_guaranteed_finalizers(annex_ptr) };
++    // Native slot and guaranteed-finalizer cleanup must reset their Weak/Global
++    // handles while V8 is live, including snapshot consumption.
++    unsafe {
++      (*annex_ptr).global_liveness().dispose();
++      (*annex_ptr).isolate_handle.dispose();
++    }
+     let taken_annex =
+       self.take_data_internal(Self::ANNEX_SLOT) as *mut IsolateAnnex;
+     debug_assert_eq!(taken_annex, annex_ptr);
+@@ -1751,6 +1757,11 @@
+         );
+       }
+     }
++  }
++
 +  /// Customize the exception raised after a native object access check fails.
 +  pub fn set_failed_access_check_callback(&mut self, callback: impl MapFnTo<FailedAccessCheckCallback>) {
 +    unsafe { v8__Isolate__SetFailedAccessCheckCallbackFunction(self.as_real_ptr(),callback.map_fn_to()) };
-+  }
-+
+   }
+ 
    /// Sets a callback for counting the number of times a feature of V8 is used.
-   #[inline(always)]
-   pub fn set_use_counter_callback(&mut self, callback: UseCounterCallback) {
+@@ -2884,6 +2895,10 @@
+       // teardown GC has a chance to fire weak callbacks that need the
+       // annex.
+       Isolate::run_remaining_guaranteed_finalizers(annex_ptr);
++      // Invalidate surviving native handles only after owned slots and
++      // guaranteed finalizers have reset registered V8 weak handles.
++      (*annex_ptr).global_liveness().dispose();
++      (*annex_ptr).isolate_handle.dispose();
+       Platform::notify_isolate_shutdown(&get_current_platform(), self);
+       // V8's final teardown runs here. `ANNEX_SLOT` still references the
+       // (drained) annex, so any re-entrant access from weak callbacks or

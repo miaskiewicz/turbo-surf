@@ -93,9 +93,9 @@ async fn frame_records_do_not_expose_a_cross_origin_document() {
         r#"
       const frame=document.createElement('iframe');frame.src='http://127.0.0.1:{port}/frame';
       frame.onload=()=>{{
-        const record=globalThis[Symbol.for('ts')].frameRecordFor(frame);
-        let blocked=false;try{{void record.realm.document;}}catch(error){{blocked=true;}}
-        document.body.setAttribute('data-safe',String(blocked&&!record.document&&!record.doc&&!record.ops));
+        const namespace=globalThis[Symbol.for('ts')];
+        let blocked=false;try{{void frame.contentWindow.document;}}catch(error){{blocked=error.name==='SecurityError';}}
+        document.body.setAttribute('data-safe',String(blocked&&frame.contentDocument===null&&namespace.frameRecordFor===undefined));
       }};document.body.appendChild(frame);
     "#
     );

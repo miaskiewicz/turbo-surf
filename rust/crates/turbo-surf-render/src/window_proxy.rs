@@ -3,13 +3,92 @@ use super::*;
 #[path = "frame_location.rs"]
 mod location;
 
-struct Proxy(v8::Global<v8::Object>);
-struct Document(v8::Global<v8::Value>);
-struct Origin(v8::Global<v8::Value>);
-struct ExceptionConstructor(v8::Global<v8::Function>);
-type CachedFunctions = std::collections::HashMap<String, v8::Global<v8::Function>>;
+struct Proxy(v8::Weak<v8::Object>);
+struct Document(v8::Weak<v8::Value>);
+struct Origin(v8::Weak<v8::Value>);
+struct ExceptionConstructor(v8::Weak<v8::Function>);
+struct LexicalOwner(v8::Weak<v8::Object>);
 #[derive(Default)]
-struct Functions(RefCell<Vec<(v8::Global<v8::Object>, CachedFunctions)>>);
+struct WindowContexts(RefCell<Vec<v8::Weak<v8::Context>>>);
+fn register_context(scope: &mut v8::PinScope) {
+    let context = scope.get_current_context();
+    let registry = scope
+        .get_slot::<Rc<WindowContexts>>()
+        .cloned()
+        .unwrap_or_else(|| {
+            let registry = Rc::new(WindowContexts::default());
+            scope.set_slot(registry.clone());
+            registry
+        });
+    let mut contexts = registry.0.borrow_mut();
+    contexts.retain(|context| !context.is_empty());
+    if !contexts
+        .iter()
+        .any(|owner| owner.to_local(scope) == Some(context))
+    {
+        contexts.push(v8::Weak::new(scope, context));
+    }
+}
+struct Functions {
+    map: RefCell<v8::Weak<v8::Object>>,
+    constructor: v8::Weak<v8::Function>,
+    get: v8::Weak<v8::Function>,
+    set: v8::Weak<v8::Function>,
+}
+
+fn retain_owned<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    name: &str,
+    value: v8::Local<'s, v8::Value>,
+) -> Option<()> {
+    let context = scope.get_current_context();
+    let owner = if let Some(owner) = context.get_slot::<LexicalOwner>() {
+        owner.0.to_local(scope)?
+    } else {
+        // Native GetPrototype does not skip the hidden JSGlobalObject. Capturing
+        // it before navigation preserves lexical ownership when its proxy moves.
+        let owner = context
+            .global(scope)
+            .get_prototype(scope)?
+            .to_object(scope)?;
+        context.set_slot(Rc::new(LexicalOwner(v8::Weak::new(scope, owner))));
+        owner
+    };
+    let name = v8::String::new(scope, &format!("turbo-surf.lexical-window.{name}"))?;
+    let key = v8::Private::for_api(scope, Some(name));
+    (owner.set_private(scope, key, value) == Some(true)).then_some(())
+}
+fn capture_functions(scope: &mut v8::PinScope) -> Option<()> {
+    let context = scope.get_current_context();
+    if context.get_slot::<Functions>().is_some() {
+        return Some(());
+    }
+    let global = context.global(scope);
+    let key = v8::String::new(scope, "WeakMap")?;
+    let constructor = v8::Local::<v8::Function>::try_from(global.get(scope, key.into())?).ok()?;
+    let key = v8::String::new(scope, "prototype")?;
+    let prototype = constructor.get(scope, key.into())?.to_object(scope)?;
+    let key = v8::String::new(scope, "get")?;
+    let get = v8::Local::<v8::Function>::try_from(prototype.get(scope, key.into())?).ok()?;
+    let key = v8::String::new(scope, "set")?;
+    let set = v8::Local::<v8::Function>::try_from(prototype.get(scope, key.into())?).ok()?;
+    let map = constructor.new_instance(scope, &[])?;
+    for (name, value) in [
+        ("functions", map.into()),
+        ("weakmap-constructor", constructor.into()),
+        ("weakmap-get", get.into()),
+        ("weakmap-set", set.into()),
+    ] {
+        retain_owned(scope, name, value)?;
+    }
+    context.set_slot(Rc::new(Functions {
+        map: RefCell::new(v8::Weak::new(scope, map)),
+        constructor: v8::Weak::new(scope, constructor),
+        get: v8::Weak::new(scope, get),
+        set: v8::Weak::new(scope, set),
+    }));
+    Some(())
+}
 
 fn access_allowed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -26,15 +105,20 @@ fn access_allowed<'s>(
 
 pub(super) fn capture_exception(scope: &mut v8::PinScope) {
     let context = scope.get_current_context();
+    if capture_functions(scope).is_none() {
+        return;
+    }
     let global = context.global(scope);
     let key = v8::String::new(scope, "DOMException").unwrap();
     if let Some(function) = global
         .get(scope, key.into())
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     {
-        context.set_slot(Rc::new(ExceptionConstructor(v8::Global::new(
-            scope, function,
-        ))));
+        if retain_owned(scope, "exception", function.into()).is_some() {
+            context.set_slot(Rc::new(ExceptionConstructor(v8::Weak::new(
+                scope, function,
+            ))));
+        }
     }
 }
 
@@ -45,7 +129,9 @@ fn named_exception(scope: &mut v8::PinScope, message: &str, name: &str) {
     // A retired realm's global proxy may now belong to another origin. Reading
     // its DOMException property here would recursively fail the same access check.
     if let Some(constructor) = context.get_slot::<ExceptionConstructor>() {
-        let constructor = v8::Local::new(scope, &constructor.0);
+        let Some(constructor) = constructor.0.to_local(scope) else {
+            return;
+        };
         if let Some(error) = constructor.new_instance(scope, &[message.into(), name.into()]) {
             scope.throw_exception(error.into());
             return;
@@ -74,40 +160,108 @@ pub(super) fn failed_access(
 
 fn document_get(
     scope: &mut v8::PinScope,
-    _args: v8::FunctionCallbackArguments,
+    args: v8::FunctionCallbackArguments,
     mut result: v8::ReturnValue,
 ) {
-    let context = scope.get_current_context();
-    let Some(proxy) = context.get_slot::<Proxy>() else {
+    let source = scope.get_current_context();
+    let lexical = source
+        .get_slot::<LexicalOwner>()
+        .and_then(|owner| owner.0.to_local(scope));
+    let target = if lexical.is_some_and(|owner| owner.strict_equals(args.this().into())) {
+        source
+            .get_slot::<Proxy>()
+            .and_then(|proxy| proxy.0.to_local(scope))
+    } else {
+        Some(args.this())
+    };
+    let Some(target) = target else {
         return;
     };
-    let proxy = v8::Local::new(scope, &proxy.0);
-    let Some(active) = proxy.get_creation_context(scope) else {
+    let Some(active) = target.get_creation_context(scope) else {
         return;
     };
-    if !context
+    if !active.global(scope).strict_equals(target.into()) {
+        let message = v8::String::new(scope, "Illegal invocation").unwrap();
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+        return;
+    }
+    if !source
         .get_security_token(scope)
         .strict_equals(active.get_security_token(scope))
     {
         deny(scope);
         return;
     }
-    if let Some(document) = active.get_slot::<Document>() {
-        result.set(v8::Local::new(scope, &document.0));
+    let document = active
+        .get_slot::<Document>()
+        .and_then(|document| document.0.to_local(scope))
+        .or_else(|| {
+            let name = v8::String::new(scope, "turbo-dom.ownership.window-document")?;
+            let key = v8::Private::for_api(scope, Some(name));
+            active.global(scope).get_private(scope, key)
+        });
+    if let Some(document) = document {
+        result.set(document);
     }
 }
 
+fn closed_get(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let Some(context) = args.this().get_creation_context(scope) else {
+        return;
+    };
+    if !context.global(scope).strict_equals(args.this().into()) {
+        let message = v8::String::new(scope, "Illegal invocation").unwrap();
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+        return;
+    }
+    result.set_bool(context.get_slot::<FrameRetired>().is_some());
+}
+
 pub(super) fn install_document(scope: &mut v8::PinScope) {
+    register_context(scope);
     let context = scope.get_current_context();
     let global = context.global(scope);
+    let native_name = v8::String::new(scope, "turbo-dom.ownership.window-document").unwrap();
+    let native_key = v8::Private::for_api(scope, Some(native_name));
+    let Some(document) = global.get_private(scope, native_key) else {
+        return;
+    };
     let key = v8::String::new(scope, "document").unwrap();
-    let document = global.get(scope, key.into()).unwrap();
-    context.set_slot(Rc::new(Document(v8::Global::new(scope, document))));
-    context.set_slot(Rc::new(Origin(v8::Global::new(
-        scope,
-        context.get_security_token(scope),
-    ))));
-    context.set_slot(Rc::new(Proxy(v8::Global::new(scope, global))));
+    let origin = context.get_security_token(scope);
+    for (name, value) in [
+        ("document", document),
+        ("origin", origin),
+        ("proxy", global.into()),
+    ] {
+        if retain_owned(scope, name, value).is_none() {
+            return;
+        }
+    }
+    context.set_slot(Rc::new(Document(v8::Weak::new(scope, document))));
+    context.set_slot(Rc::new(Origin(v8::Weak::new(scope, origin))));
+    context.set_slot(Rc::new(Proxy(v8::Weak::new(scope, global))));
+    let Some(closed) = v8::Function::builder(closed_get)
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope)
+    else {
+        return;
+    };
+    let name = v8::String::new(scope, "get closed").unwrap();
+    closed.set_name(name);
+    let undefined = v8::undefined(scope);
+    let mut descriptor = v8::PropertyDescriptor::new_from_get_set(closed.into(), undefined.into());
+    descriptor.set_enumerable(true);
+    descriptor.set_configurable(true);
+    let name = v8::String::new(scope, "closed").unwrap();
+    if global.define_property(scope, name.into(), &descriptor) != Some(true) {
+        return;
+    }
     let getter = v8::Function::builder(document_get)
         .constructor_behavior(v8::ConstructorBehavior::Throw)
         .build(scope)
@@ -127,26 +281,36 @@ pub(super) fn install_document(scope: &mut v8::PinScope) {
 pub(super) fn synchronize_origins(scope: &mut v8::PinScope, active: v8::Local<v8::Context>) {
     let proxy = active.global(scope);
     let token = active.get_security_token(scope);
-    let contexts = JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<FrameContexts>()
-        .contexts
-        .clone();
+    let contexts = scope
+        .get_slot::<Rc<WindowContexts>>()
+        .map(|registry| {
+            let mut contexts = registry.0.borrow_mut();
+            contexts.retain(|context| !context.is_empty());
+            contexts.clone()
+        })
+        .unwrap_or_default();
     for context in contexts {
-        let context = v8::Local::new(scope, context);
+        let Some(context) = context.to_local(scope) else {
+            continue;
+        };
         if context == active {
             continue;
         }
         let Some(previous) = context.get_slot::<Proxy>() else {
             continue;
         };
-        if !v8::Local::new(scope, &previous.0).strict_equals(proxy.into()) {
+        let Some(previous) = previous.0.to_local(scope) else {
+            continue;
+        };
+        if !previous.strict_equals(proxy.into()) {
             continue;
         }
         let Some(origin) = context.get_slot::<Origin>() else {
             continue;
         };
-        let origin = v8::Local::new(scope, &origin.0);
+        let Some(origin) = origin.0.to_local(scope) else {
+            continue;
+        };
         if origin.strict_equals(token) {
             context.set_security_token(origin);
         } else {
@@ -194,7 +358,7 @@ fn cached_function<'s>(
     name: &str,
     callback: v8::FunctionCallback,
     length: i32,
-) -> v8::Local<'s, v8::Function> {
+) -> Option<v8::Local<'s, v8::Function>> {
     cached_function_with_data(scope, target, name, callback, length, target.into())
 }
 
@@ -205,35 +369,36 @@ fn cached_function_with_data<'s>(
     callback: v8::FunctionCallback,
     length: i32,
     data: v8::Local<'s, v8::Value>,
-) -> v8::Local<'s, v8::Function> {
+) -> Option<v8::Local<'s, v8::Function>> {
+    capture_functions(scope)?;
     let caller = scope.get_current_context();
-    if caller.get_slot::<Functions>().is_none() {
-        caller.set_slot(Rc::new(Functions::default()));
-    }
-    let functions = caller.get_slot::<Functions>().unwrap();
-    let mut functions = functions.0.borrow_mut();
-    let index = functions
-        .iter()
-        .position(|(object, _)| v8::Local::new(scope, object).strict_equals(target.into()))
-        .unwrap_or_else(|| {
-            functions.push((v8::Global::new(scope, target), Default::default()));
-            functions.len() - 1
-        });
-    if let Some(function) = functions[index].1.get(name) {
-        return v8::Local::new(scope, function);
+    let functions = caller.get_slot::<Functions>()?;
+    let map = functions.map.borrow().to_local(scope)?;
+    let get = functions.get.to_local(scope)?;
+    let row = get.call(scope, map.into(), &[target.into()])?;
+    let row = if let Ok(row) = v8::Local::<v8::Map>::try_from(row) {
+        row
+    } else {
+        let row = v8::Map::new(scope);
+        let set = functions.set.to_local(scope)?;
+        set.call(scope, map.into(), &[target.into(), row.into()])?;
+        row
+    };
+    let key = v8::String::new(scope, name)?;
+    if let Some(function) = row
+        .get(scope, key.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    {
+        return Some(function);
     }
     let function = v8::Function::builder_raw(callback)
         .data(data)
         .length(length)
         .constructor_behavior(v8::ConstructorBehavior::Throw)
-        .build(scope)
-        .unwrap();
-    let key = v8::String::new(scope, name).unwrap();
+        .build(scope)?;
     function.set_name(key);
-    functions[index]
-        .1
-        .insert(name.to_string(), v8::Global::new(scope, function));
-    function
+    row.set(scope, key.into(), function.into())?;
+    Some(function)
 }
 
 fn cross_set<'s>(
@@ -300,7 +465,10 @@ fn cross_descriptor<'s>(
                 1,
             ),
         ] {
-            let function = cached_function(scope, args.holder(), method, callback, length);
+            let Some(function) = cached_function(scope, args.holder(), method, callback, length)
+            else {
+                return v8::Intercepted::kYes;
+            };
             let key = v8::String::new(scope, key).unwrap();
             object.set(scope, key.into(), function.into());
         }
@@ -313,14 +481,16 @@ fn cross_descriptor<'s>(
         let property = property.as_deref().unwrap();
         let name = v8::String::new(scope, property).unwrap();
         let data = v8::Array::new_with_elements(scope, &[args.holder().into(), name.into()]);
-        let getter = cached_function_with_data(
+        let Some(getter) = cached_function_with_data(
             scope,
             args.holder(),
             &format!("get {property}"),
             v8::MapFnTo::map_fn_to(cross_property_get),
             0,
             data.into(),
-        );
+        ) else {
+            return v8::Intercepted::kYes;
+        };
         let key = v8::String::new(scope, "get").unwrap();
         object.set(scope, key.into(), getter.into());
     } else {
@@ -434,7 +604,10 @@ fn cross_value<'s>(
         "parent" | "top" => {
             let mut owner = context;
             while let Some(parent) = owner.get_slot::<FrameParent>() {
-                owner = v8::Local::new(scope, &parent.0);
+                let Some(parent) = parent.0.to_local(scope) else {
+                    break;
+                };
+                owner = parent;
                 if property == "parent" {
                     break;
                 }
@@ -453,7 +626,7 @@ fn cross_value<'s>(
                 property,
                 callback,
                 if property == "postMessage" { 1 } else { 0 },
-            )
+            )?
             .into()
         }
         _ => {
@@ -590,13 +763,25 @@ pub(super) fn location_installed(scope: &mut v8::PinScope) -> bool {
 pub(super) fn seed_location(scope: &mut v8::PinScope, url: &str) {
     let context = scope.get_current_context();
     if let Some(functions) = context.get_slot::<Functions>() {
-        let window = context.global(scope);
-        // The nonconfigurable root Location accessors keep their identity across
-        // pooled installs; cross-frame methods must not retain previous pages.
-        functions
-            .0
-            .borrow_mut()
-            .retain(|(target, _)| v8::Local::new(scope, target).strict_equals(window.into()));
+        let old_map = functions.map.borrow().to_local(scope);
+        if let (Some(map), Some(get), Some(set), Some(constructor)) = (
+            old_map,
+            functions.get.to_local(scope),
+            functions.set.to_local(scope),
+            functions.constructor.to_local(scope),
+        ) {
+            let window = context.global(scope);
+            if let (Some(row), Some(new)) = (
+                get.call(scope, map.into(), &[window.into()]),
+                constructor.new_instance(scope, &[]),
+            ) {
+                if set.call(scope, new.into(), &[window.into(), row]).is_some()
+                    && retain_owned(scope, "functions", new.into()).is_some()
+                {
+                    *functions.map.borrow_mut() = v8::Weak::new(scope, new);
+                }
+            }
+        }
     }
     location::seed(scope, url);
 }

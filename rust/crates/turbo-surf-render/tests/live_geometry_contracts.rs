@@ -392,8 +392,7 @@ fn ordinary_rotated_div_and_image_geometry_origins_hits_and_carets_match_chrome(
     );
 }
 
-#[test]
-fn original_utf16_boundaries_survive_scalar_shaping_and_private_range_caret_lifecycle() {
+fn utf16_geometry_observation() -> (serde_json::Value, serde_json::Value) {
     let probe = include_str!("../../../../harness/detection/utf16-text-geometry-probe.js")
         .trim()
         .trim_end_matches(';');
@@ -406,8 +405,37 @@ fn original_utf16_boundaries_survive_scalar_shaping_and_private_range_caret_life
         &format!("JSON.stringify({probe})"),
     )
     .unwrap();
-    assert_eq!(
+    (
         serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
-        expected["result"]
-    );
+        expected["result"].clone(),
+    )
+}
+
+#[test]
+fn original_utf16_boundaries_and_private_range_caret_lifecycle_match_chrome() {
+    let (actual, expected) = utf16_geometry_observation();
+    // Font availability changes glyph metrics, but not DOM code-unit boundaries,
+    // private receiver access, or retained caret lifetime. Keep those exact on every OS.
+    for field in [
+        "originalUnits",
+        "length",
+        "selections",
+        "privateBoxesUnchanged",
+        "allOffsetsPlaced",
+        "pairHalvesShareBox",
+        "insidePairCollapsedWidthZero",
+        "retained",
+        "shortenedRectEmpty",
+        "restoredRectPlaced",
+        "hooks",
+    ] {
+        assert_eq!(actual[field], expected[field], "UTF-16 contract: {field}");
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn original_utf16_system_font_geometry_matches_independent_macos_chrome() {
+    let (actual, expected) = utf16_geometry_observation();
+    assert_eq!(actual, expected);
 }

@@ -118,6 +118,10 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Layout, CSS and resources
 
+- Preserve the complete exact macOS UTF-16/font geometry oracle and run exact
+  font-independent code-unit, selection, private access and caret lifetime
+  contracts on every platform. Linux fallback fonts differ from the captured
+  macOS system-font environment; Linux glyph parity remains unmeasured.
 - Connect native live-tree snapshots/private CSSOM to branded per-realm rectangle
   interfaces, transforms, client/offset metrics, scrolling/clamping, point hits,
   shaped original-unit text, Range/caret geometry and outer SVG boxes. Preserve

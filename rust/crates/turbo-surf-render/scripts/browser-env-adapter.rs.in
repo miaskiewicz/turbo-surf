@@ -29,3 +29,7 @@ pub(crate) use live_layout_dom::{
     capture_document as capture_native_document_layout,
     valid_receiver as valid_native_geometry_receiver, wrap_elements as wrap_native_layout_elements,
 };
+
+#[path = "compression_dictionary_dom.rs"]
+mod compression_dictionary_dom;
+pub(crate) use compression_dictionary_dom::links as native_compression_dictionary_links;

@@ -112,16 +112,17 @@
     return result;
   }
 
+  let formIteratorRead = null;
   function collectionInterface(name) {
     const ctor = make(function () { throw new TypeError('Illegal constructor'); }, name, 0, true);
     const proto = ctor.prototype;
     Object.defineProperty(proto, Symbol.toStringTag, { value: name, configurable: true });
     Object.defineProperty(ctor, 'prototype', { writable: false });
     Object.defineProperty(g, name, { value: ctor, writable: true, configurable: true });
-    const record = receiver => { const value = getRecord(receiver); if (!value || value.kind!==name) throw new TypeError('Illegal invocation'); return value.read; };
+    const record = receiver => { const value = getRecord(receiver); if (!value || !(value.kind===name || name==='HTMLCollection'&&value.kind==='HTMLFormControlsCollection' || name==='NodeList'&&value.kind==='RadioNodeList')) throw new TypeError('Illegal invocation'); return value.read; };
     property(proto, 'length', function () { return record(this)().length; });
     method(proto, 'item', function (index) { if (!arguments.length) throw new TypeError('item requires 1 argument'); return record(this)()[(+index) >>> 0] || null; }, 1);
-    Object.defineProperty(proto, Symbol.iterator, { value: make(function () { record(this); return collectionApply(collectionValues,this,[]); }, 'values', 0), writable: true, configurable: true });
+    Object.defineProperty(proto, Symbol.iterator, { value: make(function () { if(name==='HTMLCollection'&&formIteratorRead){const target=formIteratorRead(this);if(target)return collectionApply(collectionValues,target,[]);}record(this); return collectionApply(collectionValues,this,[]); }, 'values', 0), writable: true, configurable: true });
     return { proto, record };
   }
   const collection = collectionInterface('HTMLCollection');
@@ -131,12 +132,15 @@
   for (const [name,implementation] of [['entries',collectionEntries],['keys',collectionKeys],['values',collectionValues]]) method(nodeList.proto,name,function(){nodeList.record(this);return collectionApply(implementation,this,[]);},0);
   Object.defineProperty(nodeList.proto, Symbol.iterator, {value: nodeList.proto.values, writable: true, configurable: true});
   method(nodeList.proto, 'forEach', function (callback, thisArg) { nodeList.record(this); if (typeof callback !== 'function') throw new TypeError('callback must be a function'); collectionApply(collectionForEach,this,[callback,thisArg]); }, 1);
-  function live(list, namedProperties) {
-    const proto = namedProperties ? collection.proto : nodeList.proto;
+  function live(list, namedProperties, options) {
+    const proto = options ? options.prototype : namedProperties ? collection.proto : nodeList.proto;
+    const namedLookup = options ? options.named : named;
     const object = ns.makeNamedObject(proto, function (operation, key) {
       const rows = list();
       const indexed = /^(0|[1-9][0-9]*)$/.test(key) && Number(key) < 4294967295;
-      const supported = indexed ? Number(key) < rows.length : namedProperties && !(key in proto) && named(rows, key) !== null;
+      if(indexed&&options&&options.readonlyIndices&&(operation==='set'||operation==='define'))return true;
+      const hiddenNames=!!(options&&options.hiddenNames);
+      const supported = indexed ? Number(key) < rows.length || hiddenNames&&operation==='descriptor'&&namedLookup(rows,key)!==null : namedProperties && (hiddenNames||!(key in proto)) && namedLookup(rows, key) !== null;
       if (operation === 'indices') {const indices=[];for(let index=0;index<rows.length;index++)collectionOwn(indices,index,index);return indices;}
       if (operation === 'keys') {
         const names = [];
@@ -145,24 +149,25 @@
           for(let at=0;at<values.length;at++){
             const value=values[at];let duplicate=false;
             for(let existing=0;existing<names.length;existing++)if(names[existing]===value){duplicate=true;break;}
-            if(value&&!/^(0|[1-9][0-9]*)$/.test(value)&&!(value in proto)&&!duplicate)collectionOwn(names,names.length,value);
+            if(value&&(hiddenNames||!/^(0|[1-9][0-9]*)$/.test(value)&&!(value in proto))&&!duplicate)collectionOwn(names,names.length,value);
           }
         }
         return names;
       }
       if (!supported) return undefined;
-      const value = indexed ? rows[Number(key)] : named(rows, key);
+      const value = indexed && Number(key)<rows.length ? rows[Number(key)] : namedLookup(rows, key);
       if (operation === 'get') return value;
       if (operation === 'has') return true;
-      if (operation === 'descriptor') return { value, writable: false, enumerable: indexed, configurable: true };
+      if (operation === 'descriptor') return { value, writable: false, enumerable: indexed || !!(options&&options.namedEnumerable), configurable: true };
       if (operation === 'delete') return false;
       if (operation === 'set' || operation === 'define') return true;
       return undefined;
     }, true);
-    setRecord(object,{kind:namedProperties?'HTMLCollection':'NodeList',read:list});
+    setRecord(object,{kind:options?options.kind:namedProperties?'HTMLCollection':'NodeList',read:list});
     return object;
   }
   ns.internalsLiveCollection = live;
+  ns.formCollectionFactory={live,getRecord,setIterator:read=>{formIteratorRead=read;}};
   const caches = new WeakMap(), cacheGet=WeakMap.prototype.get.bind(caches),cacheSet=WeakMap.prototype.set.bind(caches);
   function cached(receiver, key, read, namedProperties = true) {
     let cache = cacheGet(receiver);

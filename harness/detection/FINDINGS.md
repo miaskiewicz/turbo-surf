@@ -26,13 +26,14 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    admission clears the subsequently observed rule0 failure; unsafe or unknown
    declarations still fail explicitly.
    Decorated/mixed-font inline boxes and broader resource/layout behavior remain open.
-3. **DOM / forms:** canonical turbo-test2e27274 is officially vendored. All six DOM
+3. **DOM / forms:** canonical turbo-test51b5b97 is officially vendored. All six DOM
    consumers use public immutable0.5.7 candidatefb60e6f (registry latest0.5.6).
    Native AbstractRange/NodeRange/StaticRange, ElementInternals/CustomStateSet,
    checked/defaultChecked/reset/clone and genuine FormData events are integrated.
    Production tests cover30-reference internals GC, borrowed interfaces, actual
    HTTP entry mutation/order/CSP, redirects/consent cookies and same-URL POST state.
-   Disconnected/removed forms do not submit. Full radio/adoption, FileList/multipart/
+   Disconnected/removed forms do not submit. Native radio grouping/adoption and
+   live form collections now have independent controls; broader radio behavior, FileList/multipart/
    other-target forms and broader parsing/observer/reaction behavior remain open.
 4. **Audio:** deferred in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
    NEON code is limited to ARM, with real x86_64/arm64 delay PCM proofs. A separate
@@ -62,10 +63,13 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    smaller scopes are not directly comparable. The reproducible
    [API-INVENTORY.json](./API-INVENTORY.json) retains every observed path and hashes.
 9. **Housekeeping:** integrations66dab51,93bcacd,a37330f,dd73863 and544180d are pushed.
-   Canonical2e27274 is vendored. The elapsed-wait, layout and private Deno event-array batch is committed.
-   Its CI exposed a capacity-fixture timeout on slower Linux runners; the next
-   candidate preserves the exact4096-task capacity oracle while separating its
-   budget from the resource limit. Final CI remains pending. Every remaining
+   Canonical51b5b97 is vendored in the next integration batch. Runtime follow-up
+   26a08b5 is pushed, including the exact4096-task capacity control with a separate
+   conformance-fixture budget. Its Linux CI now exposes a macOS system-font oracle
+   applied on Linux; the correction retains the full exact macOS comparison and
+   separately checks exact font-independent UTF-16/lifecycle invariants everywhere.
+   The correction is pushed as6f9ebc7 with fresh CI pending. A fresh Linux Chrome/font
+   measurement remains open. Every remaining
    category has durable coverage in issue28; audio remains deferred in issue27.
    No Surf release tag is created.
 10. **Live Google:** the optimized544180d matrix repeats twice with fresh independent
@@ -84,7 +88,9 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
     Chrome cookies are never imported. Reliable native SERP remains unresolved.
 11. **Current runtime follow-up:** an offline native-op admission probe reproduces
     Missing promise after watchdog termination; a hash-pinned experimental155
-    transaction patch is under validation. The full default suite also exposed
+    transaction patch passes the offline preimage/recovery/rejection controls and is
+    included in pushed26a08b5. It applies only to the managed experimental155 SDK;
+    interrupted-reservation retention and production distribution remain open. The full default suite also exposed
     premature GC of an awaited timeout signal; a realm-local lifetime fix passes
     the exact failing test without changing its budget or Chrome expectation.
     The native155 follow-up passes155 focused tests (events9, Fetch/GC7,
@@ -97,7 +103,8 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
 
 12. **New measured transport gap:** the saved Chrome Google run fetches compression
     dictionaries and sends Available-Dictionary; one response actually uses dcb.
-    Native has no dictionary discovery/cache/decode chain. The bounded TLS/H2 and
+    The frozen live executable has no dictionary discovery/cache/decode chain.
+    A genuine source integration is in progress; it has not been live-validated. The bounded TLS/H2 and
     shared GPU controls match their measured scope. This is a real pending resource
     feature, not evidence that changing the base recipe label fixes acceptance.
     [Sanitized evidence](./compression-dictionary-saved-evidence.json) and the
@@ -109,6 +116,35 @@ Default all-target strict checks and formatting pass. Native155 affected tests
 pass155/155 and native all-target strict checks pass. These results precede the
 next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
 and fresh live validation remain pending.
+
+### Focused source integration results
+
+The current stock-engine renderer library passes326 tests. Core passes220 tests;
+its independent HTTPS dictionary gates pass10 controls on each transport,
+including headers before body completion, incremental dictionary-dependent
+output, cancellation and no partial cache publication. Actual155 production
+form collections/real-frame GC pass2 tests, form navigation passes12 tests and
+geometry passes23 tests. Source/control hashes and logs are retained with those
+component handoffs. The final actual155 combined component cohort passes46 tests with zero
+ignores/filters, including all32 dictionary Chrome cases and the ordinary radio
+GC test. Stock326 library tests plus dictionary and radio integration tests
+pass328/328. These are component results, not a final full-workspace gate.
+
+Dictionary discovery has32 fresh actual Chrome cases. The combined run exposed
+a real task-source difference: blocked resource errors used the Window timer
+queue, producing a different order while images or scripts delayed readiness.
+A separate bounded resource task source now passes the exact saved Chrome order,
+including a future-timer control and per-frame fairness; it does not hold document
+readiness. The radio adoption-GC probe also retained the iframe load Event through
+its readiness Promise. Independent repeated Chrome controls now use explicit
+readiness cleanup and a recorded real-task/GC policy; the ordinary native
+regression passes on both stock and actual155 engines. No artificial native realm root is added to
+match the old contaminated snapshot.
+
+The offline harness passes74 tests with four explicit skips, plus two Python SDK
+helper tests. JS lint/format, release-version agreement, license notices and
+23 exact native audio-source checks pass. Final combined gates, refreshed API
+inventory and a rebuilt fresh Google run remain pending.
 
 ## Isolated CSP navigation checkpoint — 2026-10-14
 

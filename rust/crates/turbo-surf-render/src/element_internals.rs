@@ -179,6 +179,257 @@ mod tests {
         reset();
     }
     #[test]
+    fn native_form_collection_records_retain_only_their_genuine_owner_context() {
+        super::super::tests::init_v8();
+        let mut isolate = v8::Isolate::new(Default::default());
+        let (keep, context, document, form, controls, list) = {
+            v8::scope!(let scope,&mut isolate);
+            let context = v8::Context::new(scope, Default::default());
+            let scope = &mut v8::ContextScope::new(scope, context);
+            install_independent_html(scope, "<!doctype html><body>");
+            let source=v8::String::new(scope,"(()=>{const form=document.createElement('form');document.body.append(form);form.innerHTML='<input name=group><input name=group>';const controls=form.elements,list=controls.namedItem('group');return [document,form,controls,list]})()").unwrap();
+            let values = v8::Script::compile(scope, source, None)
+                .unwrap()
+                .run(scope)
+                .unwrap()
+                .to_object(scope)
+                .unwrap();
+            let document = values
+                .get_index(scope, 0)
+                .unwrap()
+                .to_object(scope)
+                .unwrap();
+            let form = values
+                .get_index(scope, 1)
+                .unwrap()
+                .to_object(scope)
+                .unwrap();
+            let controls = values
+                .get_index(scope, 2)
+                .unwrap()
+                .to_object(scope)
+                .unwrap();
+            let list = values
+                .get_index(scope, 3)
+                .unwrap()
+                .to_object(scope)
+                .unwrap();
+            (
+                v8::Global::new(scope, list),
+                v8::Weak::new(scope, context),
+                v8::Weak::new(scope, document),
+                v8::Weak::new(scope, form),
+                v8::Weak::new(scope, controls),
+                v8::Weak::new(scope, list),
+            )
+        };
+        isolate.clear_kept_objects();
+        for _ in 0..3 {
+            isolate.low_memory_notification();
+        }
+        assert!(
+            !context.is_empty()
+                && !document.is_empty()
+                && !form.is_empty()
+                && !controls.is_empty()
+                && !list.is_empty()
+        );
+        drop(keep);
+        isolate.clear_kept_objects();
+        for _ in 0..3 {
+            isolate.low_memory_notification();
+        }
+        assert!(
+            context.is_empty()
+                && document.is_empty()
+                && form.is_empty()
+                && controls.is_empty()
+                && list.is_empty()
+        );
+        clear_interface_records(&mut isolate);
+        reset();
+    }
+    #[test]
+    fn native_form_collection_base_accessors_borrow_across_genuine_contexts() {
+        super::super::tests::init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let child = v8::Context::new(scope, Default::default());
+        let collection = {
+            let scope = &mut v8::ContextScope::new(scope, child);
+            install_independent_html(scope, "<!doctype html><body>");
+            let source=v8::String::new(scope,"(()=>{const form=document.createElement('form');document.body.append(form);form.innerHTML='<input name=group><input name=group>';return form.elements;})()").unwrap();
+            let value = v8::Script::compile(scope, source, None)
+                .unwrap()
+                .run(scope)
+                .unwrap();
+            v8::Global::new(scope, value)
+        };
+        let parent = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, parent);
+        install_independent_html(scope, "<!doctype html><body>");
+        let key = v8::String::new(scope, "foreignControls").unwrap();
+        let global = parent.global(scope);
+        let value = v8::Local::new(scope, &collection);
+        global.set(scope, key.into(), value);
+        let source=v8::String::new(scope,"(()=>{const list=HTMLFormControlsCollection.prototype.namedItem.call(foreignControls,'group');return Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length').get.call(foreignControls)===2&&Object.getOwnPropertyDescriptor(NodeList.prototype,'length').get.call(list)===2&&RadioNodeList.prototype.hasOwnProperty('value')&&Object.getOwnPropertyDescriptor(RadioNodeList.prototype,'value').get.call(list)==='';})()").unwrap();
+        assert!(v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap()
+            .is_true());
+        reset();
+    }
+    #[test]
+    fn native_dirty_checkedness_survives_gc_and_requery() {
+        super::super::tests::init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        let context = {
+            v8::scope!(let scope,isolate);
+            let context = v8::Context::new(scope, Default::default());
+            let scope = &mut v8::ContextScope::new(scope, context);
+            install_independent_html(
+                scope,
+                "<!doctype html><body><input id='dirty-native' type='radio' checked>",
+            );
+            let source = v8::String::new(
+                scope,
+                "document.querySelector('#dirty-native').checked=false;true",
+            )
+            .unwrap();
+            assert!(v8::Script::compile(scope, source, None)
+                .unwrap()
+                .run(scope)
+                .unwrap()
+                .is_true());
+            v8::Global::new(scope, context)
+        };
+        isolate.clear_kept_objects();
+        for _ in 0..3 {
+            isolate.low_memory_notification();
+        }
+        {
+            v8::scope!(let scope,isolate);
+            let context = v8::Local::new(scope, &context);
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let source=v8::String::new(scope,"(()=>{const node=document.querySelector('#dirty-native');const before=node.checked;node.defaultChecked=false;node.defaultChecked=true;return before===false&&node.checked===false&&node.defaultChecked===true;})()").unwrap();
+            assert!(v8::Script::compile(scope, source, None)
+                .unwrap()
+                .run(scope)
+                .unwrap()
+                .is_true());
+        }
+        drop(context);
+        reset();
+    }
+    #[test]
+    fn retired_radio_gc_control_records_independent_repeated_real_task_policy() {
+        use sha2::{Digest, Sha256};
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("radio_dirty_adoption_gc_chrome155.json")).unwrap();
+        let review: serde_json::Value = serde_json::from_str(include_str!(
+            "radio_dirty_adoption_gc_review_chrome155.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            fixture["probeSha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!("radio_dirty_adoption_gc_probe.js"))
+            )
+        );
+        assert_eq!(
+            fixture["casesSha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!("radio_dirty_cases.json"))
+            )
+        );
+        assert_eq!(
+            fixture["gcPolicy"],
+            serde_json::json!({"rounds":3,"settleMs":50,"taskExpression":"0"})
+        );
+        for repeated in review["correctedSettledRepeats"].as_array().unwrap() {
+            for key in [
+                "browser",
+                "v8",
+                "casesSha256",
+                "probeSha256",
+                "collectorSha256",
+                "errors",
+                "gcPolicy",
+                "result",
+            ] {
+                assert_eq!(repeated[key], fixture[key]);
+            }
+        }
+        assert_eq!(
+            review["correctedSettledRepeats"].as_array().unwrap().len(),
+            3
+        );
+        assert_eq!(
+            review["nativeProof"]["first"],
+            fixture["result"][0]["result"]["first"]
+        );
+        assert_eq!(
+            review["nativeProof"]["afterRelease"],
+            fixture["result"][0]["result"]["afterRelease"]
+        );
+        assert_eq!(review["nativeProof"]["probeSha256"], fixture["probeSha256"]);
+        assert_eq!(review["nativeProof"]["retiredFrameElementNull"], true);
+    }
+    #[test]
+    fn native_radio_owner_adversarial_review_matches_independent_chrome() {
+        assert_control(
+            include_bytes!("radio_dirty_cases.json"),
+            include_str!("radio_owner_review_probe.js"),
+            include_str!("radio_owner_review_chrome155.json"),
+            false,
+        );
+    }
+    #[test]
+    fn native_radio_group_moves_match_independent_chrome() {
+        assert_control(
+            include_bytes!("radio_dirty_cases.json"),
+            include_str!("radio_group_moves_probe.js"),
+            include_str!("radio_group_moves_chrome155.json"),
+            false,
+        );
+    }
+    #[test]
+    fn native_radio_dirty_matches_independent_chrome() {
+        assert_control(
+            include_bytes!("radio_dirty_cases.json"),
+            include_str!("radio_dirty_probe.js"),
+            include_str!("radio_dirty_chrome155.json"),
+            false,
+        );
+        assert_control(
+            include_bytes!("radio_dirty_cases.json"),
+            include_str!("radio_dirty_transition_probe.js"),
+            include_str!("radio_dirty_transition_chrome155.json"),
+            false,
+        );
+    }
+    #[test]
+    fn native_form_collections_match_independent_chrome() {
+        assert_control(
+            include_bytes!("form_collections_cases.json"),
+            include_str!("form_collections_probe.js"),
+            include_str!("form_collections_chrome155.json"),
+            false,
+        );
+    }
+    #[test]
+    fn native_submitter_reflection_matches_independent_chrome() {
+        assert_control(
+            include_bytes!("submitter_reflection_cases.json"),
+            include_str!("submitter_reflection_probe.js"),
+            include_str!("submitter_reflection_chrome155.json"),
+            false,
+        );
+    }
+    #[test]
     fn native_form_reflection_matches_independent_chrome() {
         assert_control(
             include_bytes!("form_reflection_cases.json"),

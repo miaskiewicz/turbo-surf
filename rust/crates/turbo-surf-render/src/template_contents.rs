@@ -230,8 +230,10 @@ pub(super) fn mark_parsed<'s>(
             pending.push(content)
         }
         pending.extend(children(scope, node));
+        custom_elements::parsed(scope, node);
         let _owner = DomScope::for_object(scope, node);
         if let Some(handle) = handle_of(scope, node) {
+            form_checked_state::refresh(handle);
             if with_tree(|tree| {
                 tree.node_type_id(handle) == 1
                     && tree.namespace_id(handle) == 0
@@ -242,6 +244,10 @@ pub(super) fn mark_parsed<'s>(
                 script_state::parsed(handle, inert)
             }
         }
+    }
+    let _owner = DomScope::for_object(scope, root);
+    if let Some(handle) = handle_of(scope, root) {
+        form_checked_state::inserted(handle);
     }
 }
 

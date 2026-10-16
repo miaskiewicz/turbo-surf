@@ -71,6 +71,11 @@ Direct ports of the JS modules, same behavior and edge cases:
   + TLS sessions are reused across pages. `request_context` derives destination/mode,
   referrer/Origin and credentials policy, with PSL site classification and session-scoped
   Accept-CH opt-ins. `FetchOptions::client_hints` shares this state with page execution.
+- `http_cache` / `compression_dictionary` — session-owned HTTP representations and
+  partitioned, origin-scoped compression dictionaries; genuine selected hash/ID
+  negotiation and bounded incremental Brotli/Zstandard decoding. The renderer owns
+  policy-aware background Link
+  discovery; see [controls and bounds](../harness/detection/COMPRESSION-DICTIONARIES.md).
 - `crawl` — frontier-driven scheduling: global + per-host concurrency, per-host
   politeness, retry/backoff, depth/page caps, robots gate. Fetch+parse seam is the
   `Navigator` trait (tier-2 `Page` implements it).

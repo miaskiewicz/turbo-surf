@@ -21,6 +21,12 @@ mod window_proxy;
 mod microtask_queue;
 use microtask_queue::op_install_microtask_queue;
 
+#[path = "compression_dictionary.rs"]
+mod compression_dictionary;
+use compression_dictionary::{
+    op_dictionary_active, op_dictionary_headers, op_dictionary_links, op_dictionary_prepare,
+};
+
 #[path = "resource_lifecycle.rs"]
 mod resource_lifecycle;
 use resource_lifecycle::{
@@ -236,6 +242,7 @@ struct CspHandle {
     partition: Option<Rc<CredentiallessPartition>>,
     policy: Rc<RefCell<crate::csp::DocumentPolicy>>,
     response_metadata: Rc<RefCell<crate::DocumentResponseMetadata>>,
+    dictionaries: Rc<RefCell<compression_dictionary::Discovery>>,
 }
 impl CspHandle {
     fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
@@ -244,6 +251,9 @@ impl CspHandle {
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
             partition: None,
+            dictionaries: Rc::new(RefCell::new(compression_dictionary::Discovery::new(
+                base, headers,
+            ))),
             response_metadata: Rc::new(RefCell::new(crate::DocumentResponseMetadata::default())),
             policy: Rc::new(RefCell::new(crate::csp::DocumentPolicy::new(
                 base, headers, html,
@@ -2802,17 +2812,29 @@ async fn op_fetch(
         };
     }
     let streaming_upload = init.get("upload").and_then(|value| value.as_bool()) == Some(true);
-    let before_request =
-        |context, target, method, headers| -> turbo_surf_core::net::BeforeRequestFuture {
-            Box::pin(crate::fetch_cors::authorize_streaming_request(
-                context,
-                target,
-                method,
-                headers,
-                client_hints.clone(),
-                streaming_upload,
-            ))
-        };
+    // Only the native dictionary snapshot emits this field. The public fetch
+    // wrapper serializes an explicit whitelist, so author Priority still preflights.
+    let dictionary_prefetch = init
+        .get("dictionary_prefetch")
+        .and_then(|value| value.as_bool())
+        == Some(true);
+    let before_request = |context,
+                          target,
+                          method,
+                          mut headers: std::collections::BTreeMap<String, String>|
+     -> turbo_surf_core::net::BeforeRequestFuture {
+        if dictionary_prefetch {
+            headers.retain(|name, _| !name.eq_ignore_ascii_case("priority"));
+        }
+        Box::pin(crate::fetch_cors::authorize_streaming_request(
+            context,
+            target,
+            method,
+            headers,
+            client_hints.clone(),
+            streaming_upload,
+        ))
+    };
     // Custom User-Agent (if set) overrides the net default for page fetches.
     if !ua.is_empty() {
         headers.insert("user-agent".to_string(), ua);
@@ -3464,12 +3486,14 @@ fn op_set_host_capabilities(
 struct TimerClock {
     started: std::time::Instant,
     advance: std::cell::Cell<f64>,
+    resource_cursor: std::cell::Cell<usize>,
 }
 impl Default for TimerClock {
     fn default() -> Self {
         Self {
             started: std::time::Instant::now(),
             advance: std::cell::Cell::new(0.0),
+            resource_cursor: std::cell::Cell::new(0),
         }
     }
 }
@@ -3495,7 +3519,7 @@ fn op_timer_advance(state: &mut OpState, due: f64) {
     }
 }
 
-fn run_next_window_timer(rt: &mut JsRuntime) -> u32 {
+fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> u32 {
     let mut contexts = vec![rt.main_context()];
     contexts.extend(
         rt.op_state()
@@ -3524,14 +3548,74 @@ fn run_next_window_timer(rt: &mut JsRuntime) -> u32 {
             }
         }
     }
-    let Some((_, context)) = next else {
+    let Some((due, context)) = next else {
         return 0;
     };
+    if !allow_advance {
+        let state = JsRuntime::op_state_from(scope);
+        let state = state.borrow();
+        let clock = state.borrow::<TimerClock>();
+        let now = clock.started.elapsed().as_secs_f64() * 1000.0 + clock.advance.get();
+        if due > now {
+            return 0;
+        }
+    }
     let active = &mut v8::ContextScope::new(scope, context);
     call_frame_helper(active, "runNextTimer", &[])
         .and_then(|value| value.uint32_value(active))
         .unwrap_or(0)
 }
+fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
+    let mut contexts = vec![rt.main_context()];
+    contexts.extend(
+        rt.op_state()
+            .borrow()
+            .borrow::<FrameContexts>()
+            .contexts
+            .iter()
+            .cloned(),
+    );
+    let start = rt
+        .op_state()
+        .borrow()
+        .borrow::<TimerClock>()
+        .resource_cursor
+        .get()
+        % contexts.len();
+    deno_core::scope!(scope, rt);
+    for offset in 0..contexts.len() {
+        let index = (start + offset) % contexts.len();
+        let context = &contexts[index];
+        let context = v8::Local::new(scope, context);
+        if context.get_slot::<FrameRetired>().is_some() {
+            continue;
+        }
+        let active = &mut v8::ContextScope::new(scope, context);
+        let caught = std::pin::pin!(v8::TryCatch::new(active));
+        let active = &mut caught.init();
+        let fired = call_frame_helper(active, "runNextBackgroundResourceTask", &[])
+            .and_then(|value| value.uint32_value(active))
+            .unwrap_or(0);
+        if fired > 0 || active.has_caught() {
+            JsRuntime::op_state_from(active)
+                .borrow()
+                .borrow::<TimerClock>()
+                .resource_cursor
+                .set(index + 1);
+        }
+        if active.has_caught() {
+            // The queue removes a task before invoking it; an exception must
+            // not retain its callback or discard later networking tasks.
+            eprintln!("[render] background resource task failed");
+            return 1;
+        }
+        if fired > 0 {
+            return 1;
+        }
+    }
+    0
+}
+
 struct FrameRetired;
 
 struct WindowMessageLimits {
@@ -3968,6 +4052,7 @@ fn call_frame_helper<'s>(
             | "setCurrentScript"
             | "timerNextDue"
             | "runNextTimer"
+            | "runNextBackgroundResourceTask"
             | "cancelDocumentTasks"
             | "retireResourceDocument"
             | "queueCspViolation"
@@ -6691,6 +6776,10 @@ deno_core::extension!(
         fetch_streams::op_fetch_read,
         op_fetch,
         op_load_image,
+        op_dictionary_active,
+        op_dictionary_headers,
+        op_dictionary_links,
+        op_dictionary_prepare,
         op_user_agent,
         op_fingerprint,
         op_browser_brands,
@@ -7806,6 +7895,9 @@ const __ReadablePipeThrough=ReadableStream.prototype.pipeThrough,__BodyTransform
 const __ReadableLocked=Object.getOwnPropertyDescriptor(ReadableStream.prototype,"locked").get;
 // fetch over the tier-1 net stack → a real Response (with real headers, so RSC
 // client navigation that reads `res.headers.get('content-type')` works).
+"##,
+    include_str!("compression_dictionary_fetch.js"),
+    r##"
 const __fetchFromSource = async (url, init, referrerSource) => {
   const source = ops.op_document_request_source(__document);
   const cookieSite = ops.op_document_cookie_site(__document);
@@ -7820,6 +7912,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   } else if (Array.isArray(hdrs)) {
     const obj = {}; for (const [k, v] of hdrs) obj[k] = v; hdrs = obj;
   }
+  __rejectManualDictionaryHeader(hdrs);
   const signal=o.signal??null;
   const isAborted=()=>signal!==null&&__baseApply(__AbortSignalAborted,signal,[]);
   const abortReason=()=>__baseApply(__AbortSignalReason,signal,[]);
@@ -9325,6 +9418,9 @@ const __resourceNativeBase=Function.prototype.call.bind(Object.getOwnPropertyDes
 const __resourceDocumentQuery=Document.prototype.querySelectorAll;
 const __resourceCompare=Node.prototype.compareDocumentPosition;
 const __resourceBaseURL=Object.getOwnPropertyDescriptor(Node.prototype,"baseURI").get;
+"##,
+    include_str!("compression_dictionary.js"),
+    r##"
 function __cssHost(doc) {let host=__resourceCSSHosts.get(doc);if(!host){host=ops.op_interface_record_get(doc).cssHost;__resourceCSSHosts.set(doc,host);}return host;}
 function __cssOriginClean(response) {return response.originClean===true;}
 function __validSheetResponse(response, doc, clean) {const mime=(response.contentType||"").split(";")[0].trim().toLowerCase();return mime==="text/css" || !response.nosniff && (__resourceCompatMode.call(doc)==="BackCompat" && clean || __cssHost(doc).looksLikeCSS(response.text));}
@@ -9413,6 +9509,7 @@ globalThis.Image = function Image(width,height) {
 globalThis.Image.prototype=globalThis.HTMLImageElement.prototype;
 __G.loadDocumentResources = function(doc = __document, win = globalThis, before = null) {
   if(doc!==__document || __documentType.call(doc)!==9)throw new TypeError("Resource loading requires the owning native Document");
+  __discoverDictionaries();
   const styles=[];
   for (const el of Array.from(__resourceDocumentQuery.call(doc,"link,img,style"))) {
     if(before&&(__resourceCompare.call(el,before)&4)===0)continue;
@@ -9453,7 +9550,7 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
   }
   return __framePromiseAll(styles);
 };
-__G.pendingResourceCount=()=>__resourcePromises.size;
+__G.pendingResourceCount=()=>__resourcePromises.size+__dictionaryPending+__dictionaryTaskCount;
 __G.documentLoadReady=()=>__resourcePromises.size===0 && ops.op_frame_pending()===0;
 __G.waitForDocumentResources=()=>__framePromiseAll(Array.from(__resourcePromises));
 function __fireScriptEvent(el, kind, err) {
@@ -9654,7 +9751,7 @@ function __startResourceScript(element, prepared) {
     __trackResource(next);
   } else __trackResource(__G.execScriptEl(element, prepared));
 }
-ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;__retireCspViolationTasks();ops.op_retire_resource_document(__document);ops.op_install_resource_consumer(__document,event=>__documentBaseMutation(event,()=>{}),__documentRuntimeState);}});
+ops.op_set_host_capabilities({retireResourceDocument:()=>{__initialResourceScripts.length=0;__frameScriptElements.length=0;__retireCspViolationTasks();__dictionaryRetireTasks();ops.op_retire_resource_document(__document);ops.op_install_resource_consumer(__document,event=>__documentBaseMutation(event,()=>{}),__documentRuntimeState);}});
 const __cspStyleSheetGetter=(()=>{
   for(let prototype=HTMLStyleElement.prototype;prototype;prototype=Object.getPrototypeOf(prototype)){
     const descriptor=Object.getOwnPropertyDescriptor(prototype,"sheet");
@@ -9691,6 +9788,7 @@ function __containsInsertedResource(node) {
     kind !== "" && __resourceApply(__resourceElementQuery,node,["link,img,style"]) !== null;
 }
 function __resourceMutation(event) {
+  if(event.type==="childList")for(let index=0;index<event.removed.length;index++)__dictionaryRemoved(event.removed[index]);
   let connected = false, relevant = false;
   for (let index = 0; index < event.ancestors.length; index++) {
     const ancestor=event.ancestors[index];
@@ -10042,7 +10140,7 @@ __G.tcApplyHover = function (el) {
 // <script> hasn't run, an ES module is unclaimed, or a fetch is in-flight (more to do
 // after the next async drain), else "0".
 __G.pendingWork = () =>
-  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __timers.length > 0 || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
+  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __timers.length > 0 || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
 __G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
@@ -12146,6 +12244,8 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
                 .borrow::<crate::DocumentResponseMetadata>()
                 .clone();
             csp.response_metadata.replace(response_metadata);
+            csp.dictionaries
+                .replace(compression_dictionary::Discovery::new(base, &headers));
             *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
             context.remove_slot::<FrameSandbox>();
             if csp.policy.borrow().header.sandbox_restrictions().is_some() {
@@ -12755,16 +12855,9 @@ async fn drain_event_loop_until_completion(
                 }
             }
 
-            // A suspended child module can depend on a Window lifecycle timer.
-            // Drive the actual timer queues while native module futures are
-            // pending; waiting for Deno quiescence first would deadlock that gate.
-            if frame_timer_budget > 0 {
-                let fired = run_next_window_timer(rt);
-                frame_timer_budget = frame_timer_budget.saturating_sub(fired);
-                if fired > 0 {
-                    return std::task::Poll::Ready(None);
-                }
-            }
+            // A completed parser/load gate returns to its host lifecycle turn
+            // before selecting another Window task. Pending gates still drive
+            // timers below, including resource errors during blocking scripts.
             if let Some(condition) = condition {
                 let value = rt
                     .execute_script("<load-gate>", condition.to_string())
@@ -12775,6 +12868,32 @@ async fn drain_event_loop_until_completion(
                     }
                     Err(error) => return std::task::Poll::Ready(Some(Err(error))),
                     _ => {}
+                }
+            }
+            // Already-due timer tasks precede background networking tasks; a
+            // resource event must not advance the clock to a future timer.
+            if frame_timer_budget > 0 {
+                let fired = run_next_window_timer(rt, false);
+                frame_timer_budget = frame_timer_budget.saturating_sub(fired);
+                if fired > 0 {
+                    return std::task::Poll::Ready(None);
+                }
+            }
+            if run_next_background_resource_task(rt) > 0 {
+                rt.v8_isolate().perform_microtask_checkpoint();
+                if rt.v8_isolate().is_execution_terminating() {
+                    return std::task::Poll::Ready(Some(Err(
+                        "Resource task microtasks were interrupted".into(),
+                    )));
+                }
+                return std::task::Poll::Ready(None);
+            }
+            // A suspended child module can depend on a future Window timer.
+            if frame_timer_budget > 0 {
+                let fired = run_next_window_timer(rt, true);
+                frame_timer_budget = frame_timer_budget.saturating_sub(fired);
+                if fired > 0 {
+                    return std::task::Poll::Ready(None);
                 }
             }
             // A JS Promise can await another native worker's storage task even

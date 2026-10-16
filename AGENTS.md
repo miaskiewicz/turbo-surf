@@ -49,6 +49,10 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   `src/element_internals{.rs,.js}` and its core/associated/state/definition/setlike controls,
   `src/computed_intrinsics_*`, `src/css_descriptor_*`, `src/checkedness_*`, `src/control_prototypes_*`, `src/form_reflection_*`
   and `src/formdata_{event,guards}_*` controls
+  and `src/form_collections.js`, `src/form_checked_state.rs`,
+  `src/{element_registry,submitter_reflection,form_collections,radio_dirty}_*`
+  probes/cases/Chrome controls and `src/radio_{group_moves,owner_review}_*`
+  probes/Chrome controls
   — re-vendor from turbo-test's committed HEAD via
   `rust/crates/turbo-surf-render/scripts/vendor-browser-env.sh`.
 

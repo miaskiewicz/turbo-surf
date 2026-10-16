@@ -181,17 +181,33 @@
       for (let index = list.length - 1; index >= 0; index--) pending[count++] = list[index];
     }
   }
-  function registryFor(node) {
+  function associate(node, selected, defaultGlobal = false) {
+    // Global associations follow the owner document without retaining its old realm.
+    wset(
+      associations,
+      node,
+      kind(node) !== 9 && ((selected && state(selected).global) || defaultGlobal)
+        ? false
+        : selected,
+    );
+  }
+  function associationFor(node) {
     let cursor = node;
     while (cursor) {
       const associated = wget(associations, cursor);
-      if (associated !== undefined) return associated;
+      if (associated !== undefined) {
+        return kind(cursor) === 9 && associated && state(associated).global ? false : associated;
+      }
       cursor =
         read(parentNode, cursor) ||
         (kind(cursor) === 11 && read(isShadowRoot, cursor) ? read(shadowHost, cursor) : null);
     }
-    const doc = documentOf(node);
-    return wget(associations, doc) ?? null;
+    const associated = wget(associations, documentOf(node));
+    return associated && state(associated).global ? false : (associated ?? false);
+  }
+  function registryFor(node) {
+    const associated = associationFor(node);
+    return associated === false ? (wget(associations, documentOf(node)) ?? null) : associated;
   }
   function definitionFor(node, selected) {
     if (kind(node) !== 1 || read(namespace, node) !== htmlNamespace || !selected) return;
@@ -211,7 +227,7 @@
       connected: read(connected, node),
     };
     wset(elementStates, node, record);
-    if(initializeInternals)initializeInternals(node,definition);
+    if (initializeInternals) initializeInternals(node, definition);
     const initial = [],
       attributes = read(attrs, node);
     for (let i = 0; i < attributes.length; i++) {
@@ -307,6 +323,8 @@
           record.moving = false;
           return;
         }
+        if (kind(node) === 1 && wget(associations, node) === undefined)
+          wset(associations, node, associationFor(node));
         visit(node, registryFor(node), true);
       });
   }
@@ -314,6 +332,7 @@
     function CustomElementRegistry() {
       if (!new.target) throw new TypeErrorValue("Please use the new operator");
       wset(registryStates, this, {
+        global: false,
         definitions: new MapValue(),
         pending: new MapValue(),
         constructors: new WeakMapValue(),
@@ -396,13 +415,19 @@
       }
       const disabledValue = constructor.disabledFeatures;
       let disabledFeatures = [];
-      if (disabledValue !== undefined) disabledFeatures = apply(arrayFrom, ArrayValue, [disabledValue, string]);
+      if (disabledValue !== undefined)
+        disabledFeatures = apply(arrayFrom, ArrayValue, [disabledValue, string]);
       const formAssociated = !!constructor.formAssociated;
       if (formAssociated) {
-        for (const name of ['formAssociatedCallback','formResetCallback','formDisabledCallback','formStateRestoreCallback']) {
+        for (const name of [
+          "formAssociatedCallback",
+          "formResetCallback",
+          "formDisabledCallback",
+          "formStateRestoreCallback",
+        ]) {
           const value = object[name];
           if (value !== undefined) {
-            if (typeof value !== 'function') throw new TypeErrorValue('Invalid lifecycle callback');
+            if (typeof value !== "function") throw new TypeErrorValue("Invalid lifecycle callback");
             callbacks[name] = value;
           }
         }
@@ -506,7 +531,11 @@
     configurable: true,
   });
   const registry = new Registry();
+  state(registry).global = true;
   wset(associations, contextDocument, registry);
+  walk(contextDocument, (node) => {
+    if (kind(node) === 1) associate(node, registry);
+  });
   define(g, "customElements", {
     get: make(
       function () {
@@ -563,7 +592,7 @@
           owner: contextDocument,
           connected: false,
         });
-        if(initializeInternals)initializeInternals(node,definition);
+        if (initializeInternals) initializeInternals(node, definition);
       }
       return node;
     }, name);
@@ -598,8 +627,13 @@
   function creation(node, options) {
     let selected = options.selected === undefined ? registryFor(node) : options.selected,
       is = options.is;
+    if (selected && state(selected).global && selected !== wget(associations, documentOf(node)))
+      throw new Exception(
+        "A foreign global registry cannot create elements in this document",
+        "NotSupportedError",
+      );
     if (is !== undefined) nativePrivate(node, is);
-    wset(associations, node, selected);
+    associate(node, selected, options.selected === undefined && associationFor(node) === false);
     const definition = definitionFor(node, selected);
     if (!definition) return node;
     if (definition.name !== definition.local) {
@@ -642,7 +676,7 @@
           "NotSupportedError",
         ),
       );
-    wset(associations, custom, selected);
+    associate(custom, selected);
     return custom;
   }
   define(Document.prototype, "createElement", {
@@ -680,15 +714,16 @@
     configurable: true,
     writable: true,
   });
-  for (const proto of [Document.prototype, ShadowRoot.prototype]) {
-    const document = proto === Document.prototype;
+  for (const proto of [Element.prototype, Document.prototype, ShadowRoot.prototype]) {
+    const element = proto === Element.prototype,
+      document = proto === Document.prototype;
     define(proto, "customElementRegistry", {
       get: make(
         function () {
           const type = kind(this);
-          if (document ? type !== 9 : type !== 11 || !read(shadowHost, this))
+          if (element ? type !== 1 : document ? type !== 9 : type !== 11 || !read(shadowHost, this))
             throw new TypeErrorValue("Illegal invocation");
-          return wget(associations, this) ?? null;
+          return document ? (wget(associations, this) ?? null) : registryFor(this);
         },
         "get customElementRegistry",
         0,
@@ -716,7 +751,7 @@
           { clonable, delegatesFocus, mode, serializable, slotAssignment },
         ]);
         if (selected === undefined) selected = registryFor(this);
-        wset(associations, shadow, selected);
+        associate(shadow, selected);
         if (selected) push(state(selected).roots, new WeakRefValue(shadow));
         return shadow;
       },
@@ -729,10 +764,19 @@
   });
   g.__captureCustomElementInternals = {
     record: (node) => wget(elementStates, node),
-    updates: (callback) => { updateInternals=callback; },
-    created: (callback) => { initializeInternals=callback; },
-    notify: (event) => {if(updateInternals)updateInternals(event);},
-    callback: (node, name, args) => {const record=wget(elementStates,node);if(record)callback(node,record,name,args);},
+    updates: (callback) => {
+      updateInternals = callback;
+    },
+    created: (callback) => {
+      initializeInternals = callback;
+    },
+    notify: (event) => {
+      if (updateInternals) updateInternals(event);
+    },
+    callback: (node, name, args) => {
+      const record = wget(elementStates, node);
+      if (record) callback(node, record, name, args);
+    },
   };
   g.__captureCustomElementError = (error, message, filename, lineno, colno) =>
     new ErrorEventValue("error", {
@@ -742,7 +786,24 @@
       lineno,
       colno,
     });
-  g.__captureCustomElementMutation = (event) => {mutation(event);if(updateInternals)updateInternals(event);};
+  g.__captureCustomElementMutation = (event) => {
+    mutation(event);
+    if (updateInternals) updateInternals(event);
+  };
+  g.__captureCustomElementParsed = (node, adopting) => {
+    if (adopting) {
+      // Adoption rebinds the old document's registry, including an inert null.
+      walk(node, (element) => {
+        if (
+          (kind(element) === 1 || (kind(element) === 11 && read(isShadowRoot, element))) &&
+          registryFor(element) === null &&
+          (wget(associations, documentOf(element)) ?? null) === null
+        )
+          wset(associations, element, false);
+      });
+    } else if (kind(node) === 1 && wget(associations, node) === undefined)
+      wset(associations, node, associationFor(node));
+  };
   g.__captureCustomElementClone = (source, clone, deep) => {
     const a = objectCreate(null),
       b = objectCreate(null);

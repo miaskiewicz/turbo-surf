@@ -1,3 +1,15 @@
+rust/crates/turbo-surf-render/src/radio_group_moves*.js
+rust/crates/turbo-surf-render/src/radio_group_moves*.json
+rust/crates/turbo-surf-render/src/radio_owner_review*.js
+rust/crates/turbo-surf-render/src/radio_owner_review*.json
+rust/crates/turbo-surf-render/src/element_registry*.js
+rust/crates/turbo-surf-render/src/element_registry*.json
+rust/crates/turbo-surf-render/src/submitter_reflection*.js
+rust/crates/turbo-surf-render/src/submitter_reflection*.json
+rust/crates/turbo-surf-render/src/form_collections*.js
+rust/crates/turbo-surf-render/src/form_collections*.json
+rust/crates/turbo-surf-render/src/radio_dirty*.js
+rust/crates/turbo-surf-render/src/radio_dirty*.json
 # oxlint 0.11 reads this file; vendored sources retain their upstream bytes.
 rust/crates/turbo-surf-render/src/document_basics.js
 rust/crates/turbo-surf-render/src/script_preparation_probe.js

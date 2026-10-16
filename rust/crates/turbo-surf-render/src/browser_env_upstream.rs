@@ -36,6 +36,8 @@ mod event_brands;
 mod event_handlers;
 #[path = "event_listeners.rs"]
 mod event_listeners;
+#[path = "form_checked_state.rs"]
+mod form_checked_state;
 #[path = "script_state.rs"]
 mod script_state;
 #[path = "trusted_types.rs"]
@@ -400,6 +402,7 @@ struct DomState {
     tree: Tree,
     /// handle → JS node object, for identity (`el === el`).
     cache: HashMap<Handle, v8::Weak<v8::Object>>,
+    checked_radios: HashMap<Handle, Option<Handle>>,
     /// shared element object template (internal_field_count = 2).
     el_template: v8::Global<v8::ObjectTemplate>,
     shadow_modes: HashMap<Handle, String>,
@@ -598,6 +601,7 @@ fn parse_html_tree<'s>(
             nonces: initial_nonces(&tree),
             tree,
             cache: HashMap::new(),
+            checked_radios: Default::default(),
             el_template: template,
             shadow_modes: HashMap::new(),
             basics_state: None,
@@ -621,6 +625,7 @@ fn parse_html_tree<'s>(
         contexts.borrow_mut().insert(id, context);
     });
     let root = with_tree(|tree| tree.root()).unwrap();
+    form_checked_state::parsed(root);
     let document = wrap(scope, root);
     if let Some(function) = projector {
         set_node_projector(scope, document, function);
@@ -1468,6 +1473,7 @@ fn el_remove_child<'s>(
     html_popover::disconnect(scope, child, true);
     range_live::removing(scope, child);
     with_tree_mut(|tree| tree.remove_child(parent, child));
+    form_checked_state::owner_changes();
     rv.set(args.get(0));
 }
 
@@ -3124,6 +3130,7 @@ fn set_inner_html<'s>(
     html_popover::disconnect(scope, h, false);
     range_live::replacing_children(scope, h);
     with_tree_mut(|t| t.set_inner_html_utf16(h, &html));
+    form_checked_state::parsed(h);
     template_contents::realize(scope, node);
     for child in with_tree(|tree| tree.children(h)).unwrap_or_default() {
         let object = wrap(scope, child);
@@ -3504,6 +3511,7 @@ fn el_remove_self(
         html_popover::disconnect(scope, h, true);
         range_live::removing(scope, h);
         with_tree_mut(|t| t.remove_child(p, h));
+        form_checked_state::owner_changes();
     }
 }
 
@@ -4095,6 +4103,8 @@ fn set_id(
         return;
     };
     with_tree_mut(|t| t.set_attribute_utf16(h, "id", &v));
+    let node = wrap(scope, h);
+    element_relations::attribute_changed(scope, node, "id");
 }
 
 fn get_class_name(
@@ -4563,11 +4573,11 @@ fn el_dispatch_event(
     } else {
         None
     };
-    let check_was = click_check.map(|_| get_bool_prop(scope, target_node, "checked"));
+    let check_snapshot = click_check.map(|_| form_checked_state::snapshot(target));
+    let check_was = click_check.map(|_| form_checked_state::checked(target));
     if let (Some(kind), Some(was)) = (click_check, check_was) {
         let next = if kind == CheckKind::Radio { true } else { !was };
-        let b = v8::Boolean::new(scope, next);
-        set_prop(scope, target_node, "checked", b.into());
+        form_checked_state::set(target, next);
     }
 
     // propagation path: ancestors (root … parent), then the target. Bubbling reverses it.
@@ -4756,14 +4766,12 @@ fn el_dispatch_event(
 
     // Finish the checkbox/radio activation: a canceled click reverts the pre-toggle; otherwise fire
     // the DOM `input` + `change` events (jsdom does this; some libs listen for them directly).
-    if let (Some(_kind), Some(was)) = (click_check, check_was) {
+    if let (Some(_kind), Some(_was)) = (click_check, check_was) {
         if not_prevented {
             dispatch_synthetic(scope, target, "input", true, false);
             dispatch_synthetic(scope, target, "change", true, false);
-        } else {
-            let el = wrap(scope, target);
-            let b = v8::Boolean::new(scope, was);
-            set_prop(scope, el, "checked", b.into());
+        } else if let Some(snapshot) = check_snapshot {
+            form_checked_state::restore(snapshot);
         }
     }
 
@@ -4817,16 +4825,23 @@ fn is_submit_control(h: Handle) -> bool {
     .unwrap_or(false)
 }
 
+fn form_checked_receiver_error(scope: &mut v8::PinScope) {
+    let message = v8::String::new(scope, "Illegal invocation").unwrap();
+    let error = v8::Exception::type_error(scope, message);
+    scope.throw_exception(error);
+}
 fn form_checked_native(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
     let Ok(node) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
+        form_checked_receiver_error(scope);
         return;
     };
     let _dom = DomScope::for_object(scope, node);
     let Some(handle) = handle_of(scope, node) else {
+        form_checked_receiver_error(scope);
         return;
     };
     let valid = with_tree(|tree| {
@@ -4834,19 +4849,21 @@ fn form_checked_native(
     })
     .unwrap_or(false);
     if !valid {
-        let message = v8::String::new(scope, "Illegal invocation").unwrap();
-        let error = v8::Exception::type_error(scope, message);
-        scope.throw_exception(error);
+        form_checked_receiver_error(scope);
         return;
     }
     let operation = args.get(0).int32_value(scope).unwrap_or(0);
     let prop = turbo_dom_parser::rtdom::tree::FormProp::Checked;
     if operation == 1 {
         let value = args.get(2).boolean_value(scope);
-        with_tree_mut(|tree| tree.set_form_property(handle, prop, value));
+        form_checked_state::set(handle, value);
     }
     if operation == 2 {
         with_tree_mut(|tree| tree.clear_form_property(handle, prop));
+        form_checked_state::group(handle);
+    }
+    if operation == 4 {
+        form_checked_state::group(handle);
     }
     if operation == 3 {
         rv.set_bool(with_tree(|tree| tree.form_property(handle, prop).is_some()).unwrap_or(false));
@@ -5000,11 +5017,18 @@ fn form_controls_native(
                 rv.set(value);
             }
         }
-        "action-url" => {
+        "action-url" | "submitter-action-url" => {
             let document_url = event_handlers::document_url();
             let raw = with_tree(|tree| {
-                tree.get_attribute(handle, "action")
-                    .map(|value| value.to_string())
+                tree.get_attribute(
+                    handle,
+                    if operation == "submitter-action-url" {
+                        "formaction"
+                    } else {
+                        "action"
+                    },
+                )
+                .map(|value| value.to_string())
             })
             .flatten()
             .unwrap_or_default();
@@ -5052,22 +5076,27 @@ fn closest_form(h: Handle) -> Option<Handle> {
             if !is_connected(t, h) || id.is_empty() {
                 return None;
             }
-            for &candidate in t.query_selector_all("[id]").iter() {
+            let mut root = h;
+            while let Some(parent) = t.parent(root) {
+                root = parent;
+            }
+            let rows = if root == t.root() {
+                t.query_selector_all("[id]")
+            } else {
+                t.query_selector_all_from_units(root, &[91, 105, 100, 93])
+            };
+            for &candidate in rows.iter() {
                 if t.get_attribute_utf16(candidate, "id").as_deref() == Some(id.as_slice()) {
-                    return t
-                        .tag_name(candidate)
-                        .is_some_and(|tag| tag.eq_ignore_ascii_case("form"))
-                        .then_some(candidate);
+                    return (t.namespace_id(candidate) == 0
+                        && t.local_name(candidate) == Some("form"))
+                    .then_some(candidate);
                 }
             }
             return None;
         }
         let mut cur = Some(h);
         while let Some(c) = cur {
-            if t.tag_name(c)
-                .map(|s| s.eq_ignore_ascii_case("form"))
-                .unwrap_or(false)
-            {
+            if t.namespace_id(c) == 0 && t.local_name(c) == Some("form") {
                 return Some(c);
             }
             cur = NodeRef::new(t, c).parent().map(|p| p.handle());
@@ -6712,6 +6741,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
             nonces: initial_nonces(&tree),
             tree,
             cache: HashMap::new(),
+            checked_radios: Default::default(),
             el_template,
             shadow_modes: HashMap::new(),
             basics_state: None,
@@ -6734,6 +6764,9 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     DOM_CONTEXTS.with(|d| {
         d.borrow_mut().insert(DOM_ID.with(|id| id.get()), global);
     });
+    if let Some(root) = with_tree(|tree| tree.root()) {
+        form_checked_state::parsed(root);
+    }
     bind_document(scope);
 
     // Window-level globals that libs read as BARE identifiers (`navigator`, `HTMLElement`, …) — a
@@ -6818,6 +6851,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     event_listeners::install(scope);
     bind_method(scope, global, "__formNative", form_controls_native);
     run_js(scope, include_str!("form_controls.js"));
+    run_js(scope, include_str!("form_collections.js"));
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())

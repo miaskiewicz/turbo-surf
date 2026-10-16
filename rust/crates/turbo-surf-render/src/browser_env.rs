@@ -1,5 +1,5 @@
 //! Generated browser binding adapter; source: scripts/browser-env-adapter.rs.in.
-//! Canonical DOM + CSS grammar + JS: turbo-test @ 2e27274.
+//! Canonical DOM + CSS grammar + JS: turbo-test @ 51b5b97.
 //! Rebuild only through scripts/vendor-browser-env.sh from committed upstream HEAD.
 #![allow(unused)]
 #![allow(clippy::all)]
@@ -29,3 +29,7 @@ pub(crate) use live_layout_dom::{
     capture_document as capture_native_document_layout,
     valid_receiver as valid_native_geometry_receiver, wrap_elements as wrap_native_layout_elements,
 };
+
+#[path = "compression_dictionary_dom.rs"]
+mod compression_dictionary_dom;
+pub(crate) use compression_dictionary_dom::links as native_compression_dictionary_links;

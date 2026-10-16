@@ -481,6 +481,7 @@ fn payload<'s>(
 }
 
 pub(super) fn flush(scope: &mut v8::PinScope) {
+    form_checked_state::owner_changes();
     if !recording() || scope.is_execution_terminating() {
         return;
     }

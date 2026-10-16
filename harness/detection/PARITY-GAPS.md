@@ -30,12 +30,12 @@ still being attempted in PR26; issue coverage does not defer that work by itself
 | Layout | Decorated/empty/mixed-font inline boxes, stacking, scrolling/events/RTL, fixed positioning, iframe migration | #28 |
 | Range / caret | Remaining composed-tree/lifecycle/geometry cases beyond the integrated interface/receiver/GC controls | #28 |
 | DOM | Parsing/observer edges, custom-element reactions/registries, broader form association/CustomStateSet lifecycle, UTF-16 edge cases | #28 |
-| Forms | Radio/adoption semantics, live form collections, FileList/multipart, other targets and broader encoding/submitter/policy cases | #28 |
+| Forms | Broader radio/adoption and form-collection behavior beyond saved controls, FileList/multipart, other targets and encoding/submitter/policy cases | #28 |
 | User activation | Consuming APIs, cross-frame propagation, broader trusted input, MCP reconstruction continuity and retained/retired receiver or cross-origin-return redirect behavior | #28 |
 | Events / promises | Stream/listener microtask interleaving and broader Object-prototype descriptor hooks during abort/event dispatch and exception reporting | #28 |
 | CSS / resources | Remaining selectors/at-rules, used downloaded fonts/animations, images/pseudo epochs, inner SVG | #28 |
 | Security | Remaining CSP/reporting/sinks, popup/navigation/sandbox, COOP/COEP and permissions policies | #28 |
-| Fetch / storage | Compression-dictionary discovery/cache/negotiation and actual dcb/dcz decoding; remaining streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
+| Fetch / storage | Final dictionary renderer integration, publication scheduling and encoded Range behavior; broader streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
 | API inventory | Every unresolved missing/extra member and descriptor/inheritance/behavior path in API-INVENTORY.json; fresh paired measurement | #28 |
 | Distribution | Stock/native V8 alignment, native patch distribution, layout publication and registry-ready transport/crypto dependencies | #28 |
 | Browser lifecycle | Watchdog/async-op admission recovery, timeout-signal delivery/GC, listener-count release and retained detached-window active-time suspension | #28 |
@@ -69,9 +69,10 @@ open in issue28.
 [Saved independent evidence](./compression-dictionary-saved-evidence.json) shows
 Chrome receiving a compression-dictionary Link, fetching/storing dictionaries,
 sending Available-Dictionary on87 requests and actually decoding one dcb response.
-No Origin-Trial response header appears in that saved trace. Native code receives
+No Origin-Trial response header appears in that saved trace. The frozen live executable receives
 the Link but has no discovery/store/decode chain; its transport default advertises
-the four base encodings. Native explicit-header logs alone do not enumerate every
+the four base encodings. The next source batch implements that chain, pending
+integrated validation; these historical observations describe the frozen executable. Native explicit-header logs alone do not enumerate every
 final wire header. The existing bounded TLS/H2 comparison and GPU probe match;
 the upstream recipe's154 label is not itself a demonstrated wire mismatch.
 
@@ -79,11 +80,20 @@ Implement genuine partitioned, origin-scoped and fresh dictionary state, validat
 headers/hashes, real decoding and policy-aware discovery before advertising the
 additional encodings. [RFC9842](https://www.rfc-editor.org/rfc/rfc9842.html) requires
 eligible dictionaries for those requests. This missing chain is being implemented;
-it is not a proven explanation for Google's rejection.
+it is not a proven explanation for Google's rejection. The fresh localhost control
+also measures asynchronous Chrome publication: immediate post-GET availability is
+absent, while +100 ms/+500 ms requests advertise it. Native EOF publication is
+synchronous. That scheduling difference and encoded HTTP Range behavior
+remain explicit work in#28; incremental coded-response delivery now passes real
+HTTPS header, partial delivery, cancellation and cache controls on both transports,
+with32 independent Chrome discovery/lifecycle cases passing in both native155
+and stock renderer integration; stable delayed positives do not close the
+publication-scheduling or encoded-Range gaps.
+See [dictionary controls and bounds](./COMPRESSION-DICTIONARIES.md).
 
 ## Current integration checkpoint (2026-10-16)
 
-Canonical turbo-test2e27274 is mechanically vendored with public DOM0.5.7
+Canonical turbo-test51b5b97 is mechanically vendored with public DOM0.5.7
 candidatefb60e6f (latest registry0.5.6). Genuine ElementInternals/CustomStateSet,
 checked-state foundation, FormData events, disconnected-form admission and native
 form reflection are integrated. The pushed544180d affected native renderer cohort passes
@@ -107,7 +117,10 @@ budget exhaustion; repeat1 reaches/sorry. Both native homes still report20s budg
 termination. See [latest run](./GOOGLE-LAST-RUN.json).
 
 An offline admission-window probe reproduces the SDK promise bookkeeping failure;
-a pinned experimental155 transaction patch remains under validation. The combined
+the pushed26a08b5 experimental155 transaction patch passes independent
+preimage/recovery/rejection controls. Its managed-SDK scope, interrupted-reservation
+retention and production-distribution bounds remain documented in
+[ASYNC-ADMISSION.md](./engine-155/ASYNC-ADMISSION.md). The combined
 default suite also found premature GC of an awaited timeout signal. Its realm-local
 retention candidate passes the exact failing test with unchanged budget/Chrome
 assertion; native retirement/forced-GC controls now pass within155 affected tests, and
@@ -122,6 +135,29 @@ Default all-target strict checks and formatting pass. Native155 affected tests
 pass155/155 and native all-target strict checks pass. These results precede the
 next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
 and fresh live validation remain pending.
+
+### Linux font control and current source integrations
+
+CI for26a08b5 passes18 geometry controls and fails the UTF-16 geometry test because
+it compares exact macOS Chrome system-font measurements with Linux's available
+fallback fonts. Preserve the full exact macOS control; separately assert original
+code units, all selected boundaries, private access, retained caret identity and
+lifecycle on every platform. This test correction does not certify Linux glyph or
+fallback parity. The correction is pushed as6f9ebc7; its fresh CI is pending. A matching Linux
+Chrome/font capture remains open under#28.
+
+The next batch vendors registry provenance, submitter reflection and genuine live
+form collections from canonical51b5b97. The actual155 production cohort passes two real iframe/collection-GC tests,
+12 form-navigation tests including reflected submitter POST overrides, and
+23 geometry controls. The final actual155 combined component cohort passes46 tests, including the
+corrected radio GC policy and all32 exact dictionary task/lifecycle controls.
+Stock-engine renderer library tests pass326/326; its dictionary and radio
+integration tests also pass. Core passes220 tests, including real HTTPS dictionary
+controls on both transports and incremental output/cancellation. Independent
+Chrome controls and official dictionary-dependent Brotli/Zstd fixtures retain
+source provenance.
+Do not close these rows or refresh measured inventory counts until the final
+integrated executable is rebuilt and captured.
 
 ## Active scope and deferred audio
 

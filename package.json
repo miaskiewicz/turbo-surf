@@ -33,7 +33,7 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "harness": "node harness/competitive/run.mjs",
     "harness:detection": "node harness/detection/run.mjs",
-    "test:detection": "node --test harness/detection/*.test.mjs",
+    "test:detection": "node --test harness/detection/*.test.mjs && python3 -B harness/detection/engine-155/test_async_admission_helper.py",
     "harness:js": "node harness/competitive/run.mjs js-quotes",
     "hotpath": "node harness/hotpath/rust-hotpath.mjs",
     "hotpath:render": "node harness/hotpath/render-bench.mjs",

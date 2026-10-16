@@ -56,6 +56,18 @@ done
 for file in form_reflection_cases.json form_reflection_probe.js form_reflection_chrome155.json control_prototypes_probe.js control_prototypes_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
+for file in submitter_reflection_cases.json submitter_reflection_probe.js submitter_reflection_chrome155.json element_registry_probe.js element_registry_chrome155.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
+for file in form_collections.js form_collections_cases.json form_collections_chrome155.json form_collections_lifecycle_chrome155.json form_collections_lifecycle_probe.js form_collections_probe.js form_collections_realm_chrome155.json form_collections_realm_probe.js; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
+for file in form_checked_state.rs radio_dirty_adoption_gc_chrome155.json radio_dirty_adoption_gc_probe.js radio_dirty_cases.json radio_dirty_chrome155.json radio_dirty_gc_chrome155.json radio_dirty_gc_probe.js radio_dirty_probe.js radio_dirty_transition_chrome155.json radio_dirty_transition_probe.js; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
+for file in radio_group_moves_probe.js radio_group_moves_chrome155.json radio_owner_review_probe.js radio_owner_review_chrome155.json radio_dirty_adoption_gc_review_chrome155.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
 for file in css_descriptor_cases.json css_descriptor_probe.js css_descriptor_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done

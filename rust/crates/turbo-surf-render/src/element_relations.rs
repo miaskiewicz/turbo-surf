@@ -26,6 +26,7 @@ pub(super) fn attribute_changed<'s>(
     }
     if let Some(handle) = handle_of(scope, element) {
         script_state::attribute_changed(handle, name);
+        form_checked_state::attribute_changed(handle, name);
     }
     if !name.starts_with("aria-") {
         return;

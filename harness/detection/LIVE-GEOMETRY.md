@@ -41,6 +41,11 @@ families (for example actual Menlo), while preserving ordinary PDF font behavior
 
 Remaining bounds:
 
+- Linux font/fallback geometry is not certified by the saved macOS system-font
+  oracle. Full exact font comparisons run on macOS; original UTF-16 boundaries,
+  private receiver access and retained caret lifecycle remain exact on every OS.
+  A matching Linux Chrome/font capture is still required.
+
 - Actual decorated, empty and mixed-font inline border production. Plain inline
   support is bounded by real source-owned text runs; unsupported decoration rejects.
 - Complete stacking contexts, scroll methods/events, RTL/vertical overflow and

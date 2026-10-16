@@ -8,6 +8,9 @@ box, types a query and presses Enter. For Google it first clicks the visible
 "Reject all" consent button when present. Both initial scripts and subsequent native
 JS navigation retries execute in persistent `PageSession`s.
 
+The [compression dictionary controls](./COMPRESSION-DICTIONARIES.md) document genuine
+discovery, policy/lifecycle, independent codec fixtures and current streaming bounds.
+
 ## Build and run
 
 On a Mac with a real Metal GPU:

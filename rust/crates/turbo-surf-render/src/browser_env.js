@@ -1137,7 +1137,7 @@ if(typeof __ns.makeNativeFunction==='function'){
       for(var index=0;index<pending.length;index++){
         var pair=pending[index];source=pair[0];clone=pair[1];
         if (controlValues.has(source)) clone.value = controlValues.get(source);
-        if(cloneApply(cloneNodeType,source,[])===1&&formValueApply(sheetTagName,source,[])==='INPUT'&&checkedNative(3,source))checkedNative(1,clone,checkedNative(0,source));
+        if(cloneApply(cloneNodeType,source,[])===1&&formValueApply(sheetTagName,source,[])==='INPUT'){if(checkedNative(3,source))checkedNative(1,clone,checkedNative(0,source));checkedNative(4,clone);}
         if (selection.optionStates.has(source)) selection.optionStates.set(clone, selection.optionStates.get(source));
         if (selection.emptySelects.has(source)) selection.emptySelects.add(clone);
         if(deep){

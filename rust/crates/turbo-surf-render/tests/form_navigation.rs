@@ -141,6 +141,48 @@ async fn post_redirect_carries_real_body_cookies_and_referrer_policy() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn reflected_submitter_overrides_drive_actual_post_navigation() {
+    for tag in ["button", "input"] {
+        let (base, rx) = server(vec![response("200 OK", "", "<p>submitted</p>")]);
+        let html = format!(
+            "<base href='/base/' target='_blank'><form action='/wrong' method='get'><input name='field' value='hello world'><{tag} type='submit' name='chosen' value='{tag}'></{tag}></form>"
+        );
+        let mut page = PageSession::open(&html, &format!("{base}/start"), "", "", 60_000)
+            .await
+            .unwrap();
+        page.eval(
+            r#"const form=document.querySelector('form'),submitter=document.querySelector('[name=chosen]');
+            Element.prototype.setAttribute=function(){throw Error('guest attribute method')};
+            submitter.formAction='submitter';submitter.formMethod='PoSt';
+            submitter.formEnctype='text/plain';submitter.formTarget='_self';
+            form.requestSubmit(submitter);"#,
+        )
+        .await
+        .unwrap();
+        let wire = request(&rx);
+        assert!(
+            wire.starts_with("POST /base/submitter HTTP/1.1\r\n"),
+            "{wire}"
+        );
+        assert!(
+            wire.to_ascii_lowercase()
+                .contains("content-type: text/plain\r\n"),
+            "{wire}"
+        );
+        assert!(
+            wire.ends_with(&format!("field=hello world\r\nchosen={tag}\r\n")),
+            "{wire}"
+        );
+        assert_eq!(
+            page.eval_expression("location.pathname+'|'+document.body.textContent")
+                .await
+                .unwrap(),
+            "/base/submitter|submitted"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn csp_or_cancelled_form_never_contacts_action() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();

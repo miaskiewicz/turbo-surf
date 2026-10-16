@@ -1427,8 +1427,10 @@ autocomplete/rel and a live branded relList. Action URL resolution uses the nati
 host-installed document URL; CSP approval of reflected base URLs remains open, and
 wider malformed-URL serialization is unverified. Input/Button prototype placement, control descriptors
 and actual text-selection/replacement behavior have measured Chrome controls.
-ValidityState's genuine constructor prototype is read-only. Live form controls
-collections/RadioNodeList and form elements/length/iterator remain open.
+ValidityState's genuine constructor prototype is read-only. The next canonical
+batch implements genuine live form controls collections/RadioNodeList and form
+elements/length/iterator; production real-frame/GC validation remains separate
+from canonical focused results.
 
 Host media evaluation now supplies the measured forced-colors, contrast, color-scheme,
 reduced-motion/transparency, pointer and hover capabilities. The last recorded combined
@@ -1489,3 +1491,25 @@ Default all-target strict checks and formatting pass. Native155 affected tests
 pass155/155 and native all-target strict checks pass. These results precede the
 next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
 and fresh live validation remain pending.
+
+
+The current source integration vendors canonical `51b5b97`: scoped registry provenance,
+submitter reflection, genuine live form collections and node-owned radio grouping,
+canceled-click restoration, adoption and indexed container/owner lifecycle behavior.
+Source-pinned production collection/real-frame GC tests pass2 controls, actual
+form navigation passes12 controls, and geometry passes23 controls under actual155.
+The final actual155 combined cohort passes46 tests, including ordinary radio GC
+and32 exact dictionary resource/lifecycle cases. Stock renderer library326 and
+dictionary/radio integration tests also pass. Focused passes do not replace
+full combined workspace/addon/production gates.
+
+Genuine compression-dictionary support now has independent Chrome resource/policy
+controls and official C-encoder fixtures. Native store/selection/decoding, decoded
+cache reuse and renderer background discovery are being integrated. Guest-supplied
+Available-Dictionary is rejected at network admission while public Headers/Request
+retain it; automatic native negotiation remains separate. Dictionary-coded bodies
+now use bounded incremental workers/channels; real HTTPS gates verify headers
+before body completion, partial output and cancellation without partial caching. See the
+[implementation and explicit bounds](../harness/detection/COMPRESSION-DICTIONARIES.md).
+Neither these source additions nor a passing local control establish Google SERP
+acceptance; the last frozen Google result predates this integration.

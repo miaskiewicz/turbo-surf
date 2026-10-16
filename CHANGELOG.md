@@ -41,16 +41,6 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Networking, Fetch and storage
 
-- Add a genuine session-owned compression-dictionary store with origin/partition
-  selection, validated hash/ID negotiation, bounded dictionary-dependent Brotli
-  and Zstandard decoding, and decoded-cache/304 reuse. Share one codec engine
-  between buffered callers and incremental Fetch bodies; expose real headers and
-  partial output through bounded workers/channels. Require explicit input/output
-  success and actual transport EOF before cache publication; cancellation, panic
-  and caps cannot publish partial data. Official C-encoder fixtures and real HTTPS
-  controls cover both transports. Chrome publication timing and encoded Range
-  semantics remain open in the parity checklist.
-
 - Use the Chrome154 BoringSSL transport recipe with measured155 navigation
   identity, real trust-anchor IDs, ML-DSA offers and signature GREASE. Pin the
   additive connector-metadata API to controlled wreq fork4ed3cf0c (upstream
@@ -75,6 +65,23 @@ residual work beyond this PR, with audio separately deferred in
   I/O, rewrite303 toGET and reject307 replay. Immediate guest abort and bounded
   transport cleanup preserve measured cancellation semantics. Resolve fixture
   script paths before launching Node from linked SDK workspaces.
+- Add a genuine session-owned compression-dictionary store with origin/partition
+  selection, validated hash/ID negotiation, bounded dictionary-dependent Brotli
+  and Zstandard decoding, and decoded-cache/304 reuse. Share one codec engine
+  between buffered callers and incremental Fetch bodies; expose real headers and
+  partial output through bounded workers/channels. Require explicit input/output
+  success and actual transport EOF before cache publication; cancellation, panic
+  and caps cannot publish partial data. Official C-encoder fixtures and real HTTPS
+  controls cover both transports. Chrome publication timing and encoded Range
+  semantics remain open in the parity checklist.
+- Discover dictionary hints in document headers and actual HTML/shadow links
+  through native policy-aware background Fetch, including shared ownership and
+  cancellation. Independent Chrome controls cover resource policies and lifecycle;
+  use a separate bounded resource task queue with per-frame fairness, microtask
+  checkpoints and retirement cleanup. This preserves due-timer/resource/future-timer
+  order without holding document readiness. Final full gates and live acceptance
+  remain unverified.
+  See [implementation and bounds](harness/detection/COMPRESSION-DICTIONARIES.md).
 - Apply all eight standard referrer policies to document/request/redirect paths.
   Process active meta referrers at parser and mutation boundaries; ignore inert
   template/shadow/foreign nodes and poisoned getters. Native jobs retain immutable
@@ -83,7 +90,7 @@ residual work beyond this PR, with audio separately deferred in
 ### Native DOM, scripts and ownership
 
 - Consume public Git-pinned turbo-dom0.5.7 candidatefb60e6f (latest registry
-  release0.5.6) and re-vendor committed turbo-test2e27274. Native per-isolate node state preserves
+  release0.5.6) and re-vendor committed turbo-test51b5b97. Native per-isolate node state preserves
   original UTF-16 payloads, names, parser positions and mutation-time ancestry.
   GC callbacks schedule bounded storage scans outside collection; genuine weak
   wrapper/guest edges and native job pins preserve retained identities without
@@ -125,6 +132,19 @@ residual work beyond this PR, with audio separately deferred in
   consent cookies, fragments and immutable metadata. Independent UTF-8 and
   Windows-1252 controls cover encoding and numeric entities. Multipart/file-input/
   other-target and broader successful-controls behavior stay explicit.
+
+- Add genuine live HTMLFormControlsCollection/RadioNodeList interfaces, native
+  indexed/named properties, SameObject form elements, external association and
+  private receiver/realm ownership. Reflect input/button submitter action, method,
+  encoding and target through native attributes. Preserve radio checked-state
+  grouping, canceled-click restoration, cross-document adoption, nested/fragment
+  moves, shadow boundaries and external ownership. A native scalar candidate index
+  avoids rescanning ordinary moved subtrees and is swept with native storage.
+- Correct the independent radio adoption-GC readiness probe so its Promise does
+  not retain the iframe load Event. Record a real-task/three-GC policy and three
+  repeat Chrome captures; preserve the original contaminated and immediate
+  observations. Check the same exact lifetime states through the production
+  PageSession without adding a native ownership root.
 
 ### Layout, CSS and resources
 
@@ -202,7 +222,9 @@ residual work beyond this PR, with audio separately deferred in
 - Implement native-backed ElementInternals and CustomStateSet, including genuine
   admission/ARIA/form association/validation/reactions, UTF-16 custom states and live
   state iterators. Preserve native checked/defaultChecked/reset/clone behavior and
-  typed :checked matching; full radio grouping and adoption remain open.
+  typed :checked matching. The later canonical integration adds real radio grouping,
+  canceled-click restoration, adoption and native owner-index lifecycle controls;
+  broader form-associated behavior remains on the central checklist.
 - Deliver genuine trusted FormData events with shared mutable entry records,
   reentrancy guards, pre-event metadata and post-event wire serialization/CSP
   admission. Disconnected forms and forms removed during submit listeners do not
@@ -287,6 +309,16 @@ residual work beyond this PR, with audio separately deferred in
   4096-task admission/recovery assertions and reject watchdog termination as a
   capacity result; give the host-media oracle a conformance budget without
   changing product execution limits or Chrome expectations.
+
+- Add genuine Input/Button submitter action, method, encoding and target reflection,
+  preserving measured missing-versus-invalid defaults and Input DOMString versus
+  Button USVString action writes. Canonical independent Chrome controls cover
+  brands, owner-document/base resolution and hostile public getters.
+- Expose Element.customElementRegistry through private native associations and
+  preserve unread parser ownership across moves. Rebind global/inert-null registry
+  state during actual adoption, including ShadowRoots, without retaining an old
+  global registry. Forty-four independent Chrome controls pass in the canonical
+  binding; final Surf integration checks remain separate.
 
 ### Validation status
 

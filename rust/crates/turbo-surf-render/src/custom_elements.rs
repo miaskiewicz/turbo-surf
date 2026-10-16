@@ -299,6 +299,7 @@ fn defining(
 }
 struct MutationHook(v8::Weak<v8::Function>);
 struct CloneHook(v8::Weak<v8::Function>);
+struct ParsedHook(v8::Weak<v8::Function>);
 
 fn mutation_hook<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -520,6 +521,29 @@ fn deliver_mutation(scope: &mut v8::PinScope, event: v8::Local<v8::Object>) {
     let receiver = v8::undefined(scope);
     function.call(scope, receiver.into(), &[event.into()]);
 }
+pub(super) fn parsed(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) {
+    association_hook(scope, node, false);
+}
+pub(super) fn adopting(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) {
+    association_hook(scope, node, true);
+}
+fn association_hook(scope: &mut v8::PinScope, node: v8::Local<v8::Object>, adopting: bool) {
+    let Some(function) = node
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<ParsedHook>())
+        .and_then(|hook| hook.0.to_local(scope))
+    else {
+        return;
+    };
+    let Some(context) = function.get_creation_context(scope) else {
+        return;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let _owner = DomScope::for_object(scope, node);
+    let undefined = v8::undefined(scope);
+    let adopting = v8::Boolean::new(scope, adopting);
+    function.call(scope, undefined.into(), &[node.into(), adopting.into()]);
+}
 pub(super) fn moved(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) {
     let event = v8::Object::new(scope);
     let null = v8::null(scope);
@@ -593,6 +617,7 @@ pub(super) fn install(scope: &mut v8::PinScope) {
         ("__captureCustomElementMutation", 0),
         ("__captureCustomElementClone", 1),
         ("__captureCustomElementError", 2),
+        ("__captureCustomElementParsed", 3),
     ] {
         let key = v8::String::new(scope, name).unwrap();
         if let Some(function) = global
@@ -610,8 +635,11 @@ pub(super) fn install(scope: &mut v8::PinScope) {
                 1 => {
                     context.set_slot(Rc::new(CloneHook(function)));
                 }
-                _ => {
+                2 => {
                     context.set_slot(Rc::new(ErrorHook(function)));
+                }
+                _ => {
+                    context.set_slot(Rc::new(ParsedHook(function)));
                 }
             }
         }
@@ -703,6 +731,13 @@ mod tests {
         reset();
     }
     #[test]
+    fn element_registry_ownership_moves_and_adoption_match_independent_chrome() {
+        check_chrome_probe(
+            include_str!("element_registry_probe.js"),
+            include_str!("element_registry_chrome155.json"),
+        );
+    }
+    #[test]
     fn custom_element_registry_and_lifecycle_match_independent_chrome() {
         check_chrome_probe(
             include_str!("custom_elements_probe.js"),
@@ -761,6 +796,29 @@ mod tests {
             .and_then(|script| script.run(scope))
             .unwrap_or_else(|| panic!("{}", scope.exception().unwrap().to_rust_string_lossy(scope)))
     }
+    #[test]
+    fn global_registry_associations_are_primitive_and_parsed_tracking_stays_private() {
+        super::super::tests::init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_with_html(scope, "<!doctype html><body></body>");
+        let node = eval(
+            scope,
+            "globalThis.keptRegistryNode=document.createElement('div');keptRegistryNode",
+        )
+        .to_object(scope)
+        .unwrap();
+        let name = v8::String::new(scope, "turbo.custom-elements.association").unwrap();
+        let key = v8::Private::for_api(scope, Some(name));
+        assert!(node.get_private(scope, key).unwrap().is_false());
+        assert!(eval(scope,"(()=>{const other=document.implementation.createHTMLDocument();other.adoptNode(keptRegistryNode);return keptRegistryNode.customElementRegistry===null&&!('__captureCustomElementParsed'in globalThis)})()").is_true());
+        assert!(node.get_private(scope, key).unwrap().is_false());
+        assert!(!recording());
+        reset();
+    }
+
     #[test]
     fn pages_without_custom_definitions_do_not_record_or_budget_plain_dom_mutations() {
         super::super::tests::init_v8();

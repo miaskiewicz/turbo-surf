@@ -19,6 +19,18 @@
   },
   "files": {
     "ignore": [
+      "rust/crates/turbo-surf-render/src/element_registry*.js",
+      "rust/crates/turbo-surf-render/src/element_registry*.json",
+      "rust/crates/turbo-surf-render/src/submitter_reflection*.js",
+      "rust/crates/turbo-surf-render/src/submitter_reflection*.json",
+      "rust/crates/turbo-surf-render/src/form_collections*.js",
+      "rust/crates/turbo-surf-render/src/form_collections*.json",
+      "rust/crates/turbo-surf-render/src/radio_dirty*.js",
+      "rust/crates/turbo-surf-render/src/radio_dirty*.json",
+      "rust/crates/turbo-surf-render/src/radio_group_moves*.js",
+      "rust/crates/turbo-surf-render/src/radio_group_moves*.json",
+      "rust/crates/turbo-surf-render/src/radio_owner_review*.js",
+      "rust/crates/turbo-surf-render/src/radio_owner_review*.json",
       "rust/crates/turbo-surf-render/src/form_entrylist*.js",
       "rust/crates/turbo-surf-render/src/form_entrylist*.json",
       "rust/crates/turbo-surf-render/src/formdata_constructor*.js",

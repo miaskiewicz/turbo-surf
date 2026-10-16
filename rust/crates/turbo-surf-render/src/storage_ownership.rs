@@ -210,6 +210,9 @@ fn sweep_scalars(state: &mut DomState) {
     state
         .cache
         .retain(|node, weak| state.tree.is_live(*node) && !weak.is_empty());
+    state
+        .checked_radios
+        .retain(|node, _| state.tree.is_live(*node));
     state.nonces.retain(|node, _| state.tree.is_live(*node));
     state
         .shadow_modes
@@ -297,6 +300,34 @@ mod contracts {
         let context = v8::Local::new(scope, context);
         let scope = &mut v8::ContextScope::new(scope, context);
         collect_native_storage(scope, budget(), 32).unwrap()
+    }
+    #[test]
+    fn native_checked_radio_index_does_not_pin_unwrapped_nodes() {
+        run(|isolate, context| {
+            collect(isolate, context);
+            let node = with_tree_mut(|tree| {
+                let node = tree.create_element("input");
+                tree.set_attribute(node, "type", "radio");
+                tree.set_attribute(node, "name", "g");
+                node
+            })
+            .unwrap();
+            form_checked_state::set(node, true);
+            assert!(DOM.with(|dom| dom
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .checked_radios
+                .contains_key(&node)));
+            with_tree_mut(|tree| {
+                tree.take_mutation_events();
+            });
+            gc(isolate);
+            let report = collect(isolate, context);
+            assert!(report.documents[0].1.reclaimed_nodes >= 1);
+            assert!(!with_tree(|tree| tree.is_live(node)).unwrap());
+            assert!(DOM.with(|dom| dom.borrow().as_ref().unwrap().checked_radios.is_empty()));
+        });
     }
     #[test]
     fn native_churn_reclaims_detached_storage_without_reusing_handles() {

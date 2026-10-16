@@ -381,6 +381,13 @@ GREASE, ML-DSA44/65/87, and exact public trust-anchor IDs against a local Chrome
 support. Workspace patches do not propagate to library consumers, so publishing
 remains blocked until these APIs are published or a distributable fork is reviewed.
 
+The development candidate also negotiates genuine compression dictionaries from
+partitioned native session state and decodes selected Brotli/Zstandard responses.
+Policy-aware document/link discovery, independent encoder fixtures and Chrome
+controls are described in the [dictionary parity notes](harness/detection/COMPRESSION-DICTIONARIES.md).
+Dictionary-coded bodies now have bounded incremental decoding and cancellation
+controls; complete browser parity and fresh live Google acceptance remain unverified.
+
 Native WebCrypto uses a reproducibly hardened Deno provider and genuine Rust
 X-Wing keys for Chrome 155's `MLKEM768-X25519`. Key permissions and private native
 cloning have adversarial regression coverage; the covered localhost algorithm

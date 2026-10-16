@@ -12,11 +12,13 @@
   const ErrorType = TypeError, Exception = DOMException, Regex = RegExp;
   const isNaNValue=Number.isNaN,absolute=Math.abs,round=Math.round,floor=Math.floor;
   const tagGetter = ns.domAccessor('tagName', false, 'Element');
+  const localNameGetter = ns.domAccessor('localName', false, 'Element');
   const parentGetter = ns.domAccessor('parentElement', false, 'Node');
   const connectedGetter = ns.domAccessor('isConnected', false, 'Node');
   const getRoot = Node.prototype.getRootNode, query = Element.prototype.querySelectorAll, documentQuery = Document.prototype.querySelectorAll;
   const nodeTypeGetter = ns.domAccessor('nodeType', false, 'Node');
-  const queryAll = (root, selector) => apply(apply(nodeTypeGetter,root,[])===9?documentQuery:query,root,[selector]);
+  const collectionRecord=ns.formCollectionFactory.getRecord;
+  const queryAll = (root, selector) => {const result=apply(apply(nodeTypeGetter,root,[])===9?documentQuery:query,root,[selector]);const record=collectionRecord(result);return record?record.read():result;};
   const attribute = Element.prototype.getAttribute, contains = Node.prototype.contains;
   const lower = Function.prototype.call.bind(String.prototype.toLowerCase);
   const regexTest = Function.prototype.call.bind(RegExp.prototype.test);
@@ -31,11 +33,19 @@
   const attr = (element, name) => apply(attribute, element, [name]);
   const parent = element => apply(parentGetter, element, []);
   const owner = element => bridge('owner', element);
+  for(const [interfaceName,localName] of [['HTMLInputElement','input'],['HTMLButtonElement','button'],['HTMLTextAreaElement','textarea'],['HTMLSelectElement','select'],['HTMLFieldSetElement','fieldset'],['HTMLObjectElement','object'],['HTMLOutputElement','output']]){
+    const constructor=g[interfaceName];if(typeof constructor!=='function')continue;
+    define(constructor.prototype,'form',{configurable:true,enumerable:true,get:native(function(){
+      if(!bridge('html-element',this)||apply(localNameGetter,this,[])!==localName)throw new ErrorType('Illegal invocation');
+      return owner(this);
+    },'get form',0)});
+  }
   const present = (element, name) => attr(element, name) !== null;
   const type = element => {
     const value=lower(attr(element,'type')||(tag(element)==='button'?'submit':'text'));
     return tag(element)==='button'&&value!=='button'&&value!=='reset'?'submit':value;
   };
+  const controlIndexOf=Array.prototype.indexOf;
   const controlTags = ['input','textarea','select','button','fieldset','object','output'];
   function checkControl(element) {
     const kind = tag(element);
@@ -75,7 +85,7 @@
   function formControls(form) {
     const root = apply(getRoot, form, []), nodes = queryAll(root, '*');
     const result = [];
-    for (let index = 0; index < nodes.length; index++) if ((associatedGet(nodes[index])||controlTags.indexOf(tag(nodes[index]))>=0)&&owner(nodes[index]) === form) result[result.length] = nodes[index];
+    for (let index = 0; index < nodes.length; index++) if ((associatedGet(nodes[index])||apply(controlIndexOf,controlTags,[tag(nodes[index])])>=0)&&owner(nodes[index]) === form) define(result,result.length,{__proto__:null,value:nodes[index],writable:true,enumerable:true,configurable:true});
     return result;
   }
   function flags(element) {
@@ -298,6 +308,20 @@
     });
   }
 
+  for(const [interfaceName,kind] of [['HTMLButtonElement','button'],['HTMLInputElement','input']]) {
+    const prototype=g[interfaceName].prototype;
+    const check=element=>{if(!bridge('html-element',element)||apply(localNameGetter,element,[])!==kind)throw new ErrorType('Illegal invocation');};
+    for(const [property,attributeName,choices,fallback] of [
+      ['formAction','formaction',null,null],
+      ['formEnctype','formenctype',['application/x-www-form-urlencoded','multipart/form-data','text/plain'],'application/x-www-form-urlencoded'],
+      ['formMethod','formmethod',['get','post','dialog'],'get'],['formTarget','formtarget',null,'']]) {
+      define(prototype,property,{
+        get:native(function(){check(this);if(property==='formAction')return bridge('submitter-action-url',this);const value=attr(this,attributeName);if(value===null)return '';if(!choices)return value;const normalized=lower(value);return choices.indexOf(normalized)>=0?normalized:fallback;},'get '+property,0),
+        set:native(function(value){check(this);if(typeof value==='symbol')throw new ErrorType('Cannot convert a Symbol to a string');value=string(value);if(property==='formAction'&&kind==='button')value=apply(wellFormed,value,[]);apply(reflectedSetAttribute,this,[attributeName,value]);},'set '+property,1),enumerable:true,configurable:true
+      });
+    }
+  }
+
   for(const methodName of ['checkValidity','reportValidity'])method(formPrototype,methodName,function(){checkForm(this);return validate(this);},0);
   method(formPrototype,'reset',function(){checkForm(this);const event=new EventClass('reset',{bubbles:true,cancelable:true});if(!bridge('emit',this,event))return;const controls=formControls(this);for(let i=0;i<controls.length;i++){const record=associatedGet(controls[i]);if(record){if(record.reset)record.reset();}else resetControl(controls[i]);}},0);
   method(formPrototype,'requestSubmit',function(submitter){return request(this,submitter);},0);
@@ -318,6 +342,7 @@
       complete=true;return freeze(entries);
     } finally {if(!hold||!complete)privateSet(form,'constructing-entries',false);}
   };
+  g.__captureFormCollections={bridge,privateGet,privateSet,formControls,checkForm,attr,tag,type,readValue,checkedValue,queryAll,getRoot,owner,associatedGet,localNameGetter};
   g.__captureFormInternals = {
     register:(host,record)=>associatedSet(host,record),owner,disabled,candidate,validity,message,validateControl,
     attribute:attr,parent,tag,queryAll,getRoot,apply,emit:(host,event)=>bridge('emit',host,event),

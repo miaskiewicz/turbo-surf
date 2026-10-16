@@ -26,7 +26,7 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    admission clears the subsequently observed rule0 failure; unsafe or unknown
    declarations still fail explicitly.
    Decorated/mixed-font inline boxes and broader resource/layout behavior remain open.
-3. **DOM / forms:** canonical turbo-test0ec37f5 is officially vendored. All six DOM
+3. **DOM / forms:** canonical turbo-test2e27274 is officially vendored. All six DOM
    consumers use public immutable0.5.7 candidatefb60e6f (registry latest0.5.6).
    Native AbstractRange/NodeRange/StaticRange, ElementInternals/CustomStateSet,
    checked/defaultChecked/reset/clone and genuine FormData events are integrated.
@@ -48,41 +48,39 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    ownership fixes remove a real parent-to-child realm retention edge; existing
    Fetch/form GC regressions now pass. Genuine multipart FormData BodyInit and
    broader storage-access/Fetch behavior remain explicit unsupported work.
-7. **Validation:** the integrated actual155 affected cohort passes416 tests:
-   renderer library308, production geometry/media36 and native MCP72 (default71).
-   The earlier337-test renderer/API/forms/media rerun also passed after Blob and
-   ValidityState repairs. The68 offline harness tests pass. Strict all-target actual155 workspace checks pass. Full final
-   workspace tests/default/native/addon/shim/E2E and distribution gates remain pending.
-8. **API inventory:** the fresh69-interface Chrome155.80/native155.23 capture
+7. **Validation:** the current actual155 affected renderer cohort passes385 tests
+   with zero failures/ignores:312 library tests and73 integration controls across
+   events, Fetch/GC, input/navigation/activation, geometry/media and shadow/resource
+   behavior. Full all-target actual155 workspace strict checks pass. The earlier
+   native MCP72/default71 checkpoint remains separate. Full default workspace,
+   addon/shim/E2E and remaining final native/distribution gates are in progress.
+8. **API inventory:** the fresh70-interface Chrome155.80/native155.23 capture
    reports65 missing own members in the original four and134 in the expanded
    measured set, with349 difference paths. Two collection interfaces are absent.
-   Same-scope paths fell from359 after descriptor/order repairs; growing the earlier
-   scope from58 interfaces prevents direct comparison with its304-path snapshot.
-   Existing Blob, ValidityState, form, input and button descriptor controls now match.
-   Missing members and broader behavior remain open. The reproducible
+   The new UserActivation interface has zero measured shape differences. The prior
+   69-interface scope fell from359 to349 after descriptor/order repairs; earlier
+   smaller scopes are not directly comparable. The reproducible
    [API-INVENTORY.json](./API-INVENTORY.json) retains every observed path and hashes.
-9. **Housekeeping:** integrations66dab51 and93bcacd are pushed. Canonical0ec37f5
-   and authored modern-CSS/MCP/media repairs are integrated and tested; their Surf
-   follow-up commit/push and final CI remain pending. Every remaining category has
-   durable coverage in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28).
+9. **Housekeeping:** integrations66dab51,93bcacd,a37330f anddd73863 are pushed.
+   Canonical2e27274 is vendored. The tested elapsed-wait, layout and private Deno
+   event-array batch is awaiting its follow-up commit and final CI. Every remaining
+   category has durable coverage in issue28; audio remains deferred in issue27.
    No Surf release tag is created.
-10. **Live Google:** after host-media and typed-CSS repairs, the new all-feature
-    baseline completes genuine native form submission, obtains /search200 and
-    follows the page-script retry to /sorry429. It has zero collector errors and no
-    synthesized fallback. Native home/consent still exhaust the20s hydration budget;
-    instrumented native remains on home with no submission. Chrome baseline has7
-    result markers but one collector error; instrumented Chrome reaches /sorry with
-    one error. This single matrix does not establish reliable acceptance.
-    [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json) saves sanitized paths/statuses,
-    exact binary/harness/trace hashes and readiness diagnostics. Raw private artifacts
-    retain payloads; Chrome cookies are never imported. The prior input runtime
-    failures are cleared. Active investigation covers incomplete consent/hydration,
-    internal computed-style work. That saved matrix predates the subsequent
-    activation repairs: private input state now reaches genuine form and Location
-    navigation, HTTP redirects retain it, and new-document retries clear transient
-    activation. The 14-case independent localhost Chrome control also verifies
-    same-origin sticky carry and cross-origin reset. A fresh live run must assess
-    these repairs; they do not establish Google clearance.
+10. **Live Google:** the latest completed optimized155 matrix predates the elapsed-
+    wait repair. Both native baseline and instrumented runs perform genuine form
+    search200 followed by a page-script retry to sorry429. Real consent/save204 is
+    now observed, but its response arrives after search starts and its HttpOnly
+    BUCKET cookie is absent from the next document. Both native runs retain home
+    hydration-budget failures. Chrome baseline has7 result markers and zero recorded
+    errors; instrumented Chrome reaches /sorry with one recorded error. These counts
+    describe trace.errors, not all native stderr script diagnostics.
+    [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json) saves sanitized request contexts,
+    consent ordering, cookie names, readiness and exact executable/harness/trace
+    hashes. A separate60s native diagnostic also reaches sorry; increasing budget
+    alone does not establish acceptance. The real-elapsed-wait regression now passes
+    against a delayed localhost XHR; a fresh optimized live run remains pending.
+    Chrome cookies are never imported. Reliable native SERP acceptance remains
+    unverified.
 
 ## Isolated CSP navigation checkpoint — 2026-10-14
 

@@ -1400,7 +1400,7 @@ real Readable/Writable/TransformStream transfers through private ports, composed
 shadow geometry, original UTF-16 Range/caret controls, Trusted Types/native155
 code-generation admission, parser/HTTP reporting, response/upload streams and
 profile-owned cache/storage effects. The committed canonical binding is turbo-test
-`0ec37f5`; generated consumer files are copied through the normal vendor script.
+`2e27274`; generated consumer files are copied through the normal vendor script.
 
 Genuine ElementInternals and CustomStateSet now provide native custom-element
 admission, form association/validation, live labels, association/disabled/reset
@@ -1459,11 +1459,21 @@ existing signed-zero equality preserved. Licensed kernels and exact assertions
 remain unchanged. Linux Chrome browser audio output and deferred advanced audio
 remain outside this bounded proof.
 
-The latest fresh Google baseline passes both former host-media/CSS runtime failures,
-completes a genuine form submission and receives search200, then follows a page-script
-retry to sorry429. Homepage/consent hydration still exceeds20s; instrumented native
-does not submit. Successful native SERP loading and transport/GPU parity remain
-unverified. Earlier dated checkpoints above preserve
+The current actual155 affected renderer cohort passes385 tests with zero failures/
+ignores and the full all-target workspace strict gate passes. The harness now waits
+real elapsed time and pumps callbacks between waits; a delayed-XHR regression
+verifies response-cookie delivery before the next search. Hash-guarded private
+Deno event arrays preserve official abort lifetime/timeout handling. The measured
+stream/listener microtask-order difference and broader descriptor-hook isolation
+remain open in the parity checklist.
+
+The latest completed optimized Google matrix predates the real-wait repair. Both
+native baseline and instrumented runs submit genuine forms, obtain search200 and
+follow page-script retry to sorry429. Consent/save204 arrives after search starts;
+homepage hydration still exceeds20s. Chrome baseline has7 result markers and zero
+recorded errors, while its instrumented run reaches sorry. Fresh optimized live
+validation of the wait repair remains pending. Successful native SERP loading and
+transport/GPU parity remain unverified. Earlier dated checkpoints above preserve
 their historical scope. Broader DOM/security/Fetch/resource behavior and final
 combined/live validation remain tracked in
 [PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md) and

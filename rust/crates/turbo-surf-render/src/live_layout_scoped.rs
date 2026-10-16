@@ -73,32 +73,50 @@ fn prepare_rule(
         return Err("native selector source provenance mismatch".into());
     }
     let matcher = Matcher { tree, root, graph };
-    let mut targets = Vec::new();
-    for &node in graph.scopes.keys() {
-        if tree.node_type_id(node) != 1 {
-            continue;
-        }
-        let mut specificity = None;
-        for (selector, source) in style.selectors.0.iter().zip(&sources) {
-            let matches = if shadow_selector(selector) {
-                matcher.matches(selector, node, false)?
-            } else {
-                graph.scopes.get(&node) == Some(&root)
-                    && tree
-                        .matches_checked(node, source)
-                        .map_err(|error| format!("native selector match failed: {error:?}"))?
-            };
-            if matches {
-                specificity = Some(specificity.unwrap_or(0).max(selector.specificity()));
+    let mut specificity_by_node = std::collections::HashMap::<Handle, u32>::new();
+    for (selector, source) in style.selectors.0.iter().zip(&sources) {
+        // Native query results are version-cached. Context-sensitive and dynamic
+        // pseudos retain per-node matching: their state need not bump tree.version.
+        let batched = root == tree.root() && !source.contains(':');
+        if batched {
+            #[cfg(test)]
+            BATCH_QUERIES.with(|count| count.set(count.get() + 1));
+            let nodes = tree
+                .query_selector_all_checked(source)
+                .map_err(|error| format!("native selector match failed: {error:?}"))?;
+            for &node in nodes.iter() {
+                if graph.scopes.get(&node) == Some(&root) {
+                    let value = specificity_by_node.entry(node).or_default();
+                    *value = (*value).max(selector.specificity());
+                }
+            }
+        } else {
+            for &node in graph.scopes.keys() {
+                if tree.node_type_id(node) != 1 {
+                    continue;
+                }
+                let matches = if shadow_selector(selector) {
+                    matcher.matches(selector, node, false)?
+                } else {
+                    graph.scopes.get(&node) == Some(&root)
+                        && tree
+                            .matches_checked(node, source)
+                            .map_err(|error| format!("native selector match failed: {error:?}"))?
+                };
+                if matches {
+                    let value = specificity_by_node.entry(node).or_default();
+                    *value = (*value).max(selector.specificity());
+                }
             }
         }
-        if let Some(value) = specificity {
-            targets.push(Target {
-                source: source_id(document, node),
-                specificity: (value >> 20, (value >> 10) & 1023, value & 1023),
-            });
-        }
     }
+    let mut targets = specificity_by_node
+        .into_iter()
+        .map(|(node, value)| Target {
+            source: source_id(document, node),
+            specificity: (value >> 20, (value >> 10) & 1023, value & 1023),
+        })
+        .collect::<Vec<_>>();
     targets.sort_by_key(|target| target.source.0);
     Ok(ScopedRule {
         declarations,
@@ -551,8 +569,148 @@ pub(crate) fn style_composed_tree(
 }
 
 #[cfg(test)]
+thread_local! {static BATCH_QUERIES:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    fn prepared(tree: &Tree, root: Handle, graph: &Composition, css: &str) -> ScopedRule {
+        prepare_rule(
+            tree,
+            1,
+            root,
+            graph,
+            &RuleSnapshot {
+                kind: 1,
+                css_text: css.into(),
+                prelude: None,
+                rules: None,
+                media: String::new(),
+                style_sheet: None,
+                scoped: None,
+            },
+        )
+        .unwrap()
+    }
+
+    fn legacy_targets(tree: &Tree, root: Handle, graph: &Composition, css: &str) -> Vec<Target> {
+        let parsed = StyleSheet::parse(css, ParserOptions::default()).unwrap();
+        let CssRule::Style(rule) = &parsed.rules.0[0] else {
+            panic!("style expected")
+        };
+        let sources = selector_sources(css).unwrap();
+        let matcher = Matcher { tree, root, graph };
+        let mut targets = Vec::new();
+        for &node in graph.scopes.keys() {
+            if tree.node_type_id(node) != 1 {
+                continue;
+            }
+            let mut specificity = None;
+            for (selector, source) in rule.selectors.0.iter().zip(&sources) {
+                let matches = if shadow_selector(selector) {
+                    matcher.matches(selector, node, false).unwrap()
+                } else {
+                    graph.scopes.get(&node) == Some(&root)
+                        && tree.matches_checked(node, source).unwrap()
+                };
+                if matches {
+                    specificity = Some(specificity.unwrap_or(0).max(selector.specificity()));
+                }
+            }
+            if let Some(value) = specificity {
+                targets.push(Target {
+                    source: source_id(1, node),
+                    specificity: (value >> 20, (value >> 10) & 1023, value & 1023),
+                });
+            }
+        }
+        targets.sort_by_key(|target| target.source.0);
+        targets
+    }
+
+    #[test]
+    fn document_selector_batches_preserve_legacy_targets_specificity_and_mutations() {
+        let mut tree = Tree::parse("<body><div id=x class=pick></div><input id=c></body>");
+        let x = tree.get_element_by_id("x").unwrap();
+        for css in [
+            ".pick,#x,body > .pick{width:10px}",
+            ":root,:scope,body .pick{height:3px}",
+        ] {
+            let graph = Composition::scopes(&tree).unwrap();
+            let expected = legacy_targets(&tree, tree.root(), &graph, css);
+            BATCH_QUERIES.with(|count| count.set(0));
+            assert_eq!(prepared(&tree, tree.root(), &graph, css).targets, expected);
+            let expected_queries = if css.starts_with(".pick") { 3 } else { 1 };
+            assert_eq!(BATCH_QUERIES.with(|count| count.get()), expected_queries);
+            assert_eq!(prepared(&tree, tree.root(), &graph, css).targets, expected);
+        }
+        tree.set_attribute(x, "class", "other");
+        let graph = Composition::scopes(&tree).unwrap();
+        assert!(prepared(&tree, tree.root(), &graph, ".pick{width:10px}")
+            .targets
+            .is_empty());
+        let child = tree.create_element("div");
+        tree.set_attribute(child, "class", "pick");
+        tree.append_child(x, child);
+        let graph = Composition::scopes(&tree).unwrap();
+        for css in [
+            ".pick{width:10px}",
+            "#x > .pick{width:30px}",
+            "#x{width:40px}",
+        ] {
+            assert_eq!(
+                prepared(&tree, tree.root(), &graph, css).targets,
+                legacy_targets(&tree, tree.root(), &graph, css)
+            );
+        }
+    }
+
+    #[test]
+    fn shadow_and_dynamic_pseudos_keep_per_node_matching_and_scope_isolation() {
+        let mut tree = Tree::parse("<body><div id=host><input id=light class=pick></div></body>");
+        let host = tree.get_element_by_id("host").unwrap();
+        let light = tree.get_element_by_id("light").unwrap();
+        let shadow = tree.attach_shadow(host);
+        let inner = tree.create_element("input");
+        tree.set_attribute(inner, "class", "pick");
+        tree.append_child(shadow, inner);
+        for checked in [false, true, false] {
+            if checked {
+                tree.set_attribute(light, "checked", "");
+            } else {
+                tree.remove_attribute(light, "checked");
+            }
+            let graph = Composition::scopes(&tree).unwrap();
+            for (root, css) in [
+                (tree.root(), ".pick{width:10px}"),
+                (shadow, ".pick{width:20px}"),
+                (shadow, ":host{width:30px}"),
+                (tree.root(), ":checked,:focus,:active,:scope{height:8px}"),
+            ] {
+                BATCH_QUERIES.with(|count| count.set(0));
+                assert_eq!(
+                    prepared(&tree, root, &graph, css).targets,
+                    legacy_targets(&tree, root, &graph, css)
+                );
+                if root == shadow || css.starts_with(':') {
+                    assert_eq!(BATCH_QUERIES.with(|count| count.get()), 0);
+                }
+            }
+            assert_eq!(
+                prepared(&tree, tree.root(), &graph, ".pick{width:1px}")
+                    .targets
+                    .len(),
+                1
+            );
+            assert_eq!(
+                prepared(&tree, shadow, &graph, ".pick{width:1px}")
+                    .targets
+                    .len(),
+                1
+            );
+        }
+    }
 
     #[test]
     fn original_scopes_and_slot_assignment_are_distinct_from_flat_parentage() {

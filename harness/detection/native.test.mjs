@@ -267,3 +267,66 @@ test(
     }
   },
 );
+
+test(
+  "consent dismissal waits real elapsed time and installs delayed response cookies before search",
+  { skip: !existsSync(binary) },
+  async () => {
+    const out = mkdtempSync(join(tmpdir(), "detection-consent-wait-"));
+    const seen = [];
+    const server = createServer((req, res) => {
+      const path = new URL(req.url, "http://localhost").pathname;
+      seen.push({ path, time: Date.now(), cookie: req.headers.cookie || "" });
+      res.setHeader("Content-Type", "text/html");
+      if (path === "/") {
+        res.end(`<button id="consent" type="button">save</button>
+          <form action="/search"><input name="q"></form><script>
+          document.querySelector('#consent').onclick=()=>{
+            const xhr=new XMLHttpRequest();xhr.open('POST','/save');xhr.send('consent');
+          };</script>`);
+      } else if (path === "/save") {
+        setTimeout(() => {
+          res.setHeader("Set-Cookie", "saved=real-response; HttpOnly; Path=/");
+          res.writeHead(204);
+          res.end();
+        }, 800);
+      } else {
+        res.end("<main>done</main>");
+      }
+    });
+    try {
+      await new Promise((done) => server.listen(0, "127.0.0.1", done));
+      const config = join(out, "config.json");
+      writeFileSync(
+        config,
+        JSON.stringify({
+          url: `http://127.0.0.1:${server.address().port}/`,
+          dismissSelector: "#consent",
+          waitMs: 1500,
+          requireNativeFormNavigation: true,
+          steps: [
+            { focus: "input[name=q]" },
+            { type: "fixture" },
+            { wait: 350 },
+            { press: "Enter" },
+          ],
+        }),
+      );
+      await run(binary, [config, join(out, "capture")]);
+      const home = seen.find((request) => request.path === "/");
+      const saved = seen.find((request) => request.path === "/save");
+      const search = seen.find((request) => request.path === "/search");
+      assert.ok(saved, "consent handler issued genuine XHR");
+      assert.ok(search, "native form navigation reached search");
+      assert.ok(search.time - home.time >= 1850, "configured wait is real elapsed time");
+      assert.match(search.cookie, /(?:^|; )saved=real-response(?:;|$)/);
+      const trace = JSON.parse(readFileSync(join(out, "capture/trace.json")));
+      assert.deepEqual(trace.errors, []);
+      assert.equal(trace.dismissal.clicked, true);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((done) => server.close(done));
+      rmSync(out, { recursive: true, force: true });
+    }
+  },
+);

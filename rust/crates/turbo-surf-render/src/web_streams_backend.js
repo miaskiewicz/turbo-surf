@@ -470,7 +470,7 @@
     Object.setPrototypeOf(front, Signal.prototype);
     save(front, "AbortSignal", raw);
     const state = record(front, "AbortSignal");
-    state.dispatch = (reason) => apply(oldAbort, controller, [localError(reason)]);
+    state.dispatch = () => apply(oldAbort, controller, [signalReason(front)]);
     if (apply(backend.signal.aborted.get, raw, []))
       state.dispatch(apply(backend.signal.reason.get, raw, []));
     else {
@@ -509,15 +509,22 @@
       }
     define(Signal.prototype, name, copy);
   }
-  const previousReason = Object.getOwnPropertyDescriptor(
-    Object.getPrototypeOf(apply(oldSignal, new ControllerBefore(), [])),
-    "reason",
-  ).get;
+  function signalReason(front) {
+    const state = record(front, "AbortSignal");
+    if (!apply(backend.signal.aborted.get, state.raw, [])) return undefined;
+    // All dependent raw reasons are assigned before the parent's abort event.
+    // Translate once so reason identity survives the later frontend dispatch.
+    if (!own(state, "translatedReason"))
+      define(state, "translatedReason", {
+        __proto__: null,
+        value: state.realm.localError(apply(backend.signal.reason.get, state.raw, [])),
+      });
+    return state.translatedReason;
+  }
   define(Signal.prototype, "reason", {
     get: make(
       function () {
-        record(this, "AbortSignal");
-        return apply(previousReason, this, []);
+        return signalReason(this);
       },
       "get reason",
       0,
@@ -529,7 +536,7 @@
     value: make(
       function () {
         if (apply(backend.signal.aborted.get, unwrap(this, "AbortSignal"), []))
-          throw apply(previousReason, this, []);
+          throw signalReason(this);
       },
       "throwIfAborted",
       0,

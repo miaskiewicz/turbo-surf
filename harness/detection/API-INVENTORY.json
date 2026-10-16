@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
-  "collectedAt": "2026-10-16T12:01:56.265Z",
+  "collectedAt": "2026-10-16T12:52:30.719Z",
   "note": "Uninstrumented localhost API contract queries; no site detection conclusion.",
   "build": {
     "version": "0.5.4",
+    "debugAssertions": false,
     "features": {
       "impersonate": true,
       "trustAnchors": true,
@@ -20,10 +21,10 @@
     }
   },
   "chromeVersion": "Chrome/155.0.8059.80",
-  "binaryHash": "7ab91fab1cee5b6510ee60a6652bfb5b74ae1798c22e118c4178359df70b0f19",
-  "collectorHash": "bf6834734647ccb368d5bc1f372b875ab5939fa2d89feaa3b348b7e724a4fdae",
+  "binaryHash": "213be61bac582a98b5d8ac4192cd76472b3041af4b22337f4a10a678bb179348",
+  "collectorHash": "7ec6d216db08da51e25e0c61a237ed4dde93247b2de1ed3c1aaf73407e5fc8f8",
   "totals": {
-    "interfaceCount": 69,
+    "interfaceCount": 70,
     "originalFourMissing": 65,
     "expandedMeasuredMissing": 134,
     "unmeasuredInterfaces": ["HTMLFormControlsCollection", "RadioNodeList"],
@@ -1295,6 +1296,12 @@
           "native": false
         }
       ]
+    },
+    "UserActivation": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
     },
     "ValidityState": {
       "measured": true,

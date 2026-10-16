@@ -31,6 +31,8 @@ still being attempted in PR26; issue coverage does not defer that work by itself
 | Range / caret | Remaining composed-tree/lifecycle/geometry cases beyond the integrated interface/receiver/GC controls | #28 |
 | DOM | Parsing/observer edges, custom-element reactions/registries, broader form association/CustomStateSet lifecycle, UTF-16 edge cases | #28 |
 | Forms | Radio/adoption semantics, live form collections, FileList/multipart, other targets and broader encoding/submitter/policy cases | #28 |
+| User activation | Consuming APIs, cross-frame propagation, broader trusted input, MCP reconstruction continuity and retained/retired receiver or cross-origin-return redirect behavior | #28 |
+| Events / promises | Stream/listener microtask interleaving and broader Object-prototype descriptor hooks during abort/event dispatch and exception reporting | #28 |
 | CSS / resources | Remaining selectors/at-rules, used downloaded fonts/animations, images/pseudo epochs, inner SVG | #28 |
 | Security | Remaining CSP/reporting/sinks, popup/navigation/sandbox, COOP/COEP and permissions policies | #28 |
 | Fetch / storage | Remaining streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
@@ -44,36 +46,49 @@ When an item is finished, record the relevant test/capture and commit before
 checking its issue task. If a narrower follow-up issue is created, link it from
 this table and #28 so the residual backlog stays complete.
 
+### Measured abort/stream queue difference
+
+The independent [Chrome control](./fixtures/abort-bridge-order-chrome155.json)
+and [unadapted Deno baseline](./fixtures/abort-bridge-deno-baseline.json) retain an
+exact open difference: Chrome runs stream sink-abort/cancel reactions before the
+microtask queued by the signal listener; the native Deno backend runs that listener
+microtask first. The same difference existed before the private event-array fix
+and remains tracked in issue28. Event state, dependent reason identity and timeout
+results are checked against Chrome separately; a passing state control does not
+close this queue-order gap.
+
+The private-array and reason-cache controls do not certify all descriptor paths.
+Poisoning `Object.prototype.get`/`set` around the entire abort dispatch still reaches
+another event-dispatch/exception-reporting path. The reason-cache read itself is
+protected by a null-prototype descriptor; broader descriptor-hook isolation remains
+open in issue28.
+
 ## Current integration checkpoint (2026-10-16)
 
-Canonical turbo-test0ec37f5 is mechanically vendored with public DOM0.5.7
+Canonical turbo-test2e27274 is mechanically vendored with public DOM0.5.7
 candidatefb60e6f (latest registry0.5.6). Genuine ElementInternals/CustomStateSet,
 checked-state foundation, FormData events, disconnected-form admission and native
-form reflection are integrated. The native371 cohort and all-target workspace
-strict checks pass before the latest Blob/ValidityState descriptor repairs;
-those repairs pass the later337-test renderer/API/forms/media rerun. The modern
-CSS/geometry/media cohort passes344 tests on actual155, and the native MCP suite
-passes72 (default71). Full final gates remain pending.
+form reflection are integrated. The current affected native renderer cohort passes
+385 tests with zero failures/ignores, including312 library and73 integration tests.
+Full all-target actual155 workspace strict checks pass. The earlier native MCP
+checkpoint passes72/default71 tests; full final workspace/addon/shim/E2E gates
+remain separate and are in progress.
 
 Public immutable layout producer0.3.8 candidate9d7f02fb is integrated; latest
 published registry release is0.3.7. Actual V815.5.35.23-rusty matches installed
 Chrome155.0.8059.80's V8 patch; SDK source provenance remains155.0.8059.79.
 Stock production SDK150 remains a distinct incomplete configuration.
 
-The host-media and modern-CSS input failures are repaired and covered by independent
-controls. The new native baseline completes genuine form submission, receives
-/search200 and follows page-script retry to /sorry429 with no collector errors or
-synthesized fallback. Native homepage/consent hydration still exceeds20s; the
-instrumented native run never submits. Chrome baseline has7 result markers and
-one collector error; its instrumented run reaches /sorry. See the sanitized
-[latest run](./GOOGLE-LAST-RUN.json). Reliable native acceptance remains unverified.
-Current investigation covers consent/hydration work, internal computed-style
-queries. The captured matrix predates the repaired Sec-Fetch-User propagation:
-trusted input is sampled before pointerdown/keydown handlers, genuine form and
-Location navigation retain it through HTTP redirects, and document-script retries
-clear transient activation. Independent localhost Chrome controls verify these
-paths, expiry and same-origin sticky carry versus cross-origin reset. Live
-acceptance after these repairs remains a separate check.
+The host-media and modern-CSS input failures are repaired. The latest completed
+optimized155 matrix has both native runs submit genuine forms, receive/search200
+and follow page-script retry to/sorry429. Consent/save204 now occurs, but its
+response arrives after search starts; the harness's virtual waits allowed the
+original document to be replaced before its HttpOnly response cookie was merged.
+The real-elapsed-wait repair passes its delayed-XHR localhost regression and awaits
+fresh live validation. Native homepage hydration still exceeds20s; a60s diagnostic
+also rejects. Chrome baseline has7 markers and zero recorded errors; its traced
+run reaches/sorry. See [latest run](./GOOGLE-LAST-RUN.json). Reliable native
+acceptance remains unverified.
 
 ## Active scope and deferred audio
 
@@ -95,10 +110,10 @@ path matters to the target; no Google-audio cause is established by these contro
 lists, actual Chrome/native versions and source/executable hashes. The latest
 localhost pair uses Chrome155.0.8059.80/native V815.5.35.23 with all GPU/wreq features.
 The original four interfaces have **65** missing own members (Document29,
-Element30, HTMLElement4, Canvas2); the expanded69-interface capture has **134**
+Element30, HTMLElement4, Canvas2); the expanded70-interface capture has **134**
 missing own members among measured interfaces. Two native interfaces are absent:
 HTMLFormControlsCollection and RadioNodeList. AbstractRange, NodeRange, StaticRange,
-ElementInternals, CustomStateSet, File, FormData and FormDataEvent have zero measured
+ElementInternals, CustomStateSet, File, FormData, FormDataEvent and UserActivation have zero measured
 own-member/descriptor differences. There are349 total difference paths, including
 raw own-key order and descriptors. Existing Blob, ValidityState, form, input and
 button members now have zero measured descriptor differences. Blob.textStream
@@ -106,8 +121,9 @@ and the listed missing form/control members remain open.
 
 Historical counts were94, then66 original/147 expanded. The preceding58-interface
 snapshot measured133 expanded members and304 paths; growing the constructor scope
-and adding raw key order changes the denominator. The same69-interface capture
-previously had359 paths before the ten descriptor/order repairs. Real form reflection and existing
+and adding raw key order changes the denominator. The prior69-interface capture
+had359 paths before the ten descriptor/order repairs; the new70-interface scope
+adds UserActivation with no measured differences and retains349 paths. Real form reflection and existing
 input/button descriptor repairs are integrated. Every remaining named path is
 tracked under issue28; none of these measurements certifies browser conformance.
 

@@ -24,7 +24,7 @@ residual work beyond this PR, with audio separately deferred in
 - Expand the API audit with exact missing/extra members, callable shapes,
   descriptors, inheritance, collector/executable hashes and separately unmeasured
   interfaces. The latest2026-10-16 snapshot reports65 missing own members across the
-  original four interfaces and134 across an expanded69-interface scope. Two native
+  original four interfaces and134 across an expanded70-interface scope. Two native
   collection interfaces remain absent. Preserve raw own-key order as well as sorted
   inventories. AbstractRange, NodeRange, StaticRange and ElementInternals have zero
   own-member/descriptor differences in this snapshot. Broader behavior remains bounded.
@@ -73,7 +73,7 @@ residual work beyond this PR, with audio separately deferred in
 ### Native DOM, scripts and ownership
 
 - Consume public Git-pinned turbo-dom0.5.7 candidatefb60e6f (latest registry
-  release0.5.6) and re-vendor committed turbo-test0ec37f5. Native per-isolate node state preserves
+  release0.5.6) and re-vendor committed turbo-test2e27274. Native per-isolate node state preserves
   original UTF-16 payloads, names, parser positions and mutation-time ancestry.
   GC callbacks schedule bounded storage scans outside collection; genuine weak
   wrapper/guest edges and native job pins preserve retained identities without
@@ -247,26 +247,38 @@ residual work beyond this PR, with audio separately deferred in
 - Record synchronous interface call durations, cumulative/max time and timed samples
   using captured clocks, including throws. Preserve guest return/Promise/error
   identity and exclude trace serialization/stack work from the measured call span.
+- Capture private computed-style selector intrinsics so page overrides do not run
+  as internal matching hooks or appear as page-originated interface queries.
+- Reuse the resolved layout view for geometry and scroll translation. Batch ordinary
+  document selectors through the native query cache; dynamic pseudos and shadow
+  selectors retain their existing matching path and scope behavior.
+- Use real elapsed waits in the comparison harness while pumping pending native
+  callbacks. A delayed-XHR regression verifies that a genuine HttpOnly consent
+  cookie reaches the subsequent search request before document replacement.
+- Harden private dense arrays in two hash-pinned official Deno event modules
+  without changing public Array or the official abort/timer/dependent lifecycle.
+  Preserve translated dependent-signal reason identity before event delivery.
+  Chrome state/timeout controls and the pre-adapter native phase order are retained;
+  the measured stream/listener microtask-order difference remains open in issue28.
 
 ### Validation status
 
-The current actual155 affected cohort passes416 tests: renderer library308,
-production geometry/media36 and native MCP72 (default71). The earlier337-test
-renderer/API/forms/media rerun passed after Blob/ValidityState repairs. All68
-offline harness tests pass. The fresh69-interface API audit preserves349 difference
-paths, down from359 in the same scope;65 original/134 expanded missing members
-and two absent native collection interfaces remain. Strict all-target actual155 workspace checks pass. Full final workspace
-tests/default/native/addon/shim/E2E gates and reliable native Google acceptance
-remain pending. See [FINDINGS.md](harness/detection/FINDINGS.md) for exact capture
-outcomes and earlier checkpoints; bounded tests do not establish complete Chrome
-conformance.
+The current actual155 renderer cohort passes385 tests with zero failures/ignores
+and the full all-target actual155 workspace strict gate passes. The earlier MCP
+checkpoint passes72 native/default71 tests. Full final default workspace,
+addon/shim/E2E and remaining native/distribution gates are in progress. The latest
+70-interface API audit retains349 differences,65 original/134 expanded missing
+members and two absent collection interfaces. UserActivation matches its measured
+shape. See FINDINGS.md and PARITY-GAPS.md for bounded evidence and remaining work.
 
-The fresh native Google baseline now completes genuine form submission: search200,
-then page-script retry to sorry429, with zero collector errors and no synthesized
-fallback. Homepage/consent hydration still exceeds20s. Chrome baseline has7 result
-markers with one collector error; instrumented native does not submit. Persist
-sanitized run metadata and hashes in GOOGLE-LAST-RUN.json; reliable native SERP
-acceptance remains unverified.
+The latest completed optimized Google matrix predates the elapsed-wait repair:
+both native runs submit genuine forms, receive search200 and follow retry to
+sorry429. Consent/save204 occurs after search has started, losing a response cookie
+across replacement. Chrome baseline has7 markers with zero recorded errors;
+instrumented Chrome reaches sorry. Native hydration still reports budget failures.
+The real-wait localhost regression passes; fresh optimized live validation remains
+pending. Sanitized metadata and hashes are saved in GOOGLE-LAST-RUN.json. Reliable
+native SERP acceptance remains unverified.
 
 ## [0.5.3] — 2026-09-29 — hide internal globals from window fingerprint
 

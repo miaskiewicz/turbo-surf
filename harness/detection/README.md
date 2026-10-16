@@ -111,6 +111,11 @@ Input respects cancellation and its execution budget; timed-out queued edits are
 canceled, and the session remains usable. These gestures are comparable intent, not identical
 motion/clock samples. The default Google dismissal selector is `#W0wltc`;
 an empty `--dismiss-selector ''` disables it. Other sites default to no dismissal.
+The harness runs explicit wait steps and the post-dismissal wait against real
+monotonic elapsed time, pumping pending native callbacks between sleeps. The
+underlying host input driver uses virtual timers; advancing those timers alone
+would allow search to replace the document before delayed consent responses and
+their cookies arrive. Explicit waits accept integers from 0 to 60000 ms.
 The conditional click is recorded before typing; its presence alone does not
 prove that the consent dialog closed. Snapshots retain the query value, focus and
 consent state so an unsuccessful input flow is distinguishable from a rejected
@@ -692,3 +697,17 @@ pointerdown cancellation, real elapsed expiry, Location handlers, HTTP redirects
 same-origin sticky state and cross-origin reset. The checked-in Chrome control is
 source-pinned. `native.test.mjs` separately checks actual CLI request headers and
 automatic retries against localhost servers using the selected detection binary.
+
+Abort state and stream reaction order have a separate reusable Chrome control:
+
+```bash
+node harness/detection/authored-dom-chrome.mjs harness/detection/abort-bridge-order-probe.js /tmp/abort-bridge-order.json
+```
+
+The full Chrome fixture and pre-adapter Deno phase order are retained independently.
+`event_contracts` checks Chrome state/reasons/timeouts and native phase-order
+preservation; the measured remaining queue-order difference is listed in
+[PARITY-GAPS.md](./PARITY-GAPS.md). Two official Deno event modules receive a
+hash-guarded adapter for private dense-array operations. Their original dispatch,
+timeout and dependent-signal algorithms remain in place, and public Array is
+unchanged.

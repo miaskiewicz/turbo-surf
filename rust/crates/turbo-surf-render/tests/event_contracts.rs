@@ -205,3 +205,119 @@ fn error_event_preserves_native_error_and_branded_readonly_fields() {
         ])
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn official_abort_bridge_keeps_chrome_state_and_unadapted_reaction_order() {
+    use sha2::{Digest, Sha256};
+    let probe = include_str!("../../../../harness/detection/abort-bridge-order-probe.js");
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/abort-bridge-order-chrome155.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        expected["probeSha256"],
+        format!("{:x}", Sha256::digest(probe.as_bytes()))
+    );
+    let source = format!(
+        "(async()=>{{globalThis.__RESULT=JSON.stringify(await ({}));}})()",
+        probe.trim().trim_end_matches(';')
+    );
+    let result =
+        turbo_surf_render::eval_async("<body>abort order</body>", "https://events.test/", &source)
+            .await
+            .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let baseline: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/abort-bridge-deno-baseline.json"
+    ))
+    .unwrap();
+    assert_eq!(baseline["probeSha256"], expected["probeSha256"]);
+    for (name, rows) in actual.as_object().unwrap() {
+        let rows = rows.as_array().unwrap();
+        let phases: Vec<_> = rows.iter().map(|row| row[0].clone()).collect();
+        // Preserve the official Deno queue order; its known Chrome difference
+        // remains explicitly tracked rather than silently normalizing the API.
+        assert_eq!(
+            serde_json::json!(phases),
+            baseline["phases"][name],
+            "{name}"
+        );
+        let mut actual_states = rows.clone();
+        let mut chrome_states = expected["result"][name].as_array().unwrap().clone();
+        actual_states.sort_by(|a, b| a[0].as_str().cmp(&b[0].as_str()));
+        chrome_states.sort_by(|a, b| a[0].as_str().cmp(&b[0].as_str()));
+        assert_eq!(actual_states, chrome_states, "{name}");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dependent_abort_never_calls_inherited_array_hooks() {
+    let source = r#"globalThis.__RESULT=JSON.stringify((()=>{
+      const define=Object.defineProperty,descriptor=Object.getOwnPropertyDescriptor;
+      const controller=new AbortController(),dependent=AbortSignal.any([controller.signal]);
+      let calls=0,hooks=0;const reason={original:true};
+      controller.signal.addEventListener('abort',()=>calls++);
+      dependent.addEventListener('abort',()=>calls++);
+      const oldZero=descriptor(Array.prototype,'0'),oldConstructor=descriptor(Array.prototype,'constructor');
+      const poison=()=>{hooks++;throw Error('private array hook')};
+      const constructor=Object.create(null);define(constructor,Symbol.species,{get:poison});
+      let error=null;
+      try{
+        define(Array.prototype,'0',{configurable:true,set:poison});
+        define(Array.prototype,'constructor',{...oldConstructor,value:constructor});
+        controller.abort(reason);
+      }catch(caught){error=caught.name}
+      finally{
+        if(oldZero)define(Array.prototype,'0',oldZero);else delete Array.prototype[0];
+        define(Array.prototype,'constructor',oldConstructor);
+      }
+      return {calls,hooks,error,source:controller.signal.reason===reason,dependent:dependent.reason===reason};
+    })())"#;
+    let result = turbo_surf_render::eval_async(
+        "<body>dependent abort</body>",
+        "https://events.test/",
+        source,
+    )
+    .await
+    .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        actual,
+        serde_json::json!({"calls":2,"hooks":0,"error":null,"source":true,"dependent":true})
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn translated_abort_reason_ignores_inherited_descriptor_hooks() {
+    let source = r#"globalThis.__RESULT=JSON.stringify((()=>{
+      const define=Object.defineProperty,descriptor=Object.getOwnPropertyDescriptor;
+      const controller=new AbortController(),dependent=AbortSignal.any([controller.signal]),reason={authored:true};
+      let hooks=0,error=null,same=false;const poison=()=>{hooks++;throw Error('inherited descriptor hook')};
+      controller.signal.addEventListener('abort',()=>{
+        const oldGet=descriptor(Object.prototype,'get'),oldSet=descriptor(Object.prototype,'set');
+        try{
+          define(Object.prototype,'get',{__proto__:null,configurable:true,get:poison});
+          define(Object.prototype,'set',{__proto__:null,configurable:true,get:poison});
+          same=dependent.reason===reason;
+        }catch(caught){error=caught.name}
+        finally{
+          if(oldGet)define(Object.prototype,'get',oldGet);else delete Object.prototype.get;
+          if(oldSet)define(Object.prototype,'set',oldSet);else delete Object.prototype.set;
+        }
+      });
+      controller.abort(reason);
+      return {hooks,error,same};
+    })())"#;
+    let result = turbo_surf_render::eval_async(
+        "<body>reason privacy</body>",
+        "https://events.test/",
+        source,
+    )
+    .await
+    .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        actual,
+        serde_json::json!({"hooks":0,"error":null,"same":true})
+    );
+}

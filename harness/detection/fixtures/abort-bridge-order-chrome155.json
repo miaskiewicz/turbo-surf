@@ -1,0 +1,26 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "e9bcb8f082333d2d33fc82bf20814289c1485275b9e8af3ad6e62f51c5d49979",
+  "result": {
+    "listenerBeforePipe": [
+      ["signal", true, true, true, true],
+      ["dependent", true, true, true, true],
+      ["after-abort", true, true, true, true],
+      ["sink-abort", true, true, true, true, true],
+      ["cancel", true, true, true, true, true],
+      ["signal-microtask", true, true, true, true],
+      ["pipe-reject", true, true, true, true, true]
+    ],
+    "listenerAfterPipe": [
+      ["signal", true, true, true, true],
+      ["dependent", true, true, true, true],
+      ["after-abort", true, true, true, true],
+      ["sink-abort", true, true, true, true, true],
+      ["cancel", true, true, true, true, true],
+      ["signal-microtask", true, true, true, true],
+      ["pipe-reject", true, true, true, true, true]
+    ],
+    "timeout": [["timeout", true, "TimeoutError"], ["after-timeout", true, "TimeoutError"]]
+  }
+}

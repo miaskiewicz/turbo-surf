@@ -9,6 +9,39 @@ use turbo_surf_core::{
 };
 use turbo_surf_render::PageSession;
 
+// Host input timers are virtual; comparison waits must let real network futures finish.
+async fn input_with_real_waits(page: &mut PageSession, steps: &Value) -> Result<(), String> {
+    let steps = steps.as_array().ok_or("steps array required")?;
+    let mut batch = Vec::new();
+    for step in steps {
+        if let Some(wait) = step.get("wait") {
+            let wait = wait
+                .as_u64()
+                .filter(|wait| *wait <= 60_000)
+                .ok_or("wait must be an integer from 0 to 60000 milliseconds")?;
+            if !batch.is_empty() {
+                page.input(&Value::Array(std::mem::take(&mut batch)))
+                    .await?;
+            }
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait);
+            while tokio::time::Instant::now() < deadline {
+                tokio::time::sleep_until(std::cmp::min(
+                    deadline,
+                    tokio::time::Instant::now() + std::time::Duration::from_millis(25),
+                ))
+                .await;
+                page.eval("void 0").await?;
+            }
+        } else {
+            batch.push(step.clone());
+        }
+    }
+    if !batch.is_empty() {
+        page.input(&Value::Array(batch)).await?;
+    }
+    Ok(())
+}
+
 const SNAPSHOT: &str = r#"({
   url: location.href,
   interfaces: globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot() || null,
@@ -288,8 +321,7 @@ async fn capture(
         checkpoint(out, trace)?;
         if present {
             let wait = config["waitMs"].as_u64().unwrap_or(2500);
-            match page
-                .input(&json!([{ "click":dismiss },{ "wait":wait }]))
+            match input_with_real_waits(&mut page, &json!([{ "click":dismiss },{ "wait":wait }]))
                 .await
             {
                 Ok(()) => trace["dismissal"]["clicked"] = json!(true),
@@ -309,7 +341,7 @@ async fn capture(
     let native_before_input = page.navigation_snapshot().0;
     let steps = config["steps"].as_array().ok_or("steps array required")?;
     if !steps.is_empty() {
-        if let Err(error) = page.input(&config["steps"]).await {
+        if let Err(error) = input_with_real_waits(&mut page, &config["steps"]).await {
             trace["pages"]
                 .as_array_mut()
                 .unwrap()

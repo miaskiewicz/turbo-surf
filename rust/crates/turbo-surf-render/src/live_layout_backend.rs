@@ -84,7 +84,7 @@ fn measure<'s>(
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<Geometry, String> {
     let input = crate::browser_env::capture_native_layout(scope, receiver)?;
-    let mut geometry = if !input.connected || !input.browsing_context {
+    let geometry = if !input.connected || !input.browsing_context {
         crate::live_layout_metrics::empty_geometry()
     } else {
         let context = input
@@ -94,33 +94,27 @@ fn measure<'s>(
             .get_slot::<Viewport>()
             .ok_or("native layout viewport was not captured")?;
         let snapshot = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
-        element_geometry(
+        let mut geometry = element_geometry(
             &snapshot,
             crate::live_layout::source_id(input.tree.document_id, input.handle),
-        )?
-    };
-    if input.connected && input.browsing_context && !geometry.rects.is_empty() {
-        let context = input
-            .owner_context
-            .ok_or("native layout owner realm unavailable")?;
-        let viewport = context
-            .get_slot::<Viewport>()
-            .ok_or("native layout viewport was not captured")?;
-        let snapshot = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
-        let state = scroll_state(context);
-        let translation = crate::live_layout_scroll::scroll_translation(
-            &snapshot.snapshot,
-            &snapshot.styles,
-            crate::live_layout::source_id(input.tree.document_id, input.handle),
-            &state.values.borrow(),
         )?;
-        geometry.bounds.x -= translation[0];
-        geometry.bounds.y -= translation[1];
-        for rect in &mut geometry.rects {
-            rect.x -= translation[0];
-            rect.y -= translation[1];
+        if !geometry.rects.is_empty() {
+            let state = scroll_state(context);
+            let translation = crate::live_layout_scroll::scroll_translation(
+                &snapshot.snapshot,
+                &snapshot.styles,
+                crate::live_layout::source_id(input.tree.document_id, input.handle),
+                &state.values.borrow(),
+            )?;
+            geometry.bounds.x -= translation[0];
+            geometry.bounds.y -= translation[1];
+            for rect in &mut geometry.rects {
+                rect.x -= translation[0];
+                rect.y -= translation[1];
+            }
         }
-    }
+        geometry
+    };
     let rect = |r: turbo_html2pdf_core::layout_snapshot::Rect| [r.x, r.y, r.width, r.height];
     Ok(Geometry {
         bounds: rect(geometry.bounds),

@@ -16,12 +16,7 @@ async fn official_stream_abort_interfaces_match_source_pinned_chrome() {
     let probe = include_str!("../../../../harness/detection/stream-abort-probe.js")
         .trim()
         .trim_end_matches(';');
-    let actual = page
-        .eval(&format!(
-            "(async()=>{{globalThis.__RESULT=JSON.stringify(await({probe}));}})()"
-        ))
-        .await
-        .unwrap();
+    let actual = page.eval_json_expression(probe).await.unwrap();
     let actual: Value = serde_json::from_str(&actual).unwrap();
     let expected: Value = serde_json::from_str(include_str!(
         "../../../../harness/detection/fixtures/stream-abort-chrome155.json"

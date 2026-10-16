@@ -1,5 +1,7 @@
 //! Official native WebCrypto classes; no replacement of the rtdom Web globals.
 use deno_core::Extension;
+#[path = "web_event_arrays.rs"]
+mod web_event_arrays;
 
 pub(crate) const BOOTSTRAP: &str = include_str!("crypto_backend.js");
 const ALGORITHMS: &str = include_str!("crypto_algorithms.js");
@@ -66,12 +68,13 @@ pub(crate) fn install<'s>(
 pub(crate) fn extensions() -> Vec<Extension> {
     vec![
         deno_webidl::deno_webidl::init(),
-        deno_web::deno_web::init(
+        web_event_arrays::harden(deno_web::deno_web::init(
             deno_web::BlobStore::default_arc(),
             None,
             false,
             deno_web::InMemoryBroadcastChannel::default(),
-        ),
+        ))
+        .expect("Pinned official Deno private event array adapter"),
         deno_crypto::deno_crypto::init(None),
         crate::crypto_hybrid::extension(),
     ]

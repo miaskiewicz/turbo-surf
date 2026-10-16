@@ -305,9 +305,10 @@ search box, clicks, focuses, types `{query}` and presses Enter. Those script-dis
 events are untrusted. The differential harness uses a separate private native
 host-input capability to create trusted events, bound by a cancellable execution
 budget; guest scripts cannot access that capability. Neither path establishes
-server acceptance. The latest dated native Google control still failed its retry,
-while a fresh Chrome control reached results without ENID. See the
-[reusable differential harness](./harness/detection/README.md) and its
+server acceptance. Fresh native-cookie Google controls complete genuine consent
+and form navigation, but reliable native SERP acceptance remains unresolved. See
+the [latest sanitized capture](./harness/detection/GOOGLE-LAST-RUN.json),
+[reusable differential harness](./harness/detection/README.md) and
 [dated observations](./harness/detection/FINDINGS.md).
 
 **Render-tier realism.** The isolate is shaped to match real Chrome structurally, verified by
@@ -386,7 +387,9 @@ partitioned native session state and decodes selected Brotli/Zstandard responses
 Policy-aware document/link discovery, independent encoder fixtures and Chrome
 controls are described in the [dictionary parity notes](harness/detection/COMPRESSION-DICTIONARIES.md).
 Dictionary-coded bodies now have bounded incremental decoding and cancellation
-controls; complete browser parity and fresh live Google acceptance remain unverified.
+controls. Fresh live traces also show native dictionary acquisition/negotiation;
+that does not demonstrate live dictionary decoding, complete browser parity or
+Google acceptance. See the [live header boundaries](harness/detection/COMPRESSION-DICTIONARIES.md#final-live-google-observation--2026-10-16).
 
 Native WebCrypto uses a reproducibly hardened Deno provider and genuine Rust
 X-Wing keys for Chrome 155's `MLKEM768-X25519`. Key permissions and private native

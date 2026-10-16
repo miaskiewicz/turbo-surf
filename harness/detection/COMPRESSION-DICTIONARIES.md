@@ -79,11 +79,10 @@ in [FINDINGS.md](./FINDINGS.md), not inferred from these focused controls.
 
 [Sanitized live evidence](./compression-dictionary-live-evidence.json) records
 real dictionary acquisition and negotiation in the final two-repeat capture.
-Native baseline requests advertise Available-Dictionary and dcb/dcz on16 and12
-requests; the instrumented passes do so on16 and17. Each native pass receives
-one Use-As-Dictionary response. Chrome's baseline counts are87 and76, with two
-Use-As-Dictionary responses each; the instrumented passes advertise on28 requests
-each and receive one dictionary response. These are different page flows, not
+Native baseline requests advertise Available-Dictionary and dcb/dcz on16 and21
+requests; the instrumented passes do so on16 and16. Each native pass receives
+one Use-As-Dictionary response. Chrome's baseline counts are81 and74, with two
+Use-As-Dictionary responses each; the instrumented passes advertise on30 and32 requests and receive one dictionary response. These are different page flows, not
 identical request workloads.
 
 Native counts use explicit application headers after dictionary negotiation and

@@ -173,7 +173,11 @@ Host events record trust, targets, dispatch phase and state after dispatch.
 The interface tracer preserves native host-pump observations separately as
 `runtimeInterfaces`; `interfaces` compares page call sites. This attribution uses
 the immediate source location in the captured stack, and is a diagnostic hint rather
-than a security boundary. Older traces without attribution retain their original totals.
+than a security boundary. Source-less immediate `__G.execScriptEl` frames are
+classified as runtime; page functions called by that pump remain page calls.
+Snapshots are cumulative within a document and retain only the first stack for
+each origin/member/kind aggregate, so do not sum phases or attribute every count
+to that first caller. Older traces retain their original classification and totals.
 It preserves both raw traces and exact difference paths in `comparison.json`. The
 control covers those contracts; it does not simulate incremental HTML parsing,
 every resource type or a complete browser loader.
@@ -273,6 +277,9 @@ can contain session secrets; keep raw artifacts local.
 [VALIDATION-LAST-RUN.json](./VALIDATION-LAST-RUN.json) records the final local
 default/native workspace and addon results, configurations and evidence hashes.
 It covers the tested contracts, rather than complete Chrome conformance.
+[GOOGLE-DIAGNOSTICS.json](./GOOGLE-DIAGNOSTICS.json) separately records constant
+stylesheet telemetry codes and stdout/stderr counts from the latest capture;
+these are distinct from the structured `trace.errors` array.
 
 - `manifest.json`: checkout commit/branch, dirty diff hash, executable hash/mtime,
   harness hashes, complete streamed dirty-diff hash and untracked source hashes, actual native build diagnostics, per-process exit/timeout status. This records provenance; rebuild

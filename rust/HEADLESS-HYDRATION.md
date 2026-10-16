@@ -1395,11 +1395,82 @@ Credentialless frames use an ephemeral top-document partition containing a real 
 
 ## Current parity integration (2026-10-16)
 
-The current candidate includes native AbstractRange/NodeRange/StaticRange,
+Production source at `26bd0f4` vendors committed canonical turbo-test `1e93cae`
+through the normal vendor script. Public DOM 0.5.7 candidate `fb60e6f` and layout 0.3.8
+candidate `9d7f02fb` remain distinct from registry releases 0.5.6 and 0.3.7. The stock
+engine is V8 15.0.245.2-rusty; the managed native 155 profile uses actual
+V8 15.5.35.23-rusty with the matching native callback patches. These are separate
+build configurations, not an engine upgrade achieved through UA strings.
+
+Native AbstractRange/NodeRange/StaticRange, original UTF-16 boundaries, composed
+shadow geometry, scrolling, point hits and caret controls are integrated.
+ElementInternals/CustomStateSet, custom-element admission and form association,
+live control collections, RadioNodeList, native labels, validation and FormData
+lifecycle have independent behavior, receiver-realm and collection controls.
+Genuine top-document text GET/POST form submission uses actual network/cookie
+state and policy checks. Child-frame navigation, multipart parsing/encoding and
+broader form lifecycle remain explicit follow-up work.
+
+Private native ownership backs Window/MessagePort and genuine stream transfers.
+Response/upload streams, cancellation, cache/referrer effects, partitioned and
+credentialless DOM storage, CSP/Trusted Types/resource policies and bounded
+reporting are integrated. Native compression dictionaries now have a real
+partitioned store, discovery, validated negotiation and bounded incremental
+Brotli/Zstandard decoding. The independent HTTPS and Chrome controls cover
+actual partial delivery and cancellation. Publication timing and encoded Range
+behavior remain open; live negotiation alone does not prove live decoding.
+
+Official hardened Deno WebCrypto and native X-Wing keys implement the tested
+Chrome 155 key/KEM contracts. Private abort/controller boundaries, timeout-signal
+GC ownership and actual native/Window timer ordering have regression coverage.
+The human driver awaits its real Promise. XHR identity, descriptors/constants
+and private receiver checks match the independent bounded Chrome/HTTP controls.
+These implementations do not close broader lifecycle, policy or API behavior.
+
+The final complete workspace commands pass **1,376 default / 1,415 native 155
+tests**, zero failures, across 129 component suites each. Default has three
+unavailable native-callback ignores plus six generated doctest ignores; native 155
+has the six doctest ignores. Both strict all-target Clippy and formatting gates
+pass. Rebuilt addons pass the shim/E2E and offline detection gates, with exact
+counts, feature sets and hashes recorded in
+[VALIDATION-LAST-RUN.json](../harness/detection/VALIDATION-LAST-RUN.json).
+Native validation includes the MCP wreq/trust-anchors/Metal/CoreText set and the
+NAPI Metal/CoreText features. The shared GPU scene matches within its tested scope.
+
+The current independent 75-interface pair measures 64 original-scope / 142 expanded
+missing own members and 374 leaf difference paths. All measured interfaces are
+present; this does not certify their full behavior or every browser interface.
+[API-INVENTORY.json](../harness/detection/API-INVENTORY.json) preserves exact lists
+and descriptors; every residual is tracked in #28. Conditional presence-only
+Navigator, database, cache, network and Navigation API fallbacks do not establish
+implemented browser behavior.
+
+The final-source Google matrix uses fresh native cookies, actual consent and
+genuine forms with no Chrome cookie import or fallback. Native fetches `/search` with HTTP200
+then follows retry to `/sorry` with HTTP429; accepted native SERP remains unresolved. See the
+[latest sanitized run](../harness/detection/GOOGLE-LAST-RUN.json) and
+[findings](../harness/detection/FINDINGS.md) for the current repetitions, budgets,
+script diagnostics and baseline/instrumentation distinction. The passing shared
+probes do not identify Google's rejection signal.
+
+All broader residuals are itemized in
+[PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md) and
+[issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28). Advanced audio stays
+in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27); the tested offline
+DSP remains implemented. Full Chrome conformance and production release alignment
+remain open. Current-head CI is recorded in the PR checks.
+
+### Earlier integration notes
+
+The notes below preserve intermediate source snapshots, focused counts and the
+older544180d live capture. Statements about pending integration or a next batch
+are historical; the current status and validation links above supersede them.
+
+The earlier candidate includes native AbstractRange/NodeRange/StaticRange,
 real Readable/Writable/TransformStream transfers through private ports, composed
 shadow geometry, original UTF-16 Range/caret controls, Trusted Types/native155
 code-generation admission, parser/HTTP reporting, response/upload streams and
-profile-owned cache/storage effects. The committed canonical binding is turbo-test
+profile-owned cache/storage effects. That checkpoint uses canonical turbo-test
 `2e27274`; generated consumer files are copied through the normal vendor script.
 
 Genuine ElementInternals and CustomStateSet now provide native custom-element
@@ -1469,7 +1540,7 @@ Deno event arrays preserve official abort lifetime/timeout handling. The measure
 stream/listener microtask-order difference and broader descriptor-hook isolation
 remain open in the parity checklist.
 
-The latest optimized544180d Google matrix repeats twice. Both native baselines
+The earlier optimized544180d Google matrix repeats twice. Both native baselines
 complete consent/save204 with its HttpOnly BUCKET cookie before search, then follow
 search200 to sorry429 (0/2 native baseline SERP successes). Chrome baselines each
 have9 markers and zero recorded errors. One native traced pass fails Missing promise
@@ -1493,7 +1564,7 @@ next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gat
 and fresh live validation remain pending.
 
 
-The current source integration vendors canonical `51b5b97`: scoped registry provenance,
+An intermediate integration vendors canonical `51b5b97`: scoped registry provenance,
 submitter reflection, genuine live form collections and node-owned radio grouping,
 canceled-click restoration, adoption and indexed container/owner lifecycle behavior.
 Source-pinned production collection/real-frame GC tests pass2 controls, actual
@@ -1514,7 +1585,7 @@ before body completion, partial output and cancellation without partial caching.
 Neither these source additions nor a passing local control establish Google SERP
 acceptance; the last frozen Google result predates this integration.
 
-The next source integration vendors canonical1e93cae for genuine live control
+The subsequent integration vendors canonical1e93cae for genuine live control
 labels, receiver-realm collection identity and namespace-safe native association.
 Actual155 production behavior/iframe and retired-realm GC tests pass. The host
 pump also waits on a precise real Window deadline while native work is pending,

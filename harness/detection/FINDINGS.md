@@ -20,7 +20,7 @@ zero failures, with six generated doctest ignores. Both final full commands
 cover129 component suites; these are actual complete command results.
 
 Both rebuilt addons pass **95 shim tests** (one intentional test-framework skip),
-**20 E2E tests**, **88 detection tests** without skips and **two Python SDK-helper
+**20 E2E tests**, **89 detection tests** without skips and **two Python SDK-helper
 tests**. The native artifact uses actual V815.5.35.23-rusty, wreq, trust anchors,
 Metal and CoreText. Its real addon GPU triangle produces pixel hash3630084024,
 130,944 nonzero bytes out of131,072, and centerRGBA[128,128,153,255]. This is the
@@ -44,12 +44,13 @@ configurations, full command results and evidence hashes.
 
 ### Fresh Google matrix — final source, 2026-10-16
 
-The frozen executable above was captured from checkout90fc381, with production
-source26bd0f4. All14 capture/comparison processes exit0 without timeouts. Both
+The frozen executable above uses production source26bd0f4. The corrected tracer
+was captured against base589d2d3 with its exact dirty-diff and harness hashes
+recorded in the manifest and sanitized summary. All14 capture/comparison processes exit0 without timeouts. Both
 native baselines complete real consent POST/save204 before genuine native form
 submission, carry server-issued native cookies and fetch/search200; Google's
 retry sends both to/sorry429. **Native accepted SERPs:0/2.** Chrome baselines load
-8 and9 result markers with zero recorded errors. Both instrumented Chrome passes
+9 result markers each with zero recorded errors. Both instrumented Chrome passes
 are rejected, so traced observations cannot be treated as an unchanged baseline.
 
 All four native passes use wreq, trust anchors, Metal and CoreText, fresh native
@@ -70,10 +71,25 @@ wrappers also affect probe results. None of these measurements establishes the
 cause of Google's rejection or universal wire/GPU parity.
 
 Native dictionary acquisition/negotiation now occurs in the live trace: baseline
-Available-Dictionary/dcb-dcz counts are16/12, instrumented16/17. No captured
+Available-Dictionary/dcb-dcz counts are16/21, instrumented16/16. No captured
 response header lists dcb/dcz; this does not establish live codec decoding or
 complete wire visibility. See [live dictionary evidence](./compression-dictionary-live-evidence.json)
 for each header boundary and the differing Chrome page flows.
+
+The corrected tracer classifies all20 saved immediate native script-pump frame
+rows as runtime while preserving genuine Google-first calls as page activity.
+The regression tests retain return identity and timing. First-stack aggregation
+and differing wrapper coverage still limit attribution; zero dropped rows does
+not mean every interface is observable.
+
+Actual Google stylesheet telemetry remains open despite the passing isolated
+CSSOM probe. All four native passes emit both `jc` and `lc` after consent and
+before the first search: each code appears at `/gen_204` and
+`/httpservice/retry/jserror`, with HTTP204 responses. Chrome emits neither code.
+The earlier589 matrix emitted those codes only in repeat0, yet repeat1 also
+rejected native searches. Their presence is not a proven rejection cause or
+necessary condition. [GOOGLE-DIAGNOSTICS.json](./GOOGLE-DIAGNOSTICS.json) records
+only constant codes/counts, stream diagnostics and raw artifact hashes.
 
 Audio remains in#27; every other deferred behavior, homepage lifecycle bounds and
 reliable Google acceptance are explicitly recorded in#28. The finite PR26 delivery

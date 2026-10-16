@@ -1,8 +1,8 @@
 {
   "schemaVersion": 3,
-  "collectedAt": "2026-10-16T18:03:00.580Z",
-  "baseCommit": "90fc38155f311e4487c0bf39369ee1d2861a54a7",
-  "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "collectedAt": "2026-10-16T18:32:46.343Z",
+  "baseCommit": "589d2d30df30f9d36bfd9952082285c6847b6f5d",
+  "dirtyDiffHash": "3c44b253d3ec52c521d9fcb52dfbf148669d3027f6eb4d44d9dba6340702c451",
   "binaryHash": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50",
   "build": {
     "version": "0.5.4",
@@ -27,7 +27,7 @@
     "chrome-trace.mjs": "0b274768d9505cfcbaee162c0307f4cf85740efd0806154f3c1d7e11ad5d712a",
     "chrome-cdp-trace.mjs": "ae27ad725fe0fa3d03e9311813895bc38eae384c66bb0b49c0a121f702177c34",
     "cdp-connection.mjs": "7b9f522db23484f79575ee46cf320277a4a516de53becba1eef5730d5a5549a0",
-    "interface-trace.js": "ff3bfa20aee39a9a37622c746c62584563374a766fbe1b8b64f9a51b831de59f",
+    "interface-trace.js": "0a43b414acde5bd3cd8e0b3eabc1c21ac544c22928f9cdbff63ca2e640f39caf",
     "capabilities.js": "787246288936c57d61b5ad4920ed69184891d38e79908cdcf4ca45b831092b84",
     "api-shape.js": "21d5aafbdf94c61e6f8a7216b51d448b750ff099688e1a26ff9c3d31e1975bae",
     "compare.mjs": "b07cda7cf11beb6f9ce6a337d6ddfbf4f38797237c2b471df35f12b72200d2d7",
@@ -47,7 +47,7 @@
       "traceMissing": false,
       "collectorComplete": null,
       "recordedErrorCount": 0,
-      "traceSha256": "e88cd12a5f332651f70cd1f76ea3f3c3d4faff4df9a0f890d57ccd5d08f49ba5",
+      "traceSha256": "d2b258eb13b4df52f6ccb517a65903b6ef351f67d108c1e64d2e39652616ad22",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -163,25 +163,18 @@
         },
         {
           "phase": "step-5",
-          "path": "/search",
+          "path": "/",
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "search",
           "path": "/search",
           "origin": "https://www.google.com",
-          "results": 8,
+          "results": 9,
           "hydrationBudgetExceeded": null,
           "pendingNavigation": null,
           "cookieNames": [
@@ -201,7 +194,7 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "0b3f323f0315b097978a9d357e88b2e2540c795f3236f57830caef2afe030f86",
+      "traceSha256": "fe0e59e7253904a4a61b58cd7c11008c0c0fc49e809d8a4bbcad30be021ec85e",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -358,7 +351,7 @@
       "traceMissing": false,
       "collectorComplete": null,
       "recordedErrorCount": 1,
-      "traceSha256": "516b66586c5a7a116f2e1c8d13d4e07ab2ff131210037dfed27a2823aee20622",
+      "traceSha256": "2c5ec8fb3e08c479be3bcc261ee87c908869661a90d58465339d51d37fae16c5",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -489,14 +482,7 @@
           "results": 0,
           "hydrationBudgetExceeded": null,
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "search",
@@ -515,7 +501,7 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "d1be71ebcfbded307b2a9c69ebce24141965843b0c38594498f61ced18991443",
+      "traceSha256": "4f3b950fbd836a17e7c7fa424dae7eb88bf613f1b5f4371c479c9102b11f0171",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -672,7 +658,7 @@
       "traceMissing": false,
       "collectorComplete": null,
       "recordedErrorCount": 0,
-      "traceSha256": "f75d992bdcb120ff0be95c765f2276e7cdd24075718252ca7a78fd81a50020d3",
+      "traceSha256": "7198eb584d48c2fc06cbef7610537501ddec35b1ef03ba22526e377bd8a8dbda",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -819,7 +805,7 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "7bfa9dd0b195cd0d63b22618ede7290d9da17153dc505bf9e8e1cf9f001cc3b3",
+      "traceSha256": "0ee6598aefcbbaeda121c76fb2cc1c8bc1bb9b94b129ea7e8b6cba517c4bf99d",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -976,7 +962,7 @@
       "traceMissing": false,
       "collectorComplete": null,
       "recordedErrorCount": 1,
-      "traceSha256": "d7bff0ac6ca320efaa2a6e8015fa134288d983f299f7bbc158bdb7cc10232c5a",
+      "traceSha256": "3e1b79a149b639cf1367646757d9ed833cc5ef3c7025d729e305f2fc239f2ccb",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1107,7 +1093,14 @@
           "results": 0,
           "hydrationBudgetExceeded": null,
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": [
+            "AEC",
+            "SEARCH_SAMESITE",
+            "SG_SS",
+            "SOCS",
+            "__Secure-BUCKET",
+            "__Secure-ENID"
+          ]
         },
         {
           "phase": "search",
@@ -1126,7 +1119,7 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "5bbfc595495d1028ce2a3d504b93eb29a0218a1b450b7853b2699d0ade14b7e1",
+      "traceSha256": "95c443cf0d508f8182384bcf530bc45422695df7923814fd3fae2a22fb300a68",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,

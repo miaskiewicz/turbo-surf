@@ -28,10 +28,12 @@
       const caller = stack?.split("\n")[0] || "";
       // Native host pumps are implemented in JS. Preserve their observations separately
       // so polling/loading does not masquerade as target-script interface queries.
+      // Source-less execScriptEl frames occur in the native module bootstrap. Match
+      // only the immediate frame: real page code can have this host in its ancestry.
       const origin =
         /<(?:env|rs-[^>]*|initial-hydrate|hydrate|pending|dom-bootstrap|frame-resources|turbo-cdp-host|frame-init|session-eval)>/.test(
           caller,
-        )
+        ) || /^\s*at (?:Object\.)?__G\.execScriptEl \(<anonymous>:\d+:\d+\)$/.test(caller)
           ? "runtime"
           : "page";
       const id = `${origin}:${name}:${kind}`;

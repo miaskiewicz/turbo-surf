@@ -11,6 +11,10 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Reusable diagnostics and browser identity
 
+- Separate source-less native script-pump reads from page queries in interface
+  traces. A real-stack regression preserves page callees, return identity and
+  timing; source/ancestor attribution remains a diagnostic heuristic. Refresh
+  product and engine documentation against the final code and linked evidence.
 - Add fresh-cookie paired Chrome/native tracing with baseline and instrumented
   controls, JS interface arguments/results/stacks, request payloads, response
   bodies, debugger source inventories, failure checkpoints and build hashes.
@@ -374,7 +378,7 @@ stock-native callback skips and six generated doctest ignores. The final actual1
 six-feature workspace passes1,415 tests with zero failures and six generated
 doctest ignores. Both complete commands cover129 component suites. Both engines pass final XHR5, shadow9,
 all-target strict Clippy and formatting. Both rebuilt addons pass95 shim tests
-(one intentional test-framework skip),20 E2E tests,88 detection controls without
+(one intentional test-framework skip),20 E2E tests,89 detection controls without
 skips and2 Python SDK-helper tests.
 
 The optimized native CLI/addon includes wreq, trust anchors, Metal and CoreText.
@@ -384,11 +388,14 @@ and374 paths. On the same68 previously measured interfaces, missing members fall
 Both actual detector captures have no strong findings. The fresh two-repeat
 final-source Google matrix completes with all four native features and genuine
 consent/native-cookie forms, without sidecar or fallback. Native baselines reach
-/search200 then/sorry429:0/2 accepted SERPs. Chrome baselines load8/9 markers;
+/search200 then/sorry429:0/2 accepted SERPs. Chrome baselines load9 markers each;
 instrumented Chrome is rejected in both repetitions. Native trace.errors is empty
 in all four passes, but stdout records reCAPTCHA fetch failures and homepage
 hydration still reaches its20s budget. Fresh paired capabilities and shared WebGL
-probes match within their measured scope; no rejection cause is established.
+probes match within their measured scope. All four native passes still emit
+Google jc/lc stylesheet telemetry before search; Chrome emits neither. The
+constant-code diagnostic snapshot records this residual without asserting a
+rejection cause.
 
 Full local gates and hashes are recorded in VALIDATION-LAST-RUN.json; sanitized
 live results are in GOOGLE-LAST-RUN.json. Broader residual behavior and reliable

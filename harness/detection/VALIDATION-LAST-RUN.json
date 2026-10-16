@@ -54,12 +54,13 @@
     },
     "detection": {
       "exitCode": 0,
-      "nodePassed": 88,
+      "nodePassed": 89,
       "nodeFailed": 0,
       "nodeSkipped": 0,
       "pythonPassed": 2,
       "pythonFailed": 0,
-      "addonExplicit": true
+      "addonExplicit": true,
+      "logSha256": "b8ef58258a2cedfdee86f201050d49ba076765a0fd6ce517e6dffb65669376e6"
     },
     "fullLogSha256": "63c3cb228913c751fb1c1c95dfcde455e273ef3fe6ea608eddb88ce17a119dc7",
     "sourceManifestSha256": "bbf0c961f10170e28f27fc4df53ee36460bcdf57316b66c3f0c578fdd8b10e27",
@@ -111,16 +112,32 @@
     },
     "detection": {
       "exitCode": 0,
-      "nodePassed": 88,
+      "nodePassed": 89,
       "nodeFailed": 0,
       "nodeSkipped": 0,
       "pythonPassed": 2,
       "pythonFailed": 0,
-      "logSha256": "056073943ade39ff48ec263c9582e983cc426920566cae8c054d4de032b9ecdb"
+      "logSha256": "07ce0c5f5711938792f8c783e8a9f353f9e1a2ba236a5f1ffd0a5f4e47bd198d"
     },
     "fullLogSha256": "78cdd5ff6c07ac2a6910c39cf690a73681155851e5c2be1f41f33dbf25a16114",
     "localReceiptSha256": "1e1d2847fd1694a2dd60f9f1019ee2a81f51bc4458388eab91e521e1098b2d4b"
   },
   "reproduction": "See harness/detection/README.md and engine-155/README.md. Native feature qualification includes both the MCP four-feature set and NAPI gpu-metal/coretext; stock SDK and managed native155 are distinct configurations.",
-  "rawEvidence": "Ignored local receipts and logs retain command details. This report contains selected result counts and hashes; it does not embed raw logs."
+  "rawEvidence": "Ignored local receipts and logs retain command details. This report contains selected result counts and hashes; it does not embed raw logs.",
+  "harnessFollowup": {
+    "baseCommit": "589d2d30df30f9d36bfd9952082285c6847b6f5d",
+    "sourceFiles": [
+      {
+        "path": "harness/detection/interface-trace.js",
+        "sha256": "0a43b414acde5bd3cd8e0b3eabc1c21ac544c22928f9cdbff63ca2e640f39caf"
+      },
+      {
+        "path": "harness/detection/interface-trace.test.mjs",
+        "sha256": "37c83d9b2e1335b1d9c40d659afe02fbf80d26a3c014e2a1fc9b7ffe9347d91f"
+      }
+    ],
+    "scope": "Complete offline detection only; sequential existing artifacts, no Rust rebuild; interface tracing origin correction. Earlier88 logs preserved.",
+    "command": "TURBO_SURF_NAPI_PATH=<addon> TURBO_SURF_DETECTION_BINARY=<cli> npm run test:detection",
+    "localReceiptSha256": "cd690399dd44fbdfa663f69cc90bc1e6fd1a9fc773b27e8013b25a347925569f"
+  }
 }

@@ -1,6 +1,6 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { test } from "node:test";
 import vm from "node:vm";
 
 test("interface tracer preserves and separates immediate host and page call sites", () => {
@@ -32,6 +32,45 @@ test("interface tracer preserves and separates immediate host and page call site
   );
   assert.match(calls[0].stack, /<env>/);
   assert.match(calls[1].stack, /example\.test/);
+});
+
+test("source-less native script pump is runtime but its real page callee stays page", () => {
+  const context = vm.createContext({});
+  vm.runInContext(
+    `globalThis.clock=0;class Document {querySelectorAll(){clock+=3;return document;}}
+    globalThis.Document=Document;globalThis.document=new Document();
+    globalThis.navigator={};globalThis.screen={};globalThis.performance={now:()=>clock};`,
+    context,
+  );
+  vm.runInContext(readFileSync(new URL("./interface-trace.js", import.meta.url), "utf8"), context);
+  vm.runInContext(`function googlePage(){return document.querySelectorAll('page');}`, context, {
+    filename: "https://example.test/app.js",
+  });
+  vm.runInContext(
+    `globalThis.__G={};__G.execScriptEl=function(){
+      const hostResult=document.querySelectorAll('script');
+      return hostResult===googlePage();
+    };`,
+    context,
+    { filename: "<anonymous>" },
+  );
+  assert.equal(vm.runInContext(`__G.execScriptEl()`, context), true);
+  const rows = JSON.parse(
+    vm.runInContext(
+      `JSON.stringify(globalThis[Symbol.for('turbo-surf.interface-trace')].snapshot().accesses)`,
+      context,
+    ),
+  ).filter((row) => row.name === "Document.querySelectorAll");
+  assert.deepEqual(
+    rows.map((row) => [row.origin, row.count, row.durationMs]),
+    [
+      ["runtime", 1, 3],
+      ["page", 1, 3],
+    ],
+  );
+  assert.match(rows[0].stack.split("\n")[0], /at (?:Object\.)?__G\.execScriptEl \(<anonymous>:/);
+  assert.match(rows[1].stack.split("\n")[0], /at googlePage \(https:\/\/example\.test\/app\.js:/);
+  assert.match(rows[1].stack, /(?:Object\.)?__G\.execScriptEl/);
 });
 
 test("interface tracer records supported own declaration methods without installer noise", () => {

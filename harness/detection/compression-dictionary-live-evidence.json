@@ -1,54 +1,45 @@
 {
-  "capture": "google-final26-20261016",
+  "capture": "google-final26-originfix-20261016",
   "scope": "All8completedlivebaseline/interfacepasses; probeOnly blank-page controls excluded",
   "table": [
     {
       "repeat": 0,
       "runtime": "chrome",
       "pass": "baseline",
-      "recordedRequestEntries": 194,
-      "availableDictionaryRequests": 87,
-      "dcbDczAdvertisedRequests": 87,
-      "availableDictionaryScopes": {
-        "cdp-extra-info": 87
-      },
+      "recordedRequestEntries": 185,
+      "availableDictionaryRequests": 81,
+      "dcbDczAdvertisedRequests": 81,
       "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
       "useAsDictionaryResponses": 2,
       "responseDcbDczHeaders": 0,
       "responseHeaderBoundary": "CDP response headers",
-      "headerArtifactSha256": "e88cd12a5f332651f70cd1f76ea3f3c3d4faff4df9a0f890d57ccd5d08f49ba5"
+      "headerArtifactSha256": "d2b258eb13b4df52f6ccb517a65903b6ef351f67d108c1e64d2e39652616ad22"
     },
     {
       "repeat": 0,
       "runtime": "chrome",
       "pass": "interfaces",
       "recordedRequestEntries": 103,
-      "availableDictionaryRequests": 28,
-      "dcbDczAdvertisedRequests": 28,
-      "availableDictionaryScopes": {
-        "cdp-extra-info": 28
-      },
+      "availableDictionaryRequests": 30,
+      "dcbDczAdvertisedRequests": 30,
       "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
       "useAsDictionaryResponses": 1,
       "responseDcbDczHeaders": 0,
       "responseHeaderBoundary": "CDP response headers",
-      "headerArtifactSha256": "516b66586c5a7a116f2e1c8d13d4e07ab2ff131210037dfed27a2823aee20622"
+      "headerArtifactSha256": "2c5ec8fb3e08c479be3bcc261ee87c908869661a90d58465339d51d37fae16c5"
     },
     {
       "repeat": 0,
       "runtime": "native",
       "pass": "baseline",
-      "recordedRequestEntries": 35,
+      "recordedRequestEntries": 37,
       "availableDictionaryRequests": 16,
       "dcbDczAdvertisedRequests": 16,
-      "availableDictionaryScopes": {
-        "application headers including context and hints; transport-added headers absent": 16
-      },
       "requestHeaderField": "network.jsonl request.explicit_headers",
       "useAsDictionaryResponses": 1,
       "responseDcbDczHeaders": 0,
-      "responseHeaderBoundary": "Core response headers after client transport automatic decoding",
-      "headerArtifactSha256": "3aaf380f2a074f8326717f7da393fecb4b0cdaf8dcc2d32e2810a9977e038ebc"
+      "responseHeaderBoundary": "native ordinary client automatic decoding may strip original encoding; no dcb/dcz observed is not uncompressed-wire proof",
+      "headerArtifactSha256": "5f1f2b585444162cc23ced68d229f20fd81edc3fe2a113f1ed1041ec8443a857"
     },
     {
       "repeat": 0,
@@ -57,78 +48,63 @@
       "recordedRequestEntries": 37,
       "availableDictionaryRequests": 16,
       "dcbDczAdvertisedRequests": 16,
-      "availableDictionaryScopes": {
-        "application headers including context and hints; transport-added headers absent": 16
-      },
       "requestHeaderField": "network.jsonl request.explicit_headers",
       "useAsDictionaryResponses": 1,
       "responseDcbDczHeaders": 0,
-      "responseHeaderBoundary": "Core response headers after client transport automatic decoding",
-      "headerArtifactSha256": "23ce17a0b1b3e53db6907f5ec1365fc515b98711c802b2e066506750779a9288"
+      "responseHeaderBoundary": "native ordinary client automatic decoding may strip original encoding; no dcb/dcz observed is not uncompressed-wire proof",
+      "headerArtifactSha256": "ef325317b5605f0c0e01bbb0fa27d59ea777f701fe60bc19a98e172b095dbea9"
     },
     {
       "repeat": 1,
       "runtime": "chrome",
       "pass": "baseline",
-      "recordedRequestEntries": 194,
-      "availableDictionaryRequests": 76,
-      "dcbDczAdvertisedRequests": 76,
-      "availableDictionaryScopes": {
-        "cdp-extra-info": 76
-      },
+      "recordedRequestEntries": 175,
+      "availableDictionaryRequests": 74,
+      "dcbDczAdvertisedRequests": 74,
       "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
       "useAsDictionaryResponses": 2,
       "responseDcbDczHeaders": 0,
       "responseHeaderBoundary": "CDP response headers",
-      "headerArtifactSha256": "f75d992bdcb120ff0be95c765f2276e7cdd24075718252ca7a78fd81a50020d3"
+      "headerArtifactSha256": "7198eb584d48c2fc06cbef7610537501ddec35b1ef03ba22526e377bd8a8dbda"
     },
     {
       "repeat": 1,
       "runtime": "chrome",
       "pass": "interfaces",
-      "recordedRequestEntries": 101,
-      "availableDictionaryRequests": 28,
-      "dcbDczAdvertisedRequests": 28,
-      "availableDictionaryScopes": {
-        "cdp-extra-info": 28
-      },
+      "recordedRequestEntries": 102,
+      "availableDictionaryRequests": 32,
+      "dcbDczAdvertisedRequests": 32,
       "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
       "useAsDictionaryResponses": 1,
       "responseDcbDczHeaders": 0,
       "responseHeaderBoundary": "CDP response headers",
-      "headerArtifactSha256": "d7bff0ac6ca320efaa2a6e8015fa134288d983f299f7bbc158bdb7cc10232c5a"
+      "headerArtifactSha256": "3e1b79a149b639cf1367646757d9ed833cc5ef3c7025d729e305f2fc239f2ccb"
     },
     {
       "repeat": 1,
       "runtime": "native",
       "pass": "baseline",
-      "recordedRequestEntries": 31,
-      "availableDictionaryRequests": 12,
-      "dcbDczAdvertisedRequests": 12,
-      "availableDictionaryScopes": {
-        "application headers including context and hints; transport-added headers absent": 12
-      },
+      "recordedRequestEntries": 38,
+      "availableDictionaryRequests": 21,
+      "dcbDczAdvertisedRequests": 21,
       "requestHeaderField": "network.jsonl request.explicit_headers",
       "useAsDictionaryResponses": 1,
       "responseDcbDczHeaders": 0,
-      "responseHeaderBoundary": "Core response headers after client transport automatic decoding",
-      "headerArtifactSha256": "5e172f365d60818a8851d99edb897091387473188a7d788fd048c65dac0e6067"
+      "responseHeaderBoundary": "native ordinary client automatic decoding may strip original encoding; no dcb/dcz observed is not uncompressed-wire proof",
+      "headerArtifactSha256": "7470ae37c7509009158045d26e3d1e20af75c125ffbfffc32f7d9c7d2bde9868"
     },
     {
       "repeat": 1,
       "runtime": "native",
       "pass": "interfaces",
-      "recordedRequestEntries": 34,
-      "availableDictionaryRequests": 17,
-      "dcbDczAdvertisedRequests": 17,
-      "availableDictionaryScopes": {
-        "application headers including context and hints; transport-added headers absent": 17
-      },
+      "recordedRequestEntries": 38,
+      "availableDictionaryRequests": 16,
+      "dcbDczAdvertisedRequests": 16,
       "requestHeaderField": "network.jsonl request.explicit_headers",
       "useAsDictionaryResponses": 1,
       "responseDcbDczHeaders": 0,
-      "responseHeaderBoundary": "Core response headers after client transport automatic decoding",
-      "headerArtifactSha256": "248090aa16ede9471117b4625fbe3dc989e1179b16b8de40098300efd41bca94"
+      "responseHeaderBoundary": "native ordinary client automatic decoding may strip original encoding; no dcb/dcz observed is not uncompressed-wire proof",
+      "headerArtifactSha256": "8cb81de71178730a674f3c223642682bb138a5db9f03584965b2eb484fca87d7"
     }
   ],
   "boundaries": [
@@ -140,6 +116,7 @@
   ],
   "noSecrets": "No URLs, query values, body bytes, cookie values, dictionary hashes or IDs included.",
   "productionSourceCommit": "26bd0f459c0edeab35dea345550f7f311818ed32",
-  "captureCheckoutCommit": "90fc38155f311e4487c0bf39369ee1d2861a54a7",
-  "binarySha256": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50"
+  "captureCheckoutCommit": "589d2d30df30f9d36bfd9952082285c6847b6f5d",
+  "binarySha256": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50",
+  "dirtyDiffHash": "3c44b253d3ec52c521d9fcb52dfbf148669d3027f6eb4d44d9dba6340702c451"
 }

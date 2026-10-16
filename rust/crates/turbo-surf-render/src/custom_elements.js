@@ -158,6 +158,7 @@
     documentOf = (node) => (kind(node) === 9 ? node : read(owner, node));
   const ErrorEventValue = ErrorEvent;
   const report = (error) => nativeReport(error);
+  let updateInternals, initializeInternals;
   const callback = (node, record, name, args) => {
     const fn = record.definition.callbacks[name];
     if (fn && nativeReact(node, fn, args)) return;
@@ -210,6 +211,7 @@
       connected: read(connected, node),
     };
     wset(elementStates, node, record);
+    if(initializeInternals)initializeInternals(node,definition);
     const initial = [],
       attributes = read(attrs, node);
     for (let i = 0; i < attributes.length; i++) {
@@ -228,6 +230,7 @@
     for (let i = 0; i < initial.length; i++)
       callback(node, record, "attributeChangedCallback", initial[i]);
     if (record.connected) callback(node, record, "connectedCallback", []);
+    if (updateInternals) updateInternals();
   }
   function visit(node, selected, connect) {
     if (kind(node) !== 1) return;
@@ -391,7 +394,22 @@
           observed = apply(arrayFrom, ArrayValue, [iterable, string]);
         }
       }
+      const disabledValue = constructor.disabledFeatures;
+      let disabledFeatures = [];
+      if (disabledValue !== undefined) disabledFeatures = apply(arrayFrom, ArrayValue, [disabledValue, string]);
+      const formAssociated = !!constructor.formAssociated;
+      if (formAssociated) {
+        for (const name of ['formAssociatedCallback','formResetCallback','formDisabledCallback','formStateRestoreCallback']) {
+          const value = object[name];
+          if (value !== undefined) {
+            if (typeof value !== 'function') throw new TypeErrorValue('Invalid lifecycle callback');
+            callbacks[name] = value;
+          }
+        }
+      }
       return {
+        disabledFeatures,
+        formAssociated,
         name,
         local: localName,
         constructor,
@@ -545,6 +563,7 @@
           owner: contextDocument,
           connected: false,
         });
+        if(initializeInternals)initializeInternals(node,definition);
       }
       return node;
     }, name);
@@ -708,6 +727,13 @@
     configurable: true,
     writable: true,
   });
+  g.__captureCustomElementInternals = {
+    record: (node) => wget(elementStates, node),
+    updates: (callback) => { updateInternals=callback; },
+    created: (callback) => { initializeInternals=callback; },
+    notify: (event) => {if(updateInternals)updateInternals(event);},
+    callback: (node, name, args) => {const record=wget(elementStates,node);if(record)callback(node,record,name,args);},
+  };
   g.__captureCustomElementError = (error, message, filename, lineno, colno) =>
     new ErrorEventValue("error", {
       error,
@@ -716,7 +742,7 @@
       lineno,
       colno,
     });
-  g.__captureCustomElementMutation = mutation;
+  g.__captureCustomElementMutation = (event) => {mutation(event);if(updateInternals)updateInternals(event);};
   g.__captureCustomElementClone = (source, clone, deep) => {
     const a = objectCreate(null),
       b = objectCreate(null);

@@ -105,7 +105,7 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   remain under validation; see [the ownership contract](../harness/detection/MESSAGE-TRANSFERS.md). The published V8 150 backend uses a limited caller-realm Window view:
   protected reads throw `SecurityError`, and replacement creates an isolated context with
   a different `contentWindow` identity. Retained old globals/documents remain isolated
-  and callable. The explicit native V8 154 build uses genuine V8 global detach/reuse and
+  and callable. The current experimental native V8 155 build (and historical154 profile) uses genuine V8 global detach/reuse and
   native access-check callbacks, preserving `contentWindow` and MessageEvent.source
   identity across same-origin and cross-origin replacements. Same-origin retained
   Function constructors and precompiled functions resolve the new Document; a retained
@@ -183,8 +183,9 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   Document event-handler properties retain native listener ordering and cancellation.
 - adoptNode preserves existing native wrapper identities while moving tree ownership,
   attached Attr nodes, shadow trees, listeners, control values and nonce state. Created
-  fragments, text, comments, processing instructions, attributes and doctypes are supported; template content and
-  custom-element adoption callbacks remain unsupported. Import/clone copy supported
+  fragments, text, comments, processing instructions, attributes, doctypes and template
+  content are supported. Native custom-element adoption callbacks have independent
+  Chrome controls; broader form-associated/reaction lifecycle remains bounded. Import/clone copy supported
   live control values and nonce state through captured per-document helpers. HTMLElement
   nonce keeps its private value independently of the reflected attribute; tabIndex uses
   measured defaults, HTML integer parsing and Web IDL conversion. These contracts do not
@@ -192,10 +193,12 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 - ProcessingInstruction is a native CharacterData node with an immutable target, XML-name
   validation, HTML serialization and clone/import/adoption support. Character-data methods
   use V8 UTF-16 offsets and throw IndexSizeError for invalid ranges. HTML documents reject
-  createCDATASection with NotSupportedError; XML documents are not implemented. HTML XML
+  createCDATASection with NotSupportedError; XML document factories are bounded and
+  CDATA construction/XML parsing remain incomplete. HTML XML
   metadata follows the measured null defaults, mutable xmlStandalone and version-1.0-only
-  setter. Native text storage still converts unpaired UTF-16 surrogates lossily when a
-  mutation crosses the Rust boundary; this is not complete DOMString conformance.
+  setter. Native original-unit APIs preserve unpaired UTF-16 through stored DOMString
+  mutations, parser provenance and script sources; serialized Rust strings still
+  require explicit conversion. Broader parsing/DOMString edges remain tracked.
 - Event state lives in private native records. Script dispatch remains untrusted;
   private record maps capture their native WeakMap operations before guest execution.
   Trusted lifecycle, message delivery and script/module completion callbacks live in
@@ -278,11 +281,12 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   Public fetch honors follow/manual/error redirects, including opaque redirect filtering
   and redirect-limit rejection. Connection failures reject with TypeError; HTTP error
   status codes still resolve to Responses. Permissions-policy hint delegation, Critical-CH
-  retries and a complete browser preflight cache remain unsupported. Request cache,
-  integrity, keepalive, signal and referrerPolicy properties are reflected but their
-  network effects are not implemented; the native default referrer policy is
-  strict-origin-when-cross-origin. Binary/multipart request bodies, response streaming,
-  full mixed-content/CORP/COEP/COOP policy and HTTP authentication behavior remain partial.
+  retries and a complete browser preflight cache remain unsupported. Request cache/integrity/signal/referrer policies have bounded real network
+  effects; binary bodies, response streams/cancellation and HTTP2 uploads are
+  integrated. Keepalive and full browser Fetch/cache behavior remain incomplete.
+  Genuine multipart FormData BodyInit still throws explicitly. The default
+  referrer policy is strict-origin-when-cross-origin. Full resource-policy and
+  HTTP authentication behavior remain partial.
 
 The reusable [detection harness](../harness/detection/README.md) records baseline and
 instrumented Chrome/native runs separately. The corrected CSSOM sentinel, iframe
@@ -771,8 +775,10 @@ Authored HTML event attributes compile through V8's native function compiler wit
 Document/form/element scope extensions and script-src-attr authorization; assigned
 function handlers retain their separate behavior. Redirected module completion reports
 the initiating requested URL while its source and relative imports use the final URL.
-Strict-dynamic, reports/report-only, violation events,
-Trusted Types, integrity and navigation/form/worker/media directives are unsupported.
+Supported report-only policies, native violation events/HTTP reports, Trusted Types,
+SRI and bounded form-action admission are integrated. Strict-dynamic and broader
+navigation/form/worker/media directive behavior remain incomplete; diagnostics
+retain unsupported/partial policy paths.
 The HTML tree is parsed before hydration, so incremental parser races are not covered.
 
 `PageSession::hydration_diagnostics()` reports real host-budget termination and partial

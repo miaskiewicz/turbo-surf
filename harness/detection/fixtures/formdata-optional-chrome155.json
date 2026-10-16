@@ -1,0 +1,30 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "915078c0f95cdd3d6bd1cd0a91b642a858b6fc3984d3a71e3aae19379bc2a8c7",
+  "result": [
+    {
+      "mode": "file-undefined",
+      "name": "original",
+      "same": true
+    },
+    {
+      "mode": "text-undefined",
+      "error": "TypeError"
+    },
+    {
+      "mode": "file-null",
+      "name": "null",
+      "same": false
+    },
+    {
+      "mode": "file-bigint",
+      "name": "1",
+      "same": false
+    },
+    {
+      "mode": "modified-bigint",
+      "error": "TypeError"
+    }
+  ]
+}

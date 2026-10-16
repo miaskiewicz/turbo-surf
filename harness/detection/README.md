@@ -633,3 +633,16 @@ hashes. Production `tests/abstract_ranges.rs` verifies static boundary behavior,
 real iframe receiver brands and actual native weak-object liveness against those
 independent controls. A passing GC control certifies its retained/released graph,
 not universal DOM collection behavior.
+
+Native form-navigation verification can prohibit the historical synthesized GET
+fallback with `--require-native-form-navigation`. A real accepted form response
+retains its native installed URL/status/referrer and monotonically counted document
+identity, including same-URL POSTs. Subsequent page-script redirects are still
+followed; the accepted current document is not fetched again. Native trace tests
+can select a freshly built executable with `TURBO_SURF_DETECTION_BINARY`.
+
+`--no-form-fallback` allows genuine form commits and page-script navigation while
+disabling synthesized GET serialization. Use it for a native search verdict when
+the site may choose either legitimate navigation path. The stronger
+`--require-native-form-navigation` is useful when testing specifically the native
+form default action. Neither option imports Chrome cookies.

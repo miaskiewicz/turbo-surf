@@ -55,14 +55,14 @@ fn build_effects() {
         .include(root)
         .define("NDEBUG", None)
         .flag_if_supported("-ffp-contract=off");
-    for file in [
-        "biquad.cc",
-        "delay.cc",
-        "delay_neon.cc",
-        "stereo_panner.cc",
-        "adapter.cc",
-    ] {
+    for file in ["biquad.cc", "delay.cc", "stereo_panner.cc", "adapter.cc"] {
         build.file(format!("{root}/effects/{file}"));
+    }
+    // The NEON translation unit includes arm_neon.h before its implementation guard.
+    // Other architectures use delay.cc's scalar fallback. Select by Cargo target,
+    // not the build host, so cross-compilation keeps the correct kernel.
+    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") {
+        build.file(format!("{root}/effects/delay_neon.cc"));
     }
     build.flag_if_supported("-Wno-unused-parameter");
     build.compile("turbo_surf_audio_effects");

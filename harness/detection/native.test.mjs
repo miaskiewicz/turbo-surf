@@ -16,7 +16,10 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const binary = resolve(root, "rust/target/debug/examples/detection_trace");
+const binary = resolve(
+  process.env.TURBO_SURF_DETECTION_BINARY ||
+    join(root, "rust/target/debug/examples/detection_trace"),
+);
 const run = (cmd, args) =>
   new Promise((done, fail) => {
     const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -60,7 +63,7 @@ test(
           res.setHeader("Accept-CH", "sec-ch-ua-arch, sec-ch-ua-bitness");
           res.setHeader("Set-Cookie", ["secret=server; HttpOnly; Path=/", "visible=yes; Path=/"]);
           res.end(
-            '<form action="/search"><input type="hidden" name="ei" value="fixture"><textarea name="q"></textarea></form>',
+            '<form action="/search"><input type="hidden" name="ei" value="fixture"><input name="q"></form>',
           );
         } else if (url.pathname === "/search") {
           res.end(`<body><script>
@@ -87,13 +90,16 @@ test(
         JSON.stringify({
           url: `http://127.0.0.1:${server.address().port}/`,
           interfaces: true,
+          requireNativeFormNavigation: true,
           interfaceScript: join(root, "harness/detection/interface-trace.js"),
-          steps: [{ focus: "textarea[name=q]" }, { type: "fixture query" }, { press: "Enter" }],
+          steps: [{ focus: "input[name=q]" }, { type: "fixture query" }, { press: "Enter" }],
         }),
       );
       await run(frozen, [config, join(out, "capture")]);
       const trace = JSON.parse(readFileSync(join(out, "capture/trace.json")));
       assert.deepEqual(trace.errors, []);
+      assert.equal(trace.navigationSource, "native-form");
+      assert.equal(trace.formFallback, null);
       assert.equal(trace.pages.at(-1).results, 1);
       assert.equal(seen.find((r) => r.path === "/search").query.get("ei"), "fixture");
       assert.equal(seen.find((r) => r.path === "/search").query.get("q"), "fixture query");
@@ -114,6 +120,61 @@ test(
       assert(rows.some((r) => r.event === "body" && r.body.includes("<h3>Result</h3>")));
       assert(
         trace.pages.some((p) => p.interfaces?.accesses.some((a) => a.name.endsWith(".cookie"))),
+      );
+    } finally {
+      server.closeAllConnections();
+      await new Promise((done) => server.close(done));
+      rmSync(out, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "native trace retains a same-URL POST response without a fallback refetch",
+  { skip: !existsSync(binary) },
+  async () => {
+    const out = mkdtempSync(join(tmpdir(), "detection-native-post-"));
+    const seen = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        seen.push([req.method, req.url, body]);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        if (req.method === "POST") {
+          res.writeHead(201, { "Set-Cookie": "consent=native; HttpOnly; Path=/" });
+          res.end('<div id="rso"><a><h3>Actual POST response</h3></a></div>');
+        } else {
+          res.end(
+            '<form method="post"><input name="token" value="real"></form><script>document.querySelector("form").submit()</script>',
+          );
+        }
+      });
+    });
+    try {
+      await new Promise((done) => server.listen(0, "127.0.0.1", done));
+      const url = `http://127.0.0.1:${server.address().port}/same`;
+      const config = join(out, "config.json");
+      writeFileSync(config, JSON.stringify({ url, steps: [], requireNativeFormNavigation: true }));
+      await run(binary, [config, join(out, "capture")]);
+      const trace = JSON.parse(readFileSync(join(out, "capture/trace.json")));
+      assert.deepEqual(trace.errors, []);
+      assert.equal(trace.navigationSource, "native-form");
+      assert.equal(trace.formFallback, null);
+      const final = trace.pages.at(-1);
+      assert.equal(final.url, url);
+      assert.equal(final.status, 201);
+      assert.equal(final.results, 1);
+      assert.equal(final.nativeNavigationCount, 1);
+      assert.deepEqual(seen, [
+        ["GET", "/same", ""],
+        ["POST", "/same", "token=real"],
+      ]);
+      assert.match(
+        readFileSync(join(out, "capture", `${final.phase}.html`), "utf8"),
+        /Actual POST response/,
       );
     } finally {
       server.closeAllConnections();

@@ -9,7 +9,7 @@ use turbo_surf_core::{
 };
 use turbo_surf_render::PageSession;
 
-const SNAPSHOT: &str = r#"globalThis.__RESULT = JSON.stringify({
+const SNAPSHOT: &str = r#"({
   url: location.href,
   interfaces: globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot() || null,
   navigator: {userAgent:navigator.userAgent,platform:navigator.platform,
@@ -38,7 +38,7 @@ const SNAPSHOT: &str = r#"globalThis.__RESULT = JSON.stringify({
     if(v) return new URL(v,location.href).href;
     return location.href;
   })()
-});"#;
+})"#;
 
 fn save(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
     #[cfg(unix)]
@@ -80,8 +80,24 @@ async fn snapshot(
     phase: &str,
     selector: &str,
 ) -> Result<Value, String> {
-    let raw = page.eval(SNAPSHOT).await?;
+    let mut stable = None;
+    for _ in 0..3 {
+        let before = page.navigation_snapshot().0;
+        let raw = page.eval_json_expression(SNAPSHOT).await?;
+        let installed = page.navigation_snapshot();
+        if before == installed.0 {
+            stable = Some((raw, installed));
+            break;
+        }
+    }
+    let (raw, (count, url, response)) =
+        stable.ok_or("Document changed repeatedly during snapshot")?;
     let mut row: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    row["guestUrl"] = row["url"].clone();
+    row["url"] = json!(url);
+    row["status"] = json!(response.status);
+    row["responseReferrer"] = json!(response.referrer);
+    row["nativeNavigationCount"] = json!(count);
     let html = page.serialize();
     save(&out.join(format!("{phase}.html")), &html).map_err(|e| e.to_string())?;
     row["phase"] = json!(phase);
@@ -264,10 +280,10 @@ async fn capture(
     checkpoint(out, trace)?;
     if let Some(dismiss) = config["dismissSelector"].as_str().filter(|s| !s.is_empty()) {
         let script = format!(
-            "globalThis.__RESULT=JSON.stringify(!!document.querySelector({}));",
+            "!!document.querySelector({})",
             serde_json::to_string(dismiss)?
         );
-        let present = serde_json::from_str::<bool>(&page.eval(&script).await?)?;
+        let present = serde_json::from_str::<bool>(&page.eval_json_expression(&script).await?)?;
         trace["dismissal"] = json!({"selector":dismiss,"present":present,"clicked":false});
         checkpoint(out, trace)?;
         if present {
@@ -290,6 +306,7 @@ async fn capture(
             checkpoint(out, trace)?;
         }
     }
+    let native_before_input = page.navigation_snapshot().0;
     let steps = config["steps"].as_array().ok_or("steps array required")?;
     if !steps.is_empty() {
         if let Err(error) = page.input(&config["steps"]).await {
@@ -306,11 +323,43 @@ async fn capture(
             .push(snapshot(&mut page, out, "interaction", selector).await?);
         checkpoint(out, trace)?;
     }
+    let (native_after_input, installed_url, _) = page.navigation_snapshot();
+    let native_form =
+        native_after_input > native_before_input || (steps.is_empty() && native_after_input > 0);
+    if native_form {
+        trace["inputSource"] = json!("native-host");
+        trace["navigationSource"] = json!("native-form");
+        trace["formFallback"] = Value::Null;
+        let row = snapshot(&mut page, out, "native-final", selector).await?;
+        let pending_script_navigation = row["nav"]
+            .as_str()
+            .is_some_and(|target| target != installed_url);
+        trace["pages"].as_array_mut().unwrap().push(row);
+        checkpoint(out, trace)?;
+        if !pending_script_navigation {
+            probes.extend(collect_probes(&mut page, config).await?);
+            trace["probes"] = json!(probes);
+            checkpoint(out, trace)?;
+            page.close();
+            return Ok(());
+        }
+    } else if config["requireNativeFormNavigation"]
+        .as_bool()
+        .unwrap_or(false)
+    {
+        return Err(
+            "No native form navigation committed; fallback prohibited by configuration".into(),
+        );
+    }
     // Follow the actual JS navigation; if the DOM's Enter default is absent, record the
     // serialized GET form fallback separately rather than claiming the JS navigated.
-    let raw = page
-        .eval(
-            r#"globalThis.__RESULT=JSON.stringify((() => {
+    let allow_fallback = !config["disableFormFallback"].as_bool().unwrap_or(false);
+    let fallback: Value = if native_form || !allow_fallback {
+        Value::Null
+    } else {
+        let raw = page
+            .eval_json_expression(
+                r#"(() => {
       const f=document.querySelector('form'); if(!f)return null;
       const u=new URL(f.getAttribute('action')||location.pathname,location.href);
       if((f.getAttribute('method')||'get').toLowerCase()!=='get')return null;
@@ -320,19 +369,26 @@ async fn capture(
           (['checkbox','radio'].includes(type)&&!el.checked))continue;
         u.searchParams.append(el.getAttribute('name'),el.value??'');
       } return u.href;
-    })());"#,
-        )
-        .await?;
-    let fallback: Value = serde_json::from_str(&raw)?;
+    })()"#,
+            )
+            .await?;
+        serde_json::from_str(&raw)?
+    };
     let mut target = trace["pages"]
         .as_array()
         .and_then(|pages| pages.last())
         .and_then(|p| p["nav"].as_str())
-        .unwrap_or(&response.final_url)
+        .unwrap_or(&installed_url)
         .to_string();
-    let mut nav_source = "script";
-    if !steps.is_empty() && target == response.final_url {
-        if let Some(u) = fallback.as_str().filter(|u| *u != response.final_url) {
+    let mut nav_source = if native_form {
+        "native-form"
+    } else if target != installed_url {
+        "script"
+    } else {
+        "none"
+    };
+    if !native_form && !steps.is_empty() && target == installed_url {
+        if let Some(u) = fallback.as_str().filter(|u| *u != installed_url) {
             target = u.into();
             nav_source = "form-fallback";
         }
@@ -341,12 +397,12 @@ async fn capture(
     trace["navigationSource"] = json!(nav_source);
     trace["formFallback"] = fallback;
     checkpoint(out, trace)?;
-    if target == response.final_url {
+    if target == installed_url {
         probes.extend(collect_probes(&mut page, config).await?);
     }
     jar = CookieJar::from_storage_state(&page.cookies());
     page.close();
-    let mut referer = response.final_url.clone();
+    let mut referer = installed_url.clone();
     for hop in 0..5 {
         if target == referer {
             break;
@@ -404,10 +460,9 @@ async fn capture(
                 break;
             }
         };
-        let mut row = snapshot(&mut next, out, &format!("navigation-{hop}"), selector).await?;
-        row["status"] = json!(search.status);
+        let row = snapshot(&mut next, out, &format!("navigation-{hop}"), selector).await?;
         target = row["nav"].as_str().unwrap_or(&search.final_url).to_string();
-        referer = search.final_url;
+        referer = next.navigation_snapshot().1;
         jar = CookieJar::from_storage_state(&next.cookies());
         trace["pages"].as_array_mut().unwrap().push(row);
         checkpoint(out, trace)?;

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "collectedAt": "2026-10-16T09:15:52.791Z",
+  "collectedAt": "2026-10-16T11:14:02.870Z",
   "note": "Uninstrumented localhost API contract queries; no site detection conclusion.",
   "build": {
     "version": "0.5.4",
@@ -20,12 +20,12 @@
     }
   },
   "chromeVersion": "Chrome/155.0.8059.80",
-  "binaryHash": "42ee8017619b6a3f124db2e0c8a1862b2e5fb4ecdd0a1077c322449a7ce57275",
-  "collectorHash": "0a6ca912aaacc3eca09390b32ae6488c11d9a3695f70fbfefce0f3187f6b41d1",
+  "binaryHash": "e76527a04c2446d2ff9b8ca0c9d8618de3591d7645aa421d8d8bb3edaafd4476",
+  "collectorHash": "1817375427ff0d0cea2f76c0b62afc687b563ccf9c8b7e1fe731a49fa9010871",
   "totals": {
-    "originalFourMissing": 66,
-    "expandedMeasuredMissing": 147,
-    "unmeasuredInterfaces": ["AbstractRange", "ElementInternals", "StaticRange"]
+    "originalFourMissing": 65,
+    "expandedMeasuredMissing": 133,
+    "unmeasuredInterfaces": []
   },
   "interfaces": {
     "AbortController": {
@@ -41,9 +41,10 @@
       "changed": []
     },
     "AbstractRange": {
-      "measured": false,
-      "chrome": true,
-      "native": false
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
     },
     "CSSStyleSheet": {
       "measured": true,
@@ -578,9 +579,10 @@
       "changed": []
     },
     "ElementInternals": {
-      "measured": false,
-      "chrome": true,
-      "native": false
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
     },
     "ErrorEvent": {
       "measured": true,
@@ -608,15 +610,11 @@
         "formAction",
         "formEnctype",
         "formMethod",
-        "formNoValidate",
         "formTarget",
         "interestForElement",
         "labels",
         "popoverTargetAction",
-        "popoverTargetElement",
-        "validationMessage",
-        "validity",
-        "willValidate"
+        "popoverTargetElement"
       ],
       "extra": [
         "accept",
@@ -675,13 +673,7 @@
     },
     "HTMLElement": {
       "measured": true,
-      "missing": [
-        "attachInternals",
-        "attributeStyleMap",
-        "editContext",
-        "focusGroup",
-        "focusGroupStart"
-      ],
+      "missing": ["attributeStyleMap", "editContext", "focusGroup", "focusGroupStart"],
       "extra": [],
       "changed": []
     },
@@ -698,12 +690,8 @@
         "length",
         "method",
         "name",
-        "noValidate",
         "rel",
         "relList",
-        "requestSubmit",
-        "reset",
-        "submit",
         "target"
       ],
       "extra": [],
@@ -715,13 +703,11 @@
         "align",
         "alt",
         "createValueRange",
-        "defaultChecked",
         "dirName",
         "files",
         "formAction",
         "formEnctype",
         "formMethod",
-        "formNoValidate",
         "formTarget",
         "height",
         "incremental",
@@ -737,13 +723,10 @@
         "stepDown",
         "stepUp",
         "useMap",
-        "validationMessage",
-        "validity",
         "valueAsDate",
         "webkitEntries",
         "webkitdirectory",
-        "width",
-        "willValidate"
+        "width"
       ],
       "extra": ["autoFocus", "click"],
       "changed": [
@@ -759,6 +742,11 @@
         },
         {
           "path": "checked.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "defaultChecked.enumerable",
           "chrome": true,
           "native": false
         },
@@ -1044,6 +1032,12 @@
       "extra": [],
       "changed": []
     },
+    "NodeRange": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
     "Performance": {
       "measured": true,
       "missing": [],
@@ -1053,14 +1047,8 @@
     "Range": {
       "measured": true,
       "missing": ["expand"],
-      "extra": ["collapsed", "endContainer", "endOffset", "startContainer", "startOffset"],
-      "changed": [
-        {
-          "path": "constructor.function.functionPrototype",
-          "chrome": false,
-          "native": true
-        }
-      ]
+      "extra": [],
+      "changed": []
     },
     "ReadableStream": {
       "measured": true,
@@ -1127,9 +1115,10 @@
       "changed": []
     },
     "StaticRange": {
-      "measured": false,
-      "chrome": true,
-      "native": false
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
     },
     "Storage": {
       "measured": true,

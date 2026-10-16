@@ -23,10 +23,10 @@ residual work beyond this PR, with audio separately deferred in
   the recorded verdict. Offline harness tests are part of the standard CI gate.
 - Expand the API audit with exact missing/extra members, callable shapes,
   descriptors, inheritance, collector/executable hashes and separately unmeasured
-  interfaces. The frozen 2026-10-16 snapshot reports66 missing own members across
-  the original four interfaces and147 across expanded measured interfaces; those
-  historical counts predate the latest Range/forms integration. Fresh measurement
-  is required before closing inventory rows.
+  interfaces. The latest2026-10-16 snapshot reports65 missing own members across the
+  original four interfaces and133 across expanded measured interfaces. All measured
+  interfaces are present; AbstractRange, NodeRange, StaticRange and ElementInternals
+  have zero own-member/descriptor differences. Broader behavior remains bounded.
 - Refresh JS/HTTP identity to independently measured Chrome155.0.8059.80.
   Preserve historical controls and SDK source provenance155.0.8059.79. The tested
   native engine is15.5.35.23-rusty; the stock production SDK remains V8150.4.0
@@ -71,8 +71,8 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Native DOM, scripts and ownership
 
-- Consume published turbo-dom0.5.6 through its public API and re-vendor the
-  canonical committed turbo-test binding. Native per-isolate node state preserves
+- Consume public Git-pinned turbo-dom0.5.7 candidatefb60e6f (latest registry
+  release0.5.6) and re-vendor committed turbo-test34ca9a8. Native per-isolate node state preserves
   original UTF-16 payloads, names, parser positions and mutation-time ancestry.
   GC callbacks schedule bounded storage scans outside collection; genuine weak
   wrapper/guest edges and native job pins preserve retained identities without
@@ -113,7 +113,7 @@ residual work beyond this PR, with audio separately deferred in
   headers/referrer after leaving the old isolate activation. Preserve redirects,
   consent cookies, fragments and immutable metadata. Independent UTF-8 and
   Windows-1252 controls cover encoding and numeric entities. Multipart/file-input/
-  other-target and remaining FormData/ElementInternals integration stay explicit.
+  other-target and broader successful-controls behavior stay explicit.
 
 ### Layout, CSS and resources
 
@@ -177,9 +177,33 @@ residual work beyond this PR, with audio separately deferred in
   Realtime playback, feedback, parameter connections, multichannel/custom waves,
   oversampling and lifecycle expansion remain deferred in issue27.
 
+- Preserve authoritative installed navigation metadata in the native trace driver,
+  including same-URL POSTs; prohibit synthesized form fallback on request while
+  still following genuine later script redirects. Native host Enter submission
+  uses captured canonical form admission and validation instead of manually
+  constructing a GET URL. Private branded File/FormData values now retain genuine
+  entry lists, conversion/iterator behavior and source-pinned Chrome controls.
+
+- Implement native-backed ElementInternals and CustomStateSet, including genuine
+  admission/ARIA/form association/validation/reactions, UTF-16 custom states and live
+  state iterators. Preserve native checked/defaultChecked/reset/clone behavior and
+  typed :checked matching; full radio grouping and adoption remain open.
+- Deliver genuine trusted FormData events with shared mutable entry records,
+  reentrancy guards, pre-event metadata and post-event wire serialization/CSP
+  admission. Disconnected forms and forms removed during submit listeners do not
+  submit. Independent controls cover actual HTTP, constructor/brand and GC edges.
+- Fix child form-value callback ownership and return fallible native bootstrap
+  errors under watchdog interruption instead of aborting the process. Existing
+  Fetch/form/host-input lifecycle regressions expose both failures before repair.
+- Compile ARM NEON delay code only for aarch64 targets. Actual x86_64/arm64
+  compilation, linking and delay PCM checks cover the Linux CI build failure;
+  upstream audio kernels/source hashes remain unchanged.
+
 ### Validation status
 
-Focused source-pinned Chrome/default/native controls are recorded in
+The integrated actual155 cohort passes335 tests (library299 plus36 production
+contracts); strict all-target native workspace checks,66 offline harness tests and
+two actual full-driver localhost regressions pass. Focused Chrome/default controls are recorded in
 [FINDINGS.md](harness/detection/FINDINGS.md) and feature documents. Test totals
 from earlier checkpoints are historical, not a final combined gate. Final
 workspace/default/native/addon/shim/E2E validation, a rebuilt API inventory and a

@@ -59,3 +59,8 @@ rust/crates/turbo-surf-render/src/form_entrylist*
 rust/crates/turbo-surf-render/src/formdata_constructor*
 rust/crates/turbo-surf-render/src/form_controls.js
 rust/crates/turbo-surf-render/src/form_methods*
+rust/crates/turbo-surf-render/src/element_internals*
+rust/crates/turbo-surf-render/src/checkedness*
+rust/crates/turbo-surf-render/src/formdata_event*
+rust/crates/turbo-surf-render/src/formdata_guards*
+rust/crates/turbo-surf-render/src/form_connectivity*

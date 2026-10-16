@@ -885,9 +885,10 @@ if(typeof __ns.makeNativeFunction==='function'){
       if (isTextarea(this)) this.textContent = String(v);
       else this.setAttribute('value', String(v));
     } };
-    // Reflect the live `checked` property to the `checked` content attribute so rtdom's `:checked`
-    // pseudo (which matches on the attribute) finds controlled checkboxes/radios React toggles.
-    var checkedDesc = { configurable: true, get: function(){ return this.__checked === undefined ? this.hasAttribute('checked') : !!this.__checked; }, set: function(v){ v = !!v; this.__checked = v; try { if (v) this.setAttribute('checked', ''); else this.removeAttribute('checked'); } catch(e){} } };
+    var checkedNative=g.__checkedNative,checkedSetAttribute=d.createElement('input').setAttribute,checkedRemoveAttribute=d.createElement('input').removeAttribute;delete g.__checkedNative;
+    var checkedDesc = { configurable: true, get: function(){ return checkedNative(0,this); }, set: function(v){ checkedNative(1,this,!!v); } };
+    var defaultCheckedDesc={configurable:true,get:function(){checkedNative(0,this);return sheetNativeAttribute(this,'checked')!==null;},set:function(value){checkedNative(0,this);if(value)cssApply(checkedSetAttribute,this,['checked','']);else cssApply(checkedRemoveAttribute,this,['checked']);}};
+    __ns.formControlChecked=function(element){return checkedNative(0,element);};
     // `type` defaults to 'text' for <input> — React's isTextInputElement keys on it to pick the
     // input/change handling path; undefined would route changes to the select/checkbox path.
     var mkTypeDesc = function(def){ return { configurable: true, get: function(){ return (this.getAttribute('type') || def).toLowerCase(); }, set: function(v){ this.setAttribute('type', v); } }; };
@@ -1000,7 +1001,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     var protoFor = {};
     var defType = { HTMLInputElement:'text', HTMLButtonElement:'submit' };
     ['HTMLInputElement','HTMLTextAreaElement','HTMLSelectElement','HTMLOptionElement','HTMLButtonElement','HTMLLabelElement','HTMLCanvasElement'].forEach(function(n){ if (typeof g[n] !== 'function') g[n] = function(){}; var p = Object.create(baseProto); try {
-      Object.defineProperty(p, 'value', valDesc); Object.defineProperty(p, 'checked', checkedDesc); Object.defineProperty(p, 'form', formDesc);
+      Object.defineProperty(p, 'value', valDesc); Object.defineProperty(p, 'checked', checkedDesc); if(n==='HTMLInputElement')Object.defineProperty(p,'defaultChecked',defaultCheckedDesc); Object.defineProperty(p, 'form', formDesc);
       if (defType[n]) Object.defineProperty(p, 'type', mkTypeDesc(defType[n]));
       // Reflected IDL string attributes: a library setting `input.name = 'x'` (e.g. react-number-
       // format, MUI) must show up as the `name` content attribute (toHaveAttribute, [name] selectors).
@@ -1102,13 +1103,24 @@ if(typeof __ns.makeNativeFunction==='function'){
       if(formValueApply(formValueHas,controlValues,[element])&&!/^(hidden|button|submit|reset|image|checkbox|radio)$/.test(type))return formValueApply(formValueGet,controlValues,[element]);
       return tag==='TEXTAREA'?formValueApply(formValueText,element,[]):formValueApply(sheetGetAttribute,element,['value'])||'';
     };
-    var cloneChildren=__ns.domAccessor('childNodes',false,'Node');
+    var resetControlDelete=WeakMap.prototype.delete,resetSelectDelete=WeakSet.prototype.delete;
+    __ns.formSelectedOptions=function(element){return selection.selectionOf(element);};
+    __ns.formResetControl=function(element){
+      formValueApply(resetControlDelete,controlValues,[element]);
+      if(formValueApply(sheetTagName,element,[])==='INPUT')checkedNative(2,element);
+      if(formValueApply(sheetTagName,element,[])==='SELECT'){
+        var options=optionsOf(element);for(var index=0;index<options.length;index++)formValueApply(resetControlDelete,selection.optionStates,[options[index]]);
+        formValueApply(resetSelectDelete,selection.emptySelects,[element]);
+      }
+    };
+    var cloneChildren=__ns.domAccessor('childNodes',false,'Node'),cloneNodeType=__ns.domAccessor('nodeType',false,'Node');
     var cloneApply=Reflect.apply,cloneDefine=Object.defineProperty;
     __ns.cloneControlState = function cloneControlState(source, clone, deep){
       var pending=[[source,clone]];
       for(var index=0;index<pending.length;index++){
         var pair=pending[index];source=pair[0];clone=pair[1];
         if (controlValues.has(source)) clone.value = controlValues.get(source);
+        if(cloneApply(cloneNodeType,source,[])===1&&formValueApply(sheetTagName,source,[])==='INPUT'&&checkedNative(3,source))checkedNative(1,clone,checkedNative(0,source));
         if (selection.optionStates.has(source)) selection.optionStates.set(clone, selection.optionStates.get(source));
         if (selection.emptySelects.has(source)) selection.emptySelects.add(clone);
         if(deep){

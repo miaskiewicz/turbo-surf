@@ -21,6 +21,9 @@ pub(super) fn attribute_changed<'s>(
     element: v8::Local<'s, v8::Object>,
     name: &str,
 ) {
+    if matches!(name, "disabled" | "form" | "id") {
+        element_internals::attribute_changed(scope, element, name);
+    }
     if let Some(handle) = handle_of(scope, element) {
         script_state::attribute_changed(handle, name);
     }

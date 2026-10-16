@@ -275,7 +275,7 @@ pub fn adopt<'s>(
             .ok_or("Document tree unavailable")?;
         mapping
     };
-    let (cache, styles, listeners, nonces, modes, handlers, scripts) = {
+    let (cache, styles, listeners, nonces, modes, handlers, scripts, custom_states) = {
         let _source = DomScope::for_object(scope, node);
         html_popover::attribute_node_change(scope, source_handle, None);
         html_popover::disconnect(scope, source_handle, true);
@@ -351,10 +351,37 @@ pub fn adopt<'s>(
             }
         });
         let handlers = event_handlers::take_adopted_sources(&mapping);
-        (cache, styles, listeners, nonces, modes, handlers, scripts)
+        let custom_states = with_tree_mut(|tree| {
+            mapping
+                .iter()
+                .map(|(old, new)| {
+                    let values = tree.custom_states_utf16(*old);
+                    tree.clear_custom_states(*old);
+                    (*new, values)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+        (
+            cache,
+            styles,
+            listeners,
+            nonces,
+            modes,
+            handlers,
+            scripts,
+            custom_states,
+        )
     };
     let _target = DomScope::for_object(scope, document);
     event_handlers::restore_adopted_sources(handlers);
+    with_tree_mut(|tree| {
+        for (node, values) in custom_states {
+            for value in values {
+                tree.set_custom_state_utf16(node, &value, true);
+            }
+        }
+    });
     for (handle, object) in cache {
         let Some(local) = object.to_local(scope) else {
             continue;

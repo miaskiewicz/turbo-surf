@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 #[path = "../src/form_navigation.rs"]
 mod form_navigation;
 
@@ -16,6 +17,17 @@ fn actual_chrome_form_wire_encodings_preserve_names_duplicates_and_fragments() {
         ),
     ] {
         let fixture: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        assert_eq!(
+            fixture["probeSha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!(
+                    "../../../../harness/detection/form-wire-probe.js"
+                ))
+            )
+        );
+        assert_eq!(fixture["browser"], "Chrome/155.0.8059.80");
+        assert_eq!(fixture["v8"], "15.5.35.23");
         for case in fixture["result"].as_array().unwrap() {
             let entries: Vec<(String, String)> =
                 serde_json::from_value(case["entries"].clone()).unwrap();

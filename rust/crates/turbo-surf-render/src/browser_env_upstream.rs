@@ -17,6 +17,8 @@ mod cssom_parser;
 mod dom_isolation;
 #[path = "dom_ownership.rs"]
 mod dom_ownership;
+#[path = "element_internals.rs"]
+mod element_internals;
 pub use dom_isolation::{activate_isolate, reset_isolate, NativeDomScope};
 #[path = "storage_ownership.rs"]
 mod storage_ownership;
@@ -430,6 +432,7 @@ struct DomContextId(u64);
 struct FormSubmissionDispatcher(v8::Weak<v8::Function>);
 struct FormValueReader(v8::Weak<v8::Function>);
 struct FormEntryListReader(v8::Weak<v8::Function>);
+struct FormDataEventDispatcher(v8::Weak<v8::Function>);
 
 #[derive(Default)]
 struct SavedDom {
@@ -1739,10 +1742,11 @@ pub fn form_submission_base_href(
 }
 
 /// Construct a native form entry list after FormData's nullable argument conversion.
-pub fn form_data_constructor_entries<'s>(
+fn form_data_entries_impl<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     form: v8::Local<'s, v8::Value>,
     submitter: v8::Local<'s, v8::Value>,
+    hold: bool,
 ) -> Option<v8::Local<'s, v8::Array>> {
     let _dom = match v8::Local::<v8::Object>::try_from(form) {
         Ok(form) => DomScope::for_object(scope, form),
@@ -1766,8 +1770,50 @@ pub fn form_data_constructor_entries<'s>(
         .to_local(scope)?;
     let scope = &mut v8::ContextScope::new(scope, context);
     let receiver = v8::undefined(scope);
-    v8::Local::<v8::Array>::try_from(callback.call(scope, receiver.into(), &[form, submitter])?)
-        .ok()
+    let hold = v8::Boolean::new(scope, hold);
+    v8::Local::<v8::Array>::try_from(callback.call(
+        scope,
+        receiver.into(),
+        &[form, submitter, hold.into()],
+    )?)
+    .ok()
+}
+pub fn form_data_constructor_entries<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    form: v8::Local<'s, v8::Value>,
+    submitter: v8::Local<'s, v8::Value>,
+) -> Option<v8::Local<'s, v8::Array>> {
+    form_data_entries_impl(scope, form, submitter, false)
+}
+/// Begin a runtime constructor transaction. The host must finish only after success.
+pub fn begin_form_data_constructor_entries<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    form: v8::Local<'s, v8::Value>,
+    submitter: v8::Local<'s, v8::Value>,
+) -> Option<v8::Local<'s, v8::Array>> {
+    form_data_entries_impl(scope, form, submitter, true)
+}
+/// Release a successfully acquired runtime constructor entry-list transaction.
+pub fn finish_form_data_constructor(scope: &mut v8::PinScope, form: v8::Local<v8::Value>) {
+    let Ok(form) = v8::Local::<v8::Object>::try_from(form) else {
+        return;
+    };
+    let _dom = DomScope::for_object(scope, form);
+    let Some(handle) = handle_of(scope, form) else {
+        return;
+    };
+    if !with_tree(|tree| {
+        tree.tag_name(handle)
+            .is_some_and(|name| name.eq_ignore_ascii_case("form"))
+    })
+    .unwrap_or(false)
+    {
+        return;
+    }
+    let name = v8::String::new(scope, "turbo.forms.private.constructing-entries").unwrap();
+    let key = v8::Private::for_api(scope, Some(name));
+    let value = v8::Boolean::new(scope, false);
+    form.set_private(scope, key, value.into());
 }
 /// Construct the owner-document native form entry list, without submission events.
 pub fn form_submission_entries<'s>(
@@ -1795,11 +1841,44 @@ pub fn form_submission_base_target(
     .flatten()
 }
 
+/// Dispatch a trusted formdata event with the actual runtime's mutable FormData.
+pub fn dispatch_formdata_event<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    form: v8::Local<'s, v8::Object>,
+    data: v8::Local<'s, v8::Value>,
+) -> bool {
+    let _dom = DomScope::for_object(scope, form);
+    let id = DOM_ID.with(std::cell::Cell::get);
+    let Some(context) = DOM_CONTEXTS.with(|contexts| {
+        contexts
+            .borrow()
+            .get(&id)
+            .and_then(|context| context.to_local(scope))
+    }) else {
+        return false;
+    };
+    let Some(callback) = context
+        .get_slot::<FormDataEventDispatcher>()
+        .and_then(|entry| entry.0.to_local(scope))
+    else {
+        return false;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let receiver = v8::undefined(scope);
+    callback
+        .call(scope, receiver.into(), &[form.into(), data])
+        .is_some()
+}
+
 /// Capture genuine runtime File/FormData snapshot authority for this native document.
 pub fn install_form_value_reader(
     scope: &mut v8::PinScope,
     callback: v8::Local<v8::Function>,
 ) -> bool {
+    let Some(context) = callback.get_creation_context(scope) else {
+        return false;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
     let id = scope
         .get_current_context()
         .get_slot::<DomContextId>()
@@ -1820,6 +1899,10 @@ pub fn install_form_submission_handler(
     scope: &mut v8::PinScope,
     callback: v8::Local<v8::Function>,
 ) -> bool {
+    let Some(context) = callback.get_creation_context(scope) else {
+        return false;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
     let id = scope
         .get_current_context()
         .get_slot::<DomContextId>()
@@ -4734,6 +4817,50 @@ fn is_submit_control(h: Handle) -> bool {
     .unwrap_or(false)
 }
 
+fn form_checked_native(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let Ok(node) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
+        return;
+    };
+    let _dom = DomScope::for_object(scope, node);
+    let Some(handle) = handle_of(scope, node) else {
+        return;
+    };
+    let valid = with_tree(|tree| {
+        tree.namespace_id(handle) == 0 && tree.local_name(handle) == Some("input")
+    })
+    .unwrap_or(false);
+    if !valid {
+        let message = v8::String::new(scope, "Illegal invocation").unwrap();
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+        return;
+    }
+    let operation = args.get(0).int32_value(scope).unwrap_or(0);
+    let prop = turbo_dom_parser::rtdom::tree::FormProp::Checked;
+    if operation == 1 {
+        let value = args.get(2).boolean_value(scope);
+        with_tree_mut(|tree| tree.set_form_property(handle, prop, value));
+    }
+    if operation == 2 {
+        with_tree_mut(|tree| tree.clear_form_property(handle, prop));
+    }
+    if operation == 3 {
+        rv.set_bool(with_tree(|tree| tree.form_property(handle, prop).is_some()).unwrap_or(false));
+        return;
+    }
+    rv.set_bool(
+        with_tree(|tree| {
+            tree.form_property(handle, prop)
+                .unwrap_or_else(|| tree.get_attribute(handle, "checked").is_some())
+        })
+        .unwrap_or(false),
+    );
+}
+
 fn form_controls_native(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -4743,11 +4870,33 @@ fn form_controls_native(
     let Ok(node) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
         return;
     };
+    if operation == "private" {
+        let family = args.get(2).to_rust_string_lossy(scope);
+        let name = v8::String::new(scope, &format!("turbo.forms.private.{family}")).unwrap();
+        let key = v8::Private::for_api(scope, Some(name));
+        if !args.get(3).is_undefined() {
+            node.set_private(scope, key, args.get(3));
+        }
+        if let Some(value) = node.get_private(scope, key) {
+            rv.set(value);
+        }
+        return;
+    }
     let _dom = DomScope::for_object(scope, node);
     let Some(handle) = handle_of(scope, node) else {
         return;
     };
     match operation.as_str() {
+        "associated" => {
+            let name = v8::String::new(scope, "turbo.forms.associated-record").unwrap();
+            let key = v8::Private::for_api(scope, Some(name));
+            if !args.get(2).is_undefined() {
+                node.set_private(scope, key, args.get(2));
+            }
+            if let Some(value) = node.get_private(scope, key) {
+                rv.set(value);
+            }
+        }
         "html-element" => {
             rv.set(
                 v8::Boolean::new(
@@ -6563,6 +6712,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     collection_records::register(scope);
     css_policy::register(scope);
     event_handlers::register(scope);
+    bind_method(scope, global, "__checkedNative", form_checked_native);
     run_js(scope, BOOTSTRAP);
     trusted_types::install(scope);
     script_state::install_text(scope);
@@ -6612,6 +6762,18 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     event_listeners::install(scope);
     bind_method(scope, global, "__formNative", form_controls_native);
     run_js(scope, include_str!("form_controls.js"));
+    let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
+    if let Some(callback) = global
+        .get(scope, key.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    {
+        if let Some(callback) = dom_ownership::helper_function(scope, callback) {
+            scope
+                .get_current_context()
+                .set_slot(std::rc::Rc::new(FormDataEventDispatcher(callback)));
+        }
+    }
+    global.delete(scope, key.into());
     let entries = v8::String::new(scope, "__captureFormEntries").unwrap();
     if let Some(callback) = global
         .get(scope, entries.into())
@@ -6665,6 +6827,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     }
     event_handlers::install(scope, None, "about:blank");
     custom_elements::install(scope);
+    element_internals::install(scope);
 }
 
 fn bind_document(scope: &mut v8::PinScope) {
@@ -7176,6 +7339,40 @@ mod tests {
         assert_eq!(
             result,
             r#"[[["NotSupportedError",9,true],["InvalidCharacterError",5,true],["InvalidCharacterError",5,true],["IndexSizeError",1,true]],null,true,"1.0",null]"#
+        );
+        reset();
+    }
+
+    #[test]
+    fn native_checkedness_matches_independent_chrome() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_independent_html(scope, "<!doctype html><body>");
+        let source = v8::String::new(scope, include_str!("checkedness_probe.js")).unwrap();
+        let actual = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        let actual = v8::json::stringify(scope, actual)
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        let control: serde_json::Value =
+            serde_json::from_str(include_str!("checkedness_chrome155.json")).unwrap();
+        use sha2::{Digest, Sha256};
+        assert_eq!(
+            control["probeSha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!("checkedness_probe.js"))
+            )
+        );
+        assert_eq!(control["errors"], serde_json::json!([]));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+            control["result"]
         );
         reset();
     }

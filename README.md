@@ -76,7 +76,7 @@ The npm package is a thin launcher that spawns the native binary:
 ```sh
 npm install -g turbo-surf   # provides the `turbo-surf-mcp` command
 # …or run without installing:
-npx -y turbo-surf-mcp
+npx -y turbo-surf
 ```
 
 Node ≥ 20 to launch; the engine is a prebuilt per-platform native binary (no Node
@@ -155,10 +155,10 @@ time you run it.
 the command Claude will spawn):
 
 ```sh
-claude mcp add turbo-surf -- npx -y turbo-surf-mcp
+claude mcp add turbo-surf -- npx -y turbo-surf
 ```
 
-That writes the server into your Claude Code config. `npx -y turbo-surf-mcp`
+That writes the server into your Claude Code config. `npx -y turbo-surf`
 resolves + spawns the native binary over stdio — one process, no Node hosting it,
 no browser.
 
@@ -181,7 +181,7 @@ user. To share it with a repo instead, add `--scope project` — that writes a
 // .mcp.json — committed; teammates get the server automatically
 {
   "mcpServers": {
-    "turbo-surf": { "command": "npx", "args": ["-y", "turbo-surf-mcp"] }
+    "turbo-surf": { "command": "npx", "args": ["-y", "turbo-surf"] }
   }
 }
 ```
@@ -195,12 +195,12 @@ claude mcp add turbo-surf -- "$PWD/rust/target/release/turbo-surf-mcp"
 
 **Troubleshooting.** `command not found: claude` → install the Claude Code CLI.
 `npx` hangs the first run → it's downloading the binary; let it finish (or pre-warm
-with `npx -y turbo-surf-mcp` in a terminal, then Ctrl-C). Shows `✗ failed` in
+with `npx -y turbo-surf` in a terminal, then Ctrl-C). Shows `✗ failed` in
 `claude mcp list` → run the command directly to see the error; on an unsupported
 platform there's no prebuilt binary (build from a checkout as above).
 
 **Other MCP clients** (Claude Desktop, Cursor, …) — point their MCP config's
-`command` at `npx` with args `["-y", "turbo-surf-mcp"]`, or at the binary path.
+`command` at `npx` with args `["-y", "turbo-surf"]`, or at the binary path.
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
@@ -396,7 +396,7 @@ The default render tier uses `deno_core` 0.412.0 and `deno_v8` 0.4.0 with
 actual engine/template versions separately from the Chrome 155 identity. The TLS
 upgrade does not upgrade the JavaScript engine. The reproducible
 [Chrome 155 source profile](harness/detection/engine-155/README.md) builds and
-validates actual V8 **15.5.35.20-rusty** and the corresponding SDK/context seams.
+validates actual V8 **15.5.35.23-rusty** and the corresponding SDK/context seams.
 The historical [Chrome 154 profile](harness/detection/engine-154/README.md) remains
 reproducible. [TRANSPORT-155.json](harness/detection/TRANSPORT-155.json) records zero
 normalized differences for the measured local ClientHello, HTTP/2 settings/window

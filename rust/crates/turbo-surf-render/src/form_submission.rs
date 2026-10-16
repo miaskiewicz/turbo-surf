@@ -9,6 +9,7 @@ struct Payload {
     enctype: String,
     target: String,
     accept_charset: Option<String>,
+    #[serde(skip)]
     entries: Vec<(String, String)>,
     charset_entries: Vec<usize>,
 }
@@ -22,11 +23,15 @@ pub(super) struct Pending {
 #[derive(Default)]
 pub(super) struct Queue(pub Option<Pending>);
 
-pub(super) fn install(scope: &mut v8::PinScope) {
-    let callback = v8::Function::new(scope, submit).expect("native form submission callback");
-    assert!(crate::browser_env::install_form_submission_handler(
-        scope, callback
-    ));
+pub(super) fn install(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
+    let callback = v8::Function::new(scope, submit)
+        .ok_or_else(|| JsErrorBox::generic("native form callback initialization interrupted"))?;
+    if !crate::browser_env::install_form_submission_handler(scope, callback) {
+        return Err(JsErrorBox::generic(
+            "native form authorization initialization interrupted",
+        ));
+    }
+    Ok(())
 }
 
 fn fail(scope: &mut v8::PinScope, message: &str) {
@@ -60,13 +65,20 @@ fn submit<'s>(
     let Ok(form) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
         return;
     };
-    let payload: Payload = match deno_core::serde_v8::from_v8(scope, args.get(3)) {
+    let mut payload: Payload = match deno_core::serde_v8::from_v8(scope, args.get(3)) {
         Ok(payload) => payload,
         Err(_) => {
             fail(
                 scope,
                 "Native form entries require supported text or private File values",
             );
+            return;
+        }
+    };
+    payload.entries = match entries(scope, context, args.get(3)) {
+        Ok(entries) => entries,
+        Err(error) => {
+            fail(scope, &error);
             return;
         }
     };
@@ -81,20 +93,43 @@ fn submit<'s>(
         fail(scope, "Native form action cannot be resolved");
         return;
     };
-    if !csp_request_for_context(scope, context, form, &action, "form-action", "") {
-        result.set_bool(true);
-        return;
-    }
+    let target = if payload.target.is_empty() {
+        crate::browser_env::form_submission_base_target(scope, form).unwrap_or_default()
+    } else {
+        payload.target.clone()
+    };
     let encoding = document_encoding(
         &state.borrow(),
         payload.accept_charset.as_deref().unwrap_or(""),
     );
+    let Some(data) = submission_form_data(scope, context, args.get(3), encoding.name()) else {
+        return;
+    };
+    if !crate::browser_env::dispatch_formdata_event(scope, form, data) {
+        return;
+    }
+    let Some(snapshot) = call_capability(scope, context, "snapshotFormValue", &[data]) else {
+        return;
+    };
+    payload.entries = match entries(scope, context, snapshot) {
+        Ok(entries) => entries,
+        Err(error) => {
+            fail(scope, &error);
+            return;
+        }
+    };
+    // Charset replacement already preceded the mutable formdata event.
+    payload.charset_entries.clear();
+    if !csp_request_for_context(scope, context, form, &action, "form-action", "") {
+        result.set_bool(true);
+        return;
+    }
     let plan = match form_navigation::prepare(
         &source,
         &action,
         &payload.method,
         &payload.enctype,
-        &payload.target,
+        &target,
         &payload.entries,
         &payload.charset_entries,
         encoding,
@@ -257,6 +292,10 @@ impl PageSession {
                 logs.extend(network.0.drain(..));
                 network.0 = logs.into();
             }
+            next.navigation_count = self
+                .navigation_count
+                .checked_add(1)
+                .ok_or("Native navigation counter exhausted")?;
             std::mem::swap(self, &mut next);
             drop(next);
         }
@@ -289,4 +328,130 @@ fn approved_base(
     } else {
         source.to_string()
     }
+}
+
+fn entries<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    payload: v8::Local<'s, v8::Value>,
+) -> Result<Vec<(String, String)>, String> {
+    let payload = payload
+        .to_object(scope)
+        .ok_or("Native form snapshot is not an object")?;
+    let key = v8::String::new(scope, "entries").unwrap();
+    let rows = payload
+        .get(scope, key.into())
+        .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+        .ok_or("Native form entry list is not an array")?;
+    let mut result = Vec::with_capacity(rows.length() as usize);
+    for i in 0..rows.length() {
+        let pair = rows
+            .get_index(scope, i)
+            .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+            .ok_or("Native form entry is not a pair")?;
+        let name = pair
+            .get_index(scope, 0)
+            .filter(|value| value.is_string())
+            .ok_or("Native form name is not text")?
+            .to_rust_string_lossy(scope);
+        let value = pair
+            .get_index(scope, 1)
+            .ok_or("Native form value is missing")?;
+        let text = if value.is_string() {
+            value.to_rust_string_lossy(scope)
+        } else {
+            file_name(scope, context, value)?
+        };
+        result.push((name, text));
+    }
+    Ok(result)
+}
+
+fn file_name<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    value: v8::Local<'s, v8::Value>,
+) -> Result<String, String> {
+    let reader = context
+        .get_slot::<HostCapabilities>()
+        .and_then(|capabilities| {
+            capabilities
+                .0
+                .borrow()
+                .get("snapshotFormFileName")
+                .and_then(|reader| reader.to_local(scope))
+        })
+        .ok_or("Native File reader is unavailable")?;
+    let receiver = v8::undefined(scope).into();
+    reader
+        .call(scope, receiver, &[value])
+        .filter(|value| value.is_string())
+        .map(|value| value.to_rust_string_lossy(scope))
+        .ok_or("Native form value is not a private File".into())
+}
+
+#[op2(reentrant)]
+pub(super) fn op_form_data_entries<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    form: v8::Local<'s, v8::Value>,
+    submitter: v8::Local<'s, v8::Value>,
+) -> v8::Local<'s, v8::Value> {
+    crate::browser_env::begin_form_data_constructor_entries(scope, form, submitter)
+        .map(Into::into)
+        .unwrap_or_else(|| v8::undefined(scope).into())
+}
+
+#[op2(nofast, reentrant)]
+pub(super) fn op_form_data_finish(scope: &mut v8::PinScope, form: v8::Local<v8::Value>) {
+    crate::browser_env::finish_form_data_constructor(scope, form);
+}
+#[op2(nofast, reentrant)]
+pub(super) fn op_form_data_event<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    form: v8::Local<'s, v8::Object>,
+    data: v8::Local<'s, v8::Value>,
+) -> bool {
+    crate::browser_env::dispatch_formdata_event(scope, form, data)
+}
+
+fn call_capability<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    name: &str,
+    args: &[v8::Local<'s, v8::Value>],
+) -> Option<v8::Local<'s, v8::Value>> {
+    let callback = context
+        .get_slot::<HostCapabilities>()
+        .and_then(|capabilities| {
+            capabilities
+                .0
+                .borrow()
+                .get(name)
+                .and_then(|callback| callback.to_local(scope))
+        });
+    let Some(callback) = callback else {
+        fail(scope, "Native form data capability is unavailable");
+        return None;
+    };
+    let receiver = v8::undefined(scope).into();
+    callback.call(scope, receiver, args)
+}
+fn submission_form_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    payload: v8::Local<'s, v8::Value>,
+    encoding: &str,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let payload = payload.to_object(scope)?;
+    let entries_key = v8::String::new(scope, "entries").unwrap();
+    let entries = payload.get(scope, entries_key.into())?;
+    let charset_key = v8::String::new(scope, "charsetEntries").unwrap();
+    let charset = payload.get(scope, charset_key.into())?;
+    let encoding = v8::String::new(scope, encoding)?.into();
+    call_capability(
+        scope,
+        context,
+        "createSubmissionFormData",
+        &[entries, charset, encoding],
+    )
 }

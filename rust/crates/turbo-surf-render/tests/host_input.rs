@@ -44,32 +44,29 @@ async fn host_input_orders_trusted_keyboard_edits_and_honors_cancellation() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn implicit_get_form_submission_uses_the_live_values_and_cancelable_submit_event() {
-    let mut page = PageSession::open("<body><form action='/search?discard=1'><input id=q name=q><input type=hidden name=token value=live><input type=checkbox name=excluded></form></body>", "https://example.test/home", "", "", 5000).await.unwrap();
-    page.eval("globalThis.submits=[];document.querySelector('form').onsubmit=event=>submits.push([event instanceof SubmitEvent,event.isTrusted,event.submitter]);").await.unwrap();
-    page.input(&json!([{"focus":"#q"},{"type":"query"},{"press":"Enter"}]))
+async fn implicit_form_submission_uses_live_values_validation_and_trusted_cancellation() {
+    let mut page = PageSession::open("<body><form action='/search'><input id=q name=q required><input type=hidden name=token value=live></form></body>", "https://example.test/home", "", "", 5000).await.unwrap();
+    page.eval("globalThis.submits=[];document.querySelector('form').onsubmit=event=>{event.preventDefault();submits.push([event instanceof SubmitEvent,event.isTrusted,event.submitter,document.querySelector('#q').value]);};").await.unwrap();
+    page.input(&json!([{"focus":"#q"},{"press":"Enter"}]))
+        .await
+        .unwrap();
+    assert_eq!(page.eval_json_expression("submits").await.unwrap(), "[]");
+    page.input(&json!([{"type":"query"},{"press":"Enter"}]))
         .await
         .unwrap();
     assert_eq!(
-        page.eval("globalThis.__RESULT=location.href")
-            .await
-            .unwrap(),
-        "https://example.test/search?q=query&token=live"
+        page.eval_json_expression("submits").await.unwrap(),
+        "[[true,true,null,\"query\"]]"
     );
-    assert_eq!(
-        page.eval("globalThis.__RESULT=JSON.stringify(submits)")
-            .await
-            .unwrap(),
-        "[[true,true,null]]"
-    );
-    page.eval("location.href='https://example.test/home';document.querySelector('form').onsubmit=event=>event.preventDefault()").await.unwrap();
+    assert_eq!(page.navigation_snapshot().0, 0);
+    assert_eq!(page.navigation_snapshot().1, "https://example.test/home");
+    page.eval("HTMLFormElement.prototype.requestSubmit=()=>{throw Error('public replacement');};Object.defineProperty(document.querySelector('#q'),'form',{get(){throw Error('public form getter');}});").await.unwrap();
     page.input(&json!([{"press":"Enter"}])).await.unwrap();
     assert_eq!(
-        page.eval("globalThis.__RESULT=location.href")
-            .await
-            .unwrap(),
-        "https://example.test/home"
+        page.eval_json_expression("submits.length").await.unwrap(),
+        "2"
     );
+    page.close();
 }
 
 #[tokio::test(flavor = "current_thread")]

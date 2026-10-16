@@ -47,6 +47,12 @@ done
 for file in trusted_types_mapping.json trusted_types_sinks_probe.js trusted_types_cases.json trusted_types_conversion_probe.js trusted_types_chrome155.json trusted_types_matrix_chrome155.json trusted_types_matrix_probe.js trusted_types_sinks_cases.json trusted_types.js trusted_types_probe.js trusted_types_sinks_chrome155.json trusted_types.rs trusted_types_conversion_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
+for file in element_internals.rs element_internals.js checkedness_probe.js checkedness_chrome155.json element_internals_core_cases.json element_internals_core_probe.js element_internals_core_chrome155.json element_internals_associated_cases.json element_internals_associated_probe.js element_internals_associated_chrome155.json element_internals_state_cases.json element_internals_state_probe.js element_internals_state_chrome155.json element_internals_definition_cases.json element_internals_definition_probe.js element_internals_definition_chrome155.json element_internals_setlike_cases.json element_internals_setlike_probe.js element_internals_setlike_chrome155.json formdata_event_cases.json formdata_event_probe.js formdata_event_chrome155.json formdata_guards_cases.json formdata_guards_probe.js formdata_guards_chrome155.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
+for file in form_connectivity_cases.json form_connectivity_probe.js form_connectivity_chrome155.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
 git -C "$repo" show "${source_rev}:src/event_handlers.rs" > "$dest/event_handlers.rs"
 git -C "$repo" show "${source_rev}:src/event_brands.rs" > "$dest/event_brands.rs"
 git -C "$repo" show "${source_rev}:src/event_listeners.rs" > "$dest/event_listeners.rs"

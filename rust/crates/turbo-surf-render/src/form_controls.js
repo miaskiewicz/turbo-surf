@@ -5,22 +5,27 @@
   delete g.__formNative;
   const readValue = ns.formControlValue;
   delete ns.formControlValue;
+  const checkedValue=ns.formControlChecked;delete ns.formControlChecked;
+  const selectedOptions=ns.formSelectedOptions,resetControl=ns.formResetControl;delete ns.formSelectedOptions;delete ns.formResetControl;
   const apply = Reflect.apply, define = Object.defineProperty, create = Object.create;
   const string = String, number = Number;
   const ErrorType = TypeError, Exception = DOMException, Regex = RegExp;
   const isNaNValue=Number.isNaN,absolute=Math.abs,round=Math.round,floor=Math.floor;
   const tagGetter = ns.domAccessor('tagName', false, 'Element');
   const parentGetter = ns.domAccessor('parentElement', false, 'Node');
+  const connectedGetter = ns.domAccessor('isConnected', false, 'Node');
   const getRoot = Node.prototype.getRootNode, query = Element.prototype.querySelectorAll, documentQuery = Document.prototype.querySelectorAll;
   const nodeTypeGetter = ns.domAccessor('nodeType', false, 'Node');
   const queryAll = (root, selector) => apply(apply(nodeTypeGetter,root,[])===9?documentQuery:query,root,[selector]);
   const attribute = Element.prototype.getAttribute, contains = Node.prototype.contains;
   const lower = Function.prototype.call.bind(String.prototype.toLowerCase);
   const regexTest = Function.prototype.call.bind(RegExp.prototype.test);
-  const custom = new WeakMap(), customGet = WeakMap.prototype.get.bind(custom), customSet = WeakMap.prototype.set.bind(custom);
-  const validityRecords = new WeakMap(), validityGet = WeakMap.prototype.get.bind(validityRecords), validitySet = WeakMap.prototype.set.bind(validityRecords);
-  const controlStates = new WeakMap(), stateGet = WeakMap.prototype.get.bind(controlStates), stateSet = WeakMap.prototype.set.bind(controlStates);
-  const submitters = new WeakMap(), submitterGet = WeakMap.prototype.get.bind(submitters), submitterSet = WeakMap.prototype.set.bind(submitters), submitterHas = WeakMap.prototype.has.bind(submitters);
+  const associatedGet=element=>bridge('associated',element),associatedSet=(element,record)=>bridge('associated',element,record);
+  const privateGet=(object,family)=>bridge('private',object,family),privateSet=(object,family,value)=>bridge('private',object,family,value);
+  const customGet=element=>privateGet(element,'customMessage'),customSet=(element,value)=>privateSet(element,'customMessage',value);
+  const validityGet=state=>privateGet(state,'validityRecord'),validitySet=(state,value)=>privateSet(state,'validityRecord',value);
+  const stateGet=element=>privateGet(element,'validityObject'),stateSet=(element,value)=>privateSet(element,'validityObject',value);
+  const submitterGet=event=>privateGet(event,'submitter'),submitterSet=(event,value)=>privateSet(event,'submitter',value),submitterHas=event=>submitterGet(event)!==undefined;
   const EventClass = Event;
   const tag = element => lower(apply(tagGetter, element, []));
   const attr = (element, name) => apply(attribute, element, [name]);
@@ -34,6 +39,7 @@
   const controlTags = ['input','textarea','select','button','fieldset','object','output'];
   function checkControl(element) {
     const kind = tag(element);
+    if(associatedGet(element))return "custom";
     for (let index = 0; index < controlTags.length; index++) if (kind === controlTags[index]) return kind;
     throw new ErrorType('Illegal invocation');
   }
@@ -57,6 +63,7 @@
   }
   function candidate(element) {
     const kind = checkControl(element), inputType = type(element);
+    if(kind==="custom")return !disabled(element)&&!present(element,"readonly");
     if (kind === 'fieldset' || kind === 'object' || kind === 'output' || disabled(element)) return false;
     if (kind === 'input' && (inputType === 'hidden' || inputType === 'reset' || inputType === 'button')) return false;
     if (kind === 'button' && inputType !== 'submit') return false;
@@ -66,22 +73,23 @@
     return true;
   }
   function formControls(form) {
-    const root = apply(getRoot, form, []), nodes = queryAll(root, 'input,textarea,select,button,fieldset,object,output');
+    const root = apply(getRoot, form, []), nodes = queryAll(root, '*');
     const result = [];
-    for (let index = 0; index < nodes.length; index++) if (owner(nodes[index]) === form) result[result.length] = nodes[index];
+    for (let index = 0; index < nodes.length; index++) if ((associatedGet(nodes[index])||controlTags.indexOf(tag(nodes[index]))>=0)&&owner(nodes[index]) === form) result[result.length] = nodes[index];
     return result;
   }
   function flags(element) {
+    const associatedRecord=associatedGet(element);if(associatedRecord)return associatedRecord.flags;
     const kind = checkControl(element), inputType = type(element), admitted = candidate(element);
     const value = readValue(element), required = present(element, 'required');
     const state = {valueMissing:false,typeMismatch:false,patternMismatch:false,tooLong:false,tooShort:false,rangeUnderflow:false,rangeOverflow:false,stepMismatch:false,badInput:false,customError:!!customGet(element)};
     if (admitted) {
       if (required && (kind === 'textarea' || kind === 'select' || kind === 'input' && !regexTest(/^(range|color|hidden|button|submit|reset|image)$/,inputType))) {
-        if (inputType === 'checkbox') state.valueMissing = !present(element, 'checked');
+        if (inputType === 'checkbox') state.valueMissing = !checkedValue(element);
         else if (inputType === 'radio') {
           const root = apply(getRoot, element, []), radios = queryAll(root,'input');
           let checked = false;
-          for (let index = 0; index < radios.length; index++) if (type(radios[index]) === 'radio' && attr(radios[index],'name') === attr(element,'name') && owner(radios[index]) === owner(element) && present(radios[index],'checked')) checked=true;
+          for (let index = 0; index < radios.length; index++) if (type(radios[index]) === 'radio' && attr(radios[index],'name') === attr(element,'name') && owner(radios[index]) === owner(element) && checkedValue(radios[index])) checked=true;
           state.valueMissing = !checked;
         } else state.valueMissing = value === '';
       }
@@ -114,6 +122,7 @@
   }
   function message(element) {
     checkControl(element);const state=flags(element);
+    const associatedRecord=associatedGet(element);if(associatedRecord)return candidate(element)&&!state.valid?associatedRecord.message:"";
     if(!candidate(element)||state.valid)return '';
     const own=customGet(element);if(own)return own;
     const inputType=type(element),value=readValue(element);
@@ -177,11 +186,34 @@
   };
   const SubmitEventClass=native(submitImplementation,'SubmitEvent',1,true,true);
   SubmitEventClass.prototype=submitImplementation.prototype;
+  Object.setPrototypeOf(SubmitEventClass,EventClass);
   define(SubmitEventClass.prototype,'constructor',{value:SubmitEventClass,writable:true,configurable:true});
   define(SubmitEventClass,'prototype',{writable:false});
   define(SubmitEventClass.prototype,'submitter',{get:native(function(){if(!submitterHas(this))throw new ErrorType('Illegal invocation');return submitterGet(this);},'get submitter',0),enumerable:true,configurable:true});
   define(SubmitEventClass.prototype,Symbol.toStringTag,{value:'SubmitEvent',configurable:true});
   define(g,'SubmitEvent',{value:SubmitEventClass,writable:true,configurable:true});
+  const formDataDocument=g.document;
+  const formDataImplementation=class FormDataEvent extends EventClass {
+    constructor(type,init) {
+      if(!arguments.length)throw new ErrorType('FormDataEvent requires a type');
+      super(type,init);
+      const value=init?.formData;
+      if(value===undefined)throw new ErrorType('FormDataEvent requires formData');
+      const snapshot=bridge('value-snapshot',formDataDocument,value);
+      if(!snapshot||snapshot.kind!=='formdata')throw new ErrorType('formData must be a genuine FormData');
+      privateSet(this,'formData',value);
+    }
+  };
+  const FormDataEventClass=native(formDataImplementation,'FormDataEvent',2,true,true);
+  FormDataEventClass.prototype=formDataImplementation.prototype;
+  Object.setPrototypeOf(FormDataEventClass,EventClass);
+  delete FormDataEventClass.prototype.constructor;
+  define(FormDataEventClass.prototype,'formData',{get:native(function(){const value=privateGet(this,'formData');if(value===undefined)throw new ErrorType('Illegal invocation');return value;},'get formData',0),enumerable:true,configurable:true});
+  define(FormDataEventClass.prototype,'constructor',{value:FormDataEventClass,writable:true,configurable:true});
+  define(FormDataEventClass.prototype,Symbol.toStringTag,{value:'FormDataEvent',configurable:true});
+  define(FormDataEventClass,'prototype',{writable:false});
+  define(g,'FormDataEvent',{value:FormDataEventClass,writable:true,configurable:true});
+  g.__captureFormDataEvent=(form,data)=>bridge('emit',form,new FormDataEventClass('formdata',{bubbles:true,formData:data}));
   const freeze = Object.freeze;
   function submission(form, submitter) {
     const entries=[],charsetEntries=[];
@@ -189,18 +221,19 @@
     const append=(name,value)=>{entries[entries.length]=freeze([name,value]);};
     for(let i=0;i<controls.length;i++) {
       const control=controls[i],kind=tag(control),inputType=type(control),name=attr(control,'name');
+      const associatedRecord=associatedGet(control);if(associatedRecord){if(!disabled(control)&&associatedRecord.value!==null){const value=associatedRecord.value;if(typeof value==='object'&&value.kind==='formdata'){for(let at=0;at<value.entries.length;at++)append(value.entries[at][0],value.entries[at][1]);}else if(name)append(name,typeof value==='object'&&value.kind==='file'?value.value:value);}continue;}
       if(disabled(control)||!name||kind==='fieldset'||kind==='object'||kind==='output')continue;
       if(kind==='button'||kind==='input'&&regexTest(/^(submit|reset|button|image)$/,inputType)) {
         if(control!==submitter)continue;
         if(inputType==='image'){append(name+'.x','0');append(name+'.y','0');continue;}
       }
-      if(kind==='input'&&regexTest(/^(checkbox|radio)$/,inputType)&&!present(control,'checked'))continue;
+      if(kind==='input'&&regexTest(/^(checkbox|radio)$/,inputType)&&!checkedValue(control))continue;
       if(kind==='input'&&inputType==='file')throw new Exception('Native FileList submission is not available.','NotSupportedError');
       if(kind==='select') {
-        const options=queryAll(control,'option');
+        const options=selectedOptions(control);
         for(let j=0;j<options.length;j++) {
           const option=options[j],group=parent(option);
-          if(!present(option,'selected')||present(option,'disabled')||group&&tag(group)==='optgroup'&&present(group,'disabled'))continue;
+          if(present(option,'disabled')||group&&tag(group)==='optgroup'&&present(group,'disabled'))continue;
           append(name,attr(option,'value')??readValue(option));
         }
       } else {if(inputType==='hidden'&&name==='_charset_')charsetEntries[charsetEntries.length]=entries.length;append(name,inputType==='checkbox'||inputType==='radio'?attr(control,'value')??'on':readValue(control));}
@@ -214,8 +247,10 @@
     return freeze(result);
   }
   function queue(form,submitter) {
-    if(bridge('submit',form,submitter,submission(form,submitter))===true)return;
-    throw new Exception('Form navigation requires a configured native submission transport.','NotSupportedError');
+    if(!apply(connectedGetter,form,[])||privateGet(form,'constructing-entries'))return;
+    privateSet(form,'constructing-entries',true);
+    try {if(bridge('submit',form,submitter,submission(form,submitter))===true)return;throw new Exception('Form navigation requires a configured native submission transport.','NotSupportedError');}
+    finally {privateSet(form,'constructing-entries',false);}
   }
   function normalizeSubmitter(form,submitter) {
     if(submitter!==null&&submitter!==undefined) {
@@ -227,10 +262,13 @@
   }
   function request(form, submitter) {
     checkForm(form);submitter=normalizeSubmitter(form,submitter);
-    if(!bridge('allowed',form)||!bridge('active',form))return;
-    if(!present(form,'novalidate')&&!(submitter&&present(submitter,'formnovalidate'))&&!validate(form))return;
-    const event=new SubmitEventClass('submit',{bubbles:true,cancelable:true,composed:submitter!==null,submitter});
-    if(!bridge('emit',form,event))return;
+    if(!apply(connectedGetter,form,[])||!bridge('allowed',form)||!bridge('active',form)||privateGet(form,'firing-submit'))return;
+    privateSet(form,'firing-submit',true);
+    try {
+      if(!present(form,'novalidate')&&!(submitter&&present(submitter,'formnovalidate'))&&!validate(form))return;
+      const event=new SubmitEventClass('submit',{bubbles:true,cancelable:true,composed:submitter!==null,submitter});
+      if(!bridge('emit',form,event))return;
+    } finally {privateSet(form,'firing-submit',false);}
     queue(form,submitter);
   }
   function method(proto,name,fn,length) {define(proto,name,{value:native(fn,name,length),enumerable:true,writable:true,configurable:true});}
@@ -246,19 +284,28 @@
   }
   const formPrototype=HTMLFormElement.prototype;
   for(const methodName of ['checkValidity','reportValidity'])method(formPrototype,methodName,function(){checkForm(this);return validate(this);},0);
+  method(formPrototype,'reset',function(){checkForm(this);const event=new EventClass('reset',{bubbles:true,cancelable:true});if(!bridge('emit',this,event))return;const controls=formControls(this);for(let i=0;i<controls.length;i++){const record=associatedGet(controls[i]);if(record){if(record.reset)record.reset();}else resetControl(controls[i]);}},0);
   method(formPrototype,'requestSubmit',function(submitter){return request(this,submitter);},0);
   method(formPrototype,'submit',function(){checkForm(this);if(!bridge('allowed',this)||!bridge('active',this))return;return queue(this,null);},0);
   for(const [proto,property,attributeName] of [[formPrototype,'noValidate','novalidate'],[HTMLButtonElement.prototype,'formNoValidate','formnovalidate'],[HTMLInputElement.prototype,'formNoValidate','formnovalidate']]) {
     const setAttribute=Element.prototype.setAttribute,removeAttribute=Element.prototype.removeAttribute;
     define(proto,property,{get:native(function(){return present(this,attributeName);},'get '+property,0),set:native(function(value){if(value)apply(setAttribute,this,[attributeName,'']);else apply(removeAttribute,this,[attributeName]);},'set '+property,1),enumerable:true,configurable:true});
   }
-  g.__captureFormEntries=(form,submitter)=>{
+  g.__captureFormEntries=(form,submitter,hold=false)=>{
     if(form===undefined){if(submitter!==undefined&&submitter!==null&&!bridge('html-element',submitter))throw new ErrorType('The submitter is not an HTMLElement.');return freeze([]);}
     checkForm(form);submitter=normalizeSubmitter(form,submitter);
-    const payload=submission(form,submitter),entries=[];
-    for(let i=0;i<payload.entries.length;i++)entries[i]=payload.entries[i];
-    for(let i=0;i<payload.charsetEntries.length;i++){const at=payload.charsetEntries[i];entries[at]=freeze([entries[at][0],'UTF-8']);}
-    return freeze(entries);
+    if(privateGet(form,'constructing-entries'))throw new Exception('The form entry list is already being constructed.','InvalidStateError');
+    privateSet(form,'constructing-entries',true);let complete=false;
+    try {
+      const payload=submission(form,submitter),entries=[];
+      for(let i=0;i<payload.entries.length;i++)entries[i]=payload.entries[i];
+      for(let i=0;i<payload.charsetEntries.length;i++){const at=payload.charsetEntries[i];entries[at]=freeze([entries[at][0],'UTF-8']);}
+      complete=true;return freeze(entries);
+    } finally {if(!hold||!complete)privateSet(form,'constructing-entries',false);}
+  };
+  g.__captureFormInternals = {
+    register:(host,record)=>associatedSet(host,record),owner,disabled,candidate,validity,message,validateControl,
+    attribute:attr,parent,tag,queryAll,getRoot,apply,emit:(host,event)=>bridge('emit',host,event),
   };
   g.__captureFormSubmission=request;
 })();

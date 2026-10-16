@@ -116,8 +116,11 @@ Check the source archive/patch with `python3 rust/vendor/update-deno-crypto.py -
 
 The DOM API dependency is published as turbo-dom0.5.6 (PR #12, actual tagged
 merge commit `ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`). Its parser provenance
-and template extraction APIs resolve from the registry; no DOM workspace Git
-patch is needed. The geometry producer turbo-html2pdf-core0.3.7 is also published
+and template extraction APIs resolve from the registry. Current ElementInternals/
+checkedness work additionally requires the public0.5.7 development candidate
+`fb60e6f90a5d373165cfd1045b090407ca945d47` (PR14, including PR13). All six DOM
+consumers use that same immutable Git source. Release the reviewed producer and
+switch to the registry0.5.7 floor before publishing Surf crates. The geometry producer turbo-html2pdf-core0.3.7 is also published
 from PR #21's tagged merge `33853374bdeae040e596858bcbf3da9670543b0e`.
 The composed-layout integration requires the tested0.3.8 PR23 candidate. Render
 and raster therefore use the immutable public Git revision

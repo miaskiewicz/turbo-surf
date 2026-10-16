@@ -40,6 +40,8 @@ const selector = flag("--selector", "textarea[name=q],input[name=q]");
 const targetUrl = flag("--url", "https://www.google.com/");
 const config = {
   url: targetUrl,
+  requireNativeFormNavigation: argv.includes("--require-native-form-navigation"),
+  disableFormFallback: argv.includes("--no-form-fallback"),
   dismissSelector: flag(
     "--dismiss-selector",
     new URL(targetUrl).hostname === "www.google.com" ? "#W0wltc" : "",

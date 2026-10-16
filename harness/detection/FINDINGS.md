@@ -10,63 +10,65 @@ its retry. Chrome oracle cookies were never reused in native tests.
 
 ## Current integration checklist — 2026-10-16
 
-The working branch integrates genuine native geometry, DOM ownership, CSP/reporting,
-request/response streams, cache/storage and current profile controls. Final gates
-remain pending. Older checkpoint counts below describe their recorded sources.
+Current results below supersede the dated checkpoints retained later in this file.
+Complete Chrome parity and reliable native Google SERP acceptance remain unverified.
 
-1. **Messaging / reclamation:** private endpoint ownership, retired-frame cleanup,
-   queued key snapshots and real stream transfers are integrated. The latest actual
-   native155+wreq run passes all9 stream transfer tests, including retirement and
-   completed-realm GC. The linked-workspace fixture startup failure is fixed without
-   weakening assertions. Broader reclamation/lifecycle coverage remains tracked.
-2. **Layout / Range / caret:**22 geometry and8 shadow/public-CSS controls passed
-   together. Composed slots, original UTF-16 text, rotated div/img, real CSP-applied
-   styles and per-session cache identities are integrated. The latest native run
-   adds3 passing resource-admission tests: font/keyframe definitions are accepted
-   only when native matched styles prove them unused. Used/unresolved resources,
-   decorated/empty/mixed-font inline boxes and broader layout remain bounded.
-   Public Git-pinned producer0.3.8 candidate9d7f02fb has730 Core tests, strict
-   checks and green CI with100% line coverage; it is not a published registry release.
-3. **DOM / forms:** published turbo-dom0.5.6 and canonical turbo-test4aeb295 are
-   integrated through the official vendor script. Genuine AbstractRange/NodeRange/
-   StaticRange behavior passes3 native tests, including real iframe and GC controls.
-   Form validation/retained-realm2, encoding2 and real HTTP navigation6 tests pass
-   on actual155+wreq. Top-document text GET/POST uses the real jar, profile and
-   response document, preserving303 redirects, consent cookies and fragments.
-   ElementInternals/FormData event integration is still in progress; other targets,
-   file-input/multipart and complete successful-controls semantics remain open.
+1. **Messaging / reclamation:** genuine port/key/stream transfers, private endpoint
+   ownership and retired-frame cleanup are integrated. The named native stream9,
+   port24 and clone17 cohorts pass. Broader lifecycle/storage reclamation remains
+   tracked, rather than certified by these bounded controls.
+2. **Layout / Range / caret:**22 geometry,8 shadow/public-CSS and3 resource-admission
+   controls pass. Actual shaped UTF-16 text, rotation, composed slots and per-session
+   caches are integrated. Unused font/keyframe definitions are admitted only when
+   native matching proves them unused. The new live Google run found a real input
+   failure: missing ForcedColors media capability. That repair is in flight.
+   Decorated/mixed-font inline boxes and broader resource/layout behavior remain open.
+3. **DOM / forms:** canonical turbo-test34ca9a8 is officially vendored. All six DOM
+   consumers use public immutable0.5.7 candidatefb60e6f (registry latest0.5.6).
+   Native AbstractRange/NodeRange/StaticRange, ElementInternals/CustomStateSet,
+   checked/defaultChecked/reset/clone and genuine FormData events are integrated.
+   Production tests cover30-reference internals GC, borrowed interfaces, actual
+   HTTP entry mutation/order/CSP, redirects/consent cookies and same-URL POST state.
+   Disconnected/removed forms do not submit. Full radio/adoption, FileList/multipart/
+   other-target forms and broader parsing/observer/reaction behavior remain open.
 4. **Audio:** deferred in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
-5. **Security / resources:** native Trusted Types, original parser/report samples,
-   HTTP report delivery, sandbox/navigation and tested COOP/COEP/permissions-policy
-   behavior are integrated. Actual155 WindowProxy/module/codegen acceptance passes.
-   Broader sinks/default reentrancy, directives/popups/deep policy remain open.
-   Stock150 lacks the native155 callback contracts.
-6. **Fetch / storage:** bounded HTTPS/HTTP2 uploads, response streams/cancellation,
-   BodyInit/cache/referrer/partition and peer/clear tasks are integrated. Three
-   combined native upload controls previously passed. Genuine stream transfers
-   retain source-pinned Chrome scenarios and rollback/partial-commit/GC controls;
-   the latest combined9 stream tests pass. Remaining storage-access and Fetch
-   behavior, including genuine multipart BodyInit, stays on the backlog.
-7. **Validation:** the latest named combined actual155+wreq batch passes25 tests:
-   Range3, encoding2, form validation/GC2, form navigation6, resources3 and streams9.
-   Full workspace/default/native, rebuilt addon and shim/E2E gates remain pending.
-   The layout dependency uses a public immutable Git pin, without private source
-   patches in production manifests. Registry publication and stock-engine alignment
-   remain separate requirements.
-8. **API inventory:** [API-INVENTORY.json](./API-INVENTORY.json) preserves a frozen
-   Chrome155.80/native155.23 pair:66 missing own members on the original interfaces,
-   147 across expanded measured interfaces. That executable predates Range/forms/
-   selector/stream changes; absent interfaces in that capture are historical
-   observations. Fresh measurement after integration is still required.
-9. **Housekeeping:** tested integrations need committing/pushing with final gate
-   evidence and refreshed PR description. The changelog is consolidated by final
-   capability; [PARITY-GAPS.md](./PARITY-GAPS.md) and
-   [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) track every residual
-   category outside completed PR26 scope. No Surf release is tagged.
-10. **Live Google:** rebuild the all-feature driver, then run fresh GPU+wreq/native
-    cookies and consent handling. Successful native SERP remains unverified.
-    Measured localhost transport/GPU fields do not certify complete parity. Chrome
-    oracle cookies are never imported; the155 HTTP identity uses the154 recipe.
+   A build-only fix limits NEON code to ARM, with real x86_64/arm64 delay PCM proofs.
+5. **Security / resources:** tested CSP/Trusted Types/parser/HTTP reporting,
+   sandbox/navigation, SRI/CORP and COOP/COEP/permissions-policy behavior is integrated.
+   Native155 WindowProxy/module/codegen acceptance passes. Broader directives,
+   sinks/reentrancy, popups/deep policy and stock150 callback alignment remain open.
+6. **Fetch / storage:** genuine bounded response/upload streams, abort, BodyInit,
+   cache/referrer/partition and peer/clear tasks are integrated. New callback-context
+   ownership fixes remove a real parent-to-child realm retention edge; existing
+   Fetch/form GC regressions now pass. Genuine multipart FormData BodyInit and
+   broader storage-access/Fetch behavior remain explicit unsupported work.
+7. **Validation:** the final integrated actual155 cohort passes335 tests (library299,
+   production36), with no failures/ignores. Strict all-target native workspace checks
+   pass, as do66 offline harness tests and2 actual full-feature driver localhost
+   regressions. Interrupted iframe bootstrap returns errors instead of aborting;
+   all9 host-input tests pass unchanged in budget. Full workspace/default/native
+   test coverage, rebuilt addon/shim/E2E and release/distribution gates remain pending.
+8. **API inventory:** the fresh Chrome155.80/native155.23 pair now reports65 missing
+   own members across the original four interfaces (Document29, Element30,
+   HTMLElement4, Canvas2),133 across expanded interfaces and304 total difference
+   paths. All measured interfaces are present. AbstractRange, NodeRange, StaticRange
+   and ElementInternals have zero measured member/descriptor differences; this
+   certifies the captured shapes, not universal behavior.
+   [API-INVENTORY.json](./API-INVENTORY.json) retains exact names and source/binary
+   hashes. Form reflection and input/button descriptor repairs are in flight.
+9. **Housekeeping:** base integration66dab51 is pushed to PR26; the subsequent
+   tested forms/internals/runtime batch needs its follow-up commit/push and CI.
+   Changelog/docs and [PARITY-GAPS.md](./PARITY-GAPS.md) reflect current bounded scope.
+   [Issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) tracks residual
+   work beyond completed PR26 scope. No Surf release tag is created.
+10. **Live Google:** the fresh all-feature, fresh-cookie matrix ran twice with
+    synthesized form fallback disabled. Both Chrome baseline passes obtained9
+    result markers; both instrumented Chrome passes reached /sorry and had capture
+    errors. All four native passes failed during input geometry on ForcedColors,
+    before search submission, with20s hydration-budget diagnostics. This is a
+    runtime failure, not evidence of a completed native BotGuard rejection/clearance.
+    Repair the media capability, rebuild and repeat. Native successful SERP remains
+    unverified; Chrome cookies are never imported.
 
 ## Isolated CSP navigation checkpoint — 2026-10-14
 
@@ -1276,9 +1278,10 @@ source-pinned to .79 with the same measured V8 .23. This transport measurement
 does not silently update SDK provenance or prove full-version client-hint/API
 identity; those remain part of the combined profile and API inventory checks.
 
-A fresh 20-case source-pinned Chrome stream-transfer oracle now covers genuine
+The earlier20-case precursor stream-transfer oracle covers genuine
 Readable/Writable/Transform transfer, acknowledged writes and close, cloned
 cancel/abort reasons, errors, Window/MessagePort delivery, unreachable transfers
-and late-lock failure atomicity. Production stream-transfer integration is still
-open. Native successful Google SERP, fresh full API inventory and final combined
+and late-lock failure atomicity. Its implementation is now integrated with further
+adversarial and actual-GC regressions; see [STREAM-TRANSFERS.md](./STREAM-TRANSFERS.md)
+and the current checkpoint above. Native successful Google SERP, fresh API inventory and final combined
 workspace/addon/shim/E2E validation remain separate required work.

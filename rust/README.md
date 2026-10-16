@@ -7,9 +7,12 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
-workspace now resolves published `turbo-dom` 0.5.6, including original UTF-16
+workspace now resolves the public Git-pinned `turbo-dom` 0.5.7 candidate
+`fb60e6f` (PR14, including PR13 custom states); latest registry release is0.5.6.
+The candidate adds native custom states and live checked-state reads to the original
+0.5.6 capabilities, including original UTF-16
 payload/name/parser APIs, native mutation batches and bounded storage collection.
-Its annotated release tag identifies PR #12 merge commit
+The published0.5.6 annotated release tag identifies PR #12 merge commit
 `ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`; npm platform/WASM metadata,
 the successful release workflow and official registry checksums were verified.
 The canonical binding consumes collection through the public API with genuine

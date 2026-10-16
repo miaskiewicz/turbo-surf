@@ -29,7 +29,7 @@ still being attempted in PR26; issue coverage does not defer that work by itself
 | Messaging / GC | Broader realm/frame retirement, detached storage reclamation, endpoint and reentrant failure coverage | #28 |
 | Layout | Decorated/empty/mixed-font inline boxes, stacking, scrolling/events/RTL, fixed positioning, iframe migration | #28 |
 | Range / caret | Remaining lifecycle/composed geometry and fresh interface/receiver/GC validation | #28 |
-| DOM | Parsing/observer edges, custom-element reactions/registries, ElementInternals/form association/CustomStateSet, UTF-16 edge cases | #28 |
+| DOM | Parsing/observer edges, custom-element reactions/registries, broader form association/CustomStateSet lifecycle, UTF-16 edge cases | #28 |
 | Forms | Genuine successful submission transport, entry lists, methods/encoding/targets and CSP/sandbox admission | #28 |
 | CSS / resources | Remaining selectors/at-rules, used downloaded fonts/animations, images/pseudo epochs, inner SVG | #28 |
 | Security | Remaining CSP/reporting/sinks, popup/navigation/sandbox, COOP/COEP and permissions policies | #28 |
@@ -46,22 +46,21 @@ this table and #28 so the residual backlog stays complete.
 
 ## Current integration checkpoint (2026-10-16)
 
-Canonical turbo-test4aeb295 is mechanically vendored. The latest actual155+wreq
-batch passes25 tests: native Range interfaces/lifecycle/GC3, form validation/GC2,
-encoding2, HTTP navigation6, resource-definition admission3 and stream transfers9.
-The previous combined geometry22 and shadow/public-CSS8 controls also pass.
-ElementInternals/FormData lifecycle work remains in flight. Full final gates and
-a fresh paired member inventory remain pending.
+Canonical turbo-test34ca9a8 is mechanically vendored with public DOM0.5.7
+candidatefb60e6f (latest registry0.5.6). Genuine ElementInternals/CustomStateSet,
+checked-state foundation, FormData events and disconnected-form admission are
+integrated. The final native335 cohort, all-target workspace strict checks,
+offline66 and2 full-driver localhost tests pass. Full final gates remain pending.
 
-Published turbo-dom0.5.6 is integrated. The native layout producer uses the public
-immutable0.3.8 candidate9d7f02fb from PR23 (green CI and100% line coverage); latest
-published registry release is0.3.7. The tested engine is V815.5.35.23-rusty,
-matching installed Chrome155.0.8059.80's V8 patch; SDK source provenance remains
-155.0.8059.79. Stock production SDK150 remains a separate incomplete configuration.
+Public immutable layout producer0.3.8 candidate9d7f02fb is integrated; latest
+published registry release is0.3.7. Actual V815.5.35.23-rusty matches installed
+Chrome155.0.8059.80's V8 patch; SDK source provenance remains155.0.8059.79.
+Stock production SDK150 remains a distinct incomplete configuration.
 
-Real text form GET/POST navigation and stream transfers are integrated, with
-remaining forms/Fetch/lifecycle limitations listed above. No broad browser parity,
-full final validation or reliable native Google acceptance is established.
+A fresh Google matrix failed all four native passes on missing ForcedColors media
+capability during input geometry, before search submission. Chrome baseline got
+9 results in both repeats; instrumented Chrome reached /sorry with capture errors.
+Media capability repair is active. Reliable native Google acceptance is unverified.
 
 ## Active scope and deferred audio
 
@@ -74,21 +73,19 @@ path matters to the target; no Google-audio cause is established by these contro
 
 ## Fresh own-member inventory (2026-10-16)
 
-[API-INVENTORY.json](./API-INVENTORY.json) retains the current full missing/extra
-member and descriptor-path lists, actual Chrome/native versions, executable and
-collector hashes. The fresh localhost pair uses Chrome155.0.8059.80 and native
-V815.5.35.23 with all GPU/wreq features. The original four interfaces now have
-**66** missing own members (Document29, Element30, HTMLElement5, Canvas2), compared
-with the historical94. The expanded measured interfaces have **147** missing
-members; AbstractRange, StaticRange and ElementInternals are absent and counted
-separately. These counts describe the frozen executable before the in-flight form,
-selector and stream-transfer batches. Presence alone does not certify behavior.
+[API-INVENTORY.json](./API-INVENTORY.json) retains full missing/extra and descriptor
+lists, actual Chrome/native versions and source/executable hashes. The latest
+localhost pair uses Chrome155.0.8059.80/native V815.5.35.23 with all GPU/wreq features.
+The original four interfaces have **65** missing own members (Document29,
+Element30, HTMLElement4, Canvas2); expanded measured interfaces have **133**.
+All measured interfaces are present. AbstractRange, NodeRange, StaticRange and
+ElementInternals have zero own-member/descriptor differences in this capture.
+There are304 total difference paths, including descriptors and other behavior.
 
-The expanded missing lists include form/input/button reflection and validation,
-shadow-root APIs, EventTarget.when, MessageEvent.userActivation and Range.expand.
-The descriptor report also captures Range inheritance and own-member placement,
-URL/Headers/TextEncoder/TextDecoder shapes and constructor property flags. Repairs
-must be followed by behavior regressions and a new paired capture.
+Historical counts were94 (2026-10-13), then66 original/147 expanded before the latest
+Range/forms work. None of these measurements is complete browser conformance.
+Active follow-ups cover real form reflection and input/button prototype placement
+and descriptors. Every remaining named path is tracked under issue28.
 
 ## Historical four-interface member differences
 
@@ -204,7 +201,7 @@ is bounded; it is not a census of every browser interface.
 | ARIA element relationships | ID resolution, tree scope, explicit element assignment, attribute clearing, frozen returned sequences | Scoped/private canonical state implemented and tested; fresh native 155 pair has zero differences for the saved probe |
 | Layout and hit testing | Complete decorated inline, stacking, scrolling/RTL, iframe migration and layout-unit behavior | Native0.3.8 candidate drives real rectangles, client/offset/scroll and point hits; original UTF-16 Range/caret, outer SVG, rotation and composed shadow controls pass. See [current bounds](./LIVE-GEOMETRY.md) |
 | Rendered text | Complete layout-dependent wrapping/line-box behavior beyond native cascade text flow | Canonical visibility/whitespace/break/table/details/setter contracts implemented; fresh native 155 pair has zero differences for the saved probe |
-| Shadow/custom elements | ElementInternals/form association, broader upgrades/reactions and scoped-registry lifecycle | Native slots/manual assignment, closed roots, scoped registries and construction/adoption controls are integrated; ElementInternals is in flight |
+| Shadow/custom elements | ElementInternals/form association, broader upgrades/reactions and scoped-registry lifecycle | Native slots/manual assignment, closed roots, scoped registries and construction/adoption controls are integrated; ElementInternals and CustomStateSet now pass native behavior/GC controls |
 | CSS parsing/layout | Complete grammar/cascade, Typed OM, animation timelines and transitions | Measured stylesheet policy controls pass; complete CSS behavior is open |
 | Live stylesheet installation | Explain Google's jc/lc reports during actual execution; compare live ownership and rule state | Minimal authored injection tests pass; reusable CSS diagnostics saved |
 | Observers | Real Mutation/Resize/Intersection/Performance observer queues and lifecycle | Native MutationObserver semantic records, microtask delivery, options/old values/transients and a private postconnection consumer are integrated. Full mutation lifecycle and Resize/Intersection/Performance queues remain open |

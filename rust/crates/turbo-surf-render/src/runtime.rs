@@ -56,6 +56,7 @@ use runtime_activation::ActivationKey;
 mod form_navigation;
 #[path = "form_submission.rs"]
 mod form_submission;
+use form_submission::{op_form_data_entries, op_form_data_event, op_form_data_finish};
 
 struct OwnedRuntime(JsRuntime, bool, ActivationKey);
 
@@ -1564,20 +1565,24 @@ fn op_run_timer_code<'s>(
         .unwrap_or_else(|| v8::undefined(scope).into())
 }
 
-fn install_css_authorization(scope: &mut v8::PinScope) {
+fn install_css_authorization(scope: &mut v8::PinScope) -> Result<(), JsErrorBox> {
     let forms_blocked = scope
         .get_current_context()
         .get_slot::<FrameSandbox>()
         .is_some_and(|flags| flags.forms_blocked);
     crate::browser_env::set_form_submission_blocked(scope, forms_blocked);
-    form_submission::install(scope);
-    let callback = v8::Function::new(scope, authorize_css).expect("native CSS policy callback");
+    form_submission::install(scope)?;
+    let callback = v8::Function::new(scope, authorize_css)
+        .ok_or_else(|| JsErrorBox::generic("native CSS callback initialization interrupted"))?;
     crate::browser_env::install_css_policy(scope, callback);
-    let trusted = v8::Function::new(scope, authorize_trusted_types)
-        .expect("native Trusted Types policy callback");
-    assert!(crate::browser_env::install_trusted_types_policy(
-        scope, trusted
-    ));
+    let trusted = v8::Function::new(scope, authorize_trusted_types).ok_or_else(|| {
+        JsErrorBox::generic("native Trusted Types callback initialization interrupted")
+    })?;
+    if !crate::browser_env::install_trusted_types_policy(scope, trusted) {
+        return Err(JsErrorBox::generic(
+            "native Trusted Types authorization initialization interrupted",
+        ));
+    }
     let context = scope.get_current_context();
     let base = context.get_slot::<CspHandle>().map_or_else(
         || "about:blank".to_string(),
@@ -1588,6 +1593,7 @@ fn install_css_authorization(scope: &mut v8::PinScope) {
         },
     );
     crate::browser_env::install_inline_event_handlers(scope, callback, &base);
+    Ok(())
 }
 
 #[op2(fast, reentrant)]
@@ -3395,9 +3401,14 @@ struct HostCapabilities(
 );
 
 #[op2(nofast, reentrant)]
-fn op_set_host_capabilities(scope: &mut v8::PinScope, record: v8::Local<v8::Object>) {
+fn op_set_host_capabilities(
+    scope: &mut v8::PinScope,
+    record: v8::Local<v8::Object>,
+) -> Result<(), JsErrorBox> {
     let Some(context) = record.get_creation_context(scope) else {
-        return;
+        return Err(JsErrorBox::generic(
+            "native host capability context unavailable",
+        ));
     };
     let capabilities = context.get_slot::<HostCapabilities>().unwrap_or_else(|| {
         let capabilities = Rc::new(HostCapabilities::default());
@@ -3415,6 +3426,16 @@ fn op_set_host_capabilities(scope: &mut v8::PinScope, record: v8::Local<v8::Obje
                 .get(scope, key)
                 .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
             {
+                if name == "snapshotFormValue" {
+                    // Imported host ops can run in the parent context. The reader
+                    // must belong to its actual document, without rooting a child.
+                    let scope = &mut v8::ContextScope::new(scope, context);
+                    if !crate::browser_env::install_form_value_reader(scope, function) {
+                        return Err(JsErrorBox::generic(
+                            "native form value capability initialization interrupted",
+                        ));
+                    }
+                }
                 if let Some(function) = crate::context_ownership::function(scope, function) {
                     functions.push((name, function));
                 }
@@ -3429,7 +3450,9 @@ fn op_set_host_capabilities(scope: &mut v8::PinScope, record: v8::Local<v8::Obje
         let scope = &mut v8::ContextScope::new(scope, context);
         flush_csp_bootstrap(scope, context);
     }
+    Ok(())
 }
+
 struct TimerClock {
     started: std::time::Instant,
     advance: std::cell::Cell<f64>,
@@ -4698,7 +4721,7 @@ fn op_frame_set_document<'s>(
     } else {
         crate::browser_env::install_independent_html_units(scope, &html_units);
     }
-    install_css_authorization(scope);
+    install_css_authorization(scope)?;
     #[cfg(turbo_surf_native_proxy)]
     window_proxy::install_document(scope);
     let global = context.global(scope);
@@ -5188,7 +5211,7 @@ fn allocate_frame<'s>(
             scope,
             "<!DOCTYPE html><html><head></head><body></body></html>",
         );
-        install_css_authorization(scope);
+        install_css_authorization(scope)?;
         #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_document(scope);
 
@@ -6559,6 +6582,9 @@ deno_core::extension!(
         op_set_host_input_driver,
         op_capture_runtime_core,
         op_set_host_capabilities,
+        op_form_data_entries,
+        op_form_data_finish,
+        op_form_data_event,
         op_storage_area,
         op_storage_factory,
         op_storage_object,
@@ -7554,23 +7580,24 @@ Object.defineProperty(Document.prototype,"importNode",{value:__documentFunction(
 
 // Browser pair iterators keep private live-collection state and inherit the
 // actual V8 Iterator prototype. Their next methods are native embedder callbacks.
-const __webIDLIterator = (tag, rows) => {
+const __webIDLIterator = (tag, rows, resumeAfterDone = false) => {
+  const TypeError=globalThis.TypeError, create=Object.create, apply=Reflect.apply, slice=Array.prototype.slice;
   const states = __interfaceMap("Iterator:"+tag);
-  const prototype = Object.create(Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())));
+  const prototype = create(Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())));
   Object.defineProperty(prototype, Symbol.toStringTag, {value: tag, configurable: true});
   const next = function () {
     const state = states.get(this);
     if (!state) throw new TypeError("Illegal invocation");
-    if (state.done) return {done: true, value: undefined};
+    if (state.done && !resumeAfterDone) return {done: true, value: undefined};
     const values = rows(state.receiver);
     if (state.index >= values.length) {state.done = true;return {done: true, value: undefined};}
     const pair = values[state.index++];
-    return {done: false, value: state.kind === "key" ? pair[0] : state.kind === "value" ? pair[1] : pair.slice()};
+    return {done: false, value: state.kind === "key" ? pair[0] : state.kind === "value" ? pair[1] : apply(slice,pair,[])};
   };
   Object.defineProperty(prototype, "next", {value: __G.makeNativeFunction(next, "next", 0), writable: true, enumerable: true, configurable: true});
   return (receiver, kind) => {
     rows(receiver); // validate the receiver immediately, before iteration starts
-    const iterator = Object.create(prototype);
+    const iterator = create(prototype);
     states.set(iterator, {receiver, kind, index: 0, done: false});
     return iterator;
   };
@@ -7615,6 +7642,7 @@ let __setHeadersGuard;
 }
 let __responseFromNetwork, __requestInit, __resourceResponse, __BodyParamsString;
 const __blobStates = __interfaceMap("Blob");
+const __formDataStates = __interfaceMap("FormData");
 const __bodyByteTag=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype),Symbol.toStringTag).get;
 const __bodyByteChunk=value=>__baseApply(__bodyByteTag,value,[])==="Uint8Array";
 const __fetchFailures=__interfaceMap("Fetch.failure");
@@ -7633,6 +7661,7 @@ const __resourceFailure=error=>__fetchFailures.get(error);
       if(__web.disturbed(raw)||applyBody(__ReadableLocked,raw,[]))throw new TypeError("Body stream is locked or disturbed");
       return {raw,type:null,sourceStream:true};
     }
+    if(__formDataStates.has(raw))throw new TypeError("Native multipart FormData BodyInit is not supported");
     const blob=__blobStates.get(raw);
     if(blob)return {raw:new Bytes(blob.bytes),type:blob.type||null,sourceStream:false};
     if(bufferView(raw)){
@@ -8083,25 +8112,49 @@ globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
 // FormData — auth/login SDKs (PropelAuth) build credential payloads with it; deno_core
 // ships none. A spec-shaped impl over an entry list (append keeps duplicates; set
 // replaces; field values stringified, File/Blob passed through).
+const __formDataTypeError=TypeError, __formDataApply=Reflect.apply, __formDataFreeze=Object.freeze;
+const __formDataSplice=Array.prototype.splice;
+const __readFormData=receiver=>{const record=__formDataStates.get(receiver);if(!record)throw new __formDataTypeError("Illegal invocation");return record.entries;};
+const __formDataIterator=__webIDLIterator("FormData Iterator",__readFormData,true);
+const __formDataValue=(value,filename,hasFilename)=>{
+  const blob=__blobStates.get(value),file=__fileStates.get(value);
+  if(!blob){if(hasFilename)throw new __formDataTypeError("The third FormData argument requires a Blob");return __fileUSV(value);}
+  const provided=hasFilename&&filename!==undefined;
+  if(file&&!provided)return value;
+  return __createPrivateFile(blob,provided?__fileUSV(filename):"blob",file?file.lastModified:__fileNow());
+};
 if (typeof globalThis.FormData === "undefined") {
   globalThis.FormData = class FormData {
-    constructor() { this._e = []; }
-    append(name, value) { this._e.push([String(name), typeof value === "object" && value !== null ? value : String(value)]); }
-    set(name, value) {
-      const n = String(name); const v = typeof value === "object" && value !== null ? value : String(value);
-      this._e = this._e.filter(([k]) => k !== n); this._e.push([n, v]);
+    constructor(form=undefined,submitter=undefined) {
+      const rows=ops.op_form_data_entries(form,submitter);
+      try {
+        const record=__makeFormDataRecord(rows);__formDataStates.set(this,record);
+        if(form!==undefined&&!ops.op_form_data_event(form,__aliasFormData(record)))throw new __formDataTypeError("Native formdata event dispatch failed");
+      } finally { ops.op_form_data_finish(form); }
     }
-    get(name) { const n = String(name); const f = this._e.find(([k]) => k === n); return f ? f[1] : null; }
-    getAll(name) { const n = String(name); return this._e.filter(([k]) => k === n).map(([, v]) => v); }
-    has(name) { const n = String(name); return this._e.some(([k]) => k === n); }
-    delete(name) { const n = String(name); this._e = this._e.filter(([k]) => k !== n); }
-    forEach(cb, thisArg = undefined) { for (const [k, v] of this._e) cb.call(thisArg, v, k, this); }
-    keys() { return this._e.map(([k]) => k)[Symbol.iterator](); }
-    values() { return this._e.map(([, v]) => v)[Symbol.iterator](); }
-    entries() { return this._e.map(([k, v]) => [k, v])[Symbol.iterator](); }
-    [Symbol.iterator]() { return this.entries(); }
+    append(name,value,filename=undefined){const rows=__readFormData(this);if(arguments.length<2)throw new __formDataTypeError("FormData.append requires two arguments");name=__fileUSV(name);value=__formDataValue(value,filename,arguments.length>2);rows[rows.length]=[name,value];}
+    set(name,value,filename=undefined){const rows=__readFormData(this);if(arguments.length<2)throw new __formDataTypeError("FormData.set requires two arguments");name=__fileUSV(name);value=__formDataValue(value,filename,arguments.length>2);let first=-1;for(let i=0;i<rows.length;i++)if(rows[i][0]===name){if(first<0){first=i;rows[i]=[name,value];}else{__formDataApply(__formDataSplice,rows,[i,1]);i--;}}if(first<0)rows[rows.length]=[name,value];}
+    get(name){const rows=__readFormData(this);if(arguments.length<1)throw new __formDataTypeError("FormData.get requires an argument");name=__fileUSV(name);for(let i=0;i<rows.length;i++)if(rows[i][0]===name)return rows[i][1];return null;}
+    getAll(name){const rows=__readFormData(this);if(arguments.length<1)throw new __formDataTypeError("FormData.getAll requires an argument");name=__fileUSV(name);const out=[];for(let i=0;i<rows.length;i++)if(rows[i][0]===name)out[out.length]=rows[i][1];return out;}
+    has(name){const rows=__readFormData(this);if(arguments.length<1)throw new __formDataTypeError("FormData.has requires an argument");name=__fileUSV(name);for(let i=0;i<rows.length;i++)if(rows[i][0]===name)return true;return false;}
+    delete(name){const rows=__readFormData(this);if(arguments.length<1)throw new __formDataTypeError("FormData.delete requires an argument");name=__fileUSV(name);for(let i=rows.length-1;i>=0;i--)if(rows[i][0]===name)__formDataApply(__formDataSplice,rows,[i,1]);}
+    forEach(callback,thisArg=undefined){const rows=__readFormData(this);if(typeof callback!=="function")throw new __formDataTypeError("FormData.forEach requires a function");for(let i=0;i<rows.length;i++)__formDataApply(callback,thisArg,[rows[i][1],rows[i][0],this]);}
+    keys(){return __formDataIterator(this,"key");}
+    values(){return __formDataIterator(this,"value");}
+    entries(){return __formDataIterator(this,"entry");}
+    [Symbol.iterator](){return __formDataIterator(this,"entry");}
   };
+  Object.defineProperty(FormData.prototype,Symbol.toStringTag,{value:"FormData",configurable:true});
+  for(const key of ["append","set","get","getAll","has","delete","forEach","keys","values","entries"])Object.defineProperty(FormData.prototype,key,{...Object.getOwnPropertyDescriptor(FormData.prototype,key),enumerable:true});
+  const descriptors=Object.getOwnPropertyDescriptors(FormData.prototype);
+  for(const key of ["constructor","append","delete","get","getAll","has","set","entries","forEach","keys","values"])delete FormData.prototype[key];
+  for(const key of ["append","delete","get","getAll","has","set","entries","forEach","keys","values","constructor"])Object.defineProperty(FormData.prototype,key,descriptors[key]);
+  delete FormData.prototype[Symbol.iterator];
+  Object.defineProperty(FormData.prototype,Symbol.iterator,{value:FormData.prototype.entries,writable:true,configurable:true});
 }
+const __capturedFormDataPrototype=globalThis.FormData.prototype;
+const __makeFormDataRecord=rows=>{const entries=[];for(let i=0;i<rows.length;i++)entries[entries.length]=[__fileUSV(rows[i][0]),__formDataValue(rows[i][1],undefined,false)];return {entries};};
+const __aliasFormData=record=>{const wrapper=__recordCreate(__capturedFormDataPrototype);__formDataStates.set(wrapper,record);return wrapper;};
 // Blob / File / FileReader — analytics + upload code (PostHog, file inputs) reference
 // these during hydration; deno_core ships none ("File is not defined" aborts PostHog
 // init). Private byte buffers preserve binary Blob/File parts and authentic brands
@@ -8131,9 +8184,9 @@ if (typeof globalThis.Blob === "undefined") {
 }
 const __fileStates=__interfaceMap("File");
 const __fileTypeError=TypeError, __fileNumber=Number, __fileTrunc=Math.trunc;
-const __fileNow=Date.now, __fileBigInt=BigInt, __fileInt64=BigInt.asIntN, __fileBytes=Uint8Array;
+const __fileDate=Date, __fileNow=Date.now, __fileBigInt=BigInt, __fileInt64=BigInt.asIntN, __fileBytes=Uint8Array;
 const __fileApply=Reflect.apply, __fileToWellFormed=String.prototype.toWellFormed;
-const __fileUSV=value=>__fileApply(__fileToWellFormed,__String(value),[]);
+const __fileUSV=value=>{if(typeof value==="symbol")throw new __fileTypeError("Cannot convert a Symbol value to a string");return __fileApply(__fileToWellFormed,__String(value),[]);};
 const __readFile=receiver=>{const record=__fileStates.get(receiver);if(!record)throw new __fileTypeError("Illegal invocation");return record;};
 if (typeof globalThis.File === "undefined") {
   globalThis.File = class File extends globalThis.Blob {
@@ -8141,21 +8194,39 @@ if (typeof globalThis.File === "undefined") {
       if(arguments.length<2)throw new __fileTypeError("File requires two arguments");
       opts=opts==null?{}:opts;
       const filename=__fileUSV(name), modified=opts.lastModified;
-      const number=modified===undefined?__fileNow():__fileNumber(modified);
+      const number=modified===undefined?__fileNow():+modified;
       const lastModified=number!==number||number===Infinity||number===-Infinity?0:__fileNumber(__fileInt64(64,__fileBigInt(__fileTrunc(number))));
       super(parts, opts);
       __fileStates.set(this,{name:filename,lastModified});
     }
     get name(){return __readFile(this).name;}
     get lastModified(){return __readFile(this).lastModified;}
+    get lastModifiedDate(){return new __fileDate(__readFile(this).lastModified);}
     get webkitRelativePath(){__readFile(this);return "";}
   };
-  for(const key of ["name","lastModified","webkitRelativePath"])Object.defineProperty(File.prototype,key,{...Object.getOwnPropertyDescriptor(File.prototype,key),enumerable:true});
+  for(const key of ["name","lastModified","lastModifiedDate","webkitRelativePath"])Object.defineProperty(File.prototype,key,{...Object.getOwnPropertyDescriptor(File.prototype,key),enumerable:true});
+  const constructor=Object.getOwnPropertyDescriptor(File.prototype,"constructor");delete File.prototype.constructor;Object.defineProperty(File.prototype,"constructor",constructor);
   Object.defineProperty(File.prototype,Symbol.toStringTag,{value:"File",configurable:true});
 }
-const __capturedFile=globalThis.File;
+const __capturedFile=globalThis.File, __capturedFilePrototype=__capturedFile.prototype;
+const __createPrivateFile=(blob,name,lastModified)=>{const file=__recordCreate(__capturedFilePrototype);__blobStates.set(file,{bytes:blob.bytes,type:blob.type});__fileStates.set(file,{name,lastModified});return file;};
+const __snapshotFormValue=value=>{
+  const file=__fileStates.get(value);
+  if(file)return __formDataFreeze({kind:"file",value,name:file.name});
+  const form=__formDataStates.get(value);
+  if(!form)return null;
+  const rows=[];for(let i=0;i<form.entries.length;i++){const entry=form.entries[i];rows[rows.length]=__formDataFreeze([entry[0],entry[1]]);}
+  return __formDataFreeze({kind:"formdata",entries:__formDataFreeze(rows)});
+};
 ops.op_set_host_capabilities({
-  createEmptyFormFile:()=>new __capturedFile([],"",{type:"application/octet-stream",lastModified:0}),
+  snapshotFormValue:__snapshotFormValue,
+  createSubmissionFormData:(rows,charsetIndices,encoding)=>{
+    const record=__makeFormDataRecord(rows);
+    for(let i=0;i<charsetIndices.length;i++){const index=charsetIndices[i];if(index>=0&&index<record.entries.length)record.entries[index][1]=encoding;}
+    return __aliasFormData(record);
+  },
+  snapshotFormFileName:receiver=>{const file=__fileStates.get(receiver);return file&&__blobStates.has(receiver)?file.name:null;},
+  createEmptyFormFile:()=>__createPrivateFile({bytes:new __fileBytes(),type:"application/octet-stream"},"",__fileNow()),
   snapshotFormFile:receiver=>{const file=__fileStates.get(receiver),blob=__blobStates.get(receiver);return file&&blob?{name:file.name,lastModified:file.lastModified,type:blob.type,bytes:new __fileBytes(blob.bytes)}:null;}
 });
 if (typeof globalThis.FileReader === "undefined") {
@@ -10543,6 +10614,7 @@ __G.domSig = () => {
   // active render tier (canvas/WebGL pixels, real layout cascade, font metrics) — those stay
   // honest gaps. Every section is independently guarded so a failure can't break hydration.
   const G = globalThis;
+  const canonicalSubmitEvent = typeof G.SubmitEvent === "function" ? G.SubmitEvent : null;
   const guard = (fn) => { try { fn(); } catch (e) {} };
   const tag = (obj, name) => { if (obj) Object.defineProperty(obj, Symbol.toStringTag, { value: name, configurable: true }); };
   // Canonical Event owns its nonconfigurable isTrusted getter and keeps the
@@ -11665,6 +11737,7 @@ __G.domSig = () => {
     tag(G.Request.prototype,"Request");tag(G.Response.prototype,"Response");
   });
 
+  if (!canonicalSubmitEvent) {
   const submitEventRecords = __interfaceMap("SubmitEvent");
   G.SubmitEvent = class SubmitEvent extends G.Event {
     constructor(type, init = {}) {
@@ -11682,6 +11755,8 @@ __G.domSig = () => {
   Object.defineProperty(G.SubmitEvent.prototype, "submitter", {...Object.getOwnPropertyDescriptor(G.SubmitEvent.prototype, "submitter"), enumerable: true});
   Object.defineProperty(G.SubmitEvent.prototype, Symbol.toStringTag, {value: "SubmitEvent", configurable: true});
 
+  }
+
   // Bind the implemented JS interfaces through genuine native callbacks. The
   // class bridge uses Reflect.construct captured by the embedder, preserving
   // private state, subclass new.target and the original exception behavior.
@@ -11689,7 +11764,7 @@ __G.domSig = () => {
     const replacements = new Map();
     const constructors = ["Date", "DOMParser", "Navigator", "Performance", "Permissions", "PermissionsPolicy", "PermissionStatus", "Storage", "Headers",
       "Request", "Response", "URL", "URLSearchParams", "DOMException", "MessageEvent", "ErrorEvent",
-      "Event", "SecurityPolicyViolationEvent", "CustomEvent", "SubmitEvent", "UIEvent", "MouseEvent", "KeyboardEvent", "InputEvent", "FocusEvent", "PointerEvent", "WheelEvent", "MessageChannel", "MessagePort", "BroadcastChannel",
+      "Event", "SecurityPolicyViolationEvent", "CustomEvent", "SubmitEvent", "FormDataEvent", "UIEvent", "MouseEvent", "KeyboardEvent", "InputEvent", "FocusEvent", "PointerEvent", "WheelEvent", "MessageChannel", "MessagePort", "BroadcastChannel",
       "Blob", "File", "FormData", "XMLHttpRequest", "AbortController", "AbortSignal",
       "TextEncoder", "TextDecoder", "Screen", "Window", "Crypto", "SubtleCrypto",
       "IntersectionObserver", "ResizeObserver", "MutationObserver", "PerformanceObserver",
@@ -11735,8 +11810,9 @@ __G.domSig = () => {
       else if (native.has(fn) && orig.call(fn).includes("[native code]") === false && !["Date"].includes(key)) descriptor.value = nativize(fn, key);
       Object.defineProperty(G, key, descriptor);
     }
-    Object.setPrototypeOf(G.UIEvent, G.Event);
-    Object.setPrototypeOf(G.StorageEvent, G.Event);
+    for (const name of ["UIEvent", "StorageEvent", "SubmitEvent", "FormDataEvent"]) {
+      if (typeof G[name] === "function") Object.setPrototypeOf(G[name], G.Event);
+    }
     for (const object of [G.HTMLElement?.prototype, G.HTMLScriptElement?.prototype, G.Navigator?.prototype, G.Performance?.prototype,
       G.Permissions?.prototype, G.HTMLCanvasElement?.prototype, G.CSS, G.console,
       nav?.clipboard, G.trustedTypes, G.crypto, G.crypto?.subtle]) bindProperties(object, ["constructor"]);
@@ -12055,7 +12131,7 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         } else {
             crate::browser_env::install_html(&mut scope, html);
         }
-        install_css_authorization(&mut scope);
+        install_css_authorization(&mut scope).map_err(|error| error.to_string())?;
     }
     let origin = ModuleSpecifier::parse(base)
         .map(|url| url.origin().ascii_serialization())
@@ -13741,6 +13817,7 @@ pub struct HydrationDiagnostics {
 
 pub struct PageSession {
     script_inventory: Option<crate::script_inventory::ScriptInventory>,
+    navigation_count: u64,
     rt: OwnedRuntime,
     hydration_diagnostics: HydrationDiagnostics,
     budget_ms: u64,
@@ -13949,6 +14026,7 @@ impl PageSession {
         match result {
             Ok(_) => Ok(PageSession {
                 script_inventory,
+                navigation_count: 0,
                 rt,
                 hydration_diagnostics: HydrationDiagnostics {
                     budget_exceeded,
@@ -13968,6 +14046,7 @@ impl PageSession {
                 rt.v8_isolate().cancel_terminate_execution();
                 Ok(PageSession {
                     script_inventory,
+                    navigation_count: 0,
                     rt,
                     hydration_diagnostics: HydrationDiagnostics {
                         budget_exceeded,
@@ -14325,6 +14404,18 @@ impl PageSession {
     /// Native hydration outcome; guest page scripts cannot overwrite this state.
     pub fn hydration_diagnostics(&self) -> &HydrationDiagnostics {
         &self.hydration_diagnostics
+    }
+
+    /// Host-owned installed response state; guest URL/referrer getters are never read.
+    /// The count includes same-URL form commits and initial-script submissions.
+    pub fn navigation_snapshot(&self) -> (u64, String, crate::DocumentResponseMetadata) {
+        let state = self.rt.op_state();
+        let state = state.borrow();
+        (
+            self.navigation_count,
+            state.borrow::<Base>().0.clone(),
+            state.borrow::<crate::DocumentResponseMetadata>().clone(),
+        )
     }
 
     /// Serialize the CURRENT live DOM to HTML (no reset — the page stays alive).

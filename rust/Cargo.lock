@@ -5834,9 +5834,8 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "956980480d640677b66d88750dcf9ceabb1572b291416c07b18c180d4e5ab52f"
+version = "0.5.7"
+source = "git+https://github.com/miaskiewicz/turbo-dom?rev=fb60e6f90a5d373165cfd1045b090407ca945d47#fb60e6f90a5d373165cfd1045b090407ca945d47"
 dependencies = [
  "html5ever",
  "log",

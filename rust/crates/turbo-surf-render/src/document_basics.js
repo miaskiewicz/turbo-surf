@@ -162,6 +162,7 @@
     setRecord(object,{kind:namedProperties?'HTMLCollection':'NodeList',read:list});
     return object;
   }
+  ns.internalsLiveCollection = live;
   const caches = new WeakMap(), cacheGet=WeakMap.prototype.get.bind(caches),cacheSet=WeakMap.prototype.set.bind(caches);
   function cached(receiver, key, read, namedProperties = true) {
     let cache = cacheGet(receiver);

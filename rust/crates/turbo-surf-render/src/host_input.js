@@ -4,6 +4,18 @@
   const document = globalThis.document;
   const query = document.querySelector.bind(document);
   const focus = HTMLElement.prototype.focus;
+  const apply = Reflect.apply;
+  const requestSubmit = HTMLFormElement.prototype.requestSubmit;
+  const controls = document.querySelectorAll.bind(document);
+  const matches = Element.prototype.matches;
+  const controlGetters = [HTMLInputElement, HTMLButtonElement].map((Constructor) =>
+    Object.fromEntries(
+      ["form", "type"].map((key) => [
+        key,
+        Object.getOwnPropertyDescriptor(Constructor.prototype, key).get,
+      ]),
+    ),
+  );
   const events = Object.fromEntries(
     ["Event", "SubmitEvent", "MouseEvent", "PointerEvent", "KeyboardEvent", "InputEvent"].map(
       (name) => [name, globalThis[name]],
@@ -88,26 +100,42 @@
       fire(target, "KeyboardEvent", "keyup", key);
     }
   }
-  function submit(target) {
-    const form = target.form;
-    if (!form) return;
-    if (!fire(form, "SubmitEvent", "submit", { bubbles: true, cancelable: true })) return;
-    const method = (form.getAttribute("method") || "get").toLowerCase();
-    if (method !== "get")
-      throw new Error("Native input form navigation currently supports GET forms");
-    const url = new URL(form.getAttribute("action") || location.href, document.baseURI);
-    url.search = "";
-    for (const control of form.querySelectorAll("input[name],textarea[name],select[name]")) {
-      const type = (control.getAttribute("type") || "").toLowerCase();
-      if (
-        control.disabled ||
-        ["submit", "button", "reset", "file"].includes(type) ||
-        (["checkbox", "radio"].includes(type) && !control.checked)
-      )
-        continue;
-      url.searchParams.append(control.getAttribute("name"), control.value ?? "");
+  function controlState(target) {
+    for (let kind = 0; kind < controlGetters.length; kind++) {
+      const getters = controlGetters[kind];
+      try {
+        return {
+          form: apply(getters.form, target, []),
+          type: apply(getters.type, target, []),
+          kind,
+        };
+      } catch {}
     }
-    location.assign(url.href);
+    return null;
+  }
+  function submit(target) {
+    const state = controlState(target);
+    const blocking =
+      /^(text|search|tel|url|email|password|date|month|week|time|datetime-local|number)$/;
+    if (!state || state.kind !== 0 || !blocking.test(state.type) || !state.form) return;
+    let fields = 0;
+    const candidates = controls("input,button");
+    for (let index = 0; index < candidates.length; index++) {
+      const candidate = candidates[index],
+        value = controlState(candidate);
+      if (value?.form !== state.form) continue;
+      if (value.type === "submit" || (value.kind === 0 && value.type === "image")) {
+        if (!apply(matches, candidate, [":disabled"]))
+          fire(candidate, "PointerEvent", "click", {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+          });
+        return;
+      }
+      if (value.kind === 0 && blocking.test(value.type)) fields++;
+    }
+    if (fields <= 1) apply(requestSubmit, state.form, []);
   }
   async function input(steps) {
     if (!Array.isArray(steps)) throw new TypeError("Input steps must be an array");

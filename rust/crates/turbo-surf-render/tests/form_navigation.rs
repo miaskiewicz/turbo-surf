@@ -1,7 +1,19 @@
+use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc::{channel, Receiver};
 use turbo_surf_render::PageSession;
+
+fn chrome_fixture(raw: &str, probe: &str) -> serde_json::Value {
+    let value: serde_json::Value = serde_json::from_str(raw).unwrap();
+    assert_eq!(
+        value["probeSha256"],
+        format!("{:x}", Sha256::digest(probe.as_bytes()))
+    );
+    assert_eq!(value["browser"], "Chrome/155.0.8059.80");
+    assert_eq!(value["v8"], "15.5.35.23");
+    value
+}
 
 fn server(responses: Vec<String>) -> (String, Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -197,10 +209,10 @@ async fn private_file_metadata_matches_fresh_chrome_control() {
         ))
         .await
         .unwrap();
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../harness/detection/fixtures/file-metadata-chrome155.json"
-    ))
-    .unwrap();
+    let fixture = chrome_fixture(
+        include_str!("../../../../harness/detection/fixtures/file-metadata-chrome155.json"),
+        include_str!("../../../../harness/detection/file-metadata-probe.js"),
+    );
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
         fixture["result"]
@@ -238,4 +250,96 @@ async fn last_queued_form_wins_and_cancelled_replacement_keeps_first() {
             .unwrap(),
         "last"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn private_formdata_entries_and_live_iterators_match_chrome() {
+    let mut page = PageSession::open("<body>", "https://forms.invalid/", "", "", 5000)
+        .await
+        .unwrap();
+    let actual = page
+        .eval_json_expression(include_str!(
+            "../../../../harness/detection/formdata-private-probe.js"
+        ))
+        .await
+        .unwrap();
+    let fixture = chrome_fixture(
+        include_str!("../../../../harness/detection/fixtures/formdata-private-chrome155.json"),
+        include_str!("../../../../harness/detection/formdata-private-probe.js"),
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        fixture["result"]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_formdata_constructor_conversion_order_matches_chrome() {
+    let mut page = PageSession::open("<body>", "https://forms.invalid/", "", "", 5000)
+        .await
+        .unwrap();
+    let actual = page
+        .eval_json_expression(include_str!(
+            "../../../../harness/detection/formdata-constructor-probe.js"
+        ))
+        .await
+        .unwrap();
+    let fixture = chrome_fixture(
+        include_str!("../../../../harness/detection/fixtures/formdata-constructor-chrome155.json"),
+        include_str!("../../../../harness/detection/formdata-constructor-probe.js"),
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        fixture["result"]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_base_target_never_silently_routes_to_current_document() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let mut page = PageSession::open(
+        "<base target='_blank'><form action='/must-not-fetch'><input name='q' value='x'></form>",
+        &format!("{base}/start"),
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let error=page.eval_expression("(()=>{Object.defineProperty(document,'baseURI',{get(){throw Error('guest base')}});try{document.querySelector('form').requestSubmit();return 'missing failure';}catch(error){return error.message}})()").await.unwrap();
+    assert!(error.contains("another browsing context"), "{error}");
+    assert_eq!(
+        page.eval_expression("location.pathname").await.unwrap(),
+        "/start"
+    );
+    assert!(listener.accept().is_err());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn private_formdata_optional_filename_and_file_timestamp_match_chrome() {
+    let probe = include_str!("../../../../harness/detection/formdata-optional-probe.js");
+    let control = chrome_fixture(
+        include_str!("../../../../harness/detection/fixtures/formdata-optional-chrome155.json"),
+        probe,
+    );
+    let mut page = PageSession::open(
+        "<!doctype html><body></body>",
+        "https://example.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(
+        &page
+            .eval_json_expression(probe.trim().trim_end_matches(';'))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual, control["result"]);
+    page.close();
 }

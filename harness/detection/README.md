@@ -308,12 +308,16 @@ node harness/detection/summarize-run.mjs /tmp/search-trace /tmp/search-summary.j
 
 The summarizer verifies the executable hash, retains missing captures and process
 failures, and excludes cookie values, query strings, bodies and error text. It
-records actual consent ordering and fallback configuration. A native baseline
-counts as successful only with a complete, successful capture, genuine native
-form navigation, disabled/unused fallback and positive result markers on the last
-settled HTTP200 search page, with complete readiness and no budget failure or
-pending navigation. This does not certify reliability beyond the measured repetitions. Malformed
-JSONL is an error; partial evidence is never silently dropped.
+records actual consent ordering and fallback configuration. `nativeBaseline` is a
+Google acceptance metric: both the configured starting URL and final page must
+have the exact origin `https://www.google.com`. Custom URLs remain captured but
+do not count toward this metric. A native baseline counts as successful only
+with a complete, successful capture, genuine native form navigation,
+disabled/unused fallback and positive result markers on the last settled HTTP200
+`/search` page, with complete readiness and no budget failure or pending
+navigation. Other origins are redacted as `<other>`. This does not certify
+reliability beyond the measured repetitions. Malformed JSONL is an error; partial
+evidence is never silently dropped.
 
 Interface tracing wraps configurable getters/functions and selected setters
 before page scripts, preserving native receivers. It records first stacks and

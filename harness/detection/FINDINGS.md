@@ -18,12 +18,22 @@ stock-native callback skips plus six generated doctest ignores; actual155 has
 only the six doctest ignores. The test-only cancellation observation correction
 is included from each command's start. A further Linux font-scope correction
 keeps exact macOS Chrome shadow Range metrics and all-platform structural and
-retirement assertions; the whole nine-test stock suite passes.
+retirement assertions; the whole nine-test shadow suite passes on both engines.
+Both full-workspace all-target strict Clippy and formatting gates pass. The rebuilt stock debug addon passes95 shim tests (one
+intentional skip) and20 E2E tests.
 
-Final strict checks, rebuilt addon/shim/E2E and optimized artifacts are still in
-progress. The75-interface collector is ready; current API and Google counts still
+Native optimized artifacts and their addon/shim/E2E checks are still in progress.
+The75-interface collector is ready; current API and Google counts still
 describe the older frozen executable, not these source changes. Deferred behavior
 remains itemized in#27/#28. No complete parity or reliable SERP claim is made.
+
+The subsequent HostMedia initializer correction changes construction syntax only
+and passes focused media/strict checks. A real Botto detector run then identifies
+XHR's wrong tag. Its bounded correction matches a source-pinned independent
+Chrome control and four existing HTTP/frame tests on default; actual155 checks
+and a fresh detector capture are required. The preceding full-workspace counts
+are checkpoints before those last follow-ups. XHR state, hierarchy/upload and
+broader lifecycle behavior remain in#28.
 
 ## Earlier integration snapshot — 544180d / 26a08b5
 

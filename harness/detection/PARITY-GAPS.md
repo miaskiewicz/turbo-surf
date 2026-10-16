@@ -27,12 +27,13 @@ reading source alone.
 
 | Repair | Current evidence | State |
 |---|---|---|
-| Dictionary store, negotiation and incremental decoding | Pushed ec868b7; Core220 and10 HTTPS controls per transport, strict/format pass | Implemented; final workspace/live gates pending |
+| Dictionary store, negotiation and incremental decoding | Pushed ec868b7; Core220 and10 HTTPS controls per transport, strict/format pass | Implemented; full Rust gates pass, fresh live gate pending |
 | Dictionary discovery and resource task source | Pushed a15d098;32 exact independent Chrome cases pass on stock and actual155 | Implemented; publication timing/encoded Range remain open |
 | Live form collections, submitters and radio ownership | Pushed a15d098/canonical51b5b97; actual155 collection2/navigation12/radio1 pass | Implemented within controls; broader forms remain open |
-| Native control labels and receiver-realm NodeList | Pushed5c0b886/canonical1e93cae; actual155 and stock production behavior/GC2 pass | Integrated; final full gates pending, label activation open |
-| Real native deadlines vs virtual Window timers | Pushed5c0b886; source-pinned Chrome4 outcomes, actual155 affected14 and MCP73 pass | Integrated; final full gates pending |
+| Native control labels and receiver-realm NodeList | Pushed5c0b886/canonical1e93cae; actual155 and stock production behavior/GC2 pass | Integrated; full Rust gates pass, label activation open |
+| Real native deadlines vs virtual Window timers | Pushed5c0b886; source-pinned Chrome4 outcomes, actual155 affected14 and MCP73 pass | Integrated; full Rust gates pass |
 | Private abort/controller conversion | Actual155 privacy2 and stock privacy2/adapter2 pass; original hostile-hook reproductions retained | Concrete exposed paths fixed; broader hooks/array fast-path count remain in#28 |
+| Native XHR identity and receivers | Independent Chrome control1/default existing HTTP-frame4 and strict pass | Bounded fix; actual155 checks pending, broader XHR remains#28 |
 | API inventory | Frozen70-interface capture predates these repairs;75-interface collector expansion tested | Rebuild and fresh pair required; no predicted counts |
 | Google acceptance | Last frozen544180d baseline0/2 native SERP | Rebuilt fresh GPU/wreq run pending |
 
@@ -45,23 +46,30 @@ zero failures/filtered cases and six generated doctest ignores. Both commands
 include the corrected cancellation observation from the start. A subsequent
 test-only font-scope correction preserves the full macOS Chrome comparison and
 font-independent shadow Range/retirement assertions on Linux; its whole nine-test
-suite passes on stock, with actual155 and final strict checks in progress.
-Addon/shim/E2E and fresh optimized API/Google captures remain separate gates.
+suite passes on both stock and actual155. Both engines pass workspace all-target
+Clippy with `-D warnings` and formatting. The rebuilt stock debug addon passes
+95 shim tests (one intentional skip) and20 E2E tests. Native optimized addon
+checks and fresh optimized API/Google captures remain separate gates. These full
+runs precede the equivalent HostMedia initializer and bounded XHR follow-up;
+default affected controls and strict checks pass, with final actual155 affected
+controls and the complete six-feature strict check required before delivery.
 
 ## Required PR26 completion work
 
 The deferred behavioral residuals remain explicitly tracked in#27/#28. The
 following delivery and validation work remains required for this PR:
 
-- Labels, clock, privacy and driver fixes are pushed in5c0b886; finish the
-  final test-only cancellation/font controls and delivery evidence.
-- Pass final full default/native workspace, all-target strict and formatting gates.
-- Rebuild the addon and pass shim/E2E controls with recorded engine/features.
-- Rebuild the optimized native executable with wreq, trust anchors, Metal and CoreText.
-- Capture the fresh75-interface pair and update every measured inventory count.
-- Run fresh native-cookie Google controls with actual consent and genuine forms;
+- [x] Push tested labels, clock, privacy, driver and conformance fixes:5c0b886/95e4c5c.
+- [x] Pass full default/native workspace and both strict/format checkpoint gates.
+- [ ] Pass final XHR affected controls and all-target strict checks with the complete
+  native CLI/addon feature combination (the preceding full runs are recorded above).
+- [ ] Rebuild both addons and pass shim/E2E controls with recorded engine/features;
+  default debug passes95 shim/20 E2E, optimized actual155 is building.
+- [ ] Rebuild the optimized native executable with wreq, trust anchors, Metal and CoreText.
+- [ ] Capture the fresh75-interface pair and update every measured inventory count.
+- [ ] Run fresh native-cookie Google controls with actual consent and genuine forms;
   record the accepted/rejected outcome without importing Chrome cookies.
-- Refresh changelog, findings and PR description; retain evidence and remove
+- [ ] Refresh changelog, findings and PR description; retain evidence and remove
   superseded temporary build outputs safely.
 
 ## Open work and issue ownership
@@ -81,11 +89,11 @@ still being attempted in PR26; issue coverage does not defer that work by itself
 | Events / promises | Stream/listener microtask interleaving and broader Object-prototype descriptor hooks during abort/event dispatch and exception reporting | #28 |
 | CSS / resources | Remaining selectors/at-rules, used downloaded fonts/animations, images/pseudo epochs, inner SVG | #28 |
 | Security | Remaining CSP/reporting/sinks, popup/navigation/sandbox, COOP/COEP and permissions policies | #28 |
-| Fetch / storage | Final dictionary renderer integration, publication scheduling and encoded Range behavior; broader streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
+| Fetch / storage | Dictionary publication scheduling and encoded Range behavior; broader streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
 | API inventory | Every unresolved missing/extra member and descriptor/inheritance/behavior path in API-INVENTORY.json; fresh paired measurement | #28 |
 | Distribution | Stock/native V8 alignment, native patch distribution, layout publication and registry-ready transport/crypto dependencies | #28 |
 | Browser lifecycle | Watchdog/async-op admission recovery, timeout-signal delivery/GC, listener-count release and retained detached-window active-time suspension | #28 |
-| Validation | Final combined workspace/default/native/addon/shim/E2E gates and lifecycle regressions | #28 |
+| Validation | Remaining native addon/shim/E2E gates and broader lifecycle regressions | #28 |
 | Transport / GPU / Google | Unmeasured identity/wire/rendering differences and fresh native-cookie consent/SERP run | #28 |
 | Audio | Realtime/feedback/parameter connections/multichannel/custom waves/oversampling/suspend-resume | [#27](https://github.com/miaskiewicz/turbo-surf/issues/27) |
 
@@ -428,3 +436,24 @@ after Default. A standalone exact non-macOS capture-body proof reproduces the
 Clippy failure before the fix and passes afterward, including both native-pointer
 values. This changes no media-policy or production-budget behavior; fresh CI
 still validates the actual Linux build.
+
+### Bounded XMLHttpRequest correction
+
+The independent Botto oracle identifies XMLHttpRequest's `[object Object]` brand
+on the preserved default stock150 addon. The existing implementation performs
+real native Fetch requests; its anonymous class and later generic setup skipped
+the standard tag. The fix names the constructor, installs Chrome's actual
+prototype/global/constant and six network-method descriptors, and validates
+receivers with captured private WeakMap operations. It does not add unsupported
+service-worker behavior or fabricate native function source.
+
+An independent Chrome155.80/V815.5.35.23 control pins the probe/collector/server
+sources and matches descriptors, forged/proxy/subclass/detached receivers,
+hostile WeakMap hooks and actual HTTP state1/2/3/4/body delivery. The default
+control plus four existing HTTP/frame tests and full all-target strict/fmt pass.
+Actual155 validation and a repeated detector capture remain required.
+
+Broader XHR writable/public state, EventTarget hierarchy, upload/progress,
+synchronous/timeout/transport-abort behavior, cross-realm borrowed receivers and
+reentrant loadstart/send state admission remain explicit API/Fetch/lifecycle work
+in#28. The bounded repair does not certify complete XHR conformance.

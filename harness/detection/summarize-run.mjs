@@ -12,6 +12,10 @@ const publicPath = (row) => {
   const path = pathname(row);
   return ["/", "/save", "/search", "/sorry", "/sorry/index"].includes(path) ? path : "<other>";
 };
+const publicOrigin = (row) =>
+  new URL(row.url || "https://capture.invalid/").origin === "https://www.google.com"
+    ? "https://www.google.com"
+    : "<other>";
 const timestamp = (row) => row.time_us ?? row.timeMs * 1000;
 const cookieNames = (cookie) =>
   cookie
@@ -70,6 +74,7 @@ export function summarizeRun(directory) {
       collectorComplete: trace.captureComplete ?? null,
       recordedErrorCount: trace.errors?.length || 0,
       traceSha256: sha(tracePath),
+      startOrigin: publicOrigin(config),
       formFallbackDisabled: config.disableFormFallback === true,
       formFallbackUsed: Boolean(trace.formFallback),
       navigationSource: ["native-form", "fallback", "none"].includes(trace.navigationSource)
@@ -106,6 +111,7 @@ export function summarizeRun(directory) {
       pages: (trace.pages || []).map((page) => ({
         phase: page.phase,
         path: publicPath(page),
+        origin: publicOrigin(page),
         status: page.status,
         results: page.results,
         nativeNavigationCount: page.nativeNavigationCount,
@@ -141,9 +147,11 @@ export function summarizeRun(directory) {
           run.formFallbackDisabled &&
           !run.formFallbackUsed &&
           run.navigationSource === "native-form" &&
+          run.startOrigin === "https://www.google.com" &&
           page &&
           (page.phase === "native-final" || /^navigation-\d+$/.test(page.phase)) &&
           page.path === "/search" &&
+          page.origin === "https://www.google.com" &&
           page.status === 200 &&
           page.readyState === "complete" &&
           page.hydrationBudgetExceeded === false &&

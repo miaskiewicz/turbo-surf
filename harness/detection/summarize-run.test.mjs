@@ -15,7 +15,11 @@ function fixture(body) {
     binaryHash: createHash("sha256").update("frozen executable").digest("hex"),
     runs: [{ runtime: "native", pass: "baseline", repeat: 0, code: 0 }],
   });
-  write("baseline-config.json", { disableFormFallback: true, query: "private-query" });
+  write("baseline-config.json", {
+    url: "https://www.google.com/",
+    disableFormFallback: true,
+    query: "private-query",
+  });
   write("native-baseline/trace.json", {
     captureComplete: true,
     navigationSource: "native-form",
@@ -184,5 +188,32 @@ test("timeouts and absent or incomplete consent timing never invent successful e
     const partial = summarizeRun(directory).runs["0/native-baseline"];
     assert.deepEqual(partial.consent.responseStatuses, [204]);
     assert.equal(partial.consent.responseBeforeFirstSearch, null);
+  });
+});
+
+test("Google acceptance excludes other origins and custom starting URLs even with search markers", () => {
+  fixture((directory, write) => {
+    const trace = JSON.parse(readFileSync(join(directory, "native-baseline/trace.json")));
+    const page = trace.pages[0];
+    for (const url of [
+      "https://other.invalid/search?q=private-query",
+      "http://www.google.com/search",
+      "https://www.google.com.other.invalid/search",
+    ]) {
+      write("native-baseline/trace.json", { ...trace, pages: [{ ...page, url, nav: url }] });
+      const result = summarizeRun(directory);
+      assert.equal(result.nativeBaseline.successful, 0);
+      assert.equal(result.runs["0/native-baseline"].pages[0].origin, "<other>");
+      assert.doesNotMatch(JSON.stringify(result), /other\.invalid|private-query/);
+    }
+    write("native-baseline/trace.json", trace);
+    for (const url of ["http://localhost/", "https://other.invalid/", undefined]) {
+      write("baseline-config.json", { url, disableFormFallback: true });
+      assert.equal(summarizeRun(directory).nativeBaseline.successful, 0);
+    }
+    write("baseline-config.json", { url: "https://www.google.com/", disableFormFallback: true });
+    const good = summarizeRun(directory);
+    assert.equal(good.nativeBaseline.successful, 1);
+    assert.equal(good.runs["0/native-baseline"].startOrigin, "https://www.google.com");
   });
 });

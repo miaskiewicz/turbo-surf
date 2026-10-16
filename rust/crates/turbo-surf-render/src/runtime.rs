@@ -8042,9 +8042,15 @@ globalThis.fetch = async (input, init = undefined) => {
 // 'readystatechange', …)` (Google's home-page bundle does), and a stub with only `on*`
 // crashed with "req.addEventListener is not a function", aborting the module.
 const __xhrContexts = new WeakMap();
-globalThis.XMLHttpRequest = class {
+const __xhrGetContext = WeakMap.prototype.get, __xhrSetContext = WeakMap.prototype.set;
+const __xhrContext = (receiver) => {
+  const context = __baseApply(__xhrGetContext, __xhrContexts, [receiver]);
+  if (!context) throw new __exceptionTypeError("Illegal invocation");
+  return context;
+};
+globalThis.XMLHttpRequest = class XMLHttpRequest {
   constructor() {
-    __xhrContexts.set(this, {source: () => ops.op_document_request_url(), base: () => __baseApply(__baseURI,__document,[])});
+    __baseApply(__xhrSetContext, __xhrContexts, [this, {source: () => ops.op_document_request_url(), base: () => __baseApply(__baseURI,__document,[])}]);
     this.readyState = 0; this.status = 0; this.statusText = ""; this.responseText = ""; this.response = "";
     this.responseType = ""; this.responseURL = ""; this.withCredentials = false; this.timeout = 0;
     // Real XHR exposes an XMLHttpRequestUpload EventTarget; collectors sometimes wire
@@ -8057,24 +8063,26 @@ globalThis.XMLHttpRequest = class {
     this._ct = "";      // response content-type
     this._aborted = false;
   }
-  open(method, url) { this._m = method || "GET"; this._u = new globalThis.URL(String(url), __xhrContexts.get(this).base()).href; this._aborted = false; this._setState(1); }
-  setRequestHeader(k, v) { this._h[String(k)] = String(v); }
+  open(method, url) { const context = __xhrContext(this); this._m = method || "GET"; this._u = new globalThis.URL(String(url), context.base()).href; this._aborted = false; this._setState(1); }
+  setRequestHeader(k, v) { __xhrContext(this); this._h[String(k)] = String(v); }
   // Anti-bot/analytics code inspects response headers (e.g. a token-echo or a
   // cache/CSP header); expose both accessors over the one header op_fetch returns.
   getResponseHeader(k) {
+    __xhrContext(this);
     const want = String(k).toLowerCase();
     if (want === "content-type") return this._ct || null;
     return null;
   }
-  getAllResponseHeaders() { return this._rh; }
+  getAllResponseHeaders() { __xhrContext(this); return this._rh; }
   abort() {
+    __xhrContext(this);
     this._aborted = true;
     if (this.readyState > 0 && this.readyState < 4) { this._setState(4); this._emit("abort"); this._emit("loadend"); }
     this.status = 0;
   }
-  addEventListener(type, fn) { if (typeof fn === "function") (this._l[type] = this._l[type] || []).push(fn); }
-  removeEventListener(type, fn) { const a = this._l[type]; if (a) { const i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } }
-  dispatchEvent(ev) { this._emit(ev && ev.type, ev); return true; }
+  addEventListener(type, fn) { __xhrContext(this); if (typeof fn === "function") (this._l[type] = this._l[type] || []).push(fn); }
+  removeEventListener(type, fn) { __xhrContext(this); const a = this._l[type]; if (a) { const i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } }
+  dispatchEvent(ev) { __xhrContext(this); this._emit(ev && ev.type, ev); return true; }
   // Fire an event to both the matching `on*` property and any addEventListener handlers.
   _emit(type, ev) {
     if (!type) return;
@@ -8095,11 +8103,12 @@ globalThis.XMLHttpRequest = class {
     else if (t === "blob") { try { this.response = new globalThis.Blob([text], { type: this._ct }); } catch (_e) { this.response = null; } }
     else { this.response = text; }
   }
-  send(body) {
+  send(body = undefined) {
+    const context = __xhrContext(this);
     const self = this;
     self._emit("loadstart");
     __fetchFromSource(this._u, { method: this._m, body, headers: self._h,
-      credentials: this.withCredentials ? "include" : "same-origin" }, __xhrContexts.get(this).source())
+      credentials: this.withCredentials ? "include" : "same-origin" }, context.source())
       .then(async (r) => {
         if (self._aborted) return;
         self.status = r.status;
@@ -8121,8 +8130,16 @@ globalThis.XMLHttpRequest = class {
 };
 // XHR readyState constants (both on the instance-facing class and its prototype), as
 // real code branches on `XMLHttpRequest.DONE` / `this.HEADERS_RECEIVED`.
-Object.assign(globalThis.XMLHttpRequest, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
-Object.assign(globalThis.XMLHttpRequest.prototype, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
+Object.defineProperty(globalThis, "XMLHttpRequest", { enumerable: false });
+Object.defineProperty(XMLHttpRequest.prototype, Symbol.toStringTag, {
+  value: "XMLHttpRequest", writable: false, enumerable: false, configurable: true,
+});
+for (const [name, value] of Object.entries({ UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 })) {
+  for (const target of [XMLHttpRequest, XMLHttpRequest.prototype])
+    Object.defineProperty(target, name, { value, writable: false, enumerable: true, configurable: false });
+}
+for (const name of ["abort", "getAllResponseHeaders", "getResponseHeader", "open", "send", "setRequestHeader"])
+  Object.defineProperty(XMLHttpRequest.prototype, name, { enumerable: true });
 // Observers: no live mutation notifications over the static tree → no-op stubs. Each must be a
 // DISTINCT constructor: real Chrome has three separate classes, so `IntersectionObserver ===
 // ResizeObserver` is false and each `.name` is its own — collapsing them onto one object is a

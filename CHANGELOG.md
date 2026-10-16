@@ -49,6 +49,14 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Networking, Fetch and storage
 
+- Fix the functional native XMLHttpRequest constructor name, standard tag, global
+  enumerability, six network-method descriptors/arity and readonly ready-state
+  constants. Capture private WeakMap operations and reject forged/proxy receivers
+  before coercion or state access, while allowing genuine subclasses and detached
+  prototypes. An independent Chrome155 control covers descriptors, hostile hooks
+  and real HTTP delivery; four existing request/frame controls also pass. Broader
+  XHR state, hierarchy/upload/progress and transport lifecycle remain in issue28.
+
 - Use the Chrome154 BoringSSL transport recipe with measured155 navigation
   identity, real trust-anchor IDs, ML-DSA offers and signature GREASE. Pin the
   additive connector-metadata API to controlled wreq fork4ed3cf0c (upstream
@@ -364,38 +372,23 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Validation status
 
-- Correct the non-macOS HostMedia initializer exposed by Linux CI's strict
-  `field_reassign_with_default` lint. Preserve the captured host preferences and
-  native pointer/hover values through a struct update; no media-policy or
-  production-budget behavior changes. The exact Linux-style extracted branch
-  fails strict Clippy before the fix and passes afterward.
+The full default workspace checkpoint passes1,374 tests with three explicit
+stock-native callback skips and six generated doctest ignores. The actual155
+checkpoint passes1,413 tests with only the six doctest ignores. Both full commands
+exit0; final shadow9 and both all-target strict/fmt gates pass. These full runs
+precede the equivalent HostMedia initializer correction and the bounded XHR
+follow-up; default affected controls and strict checks pass, with final actual155
+XHR/feature checks in progress. The stock debug addon passes95 shim tests (one
+intentional skip) and20 E2E tests.
 
-The pushed544180d renderer cohort passes385 tests with zero failures/ignores
-and the full all-target actual155 workspace strict gate passes. The earlier MCP
-checkpoint passes72 native/default71 tests. Full final default workspace,
-addon/shim/E2E and remaining native/distribution gates are in progress. The latest
-70-interface API audit retains349 differences,65 original/134 expanded missing
-members and two absent collection interfaces. UserActivation matches its measured
-shape. See FINDINGS.md and PARITY-GAPS.md for bounded evidence and remaining work.
-
-The latest optimized544180d Google matrix repeats twice: both native baselines
-complete real consent204 and receive its HttpOnly cookie before search, then follow
-search200 to sorry429. Native baseline SERP succeeds0/2; Chrome baselines each have9
-markers and zero recorded errors. One native traced pass fails with Missing promise
-following budget exhaustion; the other reaches sorry. The timing repair is verified,
-but reliable native acceptance remains unresolved. Sanitized hashes, ordering and
-completeness are saved in GOOGLE-LAST-RUN.json. Offline runtime follow-ups cover
-async admission after watchdog termination and premature timeout-signal GC. The
-native155 follow-up passes155 focused tests, including timeout retirement/forced
-GC, and native all-target workspace strict checks. Final integrated full gates
-remain separate.
-
-The runtime follow-up default workspace gate passes1,312 tests across120 suites,
-with three explicit native-CSP capability skips and six generated doctest skips.
-Default all-target strict checks and formatting pass. Native155 affected tests
-pass155/155 and native all-target strict checks pass. These results precede the
-next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
-and fresh live validation remain pending.
+The optimized native CLI/addon build includes wreq, trust anchors, Metal and
+CoreText. Its fresh75-interface comparison, native addon controls and native-cookie
+Google run are still pending. The prior frozen70-interface audit and optimized
+544180d Google matrix remain historical:65 original/134 expanded missing members,
+349 difference paths, and zero native baseline SERP successes in two repetitions.
+Those counts do not describe the new source. Broader residual behavior stays in
+issue28; advanced audio stays in issue27. See FINDINGS.md and PARITY-GAPS.md for
+current evidence and bounds. No turbo-surf publication tag is created here.
 
 ## [0.5.3] — 2026-09-29 — hide internal globals from window fingerprint
 

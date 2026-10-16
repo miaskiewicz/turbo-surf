@@ -300,6 +300,21 @@ can contain session secrets; keep raw artifacts local.
   results. `traceCoverage` retains incomplete network records and native script
   inventories. Raw files retain full payloads and sources.
 
+Generate a shareable summary from the frozen run:
+
+```sh
+node harness/detection/summarize-run.mjs /tmp/search-trace /tmp/search-summary.json
+```
+
+The summarizer verifies the executable hash, retains missing captures and process
+failures, and excludes cookie values, query strings, bodies and error text. It
+records actual consent ordering and fallback configuration. A native baseline
+counts as successful only with a complete, successful capture, genuine native
+form navigation, disabled/unused fallback and positive result markers on the last
+settled HTTP200 search page, with complete readiness and no budget failure or
+pending navigation. This does not certify reliability beyond the measured repetitions. Malformed
+JSONL is an error; partial evidence is never silently dropped.
+
 Interface tracing wraps configurable getters/functions and selected setters
 before page scripts, preserving native receivers. It records first stacks and
 bounded primitive samples (160 characters, 12 variants, 3000 distinct access keys).

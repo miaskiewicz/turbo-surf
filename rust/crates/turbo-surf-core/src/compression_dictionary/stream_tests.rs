@@ -175,6 +175,11 @@ async fn cancelling_blocked_input_and_output_recovers_workers_without_transport_
     drop(reservation);
     drop(output);
     recovered().await;
+    // Worker permits can be released before Tokio polls the aborted producer.
+    // Observe transport teardown itself rather than its scheduling order.
+    tokio::time::timeout(Duration::from_secs(10), sender.closed())
+        .await
+        .expect("cancelled decoder must release its transport receiver");
     assert!(sender.is_closed());
     let encoded = bytes("encoded.dcz");
     let mut wire = encoded.clone();

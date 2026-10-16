@@ -1,4 +1,4 @@
-# Google detection audit — 2026-10-09; follow-up 2026-10-14
+# Google detection audit — 2026-10-09; follow-up 2026-10-16
 
 The canonical pending-work checklist is [PARITY-GAPS.md](./PARITY-GAPS.md).
 Residual work beyond PR26 is tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28),
@@ -8,9 +8,27 @@ Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
-## Current integration checklist — 2026-10-16
+## Latest validation checkpoint — 2026-10-16
 
-Current results below supersede the dated checkpoints retained later in this file.
+Pushed5c0b886 integrates canonical turbo-test1e93cae labels, native/Window clock
+ordering, actual human-driver Promise completion and private abort/controller
+boundaries. The final default full workspace passes1,374 tests; actual155 passes
+1,413. Both commands exit0 with no failures. Default has three explicit
+stock-native callback skips plus six generated doctest ignores; actual155 has
+only the six doctest ignores. The test-only cancellation observation correction
+is included from each command's start. A further Linux font-scope correction
+keeps exact macOS Chrome shadow Range metrics and all-platform structural and
+retirement assertions; the whole nine-test stock suite passes.
+
+Final strict checks, rebuilt addon/shim/E2E and optimized artifacts are still in
+progress. The75-interface collector is ready; current API and Google counts still
+describe the older frozen executable, not these source changes. Deferred behavior
+remains itemized in#27/#28. No complete parity or reliable SERP claim is made.
+
+## Earlier integration snapshot — 544180d / 26a08b5
+
+This snapshot predates the dictionary/labels/privacy/clock integrations below.
+Use the canonical checklist and latest capture files for the current status.
 Complete Chrome parity and reliable native Google SERP acceptance remain unverified.
 
 1. **Messaging / reclamation:** genuine port/key/stream transfers, private endpoint
@@ -68,7 +86,7 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    conformance-fixture budget. Its Linux CI now exposes a macOS system-font oracle
    applied on Linux; the correction retains the full exact macOS comparison and
    separately checks exact font-independent UTF-16/lifecycle invariants everywhere.
-   The correction is pushed as6f9ebc7 with fresh CI pending. A fresh Linux Chrome/font
+   The correction is pushed as6f9ebc7 and survived the subsequent CI run. A fresh Linux Chrome/font
    measurement remains open. Every remaining
    category has durable coverage in issue28; audio remains deferred in issue27.
    No Surf release tag is created.
@@ -149,7 +167,7 @@ inventory and a rebuilt fresh Google run remain pending.
 
 ### Labels and native timer clock follow-up
 
-The next source integration mechanically vendors canonical1e93cae. Seven existing
+Pushed5c0b886 mechanically vendors canonical1e93cae. Seven existing
 labelable interfaces have genuine native `.labels`; controls cover live identity,
 hidden transitions, adoption, first-ID/empty-ID rules, foreign namespaces,
 custom-control ordering and hostile public methods/constructors. The NodeList

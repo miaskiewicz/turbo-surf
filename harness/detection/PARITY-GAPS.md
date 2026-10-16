@@ -30,18 +30,31 @@ reading source alone.
 | Dictionary store, negotiation and incremental decoding | Pushed ec868b7; Core220 and10 HTTPS controls per transport, strict/format pass | Implemented; final workspace/live gates pending |
 | Dictionary discovery and resource task source | Pushed a15d098;32 exact independent Chrome cases pass on stock and actual155 | Implemented; publication timing/encoded Range remain open |
 | Live form collections, submitters and radio ownership | Pushed a15d098/canonical51b5b97; actual155 collection2/navigation12/radio1 pass | Implemented within controls; broader forms remain open |
-| Native control labels and receiver-realm NodeList | Canonical1e93cae vendored; actual155 and stock production behavior/GC2 pass | Source integration; final full gates pending, label activation open |
-| Real native deadlines vs virtual Window timers | Source-pinned Chrome4 outcomes; actual155 focused27 plus held-timeout1, stock focused9 pass | Source fix; MCP Promise completion fixed and73/73 pass, final full gates pending |
+| Native control labels and receiver-realm NodeList | Pushed5c0b886/canonical1e93cae; actual155 and stock production behavior/GC2 pass | Integrated; final full gates pending, label activation open |
+| Real native deadlines vs virtual Window timers | Pushed5c0b886; source-pinned Chrome4 outcomes, actual155 affected14 and MCP73 pass | Integrated; final full gates pending |
 | Private abort/controller conversion | Actual155 privacy2 and stock privacy2/adapter2 pass; original hostile-hook reproductions retained | Concrete exposed paths fixed; broader hooks/array fast-path count remain in#28 |
 | API inventory | Frozen70-interface capture predates these repairs;75-interface collector expansion tested | Rebuild and fresh pair required; no predicted counts |
 | Google acceptance | Last frozen544180d baseline0/2 native SERP | Rebuilt fresh GPU/wreq run pending |
+
+### Final full workspace checkpoint
+
+The final default full-workspace command exits0 with1,374 passing tests and nine
+explicit ignores (three unavailable stock-SDK native callbacks and six generated
+doctests). The actual155 full-workspace command exits0 with1,413 passing tests,
+zero failures/filtered cases and six generated doctest ignores. Both commands
+include the corrected cancellation observation from the start. A subsequent
+test-only font-scope correction preserves the full macOS Chrome comparison and
+font-independent shadow Range/retirement assertions on Linux; its whole nine-test
+suite passes on stock, with actual155 and final strict checks in progress.
+Addon/shim/E2E and fresh optimized API/Google captures remain separate gates.
 
 ## Required PR26 completion work
 
 The deferred behavioral residuals remain explicitly tracked in#27/#28. The
 following delivery and validation work remains required for this PR:
 
-- Finish and push the tested labels, clock, privacy, driver and conformance fixes.
+- Labels, clock, privacy and driver fixes are pushed in5c0b886; finish the
+  final test-only cancellation/font controls and delivery evidence.
 - Pass final full default/native workspace, all-target strict and formatting gates.
 - Rebuild the addon and pass shim/E2E controls with recorded engine/features.
 - Rebuild the optimized native executable with wreq, trust anchors, Metal and CoreText.
@@ -176,7 +189,7 @@ it compares exact macOS Chrome system-font measurements with Linux's available
 fallback fonts. Preserve the full exact macOS control; separately assert original
 code units, all selected boundaries, private access, retained caret identity and
 lifecycle on every platform. This test correction does not certify Linux glyph or
-fallback parity. The correction is pushed as6f9ebc7; its fresh CI is pending. A matching Linux
+fallback parity. The correction is pushed as6f9ebc7 and survived the subsequent CI run. A matching Linux
 Chrome/font capture remains open under#28.
 
 Pusheda15d098 vendors registry provenance, submitter reflection and genuine live
@@ -195,7 +208,7 @@ integrated executable is rebuilt and captured.
 
 ### Labels and native timer clock follow-up
 
-The next source integration mechanically vendors canonical1e93cae. Seven existing
+Pushed5c0b886 mechanically vendors canonical1e93cae. Seven existing
 labelable interfaces have genuine native `.labels`; controls cover live identity,
 hidden transitions, adoption, first-ID/empty-ID rules, foreign namespaces,
 custom-control ordering and hostile public methods/constructors. The NodeList
@@ -272,6 +285,18 @@ a retry later passed MCP and328 renderer unit tests before a controlled cleanup
 pause. That retry continues with its exact compiled source. The newly authored
 security/driver follow-ups require their own focused validation and updated
 combined scope before final gate or live-acceptance claims.
+
+### Cancellation observation in final full validation
+
+The final native no-fail-fast run exposes one Core cancellation regression
+assertion: it checks transport closure immediately after worker permits recover.
+Those are different completion events because aborting the producer schedules
+its teardown. The test now awaits the actual sender-closed notification under
+its existing10-second timeout, then retains the closed-state assertion. Worker
+recovery is still checked separately. Production cancellation, caps and budgets
+are unchanged. The original failing native executable/log and corrected source
+are retained. The corrected complete Core unit cohort passes195 tests, and both
+final full workspace commands above include the fix and exit0.
 
 ## Active scope and deferred audio
 

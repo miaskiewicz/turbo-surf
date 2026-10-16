@@ -17,6 +17,10 @@ residual work beyond this PR, with audio separately deferred in
   Raw CDP captures include out-of-process frames/workers and session-qualified
   network events. Native runs use compiled wreq, Metal WebGL and CoreText features;
   Chrome oracle cookies are never imported into the native runtime.
+- Add a reusable sanitized run summarizer with executable-hash verification,
+  consent ordering, missing/failed capture status and explicit native acceptance
+  conditions. Preserve cookie names while excluding values, bodies, query strings
+  and raw diagnostics; reject malformed evidence instead of silently losing rows.
 - Save consent dismissal in the shared harness and both collectors. Await bounded
   asynchronous probe results privately instead of reading a guest-controlled
   global slot. Optional capability, crypto, integrity and GPU probes run after
@@ -178,7 +182,11 @@ residual work beyond this PR, with audio separately deferred in
   and retained-owner assertions; this does not change product limits.
   Apply the same explicit conformance budget to peer-layout isolation after a
   native sample proves cold system-font discovery exhausts its old5-second limit;
-  preserve all geometry and ownership assertions.
+  preserve all geometry and ownership assertions. Scope saved macOS shadow Range
+  text metrics to that platform while checking exact font-independent boundaries,
+  positions, line boxes and retirement everywhere; retain the full macOS comparison.
+  Cancellation regressions await actual transport closure separately from worker
+  permit recovery under the existing timeout, preserving both lifecycle checks.
 
 ### Layout, CSS and resources
 

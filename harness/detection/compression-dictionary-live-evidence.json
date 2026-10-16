@@ -1,0 +1,145 @@
+{
+  "capture": "google-final26-20261016",
+  "scope": "All8completedlivebaseline/interfacepasses; probeOnly blank-page controls excluded",
+  "table": [
+    {
+      "repeat": 0,
+      "runtime": "chrome",
+      "pass": "baseline",
+      "recordedRequestEntries": 194,
+      "availableDictionaryRequests": 87,
+      "dcbDczAdvertisedRequests": 87,
+      "availableDictionaryScopes": {
+        "cdp-extra-info": 87
+      },
+      "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
+      "useAsDictionaryResponses": 2,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "CDP response headers",
+      "headerArtifactSha256": "e88cd12a5f332651f70cd1f76ea3f3c3d4faff4df9a0f890d57ccd5d08f49ba5"
+    },
+    {
+      "repeat": 0,
+      "runtime": "chrome",
+      "pass": "interfaces",
+      "recordedRequestEntries": 103,
+      "availableDictionaryRequests": 28,
+      "dcbDczAdvertisedRequests": 28,
+      "availableDictionaryScopes": {
+        "cdp-extra-info": 28
+      },
+      "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "CDP response headers",
+      "headerArtifactSha256": "516b66586c5a7a116f2e1c8d13d4e07ab2ff131210037dfed27a2823aee20622"
+    },
+    {
+      "repeat": 0,
+      "runtime": "native",
+      "pass": "baseline",
+      "recordedRequestEntries": 35,
+      "availableDictionaryRequests": 16,
+      "dcbDczAdvertisedRequests": 16,
+      "availableDictionaryScopes": {
+        "application headers including context and hints; transport-added headers absent": 16
+      },
+      "requestHeaderField": "network.jsonl request.explicit_headers",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "Core response headers after client transport automatic decoding",
+      "headerArtifactSha256": "3aaf380f2a074f8326717f7da393fecb4b0cdaf8dcc2d32e2810a9977e038ebc"
+    },
+    {
+      "repeat": 0,
+      "runtime": "native",
+      "pass": "interfaces",
+      "recordedRequestEntries": 37,
+      "availableDictionaryRequests": 16,
+      "dcbDczAdvertisedRequests": 16,
+      "availableDictionaryScopes": {
+        "application headers including context and hints; transport-added headers absent": 16
+      },
+      "requestHeaderField": "network.jsonl request.explicit_headers",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "Core response headers after client transport automatic decoding",
+      "headerArtifactSha256": "23ce17a0b1b3e53db6907f5ec1365fc515b98711c802b2e066506750779a9288"
+    },
+    {
+      "repeat": 1,
+      "runtime": "chrome",
+      "pass": "baseline",
+      "recordedRequestEntries": 194,
+      "availableDictionaryRequests": 76,
+      "dcbDczAdvertisedRequests": 76,
+      "availableDictionaryScopes": {
+        "cdp-extra-info": 76
+      },
+      "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
+      "useAsDictionaryResponses": 2,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "CDP response headers",
+      "headerArtifactSha256": "f75d992bdcb120ff0be95c765f2276e7cdd24075718252ca7a78fd81a50020d3"
+    },
+    {
+      "repeat": 1,
+      "runtime": "chrome",
+      "pass": "interfaces",
+      "recordedRequestEntries": 101,
+      "availableDictionaryRequests": 28,
+      "dcbDczAdvertisedRequests": 28,
+      "availableDictionaryScopes": {
+        "cdp-extra-info": 28
+      },
+      "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "CDP response headers",
+      "headerArtifactSha256": "d7bff0ac6ca320efaa2a6e8015fa134288d983f299f7bbc158bdb7cc10232c5a"
+    },
+    {
+      "repeat": 1,
+      "runtime": "native",
+      "pass": "baseline",
+      "recordedRequestEntries": 31,
+      "availableDictionaryRequests": 12,
+      "dcbDczAdvertisedRequests": 12,
+      "availableDictionaryScopes": {
+        "application headers including context and hints; transport-added headers absent": 12
+      },
+      "requestHeaderField": "network.jsonl request.explicit_headers",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "Core response headers after client transport automatic decoding",
+      "headerArtifactSha256": "5e172f365d60818a8851d99edb897091387473188a7d788fd048c65dac0e6067"
+    },
+    {
+      "repeat": 1,
+      "runtime": "native",
+      "pass": "interfaces",
+      "recordedRequestEntries": 34,
+      "availableDictionaryRequests": 17,
+      "dcbDczAdvertisedRequests": 17,
+      "availableDictionaryScopes": {
+        "application headers including context and hints; transport-added headers absent": 17
+      },
+      "requestHeaderField": "network.jsonl request.explicit_headers",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "Core response headers after client transport automatic decoding",
+      "headerArtifactSha256": "248090aa16ede9471117b4625fbe3dc989e1179b16b8de40098300efd41bca94"
+    }
+  ],
+  "boundaries": [
+    "Native counts use actual application headers logged in core net::send after dictionary selection/negotiate and before req.send; headerScope explicitly excludes transport-added headers.",
+    "Therefore missing native accept-encoding in other request entries is not evidence that it was absent on wire. SelectedDictionary.negotiate explicitly adds Available-Dictionary and dcb/dcz Accept-Encoding, and those additions ARE captured.",
+    "Chrome Available-Dictionary counted entries all have headerScope=cdp-extra-info; requests[].headers are enriched with actual CDP requestWillBeSentExtraInfo.",
+    "Use-As-Dictionary and Content-Encoding counts read response.headers. Native ordinary transport decoders may strip encoding metadata; native none does not imply uncompressed server bytes.",
+    "No captured response header lists dcb/dcz in thismatrix. This live run proves dictionary acquisition/negotiation, not live dictionary-codec decoding or transport-wide parity."
+  ],
+  "noSecrets": "No URLs, query values, body bytes, cookie values, dictionary hashes or IDs included.",
+  "productionSourceCommit": "26bd0f459c0edeab35dea345550f7f311818ed32",
+  "captureCheckoutCommit": "90fc38155f311e4487c0bf39369ee1d2861a54a7",
+  "binarySha256": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50"
+}

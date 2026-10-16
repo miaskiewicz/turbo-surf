@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "productionSourceCommit": "26bd0f459c0edeab35dea345550f7f311818ed32",
+  "scope": "Complete local default and actual native155 commands; bounded browser conformance tests, not complete Chrome parity or Google acceptance.",
+  "default": {
+    "engine": {
+      "version": "0.5.4",
+      "debugAssertions": true,
+      "features": {
+        "impersonate": true,
+        "trustAnchors": false,
+        "gpuMetal": false,
+        "coretext": false
+      },
+      "engine": {
+        "v8Version": "15.0.245.2-rusty",
+        "stableWindowProxy": false,
+        "transportChromeMajor": 155,
+        "transportBaseChromeMajor": 154,
+        "reportedChromeMajor": 155,
+        "reportedFullVersion": "155.0.8059.80"
+      }
+    },
+    "workspace": {
+      "exitCode": 0,
+      "passed": 1376,
+      "failed": 0,
+      "ignored": 9,
+      "suiteSummaries": 129,
+      "sourceScope": "finalXHR+finalshadow9 includedfromstart; normaltestparallelism",
+      "skipReasons": ["3nativeSDKcodegenerationcallbacktests", "6extensionmacro-generateddoctests"]
+    },
+    "strict": {
+      "exitCode": 0,
+      "sha256": "634ec06d5ccdccc1dd49d9033e2e64e4140acf33f85e180ca10151826d48a982"
+    },
+    "format": {
+      "exitCode": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "addonSha256": "f2dc71c3194227be3331db18793475cf4c400c13bf309cc7c5bd047364d3027f",
+    "shim": {
+      "exitCode": 0,
+      "passed": 95,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "explicit skipped test does not run fixture"
+    },
+    "e2e": {
+      "exitCode": 0,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0
+    },
+    "detection": {
+      "exitCode": 0,
+      "nodePassed": 88,
+      "nodeFailed": 0,
+      "nodeSkipped": 0,
+      "pythonPassed": 2,
+      "pythonFailed": 0,
+      "addonExplicit": true
+    },
+    "fullLogSha256": "63c3cb228913c751fb1c1c95dfcde455e273ef3fe6ea608eddb88ce17a119dc7",
+    "sourceManifestSha256": "bbf0c961f10170e28f27fc4df53ee36460bcdf57316b66c3f0c578fdd8b10e27",
+    "localReceiptSha256": "9e50f3510eb7a40ca526474dfa70f90371b80c15f339b6b1a218cd6e644851e4"
+  },
+  "native155": {
+    "features": [
+      "turbo-surf-mcp/impersonate",
+      "turbo-surf-mcp/trust-anchors",
+      "turbo-surf-mcp/gpu-metal",
+      "turbo-surf-mcp/coretext",
+      "turbo-surf-napi/gpu-metal",
+      "turbo-surf-napi/coretext"
+    ],
+    "workspace": {
+      "exitCode": 0,
+      "passed": 1415,
+      "failed": 0,
+      "ignored": 6,
+      "measured": 0,
+      "filtered": 0,
+      "componentSuites": 129,
+      "ignoreReasons": ["Six extension-macro generated doctest examples"]
+    },
+    "strict": {
+      "exitCode": 0,
+      "sha256": "bd2934b167bf3a72038dd91c17db3640e5ae2a61eca2754ab1755cf680bd5ec3"
+    },
+    "format": {
+      "exitCode": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cliSha256": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50",
+    "addonSha256": "141b9dd2d052e1b7ae7f01e62a34d59b3b58390fde26218b56494097b3536c4e",
+    "shim": {
+      "exitCode": 0,
+      "passed": 95,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "Explicit test-framework skipped-test control",
+      "logSha256": "9b08c5804508884ca6b8b9f25d9349c28a1a13a5efb67ab151b25fd51ade2197"
+    },
+    "e2e": {
+      "exitCode": 0,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "logSha256": "24d1b113033f11683438d761708fcbcc724ba7535b0cd7a843c49faf8a12318a"
+    },
+    "detection": {
+      "exitCode": 0,
+      "nodePassed": 88,
+      "nodeFailed": 0,
+      "nodeSkipped": 0,
+      "pythonPassed": 2,
+      "pythonFailed": 0,
+      "logSha256": "056073943ade39ff48ec263c9582e983cc426920566cae8c054d4de032b9ecdb"
+    },
+    "fullLogSha256": "78cdd5ff6c07ac2a6910c39cf690a73681155851e5c2be1f41f33dbf25a16114",
+    "localReceiptSha256": "1e1d2847fd1694a2dd60f9f1019ee2a81f51bc4458388eab91e521e1098b2d4b"
+  },
+  "reproduction": "See harness/detection/README.md and engine-155/README.md. Native feature qualification includes both the MCP four-feature set and NAPI gpu-metal/coretext; stock SDK and managed native155 are distinct configurations.",
+  "rawEvidence": "Ignored local receipts and logs retain command details. This report contains selected result counts and hashes; it does not embed raw logs."
+}

@@ -270,6 +270,10 @@ fresh directory; an existing run is refused. New directories are private and raw
 files use mode 0600 on Unix. Cookies, tokens, HTML, query strings and POST bodies
 can contain session secrets; keep raw artifacts local.
 
+[VALIDATION-LAST-RUN.json](./VALIDATION-LAST-RUN.json) records the final local
+default/native workspace and addon results, configurations and evidence hashes.
+It covers the tested contracts, rather than complete Chrome conformance.
+
 - `manifest.json`: checkout commit/branch, dirty diff hash, executable hash/mtime,
   harness hashes, complete streamed dirty-diff hash and untracked source hashes, actual native build diagnostics, per-process exit/timeout status. This records provenance; rebuild
   first because version numbers/mtime alone cannot establish source correspondence.

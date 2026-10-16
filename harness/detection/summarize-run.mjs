@@ -135,7 +135,8 @@ export function summarizeRun(directory) {
     build: manifest.nativeBuildInfo,
     harnessHashes: manifest.harnessHashes,
     repeats: Math.max(-1, ...manifest.runs.map((run) => run.repeat)) + 1,
-    errorCountScope: "Counts trace.errors; stderr and debugger diagnostics remain separate.",
+    errorCountScope:
+      "Counts trace.errors; process stdout/stderr and debugger diagnostics remain separate.",
     nativeBaseline: {
       captured: baselines.length,
       successful: baselines.filter(([, run]) => {

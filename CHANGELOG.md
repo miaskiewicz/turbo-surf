@@ -370,9 +370,9 @@ residual work beyond this PR, with audio separately deferred in
 ### Validation status
 
 The final current-source default workspace passes1,376 tests with three explicit
-stock-native callback skips and six generated doctest ignores. The earlier actual155
-full checkpoint passes1,413 tests with six doctest ignores; the final current-source
-full native command is running separately. Both engines pass final XHR5, shadow9,
+stock-native callback skips and six generated doctest ignores. The final actual155
+six-feature workspace passes1,415 tests with zero failures and six generated
+doctest ignores. Both complete commands cover129 component suites. Both engines pass final XHR5, shadow9,
 all-target strict Clippy and formatting. Both rebuilt addons pass95 shim tests
 (one intentional test-framework skip),20 E2E tests,88 detection controls without
 skips and2 Python SDK-helper tests.
@@ -381,12 +381,20 @@ The optimized native CLI/addon includes wreq, trust anchors, Metal and CoreText.
 The fresh75-interface comparison records64 original/142 expanded missing members
 and374 paths. On the same68 previously measured interfaces, missing members fall
 134→119 without additions; both formerly absent collection interfaces are present.
-Both actual detector captures have no strong findings. The final current-source
-full native workspace and fresh native-cookie Google run remain pending. The prior
-544180d Google matrix is historical, with zero native baseline SERP successes in
-two repetitions; it does not describe the new executable. Broader residual behavior
-stays in issue28; advanced audio stays in issue27. See FINDINGS.md and PARITY-GAPS.md
-for current evidence and bounds. No turbo-surf publication tag is created here.
+Both actual detector captures have no strong findings. The fresh two-repeat
+final-source Google matrix completes with all four native features and genuine
+consent/native-cookie forms, without sidecar or fallback. Native baselines reach
+/search200 then/sorry429:0/2 accepted SERPs. Chrome baselines load8/9 markers;
+instrumented Chrome is rejected in both repetitions. Native trace.errors is empty
+in all four passes, but stdout records reCAPTCHA fetch failures and homepage
+hydration still reaches its20s budget. Fresh paired capabilities and shared WebGL
+probes match within their measured scope; no rejection cause is established.
+
+Full local gates and hashes are recorded in VALIDATION-LAST-RUN.json; sanitized
+live results are in GOOGLE-LAST-RUN.json. Broader residual behavior and reliable
+native SERP acceptance stay in issue28; advanced audio stays in issue27. See
+FINDINGS.md and PARITY-GAPS.md for current evidence and bounds. No turbo-surf
+publication tag is created here.
 
 ## [0.5.3] — 2026-09-29 — hide internal globals from window fingerprint
 

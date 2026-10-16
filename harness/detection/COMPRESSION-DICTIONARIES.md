@@ -75,6 +75,26 @@ All32 exact Chrome cases pass in actual155 and stock-engine renderer tests.
 Integrated full native/default gates and live Google acceptance are recorded separately
 in [FINDINGS.md](./FINDINGS.md), not inferred from these focused controls.
 
+## Final live Google observation — 2026-10-16
+
+[Sanitized live evidence](./compression-dictionary-live-evidence.json) records
+real dictionary acquisition and negotiation in the final two-repeat capture.
+Native baseline requests advertise Available-Dictionary and dcb/dcz on16 and12
+requests; the instrumented passes do so on16 and17. Each native pass receives
+one Use-As-Dictionary response. Chrome's baseline counts are87 and76, with two
+Use-As-Dictionary responses each; the instrumented passes advertise on28 requests
+each and receive one dictionary response. These are different page flows, not
+identical request workloads.
+
+Native counts use explicit application headers after dictionary negotiation and
+before transport send. They include the dictionary-selected Accept-Encoding but
+exclude other headers inserted by the transport. Chrome counts use CDP ExtraInfo.
+No captured response header lists dcb/dcz in these eight passes. Native ordinary
+transport decoding may strip Content-Encoding, so absence is not proof of an
+uncompressed wire response. This live capture exercises acquisition/negotiation;
+codec decoding remains demonstrated by the independent HTTPS controls, rather
+than inferred from this run. Native Google SERP acceptance is still0/2.
+
 ## Bounds and open work
 
 - Store limits: 8 MiB per dictionary, 32 MiB total and 64 entries. The codec path

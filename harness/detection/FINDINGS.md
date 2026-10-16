@@ -15,9 +15,9 @@ clock ordering, awaited human input, private abort/controller boundaries and
 bounded XHR identity/receiver fixes. The final current-source default workspace
 passes **1,376 tests**, zero failures, with three explicit stock-native callback
 skips and six generated doctest ignores. Both engines pass the final five XHR
-controls and all-target strict/format checks. The actual155 full-workspace
-checkpoint passed1,413 tests before the last XHR follow-up; its current-source
-full command is running separately. No sum of focused passes replaces that gate.
+controls and all-target strict/format checks. The final actual155 six-feature full-workspace command passes **1,415 tests**,
+zero failures, with six generated doctest ignores. Both final full commands
+cover129 component suites; these are actual complete command results.
 
 Both rebuilt addons pass **95 shim tests** (one intentional test-framework skip),
 **20 E2E tests**, **88 detection tests** without skips and **two Python SDK-helper
@@ -37,13 +37,48 @@ interfaces contribute23 missing members, so expanded totals across different
 scopes cannot be compared directly. All unresolved missing/extra/descriptor paths
 are saved in API-INVENTORY.json and tracked in#28.
 
-The new optimized CLI SHA256 is
+The final optimized CLI SHA256 is
 `84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50`.
-Fresh Google validation waits until heavy validation is idle. GOOGLE-LAST-RUN.json
-still describes the older544180d run with zero native baseline SERP successes in
-two repetitions. Chrome cookies are never imported. Audio remains in#27; every
-other deferred behavior is explicitly recorded in#28. No complete parity claim
-or turbo-surf publication is made.
+[VALIDATION-LAST-RUN.json](./VALIDATION-LAST-RUN.json) records both engine
+configurations, full command results and evidence hashes.
+
+### Fresh Google matrix — final source, 2026-10-16
+
+The frozen executable above was captured from checkout90fc381, with production
+source26bd0f4. All14 capture/comparison processes exit0 without timeouts. Both
+native baselines complete real consent POST/save204 before genuine native form
+submission, carry server-issued native cookies and fetch/search200; Google's
+retry sends both to/sorry429. **Native accepted SERPs:0/2.** Chrome baselines load
+8 and9 result markers with zero recorded errors. Both instrumented Chrome passes
+are rejected, so traced observations cannot be treated as an unchanged baseline.
+
+All four native passes use wreq, trust anchors, Metal and CoreText, fresh native
+cookie state and disabled form fallback. No Chrome cookie jar or sidecar is used.
+All four native trace.errors arrays are empty; each process stdout log separately
+records one reCAPTCHA script fetch failure. The old Missing-promise failure does
+not recur in these captures. Native home and immediate dismiss snapshots still
+report20s hydration budget exhaustion; successful collection does not establish
+complete homepage execution. See [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json)
+for consent ordering, final pages, error-count scope and trace hashes.
+
+In both fresh probe-only pairs, capabilities and the shared WebGL probe match
+exactly: CSSOM rules/sentinel, iframe constructors, control values, languages,
+viewport and the shared scene's pixels/identity. Clean botguard-probe Window own
+property counts still differ (Chrome1235/native1240). API descriptors/order have
+the separately recorded374 leaf paths; these are not374 distinct APIs. Traced
+wrappers also affect probe results. None of these measurements establishes the
+cause of Google's rejection or universal wire/GPU parity.
+
+Native dictionary acquisition/negotiation now occurs in the live trace: baseline
+Available-Dictionary/dcb-dcz counts are16/12, instrumented16/17. No captured
+response header lists dcb/dcz; this does not establish live codec decoding or
+complete wire visibility. See [live dictionary evidence](./compression-dictionary-live-evidence.json)
+for each header boundary and the differing Chrome page flows.
+
+Audio remains in#27; every other deferred behavior, homepage lifecycle bounds and
+reliable Google acceptance are explicitly recorded in#28. The finite PR26 delivery
+gates are complete; full Chrome parity and native SERP acceptance remain open.
+No turbo-surf publication is performed.
 
 ## Earlier integration snapshot — 544180d / 26a08b5
 
@@ -122,7 +157,7 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
     Google acceptance. Native home hydration still exceeds20s.
     [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json) retains sanitized contexts,
     consent ordering, cookie names, completeness and exact executable/harness/trace
-    hashes. Counts describe trace.errors, not all native stderr script diagnostics.
+    hashes. Counts describe trace.errors, not all native process script diagnostics.
     Chrome cookies are never imported. Reliable native SERP remains unresolved.
 11. **Current runtime follow-up:** an offline native-op admission probe reproduces
     Missing promise after watchdog termination; a hash-pinned experimental155
@@ -139,14 +174,15 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
     verification and the final integrated feature gates remain separate. Broader
     descriptor/stream queue gaps remain tracked in#28.
 
-12. **New measured transport gap:** the saved Chrome Google run fetches compression
+12. **Historical dictionary-transport gap:** the saved Chrome Google run fetches compression
     dictionaries and sends Available-Dictionary; one response actually uses dcb.
-    The frozen live executable has no dictionary discovery/cache/decode chain.
-    A genuine source integration is in progress; it has not been live-validated. The bounded TLS/H2 and
-    shared GPU controls match their measured scope. This is a real pending resource
-    feature, not evidence that changing the base recipe label fixes acceptance.
-    [Sanitized evidence](./compression-dictionary-saved-evidence.json) and the
-    central checklist retain the exact scope; implementation is in progress.
+    The frozen544180d executable lacked dictionary discovery/cache/decode.
+    Currentec868b7/a15d098 implements that chain and passes both final workspace
+    gates,10 HTTPS controls per transport and32 independent Chrome cases per
+    engine. Publication timing and encoded Range behavior remain in#28. The
+    bounded TLS/H2 and shared GPU controls match their measured scopes; none
+    establishes the rejection cause. [Saved evidence](./compression-dictionary-saved-evidence.json)
+    describes the historical executable, not the current implementation.
 
 The runtime follow-up default workspace gate passes1,312 tests across120 suites,
 with three explicit native-CSP capability skips and six generated doctest skips.

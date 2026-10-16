@@ -5875,6 +5875,8 @@ name = "turbo-surf-core"
 version = "0.5.4"
 dependencies = [
  "async-trait",
+ "base64",
+ "brotli-decompressor 6.0.1",
  "bytes",
  "encoding_rs",
  "futures-util",
@@ -5885,17 +5887,23 @@ dependencies = [
  "hyper-rustls",
  "hyper-util",
  "psl",
+ "regex",
  "reqwest",
  "rustls",
  "serde",
  "serde_json",
+ "sfv",
+ "sha2",
  "tokio",
+ "tokio-rustls",
  "tower",
  "url",
+ "urlpattern",
  "webpki-roots",
  "wreq",
  "wreq-proto",
  "wreq-util",
+ "zstd",
 ]
 
 [[package]]

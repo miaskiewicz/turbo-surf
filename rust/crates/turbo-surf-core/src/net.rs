@@ -5,6 +5,7 @@
 //! itself is the live-IO seam (covered by the integration suite / harness).
 
 use crate::cache::ResponseCache;
+use crate::compression_dictionary::{DictionaryStore, PendingDictionary, SelectedDictionary};
 use crate::cookies::CookieJar;
 use crate::http_backend as http; // reqwest (rustls) or wreq (BoringSSL); see lib.rs
 use crate::http_cache::{CacheMode, Cached, HttpCache, PendingStore, TracePrefix};
@@ -100,6 +101,7 @@ pub struct ResponseBody {
     trace_prefix: usize,
     trace_skip_prefix: usize,
     cache_store: Option<PendingStore>,
+    dictionary_store: Option<PendingDictionary>,
     background: Option<std::sync::Arc<BackgroundBody>>,
 }
 struct BackgroundBody {
@@ -189,6 +191,7 @@ impl ResponseBody {
             trace_prefix: self.trace_prefix,
             trace_skip_prefix: 0,
             cache_store: None,
+            dictionary_store: None,
             background: Some(background.clone()),
         };
         tokio::spawn(async move {
@@ -270,6 +273,9 @@ impl ResponseBody {
                     if let Some(pending) = self.cache_store.take() {
                         pending.cache.store(pending.entry);
                     }
+                    if let Some(pending) = self.dictionary_store.take() {
+                        pending.commit();
+                    }
                     return Ok(None);
                 }
             }
@@ -282,6 +288,13 @@ impl ResponseBody {
             ));
         }
         self.received += chunk.len();
+        if self
+            .dictionary_store
+            .as_mut()
+            .is_some_and(|pending| !pending.append(&chunk))
+        {
+            self.dictionary_store = None;
+        }
         if let Some(pending) = self.cache_store.as_mut() {
             let skip = pending.skip_prefix.min(chunk.len());
             pending.skip_prefix -= skip;
@@ -302,6 +315,7 @@ impl ResponseBody {
         }
         self.stream = None;
         self.cache_store = None;
+        self.dictionary_store = None;
         self.finish_trace(true);
     }
     fn finish_trace(&mut self, incomplete: bool) {
@@ -339,6 +353,9 @@ pub type ResponseSideEffects<'a> =
     dyn Fn(&RequestContext, &str, &[(String, String)]) + Send + Sync + 'a;
 pub type ResponsePolicy<'a> =
     dyn Fn(&RequestContext, &str, &[(String, String)]) -> bool + Send + Sync + 'a;
+#[derive(Clone)]
+struct HeadResponse;
+
 #[derive(Clone)]
 struct NetworkResponseEffects {
     url: String,
@@ -392,6 +409,8 @@ pub struct FetchOptions<'a> {
     pub cache: Option<&'a mut ResponseCache>,
     /// Browser HTTP cache, independent of the crawler's legacy validator cache.
     pub http_cache: Option<&'a HttpCache>,
+    /// Explicit override; otherwise dictionaries share the native HTTP cache's session.
+    pub dictionary_store: Option<&'a DictionaryStore>,
     pub cache_mode: CacheMode,
     /// Native top-level site / frame site / anonymous-context partition.
     pub cache_partition: String,
@@ -868,6 +887,11 @@ async fn send(
         })
     });
     let mut result = req.send().await;
+    if method == "HEAD" {
+        if let Ok(response) = &mut result {
+            response.extensions_mut().insert(HeadResponse);
+        }
+    }
     if trace_id.0 != 0 {
         if let Ok(res) = &mut result {
             res.extensions_mut().insert(trace_id);
@@ -899,6 +923,9 @@ fn apply_headers(
 }
 
 fn check_content_length(res: &http::Response, max_bytes: usize) -> Result<(), HttpError> {
+    if res.extensions().get::<HeadResponse>().is_some() {
+        return Ok(());
+    }
     if let Some(len) = res.content_length() {
         if len as usize > max_bytes {
             return Err(HttpError::new(
@@ -910,21 +937,104 @@ fn check_content_length(res: &http::Response, max_bytes: usize) -> Result<(), Ht
     Ok(())
 }
 
+fn dictionary_encoding(res: &http::Response) -> Result<Option<String>, HttpError> {
+    if res.extensions().get::<Cached>().is_some()
+        || res.extensions().get::<HeadResponse>().is_some()
+    {
+        return Ok(None);
+    }
+    let encoding = list_header(res, "content-encoding")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if !encoding
+        .split(',')
+        .any(|part| matches!(part.trim(), "dcb" | "dcz"))
+    {
+        return Ok(None);
+    }
+    if !matches!(encoding.as_str(), "dcb" | "dcz") {
+        return Err(HttpError::new(
+            "Unsupported dictionary encoding chain",
+            ErrorCode::Network,
+        ));
+    }
+    Ok(Some(encoding))
+}
 async fn read_capped(res: http::Response, max_bytes: usize) -> Result<Vec<u8>, HttpError> {
-    check_content_length(&res, max_bytes)?;
+    let encoding = dictionary_encoding(&res)?;
+    let dictionary = res.extensions().get::<SelectedDictionary>().cloned();
+    if encoding.is_some() && dictionary.is_none() {
+        return Err(HttpError::new(
+            "Dictionary response without an advertised dictionary",
+            ErrorCode::Network,
+        ));
+    }
+    let mut pending = res.extensions().get::<PendingDictionary>().cloned();
+    let encoded_maximum = if encoding.is_some() {
+        crate::compression_dictionary::decode::MAX_ENCODED_BYTES
+    } else {
+        max_bytes
+    };
+    check_content_length(&res, encoded_maximum)?;
+    // Bound encoded buffering as well as CPU workers; canceled waiters retain only transport backpressure.
+    let permit = if encoding.is_some() {
+        Some(
+            crate::compression_dictionary::decode::reserve()
+                .await
+                .map_err(|error| HttpError::new(error.to_string(), ErrorCode::Network))?,
+        )
+    } else {
+        None
+    };
     let mut buf = BytesMut::new();
     let mut stream = res.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| HttpError::new(e.to_string(), ErrorCode::Network))?;
-        if buf.len() + chunk.len() > max_bytes {
+        if chunk.len() > encoded_maximum.saturating_sub(buf.len()) {
             return Err(HttpError::new(
-                format!("body exceeds maxBytes (> {max_bytes})"),
+                format!("body exceeds maxBytes (> {encoded_maximum})"),
                 ErrorCode::BodyTooLarge,
             ));
         }
         buf.extend_from_slice(&chunk);
     }
-    Ok(buf.to_vec())
+    let body = match (encoding, dictionary, permit) {
+        (Some(encoding), Some(dictionary), Some(permit)) => {
+            crate::compression_dictionary::decode::decode(
+                encoding,
+                buf.to_vec(),
+                dictionary,
+                max_bytes,
+                permit,
+            )
+            .await
+            .map_err(|error| {
+                let code = if matches!(
+                    error,
+                    crate::compression_dictionary::decode::DecodeError::Size
+                ) {
+                    ErrorCode::BodyTooLarge
+                } else {
+                    ErrorCode::Network
+                };
+                HttpError::new(format!("Dictionary response decode failed: {error}"), code)
+            })?
+        }
+        (None, _, _) => buf.to_vec(),
+        _ => {
+            return Err(HttpError::new(
+                "Missing dictionary decoding permit",
+                ErrorCode::Network,
+            ))
+        }
+    };
+    if let Some(mut registration) = pending.take() {
+        if registration.append(&body) {
+            registration.commit();
+        }
+    }
+    Ok(body)
 }
 
 fn header_value(res: &http::Response, name: &str) -> String {
@@ -959,6 +1069,16 @@ fn ingest_set_cookie(opts: &mut FetchOptions, res: &http::Response, final_url: &
     if let Some(cache) = opts.http_cache {
         let clear = list_header(res, "clear-site-data").unwrap_or_default();
         cache.clear_response(final_url, &clear);
+    }
+    if let Some(store) = opts.dictionary_store {
+        if crate::request_context::trustworthy(final_url)
+            && list_header(res, "clear-site-data")
+                .unwrap_or_default()
+                .split(',')
+                .any(|part| matches!(part.trim(), "\"cache\"" | "\"*\""))
+        {
+            store.clear_origin(final_url);
+        }
     }
     let now = opts.now;
     let Some(jar) = opts.jar.as_mut() else { return };
@@ -1240,6 +1360,20 @@ async fn cached_request(
         .await?;
     }
     let mut headers = build_headers(&hop.url, &hop.method, opts);
+    let dictionary_store = opts
+        .dictionary_store
+        .or_else(|| opts.http_cache.map(HttpCache::dictionary_store))
+        .cloned();
+    let dictionary_generation = dictionary_store
+        .as_ref()
+        .map_or(0, DictionaryStore::generation);
+    let dictionary_context = opts.context.clone().unwrap_or_default();
+    let selected_dictionary = dictionary_store
+        .as_ref()
+        .and_then(|store| store.select(&opts.cache_partition, &hop.url, &dictionary_context));
+    if let Some(dictionary) = &selected_dictionary {
+        dictionary.negotiate(&mut headers);
+    }
     let cache = opts.http_cache;
     let generation = cache.map_or(0, HttpCache::generation);
     let eligible = matches!(hop.method.as_str(), "GET" | "HEAD");
@@ -1427,6 +1561,40 @@ async fn cached_request(
             )
         }) {
             res.extensions_mut().insert(pending);
+        }
+    }
+    if let Some(dictionary) = selected_dictionary {
+        res.extensions_mut().insert(dictionary);
+    }
+    if hop.method == "HEAD" {
+        res.extensions_mut().insert(HeadResponse);
+    }
+    if hop.method != "HEAD" && mode != CacheMode::NoStore {
+        if let Some(store) = &dictionary_store {
+            let headers = res
+                .headers()
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_owned(), value.to_owned()))
+                })
+                .collect();
+            if let Some(pending) = PendingDictionary::new(
+                store,
+                dictionary_generation,
+                &opts.cache_partition,
+                &hop.url,
+                &dictionary_context,
+                res.status().as_u16(),
+                headers,
+                res.extensions()
+                    .get::<crate::http_cache::CachedStoredAt>()
+                    .map_or_else(std::time::SystemTime::now, |time| time.0),
+            ) {
+                res.extensions_mut().insert(pending);
+            }
         }
     }
     Ok(res)
@@ -1651,6 +1819,7 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
         None if opts.upload_body.is_some()
             || opts.redirect.is_some()
             || opts.http_cache.is_some()
+            || opts.dictionary_store.is_some()
             || opts.client_hints.is_some()
             || opts.context.is_some()
             || opts.request_policy.is_some()
@@ -1698,11 +1867,49 @@ pub async fn fetch_stream(
         .extensions()
         .get::<TracePrefix>()
         .map_or(0, |prefix| prefix.0);
-    let stream = res
-        .bytes_stream()
-        .map(|chunk| chunk.map_err(|error| HttpError::new(error.to_string(), ErrorCode::Network)));
+    let encoding = dictionary_encoding(&res)?;
+    let dictionary_store = res.extensions().get::<PendingDictionary>().cloned();
+    let stream: BodyStream = if let Some(encoding) = encoding {
+        let dictionary = res
+            .extensions()
+            .get::<SelectedDictionary>()
+            .cloned()
+            .ok_or_else(|| {
+                HttpError::new(
+                    "Dictionary response without an advertised dictionary",
+                    ErrorCode::Network,
+                )
+            })?;
+        let transport = Box::pin(res.bytes_stream().map(|chunk| {
+            chunk.map_err(|error| {
+                crate::compression_dictionary::decode::DecodeError::Invalid(error.to_string())
+            })
+        }));
+        Box::pin(
+            crate::compression_dictionary::decode::decode_stream(
+                encoding, transport, dictionary, max_bytes,
+            )
+            .map(|chunk| {
+                chunk.map_err(|error| {
+                    let code = if matches!(
+                        error,
+                        crate::compression_dictionary::decode::DecodeError::Size
+                    ) {
+                        ErrorCode::BodyTooLarge
+                    } else {
+                        ErrorCode::Network
+                    };
+                    HttpError::new(format!("Dictionary response decode failed: {error}"), code)
+                })
+            }),
+        )
+    } else {
+        Box::pin(res.bytes_stream().map(|chunk| {
+            chunk.map_err(|error| HttpError::new(error.to_string(), ErrorCode::Network))
+        }))
+    };
     let body = ResponseBody {
-        stream: Some(Box::pin(stream)),
+        stream: Some(stream),
         received: 0,
         max_bytes,
         trace_id,
@@ -1713,6 +1920,7 @@ pub async fn fetch_stream(
         trace_prefix,
         trace_skip_prefix: trace_prefix,
         cache_store,
+        dictionary_store,
         background: None,
     };
     Ok(StreamingResult {
@@ -1740,6 +1948,7 @@ pub async fn fetch_bytes(
     if opts.redirect.is_some()
         || opts.max_redirects.is_some()
         || opts.http_cache.is_some()
+        || opts.dictionary_store.is_some()
         || opts.client_hints.is_some()
         || opts.context.is_some()
         || opts.request_policy.is_some()
@@ -2477,6 +2686,7 @@ mod response_chunk_tests {
             trace_prefix: 0,
             trace_skip_prefix: 0,
             cache_store: None,
+            dictionary_store: None,
             background: None,
         }
     }

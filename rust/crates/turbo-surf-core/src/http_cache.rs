@@ -29,7 +29,10 @@ impl CacheMode {
 }
 
 #[derive(Clone, Default)]
-pub struct HttpCache(Arc<Mutex<CacheState>>);
+pub struct HttpCache(
+    Arc<Mutex<CacheState>>,
+    crate::compression_dictionary::DictionaryStore,
+);
 #[derive(Default)]
 struct CacheState {
     entries: Vec<Entry>,
@@ -59,6 +62,8 @@ pub(crate) struct PendingStore {
 #[derive(Clone)]
 pub(crate) struct Cached(pub String);
 #[derive(Clone)]
+pub(crate) struct CachedStoredAt(pub SystemTime);
+#[derive(Clone)]
 pub(crate) struct TracePrefix(pub usize);
 fn values(headers: &[(String, String)], name: &str) -> String {
     headers
@@ -80,36 +85,38 @@ fn directives(headers: &[(String, String)]) -> BTreeMap<String, String> {
 fn date(headers: &[(String, String)], name: &str) -> Option<SystemTime> {
     httpdate::parse_http_date(&values(headers, name)).ok()
 }
+pub(crate) fn fresh_headers(headers: &[(String, String)], stored: SystemTime) -> bool {
+    let control = directives(headers);
+    if control.contains_key("no-cache") {
+        return false;
+    }
+    let now = SystemTime::now();
+    let response_date = date(headers, "date").unwrap_or(stored);
+    let age = values(headers, "age").parse::<u64>().unwrap_or(0);
+    let initial_age = stored
+        .duration_since(response_date)
+        .unwrap_or_default()
+        .max(Duration::from_secs(age));
+    let current_age = initial_age + now.duration_since(stored).unwrap_or_default();
+    let lifetime = control
+        .get("max-age")
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .or_else(|| {
+            date(headers, "expires")
+                .map(|expires| expires.duration_since(response_date).unwrap_or_default())
+        })
+        .or_else(|| {
+            date(headers, "last-modified")
+                .and_then(|modified| response_date.duration_since(modified).ok())
+                .map(|age| age / 10)
+        })
+        .unwrap_or_default();
+    current_age < lifetime
+}
 impl Entry {
     pub fn fresh(&self) -> bool {
-        let control = directives(&self.headers);
-        if control.contains_key("no-cache") {
-            return false;
-        }
-        let now = SystemTime::now();
-        let response_date = date(&self.headers, "date").unwrap_or(self.stored);
-        let age = values(&self.headers, "age").parse::<u64>().unwrap_or(0);
-        let initial_age = self
-            .stored
-            .duration_since(response_date)
-            .unwrap_or_default()
-            .max(Duration::from_secs(age));
-        let current_age = initial_age + now.duration_since(self.stored).unwrap_or_default();
-        let lifetime = control
-            .get("max-age")
-            .and_then(|value| value.parse::<u64>().ok())
-            .map(Duration::from_secs)
-            .or_else(|| {
-                date(&self.headers, "expires")
-                    .map(|expires| expires.duration_since(response_date).unwrap_or_default())
-            })
-            .or_else(|| {
-                date(&self.headers, "last-modified")
-                    .and_then(|modified| response_date.duration_since(modified).ok())
-                    .map(|age| age / 10)
-            })
-            .unwrap_or_default();
-        current_age < lifetime
+        fresh_headers(&self.headers, self.stored)
     }
     pub fn validators(&self, headers: &mut BTreeMap<String, String>) {
         for (response, request) in [
@@ -247,10 +254,16 @@ impl Entry {
         response
             .extensions_mut()
             .insert(Cached(self.status_text.clone()));
+        response
+            .extensions_mut()
+            .insert(CachedStoredAt(self.stored));
         response.into()
     }
 }
 impl HttpCache {
+    pub fn dictionary_store(&self) -> &crate::compression_dictionary::DictionaryStore {
+        &self.1
+    }
     pub(crate) fn lookup(
         &self,
         partition: &str,
@@ -307,6 +320,7 @@ impl HttpCache {
         let Some(origin) = crate::request_context::origin(url) else {
             return;
         };
+        self.dictionary_store().clear_origin(url);
         let mut state = self.0.lock().unwrap();
         state
             .entries

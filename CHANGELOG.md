@@ -41,6 +41,16 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Networking, Fetch and storage
 
+- Add a genuine session-owned compression-dictionary store with origin/partition
+  selection, validated hash/ID negotiation, bounded dictionary-dependent Brotli
+  and Zstandard decoding, and decoded-cache/304 reuse. Share one codec engine
+  between buffered callers and incremental Fetch bodies; expose real headers and
+  partial output through bounded workers/channels. Require explicit input/output
+  success and actual transport EOF before cache publication; cancellation, panic
+  and caps cannot publish partial data. Official C-encoder fixtures and real HTTPS
+  controls cover both transports. Chrome publication timing and encoded Range
+  semantics remain open in the parity checklist.
+
 - Use the Chrome154 BoringSSL transport recipe with measured155 navigation
   identity, real trust-anchor IDs, ML-DSA offers and signature GREASE. Pin the
   additive connector-metadata API to controlled wreq fork4ed3cf0c (upstream

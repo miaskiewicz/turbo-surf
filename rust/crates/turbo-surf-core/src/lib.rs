@@ -18,6 +18,7 @@ pub mod browser;
 pub mod cache;
 pub mod challenge;
 pub mod cloudflare;
+pub mod compression_dictionary;
 pub mod consent;
 pub mod cookies;
 pub mod crawl;

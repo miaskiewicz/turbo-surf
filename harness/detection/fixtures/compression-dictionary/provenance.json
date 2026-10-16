@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "brotliCommit": "028fb5a23661f123017c060daa546b55cf4bde29",
+  "brotliVersion": "brotli 1.2.0",
+  "zstdVersion": "1.5.7",
+  "zstdSource": "https://github.com/facebook/zstd/releases/tag/v1.5.7",
+  "dictionaryRequiredWithoutDictionary": {
+    "dcb": true,
+    "dcz": true
+  },
+  "generatorSha256": "9ee85cfc8c1f77a1415dc9aebd0a895aaf732c2a12bd4bb4a21cf9e4f7192d86",
+  "zstdProducerSha256": "593a63c36b2a91a68e2aed205fcf217680c0cf542edab71962d58972a3d72219",
+  "files": {
+    "dictionary.bin": {
+      "bytes": 46080,
+      "sha256": "081a73a877f7e2022ac7c3af699fde2f8286cbc3419d7bb48a3534af0ccd3a40"
+    },
+    "decoded.bin": {
+      "bytes": 25029,
+      "sha256": "285fb3f0e3c325546673f1206ff9ce38d98caf9ee2e5afca7669aa7d92ee34f1"
+    },
+    "encoded.dcb": {
+      "bytes": 88,
+      "sha256": "2588aff39c17b3d5ef988d73e95b3c7dfd2f2900a9988f69c59af4df4ac61cb0"
+    },
+    "encoded.dcz": {
+      "bytes": 94,
+      "sha256": "eaa904d2760594ed43ab826e760abb9e15d08d99fa4c41aa09349f8a63c1c3da"
+    },
+    "oversized-window.dcb": {
+      "bytes": 90,
+      "sha256": "3c7fd7d77c8a76ba34df2e74db5ac79ea52101f431a8b2473a41cad6636239e9"
+    }
+  }
+}

@@ -364,6 +364,12 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Validation status
 
+- Correct the non-macOS HostMedia initializer exposed by Linux CI's strict
+  `field_reassign_with_default` lint. Preserve the captured host preferences and
+  native pointer/hover values through a struct update; no media-policy or
+  production-budget behavior changes. The exact Linux-style extracted branch
+  fails strict Clippy before the fix and passes afterward.
+
 The pushed544180d renderer cohort passes385 tests with zero failures/ignores
 and the full all-target actual155 workspace strict gate passes. The earlier MCP
 checkpoint passes72 native/default71 tests. Full final default workspace,

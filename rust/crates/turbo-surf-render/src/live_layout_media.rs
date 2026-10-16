@@ -23,14 +23,16 @@ pub(crate) struct HostMedia {
 impl HostMedia {
     pub(crate) fn capture(native_pointer: bool) -> Self {
         #[cfg(target_os = "macos")]
-        let mut value = macos::capture();
+        let value = macos::capture();
         #[cfg(not(target_os = "macos"))]
-        let mut value = Self::default();
+        let value = Self::default();
         // This browserless view implements mouse input and hit testing through
         // its installed native driver, independently of attached OS devices.
-        value.pointer = native_pointer.then_some(true);
-        value.hover = native_pointer.then_some(true);
-        value
+        Self {
+            pointer: native_pointer.then_some(true),
+            hover: native_pointer.then_some(true),
+            ..value
+        }
     }
     fn keyword(self, feature: Feature) -> Result<Option<(&'static str, bool)>, String> {
         let (value, positive, negative) = match feature {

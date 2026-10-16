@@ -416,3 +416,15 @@ Missing members tied to browser features cannot be closed by adding no-op method
 fabricating native results, or changing a version string. Consent handling is a
 saved default in run.mjs and both Chrome collectors, with a localhost regression;
 native checkpoints retain partial state when execution is interrupted.
+
+
+### Linux CI initializer correction
+
+The `95e4c5c` Linux Node 20 and Node 22 jobs pass the Rust tests, including all
+nine shadow layout controls, then fail strict Clippy on the non-macOS HostMedia
+initializer.
+Construct the pointer/hover overrides with a struct update rather than assignments
+after Default. A standalone exact non-macOS capture-body proof reproduces the
+Clippy failure before the fix and passes afterward, including both native-pointer
+values. This changes no media-policy or production-budget behavior; fresh CI
+still validates the actual Linux build.

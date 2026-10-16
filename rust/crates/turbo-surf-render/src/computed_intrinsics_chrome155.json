@@ -1,0 +1,48 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "6736f4b238dfa43d76cc4b3361538e0b24d5c417729ed3dbead03d210da5a822",
+  "probeSha256": "067ed774815e0c77257e1fd8d0c6bfd6b86d32aab27adf90ca232eecd333b7a2",
+  "collectorSha256": "4e61b029135dacd18fdb68e4194fea875766edc7f203f7560bd3b826ad6aa0cb",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "private-computed-style-intrinsics",
+      "result": {
+        "values": [
+          [
+            "17px",
+            "rgb(255, 0, 0)"
+          ],
+          [
+            "17px",
+            "rgb(255, 0, 0)"
+          ],
+          [
+            "17px",
+            "rgb(255, 0, 0)"
+          ],
+          [
+            "17px",
+            "rgb(255, 0, 0)"
+          ],
+          [
+            "23px",
+            "rgb(255, 0, 0)"
+          ]
+        ],
+        "matchesReads": 0,
+        "ownerReads": 0
+      }
+    }
+  ]
+}

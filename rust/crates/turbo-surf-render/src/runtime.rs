@@ -56,7 +56,15 @@ use runtime_activation::ActivationKey;
 mod form_navigation;
 #[path = "form_submission.rs"]
 mod form_submission;
+#[path = "script_navigation.rs"]
+mod script_navigation;
 use form_submission::{op_form_data_entries, op_form_data_event, op_form_data_finish};
+#[path = "user_activation.rs"]
+mod user_activation;
+pub use user_activation::NavigationActivationSnapshot;
+use user_activation::{
+    op_user_activation_install, op_user_activation_navigator, op_user_activation_read,
+};
 
 struct OwnedRuntime(JsRuntime, bool, ActivationKey);
 
@@ -6495,6 +6503,34 @@ pub(crate) fn native_pointer_media_capability(context: v8::Local<v8::Context>) -
     context.get_slot::<HostInputDriver>().is_some()
 }
 
+// Transient activation belongs to this document's native context, never guest flags.
+struct HostUserActivation(std::time::Instant);
+
+fn host_user_activation(context: v8::Local<v8::Context>) -> bool {
+    context
+        .get_slot::<HostUserActivation>()
+        .is_some_and(|activation| activation.0.elapsed() < std::time::Duration::from_secs(5))
+}
+
+#[op2(nofast)]
+fn op_script_navigation_admitted(scope: &mut v8::PinScope, #[string] target: String) {
+    script_navigation::record(
+        scope.get_entered_or_microtask_context(),
+        scope.get_current_context(),
+        target,
+    );
+}
+
+#[op2(fast)]
+fn op_host_user_activation(scope: &mut v8::PinScope) {
+    let context = scope.get_current_context();
+    if context.get_slot::<HostInputDriver>().is_some()
+        && context.get_slot::<FrameRetired>().is_none()
+    {
+        context.set_slot(Rc::new(HostUserActivation(std::time::Instant::now())));
+    }
+}
+
 struct HostInputDriver {
     input: v8::Weak<v8::Function>,
     cancel: v8::Weak<v8::Function>,
@@ -6584,6 +6620,11 @@ deno_core::extension!(
         op_message_source,
         op_event_trust,
         op_set_host_input_driver,
+        op_host_user_activation,
+        op_user_activation_install,
+        op_user_activation_navigator,
+        op_user_activation_read,
+        op_script_navigation_admitted,
         op_capture_runtime_core,
         op_set_host_capabilities,
         op_form_data_entries,
@@ -6996,7 +7037,6 @@ const __navData = {
     serviceWorker: { register: REJ, getRegistration: () => Promise.resolve(undefined), getRegistrations: () => Promise.resolve([]), ready: new Promise(() => {}), controller: null, addEventListener() {}, removeEventListener() {} },
     storage: { estimate: () => Promise.resolve({ quota: 0, usage: 0 }), persisted: () => Promise.resolve(false), persist: () => Promise.resolve(false) },
     credentials: { get: () => Promise.resolve(null), create: () => Promise.resolve(null), store: P, preventSilentAccess: P },
-    userActivation: { hasBeenActive: true, isActive: false },
     wakeLock: { request: REJ },
     keyboard: { getLayoutMap: () => Promise.resolve(new Map()), lock: P, unlock() {} },
     locks: { request: P, query: () => Promise.resolve({ held: [], pending: [] }) },
@@ -8993,7 +9033,7 @@ __BodyParamsString=URLSearchParams.prototype.toString;
   const location={};
   locations.set(location,{__proto__:null,owner:globalThis,
     read:name=>url?url[name]:"",
-    write(name,value){if(name==="href")reparse(value,url?url.href:undefined);else if(url){try{url[name]=value;}catch(_){}}}});
+    write(name,value){if(name==="href")reparse(value,url?url.href:undefined);else if(url){try{url[name]=value;}catch(_){}}if(url)ops.op_script_navigation_admitted(url.href);}});
   const state=receiver=>{
     const value=locations.get(receiver);
     if(!value)throw new __exceptionTypeError("Illegal invocation");
@@ -10012,17 +10052,30 @@ __G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
 // stop once the render has SETTLED even though background timers (analytics polling,
 // React's idle scheduler) never stop — otherwise an interaction would always run to the
 // full budget. Not for correctness, just to detect quiescence of the visible tree.
-__G.domSig = () => {
-  try {
-    const els = document.getElementsByTagName("*");
-    let n = els.length, vlen = 0;
-    const inputs = document.querySelectorAll("input,textarea,select");
-    for (let i = 0; i < inputs.length; i++) vlen += (inputs[i].value || "").length;
-    return n + ":" + vlen + ":" + (globalThis.location ? globalThis.location.href.length : 0);
-  } catch (_e) {
-    return "0";
-  }
-};
+__G.domSig = (() => {
+  const apply=Reflect.apply,query=Document.prototype.querySelectorAll;
+  const all=Document.prototype.getElementsByTagName;
+  const tag=Object.getOwnPropertyDescriptor(Element.prototype,"tagName").get;
+  const values={
+    INPUT:Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").get,
+    TEXTAREA:Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value").get,
+    SELECT:Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,"value").get,
+  };
+  return () => {
+    try {
+      const els = apply(all,document,["*"]);
+      let n = els.length, vlen = 0;
+      const inputs = apply(query,document,["input,textarea,select"]);
+      for (let i = 0; i < inputs.length; i++) {
+        const element=inputs[i],getter=values[apply(tag,element,[])];
+        vlen += (apply(getter,element,[]) || "").length;
+      }
+      return n + ":" + vlen + ":" + (globalThis.location ? globalThis.location.href.length : 0);
+    } catch (_e) {
+      return "0";
+    }
+  };
+})();
 
 (function () {
   // Every iframe is a native DOM node. Its browsing context exists only while
@@ -11827,6 +11880,7 @@ __G.domSig = () => {
 
 })();
 "##,
+    include_str!("user_activation.js"),
     include_str!("host_input.js"),
     r##"
 __hostErrorEvent=globalThis.ErrorEvent;
@@ -13958,6 +14012,37 @@ impl PageSession {
         storage: BrowserStorage,
         response_metadata: crate::DocumentResponseMetadata,
     ) -> Result<Self, String> {
+        Self::open_with_document_response_and_activation(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            None,
+        )
+        .await
+    }
+
+    /// Seed same-origin sticky activation before any destination scripts execute.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_activation(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+    ) -> Result<Self, String> {
         let mut session = Self::open_with_document_response_unfollowed(
             html,
             base,
@@ -13969,6 +14054,7 @@ impl PageSession {
             response_headers,
             storage,
             response_metadata,
+            activation,
         )
         .await?;
         session.follow_form_navigation().await?;
@@ -13987,8 +14073,10 @@ impl PageSession {
         response_headers: &[(String, String)],
         storage: BrowserStorage,
         response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
     ) -> Result<Self, String> {
         let mut rt = make_runtime_with_storage(base, cookies, ua, client_hints, storage);
+        user_activation::seed(&mut rt, base, activation);
         let mut script_inventory = std::env::var_os("TURBO_SURF_JS_TRACE")
             .map(|root| {
                 crate::script_inventory::ScriptInventory::start(
@@ -14423,6 +14511,21 @@ impl PageSession {
             state.borrow::<Base>().0.clone(),
             state.borrow::<crate::DocumentResponseMetadata>().clone(),
         )
+    }
+
+    /// Activation is captured when a script navigation is admitted, before timers run.
+    pub fn script_nav_activation_snapshot(&mut self) -> Option<(String, bool)> {
+        let _activation = self.rt.activation_key().enter();
+        deno_core::scope!(scope, self.rt);
+        script_navigation::snapshot(scope.get_current_context())
+    }
+
+    /// Native sticky activation and source origin for a subsequent document navigation.
+    pub fn navigation_activation_snapshot(&mut self) -> NavigationActivationSnapshot {
+        let source = self.rt.op_state().borrow().borrow::<Base>().0.clone();
+        let _activation = self.rt.activation_key().enter();
+        deno_core::scope!(scope, self.rt);
+        NavigationActivationSnapshot::capture(source, scope.get_current_context())
     }
 
     /// Snapshot the host-owned headers of the installed response after navigation.

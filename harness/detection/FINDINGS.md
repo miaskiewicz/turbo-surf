@@ -22,7 +22,9 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    caches are integrated. Unused font/keyframe definitions are admitted only when
    native matching proves them unused. The first live run found a missing
    ForcedColors host capability. Real macOS preferences/input-driver media now
-   match31 Chrome queries and actual CSS; the next run stops on modern CSS rule0.
+   match31 Chrome queries and actual CSS. Typed geometry-neutral modern-CSS
+   admission clears the subsequently observed rule0 failure; unsafe or unknown
+   declarations still fail explicitly.
    Decorated/mixed-font inline boxes and broader resource/layout behavior remain open.
 3. **DOM / forms:** canonical turbo-test0ec37f5 is officially vendored. All six DOM
    consumers use public immutable0.5.7 candidatefb60e6f (registry latest0.5.6).
@@ -33,7 +35,10 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    Disconnected/removed forms do not submit. Full radio/adoption, FileList/multipart/
    other-target forms and broader parsing/observer/reaction behavior remain open.
 4. **Audio:** deferred in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
-   A build-only fix limits NEON code to ARM, with real x86_64/arm64 delay PCM proofs.
+   NEON code is limited to ARM, with real x86_64/arm64 delay PCM proofs. A separate
+   authored-adapter fix selects `std::exp2(float)` consistently; the independent
+   Chrome 176-cell frequency-response grid matches exactly on Linux x86, macOS ARM
+   and Rosetta x86. No numeric tolerance or licensed-kernel changes are used.
 5. **Security / resources:** tested CSP/Trusted Types/parser/HTTP reporting,
    sandbox/navigation, SRI/CORP and COOP/COEP/permissions-policy behavior is integrated.
    Native155 WindowProxy/module/codegen acceptance passes. Broader directives,
@@ -72,7 +77,12 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
     exact binary/harness/trace hashes and readiness diagnostics. Raw private artifacts
     retain payloads; Chrome cookies are never imported. The prior input runtime
     failures are cleared. Active investigation covers incomplete consent/hydration,
-    internal computed-style work and the observed navigation activation mismatch.
+    internal computed-style work. That saved matrix predates the subsequent
+    activation repairs: private input state now reaches genuine form and Location
+    navigation, HTTP redirects retain it, and new-document retries clear transient
+    activation. The 14-case independent localhost Chrome control also verifies
+    same-origin sticky carry and cross-origin reset. A fresh live run must assess
+    these repairs; they do not establish Google clearance.
 
 ## Isolated CSP navigation checkpoint — 2026-10-14
 

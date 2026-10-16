@@ -121,6 +121,7 @@ pub(super) fn navigate<'s>(
     }
     let Some(host) = target.get_slot::<FrameHost>() else {
         if let Some(state) = target.get_slot::<State>() {
+            script_navigation::record(source, target, url.to_string());
             *state.url.borrow_mut() = url.to_string();
         }
         return;

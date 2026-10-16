@@ -5,6 +5,7 @@
   const query = document.querySelector.bind(document);
   const focus = HTMLElement.prototype.focus;
   const apply = Reflect.apply;
+  const activeElement = Object.getOwnPropertyDescriptor(Document.prototype, "activeElement").get;
   const requestSubmit = HTMLFormElement.prototype.requestSubmit;
   const controls = document.querySelectorAll.bind(document);
   const matches = Element.prototype.matches;
@@ -22,11 +23,28 @@
     ),
   );
   const dispatch = ops.op_dispatch_host_event;
+  const activate = ops.op_host_user_activation;
   const canceled = Object.getOwnPropertyDescriptor(Event.prototype, "defaultPrevented").get;
-  const valueSetters = [HTMLInputElement, HTMLTextAreaElement].map((Constructor) => [
-    Constructor,
-    Object.getOwnPropertyDescriptor(Constructor.prototype, "value")?.set,
-  ]);
+  const controlTag = Object.getOwnPropertyDescriptor(Element.prototype, "tagName").get;
+  const controlValues = Object.create(null);
+  for (const [tag, Constructor] of [
+    ["INPUT", HTMLInputElement],
+    ["TEXTAREA", HTMLTextAreaElement],
+  ]) {
+    const prototype = Constructor.prototype;
+    controlValues[tag] = {
+      value: Object.getOwnPropertyDescriptor(prototype, "value"),
+      disabled: Object.getOwnPropertyDescriptor(prototype, "disabled").get,
+      readOnly: Object.getOwnPropertyDescriptor(prototype, "readOnly").get,
+    };
+  }
+  function editingControl(target) {
+    try {
+      return controlValues[apply(controlTag, target, [])] || null;
+    } catch {
+      return null;
+    }
+  }
   const schedule = setTimeout.bind(globalThis),
     clear = clearTimeout.bind(globalThis);
   const waits = new Map();
@@ -52,6 +70,14 @@
     cursorY = 0;
   function fire(target, name, type, init = {}) {
     const event = new events[name](type, init);
+    // Only this captured embedder driver can notify activation. Dispatching an
+    // identically named guest event never reaches this capability.
+    if (
+      (type === "pointerdown" && init.pointerType === "mouse") ||
+      type === "mousedown" ||
+      (type === "keydown" && init.key !== "Escape")
+    )
+      activate();
     dispatch(event, target);
     return !canceled.call(event);
   }
@@ -61,8 +87,9 @@
     return result;
   }
   async function edit(target, text, run) {
-    const setter = valueSetters.find(([Constructor]) => target instanceof Constructor)?.[1];
-    if (!setter || target.disabled || target.readOnly) return;
+    const getters = editingControl(target);
+    if (!getters || apply(getters.disabled, target, []) || apply(getters.readOnly, target, []))
+      return;
     for (const char of text) {
       if (run !== activeRun) return;
       const code = /^[a-z]$/i.test(char)
@@ -91,7 +118,7 @@
       ) {
         const init = { data: char, inputType: "insertText", bubbles: true, composed: true };
         if (fire(target, "InputEvent", "beforeinput", { ...init, cancelable: true })) {
-          setter.call(target, String(target.value || "") + char);
+          apply(getters.value.set, target, [String(apply(getters.value.get, target, [])) + char]);
           fire(target, "InputEvent", "input", init);
         }
       }
@@ -210,7 +237,7 @@
         fire(target, "PointerEvent", "click", init);
         continue;
       }
-      const target = document.activeElement;
+      const target = apply(activeElement, document, []);
       if (step.type != null) {
         await edit(target, String(step.type), run);
         continue;

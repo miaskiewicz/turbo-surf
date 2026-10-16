@@ -1443,6 +1443,22 @@ registry0.3.7 is published. The stock production engine remains V8150, while the
 experimental155 configuration uses actual15.5.35.23 and matching patched native
 callbacks. A newer JS/HTTP profile does not establish native engine alignment.
 
+Navigation activation is private native context state. Trusted pointerdown,
+mousedown and key input activate before page handlers run. Genuine form and
+Location admission snapshot transient activation for the outgoing request and its
+HTTP redirects; later new-document script retries do not inherit it. Public
+UserActivation exposes genuine brands and context state, including same-origin
+sticky carry and cross-origin reset. The source-pinned localhost Chrome activation
+oracle covers these paths and real elapsed expiry. These controls do not prove
+server acceptance.
+
+The authored offline-audio adapter uses explicit `std::exp2(float)` to avoid the
+platform-dependent unqualified overload. The independent Chrome 176-cell response
+grid matches exactly on Linux x86, macOS ARM and Rosetta x86, with NaN bounds and
+existing signed-zero equality preserved. Licensed kernels and exact assertions
+remain unchanged. Linux Chrome browser audio output and deferred advanced audio
+remain outside this bounded proof.
+
 The latest fresh Google baseline passes both former host-media/CSS runtime failures,
 completes a genuine form submission and receives search200, then follows a page-script
 retry to sorry429. Homepage/consent hydration still exceeds20s; instrumented native

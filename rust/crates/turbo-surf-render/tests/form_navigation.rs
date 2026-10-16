@@ -343,3 +343,101 @@ async fn private_formdata_optional_filename_and_file_timestamp_match_chrome() {
     assert_eq!(actual, control["result"]);
     page.close();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn navigation_activation_comes_from_private_input_and_expires_per_document() {
+    for action in [
+        "submit",
+        "requestSubmit",
+        "untrusted",
+        "click",
+        "enter",
+        "handler",
+        "pointerdown",
+        "canceled-pointerdown",
+        "expired",
+    ] {
+        let (base, rx) = server(vec![
+            response("302 Found", "Location: /destination\r\n", ""),
+            response("200 OK", "", "<form action='/next'></form>"),
+            response("200 OK", "", "<p>next</p>"),
+        ]);
+        let mut page = PageSession::open(
+            "<form action='/destination'><input id=q name=q><button id=go>go</button></form>",
+            &format!("{base}/start"),
+            "",
+            "",
+            10000,
+        )
+        .await
+        .unwrap();
+        match action {
+            "submit" | "requestSubmit" => {
+                page.eval(&format!("document.querySelector('form').{action}()"))
+                    .await
+                    .unwrap();
+            }
+            "untrusted" => {
+                page.eval("document.querySelector('#go').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));document.querySelector('form').requestSubmit()") .await.unwrap();
+            }
+            "click" => page
+                .input(&serde_json::json!([{"click":"#go"}]))
+                .await
+                .unwrap(),
+            "enter" => page
+                .input(&serde_json::json!([{"focus":"#q"},{"press":"Enter"}]))
+                .await
+                .unwrap(),
+            "handler" => {
+                page.eval("document.querySelector('#q').addEventListener('keydown',()=>document.querySelector('form').submit())").await.unwrap();
+                page.input(&serde_json::json!([{"focus":"#q"},{"press":"x"}]))
+                    .await
+                    .unwrap();
+            }
+            "pointerdown" | "canceled-pointerdown" => {
+                page.eval(&format!(
+                    "document.querySelector('#go').addEventListener('pointerdown',event=>{{{}document.querySelector('form').submit()}})",
+                    if action == "canceled-pointerdown" { "event.preventDefault();" } else { "" },
+                )).await.unwrap();
+                page.input(&serde_json::json!([{"click":"#go"}]))
+                    .await
+                    .unwrap();
+            }
+            "expired" => {
+                page.input(&serde_json::json!([{"focus":"#q"},{"press":"x"}]))
+                    .await
+                    .unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(5100)).await;
+                page.eval("document.querySelector('form').submit()")
+                    .await
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let activated = matches!(
+            action,
+            "click" | "enter" | "handler" | "pointerdown" | "canceled-pointerdown"
+        );
+        for _ in 0..2 {
+            let wire = request(&rx).to_ascii_lowercase();
+            assert_eq!(
+                wire.contains("sec-fetch-user: ?1\r\n"),
+                activated,
+                "{action}"
+            );
+            assert!(wire.contains("sec-fetch-site: same-origin\r\n"), "{action}");
+            assert!(wire.contains("sec-fetch-mode: navigate\r\n"), "{action}");
+        }
+        // Replacing the document retires activation; a script cannot inherit it.
+        page.eval("document.querySelector('form').submit()")
+            .await
+            .unwrap();
+        assert!(
+            !request(&rx)
+                .to_ascii_lowercase()
+                .contains("sec-fetch-user:"),
+            "{action}"
+        );
+        page.close();
+    }
+}

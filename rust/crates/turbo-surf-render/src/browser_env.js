@@ -1,6 +1,6 @@
 (function(){
   var g = globalThis;
-  var compatibilityElementPrototype;
+  var compatibilityElementPrototype,computedStyleNativeMatches,computedStyleNativeOwner;
   var normalizeComputedColor=g.__normalizeComputedColor;delete g.__normalizeComputedColor;
   var prepareInlineHandler=g.__prepareInlineHandler,noteInlineHandler=g.__noteInlineHandler;delete g.__prepareInlineHandler;delete g.__noteInlineHandler;
   var collectionGet=g.__getCollectionRecord,collectionSet=g.__setCollectionRecord;
@@ -14,6 +14,7 @@
   if (typeof g.__parseCssNative === 'function') { __ns.parseCssNative = g.__parseCssNative; delete g.__parseCssNative; }
   var cssNativeParse=__ns.parseCssNative,cssSetPrototype=Object.setPrototypeOf,cssApply=Reflect.apply,cssMapGet=Function.prototype.call.bind(Map.prototype.get),cssTagUpper=Function.prototype.call.bind(String.prototype.toUpperCase);
   if (typeof g.__domAccessor === 'function') { __ns.domAccessor = g.__domAccessor; delete g.__domAccessor; }
+  computedStyleNativeOwner=__ns.domAccessor('ownerDocument',false,'Node');
   if (typeof g.__nativeDOMFunction === 'function') { __ns.makeNativeFunction = g.__nativeDOMFunction; delete g.__nativeDOMFunction; }
   if (typeof g.__nativeNamedObject === 'function') { __ns.makeNamedObject = g.__nativeNamedObject; delete g.__nativeNamedObject; }
   if (typeof g.navigator === 'undefined') g.navigator = { userAgent: 'turbo-test', platform: 'rust', language: 'en-US', languages: ['en-US'], clipboard: {}, maxTouchPoints: 0 };
@@ -104,7 +105,8 @@
       if (typeof val === 'string') expandShorthand(name, val, setProp);
     };
     try {
-      var sheets = el && el.ownerDocument ? (el.ownerDocument.styleSheets || []) : [];
+      var owner=el?cssApply(computedStyleNativeOwner,el,[]):null;
+      var sheets = owner ? (owner.styleSheets || []) : [];
       for (var si=0; si<sheets.length; si++) {
         if(sheetRecord(sheets[si]).disabled)continue;
         var rules = appliedSheetRules(sheets[si]);
@@ -113,7 +115,7 @@
           var sel = txt.slice(0, br).trim(); var body = txt.slice(br+1, txt.lastIndexOf('}'));
           var matched = false;
           var parts = sel.split(',');
-          for (var pi=0; pi<parts.length; pi++){ var s = parts[pi].trim(); if (!s) continue; try { if (el.matches && el.matches(s)) { matched = true; break; } } catch(e){} }
+          for (var pi=0; pi<parts.length; pi++){ var s = parts[pi].trim(); if (!s) continue; try { if (cssApply(computedStyleNativeMatches,el,[s])) { matched = true; break; } } catch(e){} }
           if (!matched) continue;
           var ds = body.split(';');
           for (var di=0; di<ds.length; di++){ var c = ds[di].indexOf(':'); if (c<0) continue; setProp(ds[di].slice(0,c), ds[di].slice(c+1).trim()); }
@@ -2035,6 +2037,7 @@ if(typeof __ns.makeNativeFunction==='function'){
         }
       });
     });
+    computedStyleNativeMatches=Object.getOwnPropertyDescriptor(prototypes.Element,'matches').value;
     ['querySelector','querySelectorAll','append','prepend','replaceChildren'].forEach(function(name){
       var descriptor=Object.getOwnPropertyDescriptor(d,name)||Object.getOwnPropertyDescriptor(elementProto,name);
       if(descriptor)Object.defineProperty(documentProto,name,descriptor);

@@ -298,3 +298,92 @@ async fn interrupted_frame_creation_never_exposes_bootstrap_host_capabilities() 
         "ok"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn host_edits_use_captured_document_and_control_accessors() {
+    let mut page = PageSession::open(
+        "<input id=q><textarea id=t></textarea><input id=disabled><textarea id=readonly readonly></textarea>",
+        "https://example.test/", "", "", 5000,
+    ).await.unwrap();
+    page.eval(r#"
+      globalThis.poisonCalls=[];globalThis.bodyEdits=0;
+      document.body.addEventListener('input',event=>{if(event.target===document.body)bodyEdits++});
+      globalThis.realValues=[HTMLInputElement,HTMLTextAreaElement].map(C=>Object.getOwnPropertyDescriptor(C.prototype,'value').get);
+      for(const id of ['q','t','disabled','readonly']) {
+        const control=document.getElementById(id);
+        for(const key of ['value','disabled','readOnly'])Object.defineProperty(control,key,{configurable:true,get(){poisonCalls.push(id+'.'+key);throw Error('guest control getter')}});
+      }
+      Object.defineProperty(document,'activeElement',{configurable:true,get(){poisonCalls.push('document.activeElement');throw Error('guest activeElement')}});
+    "#).await.unwrap();
+    page.input(&json!([
+        {"focus":"#q"},{"type":"ab"},
+        {"focus":"#t"},{"type":"cd"},
+        {"focus":"#readonly"},{"type":"bad"},
+        {"focus":"#disabled"},
+    ]))
+    .await
+    .unwrap();
+    page.eval("document.getElementById('disabled').setAttribute('disabled','')")
+        .await
+        .unwrap();
+    page.input(&json!([{"type":"bad"}])).await.unwrap();
+    page.input(&json!([{"focus":"body"},{"type":"ignored"}]))
+        .await
+        .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(&page.eval_json_expression(
+        "({poisonCalls,bodyEdits,values:['q','t','disabled','readonly'].map((id,i)=>realValues[i===1||i===3?1:0].call(document.getElementById(id)))})"
+    ).await.unwrap()).unwrap();
+    assert_eq!(actual["poisonCalls"], json!([]));
+    assert_eq!(actual["bodyEdits"], 0);
+    assert_eq!(actual["values"], json!(["ab", "cd", "", ""]));
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn script_navigation_captures_source_activation_at_admission() {
+    for trigger in ["script", "click", "keydown"] {
+        let mut page = PageSession::open(
+            "<button id=go>go</button><input id=q>",
+            "https://example.test/start",
+            "",
+            "",
+            5000,
+        )
+        .await
+        .unwrap();
+        match trigger {
+            "script" => {
+                page.eval("location.assign('/next')").await.unwrap();
+            }
+            "click" => {
+                page.eval("document.querySelector('#go').addEventListener('pointerdown',()=>location.assign('/next'))").await.unwrap();
+                page.input(&json!([{"click":"#go"}])).await.unwrap();
+            }
+            "keydown" => {
+                page.eval("document.querySelector('#q').addEventListener('keydown',()=>location.href='/next')").await.unwrap();
+                page.input(&json!([{"focus":"#q"},{"press":"x"}]))
+                    .await
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            page.script_nav_activation_snapshot(),
+            Some(("https://example.test/next".into(), trigger != "script"))
+        );
+        if trigger == "click" {
+            tokio::time::sleep(std::time::Duration::from_millis(5100)).await;
+            // The earlier admitted navigation keeps its actual source state.
+            assert_eq!(
+                page.script_nav_activation_snapshot(),
+                Some(("https://example.test/next".into(), true))
+            );
+            page.eval("location.replace('/later')").await.unwrap();
+            assert_eq!(
+                page.script_nav_activation_snapshot(),
+                Some(("https://example.test/later".into(), false))
+            );
+        }
+        page.close();
+    }
+}

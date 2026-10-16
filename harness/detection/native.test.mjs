@@ -73,6 +73,9 @@ test(
           location.replace('/results?sei=fixture');
         </script></body>`);
         } else if (url.pathname === "/results") {
+          res.writeHead(302, { Location: "/final" });
+          res.end();
+        } else if (url.pathname === "/final") {
           res.end('<div id="rso"><a href="https://example.test/"><h3>Result</h3></a></div>');
         } else {
           res.end("<p>ok</p>");
@@ -101,6 +104,14 @@ test(
       assert.equal(trace.navigationSource, "native-form");
       assert.equal(trace.formFallback, null);
       assert.equal(trace.pages.at(-1).results, 1);
+      assert.equal(seen.find((r) => r.path === "/search").headers["sec-fetch-user"], "?1");
+      for (const path of ["/results", "/final"]) {
+        const headers = seen.find((r) => r.path === path).headers;
+        assert.equal(headers["sec-fetch-user"], undefined);
+        assert.equal(headers["sec-fetch-site"], "same-origin");
+        assert.equal(headers["sec-fetch-mode"], "navigate");
+        assert.equal(headers["sec-fetch-dest"], "document");
+      }
       assert.equal(seen.find((r) => r.path === "/search").query.get("ei"), "fixture");
       assert.equal(seen.find((r) => r.path === "/search").query.get("q"), "fixture query");
       const collect = seen.find((r) => r.path === "/collect");
@@ -176,6 +187,79 @@ test(
         readFileSync(join(out, "capture", `${final.phase}.html`), "utf8"),
         /Actual POST response/,
       );
+    } finally {
+      server.closeAllConnections();
+      await new Promise((done) => server.close(done));
+      rmSync(out, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "native trace preserves trusted handler location activation before automatic retries",
+  { skip: !existsSync(binary) },
+  async () => {
+    const out = mkdtempSync(join(tmpdir(), "detection-handler-navigation-"));
+    const seen = [];
+    const server = createServer((req, res) => {
+      const parsed = new URL(req.url, "http://localhost");
+      const path = parsed.pathname;
+      seen.push({
+        path,
+        headers: req.headers,
+        active: parsed.searchParams.get("active"),
+        sticky: parsed.searchParams.get("sticky"),
+      });
+      res.setHeader("Content-Type", "text/html");
+      if (path === "/") {
+        res.end(`<button id=go>go</button><input id=q><script>
+          document.querySelector('#go').addEventListener('pointerdown',()=>location.assign('/next'));
+          document.querySelector('#q').addEventListener('keydown',()=>location.href='/next');
+        </script>`);
+      } else if (path === "/next" || path === "/retry") {
+        res.writeHead(302, { Location: path === "/next" ? "/destination" : "/final" });
+        res.end();
+      } else if (path === "/destination") {
+        res.end(
+          "<script>location.replace('/retry?active='+navigator.userActivation.isActive+'&sticky='+navigator.userActivation.hasBeenActive)</script>",
+        );
+      } else {
+        res.end('<div id="rso"><a href="https://example.test/"><h3>Result</h3></a></div>');
+      }
+    });
+    try {
+      await new Promise((done) => server.listen(0, "127.0.0.1", done));
+      const frozen = join(out, "native");
+      copyFileSync(binary, frozen);
+      chmodSync(frozen, 0o700);
+      for (const [name, steps] of [
+        ["click", [{ click: "#go" }]],
+        ["keydown", [{ focus: "#q" }, { press: "x" }]],
+      ]) {
+        seen.length = 0;
+        const config = join(out, `${name}.json`);
+        writeFileSync(
+          config,
+          JSON.stringify({ url: `http://127.0.0.1:${server.address().port}/`, steps }),
+        );
+        await run(frozen, [config, join(out, name)]);
+        const trace = JSON.parse(readFileSync(join(out, name, "trace.json")));
+        assert.deepEqual(trace.errors, []);
+        assert.equal(trace.navigationSource, "script");
+        assert.equal(trace.pages.at(-1).results, 1);
+        const retry = seen.find((row) => row.path === "/retry");
+        assert.equal(retry.active, "false");
+        assert.equal(retry.sticky, "true");
+        for (const path of ["/next", "/destination", "/retry", "/final"]) {
+          const request = seen.find((row) => row.path === path);
+          assert(request, `${name}: missing ${path}`);
+          assert.equal(
+            request.headers["sec-fetch-user"],
+            ["/next", "/destination"].includes(path) ? "?1" : undefined,
+            `${name}: ${path}`,
+          );
+        }
+      }
     } finally {
       server.closeAllConnections();
       await new Promise((done) => server.close(done));

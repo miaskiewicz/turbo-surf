@@ -145,6 +145,7 @@
     "FormDataEvent",
     "CustomStateSet",
     "ValidityState",
+    "UserActivation",
     "Document",
     "Range",
     "AbstractRange",

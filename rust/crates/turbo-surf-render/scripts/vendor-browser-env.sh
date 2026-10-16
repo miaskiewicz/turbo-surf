@@ -59,6 +59,9 @@ done
 for file in css_descriptor_cases.json css_descriptor_probe.js css_descriptor_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
+for file in computed_intrinsics_cases.json computed_intrinsics_probe.js computed_intrinsics_chrome155.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
 git -C "$repo" show "${source_rev}:src/event_handlers.rs" > "$dest/event_handlers.rs"
 git -C "$repo" show "${source_rev}:src/event_brands.rs" > "$dest/event_brands.rs"
 git -C "$repo" show "${source_rev}:src/event_listeners.rs" > "$dest/event_listeners.rs"

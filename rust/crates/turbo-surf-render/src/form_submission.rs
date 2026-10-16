@@ -17,6 +17,7 @@ struct Payload {
 pub(super) struct Pending {
     pub plan: form_navigation::Submission,
     pub source: String,
+    pub user_activation: bool,
     pub policy: crate::csp::Policy,
     pub referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
 }
@@ -148,6 +149,7 @@ fn submit<'s>(
     state.borrow_mut().borrow_mut::<Queue>().0 = Some(Pending {
         plan,
         source,
+        user_activation: host_user_activation(context),
         policy: policy.active.clone(),
         referrer_policy: policy.referrer_policy,
     });
@@ -208,7 +210,8 @@ impl PageSession {
                 )
             };
             let mut local = jar.borrow().fork_for_request();
-            let mut context = RequestContext::navigation(Some(pending.source.clone()), false);
+            let mut context =
+                RequestContext::navigation(Some(pending.source.clone()), pending.user_activation);
             context.referrer_policy = pending.referrer_policy;
             let final_referrer = std::sync::Mutex::new(String::new());
             let final_location = std::sync::Mutex::new(pending.plan.url.clone());
@@ -269,6 +272,7 @@ impl PageSession {
             let cookies = jar.borrow().storage_state();
             // No ActivationKey guard is live here. Hydrate the response with its real
             // policy/metadata, then dispose the retired isolate after the swap.
+            let activation = self.navigation_activation_snapshot();
             let mut next = PageSession::open_with_document_response_unfollowed(
                 &response.html,
                 &response.final_url,
@@ -280,6 +284,7 @@ impl PageSession {
                 &response.headers,
                 storage,
                 metadata,
+                Some(activation),
             )
             .await?;
             let mut logs: Vec<serde_json::Value> =

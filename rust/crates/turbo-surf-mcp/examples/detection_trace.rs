@@ -154,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn build_info() -> Value {
     let profile = fingerprint::default_profile();
-    json!({"version":turbo_surf_core::VERSION,
+    json!({"version":turbo_surf_core::VERSION,"debugAssertions":cfg!(debug_assertions),
         "features":{"impersonate":cfg!(feature="impersonate"),"trustAnchors":cfg!(feature="trust-anchors"),
             "gpuMetal":cfg!(feature="gpu-metal"),"coretext":cfg!(feature="coretext")},
         "engine":{"v8Version":turbo_surf_render::v8_version(),"stableWindowProxy":turbo_surf_render::stable_window_proxy(),
@@ -401,6 +401,8 @@ async fn capture(
         probes.extend(collect_probes(&mut page, config).await?);
     }
     jar = CookieJar::from_storage_state(&page.cookies());
+    let mut script_activation = page.script_nav_activation_snapshot();
+    let mut activation = page.navigation_activation_snapshot();
     page.close();
     let mut referer = installed_url.clone();
     for hop in 0..5 {
@@ -419,7 +421,13 @@ async fn capture(
             &target,
             FetchOptions {
                 response_policy: Some(&response_policy),
-                context: Some(RequestContext::navigation(Some(referer.clone()), hop == 0)),
+                context: Some(RequestContext::navigation(
+                    Some(referer.clone()),
+                    (nav_source == "form-fallback" && hop == 0)
+                        || script_activation
+                            .as_ref()
+                            .is_some_and(|(url, active)| *active && url == &target),
+                )),
                 client_hints: Some(&hints),
                 allow_non_html: true,
                 max_redirects: Some(10),
@@ -436,7 +444,7 @@ async fn capture(
             status: search.status,
             referrer: navigation_metadata.lock().unwrap().referrer.clone(),
         };
-        let next = PageSession::open_with_document_response(
+        let next = PageSession::open_with_document_response_and_activation(
             &search.html,
             &search.final_url,
             &jar.storage_state(),
@@ -447,6 +455,7 @@ async fn capture(
             &search.headers,
             storage.clone(),
             document_response,
+            Some(activation),
         )
         .await;
         let mut next = match next {
@@ -471,6 +480,8 @@ async fn capture(
         if target == referer {
             probes.extend(collect_probes(&mut next, config).await?);
         }
+        script_activation = next.script_nav_activation_snapshot();
+        activation = next.navigation_activation_snapshot();
         next.close();
     }
     trace["probes"] = json!(probes);

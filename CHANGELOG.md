@@ -199,6 +199,18 @@ residual work beyond this PR, with audio separately deferred in
 - Compile ARM NEON delay code only for aarch64 targets. Actual x86_64/arm64
   compilation, linking and delay PCM checks cover the Linux CI build failure;
   upstream audio kernels/source hashes remain unchanged.
+- Select the portable `std::exp2(float)` overload in the authored audio adapter.
+  The unqualified call selected double on Linux GCC and float on macOS Clang.
+  All 176 cells of the independent Chrome frequency-response control now match
+  exactly on Linux x86, macOS ARM and Rosetta x86; no tolerance or licensed-kernel
+  change is introduced. Advanced audio remains deferred in issue27.
+- Derive navigation activation from private trusted input before pointerdown,
+  mousedown and key handlers run; preserve genuine form/Location admission through
+  HTTP redirects and clear transient activation for subsequent document-script
+  retries. Public UserActivation uses native context state and genuine brands;
+  same-origin navigation retains sticky activation while cross-origin navigation
+  clears it. The reusable 14-case localhost Chrome oracle covers trusted/untrusted
+  input, expiry, Location handlers, redirects, cross-origin state and retries.
 
 - Read genuine macOS accessibility preferences and system appearance for live CSS
   and matching media queries; derive pointer/hover from the installed input driver.

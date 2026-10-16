@@ -68,7 +68,12 @@ instrumented native run never submits. Chrome baseline has7 result markers and
 one collector error; its instrumented run reaches /sorry. See the sanitized
 [latest run](./GOOGLE-LAST-RUN.json). Reliable native acceptance remains unverified.
 Current investigation covers consent/hydration work, internal computed-style
-queries and an observed Sec-Fetch-User activation mismatch.
+queries. The captured matrix predates the repaired Sec-Fetch-User propagation:
+trusted input is sampled before pointerdown/keydown handlers, genuine form and
+Location navigation retain it through HTTP redirects, and document-script retries
+clear transient activation. Independent localhost Chrome controls verify these
+paths, expiry and same-origin sticky carry versus cross-origin reset. Live
+acceptance after these repairs remains a separate check.
 
 ## Active scope and deferred audio
 
@@ -76,6 +81,11 @@ Finish messaging, layout, Range/DOM, security/resources, fetch/storage, combined
 validation, the current member inventory, PR housekeeping and fresh live Google
 validation. Remaining advanced audio is a documented TODO in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27),
 deferred at the user's request. Existing offline DSP and tests remain included.
+The authored adapter now explicitly selects `std::exp2(float)` on every target;
+all 176 independent Chrome frequency-response cells match exactly on Linux x86,
+macOS ARM and Rosetta x86. This fixes a platform overload discrepancy without
+numeric tolerance or changes to licensed kernels; a Linux Chrome browser audio
+comparison remains unmeasured.
 Reprioritize deferred audio only with captured detector evidence showing a missing
 path matters to the target; no Google-audio cause is established by these controls.
 

@@ -37,7 +37,7 @@ struct Effect {
   void coefficients(Biquad& filter,int index,const std::array<const float*,4>& p) {
     const float detune=p[3][index];
     const double normalized=p[0][index]/(.5*sample_rate);
-    const double frequency=detune?normalized*exp2(detune/1200):normalized;
+    const double frequency=detune?normalized*std::exp2(detune/1200):normalized;
     const double q=p[1][index],gain=p[2][index];
     switch(shape){
       case 0:filter.SetLowpassParams(index,frequency,q);break;

@@ -16,10 +16,16 @@ On a Mac with a real Metal GPU:
 npm install
 npm install --prefix scripts/browser-sidecar
 cd rust
-cargo build -p turbo-surf-mcp --features trust-anchors,gpu-metal,coretext --examples
+cargo build --release -p turbo-surf-mcp --features trust-anchors,gpu-metal,coretext --example detection_trace
 cd ..
-npm run harness:detection -- --live --probes --debugger
+npm run harness:detection -- --live --binary rust/target/release/examples/detection_trace --probes --debugger
 ```
+
+Use an optimized binary for live timing conclusions: debug Rust CSS/layout work
+can exhaust the execution budget. Build information records `debugAssertions`,
+alongside the exact executable hash. The stock workspace engine remains V8150;
+the [experimental155 SDK](./engine-155/README.md) uses its separate build helper
+and `.native-builds/sdk155-8059.79/target/release/examples/detection_trace`.
 
 Chrome must be installed. The default oracle uses raw CDP and Node 22 or newer (its native WebSocket API); Playwright/Patchright are optional legacy collectors. Missing binaries/dependencies and launch failures are
 reported; live work is skipped unless `--live` is explicit. A sandbox that blocks
@@ -43,6 +49,10 @@ tracing. `--native-first` reverses each pair; `--repeat 2` repeats the matrix wi
 fresh state. Change order/repeat when testing instrumentation or time/rate effects.
 A rejected result is data, not a harness failure. Crashes/timeouts/launch failures
 set a nonzero exit code, preserve logs, and allow the other passes to complete.
+`captureComplete` describes collector completion. Per-page hydration diagnostics,
+readiness and actual navigation determine whether execution completed. A consent
+`clicked` flag records accepted input dispatch; verify the response, cookie effects
+and subsequent page state before treating consent as completed.
 
 ```bash
 node harness/detection/run.mjs --live --out /tmp/search-trace --native-first --repeat 2
@@ -666,3 +676,19 @@ The captured performance clock brackets the original function/getter/setter,
 including throws, before argument/stack recording. Nested calls are inclusive, so
 aggregate durations may overlap. Promise results retain identity and are never
 awaited; these measurements cover synchronous invocation only.
+
+The localhost activation oracle uses real Chrome input and records outgoing
+`Sec-Fetch-User` headers alongside public activation state:
+
+```bash
+node harness/detection/activation-headers-chrome.mjs /tmp/activation-headers.json
+node --test harness/detection/activation-headers.test.mjs
+cd rust
+cargo test -p turbo-surf-render --test user_activation --test form_navigation --test host_input
+```
+
+Its 14 cases cover script submission, untrusted events, trusted clicks/keys,
+pointerdown cancellation, real elapsed expiry, Location handlers, HTTP redirects,
+same-origin sticky state and cross-origin reset. The checked-in Chrome control is
+source-pinned. `native.test.mjs` separately checks actual CLI request headers and
+automatic retries against localhost servers using the selected detection binary.

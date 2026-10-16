@@ -33,6 +33,8 @@
     "rust/crates/turbo-surf-render/src/form_connectivity*.json",
     "rust/crates/turbo-surf-render/src/form_reflection*.js",
     "rust/crates/turbo-surf-render/src/form_reflection*.json",
+    "rust/crates/turbo-surf-render/src/computed_intrinsics*.js",
+    "rust/crates/turbo-surf-render/src/computed_intrinsics*.json",
     "rust/crates/turbo-surf-render/src/css_descriptor*.js",
     "rust/crates/turbo-surf-render/src/css_descriptor*.json",
     "rust/crates/turbo-surf-render/src/control_prototypes*.js",

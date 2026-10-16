@@ -247,3 +247,38 @@ async fn retirement_cancels_the_request_creation_realm_even_when_parent_holds_re
         0
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn timeout_abort_listener_survives_collection_until_delivery() {
+    let mut page = PageSession::open("<body>", "https://timeout-lifetime.test/", "", "", 5000)
+        .await
+        .unwrap();
+    page.eval_expression("globalThis.timeoutDelivered=false;(()=>{const signal=AbortSignal.timeout(20);signal.addEventListener('abort',()=>{timeoutDelivered=signal.aborted&&signal.reason.name==='TimeoutError';});})() ").await.unwrap();
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    assert_eq!(
+        page.eval_expression("new Promise(resolve=>setTimeout(()=>resolve(timeoutDelivered),30))")
+            .await
+            .unwrap(),
+        "true"
+    );
+}
+
+#[cfg(turbo_surf_native_proxy)]
+#[tokio::test(flavor = "current_thread")]
+async fn pending_timeout_does_not_root_retired_document() {
+    let mut page = PageSession::open("<body>", "https://timeout-lifetime.test/", "", "", 5000)
+        .await
+        .unwrap();
+    page.eval_expression("(()=>{const frame=document.createElement('iframe');document.body.append(frame);const child=frame.contentWindow;const signal=child.AbortSignal.timeout(60000);signal.addEventListener('abort',()=>{});globalThis.timeoutRealmRefs=[new WeakRef(child),new WeakRef(signal)];frame.remove();return 'prepared';})()").await.unwrap();
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    assert_eq!(
+        page.eval_expression("JSON.stringify(timeoutRealmRefs.map(ref=>ref.deref()===undefined))")
+            .await
+            .unwrap(),
+        "[true,true]"
+    );
+}

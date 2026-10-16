@@ -260,10 +260,23 @@ residual work beyond this PR, with audio separately deferred in
   Preserve translated dependent-signal reason identity before event delivery.
   Chrome state/timeout controls and the pre-adapter native phase order are retained;
   the measured stream/listener microtask-order difference remains open in issue28.
+- Retain pending timeout signals in their document heap until delivery, releasing
+  them before dispatch; cover forced GC and retired-document ownership without
+  introducing a native realm root. Listener-count release and detached-window
+  active-time suspension remain open.
+- Pin the experimental155 SDK async-operation admission transaction and generated
+  stubs, with reusable exact-preimage failure, recovery, rejection and all-arity
+  controls. Verify source/patch provenance before compilation and retain genuine
+  rejected-operation errors. Production stock150 and arbitrary interruption
+  reservations remain outside this bounded repair.
+- Separate conformance-fixture budgets from queue-capacity checks. Preserve exact
+  4096-task admission/recovery assertions and reject watchdog termination as a
+  capacity result; give the host-media oracle a conformance budget without
+  changing product execution limits or Chrome expectations.
 
 ### Validation status
 
-The current actual155 renderer cohort passes385 tests with zero failures/ignores
+The pushed544180d renderer cohort passes385 tests with zero failures/ignores
 and the full all-target actual155 workspace strict gate passes. The earlier MCP
 checkpoint passes72 native/default71 tests. Full final default workspace,
 addon/shim/E2E and remaining native/distribution gates are in progress. The latest
@@ -271,14 +284,24 @@ addon/shim/E2E and remaining native/distribution gates are in progress. The late
 members and two absent collection interfaces. UserActivation matches its measured
 shape. See FINDINGS.md and PARITY-GAPS.md for bounded evidence and remaining work.
 
-The latest completed optimized Google matrix predates the elapsed-wait repair:
-both native runs submit genuine forms, receive search200 and follow retry to
-sorry429. Consent/save204 occurs after search has started, losing a response cookie
-across replacement. Chrome baseline has7 markers with zero recorded errors;
-instrumented Chrome reaches sorry. Native hydration still reports budget failures.
-The real-wait localhost regression passes; fresh optimized live validation remains
-pending. Sanitized metadata and hashes are saved in GOOGLE-LAST-RUN.json. Reliable
-native SERP acceptance remains unverified.
+The latest optimized544180d Google matrix repeats twice: both native baselines
+complete real consent204 and receive its HttpOnly cookie before search, then follow
+search200 to sorry429. Native baseline SERP succeeds0/2; Chrome baselines each have9
+markers and zero recorded errors. One native traced pass fails with Missing promise
+following budget exhaustion; the other reaches sorry. The timing repair is verified,
+but reliable native acceptance remains unresolved. Sanitized hashes, ordering and
+completeness are saved in GOOGLE-LAST-RUN.json. Offline runtime follow-ups cover
+async admission after watchdog termination and premature timeout-signal GC. The
+native155 follow-up passes155 focused tests, including timeout retirement/forced
+GC, and native all-target workspace strict checks. Final integrated full gates
+remain separate.
+
+The runtime follow-up default workspace gate passes1,312 tests across120 suites,
+with three explicit native-CSP capability skips and six generated doctest skips.
+Default all-target strict checks and formatting pass. Native155 affected tests
+pass155/155 and native all-target strict checks pass. These results precede the
+next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
+and fresh live validation remain pending.
 
 ## [0.5.3] — 2026-09-29 — hide internal globals from window fingerprint
 

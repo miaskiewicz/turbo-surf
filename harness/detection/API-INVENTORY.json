@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "collectedAt": "2026-10-16T12:52:30.719Z",
+  "collectedAt": "2026-10-16T13:33:12.866Z",
   "note": "Uninstrumented localhost API contract queries; no site detection conclusion.",
   "build": {
     "version": "0.5.4",
@@ -21,7 +21,7 @@
     }
   },
   "chromeVersion": "Chrome/155.0.8059.80",
-  "binaryHash": "213be61bac582a98b5d8ac4192cd76472b3041af4b22337f4a10a678bb179348",
+  "binaryHash": "981ec2b043fcdad957cd12116f11d54fa1ba7e18937030536ebce74333072508",
   "collectorHash": "7ec6d216db08da51e25e0c61a237ed4dde93247b2de1ed3c1aaf73407e5fc8f8",
   "totals": {
     "interfaceCount": 70,

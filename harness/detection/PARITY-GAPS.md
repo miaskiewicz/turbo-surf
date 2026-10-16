@@ -35,9 +35,10 @@ still being attempted in PR26; issue coverage does not defer that work by itself
 | Events / promises | Stream/listener microtask interleaving and broader Object-prototype descriptor hooks during abort/event dispatch and exception reporting | #28 |
 | CSS / resources | Remaining selectors/at-rules, used downloaded fonts/animations, images/pseudo epochs, inner SVG | #28 |
 | Security | Remaining CSP/reporting/sinks, popup/navigation/sandbox, COOP/COEP and permissions policies | #28 |
-| Fetch / storage | Remaining streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
+| Fetch / storage | Compression-dictionary discovery/cache/negotiation and actual dcb/dcz decoding; remaining streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
 | API inventory | Every unresolved missing/extra member and descriptor/inheritance/behavior path in API-INVENTORY.json; fresh paired measurement | #28 |
 | Distribution | Stock/native V8 alignment, native patch distribution, layout publication and registry-ready transport/crypto dependencies | #28 |
+| Browser lifecycle | Watchdog/async-op admission recovery, timeout-signal delivery/GC, listener-count release and retained detached-window active-time suspension | #28 |
 | Validation | Final combined workspace/default/native/addon/shim/E2E gates and lifecycle regressions | #28 |
 | Transport / GPU / Google | Unmeasured identity/wire/rendering differences and fresh native-cookie consent/SERP run | #28 |
 | Audio | Realtime/feedback/parameter connections/multichannel/custom waves/oversampling/suspend-resume | [#27](https://github.com/miaskiewicz/turbo-surf/issues/27) |
@@ -63,12 +64,29 @@ another event-dispatch/exception-reporting path. The reason-cache read itself is
 protected by a null-prototype descriptor; broader descriptor-hook isolation remains
 open in issue28.
 
+### Measured dictionary-transport gap
+
+[Saved independent evidence](./compression-dictionary-saved-evidence.json) shows
+Chrome receiving a compression-dictionary Link, fetching/storing dictionaries,
+sending Available-Dictionary on87 requests and actually decoding one dcb response.
+No Origin-Trial response header appears in that saved trace. Native code receives
+the Link but has no discovery/store/decode chain; its transport default advertises
+the four base encodings. Native explicit-header logs alone do not enumerate every
+final wire header. The existing bounded TLS/H2 comparison and GPU probe match;
+the upstream recipe's154 label is not itself a demonstrated wire mismatch.
+
+Implement genuine partitioned, origin-scoped and fresh dictionary state, validated
+headers/hashes, real decoding and policy-aware discovery before advertising the
+additional encodings. [RFC9842](https://www.rfc-editor.org/rfc/rfc9842.html) requires
+eligible dictionaries for those requests. This missing chain is being implemented;
+it is not a proven explanation for Google's rejection.
+
 ## Current integration checkpoint (2026-10-16)
 
 Canonical turbo-test2e27274 is mechanically vendored with public DOM0.5.7
 candidatefb60e6f (latest registry0.5.6). Genuine ElementInternals/CustomStateSet,
 checked-state foundation, FormData events, disconnected-form admission and native
-form reflection are integrated. The current affected native renderer cohort passes
+form reflection are integrated. The pushed544180d affected native renderer cohort passes
 385 tests with zero failures/ignores, including312 library and73 integration tests.
 Full all-target actual155 workspace strict checks pass. The earlier native MCP
 checkpoint passes72/default71 tests; full final workspace/addon/shim/E2E gates
@@ -79,16 +97,31 @@ published registry release is0.3.7. Actual V815.5.35.23-rusty matches installed
 Chrome155.0.8059.80's V8 patch; SDK source provenance remains155.0.8059.79.
 Stock production SDK150 remains a distinct incomplete configuration.
 
-The host-media and modern-CSS input failures are repaired. The latest completed
-optimized155 matrix has both native runs submit genuine forms, receive/search200
-and follow page-script retry to/sorry429. Consent/save204 now occurs, but its
-response arrives after search starts; the harness's virtual waits allowed the
-original document to be replaced before its HttpOnly response cookie was merged.
-The real-elapsed-wait repair passes its delayed-XHR localhost regression and awaits
-fresh live validation. Native homepage hydration still exceeds20s; a60s diagnostic
-also rejects. Chrome baseline has7 markers and zero recorded errors; its traced
-run reaches/sorry. See [latest run](./GOOGLE-LAST-RUN.json). Reliable native
-acceptance remains unverified.
+The host-media, modern-CSS and elapsed-wait input failures are repaired. In the
+latest two-repeat optimized544180d matrix, both native baselines complete real
+consent/save204 and carry the genuine HttpOnly BUCKET cookie before search. Both
+submit forms, receive/search200 and follow retry to/sorry429: zero native baseline
+SERP successes in two fresh runs. Chrome baselines have9 markers each and zero
+recorded errors. Native traced repeat0 fails with Missing promise after home
+budget exhaustion; repeat1 reaches/sorry. Both native homes still report20s budget
+termination. See [latest run](./GOOGLE-LAST-RUN.json).
+
+An offline admission-window probe reproduces the SDK promise bookkeeping failure;
+a pinned experimental155 transaction patch remains under validation. The combined
+default suite also found premature GC of an awaited timeout signal. Its realm-local
+retention candidate passes the exact failing test with unchanged budget/Chrome
+assertion; native retirement/forced-GC controls now pass within155 affected tests, and
+all-target native workspace strict checks pass. Final integrated full gates remain
+separate. A live or externally retained document currently retains pending timeout frontends even without public
+listeners until timeout fires. Listener-count early release and retained detached-
+window active-time suspension remain open. Reliable native acceptance is unresolved.
+
+The runtime follow-up default workspace gate passes1,312 tests across120 suites,
+with three explicit native-CSP capability skips and six generated doctest skips.
+Default all-target strict checks and formatting pass. Native155 affected tests
+pass155/155 and native all-target strict checks pass. These results precede the
+next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
+and fresh live validation remain pending.
 
 ## Active scope and deferred audio
 
@@ -155,7 +188,7 @@ Absent native interfaces in this expanded capture:
 - `RadioNodeList`: Chrome declares `value`, `constructor`, `Symbol(Symbol.toStringTag)`, `Symbol(Symbol.iterator)`.
 
 Historical counts were94 original-interface members, then66/147 on an earlier
-snapshot. The latest original-four count is65. Expanded counts now cover69
+snapshot. The latest original-four count is65. Expanded counts now cover70
 interfaces and134 missing own members; the domain grew by11 interfaces, so the
 expanded count is not directly comparable to the preceding133-member snapshot.
 [API-SHAPE.json](./API-SHAPE.json) and Git history retain the earlier evidence.
@@ -191,7 +224,7 @@ expanded count is not directly comparable to the preceding133-member snapshot.
 | Input execution | Stop at private input completion, bound synchronous runaway, cancel queued edits | Eight readiness/input regressions have passed profile cohorts. Private bootstrap arguments replace temporary public host globals; the full combined run exposed a termination race during frame setup, fixed with a checked lookup and current default regression pass. Final genuine155 combined rerun pending |
 | Classic script errors | Preserve original exceptions, trusted Window reporting and fetched-script load success; mute no-CORS cross-origin reports | Current default main/iframe and CORS controls pass; fresh Chrome155 authored fixture saved. Genuine155 paired audit pending; Window onerror registry and wider error handling in progress |
 | Element event propagation | Include actual Window in native node propagation path with capture/phase/stop/composedPath semantics | Canonical bf2a0ef passes 133 Rust and 63 JS tests, including private generic/Window/Node/Signal collection regressions. Generic EventTarget and AbortSignal listener/handler records are private; direct-target registration order follows fresh Chrome155 controls. Surf integration removes duplicate manual callbacks/DCL and public abort stubs; the earlier integrated native155 gate passed; six current event contracts pass; full default/native gates remain pending. Timeout/any, full composed-shadow retargeting and listener exception reporting remain open |
-| Live search | Fresh consent+query+retry flow without imported Chrome cookies | Native baseline genuinely submits/search200 then retries/sorry429; instrumented native remains hydration-incomplete. Chrome baseline has7 markers with one capture error |
+| Live search | Fresh consent+query+retry flow without imported Chrome cookies | Optimized544180d: both native baselines complete consent/save204 before search with genuine BUCKET cookie, then/search200→/sorry429 (0/2 SERP); Chrome baselines9 markers each, zero recorded errors. Native traced repeat0 has Missing promise; repeat1 reaches/sorry. Both native homes exhaust20s budget |
 | Publishing | Clean registry consumers need compatible published DOM and transport APIs; verify per-platform artifacts | Latest published DOM0.5.6 and layout0.3.7 are distinct from pinned public DOM0.5.7/layout0.3.8 candidates; registry-ready transport APIs, distributable hardened crypto provider and per-platform Surf artifacts remain unresolved |
 
 ## Closure record

@@ -711,3 +711,20 @@ preservation; the measured remaining queue-order difference is listed in
 hash-guarded adapter for private dense-array operations. Their original dispatch,
 timeout and dependent-signal algorithms remain in place, and public Array is
 unchanged.
+
+Awaited timeout signals are retained by their document heap until delivery and
+released before abort dispatch. Forced-GC and retired-document tests cover this
+lifetime boundary; no native root retains the document. Pending no-listener signals
+and retained detached-window active-time suspension remain explicit limitations.
+The experimental155 SDK separately carries a source-pinned async-operation
+admission repair with independent unpatched failure and patched recovery controls:
+
+```bash
+python3 -B harness/detection/engine-155/test_async_admission_helper.py
+python3 harness/detection/engine-155/run_async_admission.py .native-builds/sdk155-8059.79 --mode all
+```
+
+The second command leases the SDK target and temporarily restores exact preimages;
+run it without another compiler using that SDK. It leaves the SDK patched. Genuine
+rejections remain errors; interrupted operations are not silently discarded. See
+[the repair and its bounds](./engine-155/ASYNC-ADMISSION.md).

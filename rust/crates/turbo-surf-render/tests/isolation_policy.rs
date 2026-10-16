@@ -1162,12 +1162,14 @@ async fn report_only_csp_violation_tasks_match_chrome() {
 #[tokio::test(flavor = "current_thread")]
 async fn csp_task_capacity_is_bounded_and_recovers_after_dispatch() {
     let headers = vec![("Content-Security-Policy".into(), "style-src 'none'".into())];
+    // Fill the real 4096-entry queue before the wall-clock watchdog, including on
+    // slower CI hosts. Capacity termination is checked separately from that budget.
     let mut page = PageSession::open_with_response_headers(
         "<body></body>",
         "https://budget.test/",
         "",
         "",
-        5000,
+        60_000,
         "",
         Default::default(),
         &headers,
@@ -1189,7 +1191,7 @@ async fn csp_task_capacity_is_bounded_and_recovers_after_dispatch() {
         .await
         .unwrap_err();
     assert!(
-        error.contains("terminat") || error.contains("execution"),
+        error.contains("terminat") && !error.contains("session execution budget"),
         "{error}"
     );
     let result: Value = serde_json::from_str(

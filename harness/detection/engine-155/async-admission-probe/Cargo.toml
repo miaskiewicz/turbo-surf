@@ -1,0 +1,15 @@
+[package]
+name = "sdk155-async-admission-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+deno_core = "=0.412.0"
+deno_error = "=0.7.1"
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[profile.dev.package.v8]
+opt-level = 1

@@ -19,6 +19,10 @@
     ControllerBefore = AbortController;
   const oldSignal = Object.getOwnPropertyDescriptor(ControllerBefore.prototype, "signal").get;
   const oldAbort = ControllerBefore.prototype.abort;
+  // Pending timeout signals belong to their document heap, never a native root.
+  const pendingTimeouts = new Set(),
+    retainTimeout = Set.prototype.add.bind(pendingTimeouts),
+    releaseTimeout = Set.prototype.delete.bind(pendingTimeouts);
   const rawOwner = ops.Crypto;
   let shared = get(rawOwner);
   if (!shared) {
@@ -470,7 +474,10 @@
     Object.setPrototypeOf(front, Signal.prototype);
     save(front, "AbortSignal", raw);
     const state = record(front, "AbortSignal");
-    state.dispatch = () => apply(oldAbort, controller, [signalReason(front)]);
+    state.dispatch = () => {
+      releaseTimeout(front);
+      return apply(oldAbort, controller, [signalReason(front)]);
+    };
     if (apply(backend.signal.aborted.get, raw, []))
       state.dispatch(apply(backend.signal.reason.get, raw, []));
     else {
@@ -568,9 +575,11 @@
             if (name === "abort" && args[0] !== undefined) authored(args[0]);
             if (name === "abort" && args[0] === undefined)
               args[0] = new Exception("signal is aborted without reason", "AbortError");
-            return signalFront(
+            const front = signalFront(
               apply(backend.abort.AbortSignal[name], backend.abort.AbortSignal, args),
             );
+            if (name === "timeout") retainTimeout(front);
+            return front;
           } catch (error) {
             throw localError(error);
           }

@@ -1459,7 +1459,7 @@ existing signed-zero equality preserved. Licensed kernels and exact assertions
 remain unchanged. Linux Chrome browser audio output and deferred advanced audio
 remain outside this bounded proof.
 
-The current actual155 affected renderer cohort passes385 tests with zero failures/
+The pushed544180d affected renderer cohort passes385 tests with zero failures/
 ignores and the full all-target workspace strict gate passes. The harness now waits
 real elapsed time and pumps callbacks between waits; a delayed-XHR regression
 verifies response-cookie delivery before the next search. Hash-guarded private
@@ -1467,15 +1467,25 @@ Deno event arrays preserve official abort lifetime/timeout handling. The measure
 stream/listener microtask-order difference and broader descriptor-hook isolation
 remain open in the parity checklist.
 
-The latest completed optimized Google matrix predates the real-wait repair. Both
-native baseline and instrumented runs submit genuine forms, obtain search200 and
-follow page-script retry to sorry429. Consent/save204 arrives after search starts;
-homepage hydration still exceeds20s. Chrome baseline has7 result markers and zero
-recorded errors, while its instrumented run reaches sorry. Fresh optimized live
-validation of the wait repair remains pending. Successful native SERP loading and
-transport/GPU parity remain unverified. Earlier dated checkpoints above preserve
+The latest optimized544180d Google matrix repeats twice. Both native baselines
+complete consent/save204 with its HttpOnly BUCKET cookie before search, then follow
+search200 to sorry429 (0/2 native baseline SERP successes). Chrome baselines each
+have9 markers and zero recorded errors. One native traced pass fails Missing promise
+after homepage budget exhaustion; the other reaches sorry. Real elapsed consent
+waits are verified; reliable acceptance remains unresolved. Offline follow-ups
+cover watchdog/async-op admission recovery and premature timeout-signal GC.
+The native155 follow-up passes155 focused tests, including timeout retirement/
+forced GC, and native all-target workspace strict checks. Final integrated full
+gates remain separate. Earlier dated checkpoints above preserve
 their historical scope. Broader DOM/security/Fetch/resource behavior and final
 combined/live validation remain tracked in
 [PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md) and
 [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28). Deferred audio
 remains in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+
+The runtime follow-up default workspace gate passes1,312 tests across120 suites,
+with three explicit native-CSP capability skips and six generated doctest skips.
+Default all-target strict checks and formatting pass. Native155 affected tests
+pass155/155 and native all-target strict checks pass. These results precede the
+next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
+and fresh live validation remain pending.

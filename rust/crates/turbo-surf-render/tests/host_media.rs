@@ -18,7 +18,8 @@ async fn native_host_media_matches_chrome_and_drives_live_css_without_guest_gett
         "https://example.test/",
         "",
         "",
-        5000,
+        // This is a host/CSS conformance fixture, not an execution-budget test.
+        60_000,
     )
     .await
     .unwrap();

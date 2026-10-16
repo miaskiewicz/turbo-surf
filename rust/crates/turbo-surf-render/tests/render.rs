@@ -3714,7 +3714,7 @@ async fn grandchild_iframe_realm_tops_out_at_the_real_top_window() {
 // recursing forever, so the render completes and the observed depth is capped.
 #[tokio::test]
 async fn nested_iframe_depth_cap_stops_the_recursion() {
-    let html = render_page(
+    let html = render_page_with_budget(
         "<body><div id='root'></div></body>",
         "http://localhost/",
         r#"
@@ -3726,6 +3726,8 @@ async fn nested_iframe_depth_cap_stops_the_recursion() {
         const f0 = document.createElement('iframe');document.body.appendChild(f0);
         f0.srcdoc = window.__BOMB;
         "#,
+        // The exact depth bound, rather than concurrent host load, is this contract.
+        60_000,
     )
     .await
     .unwrap();
@@ -4394,9 +4396,12 @@ async fn iframe_native_documents_and_browser_api_functions_belong_to_each_realm(
             doc.getElementById('only-child').addEventListener('probe',()=>document.getElementById('root').textContent='updated');
             doc.getElementById('only-child').dispatchEvent(new Event('probe'));
             result.reentrant=document.getElementById('root').textContent==='updated' && doc.getElementById('only-child').textContent==='child';
-            let rejected=false;
-            try { document.body.appendChild(doc.getElementById('only-child')); } catch(error) { rejected=/Cross-document node adoption/.test(error.message); }
-            result.noAliasing=rejected && doc.getElementById('only-child').ownerDocument===doc;
+            const original=doc.getElementById('only-child');
+            document.body.appendChild(original);
+            result.noAliasing=document.getElementById('only-child')===original && original.ownerDocument===document && doc.getElementById('only-child')===null;
+            document.getElementById('root').textContent='reset';
+            original.dispatchEvent(new Event('probe'));
+            result.adoptedListener=document.getElementById('root').textContent==='updated';
             document.getElementById('root').setAttribute('data-result',JSON.stringify(result));
           };
         "#,
@@ -4410,6 +4415,7 @@ async fn iframe_native_documents_and_browser_api_functions_belong_to_each_realm(
         "cookie",
         "reentrant",
         "noAliasing",
+        "adoptedListener",
     ] {
         assert!(
             html.contains(&format!("&quot;{key}&quot;:true")),

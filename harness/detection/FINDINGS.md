@@ -61,26 +61,54 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    69-interface scope fell from359 to349 after descriptor/order repairs; earlier
    smaller scopes are not directly comparable. The reproducible
    [API-INVENTORY.json](./API-INVENTORY.json) retains every observed path and hashes.
-9. **Housekeeping:** integrations66dab51,93bcacd,a37330f anddd73863 are pushed.
-   Canonical2e27274 is vendored. The tested elapsed-wait, layout and private Deno
-   event-array batch is awaiting its follow-up commit and final CI. Every remaining
+9. **Housekeeping:** integrations66dab51,93bcacd,a37330f,dd73863 and544180d are pushed.
+   Canonical2e27274 is vendored. The elapsed-wait, layout and private Deno event-array batch is committed.
+   Its CI exposed a capacity-fixture timeout on slower Linux runners; the next
+   candidate preserves the exact4096-task capacity oracle while separating its
+   budget from the resource limit. Final CI remains pending. Every remaining
    category has durable coverage in issue28; audio remains deferred in issue27.
    No Surf release tag is created.
-10. **Live Google:** the latest completed optimized155 matrix predates the elapsed-
-    wait repair. Both native baseline and instrumented runs perform genuine form
-    search200 followed by a page-script retry to sorry429. Real consent/save204 is
-    now observed, but its response arrives after search starts and its HttpOnly
-    BUCKET cookie is absent from the next document. Both native runs retain home
-    hydration-budget failures. Chrome baseline has7 result markers and zero recorded
-    errors; instrumented Chrome reaches /sorry with one recorded error. These counts
-    describe trace.errors, not all native stderr script diagnostics.
-    [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json) saves sanitized request contexts,
-    consent ordering, cookie names, readiness and exact executable/harness/trace
-    hashes. A separate60s native diagnostic also reaches sorry; increasing budget
-    alone does not establish acceptance. The real-elapsed-wait regression now passes
-    against a delayed localhost XHR; a fresh optimized live run remains pending.
-    Chrome cookies are never imported. Reliable native SERP acceptance remains
-    unverified.
+10. **Live Google:** the optimized544180d matrix repeats twice with fresh independent
+    state. Both native baselines complete real consent/save204, retain the genuine
+    HttpOnly BUCKET cookie before search, submit genuine forms, receive/search200
+    and follow page-script retry to/sorry429: **0/2 native baseline SERP successes**.
+    Chrome baselines have9 markers each with zero recorded errors. Native traced
+    repeat0 stops during dismissal with `Missing promise @ 16` after home budget
+    exhaustion; traced repeat1 reaches/sorry429. Both traced Chrome runs also reach
+    /sorry with one recorded error each. Matrix exit1 preserves the incomplete run.
+    The elapsed-wait/cookie-ordering repair is live-verified, but did not establish
+    Google acceptance. Native home hydration still exceeds20s.
+    [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json) retains sanitized contexts,
+    consent ordering, cookie names, completeness and exact executable/harness/trace
+    hashes. Counts describe trace.errors, not all native stderr script diagnostics.
+    Chrome cookies are never imported. Reliable native SERP remains unresolved.
+11. **Current runtime follow-up:** an offline native-op admission probe reproduces
+    Missing promise after watchdog termination; a hash-pinned experimental155
+    transaction patch is under validation. The full default suite also exposed
+    premature GC of an awaited timeout signal; a realm-local lifetime fix passes
+    the exact failing test without changing its budget or Chrome expectation.
+    The native155 follow-up passes155 focused tests (events9, Fetch/GC7,
+    render128 and document11) with zero failures/ignores; the retired timeout
+    realm is genuinely collected. Native all-target workspace strict checks pass.
+    Full gates exposed stale adoption/referrer assertions, confirmed against
+    Chrome and corrected without changing product limits. Default workspace
+    verification and the final integrated feature gates remain separate. Broader
+    descriptor/stream queue gaps remain tracked in#28.
+
+12. **New measured transport gap:** the saved Chrome Google run fetches compression
+    dictionaries and sends Available-Dictionary; one response actually uses dcb.
+    Native has no dictionary discovery/cache/decode chain. The bounded TLS/H2 and
+    shared GPU controls match their measured scope. This is a real pending resource
+    feature, not evidence that changing the base recipe label fixes acceptance.
+    [Sanitized evidence](./compression-dictionary-saved-evidence.json) and the
+    central checklist retain the exact scope; implementation is in progress.
+
+The runtime follow-up default workspace gate passes1,312 tests across120 suites,
+with three explicit native-CSP capability skips and six generated doctest skips.
+Default all-target strict checks and formatting pass. Native155 affected tests
+pass155/155 and native all-target strict checks pass. These results precede the
+next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
+and fresh live validation remain pending.
 
 ## Isolated CSP navigation checkpoint — 2026-10-14
 

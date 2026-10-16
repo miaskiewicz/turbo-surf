@@ -23,6 +23,15 @@ Historical renderer cohort counts below apply to their recorded source; the
 new combined renderer/workspace/addon and fresh Google checks remain separate.
 Production Cargo defaults still select the stock150 SDK.
 
+The experimental build entry point also verifies/applies the pinned Deno async-op
+admission transaction before compiling. It registers the operation promise before
+native admission so a watchdog interruption cannot orphan an admitted completion.
+The native archive and bindings are unchanged. The reusable preimage/recovery/
+rejection controls, source hashes and explicit interruption limits are documented
+in [ASYNC-ADMISSION.md](./ASYNC-ADMISSION.md); durable offline evidence is in
+[async-admission-proof.json](./async-admission-proof.json). This patch does not
+change the production stock SDK or establish live Google acceptance.
+
 The older155.0.8059.40 / V815.5.35.20 profile and artifacts remain preserved in
 `../engine-154/profiles/155.json`. Select that file explicitly when reproducing a
 historical build. The default155 preparation now selects155-8059.79.json.

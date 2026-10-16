@@ -110,7 +110,8 @@ async fn borrowed_document_members_target_the_actual_same_origin_frame() {
     assert_eq!(value["url"], "about:srcdoc");
     assert_eq!(value["ready"], "complete");
     assert_eq!(value["body"], "frame body");
-    assert_eq!(value["referrer"], "http://localhost/parent", "{value}");
+    // The independent CSP navigation Chrome control selects origin-only for srcdoc.
+    assert_eq!(value["referrer"], "http://localhost/", "{value}");
     for name in ["owner", "chain", "inherited", "cookie", "retainedState"] {
         assert_eq!(value[name], true, "{value}");
     }

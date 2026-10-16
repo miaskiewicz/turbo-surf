@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-16",
+  "scope": "experimental managed Chrome155 SDK async-op admission transaction",
+  "native": {
+    "nativeVersionLine": "V8 15.5.35.23-rusty",
+    "engineRevision": "d89479ac5446a374c55a35be19b5a23437558d99",
+    "archiveSha256": "1866b4e3ee649fb1209d0dfb6d7a2dac7f5b8a2033adfdd0e112a7c675de7a9f",
+    "bindingsSha256": "6380313e48769666822636529cf1a6199d6ab676fa6205bbb1cf2d6786375e41"
+  },
+  "files": {
+    "async-admission.patch": "0fcad96cb36bf87e9705676d508722ec9a58ae9d353a2063bb32fe503a25a4ea",
+    "async-admission-sources.json": "a3d03e2984bd16b26636dece8312c78ccc29bd1f46f55c8db3f20a5711e4a21f",
+    "async-admission-probe/src/main.rs": "8cdb6adbb6819c765d45768c7121ebc25e7342ce791fd70cdb9fa2f31accd66e",
+    "async-admission-probe/Cargo.toml": "e33ed2613312f4cc9f5596ae4507df7d8fb33ea2de0348f2c7fc27669b86e008",
+    "async-admission-probe/Cargo.lock": "d058bb5b0f0ebe6f3902f6473c766d4a84b71824df61cd1e2d327e51204023e9"
+  },
+  "sourcePreimagesAndPostimages": {
+    "00_infra.js": {
+      "before": "1fde54bf45c211dda0cb9d14eea8740f24f933e026e1be6b067d69df966b0bc2",
+      "after": "69faaf8309c616dca26a9839680cff7ad31aad246e48c9ea3957d8a65036d4a7"
+    },
+    "rebuild_async_stubs.js": {
+      "before": "7b60d2039cbd066ae05a7c0ef1550c02ec235e4513e638ae9d27ede45c1bcde7",
+      "after": "8973d489aa589822788f266af80869b4edaa5a3b066ad7c705c9e07ec35605cc"
+    }
+  },
+  "outcomes": {
+    "preimage": {
+      "result": "PASS",
+      "requiredFailureSubstring": "Missing promise",
+      "mechanism": "native async first poll requests isolate termination before JS promise registration, yields, then host clears termination and polls"
+    },
+    "recovery": {
+      "result": "PASS",
+      "interruptedSuccessfulCompletion": "event loop completes without Missing promise",
+      "generatedStubArities": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "outcomesPerArity": ["pending", "eager", "synchronous throw"],
+      "matrixCases": 30,
+      "checks": [
+        "argument forwarding",
+        "registered promise visible during native admission",
+        "no reservation remains after settlement",
+        "normal pending/eager/caught throw before and after interruption",
+        "no unhandled rejection in successful recovery controls"
+      ]
+    },
+    "rejection": {
+      "result": "PASS",
+      "ordinaryCaught": "clean event loop",
+      "ordinaryUnhandled": "ordinary native rejection",
+      "interruptedUnhandled": "interrupted native rejection",
+      "missingPromise": false,
+      "ordinaryUnhandledErrorsSuppressed": false
+    },
+    "generatorConsistency": {
+      "result": "PASS",
+      "command": "rebuild_async_stubs.js --check (Node compatibility Deno fs adapter)"
+    }
+  },
+  "limitations": [
+    "Termination before native admission or during partial promise allocation may retain a reservation until isolate teardown; repeated interruptions are not proven bounded.",
+    "An interrupted native rejection remains genuinely unhandled when termination prevents the caller attaching its handler.",
+    "Eager and synchronous-throw calls advance internal IDs and settle an unused successful reservation, adding an internal catch microtask.",
+    "This fixes the demonstrated registration window, not every possible interrupted event-loop dispatch or promise-observation failure.",
+    "No Google acceptance claim or published SDK artifact follows from these offline controls."
+  ],
+  "reproduce": "python3 harness/detection/engine-155/run_async_admission.py SDK --mode all",
+  "evidence": "Assertions executed against actual native archive and source pre/postimages; raw local proof logs are ignored. Preimage and patched recovery were separately executed; final added rejection mode also independently executed."
+}

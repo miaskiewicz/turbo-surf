@@ -1,3 +1,5 @@
+rust/crates/turbo-surf-render/src/control_labels*.js
+rust/crates/turbo-surf-render/src/control_labels*.json
 rust/crates/turbo-surf-render/src/radio_group_moves*.js
 rust/crates/turbo-surf-render/src/radio_group_moves*.json
 rust/crates/turbo-surf-render/src/radio_owner_review*.js

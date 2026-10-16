@@ -5,8 +5,7 @@
     make = ns.makeNativeFunction,
     bridge = g.__internalsNative;
   const ce = g.__captureCustomElementInternals,
-    forms = g.__captureFormInternals,
-    live = ns.internalsLiveCollection;
+    forms = g.__captureFormInternals;
   delete g.__internalsNative;
   delete g.__captureCustomElementInternals;
   delete g.__captureFormInternals;
@@ -292,20 +291,7 @@
     return bridge("shadow", need(this, internals).host);
   });
   accessor(Internals.prototype, "labels", function () {
-    const record = formRecord(this);
-    if (!record.labels)
-      record.labels = live(() => {
-        const result = [],
-          root = apply(forms.getRoot, record.host, []),
-          labels = forms.queryAll(root, "label");
-        for (let i = 0; i < labels.length; i++) {
-          const label = labels[i],
-            target = forms.attribute(label, "for");
-          if (apply(labelControl, label, []) === record.host) result[result.length] = label;
-        }
-        return result;
-      }, false);
-    return record.labels;
+    return forms.labels(formRecord(this).host);
   });
   for (const name of ["checkValidity", "reportValidity"])
     method(Internals.prototype, name, 0, function () {
@@ -326,23 +312,9 @@
     record.restore = restored;
   });
   const contains = Node.prototype.contains;
-  const originalLabel = Object.getOwnPropertyDescriptor(HTMLLabelElement.prototype, "control").get;
-  const labelControl = function () {
-    const original = apply(originalLabel, this, []);
-    if (original) return original;
-    const root = apply(forms.getRoot, this, []),
-      target = forms.attribute(this, "for");
-    const nodes = forms.queryAll(target !== null ? root : this, target !== null ? "[id]" : "*");
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i];
-      if (target !== null && forms.attribute(node, "id") !== target) continue;
-      const definition = ce.record(node)?.definition;
-      if (definition?.formAssociated) return node;
-      if (target !== null) return null;
-    }
-    return null;
-  };
-  accessor(HTMLLabelElement.prototype, "control", labelControl);
+  accessor(HTMLLabelElement.prototype, "control", function () {
+    return forms.labelControl(this);
+  });
   method(Internals.prototype, "setValidity", 1, function (input, message, anchor) {
     const record = formRecord(this);
     if (!arguments.length) throw new ErrorType("One argument required");

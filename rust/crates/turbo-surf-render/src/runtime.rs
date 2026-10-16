@@ -3519,7 +3519,10 @@ fn op_timer_advance(state: &mut OpState, due: f64) {
     }
 }
 
-fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> u32 {
+fn run_next_window_timer(
+    rt: &mut JsRuntime,
+    allow_advance: bool,
+) -> (u32, Option<tokio::time::Instant>) {
     let mut contexts = vec![rt.main_context()];
     contexts.extend(
         rt.op_state()
@@ -3549,7 +3552,7 @@ fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> u32 {
         }
     }
     let Some((due, context)) = next else {
-        return 0;
+        return (0, None);
     };
     if !allow_advance {
         let state = JsRuntime::op_state_from(scope);
@@ -3557,13 +3560,20 @@ fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> u32 {
         let clock = state.borrow::<TimerClock>();
         let now = clock.started.elapsed().as_secs_f64() * 1000.0 + clock.advance.get();
         if due > now {
-            return 0;
+            let real_delay =
+                std::time::Duration::from_secs_f64(((due - clock.advance.get()) / 1000.0).max(0.0));
+            let deadline = clock
+                .started
+                .checked_add(real_delay)
+                .map(tokio::time::Instant::from_std);
+            return (0, deadline);
         }
     }
     let active = &mut v8::ContextScope::new(scope, context);
-    call_frame_helper(active, "runNextTimer", &[])
+    let fired = call_frame_helper(active, "runNextTimer", &[])
         .and_then(|value| value.uint32_value(active))
-        .unwrap_or(0)
+        .unwrap_or(0);
+    (fired, None)
 }
 fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
     let mut contexts = vec![rt.main_context()];
@@ -12597,6 +12607,10 @@ async fn drain_event_loop_until_completion(
     completion: Option<&v8::Global<v8::Value>>,
 ) -> Result<(), String> {
     let mut frame_timer_budget = 200000u32;
+    let mut window_timer_wake: Option<(
+        tokio::time::Instant,
+        std::pin::Pin<Box<tokio::time::Sleep>>,
+    )> = None;
     let storage_waiter = storage_events::waiter(&rt.op_state().borrow());
     // Even a synchronous result ends a script job. Observer and Promise
     // microtasks must run before the operation-completion shortcut can return.
@@ -12872,8 +12886,10 @@ async fn drain_event_loop_until_completion(
             }
             // Already-due timer tasks precede background networking tasks; a
             // resource event must not advance the clock to a future timer.
+            let mut window_deadline = None;
             if frame_timer_budget > 0 {
-                let fired = run_next_window_timer(rt, false);
+                let (fired, deadline) = run_next_window_timer(rt, false);
+                window_deadline = deadline;
                 frame_timer_budget = frame_timer_budget.saturating_sub(fired);
                 if fired > 0 {
                     return std::task::Poll::Ready(None);
@@ -12888,9 +12904,30 @@ async fn drain_event_loop_until_completion(
                 }
                 return std::task::Poll::Ready(None);
             }
-            // A suspended child module can depend on a future Window timer.
-            if frame_timer_budget > 0 {
-                let fired = run_next_window_timer(rt, true);
+            // Native I/O and official system timers use real monotonic time.
+            // Do not leap a Window timer past their earlier wake-up. Keep one
+            // precise wake so a stalled native request cannot starve the timer.
+            if frame_timer_budget > 0 && result.is_pending() {
+                if let Some(deadline) = window_deadline {
+                    if window_timer_wake
+                        .as_ref()
+                        .is_none_or(|(previous, _)| *previous != deadline)
+                    {
+                        window_timer_wake =
+                            Some((deadline, Box::pin(tokio::time::sleep_until(deadline))));
+                    }
+                    if std::future::Future::poll(window_timer_wake.as_mut().unwrap().1.as_mut(), cx)
+                        .is_ready()
+                    {
+                        cx.waker().wake_by_ref();
+                        return std::task::Poll::Ready(None);
+                    }
+                } else {
+                    window_timer_wake = None;
+                }
+            } else if frame_timer_budget > 0 {
+                window_timer_wake = None;
+                let (fired, _) = run_next_window_timer(rt, true);
                 frame_timer_budget = frame_timer_budget.saturating_sub(fired);
                 if fired > 0 {
                     return std::task::Poll::Ready(None);

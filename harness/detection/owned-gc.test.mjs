@@ -32,3 +32,21 @@ test("radio ownership controls retain their independently measured real-task GC 
   assert.deepEqual(review.nativeProof.first, control.result[0].result.first);
   assert.deepEqual(review.nativeProof.afterRelease, control.result[0].result.afterRelease);
 });
+
+test("native control labels use independently collected real-task GC controls", () => {
+  const control = JSON.parse(read(`${dom}control_labels_gc_chrome155.json`));
+  assert.equal(control.collectorSha256, digest("./owned-gc-chrome.mjs"));
+  assert.equal(control.probeSha256, digest(`${dom}control_labels_gc_probe.js`));
+  assert.equal(control.casesSha256, digest(`${dom}radio_dirty_cases.json`));
+  assert.equal(control.browser, "Chrome/155.0.8059.80");
+  assert.equal(control.v8, "15.5.35.23");
+  assert.deepEqual(control.gcPolicy, { rounds: 3, settleMs: 50, taskExpression: "0" });
+  assert.deepEqual(control.errors, []);
+  assert.deepEqual(control.result[0].result.afterRelease.alive, [
+    false,
+    false,
+    false,
+    false,
+    false,
+  ]);
+});

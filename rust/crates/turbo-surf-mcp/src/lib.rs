@@ -112,7 +112,7 @@ const HUMAN_DRIVER_TMPL: &str = r#"((raw, __opts) => {
     } catch (e) {}
     try { document.body.setAttribute("data-hi-done", "1"); } catch (e) {}
   };
-  __hi.sequence(document, steps, __opts).then(() => { captureNav(); });
+  return __hi.sequence(document, steps, __opts).then(() => { captureNav(); });
 })"#;
 
 /// Serialize a JSON value for embedding as a JS expression: standard JSON plus escaping U+2028 /
@@ -622,6 +622,17 @@ impl Session {
         base: &str,
         script: &str,
     ) -> Result<String, String> {
+        self.render_script_with_completion(html, base, script, false)
+            .await
+    }
+
+    async fn render_script_with_completion(
+        &mut self,
+        html: &str,
+        base: &str,
+        script: &str,
+        await_final_program: bool,
+    ) -> Result<String, String> {
         let mut page = turbo_surf_render::PageSession::open_with_document_response(
             html,
             base,
@@ -636,12 +647,21 @@ impl Session {
         )
         .await?;
         let mut program_error = None;
-        for program in script.split(turbo_surf_render::SCRIPT_BOUNDARY) {
-            if !program.trim().is_empty() {
-                if let Err(error) = page.eval(program).await {
-                    program_error = Some(error);
-                    break;
-                }
+        let mut programs = script
+            .split(turbo_surf_render::SCRIPT_BOUNDARY)
+            .filter(|program| !program.trim().is_empty())
+            .peekable();
+        while let Some(program) = programs.next() {
+            // The human driver returns its actual sequence Promise. Its completion
+            // is independent of DOM markers and the generic stable-DOM heuristic.
+            let result = if await_final_program && programs.peek().is_none() {
+                page.eval_expression(program).await
+            } else {
+                page.eval(program).await
+            };
+            if let Err(error) = result {
+                program_error = Some(error);
+                break;
             }
         }
         let (count, url, metadata) = page.navigation_snapshot();
@@ -825,7 +845,9 @@ impl Session {
         let base = self.url.clone();
         let b = turbo_surf_render::SCRIPT_BOUNDARY;
         let script = format!("{}{b}{driver}", turbo_surf_render::HUMAN_INPUT_JS);
-        let hydrated = self.render_script(&html, &base, &script).await?;
+        let hydrated = self
+            .render_script_with_completion(&html, &base, &script, true)
+            .await?;
         let completed = hydrated.contains("data-hi-done=");
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
@@ -3634,6 +3656,27 @@ mod tests {
             miss.unwrap_err().contains("{query}"),
             "error names the unresolved placeholder"
         );
+    }
+
+    #[tokio::test]
+    async fn human_completion_awaits_real_async_form_and_propagates_rejection() {
+        let port = spawn_form_nav_server().await;
+        let base = format!("http://127.0.0.1:{port}/");
+        let mut session = Session::new();
+        session.goto(&base).await.unwrap();
+        let html = serialize_doc(session.tree().unwrap());
+        let program = "document.body.setAttribute('data-hi-done','forged');new Promise(resolve=>setTimeout(()=>{document.querySelector('input[name=q]').value='deferred';document.querySelector('form').requestSubmit();resolve();},30))";
+        let rendered = session
+            .render_script_with_completion(&html, &base, program, true)
+            .await
+            .unwrap();
+        assert_eq!(session.last_render_navigation_count, 1);
+        assert!(session.url.contains("q=deferred"));
+        assert!(rendered.contains("Results for deferred"));
+        let source = session.url.clone();
+        let failure = session.render_script_with_completion(&rendered, &source,
+            "new Promise((_,reject)=>setTimeout(()=>reject(new Error('human completion failed')),10))", true).await.unwrap_err();
+        assert!(failure.contains("human completion failed"), "{failure}");
     }
 
     // human_interact FOLLOWS the navigation a form-submit interaction triggers: filling the

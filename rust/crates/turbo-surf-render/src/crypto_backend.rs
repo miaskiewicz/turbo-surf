@@ -67,7 +67,8 @@ pub(crate) fn install<'s>(
 
 pub(crate) fn extensions() -> Vec<Extension> {
     vec![
-        deno_webidl::deno_webidl::init(),
+        web_event_arrays::harden_webidl(deno_webidl::deno_webidl::init())
+            .expect("Pinned official Deno private WebIDL sequence array adapter"),
         web_event_arrays::harden(deno_web::deno_web::init(
             deno_web::BlobStore::default_arc(),
             None,

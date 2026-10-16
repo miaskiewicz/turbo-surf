@@ -6,7 +6,8 @@
     set = ops.op_interface_record_set;
   const define = Object.defineProperty,
     create = Object.create,
-    descriptors = Object.getOwnPropertyDescriptors;
+    descriptors = Object.getOwnPropertyDescriptors,
+    iteratorSymbol = Symbol.iterator;
   const apply = Reflect.apply,
     construct = Reflect.construct,
     own = Object.hasOwn;
@@ -122,7 +123,11 @@
       state.kind = "WebInterface";
       set(front, state);
     }
-    define(state, "web", { value: { name, raw, realm }, configurable: true });
+    define(state, "web", {
+      __proto__: null,
+      value: { __proto__: null, name, raw, realm },
+      configurable: true,
+    });
     setFront(raw, front);
     return front;
   };
@@ -289,7 +294,7 @@
               (kind === "TransformStream" && member === "transform")
                 ? 1
                 : 0;
-            if (!["cancel", "abort", "close"].includes(member))
+            if (member !== "cancel" && member !== "abort" && member !== "close")
               args[index] = wrap(
                 args[index],
                 controllerName(
@@ -564,13 +569,52 @@
           try {
             if (name === "any") {
               if (!args.length) throw new TypeErrorType("AbortSignal.any requires an argument");
-              const input = args[0],
-                iterator = input?.[Symbol.iterator];
+              const input = args[0];
+              if (input === null || (typeof input !== "object" && typeof input !== "function"))
+                throw new TypeErrorType("AbortSignal.any requires an iterable");
+              const iterator = input[iteratorSymbol];
               if (typeof iterator !== "function")
                 throw new TypeErrorType("AbortSignal.any requires an iterable");
+              const source = apply(iterator, input, []);
+              if (source === null || (typeof source !== "object" && typeof source !== "function"))
+                throw new TypeErrorType("Iterator result is not an object");
+              const next = source.next;
+              if (typeof next !== "function")
+                throw new TypeErrorType("Iterator next is not callable");
+              const values = create(null);
+              let count = 0;
+              while (true) {
+                const item = apply(next, source, []);
+                if (item === null || (typeof item !== "object" && typeof item !== "function"))
+                  throw new TypeErrorType("Iterator result is not an object");
+                if (item.done) break;
+                // Sequence conversion does not IteratorClose on a brand error.
+                define(values, count++, {
+                  __proto__: null,
+                  value: unwrap(item.value, "AbortSignal"),
+                });
+              }
+              // Raw records never pass through page Array.from, iterators,
+              // numeric setters or inherited property-descriptor accessors.
               const iterable = create(null);
-              define(iterable, Symbol.iterator, { value: () => apply(iterator, input, []) });
-              args[0] = Array.from(iterable, (value) => unwrap(value, "AbortSignal"));
+              define(iterable, iteratorSymbol, {
+                __proto__: null,
+                value: () => {
+                  let index = 0;
+                  const cursor = create(null);
+                  define(cursor, "next", {
+                    __proto__: null,
+                    value: () => {
+                      const item = create(null);
+                      item.done = index === count;
+                      if (!item.done) item.value = values[index++];
+                      return item;
+                    },
+                  });
+                  return cursor;
+                },
+              });
+              args[0] = iterable;
             }
             if (name === "abort" && args[0] !== undefined) authored(args[0]);
             if (name === "abort" && args[0] === undefined)

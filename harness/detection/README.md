@@ -11,6 +11,25 @@ JS navigation retries execute in persistent `PageSession`s.
 The [compression dictionary controls](./COMPRESSION-DICTIONARIES.md) document genuine
 discovery, policy/lifecycle, independent codec fixtures and current streaming bounds.
 
+## Window and native timer clocks
+
+`window-timer-clock-chrome.mjs` captures independent normal Chrome outcomes for
+real delayed body completion, stalled-body cancellation and official timeout
+delivery, including held signals with no public listener. It records server-side
+socket closure before browser teardown, exact source hashes and actual versions.
+
+```sh
+node harness/detection/window-timer-clock-chrome.mjs harness/detection/fixtures/window-timer-clock-chrome155.json
+cargo test --manifest-path rust/Cargo.toml -p turbo-surf-render --test window_timer_clock --test fetch_streams
+```
+
+The native pump waits on one precise, cancelable monotonic Window deadline while
+Deno reports pending native work. Due timers and resource tasks remain active;
+quiescent work retains existing virtual fast-forward. This prevents a later
+Window timer from overtaking earlier real I/O/system timers without starving
+a deadline that must cancel stalled I/O. These bounded controls do not close
+broader timer throttling, detached-document active-time or stream queue ordering.
+
 ## Build and run
 
 On a Mac with a real Metal GPU:

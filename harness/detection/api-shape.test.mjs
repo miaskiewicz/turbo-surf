@@ -58,7 +58,17 @@ test("collector tests construction without invoking the constructor or network A
       createElement(name) { return name === 'canvas' ? new HTMLCanvasElement() : new Element(); }
       querySelector() { if (!(this instanceof Document)) throw new TypeError(); return null; }
     }
-    Object.assign(globalThis, { Element, HTMLCanvasElement, Document });
+    class HTMLSelectElement extends Element {
+      constructor() { super(); constructorCalls++; }
+      get labels() { throw new Error('inventory invoked labels'); }
+    }
+    class HTMLOutputElement extends HTMLSelectElement { get labels() { throw new Error('inventory invoked labels'); } }
+    class HTMLMeterElement extends HTMLSelectElement { get labels() { throw new Error('inventory invoked labels'); } }
+    class HTMLProgressElement extends HTMLSelectElement { get labels() { throw new Error('inventory invoked labels'); } }
+    class HTMLLabelElement extends HTMLSelectElement { get control() { throw new Error('inventory invoked label.control'); } }
+    Object.defineProperty(HTMLSelectElement.prototype, 'labels', { enumerable: true });
+    Object.assign(globalThis, { Element, HTMLCanvasElement, Document,
+      HTMLSelectElement, HTMLOutputElement, HTMLMeterElement, HTMLProgressElement, HTMLLabelElement });
     globalThis.document = new Document();
     globalThis.navigator = { permissions: { query() {} }, sendBeacon() { networkCalls++; } };
     globalThis.performance = { now() { return 0; }, timeOrigin: 1 };
@@ -72,6 +82,28 @@ test("collector tests construction without invoking the constructor or network A
   assert.equal(data.constructorCalls, 0);
   assert.equal(data.networkCalls, 0);
   assert.equal(data.report.constructors.URL.shape.constructible, true);
+  for (const [name, member] of [
+    ["HTMLSelectElement", "labels"],
+    ["HTMLOutputElement", "labels"],
+    ["HTMLMeterElement", "labels"],
+    ["HTMLProgressElement", "labels"],
+    ["HTMLLabelElement", "control"],
+  ]) {
+    const collected = data.report.constructors[name];
+    assert.equal(collected.shape.name, name);
+    assert.equal(collected.shape.constructible, true);
+    assert.ok(collected.prototypeKeys.includes(member));
+    assert.ok(collected.prototypeOwnKeyOrder.includes(member));
+    assert.equal(collected.prototypeMembers[member].kind, "accessor");
+    assert.equal(collected.prototypeMembers[member].get.name, `get ${member}`);
+    assert.equal(collected.prototypeMembers[member].get.length, 0);
+    assert.equal(collected.prototypeMembers[member].configurable, true);
+  }
+  assert.equal(data.report.constructors.HTMLSelectElement.prototypeMembers.labels.enumerable, true);
+  assert.equal(
+    data.report.constructors.HTMLOutputElement.prototypeMembers.labels.enumerable,
+    false,
+  );
   assert.equal(data.report.methods["canvas.getContext"].shape.constructible, false);
   assert.deepEqual(data.report.constructors.Element.prototypeOwnKeyOrder, [
     "constructor",

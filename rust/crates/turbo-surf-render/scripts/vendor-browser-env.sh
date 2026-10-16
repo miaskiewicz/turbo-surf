@@ -65,6 +65,9 @@ done
 for file in form_checked_state.rs radio_dirty_adoption_gc_chrome155.json radio_dirty_adoption_gc_probe.js radio_dirty_cases.json radio_dirty_chrome155.json radio_dirty_gc_chrome155.json radio_dirty_gc_probe.js radio_dirty_probe.js radio_dirty_transition_chrome155.json radio_dirty_transition_probe.js; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
+for file in control_labels.rs control_labels_probe.js control_labels_chrome155.json control_labels_realm_probe.js control_labels_realm_chrome155.json control_labels_gc_probe.js control_labels_gc_chrome155.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
 for file in radio_group_moves_probe.js radio_group_moves_chrome155.json radio_owner_review_probe.js radio_owner_review_chrome155.json radio_dirty_adoption_gc_review_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done

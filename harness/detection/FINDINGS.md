@@ -146,6 +146,48 @@ helper tests. JS lint/format, release-version agreement, license notices and
 23 exact native audio-source checks pass. Final combined gates, refreshed API
 inventory and a rebuilt fresh Google run remain pending.
 
+
+### Labels and native timer clock follow-up
+
+The next source integration mechanically vendors canonical1e93cae. Seven existing
+labelable interfaces have genuine native `.labels`; controls cover live identity,
+hidden transitions, adoption, first-ID/empty-ID rules, foreign namespaces,
+custom-control ordering and hostile public methods/constructors. The NodeList
+factory follows the receiver's creation realm. Actual155 production tests pass
+both behavior/iframe and retained-list/retired-realm GC controls. Full label
+activation is not claimed.
+
+The full native run exposed an independent clock difference: a future virtual
+Window timer could overtake an earlier real Deno timeout or network body. The
+source fix keeps one precise monotonic wake while native work is pending,
+without starving a Window deadline that must abort stalled I/O. Fresh actual
+Chrome controls pin four outcomes, including timeout20ms/Window30ms after GC
+and with a held signal lacking public listeners. Focused native27 and stock9
+checks pass before the additional held-timeout fixture integration; the held
+case separately passes actual155. Full native/default retries are in progress.
+The offline harness passes78 tests with four explicit skips, plus two Python
+SDK-helper tests. Quiescent virtual fast-forward and broader browser timer policy
+remain explicit limits; no new native realm root or speculative timer capability
+is added.
+
+### Privacy and completion follow-up
+
+Concrete hostile-hook probes exposed private official abort/controller records.
+The source repair uses private null-prototype iterable/descriptor records, a
+pinned WebIDL dense-array adapter and fixed controller-member comparisons.
+Both final actual155 privacy regressions pass with the pinned adapter;
+streams7/clock3/storage2 complete the14-test affected cohort. MCP73/73 passes
+with the new Promise-completion regression. The human driver
+returns its actual sequence Promise and the host awaits the final program,
+preserving generic script draining and genuine form commits. A passing isolated
+rerun of the earlier MCP failure is retained as evidence, not used as closure.
+
+Chrome's optimized-array iterator-count difference remains explicit in#28. CI
+a15d098 also exposes the known timeout-order failure and a5-second storage
+conformance-fixture watchdog; the source clock fix and explicit fixture-only
+60-second budget preserve the exact assertions and product limits. Full source
+validation, rebuilt API/Google captures and final CI remain pending.
+
 ## Isolated CSP navigation checkpoint — 2026-10-14
 
 The resources candidate carries actual response status and selected navigation

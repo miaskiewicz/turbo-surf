@@ -4,7 +4,9 @@ use turbo_surf_render::PageSession;
 
 #[tokio::test(flavor = "current_thread")]
 async fn discarded_native_storage_is_reclaimed_while_range_and_subtree_owners_survive() {
-    let mut page = PageSession::open("<body>", "https://storage.test/", "", "", 5000)
+    // The 600 mutation/reclamation workload is a conformance check, not a
+    // five-second debug-build benchmark on shared CI runners.
+    let mut page = PageSession::open("<body>", "https://storage.test/", "", "", 60_000)
         .await
         .unwrap();
     page.eval_expression(

@@ -26,6 +26,50 @@
   };
   const local = (element) => apply(forms.localNameGetter, element, []);
   const html = (element) => !!forms.bridge("html-element", element);
+  const labelListPrototype = NodeList.prototype;
+  function labelsList(element) {
+    let list = forms.privateGet(element, "control-labels");
+    if (!list) {
+      list = factory.live(() => forms.bridge("labels-rows", element), false, {
+        prototype: labelListPrototype,
+        kind: "NodeList",
+        readonlyIndices: true,
+      });
+      forms.privateSet(element, "control-labels", list);
+    }
+    return list;
+  }
+  forms.bridge("install-labels", document, labelsList);
+  for (const [name, tag] of [
+    ["HTMLInputElement", "input"],
+    ["HTMLButtonElement", "button"],
+    ["HTMLTextAreaElement", "textarea"],
+    ["HTMLSelectElement", "select"],
+    ["HTMLOutputElement", "output"],
+    ["HTMLMeterElement", "meter"],
+    ["HTMLProgressElement", "progress"],
+  ]) {
+    const constructor = g[name];
+    if (!constructor) continue;
+    define(constructor.prototype, "labels", {
+      get: make(
+        function () {
+          if (!html(this) || local(this) !== tag) throw new ErrorType("Illegal invocation");
+          if (tag === "input" && forms.bridge("labels-hidden", this)) return null;
+          return forms.bridge("labels-list", this);
+        },
+        "get labels",
+        0,
+      ),
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  g.__captureFormInternals.labels = (element) => forms.bridge("labels-list", element);
+  g.__captureFormInternals.labelControl = (element) => {
+    if (!html(element) || local(element) !== "label") throw new ErrorType("Illegal invocation");
+    return forms.bridge("label-control", element);
+  };
   const radio = (element) =>
     html(element) && local(element) === "input" && forms.type(element) === "radio";
   const value = (element) => forms.attr(element, "value") ?? "on";

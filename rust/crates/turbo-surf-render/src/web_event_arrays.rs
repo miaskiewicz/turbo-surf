@@ -48,9 +48,26 @@ fn adapt(source: &str, expected: &str, names: &[&str]) -> Result<String, String>
     Ok(source.replacen(marker, &helpers, 1))
 }
 
-pub(crate) fn harden(mut extension: Extension) -> Result<Extension, String> {
+const WEBIDL: &[(&str, &str, &[&str])] = &[(
+    "ext:deno_webidl/00_webidl.js",
+    "9b94137c7e48d21f2c635ea10537b0059106fcb6c77953c25db7682c61559372",
+    &["ArrayPrototypePush"],
+)];
+
+pub(crate) fn harden(extension: Extension) -> Result<Extension, String> {
+    harden_modules(extension, MODULES)
+}
+
+pub(crate) fn harden_webidl(extension: Extension) -> Result<Extension, String> {
+    harden_modules(extension, WEBIDL)
+}
+
+fn harden_modules(
+    mut extension: Extension,
+    modules: &[(&'static str, &str, &[&str])],
+) -> Result<Extension, String> {
     let sources = extension.lazy_loaded_js_files.to_mut();
-    for (specifier, expected, names) in MODULES {
+    for (specifier, expected, names) in modules {
         let matches: Vec<_> = sources
             .iter()
             .enumerate()
@@ -72,6 +89,22 @@ pub(crate) fn harden(mut extension: Extension) -> Result<Extension, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn webidl_extension_is_pinned_and_hardened() {
+        let extension = harden_webidl(deno_webidl::deno_webidl::init()).unwrap();
+        let source = extension.lazy_loaded_js_files[0].load().unwrap();
+        assert!(source.contains("ArrayPrototypePush: push"));
+        assert!(!source.contains("  ArrayPrototypePush,\n"));
+        assert!(adapt("changed", WEBIDL[0].1, WEBIDL[0].2).is_err());
+        assert!(harden_webidl(deno_web::deno_web::init(
+            deno_web::BlobStore::default_arc(),
+            None,
+            false,
+            deno_web::InMemoryBroadcastChannel::default(),
+        ))
+        .is_err());
+    }
+
     #[test]
     fn upstream_drift_is_rejected_before_execution() {
         assert!(adapt("changed", MODULES[0].1, MODULES[0].2).is_err());

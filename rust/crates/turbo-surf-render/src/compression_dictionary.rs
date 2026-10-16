@@ -99,7 +99,7 @@ pub(super) fn op_dictionary_prepare<'s>(
     cancel_id: u32,
 ) -> Option<(String, String)> {
     if !relation
-        .split(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{000c}'))
+        .split([' ', '\t', '\n', '\r', '\u{000c}'])
         .any(|token| token.eq_ignore_ascii_case("compression-dictionary"))
     {
         return None;

@@ -18,6 +18,39 @@ methods and aliases must be tested before adding another implementation.
 A repair is closed only after behavior tests and a fresh paired audit pass.
 
 
+## Latest repair status
+
+Update this table when a fix or its validation changes. A component pass closes
+only its named control; the broader area stays open until its listed requirements
+and combined gates pass. Historical inventory/live counts are not updated by
+reading source alone.
+
+| Repair | Current evidence | State |
+|---|---|---|
+| Dictionary store, negotiation and incremental decoding | Pushed ec868b7; Core220 and10 HTTPS controls per transport, strict/format pass | Implemented; final workspace/live gates pending |
+| Dictionary discovery and resource task source | Pushed a15d098;32 exact independent Chrome cases pass on stock and actual155 | Implemented; publication timing/encoded Range remain open |
+| Live form collections, submitters and radio ownership | Pushed a15d098/canonical51b5b97; actual155 collection2/navigation12/radio1 pass | Implemented within controls; broader forms remain open |
+| Native control labels and receiver-realm NodeList | Canonical1e93cae vendored; actual155 and stock production behavior/GC2 pass | Source integration; final full gates pending, label activation open |
+| Real native deadlines vs virtual Window timers | Source-pinned Chrome4 outcomes; actual155 focused27 plus held-timeout1, stock focused9 pass | Source fix; MCP Promise completion fixed and73/73 pass, final full gates pending |
+| Private abort/controller conversion | Actual155 privacy2 and stock privacy2/adapter2 pass; original hostile-hook reproductions retained | Concrete exposed paths fixed; broader hooks/array fast-path count remain in#28 |
+| API inventory | Frozen70-interface capture predates these repairs;75-interface collector expansion tested | Rebuild and fresh pair required; no predicted counts |
+| Google acceptance | Last frozen544180d baseline0/2 native SERP | Rebuilt fresh GPU/wreq run pending |
+
+## Required PR26 completion work
+
+The deferred behavioral residuals remain explicitly tracked in#27/#28. The
+following delivery and validation work remains required for this PR:
+
+- Finish and push the tested labels, clock, privacy, driver and conformance fixes.
+- Pass final full default/native workspace, all-target strict and formatting gates.
+- Rebuild the addon and pass shim/E2E controls with recorded engine/features.
+- Rebuild the optimized native executable with wreq, trust anchors, Metal and CoreText.
+- Capture the fresh75-interface pair and update every measured inventory count.
+- Run fresh native-cookie Google controls with actual consent and genuine forms;
+  record the accepted/rejected outcome without importing Chrome cookies.
+- Refresh changelog, findings and PR description; retain evidence and remove
+  superseded temporary build outputs safely.
+
 ## Open work and issue ownership
 
 All rows below have durable follow-up coverage in
@@ -91,7 +124,7 @@ and stock renderer integration; stable delayed positives do not close the
 publication-scheduling or encoded-Range gaps.
 See [dictionary controls and bounds](./COMPRESSION-DICTIONARIES.md).
 
-## Current integration checkpoint (2026-10-16)
+## Earlier integration checkpoint (2026-10-16)
 
 Canonical turbo-test51b5b97 is mechanically vendored with public DOM0.5.7
 candidatefb60e6f (latest registry0.5.6). Genuine ElementInternals/CustomStateSet,
@@ -146,7 +179,7 @@ lifecycle on every platform. This test correction does not certify Linux glyph o
 fallback parity. The correction is pushed as6f9ebc7; its fresh CI is pending. A matching Linux
 Chrome/font capture remains open under#28.
 
-The next batch vendors registry provenance, submitter reflection and genuine live
+Pusheda15d098 vendors registry provenance, submitter reflection and genuine live
 form collections from canonical51b5b97. The actual155 production cohort passes two real iframe/collection-GC tests,
 12 form-navigation tests including reflected submitter POST overrides, and
 23 geometry controls. The final actual155 combined component cohort passes46 tests, including the
@@ -158,6 +191,87 @@ Chrome controls and official dictionary-dependent Brotli/Zstd fixtures retain
 source provenance.
 Do not close these rows or refresh measured inventory counts until the final
 integrated executable is rebuilt and captured.
+
+
+### Labels and native timer clock follow-up
+
+The next source integration mechanically vendors canonical1e93cae. Seven existing
+labelable interfaces have genuine native `.labels`; controls cover live identity,
+hidden transitions, adoption, first-ID/empty-ID rules, foreign namespaces,
+custom-control ordering and hostile public methods/constructors. The NodeList
+factory follows the receiver's creation realm. Actual155 production tests pass
+both behavior/iframe and retained-list/retired-realm GC controls. Full label
+activation is not claimed.
+
+The full native run exposed an independent clock difference: a future virtual
+Window timer could overtake an earlier real Deno timeout or network body. The
+source fix keeps one precise monotonic wake while native work is pending,
+without starving a Window deadline that must abort stalled I/O. Fresh actual
+Chrome controls pin four outcomes, including timeout20ms/Window30ms after GC
+and with a held signal lacking public listeners. Focused native27 and stock9
+checks pass before the additional held-timeout fixture integration; the held
+case separately passes actual155. Full native/default retries are in progress.
+The offline harness passes78 tests with four explicit skips, plus two Python
+SDK-helper tests. Quiescent virtual fast-forward and broader browser timer policy
+remain explicit limits; no new native realm root or speculative timer capability
+is added.
+
+### Peer layout conformance timing
+
+The stock full retry records1189 passing tests across101 completed suites, plus
+one failure and three explicit skips: the peer-layout fixture exhausts its
+5-second call budget. An isolated run reproduces the failure.
+A native process sample locates the stall in one-time system-font discovery and
+font parsing, before the scalar geometry result; this is not evidence of a
+Promise, timer or document-ownership leak. The peer-layout conformance fixture now has an explicit60-second budget while
+retaining every31/73/97 width,
+interleaving and replacement assertion. Production limits and font performance
+are unchanged. The current-source shadow8/8 and isolated peer1/1 pass. The sampled failure
+and fresh focused proof are retained separately.
+
+### Combined-run follow-ups still in progress
+
+The actual155 full retry exposed a human-interaction completion failure. Its exact
+MCP executable passes the isolated test and a later72-test run; default MCP also
+passes. The former driver started a sequence Promise but returned undefined,
+leaving completion dependent on incidental draining. The source fix now awaits
+that actual final Promise while preserving native form commits and their retired
+gesture realm. Actual155 MCP73/73 passes, including the new async-form/forged-marker
+and rejection regression. Product budgets are unchanged; final full gates remain.
+
+A separate adversarial probe confirms private abort backend values can escape
+through guest conversion hooks. The repair needs both private iterable conversion
+in the frontend and a source-pinned dense-array adapter in the official WebIDL
+sequence converter. Both pieces are integrated and actual155/stock hostile-hook
+regressions pass; the wrapper alone was insufficient. Broader descriptor hooks and the separately
+measured stream/listener microtask order remain open.
+
+CI for a15d098 independently reproduces the timeout-order failure on Node20;
+the source clock fix addresses that exact unchanged assertion. Node22 reaches
+the native storage lifecycle fixture and exhausts its5-second debug execution
+budget during600 create/mutate/remove operations. Its conformance-only budget is
+now60 seconds; the600 operations,1200-node reclamation assertions, identity and
+peer-isolation checks are unchanged. Production execution budgets are unchanged.
+The corrected storage fixture passes the final actual155 affected cohort;
+this is not a performance claim.
+
+The private abort/descriptor repair passes its initial actual155 regression
+with the pinned WebIDL adapter. The final source also replaces a mutable
+Array.includes decision that could skip stream-controller wrapping. Its independent
+Chrome control and native regression pass. Final actual155 affected privacy2,
+stream7, clock3 and storage2 tests pass14/14 with zero skips; stock private
+regressions2/2 and pinned adapter units2/2 pass. Exact
+Chrome array fast-path behavior remains a separate measured difference: Chrome
+skips a poisoned inherited Array iterator, while the current wrapper calls it
+once. The regression preserves that count difference and asserts no private raw
+value escapes. It stays in#28; no guessed Proxy fast path is added.
+
+Full runs and their failures remain recorded separately from component passes.
+The stock full run initially failed linking due to disk exhaustion before tests;
+a retry later passed MCP and328 renderer unit tests before a controlled cleanup
+pause. That retry continues with its exact compiled source. The newly authored
+security/driver follow-ups require their own focused validation and updated
+combined scope before final gate or live-acceptance claims.
 
 ## Active scope and deferred audio
 
@@ -176,8 +290,10 @@ path matters to the target; no Google-audio cause is established by these contro
 ## Fresh own-member inventory (2026-10-16)
 
 [API-INVENTORY.json](./API-INVENTORY.json) retains full missing/extra and descriptor
-lists, actual Chrome/native versions and source/executable hashes. The latest
+lists, actual Chrome/native versions and source/executable hashes. The frozen
 localhost pair uses Chrome155.0.8059.80/native V815.5.35.23 with all GPU/wreq features.
+It predates the implemented collection/label repairs; its absent-interface/member
+counts are historical evidence until the rebuilt75-interface capture replaces it.
 The original four interfaces have **65** missing own members (Document29,
 Element30, HTMLElement4, Canvas2); the expanded70-interface capture has **134**
 missing own members among measured interfaces. Two native interfaces are absent:

@@ -28,6 +28,10 @@ residual work beyond this PR, with audio separately deferred in
   collection interfaces remain absent. Preserve raw own-key order as well as sorted
   inventories. AbstractRange, NodeRange, StaticRange and ElementInternals have zero
   own-member/descriptor differences in this snapshot. Broader behavior remains bounded.
+- Expand the next paired API audit to75 interfaces, including Select, Output,
+  Meter, Progress and Label. Collect descriptors without invoking constructors
+  or getters; preserve the historical70-interface snapshot until a fresh rebuilt
+  pair measures the new scope.
 - Refresh JS/HTTP identity to independently measured Chrome155.0.8059.80.
   Preserve historical controls and SDK source provenance155.0.8059.79. The tested
   native engine is15.5.35.23-rusty; the stock production SDK remains V8150.4.0
@@ -90,7 +94,7 @@ residual work beyond this PR, with audio separately deferred in
 ### Native DOM, scripts and ownership
 
 - Consume public Git-pinned turbo-dom0.5.7 candidatefb60e6f (latest registry
-  release0.5.6) and re-vendor committed turbo-test51b5b97. Native per-isolate node state preserves
+  release0.5.6) and re-vendor committed turbo-test1e93cae. Native per-isolate node state preserves
   original UTF-16 payloads, names, parser positions and mutation-time ancestry.
   GC callbacks schedule bounded storage scans outside collection; genuine weak
   wrapper/guest edges and native job pins preserve retained identities without
@@ -145,6 +149,36 @@ residual work beyond this PR, with audio separately deferred in
   repeat Chrome captures; preserve the original contaminated and immediate
   observations. Check the same exact lifetime states through the production
   PageSession without adding a native ownership root.
+
+- Add genuine live control `.labels` on the seven existing labelable interfaces,
+  with native light-tree association, first-ID rules and shared ElementInternals
+  ownership. Preserve receiver-realm NodeList identity, hidden-input transitions,
+  adoption and GC. Capture the genuine collection prototype before guest code;
+  use null-namespace UTF-16 attributes so foreign id/for/type cannot change
+  association. Label activation and broader form behavior remain separate.
+- Preserve real native I/O/system-timer ordering while selecting Window tasks.
+  Keep one cancelable monotonic deadline while native work is pending; do not
+  jump a later virtual Window timer ahead of earlier body completion or timeout.
+  Independent Chrome controls cover stalled-body cancellation, retained and
+  no-public-listener timeout delivery. Quiescent virtual fast-forward remains
+  explicit; this is not universal browser timer-policy conformance.
+
+- Harden private abort conversion against guest Array.from, iterator, numeric
+  setter and descriptor hooks using private null-prototype records and a
+  source-pinned official WebIDL dense-array adapter. Preserve measured iterator
+  failure behavior and reason identity; retain the explicit Chrome array
+  fast-path iterator-count difference. Use fixed member comparisons so a poisoned
+  Array.includes cannot expose an official stream controller to guest callbacks.
+  Fresh Chrome controls and actual native attack regressions cover the boundary.
+- Return and await the actual final human-driver sequence Promise, including
+  rejection propagation and native form commits despite forged DOM completion
+  markers. Preserve generic script draining and production execution budgets.
+- Give the600-mutation native reclamation conformance fixture an explicit60-second
+  budget on shared debug CI runners. Preserve all operations,1200-node reclamation
+  and retained-owner assertions; this does not change product limits.
+  Apply the same explicit conformance budget to peer-layout isolation after a
+  native sample proves cold system-font discovery exhausts its old5-second limit;
+  preserve all geometry and ownership assertions.
 
 ### Layout, CSS and resources
 

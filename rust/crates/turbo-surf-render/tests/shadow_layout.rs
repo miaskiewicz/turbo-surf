@@ -41,14 +41,29 @@ fn nonempty_host_light_and_shadow_ranges_follow_actual_boundaries_after_reassign
 #[tokio::test(flavor = "current_thread")]
 async fn same_thread_peer_documents_and_replacements_do_not_share_layout_snapshots() {
     use turbo_surf_render::PageSession;
+    // The first geometry read discovers and parses native system fonts. That
+    // one-time host setup is outside this cache-isolation conformance contract.
+    const CONFORMANCE_BUDGET_MS: u64 = 60_000;
     let html =
         |width| format!("<!doctype html><body><div style='width:{width}px;height:20px'></div>");
-    let mut first = PageSession::open(&html(31), "https://layout.test/first", "", "", 5000)
-        .await
-        .unwrap();
-    let mut second = PageSession::open(&html(73), "https://layout.test/second", "", "", 5000)
-        .await
-        .unwrap();
+    let mut first = PageSession::open(
+        &html(31),
+        "https://layout.test/first",
+        "",
+        "",
+        CONFORMANCE_BUDGET_MS,
+    )
+    .await
+    .unwrap();
+    let mut second = PageSession::open(
+        &html(73),
+        "https://layout.test/second",
+        "",
+        "",
+        CONFORMANCE_BUDGET_MS,
+    )
+    .await
+    .unwrap();
     let read = "document.querySelector('div').getBoundingClientRect().width";
     // Both isolates begin native document numbering at one, with equal parse
     // mutation counts. Interleave reads after both viewport installations.
@@ -57,10 +72,15 @@ async fn same_thread_peer_documents_and_replacements_do_not_share_layout_snapsho
         assert_eq!(second.eval_expression(read).await.unwrap(), "73");
     }
     first.close();
-    let mut replacement =
-        PageSession::open(&html(97), "https://layout.test/replaced", "", "", 5000)
-            .await
-            .unwrap();
+    let mut replacement = PageSession::open(
+        &html(97),
+        "https://layout.test/replaced",
+        "",
+        "",
+        CONFORMANCE_BUDGET_MS,
+    )
+    .await
+    .unwrap();
     assert_eq!(second.eval_expression(read).await.unwrap(), "73");
     assert_eq!(replacement.eval_expression(read).await.unwrap(), "97");
     second.close();

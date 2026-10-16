@@ -1513,3 +1513,12 @@ before body completion, partial output and cancellation without partial caching.
 [implementation and explicit bounds](../harness/detection/COMPRESSION-DICTIONARIES.md).
 Neither these source additions nor a passing local control establish Google SERP
 acceptance; the last frozen Google result predates this integration.
+
+The next source integration vendors canonical1e93cae for genuine live control
+labels, receiver-realm collection identity and namespace-safe native association.
+Actual155 production behavior/iframe and retired-realm GC tests pass. The host
+pump also waits on a precise real Window deadline while native work is pending,
+preventing virtual timers from overtaking earlier native timeouts or body I/O.
+Independent Chrome controls and `tests/window_timer_clock.rs` retain the exact
+relative outcomes; full combined retries remain separate. See the
+[timer controls](../harness/detection/README.md#window-and-native-timer-clocks).

@@ -26,6 +26,8 @@ pub use storage_ownership::{collect_native_storage, NativeNodePin, NativeStorage
 
 #[path = "collection_records.rs"]
 mod collection_records;
+#[path = "control_labels.rs"]
+mod control_labels;
 #[path = "css_policy.rs"]
 mod css_policy;
 #[path = "custom_elements.rs"]
@@ -4923,6 +4925,27 @@ fn form_controls_native(
     let Ok(node) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
         return;
     };
+    if operation == "install-labels" || operation == "labels-list" {
+        let Some(context) = node.get_creation_context(scope) else {
+            return;
+        };
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let global = context.global(scope);
+        let name = v8::String::new(scope, "turbo.forms.labels-factory").unwrap();
+        let key = v8::Private::for_api(scope, Some(name));
+        if operation == "install-labels" {
+            global.set_private(scope, key, args.get(2));
+        } else if let Some(callback) = global
+            .get_private(scope, key)
+            .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+        {
+            let receiver = v8::undefined(scope);
+            if let Some(value) = callback.call(scope, receiver.into(), &[node.into()]) {
+                rv.set(value);
+            }
+        }
+        return;
+    }
     if operation == "private" {
         let family = args.get(2).to_rust_string_lossy(scope);
         let name = v8::String::new(scope, &format!("turbo.forms.private.{family}")).unwrap();
@@ -4940,6 +4963,25 @@ fn form_controls_native(
         return;
     };
     match operation.as_str() {
+        "labels-hidden" => {
+            rv.set(v8::Boolean::new(scope, control_labels::hidden(handle)).into());
+        }
+        "labels-rows" => {
+            let rows = control_labels::labels(scope, handle);
+            let array = v8::Array::new(scope, rows.len() as i32);
+            for (index, row) in rows.into_iter().enumerate() {
+                let value = wrap(scope, row);
+                array.set_index(scope, index as u32, value.into());
+            }
+            rv.set(array.into());
+        }
+        "label-control" => {
+            if let Some(target) = control_labels::control(scope, handle) {
+                rv.set(wrap(scope, target).into());
+            } else {
+                rv.set(v8::null(scope).into());
+            }
+        }
         "associated" => {
             let name = v8::String::new(scope, "turbo.forms.associated-record").unwrap();
             let key = v8::Private::for_api(scope, Some(name));
@@ -7504,6 +7546,85 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
             control["result"]
+        );
+        reset();
+    }
+
+    #[test]
+    fn native_control_labels_borrow_uses_receiver_realm() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let parent = v8::Context::new(scope, Default::default());
+        let child = v8::Context::new(scope, Default::default());
+        child.set_security_token(parent.get_security_token(scope));
+        let child_input = {
+            let scope = &mut v8::ContextScope::new(scope, child);
+            install_independent_html(scope, "<!doctype html><label for=i></label><input id=i>");
+            let source = v8::String::new(scope, "document.getElementById('i')").unwrap();
+            v8::Script::compile(scope, source, None)
+                .unwrap()
+                .run(scope)
+                .unwrap()
+        };
+        {
+            let scope = &mut v8::ContextScope::new(scope, parent);
+            install_independent_html(scope, "<!doctype html><body>");
+            let global = parent.global(scope);
+            let key = v8::String::new(scope, "childInput").unwrap();
+            global.set(scope, key.into(), child_input);
+            let key = v8::String::new(scope, "childGlobal").unwrap();
+            global.set(scope, key.into(), child.global(scope).into());
+            let source=v8::String::new(scope,"(()=>{const list=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'labels').get.call(childInput);return JSON.stringify([list instanceof NodeList,list instanceof childGlobal.NodeList,childInput.labels===list,list.length,NodeList.prototype.item.call(list,0).htmlFor]);})()").unwrap();
+            let result = v8::Script::compile(scope, source, None)
+                .unwrap()
+                .run(scope)
+                .unwrap()
+                .to_rust_string_lossy(scope);
+            assert_eq!(result, r#"[false,true,true,1,"i"]"#);
+        }
+        reset();
+    }
+
+    #[test]
+    fn native_control_labels_match_chrome() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_independent_html(scope, "<!doctype html><body>");
+        let source = v8::String::new(scope, include_str!("control_labels_probe.js")).unwrap();
+        let value = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        let actual = v8::json::stringify(scope, value)
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        let control: serde_json::Value =
+            serde_json::from_str(include_str!("control_labels_chrome155.json")).unwrap();
+        use sha2::{Digest, Sha256};
+        assert_eq!(control["browser"], "Chrome/155.0.8059.80");
+        assert_eq!(control["v8"], "15.5.35.23");
+        assert_eq!(
+            control["casesSha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!("radio_dirty_cases.json"))
+            )
+        );
+        assert_eq!(control["errors"], serde_json::json!([]));
+        assert_eq!(
+            control["probeSha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!("control_labels_probe.js"))
+            )
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+            control["result"][0]["result"]
         );
         reset();
     }

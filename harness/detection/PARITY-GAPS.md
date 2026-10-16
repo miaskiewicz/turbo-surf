@@ -1,35 +1,67 @@
-# Browser parity backlog
+# Google Chrome parity checklist
 
-This is the explicit backlog for PR #26. The measured member inventory comes
-from [API-SHAPE.json](./API-SHAPE.json), collected on 2026-10-13 against real
-Chrome 155.0.8059.40 / V8 15.5.35.20 and native V8 15.5.35.20-rusty (frozen executable SHA-256
-`898b3532c20030ac0d68707b19a13cca7d465e034b9c144d7965bbcd5b65e1c1`).
+This is the canonical Chrome parity checklist for PR #26 and follow-up work.
+Every unresolved item remains open until its implementation, behavior regressions
+and combined validation are recorded. Work left outside PR26 is tracked in
+[issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28); deferred audio
+has its dedicated [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+Do not close either issue merely because the PR merges.
+
+The historical [API-SHAPE.json](./API-SHAPE.json) capture used Chrome
+155.0.8059.40 / V8 15.5.35.20. The newer
+[API-INVENTORY.json](./API-INVENTORY.json) preserves the full measured lists and
+source/executable hashes for its Chrome155.80/native155.23 snapshot. Neither
+snapshot describes changes integrated after its frozen executable was built.
 A missing **own prototype member** is an observed descriptor/ownership difference;
 it does not by itself prove the feature is entirely absent. Existing inherited
 methods and aliases must be tested before adding another implementation.
 A repair is closed only after behavior tests and a fresh paired audit pass.
 
 
-## Current integration checkpoint (2026-10-14)
+## Open work and issue ownership
 
-The member counts above are historical and have not been recomputed for current
-source. Canonical binding `e1e3d4c` passes 135 focused contracts on default SDK
-149.3.0 and Surf's default SDK 150.4.0. The current Surf checkpoint passes 56
-focused document, GC, geometry, referrer, host-budget and transfer contracts plus
-strict Clippy and format checks. Earlier tests are historical evidence, not a full
-gate for current source. Full default/native155 gates, rebuilt addon/shim/E2E,
-paired inventory and native Google acceptance remain pending.
+All rows below have durable follow-up coverage in
+[issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28). They include work
+still being attempted in PR26; issue coverage does not defer that work by itself.
 
-Real weak ownership, actual MutationObserver notification microtasks and native
-script-preparation flags are integrated. Genuine geometry covers the subset in
-[LIVE-GEOMETRY.md](./LIVE-GEOMETRY.md). Detached storage reclamation is verified
-published in turbo-dom 0.5.4; its consumer integration is in progress. Text/caret
-provenance is under review in turbo-html2pdf PR #20. Resource lifecycle integration
-is being tested separately. Broader DOM/security/fetch/storage work remains open.
+| Area | Remaining closure requirements | Tracking |
+|---|---|---|
+| Messaging / GC | Broader realm/frame retirement, detached storage reclamation, endpoint and reentrant failure coverage | #28 |
+| Layout | Decorated/empty/mixed-font inline boxes, stacking, scrolling/events/RTL, fixed positioning, iframe migration | #28 |
+| Range / caret | Remaining lifecycle/composed geometry and fresh interface/receiver/GC validation | #28 |
+| DOM | Parsing/observer edges, custom-element reactions/registries, ElementInternals/form association/CustomStateSet, UTF-16 edge cases | #28 |
+| Forms | Genuine successful submission transport, entry lists, methods/encoding/targets and CSP/sandbox admission | #28 |
+| CSS / resources | Remaining selectors/at-rules, used downloaded fonts/animations, images/pseudo epochs, inner SVG | #28 |
+| Security | Remaining CSP/reporting/sinks, popup/navigation/sandbox, COOP/COEP and permissions policies | #28 |
+| Fetch / storage | Remaining streaming/cancellation/cache/signals/referrer and partition/storage-access behavior | #28 |
+| API inventory | Every unresolved missing/extra member and descriptor/inheritance/behavior path in API-INVENTORY.json; fresh paired measurement | #28 |
+| Distribution | Stock/native V8 alignment, native patch distribution, layout publication and registry-ready transport/crypto dependencies | #28 |
+| Validation | Final combined workspace/default/native/addon/shim/E2E gates and lifecycle regressions | #28 |
+| Transport / GPU / Google | Unmeasured identity/wire/rendering differences and fresh native-cookie consent/SERP run | #28 |
+| Audio | Realtime/feedback/parameter connections/multichannel/custom waves/oversampling/suspend-resume | [#27](https://github.com/miaskiewicz/turbo-surf/issues/27) |
 
-The current installed Chrome control is 155.0.8059.79 / V8 15.5.35.23; the
-experimental native155 engine is 15.5.35.20-rusty. Its ownership changes remain
-unvalidated. A saved oracle establishes only its authored behavior.
+When an item is finished, record the relevant test/capture and commit before
+checking its issue task. If a narrower follow-up issue is created, link it from
+this table and #28 so the residual backlog stays complete.
+
+## Current integration checkpoint (2026-10-16)
+
+Canonical turbo-test4aeb295 is mechanically vendored. The latest actual155+wreq
+batch passes25 tests: native Range interfaces/lifecycle/GC3, form validation/GC2,
+encoding2, HTTP navigation6, resource-definition admission3 and stream transfers9.
+The previous combined geometry22 and shadow/public-CSS8 controls also pass.
+ElementInternals/FormData lifecycle work remains in flight. Full final gates and
+a fresh paired member inventory remain pending.
+
+Published turbo-dom0.5.6 is integrated. The native layout producer uses the public
+immutable0.3.8 candidate9d7f02fb from PR23 (green CI and100% line coverage); latest
+published registry release is0.3.7. The tested engine is V815.5.35.23-rusty,
+matching installed Chrome155.0.8059.80's V8 patch; SDK source provenance remains
+155.0.8059.79. Stock production SDK150 remains a separate incomplete configuration.
+
+Real text form GET/POST navigation and stream transfers are integrated, with
+remaining forms/Fetch/lifecycle limitations listed above. No broad browser parity,
+full final validation or reliable native Google acceptance is established.
 
 ## Active scope and deferred audio
 
@@ -40,7 +72,25 @@ deferred at the user's request. Existing offline DSP and tests remain included.
 Reprioritize deferred audio only with captured detector evidence showing a missing
 path matters to the target; no Google-audio cause is established by these controls.
 
-## Every measured member difference
+## Fresh own-member inventory (2026-10-16)
+
+[API-INVENTORY.json](./API-INVENTORY.json) retains the current full missing/extra
+member and descriptor-path lists, actual Chrome/native versions, executable and
+collector hashes. The fresh localhost pair uses Chrome155.0.8059.80 and native
+V815.5.35.23 with all GPU/wreq features. The original four interfaces now have
+**66** missing own members (Document29, Element30, HTMLElement5, Canvas2), compared
+with the historical94. The expanded measured interfaces have **147** missing
+members; AbstractRange, StaticRange and ElementInternals are absent and counted
+separately. These counts describe the frozen executable before the in-flight form,
+selector and stream-transfer batches. Presence alone does not certify behavior.
+
+The expanded missing lists include form/input/button reflection and validation,
+shadow-root APIs, EventTarget.when, MessageEvent.userActivation and Range.expand.
+The descriptor report also captures Range inheritance and own-member placement,
+URL/Headers/TextEncoder/TextDecoder shapes and constructor property flags. Repairs
+must be followed by behavior regressions and a new paired capture.
+
+## Historical four-interface member differences
 
 | Interface | Missing own member | Status |
 |---|---|---|
@@ -152,23 +202,23 @@ is bounded; it is not a census of every browser interface.
 |---|---|---|
 | DOMTokenList | Stable identity, private brand, indexed/live tokens, mutation/error contracts; `part` | Canonical cached/live implementation passes offline mutation/brand contracts; fresh native 155 pair has zero differences for the saved probe |
 | ARIA element relationships | ID resolution, tree scope, explicit element assignment, attribute clearing, frozen returned sequences | Scoped/private canonical state implemented and tested; fresh native 155 pair has zero differences for the saved probe |
-| Layout and hit testing | Real CSS box rectangles, client/scroll/offset geometry, caret/element hit testing | Published core0.3.5 live-tree/CSSOM snapshots now drive DOMRect/client/offset/element scrolling and point-hit geometry;17 V8 controls pass. Text/caret/Range, full stacking/scrolling, mixedSVG document snapshots, font/image lifecycle and fractional LayoutUnit arithmetic remain open; see [current bounds](./LIVE-GEOMETRY.md) |
+| Layout and hit testing | Complete decorated inline, stacking, scrolling/RTL, iframe migration and layout-unit behavior | Native0.3.8 candidate drives real rectangles, client/offset/scroll and point hits; original UTF-16 Range/caret, outer SVG, rotation and composed shadow controls pass. See [current bounds](./LIVE-GEOMETRY.md) |
 | Rendered text | Complete layout-dependent wrapping/line-box behavior beyond native cascade text flow | Canonical visibility/whitespace/break/table/details/setter contracts implemented; fresh native 155 pair has zero differences for the saved probe |
-| Shadow/custom elements | Slots and assigned nodes, ElementInternals, scoped registries, complete upgrade lifecycle | Partial shadow isolation only |
+| Shadow/custom elements | ElementInternals/form association, broader upgrades/reactions and scoped-registry lifecycle | Native slots/manual assignment, closed roots, scoped registries and construction/adoption controls are integrated; ElementInternals is in flight |
 | CSS parsing/layout | Complete grammar/cascade, Typed OM, animation timelines and transitions | Measured stylesheet policy controls pass; complete CSS behavior is open |
 | Live stylesheet installation | Explain Google's jc/lc reports during actual execution; compare live ownership and rule state | Minimal authored injection tests pass; reusable CSS diagnostics saved |
 | Observers | Real Mutation/Resize/Intersection/Performance observer queues and lifecycle | Native MutationObserver semantic records, microtask delivery, options/old values/transients and a private postconnection consumer are integrated. Full mutation lifecycle and Resize/Intersection/Performance queues remain open |
 | Browser lifecycle/resources | Complete parsing/resource scheduling, frame navigation, media and native worker lifecycles | Tested subset only; native workers unsupported |
 | Frames/security | Complete WindowProxy/DOM policies in production SDK, opaque/sandbox navigation behavior | Stronger native proxy profile is experimental; default SDK coverage partial |
 | CSP | strict-dynamic, report-only/reports/violations, navigation/form/worker/media directives | Enforced supported script/style directives tested; remaining directives open |
-| Related resource policies | SRI, Trusted Types, mixed content, CORP/COEP/COOP, permissions policy, Critical-CH | SRI raw-byte/strongest/opaque/tampering, blocked stylesheet ownership and iframe errors pass native tests. CORP per-hop origin/site/header policy and active mixed-content admission are implemented; paired full-resource audit pending. COEP/COOP, passive image upgrades, Permissions/Integrity Policy and additional directives remain open |
-| Fetch lifecycle | Cancellation, native cache/integrity/keepalive/referrer-policy effects, streaming, preflight cache | All eight referrer policies affect actual request and redirect headers;33 authored Chrome request cases and focused native controls pass. Streaming, cancellation, cache/integrity/keepalive and preflight-cache effects remain open |
-| Cookies/privacy/storage | Complete storage-access, partitioning, third-party browser policy/private-token APIs | HttpOnly/SameSite/host-only/default-path/prefix checks pass; broader policy open |
+| Related resource policies | Full policy effects/reporting, passive upgrades, Integrity Policy and Critical-CH | Tested SRI, Trusted Types, mixed-content/CORP and COOP/COEP/Permissions Policy capability/delegation are integrated. Complete resource behavior remains open |
+| Fetch lifecycle | Broader cancellation/cache/signals/referrer/preflight-cache behavior and genuine multipart BodyInit | Genuine response/HTTP2 upload streams, initiating policy snapshots, cache effects and stream transfers are integrated; bounded controls do not establish complete Fetch conformance |
+| Cookies/privacy/storage | Complete storage-access, third-party browser policy and private-token APIs | HttpOnly cookie protection, actual partitioned/credentialless storage and peer/clear events are integrated; broader eligibility/policy remains open |
 | Element interfaces | Exact HTML namespace/local-name mapping, native borrowed control brands and SVG interfaces | Canonical135 cohort passes the authored723-row matrix's HTML/null mappings and foreign brands. All SVG observations remain saved; SVGScriptElement/SVGImageElement projection/resources and broader custom-element lifecycle are open |
-| HTML/XML parsing | XML documents, custom sanitizer configuration, full template behavior, lossless unpaired UTF-16 at Rust boundary | Supported native HTML/Attr/PI/import/adopt subset tested; bf2a0ef plus four Surf contracts cover cross-document identity/realms, fragment overlap, variadic errors, genuine frame retirement and repeated-bootstrap traversal |
+| HTML/XML parsing | Broader XML/sanitizer/template/parser lifecycle and UTF-16 edge cases | Published DOM0.5.6 native provenance/template ownership and original-unit storage are integrated, with cross-document/native observer/script controls |
 | Structured clone | Complete web-interface serialization and transfer lists | Native V8 clone, genuine ArrayBuffer/resizable-buffer transfers, DOMException, private Rust-only CryptoKey snapshots, borrowed realms, User Timing, Window/MessagePort delivery and genuine interface rejection have saved Chrome controls. Current integrated transfer24/clone17 contracts pass. Endpoint weak anchors, reservations and queued native material enforce admission before ownership commit; retired context registries, timer roots and Window queues have six lifecycle contracts. Weak native ownership/cppgc tracing and private DOMRect snapshots are integrated; full native155 ownership and detached-node collection integration, Blob/File, SAB exposure and wider serialization remain open |
 | BroadcastChannel | Shared cross-realm/tab/browser-session delivery and lifecycle | Local asynchronous delivery/brands tested |
-| Range | Mutation-adjusted boundaries and actual geometry | Canonical bf2a0ef implements content operations and private weak live boundaries through text edits/splits, insertion/removal/replacement, normalization, moves/adoption, adjacent HTML, outerHTML and innerText/outerText. Independent Chrome controls cover removal versus text-merge semantics. 133 Rust and 63 JS canonical tests pass; source is vendored locally. Geometry, broader parsing mutation seams and lossless unpaired UTF-16 remain incomplete |
+| Range | Remaining composed-tree/lifecycle/geometry edge cases | Native live mutation boundaries and actual text/Range/caret geometry are integrated. AbstractRange/NodeRange/StaticRange passes independent native interfaces, iframe and GC controls |
 | Canvas/media | Offscreen transfer, captureStream, audio/media synthesis and media lifecycle | Metal pixels match shared probe. Genuine bounded native offline audio now computes independent Chrome ARM64 PCM/hash controls, with private parameter/buffer ownership and trusted lifecycle tests; scheduled sources, automation and five effects are integrated locally after 32 exact authored ARM64 PCM controls and 474 native155 renderer/MCP tests in the isolated candidate. The current combined gate is pending; realtime, feedback, parameter-signal connections, custom waves, oversampling, suspend/resume and multichannel beyond two remain unsupported. Other media APIs remain incomplete |
 | Crypto | Real Chrome 155 encapsulation/decapsulation/getPublicKey/supports behavior and supported algorithms | Official native Deno WebCrypto integrated; hostile inherited `keyData` setter regression discovered a raw-byte leak during non-extractable import, hardened licensed provider now passes inherited-property isolation; final native155/release gates pending. Covered operation controls: real digests, AES/HMAC/Ed25519, ML-KEM-768 and ML-KEM-1024 (512 rejected by the public Chrome profile), keys/permissions/realm metadata pass offline tests; paired 155 audit matches 285 operation/name and 14 parameter controls; current integrated gates pending |
 | Hybrid KEM | Genuine MLKEM768-X25519 (X-Wing) key generation/import/export and encapsulation/decapsulation | Real native X-Wing managed keys, raw-seed/raw-public/JWK, permissions, wrapping and encapsulation implemented; known Chrome seed vector and both ciphertext directions pass. Public/native hybrid, child realms and bootstrap gate pass on genuine155; full integration/release checks pending |

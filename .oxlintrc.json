@@ -17,6 +17,13 @@
     "prefer-const": "error"
   },
   "ignorePatterns": [
+    "rust/crates/turbo-surf-render/src/form_entrylist*.js",
+    "rust/crates/turbo-surf-render/src/form_entrylist*.json",
+    "rust/crates/turbo-surf-render/src/formdata_constructor*.js",
+    "rust/crates/turbo-surf-render/src/formdata_constructor*.json",
+    "rust/crates/turbo-surf-render/src/form_controls.js",
+    "rust/crates/turbo-surf-render/src/form_methods*.js",
+    "rust/crates/turbo-surf-render/src/form_methods*.json",
     "rust/crates/turbo-surf-render/src/element_interface_probe.js",
     "rust/crates/turbo-surf-render/src/element_interface_chrome155.json",
     "rust/crates/turbo-surf-render/src/document_basics.js",
@@ -68,6 +75,20 @@
     "rust/crates/turbo-surf-render/src/utf16_*.js",
     "rust/crates/turbo-surf-render/src/utf16_*.json",
     "rust/crates/turbo-surf-render/src/script_text*.js",
-    "rust/crates/turbo-surf-render/src/script_text*.json"
+    "rust/crates/turbo-surf-render/src/script_text*.json",
+    "rust/crates/turbo-surf-render/src/trusted_types*.js",
+    "rust/crates/turbo-surf-render/src/trusted_types*.json",
+    "rust/crates/turbo-surf-render/src/custom_elements*.js",
+    "rust/crates/turbo-surf-render/src/custom_elements*.json",
+    "rust/crates/turbo-surf-render/src/template_*.js",
+    "rust/crates/turbo-surf-render/src/template_*.json",
+    "rust/crates/turbo-surf-render/src/shadow_slots*.js",
+    "rust/crates/turbo-surf-render/src/shadow_slots*.json",
+    "rust/crates/turbo-surf-render/src/iframe_credentialless*.js",
+    "rust/crates/turbo-surf-render/src/iframe_credentialless*.json",
+    "rust/crates/turbo-surf-render/src/css_selector_lexemes*.js",
+    "rust/crates/turbo-surf-render/src/css_selector_lexemes*.json",
+    "rust/crates/turbo-surf-render/src/abstract_ranges*.js",
+    "rust/crates/turbo-surf-render/src/abstract_ranges*.json"
   ]
 }

@@ -2,14 +2,28 @@
 //! represented as implemented. Header policies intersect, as do encountered meta policies.
 use base64::Engine;
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use turbo_surf_core::request_context::same_origin;
 
+#[derive(Clone)]
+pub struct ReportRecord {
+    pub original: String,
+    pub sample: bool,
+    pub destination: ReportDestination,
+}
+#[derive(Clone, Default)]
+pub enum ReportDestination {
+    #[default]
+    None,
+    Legacy(Vec<String>),
+    Group(String),
+}
 #[derive(Clone, Default)]
 pub struct Policy {
-    origin: String,
-    policies: Vec<BTreeMap<String, Vec<String>>>,
-    originals: Vec<String>,
+    origin: Arc<str>,
+    policies: Arc<Vec<BTreeMap<String, Vec<String>>>>,
+    originals: Arc<Vec<String>>,
+    header_reports: Arc<Vec<bool>>,
 }
 impl Policy {
     pub fn new(origin: &str, values: impl IntoIterator<Item = String>) -> Self {
@@ -38,9 +52,10 @@ impl Policy {
             })
             .collect();
         Self {
-            origin: origin.to_string(),
-            policies,
-            originals,
+            origin: origin.into(),
+            policies: Arc::new(policies),
+            header_reports: Arc::new(vec![true; originals.len()]),
+            originals: Arc::new(originals),
         }
     }
     pub fn origin(&self) -> &str {
@@ -48,15 +63,18 @@ impl Policy {
     }
     pub fn add(&mut self, value: &str) {
         let added = Self::new(&self.origin, [value.to_string()]);
-        self.policies.extend(added.policies);
-        self.originals.extend(added.originals);
+        Arc::make_mut(&mut self.header_reports).extend(vec![false; added.policies.len()]);
+        Arc::make_mut(&mut self.policies).extend(added.policies.iter().cloned());
+        Arc::make_mut(&mut self.originals).extend(added.originals.iter().cloned());
     }
     pub fn inherit_headers(&mut self, inherited: &Self) {
+        let reports = std::mem::take(&mut self.header_reports);
         let own = std::mem::take(&mut self.policies);
         let originals = std::mem::take(&mut self.originals);
         *self = inherited.clone();
-        self.policies.extend(own);
-        self.originals.extend(originals);
+        Arc::make_mut(&mut self.header_reports).extend(reports.iter().copied());
+        Arc::make_mut(&mut self.policies).extend(own.iter().cloned());
+        Arc::make_mut(&mut self.originals).extend(originals.iter().cloned());
     }
     fn list<'a>(policy: &'a BTreeMap<String, Vec<String>>, kind: &str) -> Option<&'a [String]> {
         if matches!(kind, "base-uri" | "form-action") {
@@ -88,47 +106,85 @@ impl Policy {
             })
         })
     }
-    pub fn request_violations(&self, kind: &str, url: &str, nonce: &str) -> Vec<(String, String)> {
+    pub fn request_violations(&self, kind: &str, url: &str, nonce: &str) -> Vec<ReportRecord> {
         self.policies
             .iter()
-            .zip(&self.originals)
-            .filter_map(|(policy, original)| {
+            .zip(self.originals.iter())
+            .zip(self.header_reports.iter())
+            .filter_map(|((policy, original), header)| {
                 let single = Self {
                     origin: self.origin.clone(),
-                    policies: vec![policy.clone()],
-                    originals: vec![original.clone()],
+                    policies: Arc::new(vec![policy.clone()]),
+                    originals: Arc::new(vec![original.clone()]),
+                    header_reports: Arc::new(vec![*header]),
                 };
                 (!single.allows_request(kind, url, nonce, false))
-                    .then(|| (original.clone(), String::new()))
+                    .then(|| Self::report_record(policy, original, false, *header))
             })
             .collect()
     }
-    pub fn inline_violations(&self, kind: &str, text: &str, nonce: &str) -> Vec<(String, String)> {
+    pub fn inline_violations(&self, kind: &str, text: &str, nonce: &str) -> Vec<ReportRecord> {
         self.policies
             .iter()
-            .zip(&self.originals)
-            .filter_map(|(policy, original)| {
+            .zip(self.originals.iter())
+            .zip(self.header_reports.iter())
+            .filter_map(|((policy, original), header)| {
                 let single = Self {
                     origin: self.origin.clone(),
-                    policies: vec![policy.clone()],
-                    originals: vec![original.clone()],
+                    policies: Arc::new(vec![policy.clone()]),
+                    originals: Arc::new(vec![original.clone()]),
+                    header_reports: Arc::new(vec![*header]),
                 };
                 (!single.allows_inline(kind, text, nonce)).then(|| {
-                    let sample = if Self::list(policy, kind)
-                        .is_some_and(|list| list.iter().any(|token| token == "'report-sample'"))
-                    {
-                        text.trim().chars().take(40).collect()
-                    } else {
-                        String::new()
-                    };
-                    (original.clone(), sample)
+                    let sample = Self::list(policy, kind)
+                        .is_some_and(|list| list.iter().any(|token| token == "'report-sample'"));
+                    Self::report_record(policy, original, sample, *header)
                 })
             })
             .collect()
     }
+    pub fn eval_violations(&self) -> Vec<ReportRecord> {
+        self.policies
+            .iter()
+            .zip(self.originals.iter())
+            .zip(self.header_reports.iter())
+            .filter_map(|((policy, original), header)| {
+                let list = Self::list(policy, "script-src")?;
+                (!list.iter().any(|token| token == "'unsafe-eval'")).then(|| {
+                    Self::report_record(
+                        policy,
+                        original,
+                        list.iter().any(|token| token == "'report-sample'"),
+                        *header,
+                    )
+                })
+            })
+            .collect()
+    }
+    fn report_record(
+        policy: &BTreeMap<String, Vec<String>>,
+        original: &str,
+        sample: bool,
+        header: bool,
+    ) -> ReportRecord {
+        let destination = if let Some(tokens) = policy.get("report-to") {
+            ReportDestination::Group(tokens.first().cloned().unwrap_or_default())
+        } else if !header {
+            ReportDestination::None
+        } else if let Some(tokens) = policy.get("report-uri") {
+            ReportDestination::Legacy(tokens.clone())
+        } else {
+            ReportDestination::None
+        };
+        ReportRecord {
+            original: original.into(),
+            sample,
+            destination,
+        }
+    }
     pub fn sandbox_restrictions(&self) -> Option<(bool, bool)> {
         let mut restrictions = None;
-        for policy in &self.policies {
+        for policy in self.policies.iter() {
             if let Some(tokens) = policy.get("sandbox") {
                 let scripts = !tokens
                     .iter()
@@ -141,6 +197,33 @@ impl Policy {
             }
         }
         restrictions
+    }
+    pub fn blocks_form_submission(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy.get("sandbox").is_some_and(|tokens| {
+                !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-forms"))
+            })
+        })
+    }
+    pub fn blocks_top_navigation_without_activation(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy.get("sandbox").is_some_and(|tokens| {
+                !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-top-navigation"))
+            })
+        })
+    }
+    pub fn blocks_storage_access(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy.get("sandbox").is_some_and(|tokens| {
+                !tokens.iter().any(|token| {
+                    token.eq_ignore_ascii_case("allow-storage-access-by-user-activation")
+                })
+            })
+        })
     }
     pub fn has_frame_ancestors(&self) -> bool {
         self.policies
@@ -205,22 +288,26 @@ impl Policy {
             "img-src",
             "frame-src",
             "child-src",
+            "report-uri",
+            "report-to",
+            "trusted-types",
         ];
         let mut limitations = std::collections::BTreeSet::new();
-        for policy in &self.policies {
+        for policy in self.policies.iter() {
             for (name, values) in policy {
-                if !SUPPORTED.contains(&name.as_str()) {
+                let native_trusted_sink =
+                    cfg!(turbo_surf_native_proxy) && name == "require-trusted-types-for";
+                if !SUPPORTED.contains(&name.as_str()) && !native_trusted_sink {
                     limitations.insert(name.clone());
                 }
                 for value in values {
                     if matches!(
                         value.as_str(),
-                        "'strict-dynamic'"
-                            | "'wasm-unsafe-eval'"
-                            | "'trusted-types-eval'"
-                            | "'inline-speculation-rules'"
-                            | "'report-sample'"
+                        "'strict-dynamic'" | "'wasm-unsafe-eval'" | "'inline-speculation-rules'"
                     ) {
+                        limitations.insert(format!("{name}: {value}"));
+                    }
+                    if value == "'trusted-types-eval'" && !cfg!(turbo_surf_native_proxy) {
                         limitations.insert(format!("{name}: {value}"));
                     }
                 }
@@ -229,8 +316,59 @@ impl Policy {
         limitations.into_iter().collect()
     }
 
+    /// Only explicit Trusted Types directives apply; default-src is not a fallback.
+    pub fn requires_trusted_types(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy
+                .get("require-trusted-types-for")
+                .is_some_and(|tokens| tokens.iter().any(|token| token == "'script'"))
+        })
+    }
+    pub fn trusted_type_violations(&self, name: Option<(&str, bool)>) -> Vec<ReportRecord> {
+        self.policies
+            .iter()
+            .zip(self.originals.iter())
+            .zip(self.header_reports.iter())
+            .filter_map(|((policy, original), header)| {
+                let violation = if let Some((name, duplicate)) = name {
+                    policy.get("trusted-types").is_some_and(|tokens| {
+                        !tokens.iter().any(|token| token == name || token == "*")
+                            || duplicate
+                                && (name == "default"
+                                    || !tokens.iter().any(|token| token == "'allow-duplicates'"))
+                    })
+                } else {
+                    policy
+                        .get("require-trusted-types-for")
+                        .is_some_and(|tokens| tokens.iter().any(|token| token == "'script'"))
+                };
+                violation.then(|| Self::report_record(policy, original, true, *header))
+            })
+            .collect()
+    }
+
     pub fn has_policy(&self) -> bool {
         !self.policies.is_empty()
+    }
+
+    pub fn bypasses_trusted_types_eval(&self) -> bool {
+        let mut has_keyword = false;
+        self.policies.iter().all(|policy| {
+            Self::list(policy, "script-src").is_none_or(|list| {
+                let trusted = list.iter().any(|token| token == "'trusted-types-eval'");
+                has_keyword |= trusted;
+                trusted || list.iter().any(|token| token == "'unsafe-eval'")
+            })
+        }) && has_keyword
+    }
+    #[cfg(turbo_surf_native_proxy)]
+    pub fn eval_error_message(&self) -> Option<String> {
+        self.policies.iter().find_map(|policy| {
+            let list = Self::list(policy, "script-src")?;
+            if list.iter().any(|source| source == "'unsafe-eval'") { return None; }
+            let directive = if policy.contains_key("script-src") { "script-src" } else { "default-src" };
+            Some(format!("Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: {directive} {}\".\n",list.join(" ")))
+        })
     }
 
     pub fn allows_eval(&self) -> bool {
@@ -303,12 +441,31 @@ pub struct DocumentPolicy {
     pub header: Policy,
     pub active: Policy,
     pub report_only: Policy,
+    pub reporting_endpoints: BTreeMap<String, crate::csp_reporting::Endpoint>,
     pub initial_base: Policy,
     pub referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy,
     pub embedder_policy: crate::resource_policy::EmbedderPolicy,
     pub permissions_policy: crate::permissions_policy::PermissionsPolicy,
     metas: Vec<(usize, String)>,
     next_meta: usize,
+    referrer_metas: Vec<(usize, turbo_surf_core::referrer_policy::ReferrerPolicy)>,
+    next_referrer_meta: usize,
+}
+fn active_parser_node(
+    tree: &turbo_dom_parser::rtdom::Tree,
+    node: turbo_dom_parser::rtdom::Handle,
+) -> bool {
+    let mut ancestor = Some(turbo_dom_parser::rtdom::NodeRef::new(tree, node));
+    while let Some(parent) = ancestor {
+        if tree.node_type_id(parent.handle()) == 11 {
+            return false;
+        }
+        if parent.handle() == tree.root() {
+            return true;
+        }
+        ancestor = parent.parent();
+    }
+    false
 }
 impl DocumentPolicy {
     pub fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
@@ -329,13 +486,31 @@ impl DocumentPolicy {
         let tree = turbo_dom_parser::rtdom::Tree::parse(html);
         let mut index = 0;
         let mut metas = Vec::new();
+        let mut referrer_metas = Vec::new();
         for &node in tree.query_selector_all("script,meta").iter() {
+            // The active native script list excludes associated template trees.
+            // Their scripts cannot advance parser phases or activate their metas.
+            if !active_parser_node(&tree, node) {
+                continue;
+            }
             if tree
                 .tag_name(node)
                 .is_some_and(|name| name.eq_ignore_ascii_case("script"))
             {
                 index += 1;
                 continue;
+            }
+            if tree.namespace_id(node) == 0
+                && tree
+                    .get_attribute(node, "name")
+                    .is_some_and(|name| name.eq_ignore_ascii_case("referrer"))
+            {
+                if let Some(policy) = tree
+                    .get_attribute(node, "content")
+                    .and_then(crate::referrer_meta::policy)
+                {
+                    referrer_metas.push((index, policy));
+                }
             }
             if !tree
                 .get_attribute(node, "http-equiv")
@@ -363,7 +538,7 @@ impl DocumentPolicy {
         }
         let mut initial_base = active.clone();
         for &node in tree.query_selector_all("base,meta").iter() {
-            if tree.namespace_id(node) != 0 {
+            if tree.namespace_id(node) != 0 || !active_parser_node(&tree, node) {
                 continue;
             }
             if tree.local_name(node) == Some("base") && tree.get_attribute(node, "href").is_some() {
@@ -394,6 +569,7 @@ impl DocumentPolicy {
             .collect::<Vec<_>>()
             .join(",");
         Self {
+            reporting_endpoints: crate::csp_reporting::endpoints(base, headers),
             referrer_policy: turbo_surf_core::referrer_policy::ReferrerPolicy::from_header(
                 &referrer_header,
             )
@@ -411,10 +587,13 @@ impl DocumentPolicy {
             report_only,
             metas,
             next_meta: 0,
+            referrer_metas,
+            next_referrer_meta: 0,
         }
     }
     pub fn unsupported(&self) -> Vec<String> {
         let mut limitations = std::collections::BTreeSet::from_iter(self.active.unsupported());
+        limitations.extend(self.report_only.unsupported());
         for (_, value) in &self.metas {
             limitations.extend(Policy::new(&self.header.origin, [value.clone()]).unsupported());
         }
@@ -434,12 +613,104 @@ impl DocumentPolicy {
             self.active.add(&self.metas[self.next_meta].1);
             self.next_meta += 1;
         }
+        while self
+            .referrer_metas
+            .get(self.next_referrer_meta)
+            .is_some_and(|(before, _)| *before <= index)
+        {
+            self.referrer_policy = self.referrer_metas[self.next_referrer_meta].1;
+            self.next_referrer_meta += 1;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn implemented_trusted_types_and_sampling_are_not_reported_as_missing() {
+        let policy = Policy::new("https://policy.test/", [
+            "trusted-types named; require-trusted-types-for 'script'; script-src 'trusted-types-eval' 'report-sample'; style-src 'report-sample'".into(),
+        ]);
+        let expected = if cfg!(turbo_surf_native_proxy) {
+            Vec::<String>::new()
+        } else {
+            vec![
+                "require-trusted-types-for".into(),
+                "script-src: 'trusted-types-eval'".into(),
+            ]
+        };
+        assert_eq!(policy.unsupported(), expected);
+        let partial = Policy::new(
+            "https://policy.test/",
+            ["sandbox allow-forms; form-action 'self'; script-src 'strict-dynamic'".into()],
+        );
+        assert_eq!(
+            partial.unsupported(),
+            vec!["form-action", "sandbox", "script-src: 'strict-dynamic'"]
+        );
+    }
+
+    #[test]
+    fn top_navigation_without_activation_sandbox_tokens_intersect() {
+        let parse = |header: &str| Policy::new("https://navigation.test/", [header.to_owned()]);
+        assert!(!parse("default-src 'self'").blocks_top_navigation_without_activation());
+        assert!(parse("sandbox allow-scripts").blocks_top_navigation_without_activation());
+        assert!(parse("sandbox allow-top-navigation-by-user-activation")
+            .blocks_top_navigation_without_activation());
+        assert!(!parse("sandbox ALLOW-TOP-NAVIGATION").blocks_top_navigation_without_activation());
+        assert!(parse("sandbox allow-top-navigation, sandbox allow-scripts")
+            .blocks_top_navigation_without_activation());
+    }
+
+    #[test]
+    fn storage_access_sandbox_tokens_intersect() {
+        let parse = |header: &str| Policy::new("https://storage.test/", [header.to_owned()]);
+        assert!(parse("sandbox allow-scripts allow-same-origin").blocks_storage_access());
+        assert!(!parse(
+            "sandbox allow-scripts allow-same-origin allow-storage-access-by-user-activation"
+        )
+        .blocks_storage_access());
+        assert!(
+            parse("sandbox allow-storage-access-by-user-activation, sandbox allow-scripts")
+                .blocks_storage_access()
+        );
+    }
+
+    #[test]
+    fn policy_snapshot_keeps_reporting_provenance_after_meta_and_header_changes() {
+        let mut active = Policy::new(
+            "https://source.test/page",
+            ["script-src 'none'; report-uri /initial".into()],
+        );
+        let initial = active.clone();
+        active.add("script-src 'none'; report-uri /ignored-meta");
+        let before_inheritance = active.clone();
+        active.inherit_headers(&Policy::new(
+            "https://source.test/page",
+            ["script-src 'none'; report-to new-group".into()],
+        ));
+        let rows = initial.inline_violations("script-src-elem", "blocked()", "");
+        assert_eq!(rows.len(), 1);
+        assert!(
+            matches!(&rows[0].destination, ReportDestination::Legacy(urls) if urls == &["/initial"])
+        );
+        let rows = before_inheritance.inline_violations("script-src-elem", "blocked()", "");
+        assert_eq!(rows.len(), 2);
+        assert!(
+            matches!(&rows[0].destination, ReportDestination::Legacy(urls) if urls == &["/initial"])
+        );
+        assert!(matches!(&rows[1].destination, ReportDestination::None));
+        let rows = active.inline_violations("script-src-elem", "blocked()", "");
+        assert_eq!(rows.len(), 3);
+        assert!(
+            matches!(&rows[0].destination, ReportDestination::Group(group) if group == "new-group")
+        );
+        assert!(
+            matches!(&rows[1].destination, ReportDestination::Legacy(urls) if urls == &["/initial"])
+        );
+        assert!(matches!(&rows[2].destination, ReportDestination::None));
+    }
     #[test]
     fn policies_intersect_sources_and_real_hashes() {
         let text = "globalThis.hashAllowed=true;";

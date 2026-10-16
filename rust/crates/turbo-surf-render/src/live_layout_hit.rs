@@ -3,8 +3,13 @@
 use crate::live_layout_scroll::{scroll_translation, SourceStyles};
 use std::collections::{BTreeMap, BTreeSet};
 use turbo_html2pdf_core::layout_snapshot::{GeometryKind, LayoutSnapshot, Rect, SourceId};
-fn contains(rect: Rect, matrix: [f32; 6], translation: [f32; 2], point: [f64; 2]) -> bool {
-    let [a, b, c, d, e, f] = matrix.map(f64::from);
+pub(crate) fn contains(
+    rect: Rect,
+    matrix: [f64; 6],
+    translation: [f32; 2],
+    point: [f64; 2],
+) -> bool {
+    let [a, b, c, d, e, f] = matrix;
     let determinant = a * d - b * c;
     if determinant == 0.0 || !determinant.is_finite() {
         return false;
@@ -20,7 +25,11 @@ fn contains(rect: Rect, matrix: [f32; 6], translation: [f32; 2], point: [f64; 2]
         && y >= f64::from(rect.y)
         && y < f64::from(rect.y + rect.height)
 }
-fn property<'a>(styles: &'a SourceStyles, mut id: SourceId, name: &str) -> Option<&'a str> {
+pub(crate) fn property<'a>(
+    styles: &'a SourceStyles,
+    mut id: SourceId,
+    name: &str,
+) -> Option<&'a str> {
     loop {
         let source = styles.get(&id)?;
         if let Some(value) = source.style.get(name) {
@@ -49,11 +58,49 @@ pub(crate) fn elements_at_point(
     }
     let mut result = Vec::new();
     let mut seen = BTreeSet::new();
+    let runs: BTreeMap<_, _> = snapshot
+        .text_runs()
+        .iter()
+        .map(|run| (run.fragment_index, run))
+        .collect();
     for fragment in snapshot.fragments().iter().rev() {
-        if fragment.kind == GeometryKind::TextLineContainer
-            && contains(fragment.rect, fragment.world_transform, [0.0; 2], point)
-        {
-            return Err("native text hit testing requires shaped cluster/source provenance".into());
+        if let Some(run) = runs.get(&fragment.index) {
+            let Some(source) = run.source_id else {
+                continue;
+            };
+            let Some(rect) = crate::live_layout_text::run_rect(snapshot, run) else {
+                continue;
+            };
+            let translation = scroll_translation(snapshot, styles, source, offsets)?;
+            if contains(
+                rect,
+                snapshot
+                    .native_hit_transform(fragment.index)
+                    .ok_or("native text hit transform unavailable")?,
+                translation,
+                point,
+            ) {
+                for (index, id) in run.source_ancestors.iter().rev().enumerate() {
+                    if index != 0
+                        && styles
+                            .get(id)
+                            .is_none_or(|style| style.style.get("display") != Some("inline"))
+                    {
+                        continue;
+                    }
+                    if seen.contains(id)
+                        || property(styles, *id, "pointer-events") == Some("none")
+                        || property(styles, *id, "visibility")
+                            .is_some_and(|value| value != "visible")
+                    {
+                        continue;
+                    }
+                    if !clipped(snapshot, styles, &run.source_ancestors, offsets, point)? {
+                        seen.insert(*id);
+                        result.push(*id);
+                    }
+                }
+            }
         }
         if fragment.kind != GeometryKind::BorderBox {
             continue;
@@ -68,43 +115,17 @@ pub(crate) fn elements_at_point(
             continue;
         }
         let translation = scroll_translation(snapshot, styles, id, offsets)?;
-        if !contains(fragment.rect, fragment.world_transform, translation, point) {
+        if !contains(
+            fragment.rect,
+            snapshot
+                .native_hit_transform(fragment.index)
+                .ok_or("native hit transform unavailable")?,
+            translation,
+            point,
+        ) {
             continue;
         }
-        let mut clipped = false;
-        for ancestor in &fragment.source_ancestors {
-            let Some(style) = styles.get(ancestor) else {
-                continue;
-            };
-            let clip_x = clip_axis(&style.style, "overflow-x");
-            let clip_y = clip_axis(&style.style, "overflow-y");
-            if !clip_x && !clip_y {
-                continue;
-            }
-            if clip_x != clip_y {
-                return Err("native hit testing asymmetric overflow clipping pending".into());
-            }
-            let source = snapshot
-                .source(*ancestor)
-                .ok_or("native hit clip source missing")?;
-            let border = source
-                .fragment_indices
-                .iter()
-                .map(|&index| &snapshot.fragments()[index])
-                .find(|fragment| fragment.kind == GeometryKind::BorderBox)
-                .ok_or("native hit clip border missing")?;
-            let used = border.used_box.ok_or("native hit clip used box missing")?;
-            let translation = scroll_translation(snapshot, styles, *ancestor, offsets)?;
-            if !contains(
-                used.padding_rect(border.rect),
-                border.world_transform,
-                translation,
-                point,
-            ) {
-                clipped = true;
-                break;
-            }
-        }
+        let clipped = clipped(snapshot, styles, &fragment.source_ancestors, offsets, point)?;
         if !clipped {
             seen.insert(id);
             result.push(id);
@@ -119,6 +140,54 @@ pub(crate) fn elements_at_point(
         }
     }
     Ok(result)
+}
+pub(crate) fn clipped(
+    snapshot: &LayoutSnapshot,
+    styles: &SourceStyles,
+    ancestors: &[SourceId],
+    offsets: &BTreeMap<SourceId, [f64; 2]>,
+    point: [f64; 2],
+) -> Result<bool, String> {
+    let mut clipped = false;
+    for ancestor in ancestors {
+        let Some(style) = styles.get(ancestor) else {
+            continue;
+        };
+        if style.style.get("display") == Some("contents") {
+            continue;
+        }
+        let clip_x = clip_axis(&style.style, "overflow-x");
+        let clip_y = clip_axis(&style.style, "overflow-y");
+        if !clip_x && !clip_y {
+            continue;
+        }
+        if clip_x != clip_y {
+            return Err("native hit testing asymmetric overflow clipping pending".into());
+        }
+        let source = snapshot
+            .source(*ancestor)
+            .ok_or("native hit clip source missing")?;
+        let border = source
+            .fragment_indices
+            .iter()
+            .map(|&index| &snapshot.fragments()[index])
+            .find(|fragment| fragment.kind == GeometryKind::BorderBox)
+            .ok_or("native hit clip border missing")?;
+        let used = border.used_box.ok_or("native hit clip used box missing")?;
+        let translation = scroll_translation(snapshot, styles, *ancestor, offsets)?;
+        if !contains(
+            used.padding_rect(border.rect),
+            snapshot
+                .native_hit_transform(border.index)
+                .ok_or("native clip transform unavailable")?,
+            translation,
+            point,
+        ) {
+            clipped = true;
+            break;
+        }
+    }
+    Ok(clipped)
 }
 #[cfg(test)]
 mod tests {

@@ -69,5 +69,30 @@
   } catch (error) { failure = error.name; }
   finally { for (let index = 0; index < intrinsics.length; index++) apply(define, Object, [intrinsics[index][0], intrinsics[index][1], descriptors[index]]); }
   output.intrinsicImmunity = { hooks, created: !!protectedHTML && !!protectedXML, failed: failure || null, title: protectedHTML?.title, owner: protectedXML?.documentElement?.ownerDocument === protectedXML, identity: protectedXML?.doctype === protectedType };
+  {
+    const fragment = document.createDocumentFragment(), first = document.createElement('div'), second = document.createElement('span');
+    first.id = second.id = 'duplicate'; fragment.append(first, second);
+    const fn = DocumentFragment.prototype.getElementById, descriptor = Object.getOwnPropertyDescriptor(DocumentFragment.prototype, 'getElementById');
+    const attempt = callback => { try { return callback(); } catch (error) { return error.name; } };
+    output.fragmentId = {
+      descriptor: [fn.name, fn.length, descriptor.writable, descriptor.enumerable, descriptor.configurable, Object.hasOwn(fn, 'prototype'), Function.prototype.toString.call(fn).includes('[native code]')],
+      order: [fragment.getElementById('duplicate') === first, fragment.getElementById('missing') === null, fragment.getElementById('') === null],
+      errors: [attempt(() => fn.call({})), attempt(() => fn.call(document, 'duplicate')), attempt(() => fn.call(fragment)), attempt(() => fn.call(fragment, Symbol()))]
+    };
+    first.id = '\ud800'; second.id = ''; output.fragmentId.units = [fragment.getElementById('\ud800') === first, fragment.getElementById('') === null];
+    const originals = [DocumentFragment.prototype.querySelectorAll, Element.prototype.getAttribute, Array.prototype.includes, globalThis.TypeError];
+    let idHooks = 0, idValue, idFailure;
+    const idPoison = () => { idHooks++; throw Error('unexpected ID lookup hook'); };
+    DocumentFragment.prototype.querySelectorAll = Element.prototype.getAttribute = Array.prototype.includes = globalThis.TypeError = idPoison;
+    try { idValue = fn.call(fragment, '\ud800') === first; try { fn.call(fragment); } catch (error) { idFailure = error.name; } }
+    finally { [DocumentFragment.prototype.querySelectorAll, Element.prototype.getAttribute, Array.prototype.includes, globalThis.TypeError] = originals; }
+    output.fragmentId.intrinsics = [idHooks, idValue, idFailure];
+    const host = document.createElement('div'); host.id = 'host'; document.body.append(host);
+    const root = host.attachShadow({mode: 'closed'}), inner = document.createElement('b'); inner.id = 'nested'; root.append(inner);
+    const nestedHost = document.createElement('div'); root.append(nestedHost); const nested = nestedHost.attachShadow({mode:'closed'}); nested.innerHTML = '<b id="leak"></b>';
+    output.fragmentId.shadow = [root.getElementById('nested') === inner, root.getElementById('host') === null, root.getElementById('leak') === null, fn.call(root, 'nested') === inner];
+    inner.id = 'changed'; output.fragmentId.changed = [root.getElementById('nested') === null, root.getElementById('changed') === inner];
+    host.remove();
+  }
   return output;
 })();

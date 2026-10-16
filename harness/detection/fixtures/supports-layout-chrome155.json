@@ -1,0 +1,10 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "999333f8c95bbecef3ed162e846c405fc4c6a935f39ce9e27f92cb8f38c39d09",
+  "result": {
+    "widths": [29, 29, 29, 11, 11, 11, 29, 29, 29, 29, 11],
+    "after": 37,
+    "nested": 41
+  }
+}

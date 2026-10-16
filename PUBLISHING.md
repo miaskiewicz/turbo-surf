@@ -82,6 +82,19 @@ real trust-anchor identifiers and signature-algorithm GREASE directly upstream;
 the old local `rust/vendor/wreq` fork has been removed. `trust-anchors` is retained
 as a compatibility feature alias; impersonation already includes real anchors.
 
+Native HTTP/2 stream-upload admission additionally requires the existing
+connection metadata trait to be public. The workspace pins the minimal additive
+fork [`greg-flux/wreq` at `4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762`](https://github.com/greg-flux/wreq/commit/4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762),
+based exactly on upstream `c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5`, while
+[upstream PR #1327](https://github.com/0x676e67/wreq/pull/1327) proposes that API.
+Only the public re-export and its external regression differ; TLS, ALPN and HTTP
+implementation are unchanged. The unchanged package version identifies that
+upstream baseline, not a new registry release. The Git revision supports native
+workspace binaries; publishing metadata strips Git pins and registry wreq lacks
+this seam too. Do not publish Surf crates until a compatible registry dependency
+path passes clean packaged-consumer checks, and do not infer authorization to
+publish a differently named dependency crate.
+
 Build development binaries with Rust 1.98.0 and the committed workspace lockfile
 (`cargo build --locked`). This PR does not authorize a turbo-surf release.
 
@@ -101,10 +114,21 @@ hardened provider or an upstream release containing the fix before publishing
 Surf crates; silently falling back to the unpatched registry crate is unsafe.
 Check the source archive/patch with `python3 rust/vendor/update-deno-crypto.py --check`.
 
-The DOM API dependency is now published as turbo-dom 0.5.2 (PR #8, tagged merge
-commit `87c2077`) and no longer needs a workspace Git patch. The transport API
-requirement above still blocks clean crate consumers until compatible registry
-versions or reviewed distributable forks are available. A local
+The DOM API dependency is published as turbo-dom0.5.6 (PR #12, actual tagged
+merge commit `ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`). Its parser provenance
+and template extraction APIs resolve from the registry; no DOM workspace Git
+patch is needed. The geometry producer turbo-html2pdf-core0.3.7 is also published
+from PR #21's tagged merge `33853374bdeae040e596858bcbf3da9670543b0e`.
+The composed-layout integration requires the tested0.3.8 PR23 candidate. Render
+and raster therefore use the immutable public Git revision
+`9d7f02fb27a9664baedb468475098b785a7d3bec`; this is an explicit development
+source pin, not a claim that0.3.8 is available on crates.io. Before publishing Surf,
+release the reviewed producer, replace the Git dependency with the registry0.3.8
+floor and regenerate/verify the production lockfile. Local private path patches
+are never committed as dependency metadata.
+
+The transport API requirement above still blocks clean crate consumers until
+compatible registry versions or reviewed distributable forks are available. A local
 `npm pack --dry-run` checks the launcher allowlist; it does not verify per-platform
 binaries staged by release CI.
 

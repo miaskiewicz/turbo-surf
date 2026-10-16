@@ -39,7 +39,7 @@ Requirements and where each stands:
 | Promise / `async`-`await` / microtask resolution (event loop) | ✅ `render_html_async` |
 | `fetch` + `XMLHttpRequest` over the real net stack (relative-URL aware) | ✅ `op_fetch` → `turbo_surf_core::net` |
 | `document.cookie` ↔ `CookieJar` bridge | ✅ `op_cookie_get/set`; HttpOnly cookies hidden/protected from JS |
-| `MutationObserver`/`IntersectionObserver`/`ResizeObserver`, history API | Synthetic observer implementations; history updates `location.href` |
+| `MutationObserver`/`IntersectionObserver`/`ResizeObserver`, history API | Native MutationObserver delivery; Intersection/Resize coverage remains bounded; history updates `location.href` |
 | TS/JSX bundle support | ✅ `turbo-surf-transform` (swc) |
 | Entry point | ✅ `render_page(html, base_url, script)` → hydrated HTML |
 
@@ -68,8 +68,8 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 - Observer delivery remains partial. Element box geometry now uses the public native
   live-tree layout seam, private actual CSSOM rules and transform provenance. Supported
   client/offset/scroll metrics and point-hit regions have authored Chrome controls;
-  fragmented inline/text/caret, full stacking contexts, composed shadow layout and
-  broader scrolling remain incomplete. See [the scope and controls](../harness/detection/LIVE-GEOMETRY.md).
+  shaped text/Range/caret and composed shadow/slot controls are integrated; decorated
+  inline boxes, full stacking contexts and broader scrolling remain incomplete. See [the scope and controls](../harness/detection/LIVE-GEOMETRY.md).
 
 **Current interface corrections (2026-10-10):**
 
@@ -1382,3 +1382,28 @@ Form-action, violation/reporting behavior and wider CSP remain open.
 Native isolation is now granted only by secure actual navigation with valid same-origin COOP, compatible COEP and inherited Permissions Policy. The iframe admission path blocks incompatible embedded documents and enforces cross-origin CORP, with genuine credentialless exceptions. Native backing-store snapshots carry agent-group/origin ownership; failed Window/MessagePort deserialization fires trusted asynchronous messageerror. Capability checks cannot be spoofed through public globals. Shared WebAssembly allocation remains available in an ordinary unisolated document, while cloning/messaging is rejected.
 
 Credentialless frames use an ephemeral top-document partition containing a real CookieJar and separate local/session storage backing. Initial navigation, response cookies, document.cookie, fetch, scripts, images and module graphs select that native partition. Credentialless siblings share it; normal frames retain their ordinary state. Native partition teardown reclaims its storage areas. PermissionsPolicy/FeaturePolicy has actual private brands/header parsing and measured defaults; Navigator.permissions query and clipboard reject disabled features.42 top headers,79 iframe admission/delegation cases,8 real shared-memory delivery cases,3 query-effect cases and a network/storage partition control match fresh normal Chrome155. Full popup/reporting/dynamic/deep policy, client-hint delegation and additional controlled APIs remain pending; merged/native155 and live-network validation remain independent.
+
+
+## Current parity integration (2026-10-16)
+
+The current candidate includes native AbstractRange/NodeRange/StaticRange,
+real Readable/Writable/TransformStream transfers through private ports, composed
+shadow geometry, original UTF-16 Range/caret controls, Trusted Types/native155
+code-generation admission, parser/HTTP reporting, response/upload streams and
+profile-owned cache/storage effects. Top-document text GET/POST form submissions
+use the actual network profile and replace the response document only after the
+prior isolate activation exits. Native155 tests cover real response scripts/status,
+redirect cookies, fragments, cancellation/CSP and retained form/Range GC.
+
+The public layout dependency is a Git-pinned0.3.8 candidate from producer PR23;
+registry0.3.7 is published. The stock production engine remains V8150, while the
+experimental155 configuration uses actual15.5.35.23 and matching patched native
+callbacks. A newer JS/HTTP profile does not establish native engine alignment.
+
+Earlier dated checkpoints above preserve their historical scope. Current open
+work, including ElementInternals/FormData lifecycle integration, decorated inline
+production, broader security/Fetch/resource behavior, final combined gates and a
+fresh native Google run, is maintained in
+[PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md) and
+[issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28). Deferred audio
+remains in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).

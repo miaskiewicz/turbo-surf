@@ -81,7 +81,7 @@ pub fn set_initializer(scope: &mut v8::PinScope, function: v8::Local<v8::Functio
     initializer_key(scope)
         .is_some_and(|key| global.set_private(scope, key, function.into()) == Some(true))
 }
-fn initialize<'s>(
+pub(super) fn initialize<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     doc: v8::Local<'s, v8::Object>,
     content_type: &str,
@@ -144,7 +144,15 @@ fn invoke<'s>(
         }
         return Some(object.into());
     }
-    if matches!(operation.as_str(), "contentType" | "view" | "url") {
+    if operation == "baseURI" {
+        let _owner = DomScope::for_object(scope, receiver);
+        handle_of(scope, receiver)?;
+        return key(scope, "about:blank").map(Into::into);
+    }
+    if matches!(
+        operation.as_str(),
+        "contentType" | "view" | "url" | "encoding"
+    ) {
         let _dom = DomScope::for_object(scope, receiver);
         let handle = handle_of(scope, receiver)?;
         if with_tree(|tree| tree.node_type_id(handle)) != Some(9) {
@@ -154,6 +162,9 @@ fn invoke<'s>(
             let value = record(scope, receiver)
                 .and_then(|record| field(scope, record, "nativeContentType"));
             return value.or_else(|| key(scope, "text/html").map(Into::into));
+        }
+        if operation == "encoding" {
+            return key(scope, "UTF-8").map(Into::into);
         }
         if operation == "url" {
             return key(scope, "about:blank").map(Into::into);

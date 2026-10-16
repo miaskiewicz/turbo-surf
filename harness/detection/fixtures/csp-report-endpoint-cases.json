@@ -1,0 +1,135 @@
+[
+  {
+    "name": "same-origin",
+    "csp": "style-src 'none' 'report-sample'; connect-src 'none'; report-uri /report?case={id}",
+    "policy": "unsafe-url"
+  },
+  {
+    "name": "cross-origin",
+    "csp": "style-src 'none' 'report-sample'; report-uri http://localhost:{port}/report?case={id}"
+  },
+  {
+    "name": "no-referrer",
+    "csp": "style-src 'none'; report-uri /report?case={id}",
+    "policy": "no-referrer"
+  },
+  {
+    "name": "redirect307",
+    "csp": "style-src 'none'; report-uri /redirect307?case={id}"
+  },
+  {
+    "name": "redirect302",
+    "csp": "style-src 'none'; report-uri /redirect302?case={id}"
+  },
+  {
+    "name": "multiple",
+    "csp": "style-src 'none'; report-uri /report?case={id}&n=a /report?case={id}&n=b"
+  },
+  {
+    "name": "duplicate-uri",
+    "csp": "style-src 'none'; report-uri /report?case={id} /report?case={id}"
+  },
+  {
+    "name": "report-only",
+    "reportOnly": "style-src 'none' 'report-sample'; report-uri /report?case={id}"
+  },
+  {
+    "name": "lone-sample",
+    "csp": "style-src 'none' 'report-sample'; report-uri /report?case={id}",
+    "sampleUnits": [
+      97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97,
+      97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 55357, 56832
+    ]
+  },
+  {
+    "name": "tamper-json",
+    "csp": "style-src 'none' 'report-sample'; report-uri /report?case={id}",
+    "tamper": true
+  },
+  {
+    "name": "meta-ignored",
+    "meta": "style-src 'none'; report-uri /report?case={id}"
+  },
+  {
+    "name": "report-to-missing",
+    "csp": "style-src 'none'; report-uri /report?case={id}; report-to missing"
+  },
+  {
+    "name": "report-to-empty",
+    "csp": "style-src 'none'; report-uri /report?case={id}; report-to"
+  },
+  {
+    "name": "modern-same",
+    "csp": "style-src 'none' 'report-sample'; report-uri /fallback?case={id}; report-to g{id}",
+    "endpoints": "g{id}=\"/report?case={id}\"",
+    "modern": true
+  },
+  {
+    "name": "modern-cross",
+    "csp": "style-src 'none' 'report-sample'; report-to g{id}",
+    "endpoints": "g{id}=\"http://localhost:{port}/report?case={id}\"",
+    "modern": true
+  },
+  {
+    "name": "old-report-to-header",
+    "csp": "style-src 'none'; report-uri /fallback?case={id}; report-to g{id}",
+    "reportTo": true,
+    "modern": true
+  },
+  {
+    "name": "frame-retirement",
+    "csp": "style-src 'none'; report-uri /report?case={id}",
+    "frame": true
+  },
+  {
+    "name": "frame-hold-gc",
+    "csp": "style-src 'none'; report-uri /hold-report?case={id}",
+    "frame": true,
+    "hold": true
+  },
+  {
+    "name": "modern-redirect307",
+    "modern": true,
+    "csp": "style-src 'none'; report-to g{id}",
+    "endpoints": "g{id}=\"/redirect307?case={id}\""
+  },
+  {
+    "name": "modern-redirect302",
+    "modern": true,
+    "csp": "style-src 'none'; report-to g{id}",
+    "endpoints": "g{id}=\"/redirect302?case={id}\""
+  },
+  {
+    "name": "modern-frame-retirement",
+    "modern": true,
+    "frame": true,
+    "csp": "style-src 'none'; report-to g{id}",
+    "endpoints": "g{id}=\"/report?case={id}\""
+  },
+  {
+    "name": "modern-meta",
+    "modern": true,
+    "meta": "style-src 'none'; report-to g{id}",
+    "endpoints": "g{id}=\"/report?case={id}\""
+  },
+  {
+    "name": "modern-lone-sample",
+    "modern": true,
+    "csp": "style-src 'none' 'report-sample'; report-to g{id}",
+    "endpoints": "g{id}=\"/report?case={id}\"",
+    "sampleUnits": [
+      97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97,
+      97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 55357, 56832
+    ]
+  },
+  {
+    "name": "legacy-nonsample-lone",
+    "csp": "style-src 'none' 'report-sample'; report-uri /report?case={id}",
+    "sampleUnits": [55296, 34, 92, 10, 56320]
+  },
+  {
+    "name": "report-only-fetch-once",
+    "reportOnly": "connect-src 'none'; report-uri /report?case={id}",
+    "request": true
+  }
+]

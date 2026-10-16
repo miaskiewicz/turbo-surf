@@ -42,6 +42,46 @@ export function differences(chrome, native, path = "") {
   return [{ path, chrome, native }];
 }
 
+// Member counts are measured from this pair, rather than carried forward from
+// an older browser/binary. Descriptor differences remain separate from absence.
+export function memberInventory(chrome, native) {
+  return Object.fromEntries(
+    [
+      ...new Set([
+        ...Object.keys(chrome.constructors || {}),
+        ...Object.keys(native.constructors || {}),
+      ]),
+    ]
+      .sort()
+      .map((name) => {
+        const expected = chrome.constructors?.[name]?.prototypeMembers;
+        const actual = native.constructors?.[name]?.prototypeMembers;
+        if (!expected || !actual) {
+          return [
+            name,
+            { measured: false, chrome: expected !== undefined, native: actual !== undefined },
+          ];
+        }
+        return [
+          name,
+          {
+            measured: true,
+            missing: Object.keys(expected)
+              .filter((key) => !Object.hasOwn(actual, key))
+              .sort(),
+            extra: Object.keys(actual)
+              .filter((key) => !Object.hasOwn(expected, key))
+              .sort(),
+            changed: Object.keys(expected)
+              .filter((key) => Object.hasOwn(actual, key))
+              .sort()
+              .flatMap((key) => differences(expected[key], actual[key], key)),
+          },
+        ];
+      }),
+  );
+}
+
 const run = (command, args, out, env = {}) =>
   new Promise((done, fail) => {
     const child = spawn(command, args, {
@@ -96,6 +136,9 @@ export async function captureApiShape({
   const frozen = join(out, "native-executable");
   copyFileSync(binary, frozen);
   chmodSync(frozen, 0o700);
+  const collectorSource = readFileSync(collector);
+  const frozenCollector = join(out, "collector.js");
+  writeFileSync(frozenCollector, collectorSource, { mode: 0o600 });
   const build = JSON.parse(execFileSync(frozen, ["--build-info"], { encoding: "utf8" }));
   const hash = (value) => createHash("sha256").update(value).digest("hex");
   const server = fixtureUrl
@@ -124,7 +167,7 @@ export async function captureApiShape({
       interfaces: false,
       disableExtensions: true,
       steps: [],
-      probes: [collector],
+      probes: [frozenCollector],
       successSelector: "body",
     };
     const configPath = join(out, "config.json");
@@ -132,12 +175,18 @@ export async function captureApiShape({
     const targets = ["chrome", "native"].map((name) => join(out, name));
     for (const target of targets) mkdirSync(target, { mode: 0o700 });
     const runs = await Promise.allSettled([
-      run(process.execPath, [join(here, "chrome-trace.mjs"), configPath, targets[0]], targets[0]),
+      run(
+        process.execPath,
+        [join(here, "chrome-cdp-trace.mjs"), configPath, targets[0]],
+        targets[0],
+      ),
       run(frozen, [configPath, targets[1]], targets[1], { TURBO_SURF_TZ: config.timezone }),
     ]);
     for (const result of runs) if (result.status === "rejected") throw result.reason;
     const traces = targets.map((target) => JSON.parse(readFileSync(join(target, "trace.json"))));
-    const probes = traces.map((trace) => trace.probes.find((probe) => probe.path === collector));
+    const probes = traces.map((trace) =>
+      trace.probes.find((probe) => probe.path === frozenCollector),
+    );
     for (const probe of probes)
       if (!probe || !Object.hasOwn(probe, "result")) throw new Error(JSON.stringify(probe));
     const comparison = {
@@ -147,10 +196,12 @@ export async function captureApiShape({
       build,
       chromeVersion: traces[0].browserVersion,
       binaryHash: hash(readFileSync(frozen)),
-      collectorHash: hash(readFileSync(collector)),
+      collectorHash: hash(collectorSource),
       collector,
+      collectorSnapshot: "collector.js",
       chrome: probes[0].result,
       native: probes[1].result,
+      members: memberInventory(probes[0].result, probes[1].result),
       differences: differences(probes[0].result, probes[1].result),
     };
     writeFileSync(join(out, "comparison.json"), JSON.stringify(comparison, null, 2), {

@@ -1,0 +1,78 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "a81c8bc34e2fe759fa021dca75b028331a41f0c86667cd1d6108cb87c5754706",
+  "collectorSha256": "283ad6661eb021063535d4484ed6fc5743acce50139395f63f82162793476d00",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "wire": [
+    {
+      "host": "127.0.0.1:PORT",
+      "method": "GET",
+      "path": "/",
+      "cookie": null,
+      "bodyHex": ""
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "method": "GET",
+      "path": "/favicon.ico",
+      "cookie": null,
+      "bodyHex": ""
+    }
+  ],
+  "result": {
+    "missingDuplex": {
+      "error": "TypeError"
+    },
+    "invalidDuplex": {
+      "error": "TypeError"
+    },
+    "validDuplex": {
+      "result": "accepted",
+      "duplex": "half",
+      "used": false
+    },
+    "streamKeepalive": {
+      "error": "TypeError"
+    },
+    "streamNoCors": {
+      "error": "TypeError"
+    },
+    "constructFromRequest": {
+      "sourceUsed": true,
+      "copiedUsed": false,
+      "text": "text"
+    },
+    "clone": {
+      "sourceUsed": false,
+      "cloneUsed": false,
+      "source": "clone",
+      "clone": "clone"
+    },
+    "arrayBufferDuck": {
+      "type": "text/plain;charset=UTF-8",
+      "text": "plain-object",
+      "called": 0
+    },
+    "getReaderDuck": {
+      "type": "text/plain;charset=UTF-8",
+      "text": "plain-object",
+      "called": 0
+    },
+    "bufferSnapshot": "A",
+    "paramsSnapshot": "first=one",
+    "streamHttp1": {
+      "error": "TypeError",
+      "used": true
+    }
+  }
+}

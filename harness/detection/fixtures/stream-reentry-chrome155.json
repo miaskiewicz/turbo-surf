@@ -1,0 +1,48 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "fixtureSha256": "2d24a51cf1063826d522439deac916593e86b73a3c82995d54bd43819f7be614",
+  "tlsTrust": "Only the checked fixture certificate SPKI is trusted for this localhost control",
+  "probeSha256": "815395c6a939332f834f09c82dd9410712a0e79dd31a18f199fefdcb039d9d35",
+  "collectorSha256": "4c43f2f36e90a8de3869531684aa7d1783ba754285ed00eebcafa2278ae347b4",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--ignore-certificate-errors-spki-list=tgZhMuDR4ffcvwcdvk0UExoYIcSg3V4sRX6nubjtqQc=",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "wire": [
+    {
+      "method": "GET",
+      "path": "/",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/favicon.ico",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    }
+  ],
+  "result": {
+    "error": "TypeError",
+    "events": [
+      {
+        "returned": false,
+        "error": null
+      }
+    ],
+    "bufferBytes": 0,
+    "locks": [false, true]
+  }
+}

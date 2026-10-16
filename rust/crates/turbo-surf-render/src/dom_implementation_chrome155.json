@@ -1,8 +1,9 @@
 {
-  "browser": "Chrome/155.0.8059.79",
+  "browser": "Chrome/155.0.8059.80",
   "v8": "15.5.35.23",
-  "recordedAt": "2026-10-14T04:21:08.504Z",
-  "fixture": "dom-implementation-probe.js",
+  "recordedAt": "2026-10-15T23:26:55.747Z",
+  "fixture": "dom_implementation_probe.js",
+  "probeSha256": "bf8f862a355943c72f379784937be24144d1e4fe14de80b87f77bad8a4ef6610",
   "effectiveExtensionFlags": [
     "--disable-extensions",
     "--disable-component-extensions-with-background-pages"
@@ -332,6 +333,47 @@
       "title": "protected",
       "owner": true,
       "identity": true
+    },
+    "fragmentId": {
+      "descriptor": [
+        "getElementById",
+        1,
+        true,
+        true,
+        true,
+        false,
+        true
+      ],
+      "order": [
+        true,
+        true,
+        true
+      ],
+      "errors": [
+        "TypeError",
+        "TypeError",
+        "TypeError",
+        "TypeError"
+      ],
+      "units": [
+        true,
+        true
+      ],
+      "intrinsics": [
+        0,
+        true,
+        "TypeError"
+      ],
+      "shadow": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "changed": [
+        true,
+        true
+      ]
     }
   }
 }

@@ -37,6 +37,8 @@ use deno_error::JsErrorBox;
 use std::cell::RefCell;
 use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
+#[path = "fetch_streams.rs"]
+pub(crate) mod fetch_streams;
 use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
 use turbo_surf_core::request_context::{
     ClientHints, Credentials, Destination, RequestContext, RequestMode,
@@ -49,6 +51,11 @@ use turbo_surf_core::url::resolve;
 #[path = "runtime_activation.rs"]
 mod runtime_activation;
 use runtime_activation::ActivationKey;
+
+#[path = "form_navigation.rs"]
+mod form_navigation;
+#[path = "form_submission.rs"]
+mod form_submission;
 
 struct OwnedRuntime(JsRuntime, bool, ActivationKey);
 
@@ -143,6 +150,13 @@ fn register_frame_modules(scope: &mut v8::PinScope, base: &str) -> Result<(), Js
             ),
         ua: state.borrow::<Ua>().0.clone(),
         client_hints: state.borrow::<ClientHints>().clone(),
+        http_cache: state.borrow::<BrowserStorage>().http_cache(),
+        storage_effects: state.borrow::<BrowserStorage>().partition_response_effects(
+            context
+                .get_slot::<CspHandle>()
+                .and_then(|handle| handle.partition.clone())
+                .map_or(0, |partition| partition.id),
+        ),
         inline_sources: state.borrow::<InlineModules>().clone(),
         credentials,
         csp: (*context
@@ -173,6 +187,8 @@ struct NetModuleLoader {
     jar: Jar,
     ua: String,
     client_hints: ClientHints,
+    http_cache: turbo_surf_core::http_cache::HttpCache,
+    storage_effects: std::sync::Arc<turbo_surf_core::net::ResponseSideEffects<'static>>,
     inline_sources: InlineModules,
     credentials: ModuleCredentials,
     csp: CspHandle,
@@ -210,6 +226,7 @@ struct CspHandle {
     id: u32,
     partition: Option<Rc<CredentiallessPartition>>,
     policy: Rc<RefCell<crate::csp::DocumentPolicy>>,
+    response_metadata: Rc<RefCell<crate::DocumentResponseMetadata>>,
 }
 impl CspHandle {
     fn new(base: &str, headers: &[(String, String)], html: &str) -> Self {
@@ -218,11 +235,30 @@ impl CspHandle {
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
             partition: None,
+            response_metadata: Rc::new(RefCell::new(crate::DocumentResponseMetadata::default())),
             policy: Rc::new(RefCell::new(crate::csp::DocumentPolicy::new(
                 base, headers, html,
             ))),
         }
     }
+}
+#[derive(Clone, Default)]
+pub(crate) struct FetchPolicySnapshot {
+    active: crate::csp::Policy,
+    referrer: turbo_surf_core::referrer_policy::ReferrerPolicy,
+    embedder: crate::resource_policy::EmbedderPolicy,
+}
+pub(crate) fn snapshot_fetch_policy(context: v8::Local<v8::Context>) -> FetchPolicySnapshot {
+    context
+        .get_slot::<CspHandle>()
+        .map_or_else(FetchPolicySnapshot::default, |handle| {
+            let policy = handle.policy.borrow();
+            FetchPolicySnapshot {
+                active: policy.active.clone(),
+                referrer: policy.referrer_policy,
+                embedder: policy.embedder_policy,
+            }
+        })
 }
 struct CredentiallessPartition {
     id: u32,
@@ -237,11 +273,9 @@ impl Drop for CredentiallessPartition {
         let ids = areas
             .by_origin
             .iter()
-            .filter_map(|((partition, _, _), id)| (*partition == self.id).then_some(*id))
+            .filter_map(|(key, id)| (key.partition == self.id).then_some(*id))
             .collect::<Vec<_>>();
-        areas
-            .by_origin
-            .retain(|(partition, _, _), _| *partition != self.id);
+        areas.by_origin.retain(|key, _| key.partition != self.id);
         for id in ids {
             areas.values.remove(&id);
         }
@@ -449,7 +483,7 @@ fn op_csp_finish_parser(scope: &mut v8::PinScope, document: v8::Local<v8::Object
     };
     let mut policy = handle.policy.borrow_mut();
     policy.activate(usize::MAX);
-    context.set_allow_generation_from_strings(policy.current().allows_eval());
+    configure_csp_code_generation(scope, context, policy.current());
 }
 
 #[op2(fast)]
@@ -474,7 +508,32 @@ fn op_csp_meta(
     };
     let mut policy = handle.policy.borrow_mut();
     policy.active.add(&content);
-    context.set_allow_generation_from_strings(policy.current().allows_eval());
+    configure_csp_code_generation(scope, context, policy.current());
+}
+
+#[op2(fast)]
+fn op_referrer_meta(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    meta: v8::Local<v8::Object>,
+) {
+    if !crate::browser_env::node_attribute(scope, meta, "name")
+        .is_some_and(|name| name.eq_ignore_ascii_case("referrer"))
+    {
+        return;
+    }
+    let Some(policy) = crate::browser_env::node_attribute(scope, meta, "content")
+        .as_deref()
+        .and_then(crate::referrer_meta::policy)
+    else {
+        return;
+    };
+    if let Some(handle) = document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<CspHandle>())
+    {
+        handle.policy.borrow_mut().referrer_policy = policy;
+    }
 }
 
 #[derive(Default)]
@@ -491,6 +550,7 @@ fn enqueue_csp_bootstrap<'s>(
     target: v8::Local<'s, v8::Object>,
     metadata: v8::Local<'s, v8::Value>,
     bytes: usize,
+    parser_offset: Option<usize>,
 ) -> bool {
     let Some(key) = csp_bootstrap_key(scope) else {
         return false;
@@ -508,7 +568,11 @@ fn enqueue_csp_bootstrap<'s>(
     if tasks.length() >= 4096 || bytes > (64 * 1024 * 1024_usize).saturating_sub(quota.0.get()) {
         return false;
     }
-    let entry = v8::Array::new_with_elements(scope, &[target.into(), metadata]);
+    let offset = v8::Number::new(
+        scope,
+        parser_offset.map_or(f64::INFINITY, |value| value as f64),
+    );
+    let entry = v8::Array::new_with_elements(scope, &[target.into(), metadata, offset.into()]);
     if tasks.set_index(scope, tasks.length(), entry.into()) != Some(true)
         || global.set_private(scope, key, tasks.into()) != Some(true)
     {
@@ -533,6 +597,7 @@ fn flush_csp_bootstrap<'s>(scope: &mut v8::PinScope<'s, '_>, context: v8::Local<
     let Some(tasks) = tasks else {
         return;
     };
+    let mut ordered = Vec::with_capacity(tasks.length() as usize);
     for index in 0..tasks.length() {
         let Some(entry) = tasks
             .get_index(scope, index)
@@ -540,6 +605,14 @@ fn flush_csp_bootstrap<'s>(scope: &mut v8::PinScope<'s, '_>, context: v8::Local<
         else {
             continue;
         };
+        let offset = entry
+            .get_index(scope, 2)
+            .and_then(|value| value.number_value(scope))
+            .unwrap_or(f64::INFINITY);
+        ordered.push((offset, entry));
+    }
+    ordered.sort_by(|left, right| left.0.total_cmp(&right.0));
+    for (_, entry) in ordered {
         let Some(target) = entry.get_index(scope, 0) else {
             continue;
         };
@@ -555,36 +628,105 @@ fn flush_csp_bootstrap<'s>(scope: &mut v8::PinScope<'s, '_>, context: v8::Local<
     }
 }
 
-fn queue_csp_violations<'s>(
+#[derive(Clone, Copy)]
+struct CspParserLocation {
+    owner_window: bool,
+    position: Option<turbo_dom_parser::rtdom::SourcePosition>,
+}
+struct CspViolationReport<'a> {
+    kind: &'a str,
+    blocked: &'a str,
+    disposition: &'a str,
+    records: Vec<crate::csp::ReportRecord>,
+    parser: Option<CspParserLocation>,
+    sample: Option<&'a [u16]>,
+}
+fn csp_sample_units(scope: &v8::PinScope, text: v8::Local<v8::String>) -> Vec<u16> {
+    let whitespace = |unit: u16| matches!(unit, 9 | 10 | 11 | 12 | 13 | 32);
+    let mut buffer = [0; 128];
+    let length = text.length();
+    let mut start = 0;
+    while start < length {
+        if scope.is_execution_terminating() {
+            return Vec::new();
+        }
+        let count = (length - start).min(buffer.len());
+        text.write_v2(
+            scope,
+            start as u32,
+            &mut buffer[..count],
+            v8::WriteFlags::empty(),
+        );
+        if let Some(index) = buffer[..count].iter().position(|&unit| !whitespace(unit)) {
+            start += index;
+            break;
+        }
+        start += count;
+    }
+    let mut end = length;
+    while end > start {
+        if scope.is_execution_terminating() {
+            return Vec::new();
+        }
+        let count = (end - start).min(buffer.len());
+        text.write_v2(
+            scope,
+            (end - count) as u32,
+            &mut buffer[..count],
+            v8::WriteFlags::empty(),
+        );
+        if let Some(index) = buffer[..count].iter().rposition(|&unit| !whitespace(unit)) {
+            end = end - count + index + 1;
+            break;
+        }
+        end -= count;
+    }
+    let mut units = vec![0; (end - start).min(40)];
+    text.write_v2(scope, start as u32, &mut units, v8::WriteFlags::empty());
+    units
+}
+fn queue_csp_report<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
     element: v8::Local<'s, v8::Object>,
-    kind: &str,
-    blocked: &str,
-    disposition: &str,
-    records: Vec<(String, String)>,
+    report: CspViolationReport<'_>,
 ) {
+    let CspViolationReport {
+        kind,
+        blocked,
+        disposition,
+        records,
+        parser,
+        sample,
+    } = report;
+
     if records.is_empty() || scope.is_execution_terminating() {
         return;
     }
     let (mut source, mut line, mut column) = (String::new(), 0, 0);
-    if let Some(trace) = v8::StackTrace::current_stack_trace(scope, 32) {
-        for index in 0..trace.get_frame_count() {
-            let Some(frame) = trace.get_frame(scope, index) else {
-                continue;
-            };
-            let Some(name) = frame.get_script_name_or_source_url(scope) else {
-                continue;
-            };
-            let name = name.to_rust_string_lossy(scope);
-            if name.starts_with("<") || name.is_empty() {
-                continue;
+    if parser.is_none() {
+        if let Some(trace) = v8::StackTrace::current_stack_trace(scope, 32) {
+            for index in 0..trace.get_frame_count() {
+                let Some(frame) = trace.get_frame(scope, index) else {
+                    continue;
+                };
+                let Some(name) = frame.get_script_name_or_source_url(scope) else {
+                    continue;
+                };
+                let name = name.to_rust_string_lossy(scope);
+                if name.starts_with("<") || name.is_empty() {
+                    continue;
+                }
+                source = name;
+                line = frame.get_line_number();
+                column = frame.get_column();
+                break;
             }
-            source = name;
-            line = frame.get_line_number();
-            column = frame.get_column();
-            break;
         }
+    }
+    if let Some(position) = parser.and_then(|metadata| metadata.position) {
+        line = position.line;
+        column = position.column;
     }
     let url = context.get_slot::<FrameDocumentLocation>().map_or_else(
         || {
@@ -605,30 +747,185 @@ fn queue_csp_violations<'s>(
             })
             .unwrap_or_else(|_| url.clone());
     }
+    if parser.is_some_and(|metadata| !metadata.owner_window) || kind == "img-src" {
+        source.clear();
+        line = 0;
+        column = 0;
+    }
+    let response_metadata = context
+        .get_slot::<CspHandle>()
+        .map_or_else(crate::DocumentResponseMetadata::default, |handle| {
+            handle.response_metadata.borrow().clone()
+        });
     let scope = &mut v8::ContextScope::new(scope, context);
-    for (original, sample) in records {
-        let metadata = serde_json::json!({"documentURI":url,"referrer":"","blockedURI":blocked,"violatedDirective":kind,"effectiveDirective":kind,"originalPolicy":original,"disposition":disposition,"sourceFile":source,"statusCode":200,"lineNumber":line,"columnNumber":column,"sample":sample});
+    for record in records {
+        let original = &record.original;
+        let report_sample = record.sample;
+        let sample_units = if report_sample {
+            sample.unwrap_or_default()
+        } else {
+            &[]
+        };
+        let metadata = serde_json::json!({"documentURI":crate::document_response::report_url(&url),"referrer":response_metadata.referrer,"blockedURI":blocked,"violatedDirective":kind,"effectiveDirective":kind,"originalPolicy":original,"disposition":disposition,"sourceFile":source,"statusCode":response_metadata.status,"lineNumber":line,"columnNumber":column,"sample":""});
+        let report_payload = metadata.clone();
         let bytes = metadata
             .to_string()
             .len()
             .saturating_mul(2)
-            .saturating_add(96);
+            .saturating_add(sample_units.len().saturating_mul(2))
+            .saturating_add(104);
         let Some(json) = v8::String::new(scope, &metadata.to_string()) else {
             return;
         };
         let Some(metadata) = v8::json::parse(scope, json) else {
             return;
         };
+        let Some(sample) =
+            v8::String::new_from_two_byte(scope, sample_units, v8::NewStringType::Normal)
+        else {
+            return;
+        };
+        let key = v8::String::new(scope, "sample").unwrap();
+        let metadata = v8::Local::<v8::Object>::try_from(metadata).unwrap();
+        metadata.set(scope, key.into(), sample.into());
+        let metadata: v8::Local<v8::Value> = metadata.into();
         let accepted = call_frame_helper(scope, "queueCspViolation", &[element.into(), metadata])
             .map_or_else(
-                || enqueue_csp_bootstrap(scope, context, element, metadata, bytes),
+                || {
+                    enqueue_csp_bootstrap(
+                        scope,
+                        context,
+                        element,
+                        metadata,
+                        bytes,
+                        parser
+                            .and_then(|metadata| metadata.position)
+                            .map(|position| position.utf16_offset),
+                    )
+                },
                 |value| !value.is_false(),
             );
         if !accepted {
             scope.terminate_execution();
             return;
         }
+        send_csp_report(
+            scope,
+            context,
+            &url,
+            &record.destination,
+            &report_payload,
+            sample_units,
+        );
     }
+}
+
+fn send_csp_report<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    source: &str,
+    destination: &crate::csp::ReportDestination,
+    metadata: &serde_json::Value,
+    sample: &[u16],
+) {
+    use turbo_surf_core::request_context::{Credentials, Destination, RequestContext, RequestMode};
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return;
+    };
+    let endpoints = match destination {
+        crate::csp::ReportDestination::None => Vec::new(),
+        crate::csp::ReportDestination::Legacy(values) => values
+            .iter()
+            .take(4096)
+            .filter_map(|value| url::Url::parse(source).ok()?.join(value).ok())
+            .filter(|url| matches!(url.scheme(), "http" | "https"))
+            .map(|url| crate::csp_reporting::Endpoint {
+                url: url.into(),
+                modern: false,
+                credentials: true,
+            })
+            .collect(),
+        crate::csp::ReportDestination::Group(group) => handle
+            .policy
+            .borrow()
+            .reporting_endpoints
+            .get(group)
+            .cloned()
+            .into_iter()
+            .collect(),
+    };
+    if endpoints.is_empty() {
+        return;
+    }
+    let mut request = RequestContext::resource(source, Destination::Report, RequestMode::NoCors);
+    request.credentials = Credentials::SameOrigin;
+    request.opaque_origin = window_is_opaque(scope, context);
+    request.cookie_site_is_opaque = frame_cookie_site_is_opaque(scope, context);
+    request.referrer_policy = handle.policy.borrow().referrer_policy;
+    let state_rc = JsRuntime::op_state_from(scope);
+    let mut state = state_rc.borrow_mut();
+    if !state.has::<BrowserStorage>() {
+        state.put(BrowserStorage::default());
+    }
+    if !state.has::<ReportCookieTargets>() {
+        state.put(ReportCookieTargets::default());
+    }
+    apply_report_cookies(&mut state);
+    request.top_level_source = Some(state.borrow::<Base>().0.clone());
+    let jar = handle.partition.as_ref().map_or_else(
+        || state.borrow::<Jar>().clone(),
+        |partition| partition.jar.clone(),
+    );
+    let target = handle
+        .partition
+        .as_ref()
+        .map_or(0, |partition| u64::from(partition.id));
+    state
+        .borrow_mut::<ReportCookieTargets>()
+        .0
+        .insert(target, Rc::downgrade(&jar));
+    let reporter = state.borrow::<BrowserStorage>().3.clone();
+    for endpoint in endpoints {
+        let cookies = jar.borrow().fork_for_request();
+        let body = crate::csp_reporting::body(metadata, sample, endpoint.modern);
+        reporter.send(crate::csp_reporting::ReportJob {
+            endpoint,
+            context: request.clone(),
+            jar: cookies,
+            target,
+            client_hints: state.borrow::<ClientHints>().clone(),
+            body,
+            response_effects: Some(
+                state
+                    .borrow::<BrowserStorage>()
+                    .partition_response_effects(target as u32),
+            ),
+        });
+    }
+}
+
+fn queue_csp_violations<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    element: v8::Local<'s, v8::Object>,
+    kind: &str,
+    blocked: &str,
+    disposition: &str,
+    records: Vec<crate::csp::ReportRecord>,
+) {
+    queue_csp_report(
+        scope,
+        context,
+        element,
+        CspViolationReport {
+            kind,
+            blocked,
+            disposition,
+            records,
+            parser: None,
+            sample: None,
+        },
+    );
 }
 
 #[op2(fast, reentrant)]
@@ -638,7 +935,7 @@ fn op_csp_script<'s>(
     element: v8::Local<'s, v8::Object>,
     index: u32,
     #[string] url: &str,
-    #[string] text: &str,
+    text: v8::Local<'s, v8::String>,
 ) -> bool {
     let Some(context) = document.get_creation_context(scope) else {
         return false;
@@ -646,41 +943,80 @@ fn op_csp_script<'s>(
     let Some(handle) = context.get_slot::<CspHandle>() else {
         return true;
     };
+    let sample = csp_sample_units(scope, text);
+    let text = text.to_rust_string_lossy(scope);
     let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
-    let mut document = handle.policy.borrow_mut();
-    document.activate(index as usize);
-    context.set_allow_generation_from_strings(document.current().allows_eval());
-    if document.current().has_policy() {
+    let mut document_policy = handle.policy.borrow_mut();
+    document_policy.activate(index as usize);
+    configure_csp_code_generation(scope, context, document_policy.current());
+    if document_policy.current().has_policy() {
         crate::browser_env::hide_node_nonce(scope, element);
     }
     if url.is_empty() {
-        let policy = document.current().clone();
-        let report_only = document.report_only.clone();
-        drop(document);
-        let allowed = policy.allows_inline("script-src-elem", text, &nonce);
-        queue_csp_violations(
+        let policy = document_policy.current().clone();
+        let report_only = document_policy.report_only.clone();
+        drop(document_policy);
+        let allowed = policy.allows_inline("script-src-elem", &text, &nonce);
+        queue_csp_report(
             scope,
             context,
             element,
-            "script-src-elem",
-            "inline",
-            "enforce",
-            policy.inline_violations("script-src-elem", text, &nonce),
+            CspViolationReport {
+                kind: "script-src-elem",
+                blocked: "inline",
+                disposition: "enforce",
+                records: policy.inline_violations("script-src-elem", &text, &nonce),
+                parser: None,
+                sample: Some(&sample),
+            },
         );
-        queue_csp_violations(
+        queue_csp_report(
             scope,
             context,
             element,
-            "script-src-elem",
-            "inline",
-            "report",
-            report_only.inline_violations("script-src-elem", text, &nonce),
+            CspViolationReport {
+                kind: "script-src-elem",
+                blocked: "inline",
+                disposition: "report",
+                records: report_only.inline_violations("script-src-elem", &text, &nonce),
+                parser: None,
+                sample: Some(&sample),
+            },
         );
         allowed
     } else {
-        document
-            .current()
-            .allows_request("script-src-elem", url, &nonce, false)
+        let policy = document_policy.current().clone();
+        drop(document_policy);
+        let allowed = policy.allows_request("script-src-elem", url, &nonce, false);
+        if !allowed {
+            let blocked = csp_blocked_url(scope, context, url);
+            queue_csp_violations(
+                scope,
+                context,
+                document,
+                "script-src-elem",
+                &blocked,
+                "enforce",
+                policy.request_violations("script-src-elem", url, &nonce),
+            );
+        }
+        allowed
+    }
+}
+fn csp_blocked_url(
+    scope: &mut v8::PinScope,
+    context: v8::Local<v8::Context>,
+    target: &str,
+) -> String {
+    if let Ok(mut url) = url::Url::parse(target) {
+        url.set_fragment(None);
+        if window_origin(scope, context) == url.origin().ascii_serialization() {
+            url.to_string()
+        } else {
+            url.origin().ascii_serialization()
+        }
+    } else {
+        target.to_string()
     }
 }
 #[op2(fast, reentrant)]
@@ -691,23 +1027,36 @@ fn op_csp_request<'s>(
     #[string] kind: &str,
     #[string] nonce: &str,
 ) -> bool {
+    csp_request(scope, document, target, kind, nonce)
+}
+
+fn csp_request<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    target: &str,
+    kind: &str,
+    nonce: &str,
+) -> bool {
     let Some(context) = document.get_creation_context(scope) else {
         return false;
     };
+    csp_request_for_context(scope, context, document, target, kind, nonce)
+}
+
+fn csp_request_for_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    document: v8::Local<'s, v8::Object>,
+    target: &str,
+    kind: &str,
+    nonce: &str,
+) -> bool {
     let Some(handle) = context.get_slot::<CspHandle>() else {
         return true;
     };
     let policy = handle.policy.borrow().active.clone();
     let allowed = policy.allows_request(kind, target, nonce, false);
-    let mut blocked = target.to_string();
-    if let Ok(mut url) = url::Url::parse(target) {
-        url.set_fragment(None);
-        blocked = if window_origin(scope, context) == url.origin().ascii_serialization() {
-            url.to_string()
-        } else {
-            url.origin().ascii_serialization()
-        };
-    }
+    let blocked = csp_blocked_url(scope, context, target);
     queue_csp_violations(
         scope,
         context,
@@ -728,15 +1077,17 @@ fn op_csp_request<'s>(
         report_only.request_violations(kind, target, nonce),
     );
     if allowed {
-        queue_csp_violations(
-            scope,
-            context,
-            document,
-            kind,
-            &blocked,
-            "report",
-            report_only.request_violations(kind, target, nonce),
-        );
+        // Chrome dispatches pre/post-request report-only events, but uploads the
+        // identical violation once. Duplicate URI tokens still upload separately.
+        let records = report_only
+            .request_violations(kind, target, nonce)
+            .into_iter()
+            .map(|mut record| {
+                record.destination = crate::csp::ReportDestination::None;
+                record
+            })
+            .collect();
+        queue_csp_violations(scope, context, document, kind, &blocked, "report", records);
     }
     allowed
 }
@@ -794,6 +1145,10 @@ fn authorize_css(
         result.set_bool(false);
         return;
     }
+    let sample = v8::Local::<v8::String>::try_from(args.get(3))
+        .ok()
+        .map(|text| csp_sample_units(scope, text))
+        .unwrap_or_default();
     let text = args.get(3).to_rust_string_lossy(scope);
     let initial = args.get(4);
     let mut policy = if initial.is_array() {
@@ -808,42 +1163,427 @@ fn authorize_css(
             }
         }
     }
+    let parser = initial.is_array().then(|| CspParserLocation {
+        owner_window: crate::browser_env::node_has_window_owner(scope, element),
+        position: crate::browser_env::node_parser_position(
+            scope,
+            element,
+            (kind == "style-src-attr").then_some("style"),
+        ),
+    });
     let nonce = crate::browser_env::node_nonce(scope, element).unwrap_or_default();
     let allowed = policy.allows_inline(&kind, &text, &nonce);
     if policy.has_policy() {
         crate::browser_env::hide_node_nonce(scope, element);
     }
-    queue_csp_violations(
+    let target = if parser.is_some_and(|metadata| !metadata.owner_window) {
+        document
+    } else {
+        element
+    };
+    queue_csp_report(
         scope,
         context,
-        element,
-        &kind,
-        "inline",
-        "enforce",
-        policy.inline_violations(&kind, &text, &nonce),
+        target,
+        CspViolationReport {
+            kind: &kind,
+            blocked: "inline",
+            disposition: "enforce",
+            records: policy.inline_violations(&kind, &text, &nonce),
+            parser,
+            sample: Some(&sample),
+        },
     );
     let report_only = handle.policy.borrow().report_only.clone();
-    queue_csp_violations(
+    queue_csp_report(
         scope,
         context,
-        element,
-        &kind,
-        "inline",
-        "report",
-        report_only.inline_violations(&kind, &text, &nonce),
+        target,
+        CspViolationReport {
+            kind: &kind,
+            blocked: "inline",
+            disposition: "report",
+            records: report_only.inline_violations(&kind, &text, &nonce),
+            parser,
+            sample: Some(&sample),
+        },
     );
     result.set_bool(allowed);
 }
 
+fn configure_csp_code_generation(
+    scope: &mut v8::PinScope,
+    context: v8::Local<v8::Context>,
+    policy: &crate::csp::Policy,
+) {
+    let allowed = policy.allows_eval();
+    #[cfg(turbo_surf_native_proxy)]
+    let allowed = {
+        let key = v8::String::new(scope, "turbo-surf.code-generation-callback").unwrap();
+        let key = v8::Private::for_api(scope, Some(key));
+        let global = context.global(scope);
+        allowed
+            && !global
+                .get_private(scope, key)
+                .is_some_and(|callback| callback.is_function())
+    };
+    #[cfg(not(turbo_surf_native_proxy))]
+    // Published SDKs lack the private native source-conversion callback.
+    // Enforced Trusted Types must fail closed rather than admit raw eval.
+    let allowed =
+        policy.bypasses_trusted_types_eval() || allowed && !policy.requires_trusted_types();
+    #[cfg(not(turbo_surf_native_proxy))]
+    let _ = scope;
+    context.set_allow_generation_from_strings(allowed);
+}
+
+#[cfg(turbo_surf_native_proxy)]
+fn csp_eval_sample_units(scope: &v8::PinScope, source: v8::Local<v8::String>) -> Vec<u16> {
+    // Chrome's code-generation path supplies a 40-unit prefix to the report
+    // builder, which then strips ASCII whitespace. Inline reports trim first.
+    let mut units = vec![0; source.length().min(40)];
+    source.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+    let whitespace = |unit: &u16| matches!(unit, 9 | 10 | 11 | 12 | 13 | 32);
+    let start = units
+        .iter()
+        .position(|unit| !whitespace(unit))
+        .unwrap_or(units.len());
+    let end = units
+        .iter()
+        .rposition(|unit| !whitespace(unit))
+        .map_or(start, |index| index + 1);
+    units[start..end].to_vec()
+}
+
+#[cfg(turbo_surf_native_proxy)]
+fn deny_code_generation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut result: v8::ReturnValue,
+    message: &str,
+) {
+    let message = v8::String::new(scope, message).unwrap();
+    let detail = v8::Array::new(scope, 1);
+    detail.set_index(scope, 0, message.into());
+    result.set(detail.into());
+}
+#[cfg(turbo_surf_native_proxy)]
+fn authorize_code_generation<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut result: v8::ReturnValue,
+) {
+    let context = scope.get_current_context();
+    let typed = crate::browser_env::trusted_script_source(scope, args.get(0));
+    let original = match typed.or_else(|| v8::Local::<v8::String>::try_from(args.get(0)).ok()) {
+        Some(source) => source,
+        None => {
+            result.set_bool(true);
+            return;
+        }
+    };
+    if context.get_slot::<FrameRetired>().is_some() {
+        result.set_bool(false);
+        return;
+    }
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        result.set_bool(context.is_code_generation_from_strings_allowed());
+        return;
+    };
+    let policy = handle.policy.borrow().current().clone();
+    let report_only = handle.policy.borrow().report_only.clone();
+    if policy.bypasses_trusted_types_eval() {
+        result.set_bool(true);
+        return;
+    }
+    let key = v8::String::new(scope, "turbo-dom.ownership.window-document").unwrap();
+    let key = v8::Private::for_api(scope, Some(key));
+    let Some(document) = context
+        .global(scope)
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+    else {
+        result.set_bool(false);
+        return;
+    };
+    // Chromium labels generated constructor source using these engine prefixes.
+    // Source admission itself always stays in the real V8 compilation callback.
+    let text = original.to_rust_string_lossy(scope);
+    let sink = if [
+        "(function anonymous",
+        "(async function anonymous",
+        "(function* anonymous",
+        "(async function* anonymous",
+    ]
+    .iter()
+    .any(|prefix| text.starts_with(prefix))
+    {
+        "Function"
+    } else {
+        "eval"
+    };
+    v8::tc_scope!(let scope,scope);
+    let source = crate::browser_env::trusted_type_string(
+        scope,
+        document,
+        args.get(0),
+        "TrustedScript",
+        sink,
+        "",
+    );
+    let message=policy.eval_error_message().unwrap_or_else(||"Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements.".into());
+    let Some(source) = source else {
+        scope.reset();
+        deny_code_generation(scope, result, &message);
+        return;
+    };
+    if crate::browser_env::string_code_units(scope, source)
+        != crate::browser_env::string_code_units(scope, original)
+    {
+        deny_code_generation(scope, result, &message);
+        return;
+    }
+    let sample = csp_eval_sample_units(scope, source);
+    for (disposition, records) in [
+        ("enforce", policy.eval_violations()),
+        ("report", report_only.eval_violations()),
+    ] {
+        queue_csp_report(
+            scope,
+            context,
+            document,
+            CspViolationReport {
+                kind: "script-src",
+                blocked: "eval",
+                disposition,
+                records,
+                parser: None,
+                sample: Some(&sample),
+            },
+        );
+    }
+    if policy.allows_eval() {
+        result.set(source.into());
+    } else {
+        deny_code_generation(scope, result, &message);
+    }
+}
+#[cfg(turbo_surf_native_proxy)]
+fn install_code_generation_authorization(scope: &mut v8::PinScope) -> Result<(), String> {
+    let context = scope.get_current_context();
+    let callback = v8::Function::new(scope, authorize_code_generation)
+        .ok_or("Native code-generation authorization unavailable")?;
+    if context.set_code_generation_callback(callback) {
+        context.set_allow_generation_from_strings(false);
+        Ok(())
+    } else {
+        Err("Native code-generation authorization unavailable".into())
+    }
+}
+
+fn authorize_trusted_types(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let context = scope.get_current_context();
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        result.set_bool(true);
+        return;
+    };
+    let policy = handle.policy.borrow().current().clone();
+    let report_only = handle.policy.borrow().report_only.clone();
+    let action = args.get(0).to_rust_string_lossy(scope);
+    if action == "required" {
+        result.set_bool(policy.requires_trusted_types() || report_only.requires_trusted_types());
+        return;
+    }
+    let key = v8::String::new(scope, "turbo-dom.ownership.window-document").unwrap();
+    let key = v8::Private::for_api(scope, Some(key));
+    let document = context
+        .global(scope)
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok());
+    let Some(document) = document else {
+        result.set_bool(false);
+        return;
+    };
+    let (kind, blocked, sample, name) = if action == "policy" {
+        let value = args.get(1).to_rust_string_lossy(scope);
+        let duplicate = args.get(2).is_true();
+        let value_string = v8::Local::<v8::String>::try_from(args.get(1)).unwrap();
+        let sample = crate::browser_env::string_code_units(scope, value_string)
+            .into_iter()
+            .take(40)
+            .collect::<Vec<_>>();
+        (
+            "trusted-types",
+            "trusted-types-policy",
+            sample,
+            Some((value, duplicate)),
+        )
+    } else {
+        let sink = args.get(2).to_rust_string_lossy(scope);
+        let text = v8::Local::<v8::String>::try_from(args.get(3)).unwrap();
+        let mut content = crate::browser_env::string_code_units(scope, text);
+        if sink == "Function" {
+            let source = text.to_rust_string_lossy(scope);
+            for prefix in [
+                "(function anonymous",
+                "(async function anonymous",
+                "(function* anonymous",
+                "(async function* anonymous",
+            ] {
+                if source.starts_with(prefix) {
+                    content.drain(..prefix.len());
+                    break;
+                }
+            }
+        }
+        let sample = format!("{sink}|")
+            .encode_utf16()
+            .chain(content.into_iter().take(40))
+            .collect::<Vec<_>>();
+        (
+            "require-trusted-types-for",
+            "trusted-types-sink",
+            sample,
+            None,
+        )
+    };
+    let name = name
+        .as_ref()
+        .map(|(name, duplicate)| (name.as_str(), *duplicate));
+    let enforced = policy.trusted_type_violations(name);
+    let allowed = enforced.is_empty();
+    for (disposition, records) in [
+        ("enforce", enforced),
+        ("report", report_only.trusted_type_violations(name)),
+    ] {
+        queue_csp_report(
+            scope,
+            context,
+            document,
+            CspViolationReport {
+                kind,
+                blocked,
+                disposition,
+                records,
+                parser: None,
+                sample: Some(&sample),
+            },
+        );
+    }
+    result.set_bool(allowed);
+}
+
+#[op2(reentrant)]
+fn op_trusted_type_string<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    input: v8::Local<'s, v8::Value>,
+    #[string] kind: &str,
+    #[string] sink: &str,
+    #[string] prefix: &str,
+) -> v8::Local<'s, v8::Value> {
+    crate::browser_env::trusted_type_string(scope, document, input, kind, sink, prefix)
+        .map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+
+#[op2(fast, reentrant)]
+fn op_timer_code_allowed<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    source: v8::Local<'s, v8::String>,
+) -> bool {
+    let context = scope.get_current_context();
+    let Some(handle) = context.get_slot::<CspHandle>() else {
+        return false;
+    };
+    if context.get_slot::<FrameRetired>().is_some() {
+        return false;
+    }
+    let policy = handle.policy.borrow().current().clone();
+    let report_only = handle.policy.borrow().report_only.clone();
+    let units = crate::browser_env::string_code_units(scope, source);
+    let sample = &units[..units.len().min(40)];
+    for (disposition, records) in [
+        ("enforce", policy.eval_violations()),
+        ("report", report_only.eval_violations()),
+    ] {
+        queue_csp_report(
+            scope,
+            context,
+            document,
+            CspViolationReport {
+                kind: "script-src",
+                blocked: "eval",
+                disposition,
+                records,
+                parser: None,
+                sample: Some(sample),
+            },
+        );
+    }
+    policy.allows_eval()
+}
+#[op2(reentrant)]
+fn op_run_timer_code<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'s, v8::String>,
+) -> v8::Local<'s, v8::Value> {
+    let context = scope.get_current_context();
+    if context.get_slot::<FrameRetired>().is_some() {
+        return v8::undefined(scope).into();
+    }
+    let url = context.get_slot::<FrameDocumentLocation>().map_or_else(
+        || {
+            JsRuntime::op_state_from(scope)
+                .borrow()
+                .borrow::<Base>()
+                .0
+                .clone()
+        },
+        |value| value.0.clone(),
+    );
+    let name = v8::String::new(scope, &url).unwrap();
+    let origin = v8::ScriptOrigin::new(
+        scope,
+        name.into(),
+        0,
+        0,
+        false,
+        -1,
+        None,
+        false,
+        false,
+        false,
+        None,
+    );
+    v8::Script::compile(scope, source, Some(&origin))
+        .and_then(|script| script.run(scope))
+        .unwrap_or_else(|| v8::undefined(scope).into())
+}
+
 fn install_css_authorization(scope: &mut v8::PinScope) {
+    let forms_blocked = scope
+        .get_current_context()
+        .get_slot::<FrameSandbox>()
+        .is_some_and(|flags| flags.forms_blocked);
+    crate::browser_env::set_form_submission_blocked(scope, forms_blocked);
+    form_submission::install(scope);
     let callback = v8::Function::new(scope, authorize_css).expect("native CSS policy callback");
     crate::browser_env::install_css_policy(scope, callback);
+    let trusted = v8::Function::new(scope, authorize_trusted_types)
+        .expect("native Trusted Types policy callback");
+    assert!(crate::browser_env::install_trusted_types_policy(
+        scope, trusted
+    ));
     let context = scope.get_current_context();
     let base = context.get_slot::<CspHandle>().map_or_else(
         || "about:blank".to_string(),
         |handle| {
             let policy = handle.policy.borrow();
-            context.set_allow_generation_from_strings(policy.current().allows_eval());
+            configure_csp_code_generation(scope, context, policy.current());
             policy.header.origin().to_string()
         },
     );
@@ -1095,6 +1835,17 @@ impl ModuleLoader for NetModuleLoader {
         let cookie_site_is_opaque = self.origins.cookie_site_opaque.get();
         let opaque_origin = self.origins.opaque.get();
         let client_hints = self.client_hints.clone();
+        let http_cache = self.http_cache.clone();
+        let storage_effects = self.storage_effects.clone();
+        let cache_partition = http_cache_partition(
+            &self.top_level_source,
+            &self.source,
+            self.csp
+                .partition
+                .as_ref()
+                .map_or(0, |partition| partition.id),
+            if opaque_origin { self.csp.id } else { 0 },
+        );
         ModuleLoadResponse::Async(Box::pin(async move {
             let mut local = jar.borrow().fork_for_request();
             let mut headers = std::collections::BTreeMap::new();
@@ -1122,6 +1873,9 @@ impl ModuleLoader for NetModuleLoader {
                 &client_hints,
                 &mut local,
                 crate::script_fetch::ScriptPolicies {
+                    http_cache: Some(&http_cache),
+                    response_side_effects: Some(storage_effects.as_ref()),
+                    cache_partition: &cache_partition,
                     request: Some(&allowed),
                     ..Default::default()
                 },
@@ -1203,6 +1957,9 @@ struct Ua(String);
 /// `fetch` result marshaled back to JS as a `Response`-like object.
 #[derive(Default, serde::Serialize)]
 struct FetchOut {
+    status_text: String,
+    stream_id: u32,
+    aborted: bool,
     nosniff: bool,
     integrity_blocked: bool,
     script_errors_muted: bool,
@@ -1324,7 +2081,7 @@ fn op_queue_classic_script<'s>(
     Ok(promise)
 }
 
-fn cookie_now() -> f64 {
+pub(crate) fn cookie_now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64() * 1000.0)
@@ -1335,6 +2092,7 @@ fn cookie_now() -> f64 {
 #[op2]
 #[string]
 fn op_cookie_get(state: &mut OpState) -> String {
+    apply_report_cookies(state);
     let base = state.borrow::<Base>().0.clone();
     state
         .borrow::<Jar>()
@@ -1771,6 +2529,7 @@ fn op_random_fill(#[buffer] output: &mut [u8]) -> Result<(), JsErrorBox> {
 // `document.cookie` setter: ingest a `name=value; attrs` line against the base.
 #[op2(fast)]
 fn op_cookie_set(state: &mut OpState, #[string] line: &str) {
+    apply_report_cookies(state);
     let base = state.borrow::<Base>().0.clone();
     state
         .borrow::<Jar>()
@@ -1788,6 +2547,7 @@ async fn op_fetch(
     #[string] url: String,
     #[string] init_json: String,
 ) -> FetchOut {
+    apply_report_cookies(&mut state.borrow_mut());
     let (base, jar_rc, ua, client_hints) = {
         let s = state.borrow();
         (
@@ -1802,6 +2562,19 @@ async fn op_fetch(
     // page fetch was a GET with no body — a login POST (PropelAuth) 404'd.
     let init: deno_core::serde_json::Value =
         deno_core::serde_json::from_str(&init_json).unwrap_or(deno_core::serde_json::Value::Null);
+    let cancel_id = init
+        .get("cancel_id")
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+    let cancel_job = fetch_streams::job(&state.borrow(), cancel_id);
+    if cancel_id != 0 && cancel_job.is_none() {
+        return FetchOut {
+            aborted: true,
+            final_url: target,
+            ..Default::default()
+        };
+    }
     let method = init
         .get("method")
         .and_then(|m| m.as_str())
@@ -1810,6 +2583,9 @@ async fn op_fetch(
         .get("body")
         .and_then(|b| b.as_str())
         .map(|b| b.to_string());
+    let body_bytes = init
+        .get("body_bytes")
+        .and_then(|value| serde_json::from_value::<Vec<u8>>(value.clone()).ok());
     let mut headers: std::collections::BTreeMap<String, String> = init
         .get("headers")
         .and_then(|h| deno_core::serde_json::from_value(h.clone()).ok())
@@ -1859,22 +2635,30 @@ async fn op_fetch(
     let jar_rc = partition
         .as_ref()
         .map_or(jar_rc, |partition| partition.jar.clone());
+    // Upload conversion can suspend before this op. Native job preparation owns
+    // the initiating policy snapshot without retaining its guest document or realm.
+    let snapshot = cancel_job
+        .as_ref()
+        .map(|job| job.policy.clone())
+        .unwrap_or_else(|| {
+            csp.as_ref()
+                .map_or_else(FetchPolicySnapshot::default, |handle| {
+                    let policy = handle.policy.borrow();
+                    FetchPolicySnapshot {
+                        active: policy.active.clone(),
+                        referrer: policy.referrer_policy,
+                        embedder: policy.embedder_policy,
+                    }
+                })
+        });
     let referrer_policy = init
         .get("referrerPolicy")
         .and_then(|value| value.as_str())
         .and_then(turbo_surf_core::referrer_policy::ReferrerPolicy::parse)
-        .or_else(|| {
-            csp.as_ref()
-                .map(|handle| handle.policy.borrow().referrer_policy)
-        })
-        .unwrap_or_default();
-    let embedder_policy = csp
-        .as_ref()
-        .map(|handle| handle.policy.borrow().embedder_policy)
-        .unwrap_or_default();
-    let policy = csp
-        .map(|handle| handle.policy.borrow().active.clone())
-        .unwrap_or_default();
+        .unwrap_or(snapshot.referrer);
+    let embedder_policy = snapshot.embedder;
+    let policy = snapshot.active;
+    let opaque_cache_nonce = csp.as_ref().map_or(0, |handle| handle.id);
     let directive = match destination {
         Destination::Script => "script-src-elem",
         Destination::Style => "style-src-elem",
@@ -1912,6 +2696,13 @@ async fn op_fetch(
         frames.documents.insert(
             id,
             FrameDocument {
+                response_metadata: crate::DocumentResponseMetadata {
+                    status: 200,
+                    referrer: crate::document_response::local_navigation_referrer(
+                        source,
+                        referrer_policy,
+                    ),
+                },
                 partition: partition.clone(),
                 url: target.clone(),
                 html: body.clone(),
@@ -1975,6 +2766,9 @@ async fn op_fetch(
             || !turbo_surf_core::request_context::same_origin(source, &target))
     {
         return FetchOut {
+            status_text: String::new(),
+            stream_id: 0,
+            aborted: false,
             nosniff: false,
             integrity_blocked: false,
             script_errors_muted: false,
@@ -1993,14 +2787,16 @@ async fn op_fetch(
             final_url: target.clone(),
         };
     }
+    let streaming_upload = init.get("upload").and_then(|value| value.as_bool()) == Some(true);
     let before_request =
         |context, target, method, headers| -> turbo_surf_core::net::BeforeRequestFuture {
-            Box::pin(crate::fetch_cors::authorize_request(
+            Box::pin(crate::fetch_cors::authorize_streaming_request(
                 context,
                 target,
                 method,
                 headers,
                 client_hints.clone(),
+                streaming_upload,
             ))
         };
     // Custom User-Agent (if set) overrides the net default for page fetches.
@@ -2023,8 +2819,20 @@ async fn op_fetch(
     let crossed_origin = std::sync::atomic::AtomicBool::new(
         context.opaque_origin || !turbo_surf_core::request_context::same_origin(source, &target),
     );
+    let response_referrer = std::sync::Mutex::new(String::new());
+    let response_location = std::sync::Mutex::new(target.clone());
     let response_policy = |context: &RequestContext, target: &str, headers: &[(String, String)]| {
         response_received.store(true, std::sync::atomic::Ordering::Relaxed);
+        *response_location.lock().unwrap() = target.to_string();
+        *response_referrer.lock().unwrap() = context
+            .source
+            .as_deref()
+            .and_then(|source| {
+                context
+                    .referrer_policy
+                    .referrer(context.referrer.as_deref().unwrap_or(source), target)
+            })
+            .unwrap_or_default();
         let cross = context.opaque_origin
             || context.origin_tainted
             || !context.source.as_deref().is_some_and(|source| {
@@ -2036,7 +2844,38 @@ async fn op_fetch(
                 || !cross
                 || crate::fetch_cors::allowed(context, headers))
     };
-    let opts = FetchOptions {
+    let http_cache = {
+        let mut state = state.borrow_mut();
+        if !state.has::<BrowserStorage>() {
+            state.put(BrowserStorage::default());
+        }
+        state.borrow::<BrowserStorage>().http_cache()
+    };
+    let cache_mode = init
+        .get("cache")
+        .and_then(|value| value.as_str())
+        .and_then(turbo_surf_core::http_cache::CacheMode::parse)
+        .unwrap_or_default();
+    let cache_partition = http_cache_partition(
+        &base,
+        source,
+        partition.as_ref().map_or(0, |partition| partition.id),
+        if context.opaque_origin {
+            opaque_cache_nonce
+        } else {
+            0
+        },
+    );
+    let storage_partition = partition.as_ref().map_or(0, |partition| partition.id);
+    let storage_effects = state
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .partition_response_effects(storage_partition);
+    let mut opts = FetchOptions {
+        response_side_effects: Some(storage_effects.as_ref()),
+        http_cache: Some(&http_cache),
+        cache_mode,
+        cache_partition: cache_partition.clone(),
         redirect: Some(
             match init.get("redirect").and_then(|value| value.as_str()) {
                 Some("manual") => turbo_surf_core::net::RedirectMode::Manual,
@@ -2049,6 +2888,10 @@ async fn op_fetch(
         before_request: Some(&before_request),
         method: method.clone(),
         body,
+        body_bytes,
+        upload_body: cancel_job
+            .as_ref()
+            .and_then(|job| fetch_streams::take_upload(job)),
         headers,
         context: Some(context.clone()),
         client_hints: Some(&client_hints),
@@ -2058,50 +2901,153 @@ async fn op_fetch(
         // only ingests the final response's cookies — a login/consent endpoint that
         // mints its session cookie on a 302 (Google's `/save` → `NID`) would be lost.
         max_redirects: Some(20),
-        jar: Some(&mut local),
+        jar: None,
         ..Default::default()
     };
-    let mut script_errors_muted = false;
-    let response = if destination == Destination::Script {
-        crate::script_fetch::fetch(
-            &target,
-            context.clone(),
-            opts.headers.clone(),
-            &client_hints,
-            &mut local,
-            crate::script_fetch::ScriptPolicies {
-                request: Some(&|target, redirected| {
-                    policy.allows_request(directive, target, nonce, redirected)
-                }),
-                embedder: embedder_policy,
+    if destination == Destination::Empty
+        && integrity.is_empty()
+        && init.get("stream").and_then(|value| value.as_bool()) == Some(true)
+    {
+        let response = {
+            opts.jar = Some(&mut local);
+            let request = turbo_surf_core::net::fetch_stream(&target, opts);
+            if let Some(job) = &cancel_job {
+                fetch_streams::until_cancelled(job, request).await
+            } else {
+                Some(request.await)
+            }
+        };
+        let out = match response {
+            None => FetchOut {
+                aborted: true,
+                final_url: target.clone(),
+                ..Default::default()
             },
-            integrity,
-        )
-        .await
-        .map(|result| {
-            script_errors_muted = result.muted_errors;
-            result.response
-        })
-    } else {
-        fetch_html(&target, opts)
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|response| {
+            Some(Err(error)) => FetchOut {
+                response_received: response_received.load(std::sync::atomic::Ordering::Relaxed),
+                policy_blocked: policy_blocked.load(std::sync::atomic::Ordering::Relaxed),
+                cross_origin: crossed_origin.load(std::sync::atomic::Ordering::Relaxed),
+                final_url: target.clone(),
+                body: error.to_string(),
+                ..Default::default()
+            },
+            Some(Ok(response)) => {
                 let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
                     || !turbo_surf_core::request_context::same_origin(source, &response.final_url);
-                let opaque_redirect = init.get("redirect").and_then(|value| value.as_str())
-                    == Some("manual")
-                    && matches!(response.status, 301 | 302 | 303 | 307 | 308);
-                if crate::integrity::matches(
-                    &response.body_bytes,
-                    integrity,
-                    !opaque_redirect && (mode != RequestMode::NoCors || !cross),
-                ) {
-                    Ok(response)
+                let out = FetchOut {
+                    status_text: response.status_text,
+                    stream_id: cancel_id,
+                    response_received: true,
+                    cross_origin: cross,
+                    nosniff: response.headers.iter().any(|(name, value)| {
+                        name.eq_ignore_ascii_case("x-content-type-options")
+                            && value.trim().eq_ignore_ascii_case("nosniff")
+                    }),
+                    headers: crate::fetch_cors::exposed_headers(&context, response.headers, cross),
+                    redirected: response.redirected,
+                    status: response.status,
+                    ok: (200..300).contains(&response.status),
+                    content_type: response.content_type,
+                    final_url: response.final_url,
+                    ..Default::default()
+                };
+                if let Some(job) = &cancel_job {
+                    if fetch_streams::install(job, response.body).await {
+                        out
+                    } else {
+                        FetchOut {
+                            aborted: true,
+                            final_url: target.clone(),
+                            ..Default::default()
+                        }
+                    }
                 } else {
-                    Err("Response failed integrity validation".into())
+                    FetchOut {
+                        final_url: target.clone(),
+                        ..Default::default()
+                    }
                 }
-            })
+            }
+        };
+        jar_rc.borrow_mut().merge_request_changes(local);
+        if out.stream_id == 0 {
+            fetch_streams::release(&mut state.borrow_mut(), cancel_id)
+        }
+        let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"streamed":true,"streamId":cancel_id,"body":"","bodyIncomplete":true});
+        let mut state = state.borrow_mut();
+        let log = state.borrow_mut::<NetworkLog>();
+        if log.0.len() == 1000 {
+            log.0.pop_front();
+        }
+        log.0.push_back(entry);
+        return out;
+    }
+    let mut script_errors_muted = false;
+    let response = {
+        let request = async {
+            if destination == Destination::Script {
+                crate::script_fetch::fetch(
+                    &target,
+                    context.clone(),
+                    opts.headers.clone(),
+                    &client_hints,
+                    &mut local,
+                    crate::script_fetch::ScriptPolicies {
+                        http_cache: Some(&http_cache),
+                        response_side_effects: Some(storage_effects.as_ref()),
+                        cache_partition: &cache_partition,
+                        request: Some(&|target, redirected| {
+                            policy.allows_request(directive, target, nonce, redirected)
+                        }),
+                        embedder: embedder_policy,
+                    },
+                    integrity,
+                )
+                .await
+                .map(|result| {
+                    script_errors_muted = result.muted_errors;
+                    result.response
+                })
+            } else {
+                opts.jar = Some(&mut local);
+                fetch_html(&target, opts)
+                    .await
+                    .map_err(|error| error.to_string())
+                    .and_then(|response| {
+                        let cross = crossed_origin.load(std::sync::atomic::Ordering::Relaxed)
+                            || !turbo_surf_core::request_context::same_origin(
+                                source,
+                                &response.final_url,
+                            );
+                        let opaque_redirect = init.get("redirect").and_then(|value| value.as_str())
+                            == Some("manual")
+                            && matches!(response.status, 301 | 302 | 303 | 307 | 308);
+                        if crate::integrity::matches(
+                            &response.body_bytes,
+                            integrity,
+                            !opaque_redirect && (mode != RequestMode::NoCors || !cross),
+                        ) {
+                            Ok(response)
+                        } else {
+                            Err("Response failed integrity validation".into())
+                        }
+                    })
+            }
+        };
+        if let Some(job) = &cancel_job {
+            fetch_streams::until_cancelled(job, request).await
+        } else {
+            Some(request.await)
+        }
+    };
+    let Some(response) = response else {
+        jar_rc.borrow_mut().merge_request_changes(local);
+        fetch_streams::release(&mut state.borrow_mut(), cancel_id);
+        return FetchOut {
+            aborted: true,
+            final_url: target,
+            ..Default::default()
+        };
     };
     let out = match response {
         Ok(r) => {
@@ -2113,8 +3059,12 @@ async fn op_fetch(
                 frames.documents.insert(
                     id,
                     FrameDocument {
+                        response_metadata: crate::DocumentResponseMetadata {
+                            status: r.status,
+                            referrer: response_referrer.lock().unwrap().clone(),
+                        },
                         partition: partition.clone(),
-                        url: r.final_url.clone(),
+                        url: response_location.lock().unwrap().clone(),
                         html: r.html.clone(),
                         headers: r.headers.clone(),
                     },
@@ -2144,6 +3094,9 @@ async fn op_fetch(
                 0
             };
             FetchOut {
+                status_text: r.status_text,
+                stream_id: 0,
+                aborted: false,
                 integrity_blocked: false,
                 script_errors_muted,
                 nosniff: r.headers.iter().any(|(name, value)| {
@@ -2172,6 +3125,9 @@ async fn op_fetch(
             }
         }
         Err(error) => FetchOut {
+            status_text: String::new(),
+            stream_id: 0,
+            aborted: false,
             script_errors_muted: false,
             nosniff: false,
             integrity_blocked: error == "Response failed integrity validation"
@@ -2192,6 +3148,7 @@ async fn op_fetch(
         },
     };
     jar_rc.borrow_mut().merge_request_changes(local);
+    fetch_streams::release(&mut state.borrow_mut(), cancel_id);
     let entry = serde_json::json!({"url":target,"status":out.status,"ok":out.ok,"method":method.as_deref().unwrap_or("GET"),"contentType":out.content_type,"body":out.body});
     let mut state = state.borrow_mut();
     let log = state.borrow_mut::<NetworkLog>();
@@ -2200,6 +3157,18 @@ async fn op_fetch(
     }
     log.0.push_back(entry);
     out
+}
+
+fn http_cache_partition(top_level: &str, source: &str, anonymous: u32, opaque: u32) -> String {
+    format!(
+        "{}\n{}\n{}\n{}",
+        turbo_surf_core::request_context::schemeful_site(top_level).unwrap_or_default(),
+        turbo_surf_core::request_context::schemeful_site(source)
+            .or_else(|| turbo_surf_core::request_context::schemeful_site(top_level))
+            .unwrap_or_default(),
+        anonymous,
+        opaque
+    )
 }
 
 #[derive(Default, serde::Serialize)]
@@ -2236,7 +3205,11 @@ async fn op_load_image(
         .get(&csp)
         .and_then(|handle| handle.partition.as_ref())
         .map_or(jar.clone(), |partition| partition.jar.clone());
-    let source = if source.is_empty() { base } else { source };
+    let source = if source.is_empty() {
+        base.clone()
+    } else {
+        source
+    };
     let target = resolve(&source, &url).unwrap_or(url);
     let (policy, embedder_policy) = state
         .borrow()
@@ -2277,7 +3250,28 @@ async fn op_load_image(
         .get("opaque_origin")
         .and_then(|value| value.as_bool())
         .unwrap_or(true);
+    let http_cache = state.borrow().borrow::<BrowserStorage>().http_cache();
+    let anonymous = state
+        .borrow()
+        .borrow::<CspContexts>()
+        .0
+        .get(&csp)
+        .and_then(|handle| handle.partition.as_ref())
+        .map_or(0, |partition| partition.id);
+    let cache_partition = http_cache_partition(
+        &base,
+        &source,
+        anonymous,
+        if context.opaque_origin { csp } else { 0 },
+    );
+    let storage_effects = state
+        .borrow()
+        .borrow::<BrowserStorage>()
+        .partition_response_effects(anonymous);
     let opts = FetchOptions {
+        response_side_effects: Some(storage_effects.as_ref()),
+        http_cache: Some(&http_cache),
+        cache_partition,
         request_policy: Some(&request_policy),
         response_policy: Some(&|context, target, headers| {
             crate::resource_policy::embedder_allowed(embedder_policy, context, target, headers)
@@ -2339,6 +3333,10 @@ struct FrameSandbox {
     opaque: bool,
     scripts_blocked: bool,
     origin_restricted: bool,
+    storage_access_blocked: bool,
+    top_navigation_without_activation_blocked: bool,
+    forms_blocked: bool,
+    top_navigation_without_activation_permitted: bool,
 }
 impl FrameSandbox {
     fn apply_csp(&mut self, policy: &crate::csp::Policy) {
@@ -2346,6 +3344,12 @@ impl FrameSandbox {
             self.scripts_blocked |= scripts;
             self.opaque |= origin;
             self.origin_restricted |= origin;
+            self.storage_access_blocked |= policy.blocks_storage_access();
+            self.forms_blocked |= policy.blocks_form_submission();
+            self.top_navigation_without_activation_blocked |=
+                policy.blocks_top_navigation_without_activation();
+            self.top_navigation_without_activation_permitted |=
+                !policy.blocks_top_navigation_without_activation();
         }
     }
     fn from_host(
@@ -2360,6 +3364,12 @@ impl FrameSandbox {
             opaque: inherited.origin_restricted,
             origin_restricted: inherited.origin_restricted,
             scripts_blocked: inherited.scripts_blocked,
+            storage_access_blocked: inherited.storage_access_blocked,
+            forms_blocked: inherited.forms_blocked,
+            top_navigation_without_activation_blocked: inherited
+                .top_navigation_without_activation_blocked,
+            top_navigation_without_activation_permitted: inherited
+                .top_navigation_without_activation_permitted,
         };
         if let Some(attribute) = crate::browser_env::node_attribute(scope, host, "sandbox") {
             let tokens = attribute.to_ascii_lowercase();
@@ -2367,6 +3377,13 @@ impl FrameSandbox {
             flags.opaque |= !tokens.contains(&"allow-same-origin");
             flags.origin_restricted |= !tokens.contains(&"allow-same-origin");
             flags.scripts_blocked |= !tokens.contains(&"allow-scripts");
+            flags.forms_blocked |= !tokens.contains(&"allow-forms");
+            flags.top_navigation_without_activation_blocked |=
+                !tokens.contains(&"allow-top-navigation");
+            flags.top_navigation_without_activation_permitted |=
+                tokens.contains(&"allow-top-navigation");
+            flags.storage_access_blocked |=
+                !tokens.contains(&"allow-storage-access-by-user-activation");
         }
         flags
     }
@@ -2511,6 +3528,7 @@ struct FrameContexts {
     scripts: std::collections::HashMap<u32, FrameScriptResponse>,
 }
 struct FrameDocument {
+    response_metadata: crate::DocumentResponseMetadata,
     partition: Option<Rc<CredentiallessPartition>>,
     url: String,
     html: String,
@@ -3506,6 +4524,13 @@ fn op_frame_set_document<'s>(
     let _ = replaced;
     metadata["depth"] =
         serde_json::Value::from(context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0));
+    if metadata
+        .get("initial")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        metadata["location"] = serde_json::Value::String("about:blank".into());
+    }
     let url = metadata
         .get("url")
         .and_then(|v| v.as_str())
@@ -3528,7 +4553,10 @@ fn op_frame_set_document<'s>(
         })
     };
     let html = String::from_utf16_lossy(&html_units);
-    let mut csp = if let Some(document) = &document {
+    let mut csp = if let Some(document) = document
+        .as_ref()
+        .filter(|document| !document.url.starts_with("data:"))
+    {
         CspHandle::new(url, &document.headers, &html)
     } else {
         let handle = CspHandle::new(url, &[], &html);
@@ -3540,10 +4568,48 @@ fn op_frame_set_document<'s>(
             policy.active = inherited;
             policy.report_only = parent_policy.policy.borrow().report_only.clone();
             policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
+            policy.reporting_endpoints = parent_policy.policy.borrow().reporting_endpoints.clone();
             policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
         }
         handle
     };
+    let response_metadata = document.as_ref().map_or_else(
+        || {
+            let source = parent.get_slot::<FrameDocumentLocation>().map_or_else(
+                || {
+                    JsRuntime::op_state_from(scope)
+                        .borrow()
+                        .borrow::<Base>()
+                        .0
+                        .clone()
+                },
+                |location| location.0.clone(),
+            );
+            let referrer = if metadata.get("location").and_then(|value| value.as_str())
+                == Some("about:blank")
+            {
+                source
+            } else {
+                let policy = frame_referrer_policy_token(scope, host)
+                    .as_deref()
+                    .and_then(turbo_surf_core::referrer_policy::ReferrerPolicy::parse)
+                    .unwrap_or_else(|| {
+                        parent
+                            .get_slot::<CspHandle>()
+                            .map_or(Default::default(), |handle| {
+                                handle.policy.borrow().referrer_policy
+                            })
+                    });
+                crate::document_response::local_navigation_referrer(&source, policy)
+            };
+            crate::DocumentResponseMetadata {
+                status: 0,
+                referrer,
+            }
+        },
+        |document| document.response_metadata.clone(),
+    );
+    csp.response_metadata.replace(response_metadata.clone());
     let state = JsRuntime::op_state_from(scope);
     csp.partition = document
         .as_ref()
@@ -3623,7 +4689,15 @@ fn op_frame_set_document<'s>(
     let scope = &mut v8::ContextScope::new(scope, context);
     #[cfg(turbo_surf_native_proxy)]
     register_frame_modules(scope, &document_base)?;
-    crate::browser_env::install_independent_html_units(scope, &html_units);
+    let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
+        let policy = handle.policy.borrow();
+        policy.initial_base.has_policy() || policy.report_only.has_policy()
+    });
+    if source_positions {
+        crate::browser_env::install_independent_utf16_source_positions(scope, &html_units);
+    } else {
+        crate::browser_env::install_independent_html_units(scope, &html_units);
+    }
     install_css_authorization(scope);
     #[cfg(turbo_surf_native_proxy)]
     window_proxy::install_document(scope);
@@ -3981,7 +5055,9 @@ fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'
                 if context.get_slot::<FrameRetired>().is_none() {
                     crate::script_inventory::retire_frame(scope, context);
                 }
+                fetch_streams::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
+                storage_events::retire(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
                 #[cfg(turbo_surf_native_proxy)]
@@ -4095,6 +5171,8 @@ fn allocate_frame<'s>(
                 policy.initial_base.inherit_headers(&inherited);
                 policy.active = inherited;
                 policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
+                policy.reporting_endpoints =
+                    parent_policy.policy.borrow().reporting_endpoints.clone();
                 policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
                 policy.permissions_policy =
                     parent_policy.policy.borrow().permissions_policy.clone();
@@ -4120,6 +5198,7 @@ fn allocate_frame<'s>(
             .get(scope, namespace_key.into())
             .and_then(|v| v.to_object(scope))
             .ok_or_else(|| {
+                storage_events::retire(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
                 JsErrorBox::generic("frame initialization was interrupted")
@@ -4527,6 +5606,32 @@ fn op_document_location_url(
     )
 }
 
+fn frame_referrer_policy_token(
+    scope: &mut v8::PinScope,
+    host: v8::Local<v8::Object>,
+) -> Option<String> {
+    let token =
+        crate::browser_env::node_attribute(scope, host, "referrerpolicy")?.to_ascii_lowercase();
+    turbo_surf_core::referrer_policy::ReferrerPolicy::parse(&token).map(|_| token)
+}
+
+#[op2]
+#[string]
+fn op_frame_referrer_policy(scope: &mut v8::PinScope, host: v8::Local<v8::Object>) -> String {
+    frame_referrer_policy_token(scope, host).unwrap_or_default()
+}
+
+#[op2]
+#[string]
+fn op_document_referrer(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> String {
+    document
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<CspHandle>())
+        .map_or_else(String::new, |handle| {
+            handle.response_metadata.borrow().referrer.clone()
+        })
+}
+
 #[op2]
 #[string]
 fn op_document_request_url(scope: &mut v8::PinScope, state: &mut OpState) -> String {
@@ -4607,6 +5712,7 @@ fn op_frame_cookie_get(
     state: &mut OpState,
     document: v8::Local<v8::Object>,
 ) -> String {
+    apply_report_cookies(state);
     let url = document
         .get_creation_context(scope)
         .and_then(|context| context.get_slot::<FrameDocumentUrl>())
@@ -4631,6 +5737,7 @@ fn op_frame_cookie_set(
     document: v8::Local<v8::Object>,
     #[string] line: &str,
 ) {
+    apply_report_cookies(state);
     let url = document
         .get_creation_context(scope)
         .and_then(|context| context.get_slot::<FrameDocumentUrl>())
@@ -4647,17 +5754,279 @@ fn op_frame_cookie_set(
     jar.borrow_mut().set_from_document(&url, line, cookie_now());
 }
 
+type StorageEntries = Vec<(Vec<u16>, Vec<u16>)>;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct StorageKey {
+    partition: u32,
+    site: String,
+    origin: String,
+    cross_site_ancestor: bool,
+    session: bool,
+    tab: u64,
+}
+
 #[derive(Default)]
 struct StorageAreas {
     next: u32,
-    by_origin: std::collections::BTreeMap<(u32, String, bool), u32>,
-    values: std::collections::BTreeMap<u32, Vec<(String, String)>>,
+    next_tab: u64,
+    by_origin: std::collections::BTreeMap<StorageKey, u32>,
+    values: std::collections::BTreeMap<u32, StorageEntries>,
+    subscribers: Vec<std::sync::Weak<std::sync::Mutex<storage_events::Inbox>>>,
 }
 
 /// Native storage backing for one browsing tab across document navigations.
-/// Independent handles have separate state; same-origin child frames share it.
-#[derive(Clone, Default)]
-pub struct BrowserStorage(std::sync::Arc<std::sync::Mutex<StorageAreas>>);
+/// Independent handles have separate state. Frames share only within the same
+/// top-level schemeful site, origin and credentialless partition.
+struct StorageTab {
+    areas: std::sync::Arc<std::sync::Mutex<StorageAreas>>,
+    id: u64,
+}
+impl Drop for StorageTab {
+    fn drop(&mut self) {
+        let Ok(mut areas) = self.areas.lock() else {
+            return;
+        };
+        let ids = areas
+            .by_origin
+            .iter()
+            .filter_map(|(key, id)| (key.session && key.tab == self.id).then_some(*id))
+            .collect::<Vec<_>>();
+        areas
+            .by_origin
+            .retain(|key, _| !key.session || key.tab != self.id);
+        for id in ids {
+            areas.values.remove(&id);
+        }
+    }
+}
+#[derive(Clone)]
+pub struct BrowserStorage(
+    std::sync::Arc<std::sync::Mutex<StorageAreas>>,
+    turbo_surf_core::http_cache::HttpCache,
+    std::sync::Arc<StorageTab>,
+    crate::csp_reporting::Reporter,
+);
+impl Default for BrowserStorage {
+    fn default() -> Self {
+        let areas = std::sync::Arc::new(std::sync::Mutex::new(StorageAreas::default()));
+        Self(
+            areas.clone(),
+            turbo_surf_core::http_cache::HttpCache::default(),
+            std::sync::Arc::new(StorageTab { areas, id: 0 }),
+            crate::csp_reporting::Reporter::default(),
+        )
+    }
+}
+impl BrowserStorage {
+    /// Share the profile's native HTTP cache with host navigation/resource callers.
+    pub fn http_cache(&self) -> turbo_surf_core::http_cache::HttpCache {
+        self.1.clone()
+    }
+    /// A new tab shares local storage and HTTP cache, with its own session namespace.
+    /// Clones retain this tab's identity across document navigation.
+    pub fn new_tab(&self) -> Result<Self, String> {
+        let id = {
+            let mut areas = self.0.lock().map_err(|_| "Storage backing unavailable")?;
+            areas.next_tab = areas
+                .next_tab
+                .checked_add(1)
+                .ok_or("Too many browsing tabs")?;
+            areas.next_tab
+        };
+        Ok(Self(
+            self.0.clone(),
+            self.1.clone(),
+            std::sync::Arc::new(StorageTab {
+                areas: self.0.clone(),
+                id,
+            }),
+            self.3.clone(),
+        ))
+    }
+    /// Storage side effects for actual native HTTP response headers. This
+    /// captures native storage only; it cannot retain a profile/report owner.
+    /// Call before guest response policy, never for a replayed cache entry.
+    pub fn response_storage_effects(
+        &self,
+    ) -> std::sync::Arc<turbo_surf_core::net::ResponseSideEffects<'static>> {
+        self.partition_response_effects(0)
+    }
+    fn partition_response_effects(
+        &self,
+        partition: u32,
+    ) -> std::sync::Arc<turbo_surf_core::net::ResponseSideEffects<'static>> {
+        let storage = self.0.clone();
+        let cache = self.1.clone();
+        std::sync::Arc::new(move |context, target, headers| {
+            cache.observe_response(context, target, headers);
+            clear_storage_from_response(&storage, partition, context, target, headers);
+        })
+    }
+    #[cfg(test)]
+    fn clear_from_response(
+        &self,
+        partition: u32,
+        context: &RequestContext,
+        target: &str,
+        headers: &[(String, String)],
+    ) {
+        clear_storage_from_response(&self.0, partition, context, target, headers)
+    }
+}
+
+fn clear_storage_from_response(
+    storage: &std::sync::Mutex<StorageAreas>,
+    partition: u32,
+    context: &RequestContext,
+    target: &str,
+    headers: &[(String, String)],
+) {
+    let Ok(url) = url::Url::parse(target) else {
+        return;
+    };
+    let loopback = match url.host() {
+        Some(url::Host::Domain(host)) => host == "localhost" || host.ends_with(".localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    let trustworthy = url.scheme() == "https" || url.scheme() == "http" && loopback;
+    if !trustworthy || !context.sends_credentials(target) {
+        return;
+    }
+    let clears = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("clear-site-data"))
+        .any(|(_, value)| {
+            value
+                .split(',')
+                .map(str::trim)
+                .any(|token| matches!(token, "\"storage\"" | "\"*\""))
+        });
+    if !clears {
+        return;
+    }
+    let top_navigation =
+        context.destination == Destination::Document && context.mode == RequestMode::Navigate;
+    let source = if top_navigation {
+        target
+    } else {
+        context
+            .top_level_source
+            .as_deref()
+            .or(context.source.as_deref())
+            .unwrap_or(target)
+    };
+    let cross_site_ancestor = if top_navigation {
+        false
+    } else {
+        context.cookie_site_is_opaque
+            || context.destination == Destination::Iframe
+                && !turbo_surf_core::request_context::same_site(source, target)
+    };
+    let Some(site) = turbo_surf_core::request_context::schemeful_site(source) else {
+        return;
+    };
+    let Some(origin) = turbo_surf_core::request_context::origin(target) else {
+        return;
+    };
+    let Ok(mut areas) = storage.lock() else {
+        return;
+    };
+    let ids = areas
+        .by_origin
+        .iter()
+        .filter(|(key, _)| {
+            key.partition == partition
+                && key.site == site
+                && key.origin == origin
+                && key.cross_site_ancestor == cross_site_ancestor
+        })
+        .map(|(key, id)| (*id, key.session))
+        .collect::<Vec<_>>();
+    let mut changed = Vec::new();
+    for (id, session) in ids {
+        if let Some(values) = areas.values.get_mut(&id) {
+            // Chrome clears session namespaces and notifies their windows
+            // even if empty; local storage only reports an actual change.
+            if session || !values.is_empty() {
+                values.clear();
+                changed.push(id);
+            }
+        }
+    }
+    areas
+        .subscribers
+        .retain(|receiver| receiver.strong_count() != 0);
+    let mut wake = Vec::new();
+    for receiver in &areas.subscribers {
+        let Some(receiver) = receiver.upgrade() else {
+            continue;
+        };
+        let Ok(mut inbox) = receiver.lock() else {
+            continue;
+        };
+        for area in &changed {
+            inbox.push(*area);
+        }
+        if !changed.is_empty() {
+            if let Some(waiter) = inbox.take_waiter() {
+                wake.push(waiter);
+            }
+        }
+    }
+    drop(areas);
+    for waiter in wake {
+        waiter.wake();
+    }
+}
+
+impl BrowserStorage {
+    /// Host-only private transport injection for localhost certificate fixtures.
+    #[doc(hidden)]
+    pub fn set_csp_report_transport_for_testing(
+        &mut self,
+        client: turbo_surf_core::net::ReportClient,
+    ) {
+        self.3 = crate::csp_reporting::Reporter::with_client(client);
+    }
+    /// Native raw response effects. Capture storage/cache backing, never this
+    /// profile or a V8/OpState owner, so pending IO cannot retain its sender.
+    pub fn set_csp_report_response_effects(
+        &self,
+        effects: std::sync::Arc<turbo_surf_core::net::ResponseSideEffects<'static>>,
+    ) {
+        self.3.set_response_effects(effects);
+    }
+    #[doc(hidden)]
+    pub fn csp_report_diagnostics_for_testing(&self) -> serde_json::Value {
+        self.3.diagnostics()
+    }
+}
+
+#[derive(Default)]
+struct ReportCookieTargets(std::collections::HashMap<u64, std::rc::Weak<RefCell<CookieJar>>>);
+fn apply_report_cookies(state: &mut OpState) {
+    if !state.has::<BrowserStorage>() || !state.has::<ReportCookieTargets>() {
+        return;
+    }
+    for (target, url, lines) in state.borrow::<BrowserStorage>().3.drain_cookies() {
+        if let Some(jar) = state
+            .borrow::<ReportCookieTargets>()
+            .0
+            .get(&target)
+            .and_then(std::rc::Weak::upgrade)
+        {
+            jar.borrow_mut()
+                .set_from_response(&url, &lines, cookie_now());
+        }
+    }
+    state
+        .borrow_mut::<ReportCookieTargets>()
+        .0
+        .retain(|_, jar| jar.strong_count() > 0);
+}
 
 #[op2(fast)]
 fn op_storage_area(
@@ -4665,6 +6034,16 @@ fn op_storage_area(
     state: &mut OpState,
     window: v8::Local<v8::Object>,
     session: bool,
+    unpartitioned: bool,
+) -> Result<u32, JsErrorBox> {
+    storage_area(scope, state, window, session, unpartitioned)
+}
+fn storage_area(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    window: v8::Local<v8::Object>,
+    session: bool,
+    unpartitioned: bool,
 ) -> Result<u32, JsErrorBox> {
     let context = window
         .get_creation_context(scope)
@@ -4678,6 +6057,13 @@ fn op_storage_area(
         ));
     }
     let origin = window_origin(scope, context);
+    let source = if unpartitioned {
+        &origin
+    } else {
+        &state.borrow::<Base>().0
+    };
+    let site =
+        turbo_surf_core::request_context::schemeful_site(source).unwrap_or_else(|| source.clone());
     let partition = context
         .get_slot::<CspHandle>()
         .and_then(|handle| handle.partition.clone())
@@ -4686,11 +6072,19 @@ fn op_storage_area(
         state.put(BrowserStorage::default());
     }
     let backing = state.borrow::<BrowserStorage>().clone();
+    let key = StorageKey {
+        partition,
+        site,
+        origin,
+        cross_site_ancestor: !unpartitioned && frame_cookie_site_is_opaque(scope, context),
+        session,
+        tab: if session { backing.2.id } else { 0 },
+    };
     let mut areas = backing
         .0
         .lock()
         .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?;
-    if let Some(id) = areas.by_origin.get(&(partition, origin.clone(), session)) {
+    if let Some(id) = areas.by_origin.get(&key) {
         return Ok(*id);
     }
     areas.next = areas
@@ -4698,54 +6092,284 @@ fn op_storage_area(
         .checked_add(1)
         .ok_or_else(|| JsErrorBox::range_error("Too many storage areas"))?;
     let id = areas.next;
-    areas.by_origin.insert((partition, origin, session), id);
+    areas.by_origin.insert(key, id);
     areas.values.insert(id, Vec::new());
     Ok(id)
 }
 
+struct StorageFactory(v8::Weak<v8::Function>);
+#[op2(fast)]
+fn op_storage_factory(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
+    if let Some(context) = callback.get_creation_context(scope) {
+        if let Some(callback) = crate::context_ownership::function(scope, callback) {
+            context.set_slot(Rc::new(StorageFactory(callback)));
+        }
+    }
+}
+#[op2(reentrant)]
+fn op_storage_object<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+    id: u32,
+    session: bool,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    if !window.strict_equals(context.global(scope).into()) {
+        return Err(JsErrorBox::type_error("Illegal invocation"));
+    }
+    let factory = context
+        .get_slot::<StorageFactory>()
+        .ok_or_else(|| JsErrorBox::generic("Storage context unavailable"))?;
+    let callback = crate::context_ownership::local(scope, &factory.0);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let id = v8::Integer::new_from_unsigned(scope, id).into();
+    let session = v8::Boolean::new(scope, session).into();
+    let receiver = v8::undefined(scope).into();
+    callback
+        .call(scope, receiver, &[id, session])
+        .ok_or_else(|| JsErrorBox::generic("Storage object creation interrupted"))
+}
+
+struct StorageAccessFactory(v8::Weak<v8::Function>);
+
+#[op2(fast)]
+fn op_storage_access_factory(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
+    if let Some(context) = callback.get_creation_context(scope) {
+        if let Some(callback) = crate::context_ownership::function(scope, callback) {
+            context.set_slot(Rc::new(StorageAccessFactory(callback)));
+        }
+    }
+}
+
+#[op2(reentrant)]
+fn op_storage_access_handle<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    types: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    let context = document
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    let factory = context
+        .get_slot::<StorageAccessFactory>()
+        .ok_or_else(|| JsErrorBox::generic("Storage access context unavailable"))?;
+    let callback = crate::context_ownership::local(scope, &factory.0);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let receiver = v8::undefined(scope).into();
+    callback
+        .call(scope, receiver, &[types.into()])
+        .ok_or_else(|| JsErrorBox::generic("Storage handle creation interrupted"))
+}
+
 #[op2]
 #[serde]
-fn op_storage_call(
+fn op_storage_access_state(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+) -> serde_json::Value {
+    let Some(context) = document.get_creation_context(scope) else {
+        return serde_json::Value::Null;
+    };
+    let opaque = window_is_opaque(scope, context);
+    let credentialless = context
+        .get_slot::<CspHandle>()
+        .is_some_and(|handle| handle.partition.is_some());
+    let policy = context.get_slot::<CspHandle>().is_none_or(|handle| {
+        handle
+            .policy
+            .borrow()
+            .permissions_policy
+            .allows_self("storage-access", &window_origin(scope, context))
+    });
+    let sandbox = context
+        .get_slot::<FrameSandbox>()
+        .is_some_and(|flags| flags.storage_access_blocked);
+    serde_json::json!({"opaque":opaque,"credentialless":credentialless,"allowed":policy && !sandbox,"frame":context.get_slot::<FrameParent>().is_some()})
+}
+
+fn storage_string<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v8::Value> {
+    v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal)
+        .unwrap()
+        .into()
+}
+
+#[path = "storage_events.rs"]
+mod storage_events;
+
+enum StorageReply {
+    Null,
+    Value(Vec<u16>),
+    Keys(Vec<Vec<u16>>),
+}
+
+enum StorageEdit {
+    Set(Option<usize>, Vec<u16>, Vec<u16>),
+    Remove(usize),
+    Clear,
+}
+impl StorageEdit {
+    fn apply(self, values: &mut StorageEntries) {
+        match self {
+            Self::Set(Some(index), _, value) => values[index].1 = value,
+            Self::Set(None, key, value) => values.push((key, value)),
+            Self::Remove(index) => {
+                values.remove(index);
+            }
+            Self::Clear => values.clear(),
+        }
+    }
+}
+
+#[op2]
+fn op_storage_call<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
     state: &mut OpState,
     id: u32,
+    receiver: v8::Local<'s, v8::Object>,
     #[string] command: &str,
-    #[string] key: &str,
-    #[string] value: &str,
-) -> Result<serde_json::Value, JsErrorBox> {
-    let backing = state.borrow::<BrowserStorage>().clone();
-    let mut areas = backing
-        .0
-        .lock()
-        .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?;
-    let values = areas
-        .values
-        .get_mut(&id)
-        .ok_or_else(|| JsErrorBox::type_error("Storage area unavailable"))?;
-    Ok(match command {
-        "get" => values
-            .iter()
-            .find(|(name, _)| name == key)
-            .map_or(serde_json::Value::Null, |(_, value)| {
-                serde_json::json!(value)
-            }),
-        "set" => {
-            if let Some((_, stored)) = values.iter_mut().find(|(name, _)| name == key) {
-                *stored = value.to_string();
-            } else {
-                values.push((key.to_string(), value.to_string()));
+    key: v8::Local<'s, v8::String>,
+    value: v8::Local<'s, v8::String>,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    const QUOTA_UNITS: usize = 5 * 1024 * 1024;
+    let owner = receiver
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    if storage_id(scope, receiver)? != id {
+        return Err(JsErrorBox::type_error("Illegal invocation"));
+    }
+    #[cfg(turbo_surf_native_proxy)]
+    let location = window_proxy::location_url(owner);
+    #[cfg(not(turbo_surf_native_proxy))]
+    let location = None;
+    let url = location
+        .or_else(|| {
+            owner
+                .get_slot::<FrameDocumentLocation>()
+                .map(|url| url.0.clone())
+        })
+        .unwrap_or_else(|| state.borrow::<Base>().0.clone());
+    if command == "set" && key.length() + value.length() > QUOTA_UNITS {
+        return Err(JsErrorBox::range_error("Storage quota exceeded"));
+    }
+    // An oversized key cannot have been stored. Avoid materializing a guest rope
+    // that cannot possibly match an entry or pass the write quota.
+    if key.length() > QUOTA_UNITS && matches!(command, "get" | "delete") {
+        let backing = state.borrow::<BrowserStorage>().clone();
+        let valid = backing
+            .0
+            .lock()
+            .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?
+            .values
+            .contains_key(&id);
+        if !valid {
+            return Err(JsErrorBox::type_error("Storage area unavailable"));
+        }
+        return Ok(v8::null(scope).into());
+    }
+    let recipients = storage_events::recipients(scope, state, Some(owner), id);
+    let key = crate::browser_env::string_code_units(scope, key);
+    let value = crate::browser_env::string_code_units(scope, value);
+    let (reply, wake) = {
+        let backing = state.borrow::<BrowserStorage>().clone();
+        let mut areas = backing
+            .0
+            .lock()
+            .map_err(|_| JsErrorBox::generic("Storage backing unavailable"))?;
+        let StorageAreas {
+            values,
+            subscribers,
+            ..
+        } = &mut *areas;
+        let values = values
+            .get_mut(&id)
+            .ok_or_else(|| JsErrorBox::type_error("Storage area unavailable"))?;
+        let mut edit = None;
+        let reply = match command {
+            "get" => values
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map_or(StorageReply::Null, |(_, value)| {
+                    StorageReply::Value(value.clone())
+                }),
+            "set" => {
+                let other_units: usize = values
+                    .iter()
+                    .filter(|(name, _)| *name != key)
+                    .map(|(name, value)| name.len() + value.len())
+                    .sum();
+                if other_units + key.len() + value.len() > QUOTA_UNITS {
+                    return Err(JsErrorBox::range_error("Storage quota exceeded"));
+                }
+                let index = values.iter().position(|(name, _)| *name == key);
+                if index.is_none_or(|index| values[index].1 != value) {
+                    let mutation = storage_events::Mutation {
+                        key: Some(key.clone()),
+                        old: index.map(|index| values[index].1.clone()),
+                        new: Some(value.clone()),
+                        url,
+                    };
+                    edit = Some((StorageEdit::Set(index, key, value), mutation));
+                }
+                StorageReply::Null
             }
-            serde_json::Value::Null
+            "delete" => {
+                if let Some(index) = values.iter().position(|(name, _)| *name == key) {
+                    edit = Some((
+                        StorageEdit::Remove(index),
+                        storage_events::Mutation {
+                            key: Some(key),
+                            old: Some(values[index].1.clone()),
+                            new: None,
+                            url,
+                        },
+                    ));
+                }
+                StorageReply::Null
+            }
+            "clear" => {
+                if !values.is_empty() {
+                    edit = Some((
+                        StorageEdit::Clear,
+                        storage_events::Mutation {
+                            key: None,
+                            old: None,
+                            new: None,
+                            url,
+                        },
+                    ));
+                }
+                StorageReply::Null
+            }
+            "keys" => StorageReply::Keys(values.iter().map(|(name, _)| name.clone()).collect()),
+            _ => return Err(JsErrorBox::type_error("Unknown storage operation")),
+        };
+        let wake = if let Some((edit, mutation)) = edit {
+            storage_events::commit(state, recipients, subscribers, id, mutation, || {
+                edit.apply(values)
+            })?
+        } else {
+            Vec::new()
+        };
+        (reply, wake)
+    };
+    for waiter in wake {
+        waiter.wake();
+    }
+    // V8 allocation may collect a credentialless realm whose native partition
+    // destructor reclaims this storage; no backing lock can survive that call.
+    Ok(match reply {
+        StorageReply::Null => v8::null(scope).into(),
+        StorageReply::Value(units) => storage_string(scope, &units),
+        StorageReply::Keys(keys) => {
+            let array = v8::Array::new(scope, keys.len() as i32);
+            for (index, key) in keys.iter().enumerate() {
+                let key = storage_string(scope, key);
+                array.set_index(scope, index as u32, key);
+            }
+            array.into()
         }
-        "delete" => {
-            values.retain(|(name, _)| name != key);
-            serde_json::Value::Null
-        }
-        "clear" => {
-            values.clear();
-            serde_json::Value::Null
-        }
-        "keys" => serde_json::json!(values.iter().map(|(name, _)| name).collect::<Vec<_>>()),
-        _ => return Err(JsErrorBox::type_error("Unknown storage operation")),
     })
 }
 
@@ -4780,6 +6404,9 @@ fn op_storage_id(
     scope: &mut v8::PinScope,
     object: v8::Local<v8::Object>,
 ) -> Result<u32, JsErrorBox> {
+    storage_id(scope, object)
+}
+fn storage_id(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) -> Result<u32, JsErrorBox> {
     let name = v8::String::new(scope, "turbo-surf.Storage.area").unwrap();
     let key = v8::Private::for_api(scope, Some(name));
     object
@@ -4813,15 +6440,25 @@ fn install_environment<'s>(
     // A navigation can be interrupted while trusted bootstrap is compiling. The
     // retained WindowProxy must never expose bootstrap-only host capabilities.
     v8::tc_scope!(let scope, scope);
+    let web_source = v8::String::new(scope, crate::web_streams_backend::SOURCE).unwrap();
+    let web_factory = v8::Script::compile(scope, web_source, None)
+        .and_then(|script| script.run(scope))
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+        .ok_or("Native stream initialization failed")?;
     let code = v8::String::new(scope, ENV_BOOTSTRAP).unwrap();
     let function = v8::Script::compile(scope, code, None)
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
     if let Some(function) = function {
         let receiver = v8::undefined(scope);
-        if function.call(scope, receiver.into(), &[core]).is_some() {
+        if function
+            .call(scope, receiver.into(), &[core, web_factory.into()])
+            .is_some()
+        {
             crate::browser_env::capture_popover_scheduler(scope);
             crate::browser_env::capture_window_event_interfaces(scope);
+            #[cfg(turbo_surf_native_proxy)]
+            install_code_generation_authorization(scope)?;
             return Ok(());
         }
     }
@@ -4923,18 +6560,32 @@ deno_core::extension!(
         op_capture_runtime_core,
         op_set_host_capabilities,
         op_storage_area,
+        op_storage_factory,
+        op_storage_object,
+        op_storage_access_factory,
+        op_storage_access_handle,
+        op_storage_access_state,
         op_storage_call,
+        storage_events::op_storage_events_factory,
+        storage_events::op_storage_events,
+        storage_events::op_storage_event_create,
         op_storage_bind,
         op_interface_record_get,
         op_interface_record_set,
         op_storage_id,
         op_dispatch_host_event,
+        crate::stream_transfers::op_stream_transfer_install,
+        crate::web_streams_backend::op_web_abort_bind,
+        crate::web_streams_backend::op_web_abort_listener,
+        crate::web_streams_backend::op_web_abort_dispatch,
         op_event_callback,
         op_install_microtask_queue,
         op_frame_cookie_get,
         op_document_location_url,
         op_frame_request_partition,
         op_document_request_url,
+        op_document_referrer,
+        op_frame_referrer_policy,
         op_document_request_source,
         op_frame_owner_metadata,
         op_frame_owner_window,
@@ -4944,6 +6595,9 @@ deno_core::extension!(
         op_document_has_active_window,
         op_document_cookie_allowed,
         op_parse_html_document,
+        op_trusted_type_string,
+        op_timer_code_allowed,
+        op_run_timer_code,
         op_set_inert_document_initializer,
         op_document_create_element,
         op_document_import_node,
@@ -4955,6 +6609,15 @@ deno_core::extension!(
         op_execute_inline_script,
         op_cookie_get,
         op_cookie_set,
+        fetch_streams::op_fetch_prepare,
+        fetch_streams::op_fetch_upload_start,
+        fetch_streams::op_fetch_upload_write,
+        fetch_streams::op_fetch_upload_finish,
+        fetch_streams::op_fetch_watch_body,
+        fetch_streams::op_fetch_cancel,
+        fetch_streams::op_fetch_abort,
+        fetch_streams::op_fetch_release,
+        fetch_streams::op_fetch_read,
         op_fetch,
         op_load_image,
         op_user_agent,
@@ -4972,6 +6635,7 @@ deno_core::extension!(
         op_permissions_policy,
         op_iframe_permissions_policy,
         op_csp_meta,
+        op_referrer_meta,
         op_csp_finish_parser,
         op_csp_inline,
         op_csp_request,
@@ -5011,11 +6675,12 @@ deno_core::extension!(
 // inside the IIFE they're per-invocation. Globals are assigned to `globalThis`
 // (idempotent) and the cookie bridge re-applies to the current `document`.
 const ENV_BOOTSTRAP: &str = concat!(
-    r##"((__core) => {
+    r##"((__core, __webFactory) => {
 "use strict";
 // Core is a private embedder argument; no page global temporarily exposes ops.
 const ops = __core.ops;
 const __print = __core.print;
+let __web;
 ops.op_capture_runtime_core(__core);
 if(!ops.op_shared_memory_allowed())delete globalThis.SharedArrayBuffer;
 const __NS = Symbol.for("ts");
@@ -5026,6 +6691,7 @@ let __markDocumentInteractive;
 // Interface records use a native, isolate-owned ephemeron map. Same-origin
 // borrowed methods accept foreign-realm objects without exposing a brand setter.
 const __stringify = JSON.stringify, __String = String;
+const __framePromiseAll = Promise.all.bind(Promise);
 const __recordOwn = Object.hasOwn, __recordCreate = Object.create, __recordDefine = Object.defineProperty;
 const __interfaceMap = brand => ({
   has(receiver) { return this.get(receiver) !== undefined; },
@@ -5114,7 +6780,7 @@ const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || []
 // the UA string carries. Default matches turbo-surf-core's browser registry default
 // release; a caller rotating to a non-default major should pass fullVersion too (the
 // session pushes it from the wire profile so both layers stay coherent).
-const __fullVersion = String(__pick("fullVersion", "155.0.8059.79"));
+const __fullVersion = String(__pick("fullVersion", "155.0.8059.80"));
 const __brands=JSON.parse(ops.op_browser_brands(Number(__major), __major, false));
 const __fullBrands=JSON.parse(ops.op_browser_brands(Number(__major), __fullVersion, true));
 // Chrome ships exactly these five PDF-viewer plugins, all aliased to the internal
@@ -5409,24 +7075,43 @@ globalThis.chrome = globalThis.chrome || {
 globalThis.location = globalThis.location || { href: "about:blank", protocol: "about:", host: "", pathname: "blank" };
 // Storage areas live in the host and are keyed by the actual Window's origin.
 // Private IDs remain attached to retained Storage objects across navigation.
-const __storageWindows = new WeakMap();
+const __storageApply=Reflect.apply,__storageCharCode=String.prototype.charCodeAt,__storageGetters=__recordCreate(null);
+const __storageWindows = new WeakMap(),__storageWindowGet=WeakMap.prototype.get.bind(__storageWindows),__storageWindowSet=WeakMap.prototype.set.bind(__storageWindows),__storageNumber=Number;
 const __storageMap = receiver => ops.op_storage_id(receiver);
-const __storageString = value => {if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);};
-const __storageCall = (receiver, command, key='', value='') => ops.op_storage_call(__storageMap(receiver),command,key,value);
-function Storage() {throw new TypeError('Illegal constructor');}
+const __storageString = value => {if(typeof value==='symbol')throw new __exceptionTypeError('Cannot convert a Symbol to a string');return __String(value);};
+const __storageRangeError=RangeError,__storageException=DOMException;
+const __storageNativeCall=(id,receiver,command,key='',value='')=>{
+ try{return ops.op_storage_call(id,receiver,command,key,value);}catch(error){
+  if(error instanceof __storageRangeError&&error.message==='Storage quota exceeded')throw new __storageException(error.message,'QuotaExceededError');
+  throw error;
+ }
+};
+const __storageCall = (receiver, command, key='', value='') => __storageNativeCall(__storageMap(receiver),receiver,command,key,value);
+function Storage() {throw new __exceptionTypeError('Illegal constructor');}
 const __storageMethods = {
- getItem(key){if(!arguments.length)throw new TypeError('A key is required');return __storageCall(this,'get',__storageString(key));},
- setItem(key,value){if(arguments.length<2)throw new TypeError('A key and value are required');__storageCall(this,'set',__storageString(key),__storageString(value));},
- removeItem(key){if(!arguments.length)throw new TypeError('A key is required');__storageCall(this,'delete',__storageString(key));},
+ getItem(key){if(!arguments.length)throw new __exceptionTypeError('A key is required');return __storageCall(this,'get',__storageString(key));},
+ setItem(key,value){if(arguments.length<2)throw new __exceptionTypeError('A key and value are required');__storageCall(this,'set',__storageString(key),__storageString(value));},
+ removeItem(key){if(!arguments.length)throw new __exceptionTypeError('A key is required');__storageCall(this,'delete',__storageString(key));},
  clear(){__storageCall(this,'clear');},
- key(index){if(!arguments.length)throw new TypeError('An index is required');return __storageCall(this,'keys')[Number(index)>>>0]??null;},
+ key(index){if(!arguments.length)throw new __exceptionTypeError('An index is required');return __storageCall(this,'keys')[__storageNumber(index)>>>0]??null;},
  get length(){return __storageCall(this,'keys').length;},
 };
-Object.defineProperties(Storage.prototype,Object.getOwnPropertyDescriptors(__storageMethods));
+delete Storage.prototype.constructor;
+for(const name of ['length','clear','getItem','key','removeItem','setItem']) {
+ const descriptor=Object.getOwnPropertyDescriptor(__storageMethods,name);
+ if(descriptor.get)descriptor.get=__G.makeNativeFunction(descriptor.get,'get '+name,0);
+ if(descriptor.value)descriptor.value=__G.makeNativeFunction(descriptor.value,name,descriptor.value.length);
+ Object.defineProperty(Storage.prototype,name,descriptor);
+}
+const __StorageImplementation=Storage;
+Storage=__G.makeNativeFunction(__StorageImplementation,'Storage',0,true,true);
+Storage.prototype=__StorageImplementation.prototype;
+Object.defineProperty(Storage.prototype,'constructor',{value:Storage,writable:true,configurable:true});
+Object.defineProperty(Storage,'prototype',{writable:false});
 Object.defineProperty(Storage.prototype,Symbol.toStringTag,{value:'Storage',configurable:true});
 globalThis.Storage=Storage;
 const __mkStorage = id => {
- const call=(command,key='',value='')=>ops.op_storage_call(id,command,key,value);
+ const call=(command,key='',value='')=>__storageNativeCall(id,storage,command,key,value);
  const storage=__G.makeNamedObject(Storage.prototype,function(command,key,value){
   if(command==='get')return call('get',key)??undefined;
   if(command==='has')return call('get',key)!==null;
@@ -5434,20 +7119,85 @@ const __mkStorage = id => {
   if(command==='descriptor'){const value=call('get',key);return value===null?undefined:{value,writable:true,enumerable:true,configurable:true};}
   if(command==='set'){call('set',key,__storageString(value));return true;}
   if(command==='delete'){call('delete',key);return true;}
-  if(command==='define'){if('get'in value||'set'in value)throw new TypeError('Storage cannot define an accessor');call('set',key,__storageString(value.value));return true;}
-  throw new TypeError('Unknown Storage property operation');
+  if(command==='define'){if('get'in value||'set'in value)throw new __exceptionTypeError('Storage cannot define an accessor');call('set',key,__storageString(value.value));return true;}
+  throw new __exceptionTypeError('Unknown Storage property operation');
  });
  ops.op_storage_bind(storage,id);return storage;
 };
+ops.op_storage_factory((id,session)=>{
+ let areas=__storageWindowGet(globalThis);if(!areas){areas=__recordCreate(null);__storageWindowSet(globalThis,areas);}
+ const name=session?'sessionStorage':'localStorage';
+ if(areas[name]?.id!==id)areas[name]={id,value:__mkStorage(id)};return areas[name].value;
+});
 for(const [name,session]of [['localStorage',false],['sessionStorage',true]]){
  const getter=Object.getOwnPropertyDescriptor({get [name](){
   if(ops.op_window_opaque(this))throw new DOMException('Storage is unavailable to an opaque origin','SecurityError');
-  let areas=__storageWindows.get(this);if(!areas){areas={};__storageWindows.set(this,areas);}
-  const id=ops.op_storage_area(this,session);
-  if(areas[name]?.id!==id)areas[name]={id,value:__mkStorage(id)};return areas[name].value;
+  const id=ops.op_storage_area(this,session,false);
+  return ops.op_storage_object(this,id,session);
  }},name).get;
+ __storageGetters[name]=getter;
  Object.defineProperty(globalThis,name,{get:__G.makeNativeFunction(getter,'get '+name,0),enumerable:true,configurable:true});
 }
+
+const __storageEventRecords=__interfaceMap('StorageEvent');
+const __storageEventState=event=>{const state=__storageEventRecords.get(event);if(!state)throw new __exceptionTypeError('Illegal invocation');return state;};
+const __storageEventInit=__hostEvent.prototype.initEvent;
+const __storageEventPhase=Object.getOwnPropertyDescriptor(__hostEvent.prototype,'eventPhase').get;
+const __storageUSV=value=>{const text=__storageString(value);let result='';for(let index=0;index<text.length;index++){const unit=__storageApply(__storageCharCode,text,[index]);if(unit>=0xd800&&unit<=0xdbff){const next=__storageApply(__storageCharCode,text,[index+1]);if(next>=0xdc00&&next<=0xdfff){result+=text[index]+text[++index];}else result+='\ufffd';}else result+=unit>=0xdc00&&unit<=0xdfff?'\ufffd':text[index];}return result;};
+const __storageEventValues=(key,oldValue,newValue,url,storageArea)=>{
+ key=key==null?null:__storageString(key);oldValue=oldValue==null?null:__storageString(oldValue);newValue=newValue==null?null:__storageString(newValue);url=__storageUSV(url);
+ if(storageArea!=null)__storageMap(storageArea);
+ return {key,oldValue,newValue,url,storageArea:storageArea??null};
+};
+class StorageEvent extends __hostEvent {
+ constructor(type,init=undefined){
+  if(!arguments.length)throw new __exceptionTypeError('StorageEvent requires a type');
+  type=__storageString(type);
+  if(init!=null&&typeof init!=='object'&&typeof init!=='function')throw new __exceptionTypeError('Event options must be a dictionary');
+  init=init??{__proto__:null};
+  const bubbles=!!init.bubbles,cancelable=!!init.cancelable,composed=!!init.composed;
+  let key=init.key;key=key==null?null:__storageString(key);
+  let newValue=init.newValue;newValue=newValue==null?null:__storageString(newValue);
+  let oldValue=init.oldValue;oldValue=oldValue==null?null:__storageString(oldValue);
+  let storageArea=init.storageArea;storageArea=storageArea??null;if(storageArea!==null)__storageMap(storageArea);
+  let url=init.url;url=url===undefined?'':__storageUSV(url);
+  super(type,{__proto__:null,bubbles,cancelable,composed});
+  __storageEventRecords.set(this,{key,oldValue,newValue,url,storageArea});
+ }
+ get key(){return __storageEventState(this).key;}
+ get oldValue(){return __storageEventState(this).oldValue;}
+ get newValue(){return __storageEventState(this).newValue;}
+ get url(){return __storageEventState(this).url;}
+ get storageArea(){return __storageEventState(this).storageArea;}
+ initStorageEvent(type,bubbles=false,cancelable=false,key=null,oldValue=null,newValue=null,url='',storageArea=null){
+  const state=__storageEventState(this);
+  if(!arguments.length)throw new __exceptionTypeError('A type is required');
+  type=__storageString(type);
+  const values=__storageEventValues(key,oldValue,newValue,url,storageArea);
+  if(__storageApply(__storageEventPhase,this,[])!==0)return;
+  __storageApply(__storageEventInit,this,[type,!!bubbles,!!cancelable]);
+  state.key=values.key;state.oldValue=values.oldValue;state.newValue=values.newValue;state.url=values.url;state.storageArea=values.storageArea;
+ }
+}
+const __StorageEventImplementation=StorageEvent;
+delete StorageEvent.prototype.constructor;
+for(const name of ['key','oldValue','newValue','url','storageArea','initStorageEvent']){
+ const descriptor=Object.getOwnPropertyDescriptor(StorageEvent.prototype,name);descriptor.enumerable=true;
+ if(descriptor.get)descriptor.get=__G.makeNativeFunction(descriptor.get,'get '+name,0);
+ if(descriptor.value)descriptor.value=__G.makeNativeFunction(descriptor.value,name,1);
+ Object.defineProperty(StorageEvent.prototype,name,descriptor);
+}
+StorageEvent=__G.makeNativeFunction(__StorageEventImplementation,'StorageEvent',1,true,true);
+StorageEvent.prototype=__StorageEventImplementation.prototype;
+Object.setPrototypeOf(StorageEvent,__hostEvent);
+Object.defineProperty(StorageEvent.prototype,'constructor',{value:StorageEvent,writable:true,configurable:true});
+Object.defineProperty(StorageEvent,'prototype',{writable:false});
+Object.defineProperty(StorageEvent.prototype,Symbol.toStringTag,{value:'StorageEvent',configurable:true});
+globalThis.StorageEvent=StorageEvent;
+ops.op_storage_events_factory((key,oldValue,newValue,url,session)=>{
+ const event=new __StorageEventImplementation('storage',{__proto__:null,key,oldValue,newValue,url,storageArea:__storageApply(__storageGetters[session?'sessionStorage':'localStorage'],globalThis,[])});
+ ops.op_event_trust(event,-1);ops.op_dispatch_host_event(event,globalThis);
+},()=>new __StorageEventImplementation(''));
 
 // indexedDB — a real Chrome window global (IDBFactory). `typeof indexedDB === "undefined"`
 // is a classic headless tell. A shape stub (no real persistence) that answers presence +
@@ -5494,17 +7244,24 @@ const __timerNow = () => ops.op_timer_clock();
 const __VIRTUAL_BUDGET_MS = 15000;
 let __budgetBase = __timerNow();
 __G.resetTimerBudget = () => { __budgetBase = __timerNow(); };
-globalThis.setTimeout = (fn, delay = 0, ...args) => {
-  __timerPush({__proto__:null, id: __tid, fn, due: __timerNow() + (+delay || 0), args });
-  return __tid++;
+const __timerDocument = globalThis.document;
+const __activeTimers = new Map();
+const __timerGet = Map.prototype.get.bind(__activeTimers), __timerSet = Map.prototype.set.bind(__activeTimers), __timerDelete = Map.prototype.delete.bind(__activeTimers), __timerClear = Map.prototype.clear.bind(__activeTimers);
+const __createTimer = (name, repeat, handler, delay, args) => {
+  const source=typeof handler === "function" ? null : ops.op_trusted_type_string(__timerDocument,handler,"TrustedScript","Window "+name,"Failed to execute '"+name+"' on 'Window': ");
+  delay=+delay || 0;
+  const id=__tid++;
+  if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return id;
+  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+Math.max(0,delay),delay:Math.max(1,delay),repeat,args};
+  __timerSet(id,timer);__timerPush(timer);return id;
 };
-globalThis.setInterval = globalThis.setTimeout; // one-shot here (no event loop)
-globalThis.clearTimeout = (id) => {
-  const i = __timerFindIndex((t) => t.id === id);
-  if (i >= 0) __timerSplice(i, 1);
+globalThis.setTimeout=(handler,delay=0,...args)=>__createTimer("setTimeout",false,handler,delay,args);
+globalThis.setInterval=(handler,delay=0,...args)=>__createTimer("setInterval",true,handler,delay,args);
+globalThis.clearTimeout=(id)=>{
+  id=+id;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
 };
-globalThis.clearInterval = globalThis.clearTimeout;
-ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timers.length=0;}});
+globalThis.clearInterval=globalThis.clearTimeout;
+ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timers.length=0;__timerClear();}});
 // The origin-relative clock combines elapsed native monotonic time with the virtual
 // timer scheduler. Timers advance their scheduled delay; synchronous work consumes
 // real elapsed time. Date/rAF/Event timestamps share this navigation origin.
@@ -5598,12 +7355,16 @@ const __runLocalTimers = (max=100000) => {
   while(fired<max){
     const index=__nextLocalTimer();if(index<0)break;
     const timer=__timers[index];__timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;
-    try{__timerApply(timer.fn,globalThis,timer.args);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
+    if(!timer.repeat)__timerDelete(timer.id);
+    try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
+    if(timer.repeat&&__timerGet(timer.id)===timer){timer.due=__timerNow()+timer.delay;__timerPush(timer);}
   }
   return fired;
 };
 __G.runTimers = (max=100000) => {
-  let fired=__runLocalTimers(max);
+  let fired=ops.op_storage_events();
+  if(fired)return fired;
+  fired=__runLocalTimers(max);
   if(!__G.isFrame)fired+=ops.op_run_frame_timers();
   return fired;
 };
@@ -5630,7 +7391,7 @@ const __newDocumentMembers=(source)=> {
   return result;
 };
 const __parsedDocumentStates = __interfaceMap("Document.parsed");
-const __documentRuntimeState = {__proto__:null,document: __document, window: globalThis, frame: null, referrer: "", createElement: null, readyState: "complete", currentScript: null, fonts: __document.fonts, handlers: new Map()};
+const __documentRuntimeState = {__proto__:null,document: __document, window: globalThis, frame: null, referrer: ops.op_document_referrer(__document), createElement: null, readyState: "complete", currentScript: null, fonts: __document.fonts, handlers: new Map()};
 const __documentState = (receiver) => {
   if (__documentApply(__documentType,receiver,[]) !== 9) throw new TypeError("Illegal invocation");
   if (receiver === __document) return __documentRuntimeState;
@@ -5657,6 +7418,70 @@ const __defineDocumentAccessor = (name, read, write) => {
   Object.defineProperty(Document.prototype, name, descriptor);
   if (Object.hasOwn(__document, name)) delete __document[name];
 };
+const __legacyDocumentCreateEvent=__document.createEvent,__storageEventLower=String.prototype.toLowerCase;
+__document.createEvent=({createEvent(type){
+ __documentState(this);if(!arguments.length)throw new __exceptionTypeError('An event interface is required');
+ type=__storageString(type);
+ if(__documentApply(__storageEventLower,type,[])==='storageevent')return ops.op_storage_event_create(this);
+ return __documentApply(__legacyDocumentCreateEvent,this,[type]);
+}}).createEvent;
+// Storage grants use the actual native document/context and its inherited policy.
+// The default browsing profile permits unpartitioned cookies; handles expose
+// separate unpartitioned DOM storage without switching the document's bucket.
+const __storagePromise=Promise,__storageResolveIntrinsic=Promise.resolve,__storageRejectIntrinsic=Promise.reject,__storageAccessException=DOMException,__storageAccessApply=Reflect.apply;
+const __storageResolve=value=>__storageAccessApply(__storageResolveIntrinsic,__storagePromise,[value]),__storageReject=value=>__storageAccessApply(__storageRejectIntrinsic,__storagePromise,[value]);
+const __storageRealm={resolve:__storageResolve,reject:__storageReject,exception:__storageAccessException};
+__documentRuntimeState.storageRealm=__storageRealm;
+const __storageAccessTypes=['all','broadcastChannel','caches','cookies','createObjectURL','estimate','getDirectory','indexedDB','localStorage','locks','revokeObjectURL','sessionStorage','sharedWorker'];
+const __storageRequested=types=>{for(let index=0;index<__storageAccessTypes.length;index++){if(types[__storageAccessTypes[index]])return true;}return false;};
+function StorageAccessHandle(){throw new __exceptionTypeError('Illegal constructor');}
+const __storageHandleMap=__interfaceMap('StorageAccessHandle');
+const __storageHandleRecord=receiver=>{const value=__storageHandleMap.get(receiver);if(!value)throw new __exceptionTypeError('Illegal invocation');return value;};
+for(const name of ['localStorage','sessionStorage','indexedDB','locks','caches']) {
+ const getter=Object.getOwnPropertyDescriptor({get [name](){
+  const state=__storageHandleRecord(this);
+  if(!state.types.all&&!state.types[name])throw new __storageAccessException('Access was not requested','SecurityError');
+  if(name!=='localStorage'&&name!=='sessionStorage')throw new __storageAccessException('This storage capability is not implemented','NotSupportedError');
+  if(!state[name])state[name]=__mkStorage(ops.op_storage_area(globalThis,name==='sessionStorage',true));
+  return state[name];
+ }},name).get;
+ Object.defineProperty(StorageAccessHandle.prototype,name,{get:__documentFunction(getter,'get '+name,0),enumerable:true,configurable:true});
+}
+const __StorageAccessHandleImplementation=StorageAccessHandle;
+StorageAccessHandle=__G.makeNativeFunction(__StorageAccessHandleImplementation,'StorageAccessHandle',0,true,true);
+StorageAccessHandle.prototype=__StorageAccessHandleImplementation.prototype;
+Object.defineProperty(StorageAccessHandle.prototype,'constructor',{value:StorageAccessHandle,writable:true,configurable:true});
+Object.defineProperty(StorageAccessHandle,'prototype',{writable:false});
+Object.defineProperty(StorageAccessHandle.prototype,Symbol.toStringTag,{value:'StorageAccessHandle',configurable:true});
+ops.op_storage_access_factory(source=>{const types={__proto__:null};for(let index=0;index<__storageAccessTypes.length;index++){const name=__storageAccessTypes[index];types[name]=source[name];}const handle=__recordCreate(StorageAccessHandle.prototype);__storageHandleMap.set(handle,{types});return handle;});
+if(ops.op_is_secure_context()) {
+ globalThis.StorageAccessHandle=StorageAccessHandle;
+ const __accessError=(state,name,message)=>new (state.storageRealm?.exception||__storageAccessException)(message,name);
+ const __accessActive=state=>!state.inactive&&state.window&&ops.op_document_has_active_window(state.document);
+ const has=function hasStorageAccess(){
+  let state;try{state=__documentState(this);}catch(error){return __storageReject(error);}
+  const realm=state.storageRealm||__storageRealm;
+  if(!__accessActive(state))return realm.reject(__accessError(state,'InvalidStateError','Document is not fully active'));
+  const native=ops.op_storage_access_state(this);
+  return realm.resolve(!native.opaque&&!native.credentialless);
+ };
+ const request=function requestStorageAccess(options){
+  let state;try{state=__documentState(this);}catch(error){return __storageReject(error);}
+  const realm=state.storageRealm||__storageRealm;
+  let types=null;
+  try{if(arguments.length&&options!==undefined) {
+   if(options!==null&&typeof options!=='object'&&typeof options!=='function')throw new __exceptionTypeError('Storage access options must be a dictionary');
+   types={__proto__:null};for(let index=0;index<__storageAccessTypes.length;index++){const name=__storageAccessTypes[index];types[name]=!!options?.[name];}
+  }}catch(error){return realm.reject(error);}
+  if(!__accessActive(state))return realm.reject(__accessError(state,'InvalidStateError','Document is not fully active'));
+  if(types&&!__storageRequested(types))return realm.reject(__accessError(state,'SecurityError','No storage access was requested'));
+  const native=ops.op_storage_access_state(this);
+  if(native.opaque||native.credentialless||!native.allowed)return realm.reject(__accessError(state,'NotAllowedError','Storage access is denied for this document'));
+  return realm.resolve(types&&native.frame?ops.op_storage_access_handle(this,types):undefined);
+ };
+ for(const [name,method,length]of [['hasStorageAccess',has,0],['hasUnpartitionedCookieAccess',has,0],['requestStorageAccess',request,0]])
+  Object.defineProperty(Document.prototype,name,{value:__documentFunction(method,name,length),writable:true,enumerable:true,configurable:true});
+}
 const __cookieAccess = () => {if (!ops.op_document_cookie_allowed(__document)) throw new DOMException("An opaque document cannot access cookies", "SecurityError");};
 __documentRuntimeState.readCookie = () => {__cookieAccess();return __documentRuntimeState.frame ? ops.op_frame_cookie_get(__document) : ops.op_cookie_get();};
 __documentRuntimeState.writeCookie = value => {__cookieAccess();return __documentRuntimeState.frame ? ops.op_frame_cookie_set(__document, value) : ops.op_cookie_set(value);};
@@ -5703,6 +7528,7 @@ class DOMParser {
   parseFromString(input,type){
     if(!__domParserInstances.has(this))throw new TypeError("Illegal invocation");
     if(arguments.length<2)throw new TypeError("parseFromString requires two arguments");
+    input=ops.op_trusted_type_string(__document,input,"TrustedHTML","DOMParser parseFromString", "Failed to execute 'parseFromString' on 'DOMParser': ");
     if(typeof type==="symbol")throw new TypeError("Cannot convert a Symbol value to a string");
     type=String(type);
     if(!["text/html","text/xml","application/xml","application/xhtml+xml","image/svg+xml"].includes(type))throw new TypeError("Unsupported MIME type");
@@ -5752,7 +7578,7 @@ const __webIDLIterator = (tag, rows) => {
 // Headers — fetch + analytics (PostHog) construct/read these; deno_core ships none.
 // Case-insensitive name lookup, per the spec.
 let __setHeadersGuard;
-if (typeof globalThis.Headers === "undefined") {
+{
   const maps = __interfaceMap("Headers.map"), cookies = __interfaceMap("Headers.cookies"), guards = __interfaceMap("Headers.guard");
   const map = (receiver) => {const value = maps.get(receiver); if (!value) throw new TypeError("Illegal invocation");return value;};
   const string = value => {if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);};
@@ -5787,7 +7613,10 @@ if (typeof globalThis.Headers === "undefined") {
   Object.defineProperty(Headers.prototype,Symbol.iterator,{value:Headers.prototype.entries,writable:true,configurable:true});
   Object.defineProperty(Headers.prototype,Symbol.toStringTag,{value:"Headers",configurable:true});
 }
-let __responseFromNetwork, __requestInit, __resourceResponse;
+let __responseFromNetwork, __requestInit, __resourceResponse, __BodyParamsString;
+const __blobStates = __interfaceMap("Blob");
+const __bodyByteTag=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype),Symbol.toStringTag).get;
+const __bodyByteChunk=value=>__baseApply(__bodyByteTag,value,[])==="Uint8Array";
 const __fetchFailures=__interfaceMap("Fetch.failure");
 const __resourceFailure=error=>__fetchFailures.get(error);
 // Private body and interface state. Public members are receiver-checked Web-IDL
@@ -5795,15 +7624,38 @@ const __resourceFailure=error=>__fetchFailures.get(error);
 {
   const responses = __interfaceMap("Response"), requests = __interfaceMap("Request");
   const state = (map, receiver) => {const value = map.get(receiver);if (!value) throw new TypeError("Illegal invocation");return value;};
-  const bodyState = raw => ({raw, used: false, stream: null});
+  const bufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+  const bufferView = ArrayBuffer.isView, Bytes = Uint8Array;
+  const applyBody = Reflect.apply;
+  const extractBody = raw => {
+    if(raw==null)return {raw:null,type:null,sourceStream:false};
+    if(__web.readable(raw)){
+      if(__web.disturbed(raw)||applyBody(__ReadableLocked,raw,[]))throw new TypeError("Body stream is locked or disturbed");
+      return {raw,type:null,sourceStream:true};
+    }
+    const blob=__blobStates.get(raw);
+    if(blob)return {raw:new Bytes(blob.bytes),type:blob.type||null,sourceStream:false};
+    if(bufferView(raw)){
+      applyBody(bufferLength,raw.buffer,[]);
+      return {raw:new Bytes(new Bytes(raw.buffer,raw.byteOffset,raw.byteLength)),type:null,sourceStream:false};
+    }
+    let arrayBuffer=false;
+    try{applyBody(bufferLength,raw,[]);arrayBuffer=true;}catch{}
+    if(arrayBuffer)return {raw:new Bytes(new Bytes(raw)),type:null,sourceStream:false};
+    let params;
+    try{params=applyBody(__BodyParamsString,raw,[]);}catch{}
+    if(params!==undefined)return {raw:params,type:"application/x-www-form-urlencoded;charset=UTF-8",sourceStream:false};
+    if(typeof raw==="symbol")throw new TypeError("Cannot convert a Symbol value to a string");
+    return {raw:__String(raw),type:"text/plain;charset=UTF-8",sourceStream:false};
+  };
+  const bodyState = (raw,sourceStream=false) => ({raw,sourceStream,used:false,stream:null});
   const rawBytes = async raw => {
     if (raw == null) return new Uint8Array();
     if (raw instanceof ArrayBuffer) return new Uint8Array(raw.slice(0));
     if (ArrayBuffer.isView(raw)) return new Uint8Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
-    if (typeof raw.arrayBuffer === "function") return new Uint8Array(await raw.arrayBuffer());
-    if (typeof raw.getReader === "function") {
-      const reader=raw.getReader(), chunks=[];let size=0;
-      try {while(true){const part=await reader.read();if(part.done)break;const bytes=part.value instanceof Uint8Array?part.value:new Uint8Array(part.value);chunks.push(bytes);size+=bytes.length;}}
+    if (__web.readable(raw)) {
+      const reader=applyBody(__ReadableGetReader,raw,[]), chunks=[];let size=0;
+      try {while(true){const part=await reader.read();if(part.done)break;if(!__bodyByteChunk(part.value))throw new TypeError("Body stream chunks must be Uint8Array");const bytes=new Bytes(part.value);chunks.push(bytes);size+=bytes.length;}}
       finally {reader.releaseLock();}
       const bytes=new Uint8Array(size);let at=0;for(const part of chunks){bytes.set(part,at);at+=part.length;}return bytes;
     }
@@ -5812,18 +7664,20 @@ const __resourceFailure=error=>__fetchFailures.get(error);
   const body = value => {
     if(value.raw==null)return null;
     if(value.stream)return value.stream;
-    value.stream=typeof value.raw.getReader==="function"?value.raw:new ReadableStream({async start(controller){try{controller.enqueue(await rawBytes(value.raw));controller.close();}catch(error){controller.error(error);}}});
-    const original=value.stream.getReader.bind(value.stream);
-    value.stream.getReader=(...args)=>{const reader=original(...args),read=reader.read.bind(reader),cancel=reader.cancel.bind(reader);reader.read=(...values)=>{value.used=true;return read(...values);};reader.cancel=(...values)=>{value.used=true;return cancel(...values);};return reader;};
+    value.stream=__web.readable(value.raw)?value.raw:new __FetchReadable({async start(controller){try{controller.enqueue(await rawBytes(value.raw));controller.close();}catch(error){controller.error(error);}}});
     return value.stream;
   };
-  const consume = async value => {if(value.used || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.raw==null&&!value.stream)return new Uint8Array();value.used=true;return value.stream?rawBytes(value.stream):rawBytes(value.raw);};
-  const copyBody = value => {if(value.used || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.stream || value.raw?.getReader){const streams=body(value).tee();value.stream=streams[0];value.raw=streams[0];return streams[1];}return value.raw;};
-  const addContentType = (headers, raw) => {
-    if(headers.has("content-type") || raw==null)return;
-    if(typeof raw==="string")headers.set("content-type","text/plain;charset=UTF-8");
-    else if(raw instanceof URLSearchParams)headers.set("content-type","application/x-www-form-urlencoded;charset=UTF-8");
-    else if(raw.type)headers.set("content-type",raw.type);
+  const consume = async value => {if(value.used || value.stream && __web.disturbed(value.stream) || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.raw==null&&!value.stream)return new Uint8Array();value.used=true;return value.stream?rawBytes(value.stream):rawBytes(value.raw);};
+  const copyBody = value => {if(value.used || value.stream && __web.disturbed(value.stream) || value.stream?.locked)throw new TypeError("Body has already been consumed");if(value.stream || __web.readable(value.raw)){const streams=applyBody(__ReadableTee,body(value),[]);value.stream=streams[0];value.raw=streams[0];return streams[1];}return value.raw;};
+  const transferBody = value => {
+    if(value.raw==null)return null;
+    if(value.used||value.stream&&(__web.disturbed(value.stream)||applyBody(__ReadableLocked,value.stream,[])))throw new TypeError("Body has already been consumed");
+    const transferred=applyBody(__ReadablePipeThrough,body(value),[new __BodyTransform()]);
+    value.used=true;
+    return transferred;
+  };
+  const addContentType = (headers, extracted) => {
+    if(!headers.has("content-type")&&extracted.type)headers.set("content-type",extracted.type);
   };
   const bodyMethods = map => ({
     async arrayBuffer(){const bytes=await consume(state(map,this).body);return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);},
@@ -5831,26 +7685,26 @@ const __resourceFailure=error=>__fetchFailures.get(error);
     async text(){return new TextDecoder().decode(await consume(state(map,this).body));},
     async json(){return JSON.parse(new TextDecoder().decode(await consume(state(map,this).body)));},
     async blob(){const value=state(map,this);return new Blob([await consume(value.body)],{type:value.headers.get("content-type") || ""});},
-    textStream(){const value=state(map,this).body;if(value.used||value.stream?.locked)throw new TypeError("Body has already been consumed");const stream=body(value);value.used=true;const decoder=new TextDecoder();return new ReadableStream({async start(controller){try{if(stream){const reader=stream.getReader();try{while(true){const part=await reader.read();if(part.done)break;const text=decoder.decode(part.value,{stream:true});if(text)controller.enqueue(text);}}finally{reader.releaseLock();}}const rest=decoder.decode();if(rest)controller.enqueue(rest);controller.close();}catch(error){controller.error(error);}}});},
+    textStream(){const value=state(map,this).body;if(value.used||value.stream&&__web.disturbed(value.stream)||value.stream?.locked)throw new TypeError("Body has already been consumed");const stream=body(value);value.used=true;const decoder=new TextDecoder(),reader=stream?.getReader();let released=false;const release=()=>{if(reader&&!released){released=true;reader.releaseLock();}};return new __FetchReadable({async pull(controller){try{if(reader){while(true){const part=await reader.read();if(part.done)break;const text=decoder.decode(part.value,{stream:true});if(text){controller.enqueue(text);return;}}}const rest=decoder.decode();if(rest)controller.enqueue(rest);controller.close();release();}catch(error){controller.error(error);release();}},async cancel(reason){try{if(reader)await reader.cancel(reason);}finally{release();}}},{highWaterMark:0});},
     async formData(){const value=state(map,this),type=value.headers.get("content-type")||"",bytes=await consume(value.body);if(!/^application\/x-www-form-urlencoded(?:;|$)/i.test(type))throw new TypeError("Unsupported form encoding");const form=new FormData();for(const [key,item] of new URLSearchParams(new TextDecoder().decode(bytes)))form.append(key,item);return form;}
   });
   const project = (ctor,map,fields) => {
     for(const field of fields)Object.defineProperty(ctor.prototype,field,{get:({["get "+field](){return state(map,this)[field];}})["get "+field],enumerable:true,configurable:true});
     // Getter functions are extracted from descriptors, preserving nonconstructibility.
     Object.defineProperty(ctor.prototype,"body",{get:Object.getOwnPropertyDescriptor({get body(){return body(state(map,this).body);}},"body").get,enumerable:true,configurable:true});
-    Object.defineProperty(ctor.prototype,"bodyUsed",{get:Object.getOwnPropertyDescriptor({get bodyUsed(){return state(map,this).body.used;}},"bodyUsed").get,enumerable:true,configurable:true});
+    Object.defineProperty(ctor.prototype,"bodyUsed",{get:Object.getOwnPropertyDescriptor({get bodyUsed(){const value=state(map,this).body;return value.used||!!(value.stream&&__web.disturbed(value.stream));}},"bodyUsed").get,enumerable:true,configurable:true});
     for(const [name,method] of Object.entries(bodyMethods(map)))Object.defineProperty(ctor.prototype,name,{value:method,writable:true,enumerable:true,configurable:true});
   };
   globalThis.Response = class Response {
-    constructor(raw=null, init=undefined){init=init||{};const status=init.status==null?200:Number(init.status);if(!Number.isInteger(status)||status<200||status>599)throw new RangeError("Invalid response status");if(raw!=null&&[204,205,304].includes(status))throw new TypeError("Null body status cannot have a body");const headers=new Headers(init.headers),statusText=String(init.statusText||"");if(/[\r\n]/.test(statusText))throw new TypeError("Invalid status text");addContentType(headers,raw);responses.set(this,{body:bodyState(raw),status,statusText,headers,ok:status>=200&&status<300,type:"default",url:"",redirected:false});}
+    constructor(raw=null, init=undefined){init=init||{};const status=init.status==null?200:Number(init.status);if(!Number.isInteger(status)||status<200||status>599)throw new RangeError("Invalid response status");if(raw!=null&&[204,205,304].includes(status))throw new TypeError("Null body status cannot have a body");const headers=new Headers(init.headers),statusText=String(init.statusText||"");if(/[\r\n]/.test(statusText))throw new TypeError("Invalid status text");const extracted=extractBody(raw);addContentType(headers,extracted);responses.set(this,{body:bodyState(extracted.raw,extracted.sourceStream),status,statusText,headers,ok:status>=200&&status<300,type:"default",url:"",redirected:false});}
     static json(data,init=undefined){const text=JSON.stringify(data);if(text===undefined)throw new TypeError("JSON data is not serializable");const headers=new Headers(init?.headers);if(!headers.has("content-type"))headers.set("content-type","application/json");return new Response(text,{...init,headers});}
     static error(){const response=new Response();Object.assign(state(responses,response),{status:0,statusText:"",ok:false,type:"error"});return response;}
     static redirect(url,status=302){const absolute=new URL(String(url),location.href);if(![301,302,303,307,308].includes(Number(status)))throw new RangeError("Invalid redirect status");return new Response(null,{status:Number(status),headers:{location:absolute.href}});}
-    clone(){const value=state(responses,this);const clone=new Response(copyBody(value.body),{status:value.status||200,statusText:value.statusText,headers:value.headers});Object.assign(state(responses,clone),{status:value.status,ok:value.ok,type:value.type,url:value.url,redirected:value.redirected});if(value.type!=="default")__setHeadersGuard(clone.headers,"immutable");return clone;}
+    clone(){const value=state(responses,this),copied=copyBody(value.body);const clone=new Response([204,205,304].includes(value.status)?null:copied,{status:value.status||200,statusText:value.statusText,headers:value.headers});if([204,205,304].includes(value.status))state(responses,clone).body=bodyState(copied);Object.assign(state(responses,clone),{status:value.status,ok:value.ok,type:value.type,url:value.url,redirected:value.redirected});if(value.type!=="default")__setHeadersGuard(clone.headers,"immutable");return clone;}
   };
   project(Response,responses,["status","statusText","headers","ok","type","url","redirected"]);
   globalThis.Request = class Request {
-    constructor(input,init=undefined){if(!arguments.length)throw new TypeError("Request requires an input");init=init||{};const previous=requests.get(input),integrity=init.integrity,absolute=new URL(previous?previous.url:String(input),__baseApply(__baseURI,__document,[]));if(absolute.username||absolute.password)throw new TypeError("Request URL cannot include credentials");const requested=String(init.method||previous?.method||"GET");if(!/^[!#$%&'*+.^_`|~0-9a-zA-Z-]+$/.test(requested)||["CONNECT","TRACE","TRACK"].includes(requested.toUpperCase()))throw new TypeError("Invalid request method");const method=["DELETE","GET","HEAD","OPTIONS","POST","PUT"].includes(requested.toUpperCase())?requested.toUpperCase():requested;const raw=init.body!==undefined?init.body:previous?copyBody(previous.body):null;if(raw!=null&&["GET","HEAD"].includes(method))throw new TypeError("GET and HEAD cannot have bodies");const headers=new Headers(init.headers||previous?.headers);addContentType(headers,raw);const mode=init.mode||previous?.mode||"cors",credentials=init.credentials||previous?.credentials||"same-origin",cache=init.cache||previous?.cache||"default",redirect=init.redirect||previous?.redirect||"follow";if(!["cors","no-cors","same-origin"].includes(mode)||!["omit","same-origin","include"].includes(credentials)||!["default","no-store","reload","no-cache","force-cache","only-if-cached"].includes(cache)||!["follow","error","manual"].includes(redirect)||cache==="only-if-cached"&&mode!=="same-origin")throw new TypeError("Invalid request option");if(mode==="no-cors"&&!["GET","HEAD","POST"].includes(method))throw new TypeError("Invalid no-cors request method");__setHeadersGuard(headers,mode==="no-cors"?"request-no-cors":"request");
+    constructor(input,init=undefined){if(!arguments.length)throw new TypeError("Request requires an input");init=init||{};const previous=requests.get(input),integrity=init.integrity,signal=__web.dependent(init.signal===undefined?previous?.signal??null:init.signal),absolute=new URL(previous?previous.url:String(input),__baseApply(__baseURI,__document,[]));if(absolute.username||absolute.password)throw new TypeError("Request URL cannot include credentials");const requested=String(init.method||previous?.method||"GET");if(!/^[!#$%&'*+.^_`|~0-9a-zA-Z-]+$/.test(requested)||["CONNECT","TRACE","TRACK"].includes(requested.toUpperCase()))throw new TypeError("Invalid request method");const method=["DELETE","GET","HEAD","OPTIONS","POST","PUT"].includes(requested.toUpperCase())?requested.toUpperCase():requested;const supplied=init.body!=null,extracted=supplied?extractBody(init.body):{raw:previous?.body.raw??null,type:null,sourceStream:previous?.body.sourceStream??false};if(extracted.raw!=null&&["GET","HEAD"].includes(method))throw new TypeError("GET and HEAD cannot have bodies");if(init.duplex!==undefined&&__String(init.duplex)!=="half")throw new TypeError("Invalid request duplex");if(supplied&&extracted.sourceStream&&init.duplex===undefined)throw new TypeError("Stream requests require duplex");const headers=new Headers(init.headers||previous?.headers);addContentType(headers,extracted);const mode=init.mode||previous?.mode||"cors",credentials=init.credentials||previous?.credentials||"same-origin",cache=init.cache||previous?.cache||"default",redirect=init.redirect||previous?.redirect||"follow";if(!["cors","no-cors","same-origin"].includes(mode)||!["omit","same-origin","include"].includes(credentials)||!["default","no-store","reload","no-cache","force-cache","only-if-cached"].includes(cache)||!["follow","error","manual"].includes(redirect)||cache==="only-if-cached"&&mode!=="same-origin")throw new TypeError("Invalid request option");if(mode==="no-cors"&&!["GET","HEAD","POST"].includes(method))throw new TypeError("Invalid no-cors request method");__setHeadersGuard(headers,mode==="no-cors"?"request-no-cors":"request");
       const referrerPolicy=__String(init.referrerPolicy??previous?.referrerPolicy??"");
       if(!["","no-referrer","no-referrer-when-downgrade","same-origin","origin","strict-origin","origin-when-cross-origin","strict-origin-when-cross-origin","unsafe-url"].includes(referrerPolicy))throw new TypeError("Invalid referrer policy");
       let referrer=__String(init.referrer??previous?.referrer??"about:client");
@@ -5859,15 +7713,24 @@ const __resourceFailure=error=>__fetchFailures.get(error);
         const documentUrl=new URL(ops.op_document_request_url());
         referrer=referrerUrl.origin===documentUrl.origin?referrerUrl.href:"about:client";
       }
-      requests.set(this,{url:absolute.href,method,headers,body:bodyState(raw),mode,credentials,cache,redirect,referrer,referrerPolicy,integrity:__String(integrity!==undefined?integrity:previous?.integrity??""),keepalive:!!(init.keepalive??previous?.keepalive),signal:init.signal||previous?.signal||new AbortController().signal,destination:"",duplex:"half",targetAddressSpace:init.targetAddressSpace??previous?.targetAddressSpace??"unknown",isHistoryNavigation:false,isReloadNavigation:false});}
-    clone(){const value=state(requests,this);return new Request(value.url,{...value,body:copyBody(value.body)});}
+      const keepalive=!!(init.keepalive??previous?.keepalive);
+      if(extracted.sourceStream&&(keepalive||mode==="no-cors"))throw new TypeError("Invalid stream request options");
+      const raw=supplied?extracted.raw:previous?transferBody(previous.body):null;
+      requests.set(this,{url:absolute.href,method,headers,body:bodyState(raw,extracted.sourceStream),mode,credentials,cache,redirect,referrer,referrerPolicy,integrity:__String(integrity!==undefined?integrity:previous?.integrity??""),keepalive,signal,destination:"",duplex:"half",targetAddressSpace:init.targetAddressSpace??previous?.targetAddressSpace??"unknown",isHistoryNavigation:false,isReloadNavigation:false});}
+    clone(){const value=state(requests,this),clone=new Request(value.url,{...value,body:copyBody(value.body)});state(requests,clone).body.sourceStream=value.body.sourceStream;return clone;}
   };
   project(Request,requests,["url","method","headers","mode","credentials","cache","redirect","referrer","referrerPolicy","integrity","keepalive","signal","destination","duplex","targetAddressSpace","isHistoryNavigation","isReloadNavigation"]);
   const __NetworkResponse=Response,__NetworkHeaders=Headers;
-  __responseFromNetwork=(raw,options)=>{const filtered=options.type==="opaque"||options.type==="opaqueredirect";const response=new __NetworkResponse(filtered?null:raw,{...options,status:filtered?200:options.status});Object.assign(state(responses,response),filtered?{status:0,statusText:"",ok:false,url:options.type==="opaqueredirect"?options.url:"",redirected:false,type:options.type,headers:new __NetworkHeaders()}:{url:options.url,redirected:options.redirected,type:options.type||"basic"});const item=state(responses,response);__setHeadersGuard(item.headers,"immutable");item.resource=options.resource;return response;};
+  __responseFromNetwork=(raw,options)=>{const filtered=options.type==="opaque"||options.type==="opaqueredirect";const response=new __NetworkResponse(filtered||[204,205,304].includes(options.status)?null:raw,{...options,status:filtered?200:options.status});if(!filtered&&[204,205,304].includes(options.status))state(responses,response).body=bodyState(raw);Object.assign(state(responses,response),filtered?{status:0,statusText:"",ok:false,url:options.type==="opaqueredirect"?options.url:"",redirected:false,type:options.type,headers:new __NetworkHeaders()}:{url:options.url,redirected:options.redirected,type:options.type||"basic"});const item=state(responses,response);__setHeadersGuard(item.headers,"immutable");item.resource=options.resource;return response;};
   __resourceResponse=response=>{const item=state(responses,response);if(!item.resource)throw new TypeError("Not a network response");return item.resource;};
-  __requestInit = value => {const item=requests.get(value);return item?{...item,body:item.body.raw}:value;};
+  __requestInit = value => {const item=requests.get(value);return item?{...item,body:item.body.raw,bodyIsStream:item.body.sourceStream}:value;};
 }
+__web = __webFactory(__core, __G.makeNativeFunction);
+const __FetchReadable=ReadableStream;
+const __FetchPromise=Promise,__FetchPromiseRace=Promise.race.bind(Promise),__FetchThen=Function.prototype.call.bind(Promise.prototype.then);
+const __ReadableGetReader=ReadableStream.prototype.getReader,__ReadableTee=ReadableStream.prototype.tee;
+const __ReadablePipeThrough=ReadableStream.prototype.pipeThrough,__BodyTransform=TransformStream;
+const __ReadableLocked=Object.getOwnPropertyDescriptor(ReadableStream.prototype,"locked").get;
 // fetch over the tier-1 net stack → a real Response (with real headers, so RSC
 // client navigation that reads `res.headers.get('content-type')` works).
 const __fetchFromSource = async (url, init, referrerSource) => {
@@ -5884,10 +7747,44 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   } else if (Array.isArray(hdrs)) {
     const obj = {}; for (const [k, v] of hdrs) obj[k] = v; hdrs = obj;
   }
-  let body = o.body == null ? o._body : o.body;
-  if (body != null && typeof body !== "string") {
-    try { body = String(body); } catch (_e) { body = ""; }
-  }
+  const signal=o.signal??null;
+  const isAborted=()=>signal!==null&&__baseApply(__AbortSignalAborted,signal,[]);
+  const abortReason=()=>__baseApply(__AbortSignalReason,signal,[]);
+  if(isAborted())throw abortReason();
+  const requestTarget=o.url || __String(url);
+  const directive=o.destination==="script"?"script-src-elem":o.destination==="style"?"style-src-elem":o.destination==="image"?"img-src":o.destination==="iframe"?"frame-src":"connect-src";
+  if(!ops.op_csp_request(__document,requestTarget,directive,o.nonce||""))throw new __exceptionTypeError("Failed to fetch");
+  const cancelId=ops.op_fetch_prepare(__document);
+  const transport={controller:null,done:false,uploadReader:null};
+  let uploadPump=null,uploadError=null,notifyAbort;
+  const abortNotice=signal?new __FetchPromise(resolve=>{notifyAbort=resolve;}):null;
+  const finish=()=>{if(transport.done)return;transport.done=true;if(signal)__baseApply(__AbortRemove,signal,["abort",onAbort]);};
+  const onAbort=()=>{const reason=abortReason();notifyAbort?.(reason);ops.op_fetch_abort(cancelId);if(transport.uploadReader)transport.uploadReader.cancel(reason).catch(()=>{});if(transport.controller)transport.controller.error(reason);finish();};
+  if(signal)__baseApply(__AbortAdd,signal,["abort",onAbort,{once:true}]);
+  let body = o.body == null ? o._body : o.body,bodyBytes;
+  try {
+    if(o.bodyIsStream&&new URL(requestTarget).protocol==="http:"){
+      const error=new __exceptionTypeError("Streaming requests require HTTP/2 or HTTP/3");
+      if(body&&__web.readable(body))body.cancel(error).catch(()=>{});
+      throw error;
+    }
+    if(body!=null&&typeof body!=="string"){
+      if(body instanceof ArrayBuffer)bodyBytes=Array.from(new Uint8Array(body));
+      else if(ArrayBuffer.isView(body))bodyBytes=Array.from(new Uint8Array(body.buffer,body.byteOffset,body.byteLength));
+      else if(typeof body.arrayBuffer==="function")bodyBytes=Array.from(new Uint8Array(await body.arrayBuffer()));
+      else if(__web.readable(body)&&o.bodyIsStream){
+        const reader=__baseApply(__ReadableGetReader,body,[]);transport.uploadReader=reader;
+        ops.op_fetch_upload_start(cancelId);
+        uploadPump=(async()=>{try{for(;;){const part=await reader.read();if(isAborted())throw abortReason();if(part.done)break;if(!__bodyByteChunk(part.value))throw new __exceptionTypeError("Request stream chunks must be Uint8Array");for(let at=0;at<part.value.byteLength;at+=65536){const chunk=new Uint8Array(part.value.buffer,part.value.byteOffset+at,Math.min(65536,part.value.byteLength-at));await ops.op_fetch_upload_write(cancelId,chunk);}}ops.op_fetch_upload_finish(cancelId);}catch(error){uploadError=error;ops.op_fetch_cancel(cancelId);}finally{reader.releaseLock();transport.uploadReader=null;}})();
+        body=undefined;
+      }else if(__web.readable(body)){
+        const reader=__baseApply(__ReadableGetReader,body,[]),chunks=[];let size=0;
+        try{for(;;){const part=await reader.read();if(isAborted())throw abortReason();if(part.done)break;if(!__bodyByteChunk(part.value))throw new __exceptionTypeError("Request stream chunks must be Uint8Array");const chunk=new Uint8Array(part.value);chunks.push(chunk);size+=chunk.length;}const bytes=new Uint8Array(size);let at=0;for(const part of chunks){bytes.set(part,at);at+=part.length;}bodyBytes=Array.from(bytes);}finally{reader.releaseLock();}
+      }else body=__String(body);
+      if(bodyBytes)body=undefined;
+    }
+    if(isAborted())throw abortReason();
+  }catch(error){ops.op_fetch_cancel(cancelId);finish();throw error;}
   // Next.js App Router CLIENT navigation (`router.push`/`replace`, e.g. the post-login
   // redirect) fetches the target route's RSC flight with an `RSC` header — a PREFETCH
   // adds `Next-Router-Prefetch`. We don't do in-place RSC soft-nav (it never completes
@@ -5909,10 +7806,7 @@ const __fetchFromSource = async (url, init, referrerSource) => {
       }
     }
   } catch (_e) {}
-  const requestTarget=o.url || __String(url);
-  const directive=o.destination==="script"?"script-src-elem":o.destination==="style"?"style-src-elem":o.destination==="image"?"img-src":o.destination==="iframe"?"frame-src":"connect-src";
-  if(!ops.op_csp_request(__document,requestTarget,directive,o.nonce||""))throw new __exceptionTypeError("Failed to fetch");
-  const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body,
+  const initJson = __stringify({ __proto__:null, method: o.method, headers: hdrs || undefined, body, body_bytes:bodyBytes, upload:!!uploadPump, cancel_id:cancelId, stream:!o.destination, cache:o.cache,
     referrer:o.referrer,referrerPolicy:o.referrerPolicy,
     mode: o.mode, credentials: o.credentials, redirect:o.redirect, integrity:o.integrity, destination: o.destination, source, referrer_source:referrerSource,
     opaque_origin: ops.op_window_opaque(__document), ...cookieSite, csp:ops.op_csp_context(__document), nonce:o.nonce });
@@ -5923,22 +7817,46 @@ const __fetchFromSource = async (url, init, referrerSource) => {
   globalThis.__pendingFetches = (globalThis.__pendingFetches || 0) + 1;
   let r;
   try {
-    r = await ops.op_fetch(__String((url && url.url) || url), initJson);
-  } finally {
+    const request=ops.op_fetch(__String(requestTarget), initJson);
+    r = await (abortNotice?__FetchPromiseRace([request,__FetchThen(abortNotice,reason=>{throw reason;})]):request);
+  } catch(error) {ops.op_fetch_cancel(cancelId);finish();throw error;} finally {
     globalThis.__pendingFetches = Math.max(0, (globalThis.__pendingFetches || 1) - 1);
   }
-  if (!r.status) {const error=new __exceptionTypeError("Failed to fetch");__fetchFailures.set(error,{policyBlocked:r.policy_blocked,integrityBlocked:r.integrity_blocked,started:!r.policy_blocked,crossOrigin:r.cross_origin,responseReceived:r.response_received});throw error;}
+  if(uploadPump){
+    if((r.aborted||!r.status||isAborted())&&transport.uploadReader)await transport.uploadReader.cancel(isAborted()?abortReason():new __exceptionTypeError("Failed to fetch")).catch(()=>{});
+    await uploadPump;
+    if(uploadError&&!isAborted()){ops.op_fetch_cancel(cancelId);finish();throw new __exceptionTypeError("Failed to fetch");}
+  }
+  if(r.aborted||isAborted()){ops.op_fetch_cancel(cancelId);finish();throw isAborted()?abortReason():new DOMException("The operation was aborted","AbortError");}
+  if (!r.status) {ops.op_fetch_cancel(cancelId);finish();const error=new __exceptionTypeError("Failed to fetch");__fetchFailures.set(error,{policyBlocked:r.policy_blocked,integrityBlocked:r.integrity_blocked,started:!r.policy_blocked,crossOrigin:r.cross_origin,responseReceived:r.response_received});throw error;}
   const crossOrigin = r.cross_origin;
   const responseType = o.redirect==="manual"&&[301,302,303,307,308].includes(r.status)?"opaqueredirect":crossOrigin && (o.mode || "cors") === "no-cors" && !o.destination ? "opaque" : crossOrigin && (o.mode || "cors") === "cors" ? "cors" : "basic";
   const headers = (r.headers || []).filter(([name]) => !["set-cookie", "set-cookie2"].includes(name.toLowerCase()));
   if (r.content_type && !headers.some(([name]) => name.toLowerCase() === "content-type")) headers.push(["content-type",r.content_type]);
-  return __responseFromNetwork([204,205,304].includes(r.status) ? null : new Uint8Array(r.body_bytes || []), {
-    status: r.status, headers, type: responseType, url: r.final_url || __String((url && url.url) || url), redirected: r.redirected,
+  let payload=new Uint8Array(r.body_bytes||[]);
+  if(r.stream_id){
+    if(responseType==="opaque"||responseType==="opaqueredirect"){
+      payload=null;
+      (async()=>{try{for(;;){const part=await ops.op_fetch_read(r.stream_id);if(part.done||part.aborted||part.error)break;}}catch{}finally{finish();}})();
+    }
+    else if([204,205,304].includes(r.status)){ops.op_fetch_cancel(cancelId);finish();payload=new __FetchReadable({type:"bytes",start(controller){controller.close();}});}
+    else {
+      payload=new __FetchReadable({type:"bytes",start(controller){transport.controller=controller;},async pull(controller){
+        try{const part=await ops.op_fetch_read(r.stream_id);if(transport.done)return;if(part.aborted||isAborted())throw isAborted()?abortReason():new DOMException("The operation was aborted","AbortError");if(part.error)throw new __exceptionTypeError(part.error);if(part.done){controller.close();finish();}else controller.enqueue(new Uint8Array(part.bytes));}catch(error){controller.error(error);ops.op_fetch_cancel(cancelId);finish();}
+      },cancel(){ops.op_fetch_cancel(cancelId);finish();}},{highWaterMark:0});
+      ops.op_fetch_watch_body(payload,cancelId);
+    }
+  }else finish();
+  return __responseFromNetwork(payload, {
+    status: r.status, statusText:r.status_text, headers, type: responseType, url: r.final_url || __String((url && url.url) || url), redirected: r.redirected,
     resource:{url:r.final_url,status:r.status,ok:r.ok,nosniff:r.nosniff,contentType:r.content_type,headers:r.headers,text:r.body,mutedErrors:!!r.script_errors_muted,originClean:!crossOrigin||o.mode==="cors"},
   });
 };
 const __FetchRequest=Request;
-globalThis.fetch = (input, init = undefined) => {
+const __AbortSignalAborted=Object.getOwnPropertyDescriptor(AbortSignal.prototype,"aborted").get;
+const __AbortSignalReason=Object.getOwnPropertyDescriptor(AbortSignal.prototype,"reason").get;
+const __AbortAdd=EventTarget.prototype.addEventListener,__AbortRemove=EventTarget.prototype.removeEventListener;
+globalThis.fetch = async (input, init = undefined) => {
   const request = new __FetchRequest(input, init);
   return __fetchFromSource(request, {...__requestInit(request), destination:""}, ops.op_document_request_url());
 };
@@ -6186,11 +8104,11 @@ if (typeof globalThis.FormData === "undefined") {
 }
 // Blob / File / FileReader — analytics + upload code (PostHog, file inputs) reference
 // these during hydration; deno_core ships none ("File is not defined" aborts PostHog
-// init). Minimal spec-shaped impls over the concatenated parts as a string — enough to
-// construct/inspect; no real binary I/O in this engine.
+// init). Private byte buffers preserve binary Blob/File parts and authentic brands
+// across same-origin realms; BodyInit reads this native private state directly.
 let __readBlobBytes = null;
 if (typeof globalThis.Blob === "undefined") {
-  const blobs = new WeakMap();
+  const blobs = __blobStates;
   const read = receiver => {const value=blobs.get(receiver);if(!value)throw new TypeError("Illegal invocation");return value;};
   __readBlobBytes = receiver => read(receiver).bytes;
   globalThis.Blob = class Blob {
@@ -6211,15 +8129,35 @@ if (typeof globalThis.Blob === "undefined") {
   };
   Object.defineProperty(Blob.prototype,Symbol.toStringTag,{value:"Blob",configurable:true});
 }
+const __fileStates=__interfaceMap("File");
+const __fileTypeError=TypeError, __fileNumber=Number, __fileTrunc=Math.trunc;
+const __fileNow=Date.now, __fileBigInt=BigInt, __fileInt64=BigInt.asIntN, __fileBytes=Uint8Array;
+const __fileApply=Reflect.apply, __fileToWellFormed=String.prototype.toWellFormed;
+const __fileUSV=value=>__fileApply(__fileToWellFormed,__String(value),[]);
+const __readFile=receiver=>{const record=__fileStates.get(receiver);if(!record)throw new __fileTypeError("Illegal invocation");return record;};
 if (typeof globalThis.File === "undefined") {
   globalThis.File = class File extends globalThis.Blob {
     constructor(parts, name, opts = {}) {
+      if(arguments.length<2)throw new __fileTypeError("File requires two arguments");
+      opts=opts==null?{}:opts;
+      const filename=__fileUSV(name), modified=opts.lastModified;
+      const number=modified===undefined?__fileNow():__fileNumber(modified);
+      const lastModified=number!==number||number===Infinity||number===-Infinity?0:__fileNumber(__fileInt64(64,__fileBigInt(__fileTrunc(number))));
       super(parts, opts);
-      this.name = String(name == null ? "" : name);
-      this.lastModified = (opts && opts.lastModified) || 0;
+      __fileStates.set(this,{name:filename,lastModified});
     }
+    get name(){return __readFile(this).name;}
+    get lastModified(){return __readFile(this).lastModified;}
+    get webkitRelativePath(){__readFile(this);return "";}
   };
+  for(const key of ["name","lastModified","webkitRelativePath"])Object.defineProperty(File.prototype,key,{...Object.getOwnPropertyDescriptor(File.prototype,key),enumerable:true});
+  Object.defineProperty(File.prototype,Symbol.toStringTag,{value:"File",configurable:true});
 }
+const __capturedFile=globalThis.File;
+ops.op_set_host_capabilities({
+  createEmptyFormFile:()=>new __capturedFile([],"",{type:"application/octet-stream",lastModified:0}),
+  snapshotFormFile:receiver=>{const file=__fileStates.get(receiver),blob=__blobStates.get(receiver);return file&&blob?{name:file.name,lastModified:file.lastModified,type:blob.type,bytes:new __fileBytes(blob.bytes)}:null;}
+});
 if (typeof globalThis.FileReader === "undefined") {
   globalThis.FileReader = class FileReader {
     constructor() { this.result = null; this.onload = null; this.onerror = null; this.onloadend = null; }
@@ -6237,33 +8175,8 @@ if (typeof globalThis.FileReader === "undefined") {
     }
   };
 }
-// customElements — the Web Components registry. deno_core ships none, so a bundle that
-// registers a custom element (MUI and friends do) threw "customElements is not defined"
-// mid-script, aborting the rest of that chunk (→ missing UI). Register + resolve
-// whenDefined; no live upgrade pass (the static tree isn't re-instantiated), which is
-// enough to keep the page's JS running.
-if (typeof globalThis.customElements === "undefined") {
-  const __ce = new Map();
-  const __waiters = new Map();
-  globalThis.customElements = {
-    define(name, ctor) {
-      __ce.set(name, ctor);
-      const w = __waiters.get(name);
-      if (w) { w.forEach((r) => r(ctor)); __waiters.delete(name); }
-    },
-    get(name) { return __ce.get(name); },
-    getName(ctor) { for (const [n, c] of __ce) if (c === ctor) return n; return null; },
-    whenDefined(name) {
-      if (__ce.has(name)) return Promise.resolve(__ce.get(name));
-      return new Promise((r) => {
-        const arr = __waiters.get(name) || [];
-        arr.push(r);
-        __waiters.set(name, arr);
-      });
-    },
-    upgrade() {},
-  };
-}
+// The canonical binding owns native custom-element construction, registry state
+// and lifecycle reactions in every Window realm.
 // (CSSStyleSheet, document.adoptedStyleSheets, and the HTML*Element constructor
 // family are all provided by the vendored browser_env binding.)
 // MessagePort / MessageChannel — real classes (not object-literal stubs), so `port instanceof
@@ -6353,6 +8266,38 @@ Object.defineProperty(ErrorEvent.prototype, Symbol.toStringTag, {value:"ErrorEve
 "##,
     include_str!("message_ports.js"),
     r##"
+const __streamTransferFactory =
+"##,
+    include_str!("stream_transfers.js"),
+    r##"
+{
+  const apply=Reflect.apply, get=Object.getOwnPropertyDescriptor;
+  const channel=MessageChannel, cp=channel.prototype;
+  const first=get(cp,"port1").get, second=get(cp,"port2").get;
+  const post=MessagePort.prototype.postMessage, close=MessagePort.prototype.close;
+  const start=MessagePort.prototype.start, listen=EventTarget.prototype.addEventListener;
+  const data=get(MessageEvent.prototype,"data").get;
+  const api=__web.transferBackend(), Exception=DOMException;
+  api.channel=()=>{const pair=new channel();return [apply(first,pair,[]),apply(second,pair,[])];};
+  api.post=(port,value)=>apply(post,port,[value]);
+  api.close=port=>apply(close,port,[]);
+  api.listen=(port,receive,error)=>{
+    apply(listen,port,["message",event=>receive(apply(data,event,[]))]);
+    apply(listen,port,["messageerror",()=>error(new Exception("Stream chunk could not be cloned","DataCloneError"))]);
+    apply(start,port,[]);
+  };
+  const bridge=__streamTransferFactory(api);
+  const validate=bridge.validate, prepare=bridge.prepare, commit=bridge.commit;
+  const abandon=bridge.abandon, restore=bridge.restore;
+  ops.op_stream_transfer_install((mode,a,b,c)=>{
+    if(mode===0)return validate(a);
+    if(mode===1)return prepare(a);
+    if(mode===2)return commit(a,b);
+    if(mode===3)return restore(a,b,c);
+    if(mode===4)return abandon(a);
+  });
+}
+
 // window.postMessage — deliver a `message` event to THIS realm's window listeners
 // (async, via the timer queue so the hydration/interaction drain processes it). Real
 // same-window `postMessage(msg)` fires `message` handlers with `{data, origin, source}`
@@ -6440,24 +8385,6 @@ try {
     Object.defineProperty(globalThis.document, "contentType", { configurable: true, get() { return "text/html"; } });
   }
 } catch (_e) {}
-// TrustedTypes — real Chrome exposes `window.trustedTypes`; the reCAPTCHA VM (and many
-// CSP-aware bundles) probe it and wrap script/HTML sinks through a policy. Absence is a
-// (weak) tell and a `trustedTypes.createPolicy(...)` call on undefined throws. Pass-through
-// policies (identity transforms) keep the sinks working with no real sanitization.
-if (typeof globalThis.trustedTypes === "undefined") {
-  const __mkPolicy = (name, rules) => ({
-    name: String(name == null ? "" : name),
-    createHTML: (s) => (rules && rules.createHTML ? rules.createHTML(s) : String(s)),
-    createScript: (s) => (rules && rules.createScript ? rules.createScript(s) : String(s)),
-    createScriptURL: (s) => (rules && rules.createScriptURL ? rules.createScriptURL(s) : String(s)),
-  });
-  globalThis.trustedTypes = {
-    createPolicy: (name, rules) => __mkPolicy(name, rules),
-    defaultPolicy: null, emptyHTML: "", emptyScript: "",
-    getPropertyType: () => null, getAttributeType: () => null,
-    isHTML: () => false, isScript: () => false, isScriptURL: () => false,
-  };
-}
 // User Timing stores real entries; navigation records only phases this runtime observes.
 const __performanceEntries = __interfaceMap("PerformanceEntry");
 const __performanceTimeline = [];
@@ -6594,12 +8521,9 @@ if (typeof globalThis.Notification === "undefined") {
 } else if (globalThis.Notification.permission === undefined) {
   try { globalThis.Notification.permission = "default"; } catch (e) {}
 }
-// The CSS interface (window.CSS): CSS.supports (feature detection) + CSS.escape (identifier
-// escaping). Bundles reference it at load — Google's deferred `xjs` bundle aborted with
-// "CSS is not defined". No layout/CSS engine headless, so supports() validates the query
-// shape and reports supported (as modern Chrome would for a well-formed query), and escape()
-// implements the CSSOM ident serialization so a following `.replace`/selector build is safe.
+// CSS feature detection uses private native syntax and selector validation.
 if (typeof globalThis.CSS === "undefined") {
+  const cssString = String, cssTypeError = TypeError;
   const cssEscape = (value) => {
     const s = String(value);
     let out = "";
@@ -6624,10 +8548,14 @@ if (typeof globalThis.CSS === "undefined") {
     return out;
   };
   globalThis.CSS = {
-    // `supports("prop", "value")` (two-arg) or `supports("(prop: value)")` (condition string).
-    supports: (a, b) => (b !== undefined
-      ? (typeof a === "string" && a.length > 0)
-      : (typeof a === "string" && a.indexOf(":") >= 0)),
+    supports(condition) {
+      if (!arguments.length) throw new cssTypeError("Failed to execute 'supports' on 'CSS': 1 argument required, but only 0 present.");
+      const text = value => { if (typeof value === "symbol") throw new cssTypeError("Cannot convert a Symbol value to a string"); return cssString(value); };
+      const source = text(condition);
+      return arguments.length > 1
+        ? ops.op_native_css_supports(source, text(arguments[1]), true)
+        : ops.op_native_css_supports(source, "", false);
+    },
     escape: cssEscape,
   };
 }
@@ -6893,6 +8821,7 @@ if (typeof globalThis.URL === "undefined") {
   globalThis.URL.createObjectURL = () => "blob:turbo-surf";
   globalThis.URL.revokeObjectURL = () => {};
 }
+__BodyParamsString=URLSearchParams.prototype.toString;
 // Object-URL registry + download capture. The common client-side export pattern is
 // `URL.createObjectURL(blob)` → set it on a `<a download href=…>` → `link.click()`. A real
 // createObjectURL (keyed store) lets us recover the blob bytes when the anchor is clicked,
@@ -7273,6 +9202,8 @@ const __resourceAttribute=Element.prototype.getAttribute;
 const __resourceTagName=Object.getOwnPropertyDescriptor(Element.prototype,"tagName").get;
 const __resourceScriptAsync=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,"async").get;
 const __resourceText=Object.getOwnPropertyDescriptor(Node.prototype,"textContent").get;
+const __resourceNativeOwner=Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype,"ownerDocument").get);
+const __resourceNativeBase=Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype,"baseURI").get);
 const __resourceDocumentQuery=Document.prototype.querySelectorAll;
 const __resourceCompare=Node.prototype.compareDocumentPosition;
 const __resourceBaseURL=Object.getOwnPropertyDescriptor(Node.prototype,"baseURI").get;
@@ -7324,11 +9255,15 @@ function __loadImage(el, win = globalThis) {
   const state = {src,complete:!src,width:0,height:0,currentSrc:"",promise:null};
   __resources.set(el,state);
   if (!src) return Promise.resolve();
-  const source = (el.ownerDocument && el.ownerDocument.URL) || win.location.href;
+  const doc = __resourceNativeOwner(el);
+  const source = __resourceNativeBase(el);
   state.promise = __trackResource((async () => {
     let result;
     const url = new URL(src, source).href, start = __resourceNow(win);
-    try { result = await ops.op_load_image(url, source,ops.op_csp_context(el.ownerDocument),JSON.stringify({...ops.op_document_cookie_site(el.ownerDocument),opaque_origin:ops.op_window_opaque(el.ownerDocument)})); } catch (_) {}
+    try {
+      await 0;
+      if (ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc)}));
+    } catch (_) {}
     __recordResource(win, url, "img", start);
     if (__resources.get(el) !== state) return;
     state.complete=true;
@@ -7398,11 +9333,11 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
     }
     styles.push(state.promise);
   }
-  return Promise.all(styles);
+  return __framePromiseAll(styles);
 };
 __G.pendingResourceCount=()=>__resourcePromises.size;
 __G.documentLoadReady=()=>__resourcePromises.size===0 && ops.op_frame_pending()===0;
-__G.waitForDocumentResources=()=>Promise.all(Array.from(__resourcePromises));
+__G.waitForDocumentResources=()=>__framePromiseAll(Array.from(__resourcePromises));
 function __fireScriptEvent(el, kind, err) {
   // Use the same private native event path as image and stylesheet loads.
   // Plain records are not Events and cannot reach addEventListener handlers.
@@ -7623,12 +9558,49 @@ function __prepareCspStyleMutation(event){
   }
 }
 __initializeDocumentBase();
+const __loadMutatedResources = __G.loadDocumentResources;
+const __resourceApply = Reflect.apply;
+const __resourceElementQuery = Element.prototype.querySelector;
+const __resourceMutationAttributes = {__proto__: null, src:true, href:true, rel:true,
+  type:true, media:true, disabled:true, integrity:true, crossorigin:true, referrerpolicy:true};
+function __resourceElementKind(node) {
+  return __resourceApply(__documentType,node,[]) === 1
+    ? __resourceApply(__resourceTagName,node,[]) : "";
+}
+function __containsInsertedResource(node) {
+  const kind=__resourceElementKind(node);
+  return kind === "LINK" || kind === "IMG" || kind === "STYLE" ||
+    kind !== "" && __resourceApply(__resourceElementQuery,node,["link,img,style"]) !== null;
+}
+function __resourceMutation(event) {
+  let connected = false, relevant = false;
+  for (let index = 0; index < event.ancestors.length; index++) {
+    const ancestor=event.ancestors[index];
+    if (ancestor === __document) connected = true;
+    if (event.type === "characterData" && __resourceElementKind(ancestor) === "STYLE") relevant=true;
+  }
+  if (!connected) return;
+  if (event.type === "attributes") {
+    const kind=__resourceElementKind(event.target);
+    relevant = (kind === "LINK" || kind === "IMG" || kind === "STYLE") &&
+      __recordOwn(__resourceMutationAttributes,event.attributeName);
+  } else if (event.type === "childList") {
+    relevant=__resourceElementKind(event.target) === "STYLE";
+    for (let index=0; !relevant && index<event.added.length; index++)
+      relevant=__containsInsertedResource(event.added[index]);
+  }
+  // Native IO can resume after a hydration round has ended. Admit newly
+  // connected resources at their mutation; ordinary text/attribute edits do
+  // not trigger a whole-document resource scan.
+  if (relevant) __loadMutatedResources();
+}
 ops.op_install_resource_consumer(__document, event => {
   __prepareCspStyleMutation(event);
   __documentBaseMutation(event,element=>{
     const prepared=__prepareResourceScript(element);
     if(prepared)__startResourceScript(element,prepared);
   });
+  __resourceMutation(event);
 }, __documentRuntimeState);
 // Run every not-yet-run <script> in DOM order, drain timers, repeat while new
 // scripts appear or timers keep firing. Bounded by maxRounds (+ the render budget).
@@ -7666,6 +9638,7 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     if (__G.initialLoading) __markDocumentInteractive();
     const fired = fireTimers ? __G.runTimers(Math.min(timersLeft, 5000)) : 0;
     timersLeft -= fired;
+    if (fired) await undefined;
     if (!ranScript && fired === 0) break;
   }
 };
@@ -8117,13 +10090,7 @@ __G.domSig = () => {
     location.href = metadata.location;
     __documentRuntimeState.frame = metadata;
     __initializeDocumentBase();
-    try {
-      const source = new URL(metadata.referrer || "about:blank");
-      source.hash = "";
-      __documentRuntimeState.referrer = metadata.inherited || source.origin === metadata.origin ? source.href
-        : source.protocol === "https:" && String(metadata.location).startsWith("http:") ? ""
-        : source.origin === "null" ? "" : source.origin + "/";
-    } catch (_) { __documentRuntimeState.referrer = ""; }
+    __documentRuntimeState.referrer = ops.op_document_referrer(__document);
     globalThis.frames = globalThis;
     installFrameFactory(globalThis, document, metadata.depth + 1);
   };
@@ -8181,7 +10148,7 @@ __G.domSig = () => {
     record.metadata = frameMetadata(el);
     window = ops.op_frame_set_document(window, record.owner, el,
       "<!DOCTYPE html><html><head></head><body></body></html>",
-      __stringify({__proto__:null,...record.metadata, inherited: true}), 0);
+      __stringify({__proto__:null,...record.metadata, inherited: true, initial: true}), 0);
     record.realm = window;
     refreshFrameTree();
     return window;
@@ -8207,7 +10174,7 @@ __G.domSig = () => {
       else {
         const url = record.navigationURL || resolveFrameUrl(el);
         if (url && url !== "about:blank") {
-          const response = await ops.op_fetch(url, __stringify({__proto__:null,destination: "iframe", partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)}));
+          const response = await ops.op_fetch(url, __stringify({__proto__:null,destination: "iframe", referrerPolicy:ops.op_frame_referrer_policy(el), partition:ops.op_frame_request_partition(__document,el), source: record.navigationSource || ops.op_document_request_url(),csp:ops.op_csp_context(__document)}));
           if (record.epoch !== epoch || !frameConnected(el)) return;
           html = response.body || ""; responseId = response.frame_document || 0;
           frameUrl = response.final_url || url;
@@ -8224,7 +10191,7 @@ __G.domSig = () => {
       await ops.op_frame_resources(window);
       const work = await loadFrameScripts(window, frameUrl);
       await ops.op_frame_dom_ready(window);
-      await Promise.all(work.asynchronous);
+      await __framePromiseAll(work.asynchronous);
       await ops.op_frame_finish(window);
     } catch (error) {
       if (record.epoch === epoch) __print("frame error: " + (error && error.stack ? error.stack : error) + "\n");
@@ -8323,7 +10290,15 @@ __G.domSig = () => {
     const getter = Object.getOwnPropertyDescriptor({get [name]() {return read(this);}}, name).get;
     const descriptor = {get: __documentFunction(getter, "get " + name, 0), enumerable: true, configurable: true};
     if (name === "src" || name === "srcdoc") {
-      const setter = Object.getOwnPropertyDescriptor({set [name](value) {frameReceiver(this); this.setAttribute(name, String(value));}}, name).set;
+      const originalSetter = Object.getOwnPropertyDescriptor(iframeProto, name)?.set;
+      const setter = Object.getOwnPropertyDescriptor({set [name](value) {
+        frameReceiver(this);
+        if (originalSetter) {
+          frameApply(originalSetter, this, [value]);
+          const owner=frameOwner(this);
+          if(owner)ops.op_frame_host_helper(frameDocument(this), "frameSourceChanged", [this]);
+        } else this.setAttribute(name, String(value));
+      }}, name).set;
       descriptor.set = __documentFunction(setter, "set " + name, 1);
     }
     Object.defineProperty(iframeProto, name, descriptor);
@@ -8541,7 +10516,7 @@ __G.domSig = () => {
       }
     }
   } catch (e) {}
-  // window.postMessage + trustedTypes are JS shims (see their defs); a collector reading
+  // window.postMessage uses a native facade; a collector reading
   // their `.toString()` must see native source, like every other shim.
   if (typeof globalThis.postMessage === "function") mark(globalThis.postMessage, "postMessage");
   // Native-mark the message constructors — they're defined (not created by the NAMES loop), so
@@ -9209,19 +11184,7 @@ __G.domSig = () => {
   // createElement was re-wrapped as a JS closure above; re-mark it native (create-element-not-native).
   guard(() => { if (G.document && G.document.createElement) mark(G.document.createElement, "createElement"); });
 
-  // Kill the Gecko/WebKit engine false-positives: CSS.supports must reject vendor-prefixed
-  // Gecko props (a permissive syntax-only stub answered true → engineGecko → ua-chrome-wrong-engine).
-  guard(() => {
-    if (G.CSS && typeof G.CSS.supports === "function") {
-      const origSupports = G.CSS.supports.bind(G.CSS);
-      G.CSS.supports = function supports(prop, val) {
-        const p = String(prop == null ? "" : prop).toLowerCase();
-        if (p.indexOf("-moz-") === 0 || p.indexOf("-webkit-") === 0 || p.indexOf("-ms-") === 0) return false;
-        try { return origSupports(prop, val); } catch (e) { return false; }
-      };
-      mark(G.CSS.supports, "supports");
-    }
-  });
+  guard(() => { if (G.CSS) mark(G.CSS.supports, "supports"); });
 
   // Constructed-object host interfaces we own in JS (brand + native method). The 9 rtdom-native
   // element/Range/Text brands need vendored-binding work and stay as residual struct fails.
@@ -9691,7 +11654,7 @@ __G.domSig = () => {
   });
 
   guard(() => {
-    for (const name of ["Navigator","Performance","Permissions","Storage","Request","Response","Headers","URL","URLSearchParams","DOMException","MessageEvent","Event","CustomEvent","SubmitEvent","UIEvent","MouseEvent","KeyboardEvent","InputEvent","FocusEvent","PointerEvent","WheelEvent"]) {
+    for (const name of ["Navigator","Performance","Permissions","Storage","Request","Response","Headers","URL","URLSearchParams","DOMException","MessageEvent","StorageEvent","Event","CustomEvent","SubmitEvent","UIEvent","MouseEvent","KeyboardEvent","InputEvent","FocusEvent","PointerEvent","WheelEvent"]) {
       const ctor=G[name];if(typeof ctor!=="function")continue;
       Object.defineProperty(G,name,{value:ctor,writable:true,configurable:true,enumerable:false});
       const descriptor=Object.getOwnPropertyDescriptor(ctor,"prototype");
@@ -9773,6 +11736,7 @@ __G.domSig = () => {
       Object.defineProperty(G, key, descriptor);
     }
     Object.setPrototypeOf(G.UIEvent, G.Event);
+    Object.setPrototypeOf(G.StorageEvent, G.Event);
     for (const object of [G.HTMLElement?.prototype, G.HTMLScriptElement?.prototype, G.Navigator?.prototype, G.Performance?.prototype,
       G.Permissions?.prototype, G.HTMLCanvasElement?.prototype, G.CSS, G.console,
       nav?.clipboard, G.trustedTypes, G.crypto, G.crypto?.subtle]) bindProperties(object, ["constructor"]);
@@ -9855,6 +11819,15 @@ fn make_runtime_with_hints(
     ua: &str,
     client_hints: ClientHints,
 ) -> OwnedRuntime {
+    make_runtime_with_storage(base, cookies, ua, client_hints, BrowserStorage::default())
+}
+fn make_runtime_with_storage(
+    base: &str,
+    cookies: &str,
+    ua: &str,
+    client_hints: ClientHints,
+    storage: BrowserStorage,
+) -> OwnedRuntime {
     #[cfg(turbo_surf_native_proxy)]
     assert_eq!(v8::V8::get_version(), env!("TURBO_SURF_EXPECTED_NATIVE_V8"), "the exact-engine runtime requires its verified native SDK; use the matching engine build helper");
     pin_timezone();
@@ -9920,6 +11893,10 @@ fn make_runtime_with_hints(
             jar: jar.clone(),
             ua: ua.to_string(),
             client_hints: client_hints.clone(),
+            http_cache: storage.http_cache(),
+            storage_effects: storage.partition_response_effects(
+                csp.partition.as_ref().map_or(0, |partition| partition.id),
+            ),
             inline_sources: inline_sources.clone(),
             credentials: module_credentials.clone(),
             csp: csp.clone(),
@@ -9964,7 +11941,10 @@ fn make_runtime_with_hints(
     let state = rt.op_state();
     let mut state = state.borrow_mut();
     state.put(NetworkLog::default());
+    state.put(form_submission::Queue::default());
+    state.put(storage);
     state.put(ResponseHeaders::default());
+    state.put(crate::DocumentResponseMetadata::default());
     state.put(CspContexts(std::collections::HashMap::from([(
         csp.id, csp,
     )])));
@@ -9975,6 +11955,11 @@ fn make_runtime_with_hints(
     state.put(FrameContexts::default());
     state.put(TimerClock::default());
     state.put::<Base>(Base(base.to_string()));
+    let root_cookie_target = Rc::downgrade(&jar);
+    state.put(ReportCookieTargets(std::collections::HashMap::from([(
+        0,
+        root_cookie_target,
+    )])));
     state.put::<Jar>(jar);
     state.put::<Ua>(Ua(ua.to_string()));
     state.put::<ClientHints>(client_hints);
@@ -10019,6 +12004,11 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
                 .borrow::<ResponseHeaders>()
                 .0
                 .clone();
+            let response_metadata = JsRuntime::op_state_from(&scope)
+                .borrow()
+                .borrow::<crate::DocumentResponseMetadata>()
+                .clone();
+            csp.response_metadata.replace(response_metadata);
             *csp.policy.borrow_mut() = crate::csp::DocumentPolicy::new(base, &headers, html);
             context.remove_slot::<FrameSandbox>();
             if csp.policy.borrow().header.sandbox_restrictions().is_some() {
@@ -10056,7 +12046,15 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         }
         #[cfg(turbo_surf_native_proxy)]
         window_proxy::seed_location(&mut scope, base);
-        crate::browser_env::install_html(&mut scope, html);
+        let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
+            let policy = handle.policy.borrow();
+            policy.initial_base.has_policy() || policy.report_only.has_policy()
+        });
+        if source_positions {
+            crate::browser_env::install_with_html_source_positions(&mut scope, html);
+        } else {
+            crate::browser_env::install_html(&mut scope, html);
+        }
         install_css_authorization(&mut scope);
     }
     let origin = ModuleSpecifier::parse(base)
@@ -10362,6 +12360,7 @@ async fn drain_event_loop_until_completion(
     completion: Option<&v8::Global<v8::Value>>,
 ) -> Result<(), String> {
     let mut frame_timer_budget = 200000u32;
+    let storage_waiter = storage_events::waiter(&rt.op_state().borrow());
     // Even a synchronous result ends a script job. Observer and Promise
     // microtasks must run before the operation-completion shortcut can return.
     rt.v8_isolate().perform_microtask_checkpoint();
@@ -10553,6 +12552,9 @@ async fn drain_event_loop_until_completion(
             continue;
         }
         let result = std::future::poll_fn(|cx| {
+            if let Some(waiter) = &storage_waiter {
+                waiter.register(cx);
+            }
             let result = rt
                 .poll_event_loop(cx, deno_core::PollEventLoopOptions::default())
                 .map(|result| result.map_err(|error| error.to_string()));
@@ -10591,6 +12593,31 @@ async fn drain_event_loop_until_completion(
                 return std::task::Poll::Ready(None);
             }
 
+            // Storage tasks have their own source and can arrive while a
+            // Promise waits without any Window timer. Dispatch one task before
+            // selecting timers, then finish its microtasks before the next task.
+            if storage_events::pending(&rt.op_state().borrow()) > 0 {
+                let delivered = {
+                    deno_core::scope!(scope, rt);
+                    storage_events::deliver_next(scope)
+                };
+                match delivered {
+                    Ok(0) => {}
+                    Ok(_) => {
+                        rt.v8_isolate().perform_microtask_checkpoint();
+                        if rt.v8_isolate().is_execution_terminating() {
+                            return std::task::Poll::Ready(Some(Err(
+                                "Microtask execution was interrupted".into(),
+                            )));
+                        }
+                        return std::task::Poll::Ready(None);
+                    }
+                    Err(error) => {
+                        return std::task::Poll::Ready(Some(Err(error.to_string())));
+                    }
+                }
+            }
+
             // A suspended child module can depend on a Window lifecycle timer.
             // Drive the actual timer queues while native module futures are
             // pending; waiting for Deno quiescence first would deadlock that gate.
@@ -10612,6 +12639,14 @@ async fn drain_event_loop_until_completion(
                     Err(error) => return std::task::Poll::Ready(Some(Err(error))),
                     _ => {}
                 }
+            }
+            // A JS Promise can await another native worker's storage task even
+            // when Deno has no pending op. The inbox wakes this host future.
+            if completion.is_some()
+                && storage_waiter.is_some()
+                && matches!(result, std::task::Poll::Ready(Ok(())))
+            {
+                return std::task::Poll::Pending;
             }
             result.map(Some)
         })
@@ -10764,7 +12799,36 @@ pub async fn render_capture_cookies_with_browsing_state(
     response_headers: &[(String, String)],
     storage: BrowserStorage,
 ) -> Result<(String, String), String> {
-    let mut page = PageSession::open_with_browsing_state(
+    render_capture_cookies_with_document_response(
+        html,
+        base,
+        ua,
+        cookies,
+        script,
+        budget_ms,
+        client_hints,
+        response_headers,
+        storage,
+        crate::DocumentResponseMetadata::default(),
+    )
+    .await
+}
+
+/// Hydrate with the actual navigation response metadata and persistent browser state.
+#[allow(clippy::too_many_arguments)]
+pub async fn render_capture_cookies_with_document_response(
+    html: &str,
+    base: &str,
+    ua: &str,
+    cookies: &str,
+    script: &str,
+    budget_ms: u64,
+    client_hints: ClientHints,
+    response_headers: &[(String, String)],
+    storage: BrowserStorage,
+    response_metadata: crate::DocumentResponseMetadata,
+) -> Result<(String, String), String> {
+    let mut page = PageSession::open_with_document_response(
         html,
         base,
         cookies,
@@ -10774,6 +12838,7 @@ pub async fn render_capture_cookies_with_browsing_state(
         client_hints,
         response_headers,
         storage,
+        response_metadata,
     )
     .await?;
     for program in script.split(SCRIPT_BOUNDARY) {
@@ -11780,7 +13845,66 @@ impl PageSession {
         response_headers: &[(String, String)],
         storage: BrowserStorage,
     ) -> Result<Self, String> {
-        let mut rt = make_runtime_with_hints(base, cookies, ua, client_hints);
+        Self::open_with_document_response(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            crate::DocumentResponseMetadata::default(),
+        )
+        .await
+    }
+
+    /// Open with the status and selected referrer of the actual host navigation.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+    ) -> Result<Self, String> {
+        let mut session = Self::open_with_document_response_unfollowed(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+        )
+        .await?;
+        session.follow_form_navigation().await?;
+        Ok(session)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn open_with_document_response_unfollowed(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+    ) -> Result<Self, String> {
+        let mut rt = make_runtime_with_storage(base, cookies, ua, client_hints, storage);
         let mut script_inventory = std::env::var_os("TURBO_SURF_JS_TRACE")
             .map(|root| {
                 crate::script_inventory::ScriptInventory::start(
@@ -11793,7 +13917,7 @@ impl PageSession {
             .borrow_mut()
             .borrow_mut::<FrameContexts>()
             .init_script = init_script.to_owned();
-        rt.op_state().borrow_mut().put(storage);
+        rt.op_state().borrow_mut().put(response_metadata);
         rt.op_state().borrow_mut().borrow_mut::<ResponseHeaders>().0 = response_headers.to_vec();
         {
             let _activation = rt.activation_key().enter();
@@ -11812,7 +13936,7 @@ impl PageSession {
             inventory.flush();
         }
         let budget_exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
-        let mut unsupported_csp = {
+        let unsupported_csp = {
             let _activation = rt.activation_key().enter();
             let context = rt.main_context();
             let scope = std::pin::pin!(v8::HandleScope::new(rt.v8_isolate()));
@@ -11822,12 +13946,6 @@ impl PageSession {
                 .get_slot::<CspHandle>()
                 .map_or_else(Vec::new, |handle| handle.policy.borrow().unsupported())
         };
-        if response_headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("content-security-policy-report-only"))
-        {
-            unsupported_csp.push("content-security-policy-report-only".into());
-        }
         match result {
             Ok(_) => Ok(PageSession {
                 script_inventory,
@@ -11878,7 +13996,9 @@ impl PageSession {
     /// it there.
     pub async fn eval(&mut self, script: &str) -> Result<String, String> {
         let key = self.rt.activation_key();
-        key.during(self.eval_active(script)).await
+        let result = key.during(self.eval_active(script)).await;
+        self.follow_form_navigation().await?;
+        result
     }
 
     async fn eval_active(&mut self, script: &str) -> Result<String, String> {
@@ -11928,8 +14048,11 @@ impl PageSession {
         json: bool,
     ) -> Result<String, String> {
         let key = self.rt.activation_key();
-        key.during(self.eval_expression_active(expression, json))
-            .await
+        let result = key
+            .during(self.eval_expression_active(expression, json))
+            .await;
+        self.follow_form_navigation().await?;
+        result
     }
 
     async fn eval_expression_active(
@@ -11981,7 +14104,9 @@ impl PageSession {
     /// available only to the Rust session owner. Supports the harness step schema.
     pub async fn input(&mut self, steps: &serde_json::Value) -> Result<(), String> {
         let key = self.rt.activation_key();
-        key.during(self.input_active(steps)).await
+        let result = key.during(self.input_active(steps)).await;
+        self.follow_form_navigation().await?;
+        result
     }
 
     async fn input_active(&mut self, steps: &serde_json::Value) -> Result<(), String> {
@@ -12059,6 +14184,17 @@ impl PageSession {
         snapshot
     }
 
+    /// Host-only queued-task diagnostic for native lifecycle contracts.
+    /// Wait for native storage tasks without retaining a VM handle in the signal.
+    pub fn storage_event_signal(&self) -> crate::StorageEventSignal {
+        storage_events::signal(&self.rt.op_state().borrow())
+    }
+
+    #[doc(hidden)]
+    pub fn pending_storage_events_for_testing(&self) -> usize {
+        storage_events::pending(&self.rt.op_state().borrow())
+    }
+
     /// Host-only deterministic collection for native lifecycle contract tests.
     #[doc(hidden)]
     pub fn collect_message_port_garbage_for_testing(&mut self) {
@@ -12072,6 +14208,7 @@ impl PageSession {
         {
             deno_core::scope!(scope, &mut self.rt);
             crate::message_ports::sweep(scope);
+            crate::web_streams_backend::sweep(scope);
         }
         crate::browser_env::sweep_collected_documents();
     }
@@ -12129,6 +14266,7 @@ impl PageSession {
     pub fn drain_network_log(&mut self) -> String {
         let state = self.rt.op_state();
         let mut state = state.borrow_mut();
+        fetch_streams::refresh_logs(&mut state);
         let rows: Vec<_> = state.borrow_mut::<NetworkLog>().0.drain(..).collect();
         serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
     }
@@ -12199,6 +14337,7 @@ impl PageSession {
     /// cookies the in-isolate `document.cookie` can't see) — so a later navigation can
     /// carry the session established during this page's lifetime (e.g. after login).
     pub fn cookies(&self) -> String {
+        apply_report_cookies(&mut self.rt.op_state().borrow_mut());
         let op_state = self.rt.op_state();
         let jar = op_state.borrow().borrow::<Jar>().clone();
         let s = jar.borrow().storage_state();
@@ -12238,19 +14377,27 @@ mod credentialless_partition_tests {
         let storage = BrowserStorage::default();
         {
             let mut areas = storage.0.lock().unwrap();
-            areas
-                .by_origin
-                .insert((0, "https://origin.test".into(), false), 1);
-            areas
-                .by_origin
-                .insert((42, "https://origin.test".into(), false), 2);
-            areas
-                .by_origin
-                .insert((42, "https://origin.test".into(), true), 3);
+            for (id, partition, session) in [(1, 0, false), (2, 42, false), (3, 42, true)] {
+                areas.by_origin.insert(
+                    StorageKey {
+                        partition,
+                        site: "https://top.test".into(),
+                        origin: "https://origin.test".into(),
+                        cross_site_ancestor: true,
+                        session,
+                        tab: 0,
+                    },
+                    id,
+                );
+            }
             for id in 1..=3 {
-                areas
-                    .values
-                    .insert(id, vec![("key".into(), "value".into())]);
+                areas.values.insert(
+                    id,
+                    vec![(
+                        "key".encode_utf16().collect(),
+                        "value".encode_utf16().collect(),
+                    )],
+                );
             }
         }
         let partition = CredentiallessPartition {
@@ -12263,5 +14410,49 @@ mod credentialless_partition_tests {
         assert_eq!(areas.by_origin.len(), 1);
         assert_eq!(areas.values.len(), 1);
         assert!(areas.values.contains_key(&1));
+    }
+}
+
+#[cfg(test)]
+#[path = "storage_response_tests.rs"]
+mod storage_response_tests;
+
+#[cfg(test)]
+mod browsing_tab_tests {
+    use super::{BrowserStorage, StorageKey};
+
+    #[test]
+    fn session_areas_live_until_the_last_tab_clone_and_local_areas_remain_shared() {
+        let profile = BrowserStorage::default();
+        let tab = profile.new_tab().unwrap();
+        let retained = tab.clone();
+        {
+            let mut areas = profile.0.lock().unwrap();
+            for (id, session, tab_id) in [(1, true, 0), (2, true, tab.2.id), (3, false, 0)] {
+                areas.by_origin.insert(
+                    StorageKey {
+                        partition: 0,
+                        site: "https://tabs.test".into(),
+                        origin: "https://tabs.test".into(),
+                        cross_site_ancestor: false,
+                        session,
+                        tab: tab_id,
+                    },
+                    id,
+                );
+                areas.values.insert(id, vec![(vec![1], vec![2])]);
+            }
+        }
+        drop(tab);
+        assert!(profile.0.lock().unwrap().values.contains_key(&2));
+        drop(retained);
+        let areas = profile.0.lock().unwrap();
+        assert!(!areas.values.contains_key(&2));
+        assert!(areas.values.contains_key(&1));
+        assert!(areas.values.contains_key(&3));
+        assert_eq!(areas.by_origin.len(), 2);
+        drop(areas);
+        profile.0.lock().unwrap().next_tab = u64::MAX;
+        assert!(profile.new_tab().is_err());
     }
 }

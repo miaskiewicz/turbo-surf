@@ -212,3 +212,19 @@ fn native_computed_color_keeps_linked_sheet_values_and_inherits_without_guest_gl
         serde_json::json!({"parent":"rgb(0, 128, 0)","child":"rgb(0, 128, 0)","private":"undefined"})
     );
 }
+
+#[test]
+fn quoted_selector_delimiters_and_comment_text_survive_cssom_roundtrips() {
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("css_selector_lexemes_chrome155.json")).unwrap();
+    let probe = include_str!("css_selector_lexemes_probe.js")
+        .trim()
+        .trim_end_matches(';');
+    assert_eq!(
+        run(
+            "<!doctype html><html><head></head><body></body></html>",
+            &format!("JSON.stringify({probe})")
+        ),
+        expected["result"]
+    );
+}

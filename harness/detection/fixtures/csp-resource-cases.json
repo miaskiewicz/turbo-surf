@@ -1,0 +1,11 @@
+[
+  {
+    "id": "0",
+    "headers": [
+      [
+        "Content-Security-Policy",
+        "script-src 'none' 'report-sample'; style-src 'none' 'report-sample'; img-src 'none'"
+      ]
+    ]
+  }
+]

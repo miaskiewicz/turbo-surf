@@ -1,0 +1,75 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "73f30c4e851fa57338334cbcc5d67452e0e0611c4c404d82a47ddb6a1f2c2c1c",
+  "result": {
+    "light": [
+      {
+        "widths": [43, 11, 11],
+        "matches": ["main"]
+      },
+      {
+        "widths": [11, 11, 11],
+        "matches": []
+      },
+      {
+        "widths": [43, 11, 11],
+        "matches": ["main"]
+      },
+      {
+        "widths": [11, 43, 11],
+        "matches": ["x"]
+      },
+      {
+        "widths": [11, 43, 11],
+        "matches": ["x"]
+      },
+      {
+        "widths": [11, 11, 11],
+        "matches": ["y"]
+      },
+      {
+        "widths": [11, 43, 11],
+        "matches": ["x"]
+      },
+      {
+        "widths": [11, 43, 43],
+        "matches": ["x", "y"]
+      }
+    ],
+    "shadow": [
+      {
+        "widths": [43, 11, 11],
+        "matches": ["main"]
+      },
+      {
+        "widths": [11, 11, 11],
+        "matches": []
+      },
+      {
+        "widths": [43, 11, 11],
+        "matches": ["main"]
+      },
+      {
+        "widths": [11, 43, 11],
+        "matches": ["x"]
+      },
+      {
+        "widths": [11, 43, 11],
+        "matches": ["x"]
+      },
+      {
+        "widths": [11, 11, 11],
+        "matches": ["y"]
+      },
+      {
+        "widths": [11, 43, 11],
+        "matches": ["x"]
+      },
+      {
+        "widths": [11, 43, 43],
+        "matches": ["x", "y"]
+      }
+    ]
+  }
+}

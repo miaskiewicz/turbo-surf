@@ -35,7 +35,7 @@ Accept-CH negotiation is shared across each native session's navigations and pag
 fetches. Script, iframe, beacon and fetch requests use their own metadata instead
 of top-level navigation defaults. GPU renderer identity comes from the actual
 Metal adapter used for pixel execution.
-The Chrome 155 target profile reuses the pinned upstream154 TLS/H2 recipe and Chromium root store, with separately measured155 headers and seeded client hints. Both target and base recipe versions are recorded. For intentionally reduced
+The Chrome 155 target profile reuses the pinned upstream 154 TLS/H2 recipe and Chromium root store, with separately measured155 headers and seeded client hints. Both target and base recipe versions are recorded. For intentionally reduced
 builds/platforms use `--allow-reduced`, and retain that fact in comparisons.
 
 The default four passes are Chrome/native baseline, then Chrome/native interface
@@ -367,20 +367,43 @@ without HTTP traffic, cookies, certificate verification shortcuts, or Google req
 cd rust
 cargo build -p turbo-surf-core --example transport_hello
 cd ..
-node harness/detection/transport-hello.mjs --run --out /tmp/turbo-transport-oracle
+node harness/detection/authored-transport-chrome.mjs rust/target/debug/examples/transport_hello /tmp/turbo-transport-oracle
 ```
 
-The runner freezes the native executable and records its SHA256 and Chrome version.
-`comparison.json` contains public cipher/extension metadata and root IDs; random,
-session, key-share and opaque ECH bytes are discarded. Comparisons normalize
-GREASE values, extension permutation, and randomized ECH payload length while
-retaining GREASE presence, algorithm order and exact trust-anchor IDs. This is
-ClientHello evidence, not proof of complete TLS/HTTP2/browser parity. The offline
-Rust regression `cargo test -p turbo-surf-core --test client_hello` checks the
-Chrome 154 cipher sequence, signature GREASE/ML-DSA and public trust-anchor fixture.
-[TRANSPORT-HELLO.json](./TRANSPORT-HELLO.json) records a production Chrome 154
-comparison with zero normalized ClientHello differences. It does not assert full
-HTTP2 or JavaScript engine parity.
+The direct runner launches normal installed Chrome with a fresh temporary profile,
+records its actual version and the native executable SHA256, and shares no cookies.
+`comparison.json` contains parsed cipher/extension metadata, TLS versions, ALPN
+order, key-share groups/lengths and public root IDs. Separate native/Chrome binary
+records preserve the exact ClientHello bytes, including randoms, original extension
+order, key shares and ECH payloads. The normalized comparison removes GREASE values,
+extension permutation and randomized ECH payload length while retaining GREASE
+presence, algorithm order and exact trust-anchor IDs.
+
+[TRANSPORT-155.json](./TRANSPORT-155.json) records the fresh Chrome 155.0.8059.80
+TLS and HTTPS/H2 controls, with zero differences in the measured normalized fields.
+The raw ClientHello fixtures are hash checked by `transport-hello.test.mjs`.
+This is localhost capability evidence; it does not establish complete transport or
+browser parity, Google acceptance, or successful native SERP rendering. The native
+upload admission regression additionally captures normal/upload ClientHellos and
+checks that protocol admission preserves the ordinary ALPN offer. The underlying
+TLS/H2 recipe is still the upstream 154 recipe and remains identified separately.
+
+The authored HTTPS upload controls use only their checked fixture certificate
+(SPKI exception in normal Chrome, explicit certificate store in the native host):
+
+```bash
+node harness/detection/authored-upload-chrome.mjs harness/detection/upload-probe.js /tmp/upload-control.json
+node harness/detection/authored-upload-chrome.mjs harness/detection/stream-transfer-probe.js /tmp/stream-transfer-control.json
+```
+
+The upload probe covers streaming before source EOF, forced CORS preflight,
+HTTP/1 admission, 303/307 redirects, cancellation, bounded backpressure and early
+responses. A separate stalled-peer probe verifies immediate AbortSignal rejection
+without waiting for bounded native transport cleanup. The 20-case stream-transfer
+control records genuine Readable/Writable/Transform, Window/MessagePort, error and
+failure-atomicity behavior. Stream transfers are integrated with additional adversarial
+and GC controls; see [STREAM-TRANSFERS.md](./STREAM-TRANSFERS.md). The original
+20-case capture is one subset of those controls.
 
 The shared native iframe fixture exercises detached nodes, fragment insertion,
 trusted load events, removal and reinsertion. It uses the same baseline/instrumented
@@ -455,7 +478,7 @@ comparison and worker/iframe regression use this explicit isolation so installed
 system extensions cannot delay their control targets. Normal live Chrome launches
 keep their default extension behavior.
 
-`range-live-probe.js` and its saved Chrome155.0.8059.79 / V815.5.35.23 fixture
+`range-live-probe.js` and its saved Chrome 155.0.8059.79 / V815.5.35.23 fixture
 cover live boundary changes for text, splitting, insertion/removal, replacements,
 normalization, moves and adoption. The fixture retains the exact collector hash;
 canonical Rust tests also check cross-realm behavior, hostile public getters and
@@ -585,3 +608,28 @@ node harness/detection/policy-sandbox-module-chrome.mjs harness/detection/fixtur
 ```
 
 The module collector returns the actual server-observed Origin and Cookie fields from an ES module; it seeds only its own localhost cookie. The top control proves genuine shared backing-store behavior in the opaque isolated case. The script-text probe separately records an open reflected script-source setter gap. Full sandbox navigation/form/popup behavior and reporting are not certified by these controls.
+
+## Current parity and lifecycle tracking
+
+[PARITY-GAPS.md](./PARITY-GAPS.md) is the canonical open checklist. Every residual
+category outside completed PR26 scope is tracked in
+[issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28), with audio in
+[issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+[API-INVENTORY.json](./API-INVENTORY.json) retains exact missing/extra member and
+descriptor paths for its frozen executable; rerun `api-shape.mjs` after integration
+before using its historical counts as current results.
+
+The reusable authored GC collector runs a localhost probe in a fresh normal
+Chrome profile, invokes actual CDP heap collection between jobs, then compares
+retained objects before and after releasing guest roots:
+
+```bash
+node harness/detection/authored-gc-chrome.mjs harness/detection/abstract-ranges-lifecycle-cases.json harness/detection/abstract-ranges-lifecycle-probe.js /tmp/abstract-ranges-gc.json
+```
+
+The probe returns `prepared` and installs `__authoredLifecycle.read()` and
+`.release()` for the trusted collector. Records retain browser/V8 and exact source
+hashes. Production `tests/abstract_ranges.rs` verifies static boundary behavior,
+real iframe receiver brands and actual native weak-object liveness against those
+independent controls. A passing GC control certifies its retained/released graph,
+not universal DOM collection behavior.

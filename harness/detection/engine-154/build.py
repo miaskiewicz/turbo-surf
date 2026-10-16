@@ -124,6 +124,12 @@ if process.returncode:
     sys.exit(f'Native module unit regressions failed; inspect {root / "native-module-units.log"}')
 record['nativeModuleUnitsTests']='passed'
 
+with (root/'native-code-generation.log').open('w') as log:
+    process=subprocess.run(['cargo','test','--manifest-path',str(root/'Cargo.toml'),'--test','native_code_generation','--','--nocapture'],env=environment,stdout=log,stderr=subprocess.STDOUT)
+if process.returncode:
+    sys.exit(f'Native code-generation regressions failed; inspect {root / "native-code-generation.log"}')
+record['nativeCodeGenerationTests']='passed'
+
 (root/'validated.json').write_text(json.dumps(record,indent=2)+'\n')
 print(record['nativeVersionLine'])
 if args.surf:

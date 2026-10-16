@@ -34,7 +34,7 @@ lto = "thin"
 [patch.crates-io]
 v8 = { path = "vendor/rusty_v8" }
 deno_crypto = { path = "vendor/deno_crypto" }
-wreq = { git = "https://github.com/0x676e67/wreq", rev = "c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5" }
+wreq = { git = "https://github.com/greg-flux/wreq", rev = "4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762" }
 wreq-util = { git = "https://github.com/0x676e67/wreq-util", rev = "5715529002738f46eea86a7271f918f9374d3582" }
 btls = { git = "https://github.com/0x676e67/btls", rev = "f5a8a483eca2e0b3f539f944604da3f8e14a910e" }
 btls-sys = { git = "https://github.com/0x676e67/btls", rev = "f5a8a483eca2e0b3f539f944604da3f8e14a910e" }

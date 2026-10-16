@@ -41,10 +41,40 @@ pub(super) fn navigate<'s>(
     if target.get_slot::<FrameRetired>().is_some() {
         return;
     }
+    // Sandboxing constrains even same-origin descendants; origin permission
+    // cannot grant a sandboxed frame authority over the top-level document.
+    if source != target
+        && target.get_slot::<FrameParent>().is_none()
+        && source
+            .get_slot::<FrameSandbox>()
+            .is_some_and(|flags| flags.top_navigation_without_activation_blocked)
+    {
+        deny(scope);
+        return;
+    }
     let mut ancestor = target;
     let mut allowed = source
         .get_security_token(scope)
         .strict_equals(target.get_security_token(scope));
+    if !allowed
+        && target.get_slot::<FrameParent>().is_none()
+        && source.get_slot::<FrameSandbox>().is_some_and(|flags| {
+            flags.top_navigation_without_activation_permitted
+                && !flags.top_navigation_without_activation_blocked
+        })
+    {
+        let mut ancestor = source;
+        while let Some(parent) = ancestor.get_slot::<FrameParent>() {
+            let Some(parent) = parent.0.to_local(scope) else {
+                break;
+            };
+            ancestor = parent;
+            if ancestor == target {
+                allowed = true;
+                break;
+            }
+        }
+    }
     while !allowed {
         let Some(parent) = ancestor.get_slot::<FrameParent>() else {
             break;

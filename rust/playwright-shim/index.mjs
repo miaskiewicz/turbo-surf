@@ -744,7 +744,10 @@ class Page {
   constructor(context) {
     this._html = "";
     this._url = "about:blank";
+    this._documentResponse = { status: 0, referrer: "", headers: [] };
+    this._ownsContext = context == null;
     this._context = context ?? new BrowserContext();
+    this._requestState = native.requestStateNew?.(this._context._requestState);
     this._history = [];
     this._fwd = [];
     this._listeners = new Map();
@@ -764,39 +767,28 @@ class Page {
   // Hydrate-on-demand: open a live session if one isn't up (and the last navigation
   // didn't opt out via waitUntil:'commit'). Idempotent — at most one hydration per doc.
   async _ensureLive() {
+    if (this._closed) throw new Error("page is closed");
     if (!this._live && this._autoHydrate !== false) await this._openLiveSession();
   }
 
-  // Open a LIVE session: hydrate the current document and KEEP the app's JS isolate
-  // alive, so interactions dispatch real events into the running app. Used on a
-  // `waitUntil: 'networkidle'` navigation / waitForLoadState('networkidle').
-  // addInitScript bodies (context + page), wrapped so one failure can't abort the
-  // rest, as a single <script> to prepend — runs before the page's own scripts.
-  _initScriptTag() {
-    const scripts = [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])];
-    if (!scripts.length) return "";
-    const body = scripts.map((s) => `try{ ${s} }catch(e){}`).join("\n");
-    return `<script>${body}</script>`;
-  }
-
-  // Inject init scripts as the FIRST <head> script so Playwright's addInitScript
-  // semantics hold (they run before any page script) in the live isolate.
-  _withInitScripts(html) {
-    const tag = this._initScriptTag();
-    if (!tag) return html;
-    if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + tag);
-    if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => m + tag);
-    return tag + html;
+  // Init scripts use the native trusted entry point before authored scripts;
+  // inserting a script tag would change parser locations and subject it to CSP.
+  _initScriptSource() {
+    return [...(this._context._initScripts ?? []), ...(this._initScripts ?? [])]
+      .map((source) => `try{ ${source} }catch(e){}`)
+      .join("\n");
   }
 
   async _openLiveSession() {
     this._closeSession();
     this._session = await native.liveOpen(
-      this._withInitScripts(this._html),
+      this._html,
       this._url,
       this._cookies,
       this._context._userAgent ?? undefined,
-      this._context._requestState,
+      this._requestState,
+      JSON.stringify(this._documentResponse),
+      this._initScriptSource(),
     );
     this._hydrated = true;
     this._loadedPath = pathOf(this._url);
@@ -947,7 +939,27 @@ class Page {
     return base ? new URL(url, base).href : url;
   }
 
+  _navigationReferrerPolicy() {
+    const valid = new Set([
+      "no-referrer",
+      "no-referrer-when-downgrade",
+      "same-origin",
+      "origin",
+      "strict-origin",
+      "origin-when-cross-origin",
+      "strict-origin-when-cross-origin",
+      "unsafe-url",
+    ]);
+    let policy = "strict-origin-when-cross-origin";
+    for (const [name, value] of this._documentResponse?.headers || [])
+      if (name.toLowerCase() === "referrer-policy")
+        for (const token of String(value).split(","))
+          if (valid.has(token.trim())) policy = token.trim();
+    return policy;
+  }
+
   async _navigate(url, method, body) {
+    if (this._closed) throw new Error("page is closed");
     this._closeSession(); // a fresh document — discard the prior live app
     // `about:blank` (and other about: URLs) are not network resources — a browser shows an
     // empty document with NO request. Short-circuit so a goto/reload of about:blank yields a
@@ -955,6 +967,7 @@ class Page {
     if (/^about:/i.test(url)) {
       this._html = "<html><head></head><body></body></html>";
       this._url = url;
+      this._documentResponse = { status: 0, referrer: "", headers: [] };
       this._hydrated = false;
       this._emit("load");
       this._emit("domcontentloaded");
@@ -968,14 +981,20 @@ class Page {
         body ?? null,
         this._context._headersJson(),
         false,
-        this._context._requestState,
+        this._requestState,
         JSON.stringify({
           source: /^https?:/.test(this._url) ? this._url : null,
           destination: "document",
+          referrerPolicy: this._navigationReferrerPolicy(),
         }),
       ),
     );
     this._html = r.html;
+    this._documentResponse = {
+      status: r.status,
+      referrer: r.referrer || "",
+      headers: r.headers || [],
+    };
     this._url = r.finalUrl;
     this._cookies = r.cookies;
     this._hydrated = false; // fresh document — not yet run its own JS
@@ -1077,13 +1096,12 @@ class Page {
   // session is up, run in the LIVE isolate (sees the running app's state + can mutate
   // it) and refresh the snapshot; otherwise run statelessly over the cached HTML.
   async evaluate(script, arg) {
+    if (this._closed) throw new Error("page is closed");
     if (this._live) {
       const body = evalSource(script, arg);
-      // Await a returned Promise (e.g. navigator.clipboard.readText()) so evaluate
-      // resolves the value, not "[object Promise]". The drain runs the microtask.
-      const out = await native.liveEval(
+      const out = await native.liveEvalExpression(
         this._session,
-        `(async () => { return ${body}; })().then((r) => { globalThis.__RESULT = r === undefined ? "" : r; }, () => { globalThis.__RESULT = ""; });`,
+        `(async () => { try { const result = await (${body}); return result === undefined ? "" : result; } catch { return ""; } })()`,
       );
       await this._refreshFromSession();
       return out;
@@ -1111,7 +1129,8 @@ class Page {
       this._url,
       this._cookies,
       this._context._userAgent ?? undefined,
-      this._context._requestState,
+      this._requestState,
+      JSON.stringify(this._documentResponse),
     );
     this._hydrated = true;
     return this._html;
@@ -1184,7 +1203,7 @@ class Page {
         intent.body ?? null,
         this._context._headersJson(),
         false,
-        this._context._requestState,
+        this._requestState,
         JSON.stringify({
           source: /^https?:/.test(this._url) ? this._url : null,
           destination: "document",
@@ -1489,9 +1508,13 @@ class Page {
     return this._closed;
   }
   async close() {
+    if (this._closed) return;
     this._closeSession();
+    if (this._requestState != null) native.requestStateClose(this._requestState);
+    this._requestState = undefined;
     this._closed = true;
     this._emit("close");
+    if (this._ownsContext) await this._context.close();
   }
   video() {
     return null;
@@ -1541,12 +1564,7 @@ class Page {
     for (const ref of native.imageUrls(this._html).slice(0, 60)) {
       try {
         const abs = new URL(ref, this._url).href;
-        const buf = await native.fetchBytes(
-          abs,
-          this._context._requestState,
-          this._url,
-          this._cookies,
-        );
+        const buf = await native.fetchBytes(abs, this._requestState, this._url, this._cookies);
         if (buf && buf.length) images[ref] = buf;
       } catch {
         /* skip an image that won't resolve/fetch */
@@ -1572,7 +1590,7 @@ class Page {
             null,
             this._context._headersJson(),
             false,
-            this._context._requestState,
+            this._requestState,
             JSON.stringify({ source: this._url, destination: "style", mode: "no-cors" }),
           ),
         );
@@ -1736,6 +1754,7 @@ function makeDownload(entry) {
 // ---------------------------------------------------------------------------
 class BrowserContext {
   constructor(opts = {}) {
+    this._closed = false;
     const cookies = opts.storageState?.cookies ?? [];
     // `playwright.config` `use: { baseURL, testIdAttribute }` isn't read by the
     // shim runner, so the register step maps it in via env (TURBO_SHIM_*).
@@ -1784,6 +1803,7 @@ class BrowserContext {
     return Object.keys(h).length ? JSON.stringify(h) : null;
   }
   async newPage() {
+    if (this._closed) throw new Error("browser context is closed");
     const p = new Page(this);
     this._pages.push(p);
     return p;
@@ -1835,6 +1855,8 @@ class BrowserContext {
     return browserStub;
   }
   async close() {
+    if (this._closed) return;
+    this._closed = true;
     for (const page of this._pages) await page.close();
     if (this._requestState != null) native.requestStateClose(this._requestState);
     this._requestState = undefined;
@@ -1853,7 +1875,9 @@ const browserStub = {
     return new BrowserContext(opts);
   },
   async newPage(opts) {
-    return new BrowserContext(opts).newPage();
+    const page = await new BrowserContext(opts).newPage();
+    page._ownsContext = true;
+    return page;
   },
   contexts: () => [],
   isConnected: () => true,
@@ -1877,7 +1901,9 @@ export const firefox = chromium;
 export const webkit = chromium;
 
 export function newPage(opts) {
-  return new Page(new BrowserContext(opts));
+  const page = new Page(new BrowserContext(opts));
+  page._ownsContext = true;
+  return page;
 }
 
 export { Locator, Page, BrowserContext };
@@ -2262,12 +2288,12 @@ expect.extend = () => {};
 // @playwright/test surface (drop-in over node:test) — fixtures, hooks, steps.
 // ---------------------------------------------------------------------------
 import {
-  test as nodeTest,
-  describe as nodeDescribe,
-  before,
   after,
-  beforeEach,
   afterEach,
+  before,
+  beforeEach,
+  describe as nodeDescribe,
+  test as nodeTest,
 } from "node:test";
 
 // A fixture set: each value is either a plain default or [fn, opts] / async fn

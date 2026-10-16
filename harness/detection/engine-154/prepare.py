@@ -134,6 +134,7 @@ def main():
             unpack(archive, root / target, label)
         apply(root / 'deno_core', 'deno_core.patch')
         apply(root / 'v8-exact', 'sdk.patch')
+        apply(root / 'v8-exact', 'code_generation.patch')
         engine = root / 'v8-exact' / 'v8'
         shutil.rmtree(engine)
         run('git', 'init', str(engine))
@@ -171,12 +172,13 @@ def main():
     install_platform_artifacts(root, profile, args.cache)
     shutil.copyfile(HERE / 'native_window_proxy.rs', root / 'tests/native_window_proxy.rs')
     shutil.copyfile(HERE / 'native_module_units.rs', root / 'tests/native_module_units.rs')
+    shutil.copyfile(HERE / 'native_code_generation.rs', root / 'tests/native_code_generation.rs')
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root / 'v8-exact/v8', text=True).strip()
     if revision != profile['engineRevision']:
         raise SystemExit('Engine checkout does not match the pinned revision')
     verify_engine(root / 'v8-exact/v8', profile)
     verify_engine_patch(root / 'v8-exact/v8')
-    for target, name in [(root / 'deno_core', 'deno_core.patch'), (root / 'v8-exact', 'sdk.patch'), (root / 'v8-exact/v8', 'engine.patch')]:
+    for target, name in [(root / 'deno_core', 'deno_core.patch'), (root / 'v8-exact', 'sdk.patch'), (root / 'v8-exact', 'code_generation.patch'), (root / 'v8-exact/v8', 'engine.patch')]:
         verify_applied_patch(target, name)
     if (root / 'v8-exact/build/config/apple/clt_sdk_info.py').exists():
         verify_applied_patch(root / 'v8-exact', 'clt.patch')

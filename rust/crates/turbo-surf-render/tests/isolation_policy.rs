@@ -1389,15 +1389,332 @@ async fn parser_policy_events_survive_bootstrap_until_authored_listeners_execute
         .trim_end_matches(';');
     let actual: Value =
         serde_json::from_str(&page.eval_json_expression(probe).await.unwrap()).unwrap();
-    // The canonical parser does not expose source offsets yet. Preserve the full
-    // independent control and compare the implemented delivery and URI fields.
-    let mut expected = control["result"][0]["result"].clone();
-    let mut actual = actual;
-    for rows in [&mut actual, &mut expected] {
-        for row in rows.as_array_mut().unwrap() {
-            row.as_object_mut().unwrap().remove("line");
-            row.as_object_mut().unwrap().remove("column");
-        }
+    assert_eq!(actual, control["result"][0]["result"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn original_parser_source_positions_and_report_order_match_fresh_chrome() {
+    use sha2::Digest;
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/parser-source-position-cases.json"
+    ))
+    .unwrap();
+    let control: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/parser-source-position-chrome155.json"
+    ))
+    .unwrap();
+    for (key, bytes) in [
+        (
+            "casesSha256",
+            include_bytes!(
+                "../../../../harness/detection/fixtures/parser-source-position-cases.json"
+            )
+            .as_slice(),
+        ),
+        (
+            "probeSha256",
+            include_bytes!("../../../../harness/detection/parser-source-position-probe.js")
+                .as_slice(),
+        ),
+        (
+            "collectorSha256",
+            include_bytes!("../../../../harness/detection/csp-document-chrome.mjs").as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            control[key],
+            format!("{:x}", sha2::Sha256::digest(bytes)),
+            "stale control: {key}"
+        );
     }
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(control["browser"], "Chrome/155.0.8059.79");
+    assert_eq!(control["v8"], "15.5.35.23");
+    assert_eq!(cases.as_array().unwrap().len(), 14);
+    assert_eq!(control["result"].as_array().unwrap().len(), 14);
+    for (case, oracle) in cases
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(control["result"].as_array().unwrap())
+    {
+        let headers = case["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row[0].as_str().unwrap().to_string(),
+                    row[1].as_str().unwrap().to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let base = format!(
+            "http://127.0.0.1:12345/?case={}",
+            case["id"].as_str().unwrap()
+        );
+        let mut page = PageSession::open_with_response_headers(
+            case["html"].as_str().unwrap(),
+            &base,
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &headers,
+        )
+        .await
+        .unwrap();
+        let probe = include_str!("../../../../harness/detection/parser-source-position-probe.js")
+            .trim()
+            .trim_end_matches(';');
+        let actual: Value =
+            serde_json::from_str(&page.eval_json_expression(probe).await.unwrap()).unwrap();
+        assert_eq!(actual, oracle["result"], "case {}", case["id"]);
+    }
+}
+
+async fn resource_csp_results() -> Value {
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/csp-resource-cases.json"
+    ))
+    .unwrap();
+    let headers = cases[0]["headers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row[0].as_str().unwrap().to_string(),
+                row[1].as_str().unwrap().to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut page = PageSession::open_with_response_headers(
+        "<body>",
+        "http://127.0.0.1:12345/?case=0",
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let probe = include_str!("../../../../harness/detection/csp-resource-probe.js")
+        .trim()
+        .trim_end_matches(';');
+    serde_json::from_str(&page.eval_json_expression(probe).await.unwrap()).unwrap()
+}
+fn resource_csp_control() -> Value {
+    use sha2::Digest;
+    let control: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/csp-resource-chrome155.json"
+    ))
+    .unwrap();
+    for (key, bytes) in [
+        (
+            "casesSha256",
+            include_bytes!("../../../../harness/detection/fixtures/csp-resource-cases.json")
+                .as_slice(),
+        ),
+        (
+            "probeSha256",
+            include_bytes!("../../../../harness/detection/csp-resource-probe.js").as_slice(),
+        ),
+        (
+            "collectorSha256",
+            include_bytes!("../../../../harness/detection/csp-resource-chrome.mjs").as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            control[key],
+            format!("{:x}", sha2::Sha256::digest(bytes)),
+            "stale control {key}"
+        );
+    }
+    assert!(
+        include_str!("../../../../harness/detection/csp-resource-chrome.mjs")
+            .contains("allowUnsafeEvalBlockedByCSP: false")
+    );
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(
+        control["result"][0]["result"]["rows"]
+            .as_array()
+            .unwrap()
+            .len(),
+        19
+    );
+    control["result"][0]["result"].clone()
+}
+#[tokio::test(flavor = "current_thread")]
+async fn external_resource_reports_and_original_utf16_samples_match_chrome() {
+    let actual = resource_csp_results().await;
+    let expected = resource_csp_control();
+    #[cfg(not(turbo_surf_native_proxy))]
+    let expected = {
+        // The default SDK lacks the native callback; preserve the complete
+        // source-pinned oracle and compare its covered resource/sample rows.
+        let mut expected = expected;
+        let rows = expected["rows"].as_array_mut().unwrap();
+        assert_eq!(
+            rows.iter().filter(|row| row["blocked"] == "eval").count(),
+            2
+        );
+        rows.retain(|row| row["blocked"] != "eval");
+        expected
+    };
     assert_eq!(actual, expected);
+}
+#[tokio::test(flavor = "current_thread")]
+#[cfg_attr(
+    not(turbo_surf_native_proxy),
+    ignore = "requires actual native V8 code-generation callback SDK"
+)]
+async fn native_eval_and_resource_csp_reports_match_full_chrome_control() {
+    assert_eq!(resource_csp_results().await, resource_csp_control());
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[cfg_attr(
+    not(turbo_surf_native_proxy),
+    ignore = "requires actual native V8 code-generation callback SDK"
+)]
+async fn native_code_generation_preserves_lexical_identity_and_report_only_controls() {
+    use sha2::Digest;
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/csp-code-generation-cases.json"
+    ))
+    .unwrap();
+    let control: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/csp-code-generation-chrome155.json"
+    ))
+    .unwrap();
+    for (key, bytes) in [
+        (
+            "casesSha256",
+            include_bytes!("../../../../harness/detection/fixtures/csp-code-generation-cases.json")
+                .as_slice(),
+        ),
+        (
+            "probeSha256",
+            include_bytes!("../../../../harness/detection/csp-code-generation-probe.js").as_slice(),
+        ),
+        (
+            "collectorSha256",
+            include_bytes!("../../../../harness/detection/csp-resource-chrome.mjs").as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            control[key],
+            format!("{:x}", sha2::Sha256::digest(bytes)),
+            "stalecontrol {key}"
+        );
+    }
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(cases.as_array().unwrap().len(), 7);
+    assert_eq!(control["result"].as_array().unwrap().len(), 7);
+    for (case, oracle) in cases
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(control["result"].as_array().unwrap())
+    {
+        let headers = case["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row[0].as_str().unwrap().to_string(),
+                    row[1].as_str().unwrap().to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let base = format!(
+            "http://127.0.0.1:12345/?case={}",
+            case["id"].as_str().unwrap()
+        );
+        let mut page = PageSession::open_with_response_headers(
+            "<body>",
+            &base,
+            "",
+            "",
+            5000,
+            "",
+            Default::default(),
+            &headers,
+        )
+        .await
+        .unwrap();
+        let probe = include_str!("../../../../harness/detection/csp-code-generation-probe.js")
+            .trim()
+            .trim_end_matches(';');
+        let actual: Value =
+            serde_json::from_str(&page.eval_json_expression(probe).await.unwrap()).unwrap();
+        assert_eq!(actual, oracle["result"], "case {}", case["id"]);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[cfg_attr(
+    not(turbo_surf_native_proxy),
+    ignore = "requires actual native V8 code-generation callback SDK"
+)]
+async fn native_code_generation_tasks_bound_capacity_and_release_before_reentry() {
+    let headers = vec![(
+        "Content-Security-Policy".into(),
+        "script-src 'none' 'report-sample'".into(),
+    )];
+    let mut page = PageSession::open_with_response_headers(
+        "<body>",
+        "https://eval-budget.test/",
+        "",
+        "",
+        5000,
+        "",
+        Default::default(),
+        &headers,
+    )
+    .await
+    .unwrap();
+    let error = page
+        .eval_expression(
+            r#"(()=>{
+      globalThis.attempts=0;globalThis.violations=0;
+      document.addEventListener('securitypolicyviolation',()=>violations++);
+      for(let index=0;index<5000;index++){attempts++;try{eval('/*'+index+'*/')}catch{}}
+      return attempts;
+    })()"#,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error.contains("terminat") || error.contains("execution"),
+        "{error}"
+    );
+    let actual: Value = serde_json::from_str(
+        &page
+            .eval_json_expression(
+                r#"(async()=>{
+      await new Promise(resolve=>setTimeout(resolve,30));
+      const first=violations;
+      let reentered=false;
+      document.addEventListener('securitypolicyviolation',()=>{
+        if(!reentered){reentered=true;try{eval('/*reentrant*/')}catch{}}
+      });
+      try{eval('/*after dispatch*/')}catch{}
+      await new Promise(resolve=>setTimeout(resolve,30));
+      return {attempts,first,after:violations,reentered};
+    })()"#,
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        actual,
+        serde_json::json!({"attempts":4097,"first":4096,"after":4098,"reentered":true})
+    );
 }

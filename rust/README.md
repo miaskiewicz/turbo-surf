@@ -7,10 +7,10 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
-workspace now resolves published `turbo-dom` 0.5.5, including original UTF-16
+workspace now resolves published `turbo-dom` 0.5.6, including original UTF-16
 payload/name/parser APIs, native mutation batches and bounded storage collection.
-Its annotated release tag identifies PR #11 merge commit
-`6fe8bc2e0b643fe3ccebe1923a75b6e8db0e58b9`; npm platform/WASM metadata,
+Its annotated release tag identifies PR #12 merge commit
+`ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`; npm platform/WASM metadata,
 the successful release workflow and official registry checksums were verified.
 The canonical binding consumes collection through the public API with genuine
 weak wrapper roots and native job pins. Real V8 GC notifications schedule a
@@ -40,7 +40,8 @@ restore the caller before yielding.
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
 the root npm test command checks versions, the addon/shim and detection harness too.
 
-The render tier consumes published `turbo-html2pdf-core 0.3.5` for native live-tree
+The render tier consumes a public, immutable Git-pinned `turbo-html2pdf-core 0.3.8`
+release candidate from producer PR #23 (published registry release: 0.3.7) for native live-tree
 box geometry, transforms, element scroll metrics and point-hit regions. It reads
 private actual CSSOM state without guest getters or HTML rewriting. Supported
 contracts and remaining inline/caret/scroll/layout limits are recorded in

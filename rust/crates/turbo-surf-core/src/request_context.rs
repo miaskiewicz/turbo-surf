@@ -7,7 +7,7 @@
 
 use crate::fingerprint::{Profile, ACCEPT};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,6 +19,7 @@ pub enum Destination {
     Style,
     Image,
     Empty,
+    Report,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -224,7 +225,7 @@ impl RequestContext {
             Destination::Style => "u=0",
             Destination::Script => "u=1",
             Destination::Image => "u=2, i",
-            Destination::Empty => "u=1, i",
+            Destination::Empty | Destination::Report => "u=1, i",
         };
         h.insert("priority".into(), priority.into());
         if trustworthy(target) {
@@ -258,6 +259,7 @@ impl RequestContext {
                     Destination::Style => "style",
                     Destination::Image => "image",
                     Destination::Empty => "empty",
+                    Destination::Report => "report",
                 }
                 .into(),
             );
@@ -300,22 +302,27 @@ pub fn origin(url: &str) -> Option<String> {
     matches!(url.scheme(), "http" | "https").then(|| url.origin().ascii_serialization())
 }
 
+/// The schemeful site used to partition browsing-session state. Ports and
+/// subdomains do not distinguish a site; private PSL suffixes still do.
+pub fn schemeful_site(url: &str) -> Option<String> {
+    let url = Url::parse(url).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = match url.host()? {
+        url::Host::Domain(domain) => psl::domain_str(domain).unwrap_or(domain).to_owned(),
+        url::Host::Ipv4(ip) => ip.to_string(),
+        url::Host::Ipv6(ip) => format!("[{ip}]"),
+    };
+    Some(format!("{}://{host}", url.scheme()))
+}
+
 pub fn same_origin(source: &str, target: &str) -> bool {
     origin(source).is_some_and(|source| origin(target).as_deref() == Some(&source))
 }
 
 pub fn same_site(source: &str, target: &str) -> bool {
-    let (Ok(source), Ok(target)) = (Url::parse(source), Url::parse(target)) else {
-        return false;
-    };
-    let (Some(source_host), Some(target_host)) = (source.host_str(), target.host_str()) else {
-        return false;
-    };
-    source.scheme() == target.scheme()
-        && (source_host == target_host
-            || psl::domain_str(source_host)
-                .zip(psl::domain_str(target_host))
-                .is_some_and(|(a, b)| a == b))
+    schemeful_site(source).is_some_and(|source| schemeful_site(target).as_deref() == Some(&source))
 }
 
 pub fn trustworthy(url: &str) -> bool {
@@ -343,20 +350,80 @@ impl std::fmt::Debug for ClientHints {
     }
 }
 
+type ClientBuilderFactory =
+    dyn Fn() -> Result<crate::http_backend::ClientBuilder, crate::net::HttpError> + Send + Sync;
+
 #[derive(Default)]
 struct HintState {
     origins: Mutex<BTreeMap<String, BTreeSet<String>>>,
-    // The browsing session's transport pool must survive navigation and page
-    // runtime replacement, just like its negotiated hints.
-    client: OnceLock<crate::http_backend::Client>,
+    // A pooled connection is driven by the Tokio runtime that created it.
+    // Keep one pool, replacing it when an embedder changes runtime.
+    client: Mutex<Option<(tokio::runtime::Id, crate::http_backend::Client)>>,
+    builder: Option<Arc<ClientBuilderFactory>>,
+    upload_client: Mutex<Option<(tokio::runtime::Id, crate::http_backend::Client)>>,
 }
 
 impl ClientHints {
-    pub(crate) fn manual_client(&self) -> crate::http_backend::Client {
-        self.0
-            .client
-            .get_or_init(crate::net::build_browser_client)
-            .clone()
+    /// Configure a trusted host transport while preserving per-runtime pools and hints.
+    /// Manual redirect admission is enforced after this builder factory returns.
+    pub fn with_client_builder(
+        builder: impl Fn() -> Result<crate::http_backend::ClientBuilder, crate::net::HttpError>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self(Arc::new(HintState {
+            builder: Some(Arc::new(builder)),
+            ..Default::default()
+        }))
+    }
+    pub(crate) fn manual_client(
+        &self,
+    ) -> Result<crate::http_backend::Client, crate::net::HttpError> {
+        let runtime = tokio::runtime::Handle::current().id();
+        let mut client = self.0.client.lock().unwrap_or_else(|e| e.into_inner());
+        if client.as_ref().is_none_or(|(owner, _)| *owner != runtime) {
+            let created = if let Some(builder) = &self.0.builder {
+                builder()?
+                    .redirect(crate::http_backend::redirect::Policy::none())
+                    .build()
+                    .map_err(|error| crate::net::HttpError {
+                        message: error.to_string(),
+                        code: crate::net::ErrorCode::Network,
+                    })?
+            } else {
+                crate::net::build_browser_client()
+            };
+            *client = Some((runtime, created));
+        }
+        Ok(client.as_ref().unwrap().1.clone())
+    }
+    pub(crate) fn upload_client(
+        &self,
+    ) -> Result<crate::http_backend::Client, crate::net::HttpError> {
+        let runtime = tokio::runtime::Handle::current().id();
+        let mut client = self
+            .0
+            .upload_client
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if client.as_ref().is_none_or(|(owner, _)| *owner != runtime) {
+            let builder = if let Some(builder) = &self.0.builder {
+                builder()?
+            } else {
+                crate::net::client_builder()
+            };
+            let created = crate::upload_body::guard(
+                builder.redirect(crate::http_backend::redirect::Policy::none()),
+            )
+            .build()
+            .map_err(|error| crate::net::HttpError {
+                message: error.to_string(),
+                code: crate::net::ErrorCode::Network,
+            })?;
+            *client = Some((runtime, created));
+        }
+        Ok(client.as_ref().unwrap().1.clone())
     }
     pub fn observe(&self, url: &str, accept_ch: Option<&str>, clear: bool) {
         if !trustworthy(url) {
@@ -444,6 +511,106 @@ fn hint_value(name: &str, profile: &Profile) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_pool_does_not_depend_on_a_parked_previous_runtime() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut sockets = Vec::new();
+            while stopped.try_recv().is_err() && Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut socket, _)) => {
+                        socket.set_nonblocking(false).unwrap();
+                        socket
+                            .set_read_timeout(Some(Duration::from_secs(1)))
+                            .unwrap();
+                        let mut request = Vec::new();
+                        let mut byte = [0];
+                        while !request.ends_with(b"\r\n\r\n") {
+                            socket.read_exact(&mut byte).unwrap();
+                            request.push(byte[0]);
+                        }
+                        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nx").unwrap();
+                        sockets.push(socket);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("fixture accept: {error}"),
+                }
+            }
+            sockets.len()
+        });
+        let hints = ClientHints::default();
+        let runtime = || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+        };
+        let first = runtime();
+        let second = runtime();
+        let fetch = || async {
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                crate::net::fetch_html(
+                    &url,
+                    crate::net::FetchOptions {
+                        client_hints: Some(&hints),
+                        allow_non_html: true,
+                        ..Default::default()
+                    },
+                ),
+            )
+            .await
+        };
+        let initial = first.block_on(fetch());
+        // `first` stays alive but no longer drives its pooled connection.
+        let subsequent = second.block_on(fetch());
+        stop.send(()).unwrap();
+        let connections = server.join().unwrap();
+        assert_eq!(initial.unwrap().unwrap().html, "x");
+        assert_eq!(subsequent.unwrap().unwrap().html, "x");
+        assert_eq!(connections, 2);
+    }
+
+    #[test]
+    fn storage_site_keys_preserve_schemes_private_suffixes_and_ip_literals() {
+        assert_eq!(
+            schemeful_site("https://sub.example.co.uk:444/path"),
+            Some("https://example.co.uk".into())
+        );
+        assert_eq!(
+            schemeful_site("https://a.github.io"),
+            Some("https://a.github.io".into())
+        );
+        assert_eq!(
+            schemeful_site("http://localhost:80"),
+            Some("http://localhost".into())
+        );
+        assert_eq!(
+            schemeful_site("http://127.0.0.1:99"),
+            Some("http://127.0.0.1".into())
+        );
+        assert_eq!(
+            schemeful_site("http://[::1]:99"),
+            Some("http://[::1]".into())
+        );
+        assert!(!same_site("http://127.0.0.1", "http://127.1.0.1"));
+        assert_ne!(
+            schemeful_site("http://example.com"),
+            schemeful_site("https://example.com")
+        );
+        assert_eq!(schemeful_site("data:text/html,a"), None);
+    }
 
     #[test]
     fn redirect_origin_taint_preserves_cookie_site_and_fetch_site_chain() {
@@ -661,5 +828,52 @@ mod credentialless_tests {
         context.mode = RequestMode::NoCors;
         context.opaque_origin = true;
         assert!(!context.sends_credentials(source));
+    }
+}
+
+#[cfg(test)]
+mod configured_transport_tests {
+    use super::ClientHints;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn configured_transport_factory_reuses_only_the_current_runtime_pool() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let hints = ClientHints::with_client_builder(move || {
+            count.fetch_add(1, Ordering::Relaxed);
+            Ok(crate::net::client_builder())
+        });
+        hints.manual_client().unwrap();
+        hints.clone().manual_client().unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        let peer = hints.clone();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async { peer.manual_client().unwrap() });
+        })
+        .join()
+        .unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        hints.manual_client().unwrap();
+        hints.manual_client().unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn configured_transport_errors_do_not_publish_or_poison_a_pool() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let hints = ClientHints::with_client_builder(move || {
+            count.fetch_add(1, Ordering::Relaxed);
+            crate::net::client_builder_with_trust(b"not a certificate")
+        });
+        assert!(hints.manual_client().is_err());
+        assert!(hints.manual_client().is_err());
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
 }

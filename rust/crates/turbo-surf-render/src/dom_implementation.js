@@ -56,10 +56,11 @@
   define(g,'DOMImplementation',{__proto__:null,value:DOMImplementation,writable:true,configurable:true});
   define(Document.prototype,'implementation',{__proto__:null,get:make(function(){return native('implementation',this,prototype);},'get implementation',0),enumerable:true,configurable:true});
   if(Object.hasOwn(g.document,'implementation'))delete g.document.implementation;
-  for(const [name,operation] of [['contentType','contentType'],['URL','url'],['documentURI','url'],['defaultView','view']]) {
+  for(const [name,operation] of [['contentType','contentType'],['URL','url'],['documentURI','url'],['defaultView','view'],['characterSet','encoding'],['charset','encoding'],['inputEncoding','encoding']]) {
     define(Document.prototype,name,{__proto__:null,get:make(function(){return native(operation,this);},'get '+name,0),enumerable:true,configurable:true});
     if(Object.hasOwn(g.document,name))delete g.document[name];
   }
+  define(Node.prototype,'baseURI',{__proto__:null,get:make(function(){return native('baseURI',this);},'get baseURI',0),enumerable:true,configurable:true});
   const contextDocument=g.document,documentPrototype=Document.prototype;
   const DocumentConstructor=make(function(){
     if(!new.target)throw new TypeErrorValue("Please use the new operator");

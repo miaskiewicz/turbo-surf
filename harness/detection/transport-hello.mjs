@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
 export const isGrease = (value) => (value & 0x0f0f) === 0x0a0a && value >> 8 === (value & 0xff);
 
-// Retain public capabilities; omit client random, session IDs, key shares and ECH bytes.
+// Parsed public capabilities accompany the exact raw record saved by the collector.
 export function parseClientHello(record) {
   let offset = 0;
   const take = (count) => {
@@ -23,18 +23,22 @@ export function parseClientHello(record) {
   const u16 = () => take(2).readUInt16BE();
   const vector = () => take(u16());
   if (take(1)[0] !== 22) throw new Error("expected TLS handshake record");
-  take(2);
+  const recordVersion = u16();
   const recordLength = u16();
   if (recordLength + 5 !== record.length) throw new Error("invalid TLS record length");
   if (take(1)[0] !== 1) throw new Error("expected ClientHello");
-  take(3 + 2 + 32);
+  const handshakeBytes = take(3);
+  const handshakeLength = handshakeBytes.readUIntBE(0, 3);
+  if (handshakeLength + 4 !== recordLength) throw new Error("invalid ClientHello length");
+  const legacyVersion = u16();
+  take(32);
   take(take(1)[0]);
   const words = (bytes) => {
     if (bytes.length % 2) throw new Error("invalid uint16 list");
     return Array.from({ length: bytes.length / 2 }, (_, i) => bytes.readUInt16BE(i * 2));
   };
   const ciphers = words(vector());
-  take(take(1)[0]);
+  const compressionMethods = Array.from(take(take(1)[0]));
   const extensionBytes = vector();
   const extensions = [];
   for (let i = 0; i < extensionBytes.length; ) {
@@ -48,14 +52,46 @@ export function parseClientHello(record) {
     const entry = { type, length };
     if ([10, 13].includes(type)) entry.values = words(bytes.subarray(2));
     if (type === 43) entry.values = words(bytes.subarray(1));
+    if (type === 16) {
+      if (bytes.length < 2 || bytes.readUInt16BE() + 2 !== bytes.length)
+        throw new Error("invalid ALPN protocol list");
+      entry.protocols = [];
+      for (let at = 2; at < bytes.length; ) {
+        const length = bytes[at++];
+        if (!length || at + length > bytes.length) throw new Error("invalid ALPN protocol");
+        entry.protocols.push(bytes.subarray(at, at + length).toString("latin1"));
+        at += length;
+      }
+    }
+    if (type === 51) {
+      if (bytes.length < 2 || bytes.readUInt16BE() + 2 !== bytes.length)
+        throw new Error("invalid key share list");
+      entry.keyShares = [];
+      for (let at = 2; at < bytes.length; ) {
+        if (at + 4 > bytes.length) throw new Error("truncated key share");
+        const group = bytes.readUInt16BE(at),
+          length = bytes.readUInt16BE(at + 2);
+        at += 4;
+        if (at + length > bytes.length) throw new Error("truncated key share body");
+        entry.keyShares.push({ group, length });
+        at += length;
+      }
+    }
     if (type === 51764) entry.publicRootIds = bytes.toString("hex");
     extensions.push(entry);
   }
-  return { ciphers, extensions };
+  return { recordVersion, legacyVersion, compressionMethods, ciphers, extensions };
 }
 
 export function normalizeHello(hello) {
   return {
+    ...(hello.recordVersion === undefined
+      ? {}
+      : {
+          recordVersion: hello.recordVersion,
+          legacyVersion: hello.legacyVersion,
+          compressionMethods: hello.compressionMethods,
+        }),
     ciphers: hello.ciphers.filter((value) => !isGrease(value)),
     cipherGrease: hello.ciphers.some(isGrease),
     extensions: hello.extensions
@@ -64,6 +100,12 @@ export function normalizeHello(hello) {
         const result = { ...entry };
         // ECH GREASE intentionally varies its opaque payload length per connection.
         if (result.type === 65037) delete result.length;
+        if (result.keyShares) {
+          result.keyShareGreaseCount = result.keyShares.filter((value) =>
+            isGrease(value.group),
+          ).length;
+          result.keyShares = result.keyShares.filter((value) => !isGrease(value.group));
+        }
         if (result.values) {
           result.grease = result.values.some(isGrease);
           result.values = result.values.filter((value) => !isGrease(value));
@@ -75,7 +117,7 @@ export function normalizeHello(hello) {
   };
 }
 
-async function capture(start) {
+export async function captureClientHello(start, { out, label } = {}) {
   let resolveCapture;
   let rejectCapture;
   const captured = new Promise((done, fail) => {
@@ -94,7 +136,18 @@ async function capture(start) {
       }
       if (bytes.length >= 5 && bytes.length >= 5 + bytes.readUInt16BE(3)) {
         try {
-          resolveCapture(parseClientHello(bytes.subarray(0, 5 + bytes.readUInt16BE(3))));
+          const record = bytes.subarray(0, 5 + bytes.readUInt16BE(3));
+          const raw = {
+            sha256: createHash("sha256").update(record).digest("hex"),
+            bytes: record.length,
+          };
+          if (out !== undefined) {
+            if (!["native", "chrome"].includes(label)) throw new Error("invalid capture label");
+            mkdirSync(out, { recursive: true, mode: 0o700 });
+            raw.file = `${label}-client-hello.bin`;
+            writeFileSync(join(out, raw.file), record, { mode: 0o600 });
+          }
+          resolveCapture({ ...parseClientHello(record), raw });
         } catch (error) {
           rejectCapture(error);
         }
@@ -122,17 +175,20 @@ export async function compareTransport({ binary, out }) {
   mkdirSync(out, { recursive: true, mode: 0o700 });
   const frozen = join(out, "native-executable");
   copyFileSync(binary, frozen);
-  const native = await capture(async (url) => {
-    const child = spawn(frozen, [url], { stdio: "ignore" });
-    return () =>
-      new Promise((done) => {
-        if (child.exitCode !== null) done();
-        else {
-          child.kill();
-          child.once("close", done);
-        }
-      });
-  });
+  const native = await captureClientHello(
+    async (url) => {
+      const child = spawn(frozen, [url], { stdio: "ignore" });
+      return () =>
+        new Promise((done) => {
+          if (child.exitCode !== null) done();
+          else {
+            child.kill();
+            child.once("close", done);
+          }
+        });
+    },
+    { out, label: "native" },
+  );
   const { chromium } = createRequire(join(root, "scripts/browser-sidecar/package.json"))(
     "patchright",
   );
@@ -140,18 +196,21 @@ export async function compareTransport({ binary, out }) {
   let chromeVersion;
   let chrome;
   try {
-    chrome = await capture(async (url) => {
-      const context = await chromium.launchPersistentContext(profile, {
-        channel: "chrome",
-        headless: false,
-      });
-      chromeVersion = context.browser().version();
-      context
-        .pages()[0]
-        .goto(url)
-        .catch(() => {});
-      return () => context.close();
-    });
+    chrome = await captureClientHello(
+      async (url) => {
+        const context = await chromium.launchPersistentContext(profile, {
+          channel: "chrome",
+          headless: false,
+        });
+        chromeVersion = context.browser().version();
+        context
+          .pages()[0]
+          .goto(url)
+          .catch(() => {});
+        return () => context.close();
+      },
+      { out, label: "chrome" },
+    );
   } finally {
     rmSync(profile, { recursive: true, force: true });
   }
@@ -161,7 +220,7 @@ export async function compareTransport({ binary, out }) {
     collectedAt: new Date().toISOString(),
     chromeVersion,
     binaryHash: createHash("sha256").update(readFileSync(frozen)).digest("hex"),
-    note: "Localhost ClientHello only. GREASE values, extension permutation and opaque ECH payload lengths vary intentionally. No HTTP requests or browser cookies reused.",
+    note: "Localhost ClientHello only. Exact raw ClientHello records are retained with hashes. GREASE values, extension permutation and opaque ECH payload lengths vary intentionally in the normalized comparison. No HTTP requests or browser cookies reused.",
     native,
     chrome,
     normalized,

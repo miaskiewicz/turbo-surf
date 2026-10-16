@@ -103,6 +103,13 @@ function __documentBaseMutation(event, script) {
     const node = nodes[index];
     if (
       __htmlPolicyElement(node, "meta") &&
+      (event.type === "childList" ||
+        event.attributeName === "name" ||
+        event.attributeName === "content")
+    )
+      ops.op_referrer_meta(doc, node);
+    if (
+      __htmlPolicyElement(node, "meta") &&
       __baseInHead(node) &&
       (event.type === "childList" ||
         event.attributeName === "content" ||

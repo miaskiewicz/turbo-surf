@@ -1,0 +1,347 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "fixtureSha256": "2d24a51cf1063826d522439deac916593e86b73a3c82995d54bd43819f7be614",
+  "tlsTrust": "Only the checked fixture certificate SPKI is trusted for this localhost control",
+  "probeSha256": "fc9b70fc67d95f95f14aa60ea62d07d804471eb5f628d317cb34a77ae02f1400",
+  "collectorSha256": "4c43f2f36e90a8de3869531684aa7d1783ba754285ed00eebcafa2278ae347b4",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--ignore-certificate-errors-spki-list=tgZhMuDR4ffcvwcdvk0UExoYIcSg3V4sRX6nubjtqQc=",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "wire": [
+    {
+      "method": "GET",
+      "path": "/",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/favicon.ico",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "POST",
+      "path": "/upload",
+      "id": "same",
+      "protocol": "2.0",
+      "bytes": 2,
+      "bodyHex": "4142"
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "same",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "same",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/upload",
+      "id": "cross",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "cross",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "POST",
+      "path": "/upload",
+      "id": "cross",
+      "protocol": "2.0",
+      "bytes": 2,
+      "bodyHex": "4142"
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "cross",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/upload",
+      "id": "h1",
+      "protocol": "1.1",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "POST",
+      "path": "/redirect303",
+      "id": "r303",
+      "protocol": "2.0",
+      "bytes": 1,
+      "bodyHex": "41"
+    },
+    {
+      "method": "GET",
+      "path": "/redirected303",
+      "id": "r303",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "POST",
+      "path": "/redirect307",
+      "id": "r307",
+      "protocol": "2.0",
+      "bytes": 1,
+      "bodyHex": "41"
+    },
+    {
+      "method": "POST",
+      "path": "/upload",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 1,
+      "bodyHex": "41"
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "id": "abort",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "POST",
+      "path": "/upload",
+      "id": "error",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "POST",
+      "path": "/upload-hold",
+      "id": "held",
+      "protocol": "2.0",
+      "bytes": 4194304,
+      "bodyHex": "<large>"
+    },
+    {
+      "method": "GET",
+      "path": "/release",
+      "id": "held",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "POST",
+      "path": "/upload-early",
+      "id": "early",
+      "protocol": "2.0",
+      "bytes": 1,
+      "bodyHex": "41"
+    }
+  ],
+  "result": {
+    "sameOrigin": {
+      "beforeClose": true,
+      "result": {
+        "protocol": "2.0",
+        "method": "POST",
+        "bytes": 2,
+        "bodyHex": "4142",
+        "options": 0
+      }
+    },
+    "crossOrigin": {
+      "beforeClose": true,
+      "result": {
+        "protocol": "2.0",
+        "method": "POST",
+        "bytes": 2,
+        "bodyHex": "4142",
+        "options": 1
+      }
+    },
+    "http1": {
+      "error": "TypeError"
+    },
+    "redirect303": {
+      "protocol": "2.0",
+      "method": "GET",
+      "bytes": 0,
+      "bodyHex": "",
+      "options": 0
+    },
+    "redirect307": {
+      "error": "TypeError"
+    },
+    "abort": {
+      "beforeAbort": true,
+      "result": {
+        "error": "authored-stop"
+      },
+      "cancelReason": "authored-stop",
+      "serverAborted": false
+    },
+    "sourceError": {
+      "error": "TypeError"
+    },
+    "backpressure": {
+      "bounded": true,
+      "result": {
+        "protocol": "2.0",
+        "method": "POST",
+        "bytes": 4194304,
+        "bodyHex": "<large>",
+        "options": 0
+      }
+    },
+    "earlyResponse": {
+      "beforeClose": false,
+      "result": {
+        "early": true
+      }
+    }
+  }
+}

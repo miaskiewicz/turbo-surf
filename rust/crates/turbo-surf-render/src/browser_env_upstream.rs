@@ -26,6 +26,8 @@ pub use storage_ownership::{collect_native_storage, NativeNodePin, NativeStorage
 mod collection_records;
 #[path = "css_policy.rs"]
 mod css_policy;
+#[path = "custom_elements.rs"]
+mod custom_elements;
 #[path = "event_brands.rs"]
 mod event_brands;
 #[path = "event_handlers.rs"]
@@ -34,6 +36,8 @@ mod event_handlers;
 mod event_listeners;
 #[path = "script_state.rs"]
 mod script_state;
+#[path = "trusted_types.rs"]
+mod trusted_types;
 pub use script_state::{
     prepare_script, script_document, script_state, set_document_resource_active, PreparedScript,
     ScriptState,
@@ -387,6 +391,9 @@ pub fn dump_missing() {
     }
 }
 
+#[path = "template_contents.rs"]
+mod template_contents;
+
 struct DomState {
     tree: Tree,
     /// handle → JS node object, for identity (`el === el`).
@@ -405,6 +412,10 @@ struct DomState {
     browsing_context: bool,
     ownership: Option<dom_ownership::Graph>,
     ownership_dirty: bool,
+    template_contents: template_contents::State,
+    custom_elements_active: bool,
+    form_submission_blocked: bool,
+    form_submission_handler: Option<v8::Weak<v8::Function>>,
 }
 
 thread_local! {
@@ -416,6 +427,9 @@ thread_local! {
 // the caller's DOM on return (including reentrant event dispatch).
 #[derive(Clone, Copy)]
 struct DomContextId(u64);
+struct FormSubmissionDispatcher(v8::Weak<v8::Function>);
+struct FormValueReader(v8::Weak<v8::Function>);
+struct FormEntryListReader(v8::Weak<v8::Function>);
 
 #[derive(Default)]
 struct SavedDom {
@@ -491,6 +505,9 @@ pub fn install_independent_html(scope: &mut v8::PinScope, html: &str) {
 }
 pub fn install_independent_html_units(scope: &mut v8::PinScope, units: &[u16]) {
     install_independent_tree(scope, Tree::parse_utf16(units));
+}
+pub fn install_independent_utf16_source_positions(scope: &mut v8::PinScope, units: &[u16]) {
+    install_independent_tree(scope, Tree::parse_utf16_with_source_positions(units));
 }
 fn install_independent_tree(scope: &mut v8::PinScope, tree: Tree) {
     dom_isolation::install(scope);
@@ -588,6 +605,10 @@ fn parse_html_tree<'s>(
             browsing_context: false,
             ownership: None,
             ownership_dirty: true,
+            template_contents: Default::default(),
+            custom_elements_active: false,
+            form_submission_blocked: false,
+            form_submission_handler: None,
         })
     });
     script_state::initialize_inert();
@@ -603,6 +624,12 @@ fn parse_html_tree<'s>(
         let undefined = v8::undefined(scope);
         function.call(scope, undefined.into(), &[document.into()]);
     }
+    DOM.with(|dom| {
+        if let Some(dom) = dom.borrow_mut().as_mut() {
+            dom.template_contents.enabled = true
+        }
+    });
+    template_contents::realize(scope, document);
     document
 }
 
@@ -650,74 +677,81 @@ pub fn import_document_node<'s>(
         system_id: Vec<u16>,
         namespace: Option<Vec<u16>>,
         attributes: Vec<AttributeDataUtf16>,
-        children: Vec<Snapshot>,
+        parent: Option<usize>,
     }
-    fn capture(tree: &Tree, node: Handle, deep: bool) -> Result<Snapshot, &'static str> {
-        let kind = tree.node_type_id(node);
-        if !matches!(kind, 1 | 2 | 3 | 7 | 8 | 10 | 11) {
-            return Err("Importing this node kind is unsupported");
+    fn capture(tree: &Tree, node: Handle, deep: bool) -> Result<Vec<Snapshot>, &'static str> {
+        let mut records = Vec::new();
+        let mut pending = vec![(node, None)];
+        while let Some((node, parent)) = pending.pop() {
+            let kind = tree.node_type_id(node);
+            if !matches!(kind, 1 | 2 | 3 | 7 | 8 | 10 | 11) {
+                return Err("Importing this node kind is unsupported");
+            }
+            let index = records.len();
+            records.push(Snapshot {
+                kind,
+                name: tree
+                    .qualified_name_utf16(node)
+                    .or_else(|| tree.doctype_name_utf16(node))
+                    .or_else(|| tree.processing_instruction_target_utf16(node))
+                    .unwrap_or_default(),
+                value: tree.node_value_utf16(node).unwrap_or_default(),
+                public_id: tree.doctype_public_id_utf16(node).unwrap_or_default(),
+                system_id: tree.doctype_system_id_utf16(node).unwrap_or_default(),
+                namespace: tree.namespace_uri_utf16(node),
+                attributes: tree.attributes_units(node),
+                parent,
+            });
+            if deep {
+                for child in tree.children(node).into_iter().rev() {
+                    pending.push((child, Some(index)))
+                }
+            }
         }
-        if kind == 1 && tree.local_name(node) == Some("template") {
-            return Err("Importing template content is unsupported");
-        }
-        let attributes = tree.attributes_units(node);
-        Ok(Snapshot {
-            kind,
-            name: tree
-                .qualified_name_utf16(node)
-                .or_else(|| tree.doctype_name_utf16(node))
-                .or_else(|| tree.processing_instruction_target_utf16(node))
-                .unwrap_or_default(),
-            value: tree.node_value_utf16(node).unwrap_or_default(),
-            public_id: tree.doctype_public_id_utf16(node).unwrap_or_default(),
-            system_id: tree.doctype_system_id_utf16(node).unwrap_or_default(),
-            namespace: tree.namespace_uri_utf16(node),
-            attributes,
-            children: if deep {
-                tree.children(node)
-                    .into_iter()
-                    .map(|child| capture(tree, child, true))
-                    .collect::<Result<_, _>>()?
-            } else {
-                Vec::new()
-            },
-        })
+        Ok(records)
     }
-    fn materialize(tree: &mut Tree, snapshot: Snapshot) -> Handle {
-        let node = match snapshot.kind {
-            2 => tree.create_attribute_units(
-                snapshot.namespace.as_deref(),
-                &snapshot.name,
-                &snapshot.value,
-            ),
-            3 => tree.create_text_node_utf16(&snapshot.value),
-            7 => tree.create_processing_instruction_units(&snapshot.name, &snapshot.value),
-            8 => tree.create_comment_utf16(&snapshot.value),
-            10 => tree.create_document_type_units(
-                &snapshot.name,
-                &snapshot.public_id,
-                &snapshot.system_id,
-            ),
-            11 => tree.create_document_fragment(),
-            _ => tree.create_element_namespace_units(snapshot.namespace.as_deref(), &snapshot.name),
-        };
-        for attribute in snapshot.attributes {
-            tree.set_attribute_ns_units(
-                node,
-                attribute.namespace.as_deref(),
-                &attribute.qualified_name,
-                &attribute.value,
-            );
+    fn materialize(tree: &mut Tree, records: Vec<Snapshot>) -> Handle {
+        let mut nodes = Vec::with_capacity(records.len());
+        for snapshot in records {
+            let node = match snapshot.kind {
+                2 => tree.create_attribute_units(
+                    snapshot.namespace.as_deref(),
+                    &snapshot.name,
+                    &snapshot.value,
+                ),
+                3 => tree.create_text_node_utf16(&snapshot.value),
+                7 => tree.create_processing_instruction_units(&snapshot.name, &snapshot.value),
+                8 => tree.create_comment_utf16(&snapshot.value),
+                10 => tree.create_document_type_units(
+                    &snapshot.name,
+                    &snapshot.public_id,
+                    &snapshot.system_id,
+                ),
+                11 => tree.create_document_fragment(),
+                _ => tree
+                    .create_element_namespace_units(snapshot.namespace.as_deref(), &snapshot.name),
+            };
+            for attribute in snapshot.attributes {
+                tree.set_attribute_ns_units(
+                    node,
+                    attribute.namespace.as_deref(),
+                    &attribute.qualified_name,
+                    &attribute.value,
+                );
+            }
+            if let Some(parent) = snapshot.parent {
+                tree.append_child(nodes[parent], node);
+            }
+            nodes.push(node);
         }
-        for child in snapshot.children {
-            let child = materialize(tree, child);
-            tree.append_child(node, child);
-        }
-        node
+        nodes[0]
     }
     let snapshot = {
         let _source = DomScope::for_object(scope, node);
         let handle = handle_of(scope, node).ok_or("Illegal invocation")?;
+        if with_tree(|tree| tree.is_shadow_root(handle)).unwrap_or(false) {
+            return Err("Importing a shadow root is unsupported");
+        }
         with_tree(|tree| capture(tree, handle, deep)).ok_or("Node tree unavailable")??
     };
     let _target = DomScope::for_object(scope, document);
@@ -731,6 +765,8 @@ pub fn import_document_node<'s>(
     copy_control_state(scope, source_node, clone, deep);
     document_basics::copy_nonces(scope, source_node, clone, deep);
     script_state::copy(scope, source_node, clone, deep);
+    template_contents::copy_contents(scope, source_node, clone, deep);
+    custom_elements::cloned(scope, source_node, clone, deep);
     Ok(clone)
 }
 
@@ -782,6 +818,66 @@ pub fn node_attribute(
     let _dom = DomScope::for_object(scope, node);
     let handle = handle_of(scope, node)?;
     with_tree(|tree| tree.get_attribute(handle, name).map(str::to_owned)).flatten()
+}
+
+/// Original native parser provenance, unavailable for synthetic lexical nodes.
+pub fn node_parser_position(
+    scope: &mut v8::PinScope,
+    node: v8::Local<v8::Object>,
+    attribute: Option<&str>,
+) -> Option<turbo_dom_parser::rtdom::SourcePosition> {
+    let _dom = DomScope::for_object(scope, node);
+    let handle = handle_of(scope, node)?;
+    with_tree(|tree| {
+        attribute.map_or_else(
+            || tree.source_position(handle),
+            |name| tree.source_attribute_position(handle, name),
+        )
+    })
+    .flatten()
+}
+/// Determine actual Window ownership without reading guest document properties.
+pub fn node_has_window_owner<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+) -> bool {
+    let _dom = DomScope::for_object(scope, node);
+    let Some(handle) = handle_of(scope, node) else {
+        return false;
+    };
+    let Some(root) = with_tree(Tree::root) else {
+        return false;
+    };
+    let template = with_tree(|tree| {
+        let mut parent = Some(handle);
+        while let Some(current) = parent {
+            if tree.node_type_id(current) == 11
+                && tree
+                    .parent(current)
+                    .is_some_and(|owner| tree.local_name(owner) == Some("template"))
+            {
+                return true;
+            }
+            parent = tree.parent(current);
+        }
+        false
+    })
+    .unwrap_or(true);
+    if template {
+        return false;
+    }
+    let document = wrap(scope, root);
+    let Some(context) = document.get_creation_context(scope) else {
+        return false;
+    };
+    let Some(name) = v8::String::new(scope, "turbo-dom.ownership.window-document") else {
+        return false;
+    };
+    let key = v8::Private::for_api(scope, Some(name));
+    context
+        .global(scope)
+        .get_private(scope, key)
+        .is_some_and(|owner| owner.strict_equals(document.into()))
 }
 
 /// Native light-document membership, used by hosts that enumerate child navigables.
@@ -1574,6 +1670,174 @@ pub fn install_inline_event_handlers(
     event_handlers::install(scope, Some(callback), base);
 }
 
+/// Install host-only Trusted Types authorization for this Window's native factory.
+pub fn install_trusted_types_policy(
+    scope: &mut v8::PinScope,
+    callback: v8::Local<v8::Function>,
+) -> bool {
+    trusted_types::install_policy(scope, callback).is_some()
+}
+
+/// Convert a host sink input using the target document's native Trusted Types policy.
+/// Typed values are unwrapped from private fields, without guest `toString` dispatch.
+pub fn trusted_type_string<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    input: v8::Local<'s, v8::Value>,
+    kind: &str,
+    sink: &str,
+    prefix: &str,
+) -> Option<v8::Local<'s, v8::String>> {
+    let units = trusted_types::units(scope, document, input, kind, sink, prefix, false)?;
+    v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal)
+}
+
+/// Read exact branded script source for the native engine's code-generation callback.
+/// Ordinary objects and proxies remain ordinary eval arguments without coercion.
+pub fn trusted_script_source<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    input: v8::Local<'s, v8::Value>,
+) -> Option<v8::Local<'s, v8::String>> {
+    trusted_types::script_source(scope, input)
+}
+
+/// Set host sandbox admission for the current document's form default action.
+/// The value belongs to the native document, so borrowed methods and adopted
+/// controls use their actual target document rather than guest-visible flags.
+pub fn set_form_submission_blocked(scope: &mut v8::PinScope, blocked: bool) {
+    let id = scope
+        .get_current_context()
+        .get_slot::<DomContextId>()
+        .map_or(0, |id| id.0);
+    let _dom = DomScope::enter(id);
+    DOM.with(|dom| {
+        if let Some(dom) = dom.borrow_mut().as_mut() {
+            dom.form_submission_blocked = blocked;
+        }
+    });
+}
+
+/// First connected document base attribute, read without guest getters.
+pub fn form_submission_base_href(
+    scope: &mut v8::PinScope,
+    form: v8::Local<v8::Object>,
+) -> Option<String> {
+    let _dom = DomScope::for_object(scope, form);
+    with_tree(|tree| {
+        tree.query_selector_all("base[href]")
+            .iter()
+            .find_map(|&node| {
+                is_connected(tree, node)
+                    .then(|| {
+                        tree.get_attribute(node, "href")
+                            .map(|value| value.to_string())
+                    })
+                    .flatten()
+            })
+    })
+    .flatten()
+}
+
+/// Construct a native form entry list after FormData's nullable argument conversion.
+pub fn form_data_constructor_entries<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    form: v8::Local<'s, v8::Value>,
+    submitter: v8::Local<'s, v8::Value>,
+) -> Option<v8::Local<'s, v8::Array>> {
+    let _dom = match v8::Local::<v8::Object>::try_from(form) {
+        Ok(form) => DomScope::for_object(scope, form),
+        Err(_) => DomScope::enter(
+            scope
+                .get_current_context()
+                .get_slot::<DomContextId>()
+                .map_or(0, |id| id.0),
+        ),
+    };
+    let id = DOM_ID.with(std::cell::Cell::get);
+    let context = DOM_CONTEXTS.with(|contexts| {
+        contexts
+            .borrow()
+            .get(&id)
+            .and_then(|context| context.to_local(scope))
+    })?;
+    let callback = context
+        .get_slot::<FormEntryListReader>()?
+        .0
+        .to_local(scope)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let receiver = v8::undefined(scope);
+    v8::Local::<v8::Array>::try_from(callback.call(scope, receiver.into(), &[form, submitter])?)
+        .ok()
+}
+/// Construct the owner-document native form entry list, without submission events.
+pub fn form_submission_entries<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    form: v8::Local<'s, v8::Object>,
+    submitter: v8::Local<'s, v8::Value>,
+) -> Option<v8::Local<'s, v8::Array>> {
+    form_data_constructor_entries(scope, form.into(), submitter)
+}
+/// Read first connected base target directly from the native owner document.
+pub fn form_submission_base_target(
+    scope: &mut v8::PinScope,
+    form: v8::Local<v8::Object>,
+) -> Option<String> {
+    let _dom = DomScope::for_object(scope, form);
+    with_tree(|tree| {
+        tree.query_selector_all("base[target]")
+            .iter()
+            .find_map(|&node| {
+                is_connected(tree, node)
+                    .then(|| tree.get_attribute(node, "target").map(str::to_owned))
+                    .flatten()
+            })
+    })
+    .flatten()
+}
+
+/// Capture genuine runtime File/FormData snapshot authority for this native document.
+pub fn install_form_value_reader(
+    scope: &mut v8::PinScope,
+    callback: v8::Local<v8::Function>,
+) -> bool {
+    let id = scope
+        .get_current_context()
+        .get_slot::<DomContextId>()
+        .map_or(0, |id| id.0);
+    let _dom = DomScope::enter(id);
+    let Some(callback) = dom_ownership::helper_function(scope, callback) else {
+        return false;
+    };
+    scope
+        .get_current_context()
+        .set_slot(std::rc::Rc::new(FormValueReader(callback)));
+    true
+}
+
+/// Register a host-only submission admission/queue callback for this native document.
+/// The document owns the V8 edge; retiring it does not leave a host rooted realm.
+pub fn install_form_submission_handler(
+    scope: &mut v8::PinScope,
+    callback: v8::Local<v8::Function>,
+) -> bool {
+    let id = scope
+        .get_current_context()
+        .get_slot::<DomContextId>()
+        .map_or(0, |id| id.0);
+    let _dom = DomScope::enter(id);
+    let Some(callback) = dom_ownership::helper_function(scope, callback) else {
+        return false;
+    };
+    DOM.with(|dom| {
+        let mut dom = dom.borrow_mut();
+        let Some(dom) = dom.as_mut() else {
+            return false;
+        };
+        dom.form_submission_handler = Some(callback);
+        true
+    })
+}
+
 /// Install immutable host CSS authorization for the current context's document.
 pub fn install_css_policy(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
     let id = scope
@@ -1764,7 +2028,15 @@ fn el_insert_adjacent_html<'s>(
     let Some(position) = dom_string(scope, args.get(0)) else {
         return;
     };
-    let Some(html) = dom_units(scope, args.get(1)) else {
+    let Some(html) = trusted_types::units(
+        scope,
+        args.this(),
+        args.get(1),
+        "TrustedHTML",
+        "Element insertAdjacentHTML",
+        "Failed to execute 'insertAdjacentHTML' on 'Element': ",
+        false,
+    ) else {
         return;
     };
     let position = position.to_ascii_lowercase();
@@ -1806,6 +2078,10 @@ fn el_insert_adjacent_html<'s>(
     .flatten();
     // These nodes are freshly parsed, so they cannot contain an existing ancestor.
     with_tree_mut(|tree| tree.insert_adjacent_html_utf16(target, &position, &html));
+    if let Some((parent, _, _)) = location {
+        let object = wrap(scope, parent);
+        template_contents::realize(scope, object);
+    }
     if let Some((parent, index, previous_count)) = location {
         let count = with_tree(|tree| tree.children(parent).len()).unwrap_or(previous_count);
         let added = count.saturating_sub(previous_count);
@@ -1818,7 +2094,8 @@ fn el_insert_adjacent_html<'s>(
         })
         .unwrap_or_default()
         {
-            script_state::parsed(child, true);
+            let object = wrap(scope, child);
+            template_contents::mark_parsed(scope, object, true);
         }
         range_live::inserting(scope, parent, index, added);
     }
@@ -2022,7 +2299,17 @@ fn el_set_attribute_ns<'s, 'i>(
     let Some(qualified) = dom_units(scope, args.get(1)) else {
         return;
     };
-    let Some(units) = dom_units(scope, args.get(2)) else {
+    let Some(units) = trusted_types::attribute_units(
+        scope,
+        args.this(),
+        args.get(2),
+        &String::from_utf16_lossy(&qualified),
+        namespace
+            .as_deref()
+            .map(String::from_utf16_lossy)
+            .as_deref(),
+        "setAttributeNS",
+    ) else {
         return;
     };
     let value = String::from_utf16_lossy(&units);
@@ -2130,10 +2417,7 @@ fn el_set_attribute<'s>(
     let Some(mut name) = dom_units(scope, args.get(0)) else {
         return;
     };
-    let Some(units) = dom_units(scope, args.get(1)) else {
-        return;
-    };
-    let value = String::from_utf16_lossy(&units);
+    let units_input = args.get(1);
     // HTML setAttribute lowercases the qualified name (React calls setAttribute('colSpan', …); jsdom
     // stores 'colspan'). Lowercase for HTML-namespace elements only (ns 0); SVG (ns 1) keeps camelCase
     // attrs like viewBox.
@@ -2142,6 +2426,12 @@ fn el_set_attribute<'s>(
         lower_ascii_units(&mut name);
     }
     let key = String::from_utf16_lossy(&name);
+    let Some(units) =
+        trusted_types::attribute_units(scope, args.this(), units_input, &key, None, "setAttribute")
+    else {
+        return;
+    };
+    let value = String::from_utf16_lossy(&units);
     if key == "popover" {
         html_popover::attribute_change(scope, h, Some(&value));
     }
@@ -2718,29 +3008,43 @@ fn get_inner_html(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_inner_utf16(t, h))
-        .unwrap_or_default();
+    let node = wrap(scope, h);
+    let html = template_contents::serialize(scope, node, false);
     rv.set(unit_string(scope, &html).into());
 }
-fn set_inner_html(
-    scope: &mut v8::PinScope,
-    _name: v8::Local<v8::Name>,
-    value: v8::Local<v8::Value>,
-    args: v8::PropertyCallbackArguments,
+fn set_inner_html<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    _name: v8::Local<'s, v8::Name>,
+    value: v8::Local<'s, v8::Value>,
+    args: v8::PropertyCallbackArguments<'s>,
     _rv: v8::ReturnValue<()>,
 ) {
     let _dom = DomScope::for_object(scope, args.holder());
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let Some(html) = dom_units(scope, value) else {
+    let Some(html) = trusted_types::units(
+        scope,
+        args.holder(),
+        value,
+        "TrustedHTML",
+        "Element innerHTML",
+        "Failed to set the 'innerHTML' property on 'Element': ",
+        true,
+    ) else {
         return;
     };
+    let node = wrap(scope, h);
+    if template_contents::set_html(scope, node, &html) {
+        return;
+    }
     html_popover::disconnect(scope, h, false);
     range_live::replacing_children(scope, h);
     with_tree_mut(|t| t.set_inner_html_utf16(h, &html));
+    template_contents::realize(scope, node);
     for child in with_tree(|tree| tree.children(h)).unwrap_or_default() {
-        script_state::parsed(child, true);
+        let object = wrap(scope, child);
+        template_contents::mark_parsed(scope, object, true);
     }
     css_policy::invalidate_sheet(h);
 }
@@ -2754,16 +3058,16 @@ fn get_outer_html(
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let html = with_tree(|t| turbo_dom_parser::rtdom::serialize::serialize_outer_utf16(t, h))
-        .unwrap_or_default();
+    let node = wrap(scope, h);
+    let html = template_contents::serialize(scope, node, true);
     rv.set(unit_string(scope, &html).into());
 }
 
-fn set_outer_html(
-    scope: &mut v8::PinScope,
-    _name: v8::Local<v8::Name>,
-    value: v8::Local<v8::Value>,
-    args: v8::PropertyCallbackArguments,
+fn set_outer_html<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    _name: v8::Local<'s, v8::Name>,
+    value: v8::Local<'s, v8::Value>,
+    args: v8::PropertyCallbackArguments<'s>,
     _rv: v8::ReturnValue<()>,
 ) {
     let _dom = DomScope::for_object(scope, args.holder());
@@ -2787,7 +3091,15 @@ fn set_outer_html(
         );
         return;
     }
-    let Some(html) = dom_units(scope, value) else {
+    let Some(html) = trusted_types::units(
+        scope,
+        args.holder(),
+        value,
+        "TrustedHTML",
+        "Element outerHTML",
+        "Failed to set the 'outerHTML' property on 'Element': ",
+        true,
+    ) else {
         return;
     };
     html_popover::disconnect(scope, node, true);
@@ -2804,6 +3116,8 @@ fn set_outer_html(
         tree.insert_adjacent_html_utf16(node, "beforebegin", &html);
         tree.remove_child(parent, node);
     });
+    let object = wrap(scope, parent);
+    template_contents::realize(scope, object);
     if let Some((index, previous_count)) = position {
         let count = with_tree(|tree| tree.children(parent).len()).unwrap_or(previous_count - 1);
         let added = count.saturating_add(1).saturating_sub(previous_count);
@@ -2816,7 +3130,8 @@ fn set_outer_html(
         })
         .unwrap_or_default()
         {
-            script_state::parsed(child, true);
+            let object = wrap(scope, child);
+            template_contents::mark_parsed(scope, object, true);
         }
         range_live::inserting(scope, parent, index, added);
     }
@@ -2912,38 +3227,6 @@ fn get_prefix(
         Some(prefix) => rv.set(unit_string(scope, &prefix).into()),
         None => rv.set(v8::null(scope).into()),
     }
-}
-
-/// `value`/`checked`/`disabled` etc — stored on the element as expandos by default (React's
-/// controlled inputs set them directly); fall back to the attribute for `value`.
-fn get_value(
-    scope: &mut v8::PinScope,
-    _name: v8::Local<v8::Name>,
-    args: v8::PropertyCallbackArguments,
-    mut rv: v8::ReturnValue<v8::Value>,
-) {
-    let _dom = DomScope::for_object(scope, args.holder());
-    let Some(h) = handle_of(scope, args.holder()) else {
-        return;
-    };
-    let v = with_tree(|t| t.get_attribute(h, "value").map(|s| s.to_string()))
-        .flatten()
-        .unwrap_or_default();
-    rv.set(v8::String::new(scope, &v).unwrap().into());
-}
-fn set_value(
-    scope: &mut v8::PinScope,
-    _name: v8::Local<v8::Name>,
-    value: v8::Local<v8::Value>,
-    args: v8::PropertyCallbackArguments,
-    _rv: v8::ReturnValue<()>,
-) {
-    let _dom = DomScope::for_object(scope, args.holder());
-    let Some(h) = handle_of(scope, args.holder()) else {
-        return;
-    };
-    let v = value.to_rust_string_lossy(scope);
-    with_tree_mut(|t| t.set_attribute(h, "value", &v));
 }
 
 // no-op / stub element methods commonly called during render + queries.
@@ -3210,59 +3493,68 @@ fn doc_create_comment(
     }
 }
 
-/// recursively clone a subtree, returning the new root handle.
+/// Clone native nodes with an explicit traversal stack for deeply nested input.
 fn clone_subtree(t: &mut Tree, h: Handle, deep: bool) -> Handle {
-    let nt = t.node_type_id(h);
-    let new_h = match nt {
-        2 => {
-            let data = t.attribute_data_units(h).unwrap();
-            t.create_attribute_units(
-                data.namespace.as_deref(),
-                &data.qualified_name,
-                &t.node_value_utf16(h).unwrap_or_default(),
-            )
-        }
-        3 => t.create_text_node_utf16(&t.node_value_utf16(h).unwrap_or_default()),
-        7 => {
-            let target = t.processing_instruction_target_utf16(h).unwrap_or_default();
-            t.create_processing_instruction_units(
-                &target,
-                &t.node_value_utf16(h).unwrap_or_default(),
-            )
-        }
-        8 => t.create_comment_utf16(&t.node_value_utf16(h).unwrap_or_default()),
-        10 => {
-            let name = t.doctype_name_utf16(h).unwrap_or_default();
-            let public = t.doctype_public_id_utf16(h).unwrap_or_default();
-            let system = t.doctype_system_id_utf16(h).unwrap_or_default();
-            t.create_document_type_units(&name, &public, &system)
-        }
-        11 => t.create_document_fragment(),
-        _ => {
-            let tag = t
-                .qualified_name_utf16(h)
-                .unwrap_or_else(|| "div".encode_utf16().collect());
-            let namespace = t.namespace_uri_utf16(h);
-            let attributes = t.attributes_units(h);
-            let e = t.create_element_namespace_units(namespace.as_deref(), &tag);
-            for attribute in attributes {
-                t.set_attribute_ns_units(
-                    e,
-                    attribute.namespace.as_deref(),
-                    &attribute.qualified_name,
-                    &attribute.value,
-                );
+    fn shallow(t: &mut Tree, h: Handle) -> Handle {
+        let nt = t.node_type_id(h);
+        let new_h = match nt {
+            2 => {
+                let data = t.attribute_data_units(h).unwrap();
+                t.create_attribute_units(
+                    data.namespace.as_deref(),
+                    &data.qualified_name,
+                    &t.node_value_utf16(h).unwrap_or_default(),
+                )
             }
-            e
-        }
-    };
-    if deep && nt != 3 && nt != 8 {
-        for c in t.children(h) {
-            let cc = clone_subtree(t, c, true);
-            t.append_child(new_h, cc);
+            3 => t.create_text_node_utf16(&t.node_value_utf16(h).unwrap_or_default()),
+            7 => {
+                let target = t.processing_instruction_target_utf16(h).unwrap_or_default();
+                t.create_processing_instruction_units(
+                    &target,
+                    &t.node_value_utf16(h).unwrap_or_default(),
+                )
+            }
+            8 => t.create_comment_utf16(&t.node_value_utf16(h).unwrap_or_default()),
+            10 => {
+                let name = t.doctype_name_utf16(h).unwrap_or_default();
+                let public = t.doctype_public_id_utf16(h).unwrap_or_default();
+                let system = t.doctype_system_id_utf16(h).unwrap_or_default();
+                t.create_document_type_units(&name, &public, &system)
+            }
+            11 => t.create_document_fragment(),
+            _ => {
+                let tag = t
+                    .qualified_name_utf16(h)
+                    .unwrap_or_else(|| "div".encode_utf16().collect());
+                let namespace = t.namespace_uri_utf16(h);
+                let attributes = t.attributes_units(h);
+                let e = t.create_element_namespace_units(namespace.as_deref(), &tag);
+                for attribute in attributes {
+                    t.set_attribute_ns_units(
+                        e,
+                        attribute.namespace.as_deref(),
+                        &attribute.qualified_name,
+                        &attribute.value,
+                    );
+                }
+                e
+            }
+        };
+        new_h
+    }
+    let root = shallow(t, h);
+    if !deep {
+        return root;
+    }
+    let mut pending = vec![(h, root)];
+    while let Some((source, target)) = pending.pop() {
+        for child in t.children(source) {
+            let copy = shallow(t, child);
+            t.append_child(target, copy);
+            pending.push((child, copy));
         }
     }
-    new_h
+    root
 }
 
 /// `getRootNode()` → the topmost ancestor (the document root if connected). jest-dom's
@@ -3319,6 +3611,7 @@ fn el_clone_node<'s>(
         let source = wrap(scope, h);
         let clone = wrap(scope, new_h);
         script_state::copy(scope, source, clone, deep);
+        template_contents::copy_contents(scope, source, clone, deep);
         let node = wrap(scope, new_h);
         // Carry over the source's JS prototype so a cloned control element keeps its interface
         // accessors (type/value/checked/selected). createElement applies these protos, but cloneNode
@@ -3329,6 +3622,7 @@ fn el_clone_node<'s>(
             node.set_prototype(scope, p);
         }
         copy_control_state(scope, args.this(), node, deep);
+        custom_elements::cloned(scope, source, node, deep);
         rv.set(node.into());
     }
 }
@@ -3659,18 +3953,19 @@ fn get_text_content(
     rv.set(unit_string(scope, &txt).into());
 }
 
-fn set_text_content(
-    scope: &mut v8::PinScope,
-    _name: v8::Local<v8::Name>,
-    value: v8::Local<v8::Value>,
-    args: v8::PropertyCallbackArguments,
+fn set_text_content<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    _name: v8::Local<'s, v8::Name>,
+    value: v8::Local<'s, v8::Value>,
+    args: v8::PropertyCallbackArguments<'s>,
     _rv: v8::ReturnValue<()>,
 ) {
     let _dom = DomScope::for_object(scope, args.holder());
     let Some(h) = handle_of(scope, args.holder()) else {
         return;
     };
-    let Some(units) = dom_units(scope, value) else {
+    let Some(units) = trusted_types::script_units(scope, args.holder(), value, "textContent", true)
+    else {
         return;
     };
     let txt = String::from_utf16_lossy(&units);
@@ -4346,9 +4641,33 @@ fn el_dispatch_event(
 
     // DEFAULT ACTION: a non-prevented click on a submit control fires the form's `submit` event
     // (jsdom does this natively; userEvent/fireEvent.click rely on it for form submission).
-    if not_prevented && ty == "click" && is_submit_control(target) {
+    let submission_blocked = DOM.with(|dom| {
+        dom.borrow()
+            .as_ref()
+            .is_some_and(|dom| dom.form_submission_blocked)
+    });
+    if not_prevented && ty == "click" && is_submit_control(target) && !submission_blocked {
         if let Some(form) = closest_form(target) {
-            dispatch_synthetic(scope, form, "submit", true, true);
+            let form = wrap(scope, form);
+            let submitter = wrap(scope, target);
+            if let Some(context) = form.get_creation_context(scope) {
+                if let Some(dispatcher) = context.get_slot::<FormSubmissionDispatcher>() {
+                    let dispatcher = dom_ownership::local(scope, &dispatcher.0);
+                    let receiver = v8::undefined(scope);
+                    v8::tc_scope!(let call_scope, scope);
+                    dispatcher.call(
+                        call_scope,
+                        receiver.into(),
+                        &[form.into(), submitter.into()],
+                    );
+                    if !call_scope.has_terminated() {
+                        if let Some(error) = call_scope.exception() {
+                            call_scope.reset();
+                            custom_elements::report_value(call_scope, error);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -4407,17 +4726,137 @@ fn is_submit_control(h: Handle) -> bool {
         let tag = t.tag_name(h).unwrap_or_default().to_ascii_uppercase();
         let ty = t.get_attribute(h, "type").map(|s| s.to_ascii_lowercase());
         match tag.as_str() {
-            "BUTTON" => ty.as_deref().map(|t| t == "submit").unwrap_or(true),
-            "INPUT" => ty.as_deref() == Some("submit"),
+            "BUTTON" => !matches!(ty.as_deref(), Some("button" | "reset")),
+            "INPUT" => matches!(ty.as_deref(), Some("submit" | "image")),
             _ => false,
         }
     })
     .unwrap_or(false)
 }
 
+fn form_controls_native(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let operation = args.get(0).to_rust_string_lossy(scope);
+    let Ok(node) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
+        return;
+    };
+    let _dom = DomScope::for_object(scope, node);
+    let Some(handle) = handle_of(scope, node) else {
+        return;
+    };
+    match operation.as_str() {
+        "html-element" => {
+            rv.set(
+                v8::Boolean::new(
+                    scope,
+                    with_tree(|tree| {
+                        tree.node_type_id(handle) == 1 && tree.namespace_id(handle) == 0
+                    })
+                    .unwrap_or(false),
+                )
+                .into(),
+            );
+        }
+        "owner" => {
+            if let Some(form) = closest_form(handle) {
+                rv.set(wrap(scope, form).into());
+            } else {
+                rv.set(v8::null(scope).into());
+            }
+        }
+        "value-snapshot" => {
+            let id = DOM_ID.with(std::cell::Cell::get);
+            let context = DOM_CONTEXTS.with(|contexts| {
+                contexts
+                    .borrow()
+                    .get(&id)
+                    .and_then(|context| context.to_local(scope))
+            });
+            let Some(context) = context else {
+                rv.set(v8::null(scope).into());
+                return;
+            };
+            let callback = context
+                .get_slot::<FormValueReader>()
+                .and_then(|reader| reader.0.to_local(scope));
+            let Some(callback) = callback else {
+                rv.set(v8::null(scope).into());
+                return;
+            };
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let receiver = v8::undefined(scope);
+            if let Some(value) = callback.call(scope, receiver.into(), &[args.get(2)]) {
+                rv.set(value);
+            }
+        }
+        "active" | "submit" => {
+            let callback = DOM.with(|dom| {
+                dom.borrow().as_ref().and_then(|dom| {
+                    dom.form_submission_handler
+                        .as_ref()
+                        .and_then(|callback| callback.to_local(scope))
+                })
+            });
+            let Some(callback) = callback else {
+                // Standalone bindings still support validation and canceled submit events.
+                rv.set(v8::Boolean::new(scope, operation == "active").into());
+                return;
+            };
+            let Some(context) = callback.get_creation_context(scope) else {
+                return;
+            };
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let receiver = v8::undefined(scope);
+            let values = [args.get(0), node.into(), args.get(2), args.get(3)];
+            if let Some(value) = callback.call(scope, receiver.into(), &values) {
+                rv.set(value);
+            }
+        }
+        "absolute-url" => {
+            let value = args.get(2).to_rust_string_lossy(scope);
+            rv.set(v8::Boolean::new(scope, url::Url::parse(&value).is_ok()).into());
+        }
+        "allowed" => {
+            let blocked = DOM.with(|dom| {
+                dom.borrow()
+                    .as_ref()
+                    .is_some_and(|dom| dom.form_submission_blocked)
+            });
+            rv.set(v8::Boolean::new(scope, !blocked).into());
+        }
+        "emit" => {
+            let Ok(event) = v8::Local::<v8::Object>::try_from(args.get(2)) else {
+                return;
+            };
+            dispatch_host_event(scope, event, node);
+            let canceled = event_record(scope, event)
+                .is_some_and(|record| get_bool_prop(scope, record, "defaultPrevented"));
+            rv.set(v8::Boolean::new(scope, !canceled).into());
+        }
+        _ => {}
+    }
+}
+
 /// nearest ancestor `<form>` (incl. self).
 fn closest_form(h: Handle) -> Option<Handle> {
     with_tree(|t| {
+        if let Some(id) = t.get_attribute_utf16(h, "form") {
+            if !is_connected(t, h) || id.is_empty() {
+                return None;
+            }
+            for &candidate in t.query_selector_all("[id]").iter() {
+                if t.get_attribute_utf16(candidate, "id").as_deref() == Some(id.as_slice()) {
+                    return t
+                        .tag_name(candidate)
+                        .is_some_and(|tag| tag.eq_ignore_ascii_case("form"))
+                        .then_some(candidate);
+                }
+            }
+            return None;
+        }
         let mut cur = Some(h);
         while let Some(c) = cur {
             if t.tag_name(c)
@@ -5068,6 +5507,7 @@ fn ownership_callback<'s, 'i, F>(
     if scope.is_execution_terminating() {
         return;
     }
+    let reactions = custom_elements::reactions(scope);
     F::get()(scope, args, rv);
     if scope.has_terminated() {
         scope.rethrow();
@@ -5081,6 +5521,7 @@ fn ownership_callback<'s, 'i, F>(
         scope.reset();
     }
     mutation_observers::flush(scope);
+    reactions.flush(scope);
     if scope.has_terminated() || scope.is_execution_terminating() {
         scope.rethrow();
         return;
@@ -6030,6 +6471,13 @@ pub fn install(scope: &mut v8::PinScope) {
 pub fn install_with_html(scope: &mut v8::PinScope, html: &str) {
     install_with_tree(scope, Tree::parse(html));
 }
+/// Opt-in parser positions for embedders that report authentic source locations.
+pub fn install_with_html_source_positions(scope: &mut v8::PinScope, html: &str) {
+    install_with_tree(scope, Tree::parse_with_source_positions(html));
+}
+pub fn install_with_utf16_source_positions(scope: &mut v8::PinScope, units: &[u16]) {
+    install_with_tree(scope, Tree::parse_utf16_with_source_positions(units));
+}
 fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     dom_isolation::install(scope);
     // A replacement document is seeded before its new bootstrap probes native
@@ -6069,6 +6517,10 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
             browsing_context: true,
             ownership: None,
             ownership_dirty: true,
+            template_contents: Default::default(),
+            custom_elements_active: false,
+            form_submission_blocked: false,
+            form_submission_handler: None,
         });
     });
 
@@ -6112,6 +6564,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     css_policy::register(scope);
     event_handlers::register(scope);
     run_js(scope, BOOTSTRAP);
+    trusted_types::install(scope);
     script_state::install_text(scope);
     capture_node_projector(scope);
     let exception_name = v8::String::new(scope, "DOMException").unwrap();
@@ -6147,6 +6600,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     run_js(scope, include_str!("document_basics.js"));
     capture_node_projector(scope);
     dom_implementation::install(scope);
+    template_contents::install(scope);
     mutation_observers::install(scope);
     shadow_slots::install(scope);
     script_state::install(scope);
@@ -6156,6 +6610,33 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     html_popover::install(scope);
     document_xpath::install(scope);
     event_listeners::install(scope);
+    bind_method(scope, global, "__formNative", form_controls_native);
+    run_js(scope, include_str!("form_controls.js"));
+    let entries = v8::String::new(scope, "__captureFormEntries").unwrap();
+    if let Some(callback) = global
+        .get(scope, entries.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    {
+        if let Some(callback) = dom_ownership::helper_function(scope, callback) {
+            scope
+                .get_current_context()
+                .set_slot(std::rc::Rc::new(FormEntryListReader(callback)));
+        }
+    }
+    global.delete(scope, entries.into());
+    let name = v8::String::new(scope, "__captureFormSubmission").unwrap();
+    if let Some(function) = global
+        .get(scope, name.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    {
+        if let Some(function) = dom_ownership::helper_function(scope, function) {
+            scope
+                .get_current_context()
+                .set_slot(std::rc::Rc::new(FormSubmissionDispatcher(function)));
+        }
+    }
+    global.delete(scope, name.into());
+
     let key = v8::String::new(scope, "__captureEventRecord").unwrap();
     if let Some(accessor) = global
         .get(scope, key.into())
@@ -6183,6 +6664,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
         global.delete(scope, key.into());
     }
     event_handlers::install(scope, None, "about:blank");
+    custom_elements::install(scope);
 }
 
 fn bind_document(scope: &mut v8::PinScope) {
@@ -6319,6 +6801,181 @@ mod tests {
             v8::V8::initialize_platform(platform);
             v8::V8::initialize();
         });
+    }
+
+    #[test]
+    fn native_parser_positions_use_actual_units_and_private_window_ownership() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_with_html_source_positions(scope, "😀\r\n<style id=active>x{color:red}</style><template><style id=inert>x{color:blue}</style><b style=color:red></b></template>");
+        let code = v8::String::new(scope, "document.getElementById('active')").unwrap();
+        let script = v8::Script::compile(scope, code, None).unwrap();
+        let value = script.run(scope).unwrap();
+        let active = v8::Local::<v8::Object>::try_from(value).unwrap();
+        let position = node_parser_position(scope, active, None).unwrap();
+        assert_eq!(
+            (position.utf16_offset, position.line, position.column),
+            (21, 2, 18)
+        );
+        assert!(node_has_window_owner(scope, active));
+        let code = v8::String::new(
+            scope,
+            "document.querySelector('template').content.querySelector('#inert')",
+        )
+        .unwrap();
+        let script = v8::Script::compile(scope, code, None).unwrap();
+        let inert = v8::Local::<v8::Object>::try_from(script.run(scope).unwrap()).unwrap();
+        // The inert association imports storage, so it does not claim a new input token.
+        assert!(node_parser_position(scope, inert, None).is_none());
+        assert!(!node_has_window_owner(scope, inert));
+        let code = v8::String::new(
+            scope,
+            "document.implementation.createHTMLDocument().createElement('b')",
+        )
+        .unwrap();
+        let script = v8::Script::compile(scope, code, None).unwrap();
+        let value = script.run(scope).unwrap();
+        let factory = v8::Local::<v8::Object>::try_from(value).unwrap();
+        assert!(node_parser_position(scope, factory, None).is_none());
+        assert!(!node_has_window_owner(scope, factory));
+        let fake = v8::Object::new(scope);
+        assert!(node_parser_position(scope, fake, None).is_none());
+        assert!(!node_has_window_owner(scope, fake));
+        let code = v8::String::new(scope, "Object.defineProperty(document.getElementById('active'),'ownerDocument',{get(){throw Error('guest getter')}});Object.defineProperty(globalThis,'document',{get(){throw Error('guest document')}})").unwrap();
+        let script = v8::Script::compile(scope, code, None).unwrap();
+        assert!(script.run(scope).is_some());
+        assert_eq!(node_parser_position(scope, active, None), Some(position));
+        assert!(node_has_window_owner(scope, active));
+        reset();
+    }
+
+    #[test]
+    fn parser_positions_follow_actual_adoption_owner_across_creation_realms() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let parent = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, parent);
+        install_with_html_source_positions(scope, "<style id=foreign>x{}</style>");
+        let node = with_tree(|tree| tree.query_selector("#foreign"))
+            .flatten()
+            .unwrap();
+        let node = wrap(scope, node);
+        let original = node_parser_position(scope, node, None).unwrap();
+        let child = v8::Context::new(scope, Default::default());
+        {
+            let scope = &mut v8::ContextScope::new(scope, child);
+            let mut units = vec![0xd800, 13, 10];
+            units.extend("<style id=child>x{}</style>".encode_utf16());
+            install_independent_utf16_source_positions(scope, &units);
+            let code = v8::String::new(scope, "document.getElementById('child')").unwrap();
+            let script = v8::Script::compile(scope, code, None).unwrap();
+            let actual = script.run(scope).unwrap();
+            let actual = v8::Local::<v8::Object>::try_from(actual).unwrap();
+            let position = node_parser_position(scope, actual, None).unwrap();
+            assert_eq!(
+                (position.utf16_offset, position.line, position.column),
+                (19, 2, 17)
+            );
+            let key = v8::String::new(scope, "foreignNode").unwrap();
+            child.global(scope).set(scope, key.into(), node.into());
+            let code = v8::String::new(
+                scope,
+                "document.body.appendChild(document.adoptNode(foreignNode))",
+            )
+            .unwrap();
+            let script = v8::Script::compile(scope, code, None).unwrap();
+            assert!(script.run(scope).is_some());
+            assert!(node_has_window_owner(scope, node));
+            // Adoption currently imports native storage, so lexical provenance
+            // is deliberately absent instead of claiming a new input token.
+            assert!(node_parser_position(scope, node, None).is_none());
+        }
+        assert_eq!(original.line, 1);
+        reset();
+    }
+
+    #[test]
+    fn css_authorization_preserves_original_source_code_units() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let mut units = "<style>/*".encode_utf16().collect::<Vec<_>>();
+        units.extend([0xd800, 120, 0xdc00]);
+        units.extend("*/</style><b style='".encode_utf16());
+        units.extend([0xdc01, 121, 0xd802]);
+        units.extend("'></b>".encode_utf16());
+        install_with_utf16_source_positions(scope, &units);
+        let code=v8::String::new(scope,"globalThis.rows=[];(doc,node,kind,text)=>{rows.push([kind,Array.from({length:text.length},(_,i)=>text.charCodeAt(i))]);return false}").unwrap();
+        let script = v8::Script::compile(scope, code, None).unwrap();
+        let callback = script.run(scope).unwrap();
+        install_css_policy(
+            scope,
+            v8::Local::<v8::Function>::try_from(callback).unwrap(),
+        );
+        let code = v8::String::new(scope, "JSON.stringify(rows)").unwrap();
+        let script = v8::Script::compile(scope, code, None).unwrap();
+        let value = script.run(scope).unwrap();
+        let rows: serde_json::Value =
+            serde_json::from_str(&value.to_rust_string_lossy(scope)).unwrap();
+        assert_eq!(
+            rows,
+            serde_json::json!([
+                ["style-src-elem", [47, 42, 55296, 120, 56320, 42, 47]],
+                ["style-src-attr", [56321, 121, 55298]]
+            ])
+        );
+        reset();
+    }
+
+    #[test]
+    fn css_parser_metadata_keeps_template_sheets_inert_and_reauthorizes_adoption() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_with_html_source_positions(scope, "<style id=active>x{color:red}</style><template><style id=inert>x{color:blue}</style><b style=color:red></b></template>");
+        let code = v8::String::new(scope, "globalThis.rows=[];(document,node,kind,text,metas,source)=>{rows.push({tag:node.localName,kind,initial:Array.isArray(metas),...source});return false}").unwrap();
+        let script = v8::Script::compile(scope, code, None).unwrap();
+        let value = script.run(scope).unwrap();
+        let callback = v8::Local::<v8::Function>::try_from(value).unwrap();
+        install_css_policy(scope, callback);
+        let code = v8::String::new(
+            scope,
+            "document.querySelector('template').content.querySelector('#inert')",
+        )
+        .unwrap();
+        let script = v8::Script::compile(scope, code, None).unwrap();
+        let inert = v8::Local::<v8::Object>::try_from(script.run(scope).unwrap()).unwrap();
+        let key = v8::String::new(scope, "inertStyle").unwrap();
+        scope
+            .get_current_context()
+            .global(scope)
+            .set(scope, key.into(), inert.into());
+        let code = v8::String::new(scope, r#"(()=>{
+          if(rows.length!==2||rows[0].tag!=='style'||rows[0].kind!=='style-src-elem'||rows[0].line!==1||rows[0].column!==18||rows[0].offset!==17||!rows[0].ownerWindow||!rows[0].initial)throw Error('active lexical metadata '+JSON.stringify(rows));
+          if(rows[1].tag!=='b'||rows[1].kind!=='style-src-attr'||rows[1].ownerWindow||!rows[1].initial||'line'in rows[1])throw Error('template attribute parser authorization '+JSON.stringify(rows));
+          Object.defineProperty(Object.prototype,'ownerWindow',{set(){throw Error('guest metadata setter')},configurable:true});
+          const style=inertStyle;if(style.ownerDocument===document||style.ownerDocument.defaultView!==null)throw Error('associated inert ownership');
+          void style.sheet;if(rows.length!==2)throw Error('inert sheet authorization');
+          document.body.appendChild(style);void style.sheet;
+          if(rows.length!==3||rows[2].tag!=='style'||rows[2].kind!=='style-src-elem'||!rows[2].ownerWindow||rows[2].initial||'column'in rows[2])throw Error('activation authorization '+JSON.stringify(rows));
+          return 'ok';
+        })()"#).unwrap();
+        let catch = std::pin::pin!(v8::TryCatch::new(scope));
+        let catch = &mut catch.init();
+        let script = v8::Script::compile(catch, code, None).unwrap();
+        let value = script.run(catch).unwrap_or_else(|| {
+            panic!("{}", catch.exception().unwrap().to_rust_string_lossy(catch))
+        });
+        assert_eq!(value.to_rust_string_lossy(catch), "ok");
+        reset();
     }
 
     #[test]
@@ -6519,6 +7176,274 @@ mod tests {
         assert_eq!(
             result,
             r#"[[["NotSupportedError",9,true],["InvalidCharacterError",5,true],["InvalidCharacterError",5,true],["IndexSizeError",1,true]],null,true,"1.0",null]"#
+        );
+        reset();
+    }
+
+    #[test]
+    fn native_form_data_constructor_entry_arguments_match_chrome() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_independent_html(scope, "<!doctype html><body>");
+        let global = scope.get_current_context().global(scope);
+        bind_method(
+            scope,
+            global,
+            "__entryConstructor",
+            |scope, args, mut rv| {
+                if let Some(entries) =
+                    form_data_constructor_entries(scope, args.get(0), args.get(1))
+                {
+                    rv.set(entries.into());
+                }
+            },
+        );
+        let source=v8::String::new(scope,"globalThis.FormData=class {constructor(form,submitter){return __entryConstructor(form,submitter);}}").unwrap();
+        v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        let source = v8::String::new(scope, include_str!("formdata_constructor_probe.js")).unwrap();
+        let actual = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        let actual = v8::json::stringify(scope, actual)
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        let control: serde_json::Value =
+            serde_json::from_str(include_str!("formdata_constructor_chrome155.json")).unwrap();
+        use sha2::{Digest, Sha256};
+        assert_eq!(control["browser"], "Chrome/155.0.8059.80");
+        assert_eq!(control["v8"], "15.5.35.23");
+        assert_eq!(control["errors"], serde_json::json!([]));
+        for (key, source) in [
+            (
+                "casesSha256",
+                include_bytes!("formdata_constructor_cases.json").as_slice(),
+            ),
+            (
+                "probeSha256",
+                include_bytes!("formdata_constructor_probe.js").as_slice(),
+            ),
+        ] {
+            assert_eq!(control[key], format!("{:x}", Sha256::digest(source)));
+        }
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+            control["result"][0]["result"]
+        );
+        reset();
+    }
+
+    #[test]
+    fn native_form_value_reader_uses_only_registered_private_authority() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_independent_html(scope, "<!doctype html><form id=f>");
+        let global = scope.get_current_context().global(scope);
+        bind_method(scope, global, "__readerTest", form_controls_native);
+        let source=v8::String::new(scope,"(()=>{const token={};globalThis.readerToken=token;const brands=new WeakSet([token]);return value=>brands.has(value)?Object.freeze({kind:'private-test'}):null;})()").unwrap();
+        let reader = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        assert!(install_form_value_reader(
+            scope,
+            v8::Local::<v8::Function>::try_from(reader).unwrap()
+        ));
+        let source=v8::String::new(scope,"JSON.stringify([__readerTest('value-snapshot',document.getElementById('f'),readerToken).kind,__readerTest('value-snapshot',document.getElementById('f'),{kind:'private-test'})])").unwrap();
+        let actual = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        assert_eq!(actual, r#"["private-test",null]"#);
+        reset();
+    }
+
+    #[test]
+    fn native_form_submission_snapshots_are_ordered_and_host_admitted() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        use sha2::{Digest, Sha256};
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("form_entrylist_cases.json")).unwrap();
+        let expected: serde_json::Value =
+            serde_json::from_str(include_str!("form_entrylist_chrome155.json")).unwrap();
+        assert_eq!(expected["browser"], "Chrome/155.0.8059.80");
+        assert_eq!(expected["v8"], "15.5.35.23");
+        assert_eq!(expected["errors"], serde_json::json!([]));
+        for (key, source) in [
+            (
+                "casesSha256",
+                include_bytes!("form_entrylist_cases.json").as_slice(),
+            ),
+            (
+                "probeSha256",
+                include_bytes!("form_entrylist_probe.js").as_slice(),
+            ),
+        ] {
+            assert_eq!(expected[key], format!("{:x}", Sha256::digest(source)));
+        }
+        install_independent_html(scope, cases[0]["html"].as_str().unwrap());
+        let callback=v8::String::new(scope,r#"(function(op,form,submitter,payload){if(op==='active')return true;if(!Object.isFrozen(payload)||!Object.isFrozen(payload.entries)||!Object.isFrozen(payload.entries[0])||Object.getPrototypeOf(payload)!==null)throw Error('snapshot');globalThis.saved=payload;return true;})"#).unwrap();
+        let callback = v8::Script::compile(scope, callback, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        assert!(install_form_submission_handler(
+            scope,
+            v8::Local::<v8::Function>::try_from(callback).unwrap()
+        ));
+        let source=v8::String::new(scope,r#"(()=>{const form=document.getElementById('f');form.requestSubmit(document.getElementById('b'));const entries=saved.entries.map(x=>[x[0],x[1]]);for(const i of saved.charsetEntries)entries[i][1]='UTF-8';form.firstChild.value='changed';return JSON.stringify(entries);})()"#).unwrap();
+        let actual = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+            expected["result"][0]["result"]
+        );
+        let source = v8::String::new(scope, "document.getElementById('f')").unwrap();
+        let form = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        let source = v8::String::new(scope, "document.getElementById('b')").unwrap();
+        let submitter = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        let entries = form_submission_entries(
+            scope,
+            v8::Local::<v8::Object>::try_from(form).unwrap(),
+            submitter,
+        )
+        .unwrap();
+        let entries = v8::json::stringify(scope, entries.into())
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        let mut expected = expected["result"][0]["result"].clone();
+        expected[0][1] = serde_json::json!("changed");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&entries).unwrap(),
+            expected
+        );
+        let key = v8::String::new(scope, "document").unwrap();
+        let document = scope
+            .get_current_context()
+            .global(scope)
+            .get(scope, key.into())
+            .unwrap();
+        assert_eq!(
+            form_submission_base_href(scope, v8::Local::<v8::Object>::try_from(document).unwrap())
+                .as_deref(),
+            None
+        );
+        reset();
+    }
+
+    #[test]
+    fn native_form_validation_and_request_submit_match_independent_chrome() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_independent_html(scope, "<!doctype html><body></body>");
+        v8::tc_scope!(let scope, scope);
+        let source = v8::String::new(scope, include_str!("form_methods_probe.js")).unwrap();
+        let result = v8::Script::compile(scope, source, None).unwrap().run(scope);
+        if result.is_none() {
+            let exception = scope.exception().unwrap();
+            let text = exception.to_rust_string_lossy(scope);
+            let stack = scope
+                .stack_trace()
+                .map(|stack| stack.to_rust_string_lossy(scope));
+            panic!("{text}: {stack:?}");
+        }
+        let result = result.unwrap();
+        let json = v8::json::stringify(scope, result)
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        let actual: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let control: serde_json::Value =
+            serde_json::from_str(include_str!("form_methods_chrome155.json")).unwrap();
+        assert_eq!(control["browser"], "Chrome/155.0.8059.80");
+        assert_eq!(control["v8"], "15.5.35.23");
+        assert_eq!(control["errors"], serde_json::json!([]));
+        use sha2::{Digest, Sha256};
+        for (name, source) in [
+            (
+                "casesSha256",
+                include_bytes!("form_methods_cases.json").as_slice(),
+            ),
+            (
+                "probeSha256",
+                include_bytes!("form_methods_probe.js").as_slice(),
+            ),
+        ] {
+            assert_eq!(control[name], format!("{:x}", Sha256::digest(source)));
+        }
+        for (key, expected) in control["result"][0]["result"].as_object().unwrap() {
+            assert_eq!(&actual[key], expected, "{key}");
+        }
+        assert_eq!(actual, control["result"][0]["result"]);
+        reset();
+    }
+
+    #[test]
+    fn native_form_sandbox_admission_preserves_clicks_and_document_ownership() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_independent_html(scope, "<form><button>submit</button></form>");
+        let source = v8::String::new(scope, r#"globalThis.events=[];document.querySelector('button').addEventListener('click',()=>events.push('click'));document.querySelector('form').addEventListener('submit',event=>{events.push(event.isTrusted?'submit-trusted':'submit');event.preventDefault()});"#).unwrap();
+        v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        for blocked in [true, false, true] {
+            set_form_submission_blocked(scope, blocked);
+            let source =
+                v8::String::new(scope, "document.querySelector('button').click()").unwrap();
+            v8::Script::compile(scope, source, None)
+                .unwrap()
+                .run(scope)
+                .unwrap();
+        }
+        let child = v8::Context::new(scope, Default::default());
+        {
+            let child_scope = &mut v8::ContextScope::new(scope, child);
+            install_independent_html(child_scope, "<form><button>child</button></form>");
+            set_form_submission_blocked(child_scope, false);
+        }
+        let source = v8::String::new(
+            scope,
+            "document.querySelector('button').click();JSON.stringify(events)",
+        )
+        .unwrap();
+        let result = v8::Script::compile(scope, source, None)
+            .unwrap()
+            .run(scope)
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        assert_eq!(
+            result,
+            r#"["click","click","submit-trusted","click","click"]"#
         );
         reset();
     }

@@ -1,0 +1,1172 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "c103e116f73545745406738a9a86d677de04b2aac56b85f8831562d106b1dddd",
+  "probeSha256": "e491dfdc7aaf13bf223098e0f5f083fe60b99734cfdbdfb17a96908ea69892dc",
+  "collectorSha256": "700a755df1701cfa30a95ca9f20800e81724f50ca7aafd6b46f77e87b2b91351",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "code-open",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "ok": true,
+              "value": 11
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": 12
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": 23
+            }
+          ],
+          [
+            "function-string",
+            {
+              "ok": true,
+              "value": 7
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "ok": true,
+              "value": 8
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ]
+        ],
+        "trace": [],
+        "violations": [],
+        "timers": ["string", "typed", "function", "interval"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-enforce",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": 12
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": 23
+            }
+          ],
+          [
+            "function-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "error": "TypeError",
+              "message": "Failed to execute 'setTimeout' on 'Window': This document requires 'TrustedScript' assignment."
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "error": "TypeError",
+              "message": "Failed to execute 'setInterval' on 'Window': This document requires 'TrustedScript' assignment."
+            }
+          ]
+        ],
+        "trace": [],
+        "violations": [
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "eval|lexical + 1"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Function|(\n) {\nreturn 7\n})"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Function|(\n) {\nreturn 8\n})"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Window setTimeout|ttTimers.push(\"string\")"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Window setInterval|ttTimers.push(\"interval\");clearInterval("
+          }
+        ],
+        "timers": ["typed", "function"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-report",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "ok": true,
+              "value": 11
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": 12
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": 23
+            }
+          ],
+          [
+            "function-string",
+            {
+              "ok": true,
+              "value": 7
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "ok": true,
+              "value": 8
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ]
+        ],
+        "trace": [],
+        "violations": [
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "report",
+            "sample": "eval|lexical + 1"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "report",
+            "sample": "Function|(\n) {\nreturn 7\n})"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "report",
+            "sample": "Function|(\n) {\nreturn 8\n})"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "report",
+            "sample": "Window setTimeout|ttTimers.push(\"string\")"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "report",
+            "sample": "Window setInterval|ttTimers.push(\"interval\");clearInterval("
+          }
+        ],
+        "timers": ["string", "typed", "function", "interval"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-default",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "ok": true,
+              "value": 11
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": 12
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": 23
+            }
+          ],
+          [
+            "function-string",
+            {
+              "ok": true,
+              "value": 7
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "ok": true,
+              "value": 8
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ]
+        ],
+        "trace": [
+          ["lexical + 1", ["TrustedScript", "eval"]],
+          ["(function anonymous(\n) {\nreturn 7\n})", ["TrustedScript", "Function"]],
+          ["(function anonymous(\n) {\nreturn 8\n})", ["TrustedScript", "Function"]],
+          ["ttTimers.push(\"string\")", ["TrustedScript", "Window setTimeout"]],
+          [
+            "ttTimers.push(\"interval\");clearInterval(globalThis.ttInterval)",
+            ["TrustedScript", "Window setInterval"]
+          ]
+        ],
+        "violations": [],
+        "timers": ["string", "typed", "function", "interval"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-default-null",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": 12
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": 23
+            }
+          ],
+          [
+            "function-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "error": "TypeError",
+              "message": "Failed to execute 'setTimeout' on 'Window': This document requires 'TrustedScript' assignment and the 'default' policy failed to execute."
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "error": "TypeError",
+              "message": "Failed to execute 'setInterval' on 'Window': This document requires 'TrustedScript' assignment and the 'default' policy failed to execute."
+            }
+          ]
+        ],
+        "trace": [
+          ["lexical + 1", ["TrustedScript", "eval"]],
+          ["(function anonymous(\n) {\nreturn 7\n})", ["TrustedScript", "Function"]],
+          ["(function anonymous(\n) {\nreturn 8\n})", ["TrustedScript", "Function"]],
+          ["ttTimers.push(\"string\")", ["TrustedScript", "Window setTimeout"]],
+          [
+            "ttTimers.push(\"interval\");clearInterval(globalThis.ttInterval)",
+            ["TrustedScript", "Window setInterval"]
+          ]
+        ],
+        "violations": [
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "eval|lexical + 1"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Function|(\n) {\nreturn 7\n})"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Function|(\n) {\nreturn 8\n})"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Window setTimeout|ttTimers.push(\"string\")"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Window setInterval|ttTimers.push(\"interval\");clearInterval("
+          }
+        ],
+        "timers": ["typed", "function"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-eval-block",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+            }
+          ],
+          [
+            "function-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'unsafe-inline'\".\n"
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "error": "TypeError",
+              "message": "Failed to execute 'setTimeout' on 'Window': This document requires 'TrustedScript' assignment."
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "error": "TypeError",
+              "message": "Failed to execute 'setInterval' on 'Window': This document requires 'TrustedScript' assignment."
+            }
+          ]
+        ],
+        "trace": [],
+        "violations": [
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "eval|lexical + 1"
+          },
+          {
+            "effectiveDirective": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce",
+            "sample": ""
+          },
+          {
+            "effectiveDirective": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce",
+            "sample": ""
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Function|(\n) {\nreturn 7\n})"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Function|(\n) {\nreturn 8\n})"
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Window setTimeout|ttTimers.push(\"string\")"
+          },
+          {
+            "effectiveDirective": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce",
+            "sample": ""
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Window setInterval|ttTimers.push(\"interval\");clearInterval("
+          }
+        ],
+        "timers": ["function"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-eval-typed",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "ok": true,
+              "value": 11
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": {
+                "type": "object",
+                "tag": "[object TrustedScript]",
+                "text": "lexical + 2",
+                "same": true
+              }
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": {
+                "type": "object",
+                "tag": "[object TrustedScript]",
+                "text": "globalThis.ttGlobal + 3",
+                "same": true
+              }
+            }
+          ],
+          [
+            "function-string",
+            {
+              "ok": true,
+              "value": 7
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "ok": true,
+              "value": 8
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "error": "TypeError",
+              "message": "Failed to execute 'setTimeout' on 'Window': This document requires 'TrustedScript' assignment."
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "error": "TypeError",
+              "message": "Failed to execute 'setInterval' on 'Window': This document requires 'TrustedScript' assignment."
+            }
+          ]
+        ],
+        "trace": [],
+        "violations": [
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Window setTimeout|ttTimers.push(\"string\")"
+          },
+          {
+            "effectiveDirective": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce",
+            "sample": ""
+          },
+          {
+            "effectiveDirective": "require-trusted-types-for",
+            "blockedURI": "trusted-types-sink",
+            "disposition": "enforce",
+            "sample": "Window setInterval|ttTimers.push(\"interval\");clearInterval("
+          }
+        ],
+        "timers": ["function"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-eval-typed-default",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "ok": true,
+              "value": 11
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": {
+                "type": "object",
+                "tag": "[object TrustedScript]",
+                "text": "lexical + 2",
+                "same": true
+              }
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": {
+                "type": "object",
+                "tag": "[object TrustedScript]",
+                "text": "globalThis.ttGlobal + 3",
+                "same": true
+              }
+            }
+          ],
+          [
+            "function-string",
+            {
+              "ok": true,
+              "value": 7
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "ok": true,
+              "value": 8
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ]
+        ],
+        "trace": [
+          ["ttTimers.push(\"string\")", ["TrustedScript", "Window setTimeout"]],
+          [
+            "ttTimers.push(\"interval\");clearInterval(globalThis.ttInterval)",
+            ["TrustedScript", "Window setInterval"]
+          ]
+        ],
+        "violations": [
+          {
+            "effectiveDirective": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce",
+            "sample": ""
+          },
+          {
+            "effectiveDirective": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce",
+            "sample": ""
+          },
+          {
+            "effectiveDirective": "script-src",
+            "blockedURI": "eval",
+            "disposition": "enforce",
+            "sample": ""
+          }
+        ],
+        "timers": ["function"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-eval-unsafe-default",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "ok": true,
+              "value": 11
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": 12
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": 23
+            }
+          ],
+          [
+            "function-string",
+            {
+              "ok": true,
+              "value": 7
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "ok": true,
+              "value": 8
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ]
+        ],
+        "trace": [
+          ["lexical + 1", ["TrustedScript", "eval"]],
+          ["(function anonymous(\n) {\nreturn 7\n})", ["TrustedScript", "Function"]],
+          ["(function anonymous(\n) {\nreturn 8\n})", ["TrustedScript", "Function"]],
+          ["ttTimers.push(\"string\")", ["TrustedScript", "Window setTimeout"]],
+          [
+            "ttTimers.push(\"interval\");clearInterval(globalThis.ttInterval)",
+            ["TrustedScript", "Window setInterval"]
+          ]
+        ],
+        "violations": [],
+        "timers": ["string", "typed", "function", "interval"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-default-change",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": 12
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": 23
+            }
+          ],
+          [
+            "function-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "ok": true,
+              "value": true
+            }
+          ]
+        ],
+        "trace": [
+          ["lexical + 1", ["TrustedScript", "eval"]],
+          ["(function anonymous(\n) {\nreturn 7\n})", ["TrustedScript", "Function"]],
+          ["(function anonymous(\n) {\nreturn 8\n})", ["TrustedScript", "Function"]],
+          ["ttTimers.push(\"string\")", ["TrustedScript", "Window setTimeout"]],
+          [
+            "ttTimers.push(\"interval\");clearInterval(globalThis.ttInterval)",
+            ["TrustedScript", "Window setInterval"]
+          ]
+        ],
+        "violations": [],
+        "timers": ["string", "typed", "function", "interval"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    },
+    {
+      "id": "code-default-throw",
+      "result": {
+        "rows": [
+          [
+            "eval-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "eval-typed",
+            {
+              "ok": true,
+              "value": 12
+            }
+          ],
+          [
+            "eval-object",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "indirect-typed",
+            {
+              "ok": true,
+              "value": 23
+            }
+          ],
+          [
+            "function-string",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "function-typed",
+            {
+              "error": "EvalError",
+              "message": "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements."
+            }
+          ],
+          [
+            "timeout-string",
+            {
+              "error": "Error",
+              "message": "authored callback"
+            }
+          ],
+          [
+            "timeout-typed",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "timeout-function",
+            {
+              "ok": true,
+              "value": true
+            }
+          ],
+          [
+            "interval-string",
+            {
+              "error": "Error",
+              "message": "authored callback"
+            }
+          ]
+        ],
+        "trace": [
+          ["lexical + 1", ["TrustedScript", "eval"]],
+          ["(function anonymous(\n) {\nreturn 7\n})", ["TrustedScript", "Function"]],
+          ["(function anonymous(\n) {\nreturn 8\n})", ["TrustedScript", "Function"]],
+          ["ttTimers.push(\"string\")", ["TrustedScript", "Window setTimeout"]],
+          [
+            "ttTimers.push(\"interval\");clearInterval(globalThis.ttInterval)",
+            ["TrustedScript", "Window setInterval"]
+          ]
+        ],
+        "violations": [],
+        "timers": ["typed", "function"],
+        "repeating": 3,
+        "cancelled": false
+      }
+    }
+  ]
+}

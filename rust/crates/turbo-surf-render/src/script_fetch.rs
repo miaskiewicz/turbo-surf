@@ -7,6 +7,9 @@ use turbo_surf_core::request_context::{same_origin, ClientHints, RequestContext,
 #[derive(Default)]
 pub struct ScriptPolicies<'a> {
     pub request: Option<ScriptPolicy<'a>>,
+    pub response_side_effects: Option<&'a turbo_surf_core::net::ResponseSideEffects<'a>>,
+    pub http_cache: Option<&'a turbo_surf_core::http_cache::HttpCache>,
+    pub cache_partition: &'a str,
     pub embedder: crate::resource_policy::EmbedderPolicy,
 }
 
@@ -54,9 +57,23 @@ pub async fn fetch(
         if context.mode == RequestMode::SameOrigin && cross_origin {
             return Err("Script redirect violates same-origin mode".into());
         }
+        let response_policy = |context: &RequestContext,
+                               target: &str,
+                               headers: &[(String, String)]| {
+            crate::resource_policy::embedder_allowed(policies.embedder, context, target, headers)
+                && (context.mode != RequestMode::Cors
+                    || !(context.opaque_origin
+                        || context.origin_tainted
+                        || !same_origin(context.source.as_deref().unwrap_or(""), target))
+                    || crate::fetch_cors::allowed(context, headers))
+        };
         let mut response = fetch_html(
             &target,
             FetchOptions {
+                http_cache: policies.http_cache,
+                response_policy: Some(&response_policy),
+                response_side_effects: policies.response_side_effects,
+                cache_partition: policies.cache_partition.into(),
                 headers: headers.clone(),
                 context: Some(context.clone()),
                 client_hints: Some(hints),

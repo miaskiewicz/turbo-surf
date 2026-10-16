@@ -1,0 +1,60 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "74ec3de90bbffcb26d96ac825b328a16f789ee9905c6df86e0cc612e4656ec67",
+  "probeSha256": "020be1525b15a73c438fbd0fd281a05bfcada8d1d62009a38d82a8a3bd73096e",
+  "collectorSha256": "67143d168c7cbfd2151035bfb56a1a849dd55c14c1e507b6dba5a5b62db1962c",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "lifetime",
+      "result": {
+        "first": {
+          "rows": [
+            {
+              "kind": "released",
+              "alive": [false, false, false, false]
+            },
+            {
+              "kind": "policy",
+              "alive": [true, true, true, true]
+            },
+            {
+              "kind": "factory",
+              "alive": [true, true, true, true]
+            }
+          ],
+          "retainedPolicyValue": "retained",
+          "retainedFactoryBrand": true
+        },
+        "afterRelease": {
+          "rows": [
+            {
+              "kind": "released",
+              "alive": [false, false, false, false]
+            },
+            {
+              "kind": "policy",
+              "alive": [false, false, false, false]
+            },
+            {
+              "kind": "factory",
+              "alive": [false, false, false, false]
+            }
+          ],
+          "retainedPolicyValue": null,
+          "retainedFactoryBrand": null
+        }
+      }
+    }
+  ]
+}

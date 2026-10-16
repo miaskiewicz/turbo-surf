@@ -1,6 +1,7 @@
 # Native live geometry
 
-The renderer uses the published `turbo-html2pdf-core 0.3.5` live-tree snapshot API.
+The renderer uses the public Git-pinned `turbo-html2pdf-core 0.3.8` candidate
+from producer PR #23. The latest published registry release is 0.3.7.
 It copies the actual native DOM through public rtdom methods and assigns external
 source identities. Native CSSOM exports supply current inline, linked, imported
 and adopted rules, media and disabled state. The bridge does not serialize or
@@ -16,30 +17,34 @@ visibility, pointer-events and paint order. Inert documents and disconnected nod
 return empty regions before requiring active layout capabilities. Unsupported
 active layout paths reject rather than return invented dimensions.
 
-The reusable `*-chrome-control.mjs` runners in this directory serve authored
-localhost fixtures and accept `--runner /absolute/chrome-cdp-trace.mjs --out
-/absolute/control.json`. Captures must have zero collector errors before replacing
-an oracle. Their metadata records the localhost-only extension flags. The saved
-controls use Chrome 155.0.8059.79 / V8 15.5.35.23. The initial native proof uses
-the default official V8 150 SDK, with 17 meaningful V8 contracts and 17 native
-layout contracts. These results do not certify the genuine V8 155 configuration
-or a fresh Google search.
+The reusable `*-chrome-control.mjs` runners serve independent authored localhost
+fixtures. The older controls retain their original Chrome155.0.8059.79 metadata;
+new shadow/scoped controls record Chrome155.0.8059.80. Both use V815.5.35.23.
+Source/collector/font hashes pin the executed inputs. Current combined actual155
+checks pass22 geometry tests plus8 composed/conditional stylesheet and public CSS tests. These
+validate the tested0.3.8 producer candidate, which is not yet published.
+
+Implemented source geometry now includes shaped original UTF-16 clusters,
+mixed-node Range rectangles, caret ownership/hits, ordinary rotated div/img,
+outer SVG viewport boxes, composed shadow slots, named/manual reassignment,
+retained/unassigned Range behavior, scoped native declarations and real CSP-applied
+styles. Session-specific layout cache identities prevent snapshots crossing live
+isolates with equal local document IDs. Native font loading includes platform-only
+families (for example actual Menlo), while preserving ordinary PDF font behavior.
 
 Remaining bounds:
 
-- Shaped text/UTF-16 source clusters, fragmented inline borders and caret provenance.
-- Full stacking-context paint order and composed shadow-tree layout/CSS scoping.
-- Root/viewport, RTL and vertical scrolling, scrollbars, events and scroll methods.
-- Image intrinsic resources/source density, downloaded font and dynamic pseudo epochs.
-- Actual iframe viewport dimensions and stable identities across document migration.
-- Active SVG layout: any connected SVG namespace currently rejects the document
-  snapshot, including HTML receivers in a page containing SVG icons. Degenerate
-  transformed scroll-container projection is also incomplete.
-- Fixed descendants of transformed containing blocks, explicitly rejected by core 0.3.5.
-- Actual layout-unit arithmetic: authored `left/top: 0.1px` remains `0.1px` natively,
-  while Chrome returns `0.09375px`. The complete `geometry-edges` oracle retains
-  these fields; its scoped regression checks conversion, integer offsets and
-  scrolling separately. Returned rectangles are not rounded to hide this difference.
+- Actual decorated, empty and mixed-font inline border production. Plain inline
+  support is bounded by real source-owned text runs; unsupported decoration rejects.
+- Complete stacking contexts, scroll methods/events, RTL/vertical overflow and
+  scrollbars; existing metrics/clamping and ancestor projection are tested subsets.
+- Downloaded fonts, image source-density/intrinsic loading and animation/pseudo epochs.
+- Stable iframe viewport/layout identities across all document migrations.
+- Inner SVG graphical primitives; supporting outer SVG boxes does not certify SVG paint.
+- Full fixed-position/containing-block and layout-unit arithmetic behavior. Returned
+  rectangles are not quantized after layout to conceal differences.
+- Remaining stylesheet at-rules and full selector/CSS parsing behavior. Property
+  conditions use genuine private grammar; public CSS.supports now uses private native grammar and selector-capability checks.
 
 Regression source is `rust/crates/turbo-surf-render/tests/live_geometry_contracts.rs`;
 the `live_layout*` modules also test actual source provenance, rules, media,

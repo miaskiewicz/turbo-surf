@@ -47,3 +47,15 @@ rust/crates/turbo-surf-render/src/html_meta_probe.js
 rust/crates/turbo-surf-render/src/html_meta_chrome155.json
 rust/crates/turbo-surf-render/src/frame_tokens_probe.js
 rust/crates/turbo-surf-render/src/frame_tokens_chrome155.json
+rust/crates/turbo-surf-render/src/trusted_types*
+rust/crates/turbo-surf-render/src/custom_elements*
+rust/crates/turbo-surf-render/src/template_*
+rust/crates/turbo-surf-render/src/shadow_slots*
+rust/crates/turbo-surf-render/src/iframe_credentialless*
+rust/crates/turbo-surf-render/src/css_selector_lexemes*
+rust/crates/turbo-surf-render/src/abstract_ranges*
+
+rust/crates/turbo-surf-render/src/form_entrylist*
+rust/crates/turbo-surf-render/src/formdata_constructor*
+rust/crates/turbo-surf-render/src/form_controls.js
+rust/crates/turbo-surf-render/src/form_methods*

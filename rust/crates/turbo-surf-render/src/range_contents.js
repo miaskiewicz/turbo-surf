@@ -1,4 +1,4 @@
-(function (record, make, markContextualFragment) {
+(function (record, make, markContextualFragment, convertTrustedType, staticRecord) {
   "use strict";
   let Exception = DOMException;
   const LocalRange = Range,
@@ -51,6 +51,61 @@
   }
   function length(node) {
     return character(type(node)) ? data(node).length : children(node).length;
+  }
+  const setPrototype = Object.setPrototypeOf;
+  const AbstractRange = make(function () {
+    throw new TypeErrorClass("Illegal constructor");
+  }, "AbstractRange", 0, true);
+  const NodeRange = make(function () {
+    throw new TypeErrorClass("Illegal constructor");
+  }, "NodeRange", 0, true);
+  const abstractState = receiver => staticRecord(receiver) || record(receiver);
+  for (const name of ["startOffset", "endOffset", "collapsed"]) {
+    define(AbstractRange.prototype, name, {__proto__: null,
+      get: make(function () {
+        const state = abstractState(this);
+        return name === "collapsed" ? state.startContainer === state.endContainer && state.startOffset === state.endOffset : state[name];
+      }, "get " + name, 0), configurable: true, enumerable: true,
+    });
+  }
+  for (const name of ["startContainer", "endContainer"]) {
+    define(NodeRange.prototype, name, {__proto__: null,
+      get: make(function () { return abstractState(this)[name]; }, "get " + name, 0),
+      configurable: true, enumerable: true,
+    });
+  }
+  const StaticRange = make(function (init) {
+    required(arguments, 1);
+    if (init !== null && init !== undefined && typeof init !== "object" && typeof init !== "function")
+      throw new TypeErrorClass("StaticRangeInit must be a dictionary");
+    const state = {__proto__: null};
+    // Web IDL reads and converts dictionary members in lexicographic order.
+    const names = ["endContainer", "endOffset", "startContainer", "startOffset"];
+    for (let index = 0; index < names.length; index++) {
+      const name = names[index];
+      const value = init == null ? undefined : init[name];
+      if (value === undefined) throw new TypeErrorClass("Missing required StaticRangeInit member: " + name);
+      if (name === "endContainer" || name === "startContainer") {
+        type(value); state[name] = value;
+      } else state[name] = (+value) >>> 0;
+    }
+    const startType = type(state.startContainer), endType = type(state.endContainer);
+    if (startType === 2 || startType === 10 || endType === 2 || endType === 10)
+      fail("InvalidNodeTypeError");
+    return staticRecord(undefined, state, getPrototype(this));
+  }, "StaticRange", 1, true);
+  setPrototype(NodeRange.prototype, AbstractRange.prototype);
+  setPrototype(NodeRange, AbstractRange);
+  for (const constructor of [LocalRange, StaticRange]) {
+    setPrototype(constructor.prototype, NodeRange.prototype);
+    setPrototype(constructor, NodeRange);
+  }
+  for (const name of ["startContainer", "endContainer", "startOffset", "endOffset", "collapsed"])
+    delete LocalRange.prototype[name];
+  for (const constructor of [AbstractRange, NodeRange, LocalRange, StaticRange]) {
+    define(constructor, "prototype", {writable: false});
+    define(constructor.prototype, Symbol.toStringTag, {value: constructor.name, configurable: true});
+    define(globalThis, constructor.name, {value: constructor, configurable: true, writable: true, enumerable: false});
   }
   function root(node) {
     let ancestor;
@@ -302,8 +357,8 @@
   method("createContextualFragment", 1, function (html) {
     required(arguments, 1);
     const container = apply(createElement, this.document, ["div"]);
-    if (typeof html === "symbol") throw new TypeErrorClass("Cannot convert a Symbol to a string");
-    apply(innerHTML, container, [StringClass(html)]);
+    html = convertTrustedType(container, html, "TrustedHTML", "Range createContextualFragment", "Failed to execute 'createContextualFragment' on 'Range': ", false);
+    apply(innerHTML, container, [html]);
     const result = apply(fragment, this.document, []);
     let child;
     while ((child = first(container))) apply(append, result, [child]);

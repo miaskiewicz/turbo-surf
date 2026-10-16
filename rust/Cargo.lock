@@ -2255,6 +2255,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.4.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d29020232d6aa3fb1daca64c1127cf662cf97f254ae16c18c05b8ab635fc118"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "http",
+ "indexmap",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2448,6 +2467,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "httpdate"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2468,6 +2493,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "httparse",
@@ -4239,6 +4265,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -5807,9 +5834,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03ff9551d0f9d44b9f6e2e7eda4e3a926fe6ff01f795f7638d81151f518f602f"
+checksum = "956980480d640677b66d88750dcf9ceabb1572b291416c07b18c180d4e5ab52f"
 dependencies = [
  "html5ever",
  "log",
@@ -5821,11 +5848,13 @@ dependencies = [
 
 [[package]]
 name = "turbo-html2pdf-core"
-version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9b44ea3442cae7c3006ae6e6acb15021db04ad5a72e5bb4d2e8ff9e13d50f7a"
+version = "0.3.8"
+source = "git+https://github.com/miaskiewicz/turbo-html2pdf?rev=9d7f02fb27a9664baedb468475098b785a7d3bec#9d7f02fb27a9664baedb468475098b785a7d3bec"
 dependencies = [
  "chrono",
+ "core-foundation",
+ "core-text",
+ "encoding_rs",
  "html5ever",
  "jpeg-decoder",
  "markup5ever_rcdom",
@@ -5850,13 +5879,23 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-util",
+ "http",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
  "psl",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "url",
+ "webpki-roots",
  "wreq",
+ "wreq-proto",
  "wreq-util",
 ]
 
@@ -5962,6 +6001,7 @@ dependencies = [
  "encoding_rs",
  "fips203",
  "getrandom 0.4.3",
+ "httpdate",
  "image",
  "lightningcss",
  "psl",
@@ -5973,6 +6013,7 @@ dependencies = [
  "sha3",
  "subtle",
  "tokio",
+ "tokio-rustls",
  "turbo-dom",
  "turbo-html2pdf-core",
  "turbo-surf-core",
@@ -6766,7 +6807,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "wreq"
 version = "0.16.1"
-source = "git+https://github.com/0x676e67/wreq?rev=c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5#c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5"
+source = "git+https://github.com/greg-flux/wreq?rev=4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762#4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762"
 dependencies = [
  "btls",
  "btls-sys",

@@ -11,6 +11,7 @@
   const minimum = Math.min;
   const maximum = Math.max;
   const finite = Number.isFinite;
+  const single = Math.fround;
   const prototypes = create(null);
 
   function brand(receiver, kind) {
@@ -33,6 +34,14 @@
     if (!finite(result))
       throw new LocalTypeError(
         `Failed to execute '${name}' on 'Document': The provided double value is non-finite.`,
+      );
+    return result;
+  }
+  function floatCoordinate(value, name) {
+    const result = single(number(value));
+    if (!finite(result))
+      throw new LocalTypeError(
+        `Failed to execute '${name}' on 'Document': The provided float value is non-finite.`,
       );
     return result;
   }
@@ -402,23 +411,153 @@
       );
     define(Element.prototype, name, descriptor);
   }
-  for (const name of ["elementFromPoint", "elementsFromPoint"])
+  for (const [prototype, kind] of [
+    [Document.prototype, 9],
+    [ShadowRoot.prototype, 11],
+  ])
+    for (const name of ["elementFromPoint", "elementsFromPoint"])
+      define(prototype, name, {
+        __proto__: null,
+        value: make(
+          function (x, y) {
+            brand(this, kind);
+            if (arguments.length < 2)
+              throw new LocalTypeError(
+                `Failed to execute '${name}' on 'Document': 2 arguments required, but only ${arguments.length} present.`,
+              );
+            x = coordinate(x, name);
+            y = coordinate(y, name);
+            const result = ops.op_live_elements_at_point(this, x, y);
+            return name === "elementFromPoint" ? (result[0] ?? null) : result;
+          },
+          name,
+          2,
+        ),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+  for (const name of ["getClientRects", "getBoundingClientRect"])
+    define(Range.prototype, name, {
+      __proto__: null,
+      value: make(
+        function () {
+          const result = ops.op_live_range_geometry(this);
+          return name === "getClientRects" ? rectList(result.rects) : rectangle(result.bounds);
+        },
+        name,
+        0,
+      ),
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  const RangeConstructor = Range;
+  const rangeStart = Range.prototype.setStart;
+  const rangeCollapse = Range.prototype.collapse;
+  const CaretPosition = make(
+    function () {
+      throw new LocalTypeError("Illegal constructor");
+    },
+    "CaretPosition",
+    0,
+    true,
+    true,
+  );
+  const caretPrototype = CaretPosition.prototype;
+  define(caretPrototype, Symbol.toStringTag, {
+    __proto__: null,
+    value: "CaretPosition",
+    configurable: true,
+  });
+  function caretState(receiver) {
+    const record = getRecord(receiver);
+    if (!record || record.kind !== "CaretPosition") throw new LocalTypeError("Illegal invocation");
+    return record;
+  }
+  for (const [name, field] of [
+    ["offsetNode", "node"],
+    ["offset", "offset"],
+  ])
+    define(caretPrototype, name, {
+      __proto__: null,
+      get: make(
+        function () {
+          return caretState(this)[field];
+        },
+        "get " + name,
+        0,
+      ),
+      enumerable: true,
+      configurable: true,
+    });
+  define(caretPrototype, "getClientRect", {
+    __proto__: null,
+    value: make(
+      function () {
+        const record = caretState(this);
+        const rect = ops.op_live_caret_geometry(record.node, record.offset).rect;
+        return rect === null ? null : rectangle(rect);
+      },
+      "getClientRect",
+      0,
+    ),
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+  define(globalThis, "CaretPosition", {
+    __proto__: null,
+    value: CaretPosition,
+    writable: true,
+    configurable: true,
+  });
+  for (const name of ["caretRangeFromPoint", "caretPositionFromPoint"])
     define(Document.prototype, name, {
       __proto__: null,
       value: make(
         function (x, y) {
           brand(this, 9);
-          if (arguments.length < 2)
+          if (name === "caretPositionFromPoint" && arguments.length < 2)
             throw new LocalTypeError(
               `Failed to execute '${name}' on 'Document': 2 arguments required, but only ${arguments.length} present.`,
             );
-          x = coordinate(x, name);
-          y = coordinate(y, name);
-          const result = ops.op_live_elements_at_point(this, x, y);
-          return name === "elementFromPoint" ? (result[0] ?? null) : result;
+          x =
+            name === "caretRangeFromPoint"
+              ? number(x === undefined ? 0 : x) | 0
+              : floatCoordinate(x, name);
+          y =
+            name === "caretRangeFromPoint"
+              ? number(y === undefined ? 0 : y) | 0
+              : floatCoordinate(y, name);
+          if (name === "caretPositionFromPoint" && arguments[2] != null) {
+            const roots = arguments[2].shadowRoots;
+            if (roots != null && Array.from(roots).length !== 0)
+              throw new Error("Native shadow-root caret selection is unsupported");
+          }
+          const endpoint = ops.op_live_caret_at_point(this, x, y);
+          if (endpoint === null) return null;
+          if (name === "caretRangeFromPoint") {
+            const range = new RangeConstructor();
+            apply(rangeStart, range, [endpoint.node, endpoint.offset]);
+            apply(rangeCollapse, range, [true]);
+            return range;
+          }
+          const result = ops.op_geometry_object(caretPrototype);
+          if (
+            !setRecord(result, {
+              __proto__: null,
+              kind: "CaretPosition",
+              node: endpoint.node,
+              offset: endpoint.offset,
+              rect: endpoint.rect,
+            })
+          )
+            throw new LocalTypeError("Caret record installation interrupted");
+          return result;
         },
         name,
-        2,
+        name === "caretRangeFromPoint" ? 0 : 2,
       ),
       writable: true,
       enumerable: true,

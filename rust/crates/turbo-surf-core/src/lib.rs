@@ -31,6 +31,7 @@ pub mod referrer_policy;
 pub mod request_context;
 pub mod robots;
 pub mod sorry;
+pub mod upload;
 pub mod url;
 
 /// The active HTTP backend, re-exported so this crate's `net` module and every
@@ -47,3 +48,9 @@ pub use wreq as http_backend;
 
 /// Library version — kept in lockstep with `package.json` per the release rules.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod http_cache;
+
+mod http_cache_ranges;
+
+pub mod upload_body;

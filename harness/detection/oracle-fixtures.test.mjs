@@ -70,15 +70,20 @@ test("native microtask and module controls retain their measured probe and Chrom
 });
 
 test("CSP violation controls pin their original collectors, cases and probes", () => {
-  for (const [name, collectorName] of [
+  for (const [name, collectorName, probeName = name] of [
     ["csp-violation", "policy-header-chrome.mjs"],
     ["csp-parser", "csp-document-chrome.mjs"],
+    ["parser-source-position", "csp-document-chrome.mjs"],
+    ["csp-resource", "csp-resource-chrome.mjs"],
+    ["csp-code-generation", "csp-resource-chrome.mjs"],
+    ["csp-navigation", "csp-navigation-chrome.mjs"],
+    ["csp-referrer-meta", "csp-referrer-meta-chrome.mjs", "csp-navigation"],
   ]) {
     const fixture = JSON.parse(
       readFileSync(new URL(`./fixtures/${name}-chrome155.json`, import.meta.url), "utf8"),
     );
     for (const [file, expected] of [
-      [`./${name}-probe.js`, fixture.probeSha256],
+      [`./${probeName}-probe.js`, fixture.probeSha256],
       [`./fixtures/${name}-cases.json`, fixture.casesSha256],
       [`./${collectorName}`, fixture.collectorSha256],
     ]) {

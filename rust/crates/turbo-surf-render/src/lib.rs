@@ -17,33 +17,49 @@ mod crypto_backend;
 mod crypto_clone;
 mod crypto_hybrid;
 mod csp;
+mod csp_reporting;
+mod document_response;
 mod fetch_cors;
 mod geometry_backend;
 mod integrity;
 mod live_layout;
 mod live_layout_backend;
+mod live_layout_composed;
 mod live_layout_hit;
+mod live_layout_inline;
 mod live_layout_media;
 mod live_layout_metrics;
+mod live_layout_range;
+mod live_layout_resources;
+mod live_layout_scoped;
 mod live_layout_scroll;
+mod live_layout_supports;
+mod live_layout_text;
 mod live_stylesheets;
 mod message_ports;
 mod permissions_policy;
 mod probe;
+mod referrer_meta;
 mod resource_policy;
 mod runtime;
 mod script_fetch;
 mod script_inventory;
 mod storage_gc;
+mod storage_inbox;
+pub use storage_inbox::StorageEventSignal;
+mod stream_transfers;
+mod web_streams_backend;
 
+pub use document_response::DocumentResponseMetadata;
 pub use probe::{probe_globals, probe_page_async, ProbeAccess, ProbeReport};
 pub use runtime::{
     ensure_platform, eval_async, render_capture_cookies_with_browsing_state,
-    render_capture_cookies_with_request_state, render_capture_cookies_with_response_headers,
-    render_html, render_html_async, render_hydrate, render_hydrate_with_budget, render_page,
-    render_page_pooled, render_page_with_budget, run_with_dom, set_fingerprint, set_measure_fn,
-    set_raster_fn, set_raster_rgba_fn, set_webgl_fn, set_webgl_metadata_fn, BrowserStorage,
-    HydrationDiagnostics, PageSession, DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
+    render_capture_cookies_with_document_response, render_capture_cookies_with_request_state,
+    render_capture_cookies_with_response_headers, render_html, render_html_async, render_hydrate,
+    render_hydrate_with_budget, render_page, render_page_pooled, render_page_with_budget,
+    run_with_dom, set_fingerprint, set_measure_fn, set_raster_fn, set_raster_rgba_fn, set_webgl_fn,
+    set_webgl_metadata_fn, BrowserStorage, HydrationDiagnostics, PageSession,
+    DEFAULT_RENDER_BUDGET_MS, HUMAN_INPUT_JS, SCRIPT_BOUNDARY,
 };
 
 /// Actual native engine version, independently of navigator's browser identity.

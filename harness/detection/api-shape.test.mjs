@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { differences, localFixtureUrl } from "./api-shape.mjs";
+import { differences, localFixtureUrl, memberInventory } from "./api-shape.mjs";
 
 test("custom paired fixtures remain local and reject credential-bearing or remote URLs", () => {
   for (const url of [
@@ -47,6 +47,7 @@ test("collector tests construction without invoking the constructor or network A
   const result = runInNewContext(`
     let constructorCalls = 0, networkCalls = 0;
     class Element {
+      get hostile() { throw new Error('inventory must not invoke accessors'); }
       getAttribute(name) { if (!(this instanceof Element)) throw new TypeError(); return null; }
     }
     class HTMLCanvasElement extends Element {
@@ -57,6 +58,7 @@ test("collector tests construction without invoking the constructor or network A
       createElement(name) { return name === 'canvas' ? new HTMLCanvasElement() : new Element(); }
       querySelector() { if (!(this instanceof Document)) throw new TypeError(); return null; }
     }
+    Object.assign(globalThis, { Element, HTMLCanvasElement, Document });
     globalThis.document = new Document();
     globalThis.navigator = { permissions: { query() {} }, sendBeacon() { networkCalls++; } };
     globalThis.performance = { now() { return 0; }, timeOrigin: 1 };
@@ -71,7 +73,42 @@ test("collector tests construction without invoking the constructor or network A
   assert.equal(data.networkCalls, 0);
   assert.equal(data.report.constructors.URL.shape.constructible, true);
   assert.equal(data.report.methods["canvas.getContext"].shape.constructible, false);
+  assert.equal(data.report.constructors.Element.prototypeMembers.hostile.kind, "accessor");
+  assert.equal(data.report.constructors.Element.prototypeMembers.getAttribute.function.length, 1);
   assert.deepEqual(data.report.methods["document.querySelector"].invalidReceiver, {
     error: "TypeError",
   });
+});
+
+test("member inventory distinguishes missing interfaces, members and descriptor differences", () => {
+  const chrome = {
+    constructors: {
+      Element: {
+        prototypeMembers: {
+          missing: { kind: "data" },
+          same: { enumerable: true },
+          changed: { enumerable: true },
+        },
+      },
+      Document: { prototypeMembers: {} },
+    },
+  };
+  const native = {
+    constructors: {
+      Element: {
+        prototypeMembers: {
+          extra: { kind: "data" },
+          same: { enumerable: true },
+          changed: { enumerable: false },
+        },
+      },
+    },
+  };
+  const result = memberInventory(chrome, native);
+  assert.deepEqual(result.Document, { measured: false, chrome: true, native: false });
+  assert.deepEqual(result.Element.missing, ["missing"]);
+  assert.deepEqual(result.Element.extra, ["extra"]);
+  assert.deepEqual(result.Element.changed, [
+    { path: "changed.enumerable", chrome: true, native: false },
+  ]);
 });

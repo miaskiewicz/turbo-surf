@@ -216,7 +216,7 @@ Version-specific fingerprint data (reported major, full build for high-entropy
 UA-CH, and the navigation **header order** — which Chrome reorders across releases)
 lives in a declarative per-version registry (`turbo-surf-core`'s `browser` module):
 one coherent config per supported Chrome version, defaulting to Chrome
-155.0.8059.40. Wire headers and the render-tier navigator read from it. Each new
+155.0.8059.80. Wire headers and the render-tier navigator read from it. Each new
 profile needs a measured header/client-hint configuration and separate engine
 and transport validation; a reported version change does not upgrade V8.
 
@@ -366,7 +366,7 @@ prove IP reputation is the cause.
 JA3/JA4 + Akamai HTTP-2 fingerprint. The default MCP build uses BoringSSL
 (`wreq`) with the [upstream Chrome 154 profile](https://github.com/0x676e67/wreq-util/blob/5715529002738f46eea86a7271f918f9374d3582/src/emulate/profile/chrome/tls.rs)
 and the measured Chrome 155 navigation identity. The workspace pins wreq
-`c6fd8b1`, wreq-util `5715529`, and btls `f5a8a48`; btls-sys pins BoringSSL
+`4ed3cf0c` in the controlled `greg-flux/wreq` fork (upstream base `c6fd8b1`), wreq-util `5715529`, and btls `f5a8a48`; btls-sys pins BoringSSL
 `f1f2556`. These APIs require Rust 1.98.0, pinned in `rust/rust-toolchain.toml`.
 
 ```bash

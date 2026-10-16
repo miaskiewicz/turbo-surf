@@ -314,3 +314,100 @@ fn native_geometry_edge_conversion_offset_rounding_and_device_pixel_scroll_match
     }
     assert_eq!(actual, expected);
 }
+
+// This numeric Chrome control uses the same installed macOS Times face.
+// Portable source-shaping controls use identical bundled font bytes in core.
+#[cfg(target_os = "macos")]
+#[test]
+fn source_range_caret_interfaces_and_private_ownership_match_independent_chrome() {
+    let probe = include_str!("../../../../harness/detection/live-text-geometry-probe.js")
+        .trim()
+        .trim_end_matches(';');
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/live-text-geometry-chrome155.json"
+    ))
+    .unwrap();
+    let actual = run_with_dom(
+        "<!doctype html><html><head></head><body></body></html>",
+        &format!("JSON.stringify({probe})"),
+    )
+    .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(actual, expected["result"]);
+}
+
+#[test]
+fn mixed_outer_svg_uses_native_namespace_and_real_source_geometry() {
+    let actual = run_with_dom("<!doctype html><html><head><style>body{margin:0}svg{display:block}</style></head><body><svg id='icon' width='64.51' height='21.51'><rect id='shape' width='10' height='10'/></svg></body></html>",r#"(()=>{
+      const icon=document.getElementById('icon'),shape=document.getElementById('shape');
+      let hooks=0;Object.defineProperty(icon,'namespaceURI',{get(){hooks++;throw Error('public namespace shadow')}});
+      Object.defineProperty(icon,'getAttribute',{value(){hooks++;throw Error('public attribute shadow')}});
+      const first=Element.prototype.getBoundingClientRect.call(icon);
+      let unsupported='';try{shape.getBoundingClientRect()}catch(error){unsupported=error.message}
+      icon.setAttribute('width','40');const second=Element.prototype.getBoundingClientRect.call(icon);
+      return String(first.x===0&&first.y===0&&first.width===64.5078125&&first.height===21.5078125&&second.width===40&&hooks===0&&unsupported.includes('SVG descendant'));
+    })()"#).unwrap();
+    assert_eq!(actual, "true");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn mixed_node_range_wrapping_scroll_and_caret_hits_match_independent_chrome() {
+    let probe = include_str!("../../../../harness/detection/range-flow-geometry-probe.js")
+        .trim()
+        .trim_end_matches(';');
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/range-flow-geometry-chrome155.json"
+    ))
+    .unwrap();
+    let actual = run_with_dom(
+        "<!doctype html><html><head></head><body></body></html>",
+        &format!("JSON.stringify({probe})"),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        expected["result"]
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn ordinary_rotated_div_and_image_geometry_origins_hits_and_carets_match_chrome() {
+    let probe = include_str!("../../../../harness/detection/affine-element-geometry-probe.js")
+        .trim()
+        .trim_end_matches(';');
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/affine-element-geometry-chrome155.json"
+    ))
+    .unwrap();
+    let actual = run_with_dom(
+        "<!doctype html><html><head></head><body></body></html>",
+        &format!("JSON.stringify({probe})"),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        expected["result"]
+    );
+}
+
+#[test]
+fn original_utf16_boundaries_survive_scalar_shaping_and_private_range_caret_lifecycle() {
+    let probe = include_str!("../../../../harness/detection/utf16-text-geometry-probe.js")
+        .trim()
+        .trim_end_matches(';');
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/utf16-text-geometry-chrome155.json"
+    ))
+    .unwrap();
+    let actual = run_with_dom(
+        "<!doctype html><html><head></head><body></body></html>",
+        &format!("JSON.stringify({probe})"),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        expected["result"]
+    );
+}

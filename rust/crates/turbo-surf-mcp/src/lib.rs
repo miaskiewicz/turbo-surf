@@ -246,6 +246,7 @@ pub struct Session {
     jar: CookieJar,
     client_hints: ClientHints,
     response_headers: Vec<(String, String)>,
+    response_metadata: turbo_surf_render::DocumentResponseMetadata,
     browsing_storage: turbo_surf_render::BrowserStorage,
     /// "" / "no-js" = Lane A; "fast" / "secure" / "js" = render page JS after fetch.
     mode: String,
@@ -257,7 +258,7 @@ pub struct Session {
     /// `None` (the default) leaves the solve path inert.
     solver: Option<Box<dyn ChallengeSolver>>,
     /// Render-tier navigator fingerprint overrides (JSON object), applied via
-    /// `set_fingerprint`. Empty = current-stable (Chrome 154) defaults.
+    /// `set_fingerprint`. Empty = current-stable (Chrome 155) defaults.
     fingerprint: String,
     /// Layout viewport for `screenshot` (and any future geometry). Defaults to a
     /// common desktop size; overridable via `set_viewport` or per-call args.
@@ -357,11 +358,19 @@ impl Session {
         self.url = url.to_string();
         self.tree = Some(Tree::parse(html));
         self.response_headers.clear();
+        self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
     }
 
-    fn load_response(&mut self, url: &str, html: &str, headers: Vec<(String, String)>) {
+    fn load_response(
+        &mut self,
+        url: &str,
+        html: &str,
+        headers: Vec<(String, String)>,
+        response_metadata: turbo_surf_render::DocumentResponseMetadata,
+    ) {
         self.load(url, html);
         self.response_headers = headers;
+        self.response_metadata = response_metadata;
     }
 
     fn tree(&self) -> Result<&Tree, String> {
@@ -395,13 +404,17 @@ impl Session {
     ) -> Result<Value, String> {
         self.requests.push(url.to_string());
         let profile = self.profile_for(url);
+        let mut context = RequestContext::navigation(
+            (!self.url.is_empty() && self.url != "about:blank").then(|| self.url.clone()),
+            true,
+        );
+        context.apply_referrer_policy_headers(&self.response_headers);
+        let storage_effects = self.browsing_storage.response_storage_effects();
         let opts = FetchOptions {
+            response_side_effects: Some(storage_effects.as_ref()),
             method,
             body,
-            context: Some(RequestContext::navigation(
-                (!self.url.is_empty() && self.url != "about:blank").then(|| self.url.clone()),
-                true,
-            )),
+            context: Some(context),
             client_hints: Some(&self.client_hints),
             allow_non_html: true,
             headers: self.request_headers(),
@@ -411,9 +424,9 @@ impl Session {
             consent_socs: self.consent_socs.clone(),
             ..Default::default()
         };
-        let (mut cur_url, mut cur_html, mut status, headers) =
+        let (mut cur_url, mut cur_html, mut status, headers, response_metadata) =
             fetch_document_with(url, opts).await?;
-        self.load_response(&cur_url, &cur_html, headers);
+        self.load_response(&cur_url, &cur_html, headers, response_metadata);
         // If the response is a Google "Before you continue" consent interstitial,
         // replay its Accept-all form to earn the real trusted session (`NID`) into the
         // jar, then re-fetch — the synthetic `SOCS` un-hides the page, but only this
@@ -469,9 +482,13 @@ impl Session {
         // this returns the real post-consent content.
         let target = earned.continue_url.as_deref().unwrap_or(url).to_string();
         let profile = self.profile_for(&target);
+        let mut context = RequestContext::navigation(Some(url.to_string()), false);
+        context.apply_referrer_policy_headers(&self.response_headers);
+        let storage_effects = self.browsing_storage.response_storage_effects();
         let opts = FetchOptions {
+            response_side_effects: Some(storage_effects.as_ref()),
             allow_non_html: true,
-            context: Some(RequestContext::navigation(Some(url.to_string()), false)),
+            context: Some(context),
             client_hints: Some(&self.client_hints),
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
@@ -480,8 +497,9 @@ impl Session {
             consent_socs: self.consent_socs.clone(),
             ..Default::default()
         };
-        let (url, html, status, headers) = fetch_document_with(&target, opts).await?;
-        self.load_response(&url, &html, headers);
+        let (url, html, status, headers, response_metadata) =
+            fetch_document_with(&target, opts).await?;
+        self.load_response(&url, &html, headers, response_metadata);
         Ok(Some((url, html, status)))
     }
 
@@ -531,17 +549,22 @@ impl Session {
         }
         // Re-fetch with the cleared cookies (same profile/headers/jar).
         let profile = self.profile_for(url);
+        let mut context = RequestContext::navigation(Some(url.to_string()), false);
+        context.apply_referrer_policy_headers(&self.response_headers);
+        let storage_effects = self.browsing_storage.response_storage_effects();
         let opts = FetchOptions {
+            response_side_effects: Some(storage_effects.as_ref()),
             allow_non_html: true,
-            context: Some(RequestContext::navigation(Some(url.to_string()), false)),
+            context: Some(context),
             client_hints: Some(&self.client_hints),
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
             profile: Some(&profile),
             ..Default::default()
         };
-        let (url, html, status, headers) = fetch_document_with(url, opts).await?;
-        self.load_response(&url, &html, headers);
+        let (url, html, status, headers, response_metadata) =
+            fetch_document_with(url, opts).await?;
+        self.load_response(&url, &html, headers, response_metadata);
         Ok(Some(status))
     }
 
@@ -606,23 +629,7 @@ impl Session {
                 parts.push(code);
                 continue;
             };
-            if let Ok(r) = fetch_html(
-                &url,
-                FetchOptions {
-                    allow_non_html: true,
-                    headers: self.request_headers(),
-                    jar: Some(&mut self.jar),
-                    context: Some(RequestContext::resource(
-                        &self.url,
-                        Destination::Script,
-                        RequestMode::NoCors,
-                    )),
-                    client_hints: Some(&self.client_hints),
-                    ..Default::default()
-                },
-            )
-            .await
-            {
+            if let Ok(r) = self.fetch_resource(&url, Destination::Script).await {
                 parts.push(format!("{}\n//# sourceURL={}", r.html, r.final_url));
             }
         }
@@ -648,7 +655,7 @@ impl Session {
         base: &str,
         script: &str,
     ) -> Result<String, String> {
-        let (html, cookies) = turbo_surf_render::render_capture_cookies_with_browsing_state(
+        let (html, cookies) = turbo_surf_render::render_capture_cookies_with_document_response(
             html,
             base,
             self.ua.as_deref().unwrap_or(""),
@@ -658,6 +665,7 @@ impl Session {
             self.client_hints.clone(),
             &self.response_headers,
             self.browsing_storage.clone(),
+            self.response_metadata.clone(),
         )
         .await?;
         self.jar = CookieJar::from_storage_state(&cookies);
@@ -866,28 +874,20 @@ impl Session {
         // Akamai markers (bmak / sensor_data / _abck).
         let mut script_url = None;
         let mut script_body = String::new();
-        if let Some(tree) = &self.tree {
-            for &h in tree.query_selector_all("script[src]").iter() {
-                let Some(src) = tree.get_attribute(h, "src") else {
-                    continue;
-                };
-                let Some(abs) = turbo_surf_core::url::resolve(&self.url, src) else {
-                    continue;
-                };
-                if let Ok(r) = fetch_html(
-                    &abs,
-                    FetchOptions {
-                        allow_non_html: true,
-                        ..Default::default()
-                    },
-                )
-                .await
-                {
-                    if r.html.contains("bmak") || r.html.contains("sensor_data") {
-                        script_url = Some(abs);
-                        script_body = r.html;
-                        break;
-                    }
+        let urls = self.tree.as_ref().map_or_else(Vec::new, |tree| {
+            tree.query_selector_all("script[src]")
+                .iter()
+                .filter_map(|&h| {
+                    turbo_surf_core::url::resolve(&self.url, tree.get_attribute(h, "src")?)
+                })
+                .collect::<Vec<_>>()
+        });
+        for abs in urls {
+            if let Ok(response) = self.fetch_resource(&abs, Destination::Script).await {
+                if response.html.contains("bmak") || response.html.contains("sensor_data") {
+                    script_url = Some(abs);
+                    script_body = response.html;
+                    break;
                 }
             }
         }
@@ -954,8 +954,18 @@ impl Session {
     async fn test_sensor(&mut self, sensor: &str) -> bool {
         let url = self.url.clone();
         let body = json!({ "sensor_data": sensor }).to_string();
+        let profile = self.profile_for(&url);
+        let storage_effects = self.browsing_storage.response_storage_effects();
         // Post the sensor (cookies round-trip through the jar).
         let post = FetchOptions {
+            response_side_effects: Some(storage_effects.as_ref()),
+            context: Some(RequestContext::resource(
+                &url,
+                Destination::Empty,
+                RequestMode::Cors,
+            )),
+            client_hints: Some(&self.client_hints),
+            profile: Some(&profile),
             method: Some("POST".into()),
             body: Some(body),
             allow_non_html: true,
@@ -969,6 +979,10 @@ impl Session {
         // Re-fetch the page with the (possibly cleared) cookies; accepted if it is
         // no longer detected as an Akamai wall.
         let get = FetchOptions {
+            response_side_effects: Some(storage_effects.as_ref()),
+            context: Some(RequestContext::navigation(Some(url.clone()), false)),
+            client_hints: Some(&self.client_hints),
+            profile: Some(&profile),
             allow_non_html: true,
             headers: self.request_headers(),
             jar: Some(&mut self.jar),
@@ -989,7 +1003,7 @@ impl Session {
     }
 
     // Override render-tier navigator fingerprint fields (JSON object merged over
-    // the current-stable (Chrome 154) defaults; every field is individually overridable). Persisted
+    // the current-stable (Chrome 155) defaults; every field is individually overridable). Persisted
     // on the session and pushed to the render isolate. `{}` resets to defaults.
     fn set_fingerprint(&mut self, overrides: &Value) -> Result<Value, String> {
         let json = if overrides.is_null() {
@@ -1134,7 +1148,9 @@ impl Session {
     async fn fetch_image_bytes(&mut self, url: &str) -> Result<Vec<u8>, String> {
         self.requests.push(url.to_string());
         let profile = self.profile_for(url);
+        let storage_effects = self.browsing_storage.response_storage_effects();
         let opts = FetchOptions {
+            response_side_effects: Some(storage_effects.as_ref()),
             allow_non_html: true,
             context: Some(RequestContext::resource(
                 &self.url,
@@ -1185,14 +1201,24 @@ impl Session {
         url: &str,
         destination: Destination,
     ) -> Result<String, String> {
+        Ok(self.fetch_resource(url, destination).await?.html)
+    }
+
+    async fn fetch_resource(
+        &mut self,
+        url: &str,
+        destination: Destination,
+    ) -> Result<turbo_surf_core::net::FetchResult, String> {
         self.requests.push(url.to_string());
         let profile = self.profile_for(url);
+        let storage_effects = self.browsing_storage.response_storage_effects();
         let opts = FetchOptions {
+            response_side_effects: Some(storage_effects.as_ref()),
             allow_non_html: true,
             context: Some(RequestContext::resource(
                 &self.url,
                 destination,
-                if destination == Destination::Style {
+                if matches!(destination, Destination::Style | Destination::Script) {
                     RequestMode::NoCors
                 } else {
                     RequestMode::Cors
@@ -1204,7 +1230,9 @@ impl Session {
             profile: Some(&profile),
             ..Default::default()
         };
-        Ok(fetch_html_with(url, opts).await?.1)
+        fetch_html(url, opts)
+            .await
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -1296,12 +1324,34 @@ async fn fetch_html_with(
 // Document responses retain final-hop policy headers across consent/challenge refetches.
 async fn fetch_document_with(
     url: &str,
-    opts: FetchOptions<'_>,
-) -> Result<(String, String, u16, Vec<(String, String)>), String> {
+    mut opts: FetchOptions<'_>,
+) -> Result<
+    (
+        String,
+        String,
+        u16,
+        Vec<(String, String)>,
+        turbo_surf_render::DocumentResponseMetadata,
+    ),
+    String,
+> {
+    let context = opts.context.clone().unwrap_or_default();
+    let metadata = std::sync::Mutex::new(
+        turbo_surf_render::DocumentResponseMetadata::from_request(200, &context, url),
+    );
+    let prior = opts.response_policy;
+    let policy = |context: &RequestContext, target: &str, headers: &[(String, String)]| {
+        *metadata.lock().unwrap() =
+            turbo_surf_render::DocumentResponseMetadata::from_request(200, context, target);
+        prior.is_none_or(|prior| prior(context, target, headers))
+    };
+    opts.response_policy = Some(&policy);
     let res = fetch_html(url, opts)
         .await
         .map_err(|error| error.to_string())?;
-    Ok((res.final_url, res.html, res.status, res.headers))
+    let mut metadata = metadata.into_inner().unwrap();
+    metadata.status = res.status;
+    Ok((res.final_url, res.html, res.status, res.headers, metadata))
 }
 
 // The (width, height) in a PNG's IHDR (big-endian at bytes 16..24), so the
@@ -3457,18 +3507,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn render_preserves_authentic_navigation_response_metadata() {
+        let mut session = Session::default();
+        session.load_response("https://policy.test/not-found", r#"<head></head><body><script>
+        document.body.setAttribute('data-referrer',document.referrer);
+        document.addEventListener('securitypolicyviolation',event=>document.body.setAttribute('data-report',event.statusCode+' '+event.referrer));
+        const style=document.createElement('style');style.textContent='.denied{}';document.head.append(style);
+        </script></body>"#,vec![("Content-Security-Policy".into(),"style-src 'none'".into())],turbo_surf_render::DocumentResponseMetadata {status:404,referrer:"https://source.test/start?authored".into()});
+        session.render_current().await.unwrap();
+        let tree = session.tree().unwrap();
+        let body = tree.query_selector("body").unwrap();
+        assert_eq!(
+            tree.get_attribute(body, "data-referrer"),
+            Some("https://source.test/start?authored")
+        );
+        assert_eq!(
+            tree.get_attribute(body, "data-report"),
+            Some("404 https://source.test/start?authored")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn render_preserves_response_policy_and_session_storage_across_navigation() {
         let mut session = Session::default();
         let headers = vec![(
             "Content-Security-Policy".into(),
             "script-src 'nonce-good'".into(),
         )];
-        session.load_response("https://policy.test/first", "<body><script>document.body.setAttribute('data-denied','ran')</script><script nonce=good>localStorage.setItem('navigation','retained');document.body.setAttribute('data-allowed','ran')</script></body>", headers.clone());
+        session.load_response("https://policy.test/first", "<body><script>document.body.setAttribute('data-denied','ran')</script><script nonce=good>localStorage.setItem('navigation','retained');document.body.setAttribute('data-allowed','ran')</script></body>", headers.clone(), turbo_surf_render::DocumentResponseMetadata::default());
         session.render_current().await.unwrap();
         let first = serialize_doc(session.tree().unwrap());
         assert!(first.contains("data-allowed=\"ran\""), "{first}");
         assert!(!first.contains("data-denied=\"ran\""), "{first}");
-        session.load_response("https://policy.test/second", "<body><script nonce=good>document.body.setAttribute('data-storage',localStorage.getItem('navigation'))</script></body>", headers);
+        session.load_response("https://policy.test/second", "<body><script nonce=good>document.body.setAttribute('data-storage',localStorage.getItem('navigation'))</script></body>", headers, turbo_surf_render::DocumentResponseMetadata::default());
         session.render_current().await.unwrap();
         let second = serialize_doc(session.tree().unwrap());
         assert!(second.contains("data-storage=\"retained\""), "{second}");
@@ -5296,5 +5367,214 @@ mod tests {
         .unwrap();
         assert_eq!(suite["ok"], true, "{suite}");
         assert_eq!(suite["ran"][0], "h1 ok", "{suite}");
+    }
+}
+
+#[cfg(test)]
+mod storage_response_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn read_fixture_request(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> Vec<u8> {
+        const LIMIT: usize = 64 * 1024;
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 2048];
+        let head_end = loop {
+            if let Some(at) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                break at + 4;
+            }
+            assert!(
+                bytes.len() < LIMIT,
+                "fixture request headers exceeded limit"
+            );
+            let size = reader.read(&mut chunk).await.unwrap();
+            assert_ne!(size, 0, "fixture request ended inside headers");
+            bytes.extend_from_slice(&chunk[..size]);
+        };
+        let length = String::from_utf8_lossy(&bytes[..head_end])
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .map_or(0, |(_, value)| value.trim().parse::<usize>().unwrap());
+        assert!(length <= LIMIT, "fixture request body exceeded limit");
+        while bytes.len() < head_end + length {
+            let size = reader.read(&mut chunk).await.unwrap();
+            assert_ne!(size, 0, "fixture request ended inside body");
+            bytes.extend_from_slice(&chunk[..size]);
+        }
+        bytes
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fixture_request_reader_collects_fragmented_headers_and_body() {
+        let (mut write, mut read) = tokio::io::duplex(8);
+        let producer = tokio::spawn(async move {
+            for piece in [
+                b"POST /sensor HTTP/1.1\r\nContent-Len".as_slice(),
+                b"gth: 4\r\nSec-Fetch-Dest: empty\r\nCookie: legacy=kept\r\n\r",
+                b"\nbo",
+                b"dy",
+            ] {
+                write.write_all(piece).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+        });
+        let request = read_fixture_request(&mut read).await;
+        producer.await.unwrap();
+        assert_eq!(request, b"POST /sensor HTTP/1.1\r\nContent-Length: 4\r\nSec-Fetch-Dest: empty\r\nCookie: legacy=kept\r\n\r\nbody");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_legacy_resource_callers_apply_storage_effects_and_request_context() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let wire = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received = wire.clone();
+        let server = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let received = received.clone();
+                tokio::spawn(async move {
+                    let bytes = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        read_fixture_request(&mut socket),
+                    )
+                    .await
+                    .unwrap();
+                    let head_end = bytes
+                        .windows(4)
+                        .position(|part| part == b"\r\n\r\n")
+                        .unwrap()
+                        + 4;
+                    let request = String::from_utf8_lossy(&bytes[..head_end]);
+                    let first = request.lines().next().unwrap().to_string();
+                    let headers = request
+                        .lines()
+                        .skip(1)
+                        .filter_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            Some((name.to_ascii_lowercase(), value.trim().to_string()))
+                        })
+                        .collect::<BTreeMap<_, _>>();
+                    received.lock().unwrap().push((first.clone(), headers));
+                    let redirect = first.starts_with("GET /classic ");
+                    let headers = if redirect {
+                        "Location: /final.js\r\n"
+                    } else {
+                        ""
+                    };
+                    let status = if redirect { 302 } else { 200 };
+                    let body = if redirect {
+                        ""
+                    } else {
+                        "globalThis.__legacyResponse=true;"
+                    };
+                    socket.write_all(format!("HTTP/1.1 {status} OK\r\n{headers}Clear-Site-Data: \"storage\"\r\nContent-Type: text/javascript\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+                });
+            }
+        });
+        let mut outcomes = Vec::new();
+        for kind in ["body", "style", "classic", "sensor"] {
+            let mut session = Session::new();
+            let base = format!("{origin}/{kind}");
+            session.url = base.clone();
+            session.jar.add("legacy", "kept", "127.0.0.1", "/", None);
+            session.render_script("<body><script>localStorage.setItem('stored','before');sessionStorage.setItem('stored','before');</script>", &base, "").await.unwrap();
+            match kind {
+                "body" => {
+                    session.fetch_body(&base).await.unwrap();
+                }
+                "style" => {
+                    session
+                        .fetch_resource_body(&base, Destination::Style)
+                        .await
+                        .unwrap();
+                }
+                "classic" => {
+                    session.tree = Some(Tree::parse("<script src='/classic'></script>"));
+                    let script = session.page_script().await;
+                    assert!(
+                        script.contains(&format!("//# sourceURL={origin}/final.js")),
+                        "{script}"
+                    );
+                }
+                "sensor" => {
+                    assert!(session.test_sensor("offline-control").await);
+                }
+                _ => unreachable!(),
+            }
+            let html = session.render_script("<body><script>document.body.setAttribute('data-local',String(localStorage.getItem('stored')));document.body.setAttribute('data-session',String(sessionStorage.getItem('stored')));</script>", &base, "").await.unwrap();
+            outcomes.push((
+                kind,
+                html.contains("data-local=\"null\""),
+                html.contains("data-session=\"null\""),
+            ));
+        }
+        server.abort();
+        assert_eq!(
+            outcomes,
+            vec![
+                ("body", true, true),
+                ("style", true, true),
+                ("classic", true, true),
+                ("sensor", true, true)
+            ]
+        );
+        let wire = wire.lock().unwrap();
+        assert_eq!(wire.len(), 6);
+        for ((line, headers), (destination, mode)) in wire.iter().zip([
+            ("empty", "cors"),
+            ("style", "no-cors"),
+            ("script", "no-cors"),
+            ("script", "no-cors"),
+            ("empty", "cors"),
+            ("document", "navigate"),
+        ]) {
+            assert_eq!(headers["sec-fetch-dest"], destination, "{line}");
+            assert_eq!(headers["sec-fetch-mode"], mode, "{line}");
+            assert!(headers["cookie"].contains("legacy=kept"), "{line}");
+        }
+        assert!(wire[4].0.starts_with("POST /sensor "));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_navigation_storage_effects_apply_before_the_next_document_script() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut bytes = [0; 8192];
+                    let read = stream.read(&mut bytes).await.unwrap();
+                    let request = String::from_utf8_lossy(&bytes[..read]);
+                    let seed = request.starts_with("GET /seed ");
+                    let clearing = request.starts_with("GET /clear ");
+                    let script = if seed {
+                        "localStorage.setItem('stored','before');sessionStorage.setItem('stored','before');"
+                    } else {
+                        ""
+                    };
+                    let html=format!("<!doctype html><body><script>{script}document.body.setAttribute('data-local',String(localStorage.getItem('stored')));document.body.setAttribute('data-session',String(sessionStorage.getItem('stored')));</script>");
+                    let headers = if clearing {
+                        "Clear-Site-Data: \"storage\"\r\n"
+                    } else {
+                        ""
+                    };
+                    stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{html}",html.len()).as_bytes()).await.unwrap();
+                });
+            }
+        });
+        let mut session = Session::new();
+        session.mode = "js".into();
+        session.goto(&format!("{origin}/seed")).await.unwrap();
+        assert!(serialize_doc(session.tree().unwrap()).contains("data-local=\"before\""));
+        session.goto(&format!("{origin}/clear")).await.unwrap();
+        let cleared = serialize_doc(session.tree().unwrap());
+        assert!(cleared.contains("data-local=\"null\""), "{cleared}");
+        assert!(cleared.contains("data-session=\"null\""), "{cleared}");
+        session.goto(&format!("{origin}/read")).await.unwrap();
+        let read = serialize_doc(session.tree().unwrap());
+        assert!(read.contains("data-local=\"null\""), "{read}");
+        assert!(read.contains("data-session=\"null\""), "{read}");
+        server.abort();
     }
 }

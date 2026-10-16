@@ -193,6 +193,11 @@
       return live(() => rows, false);
     }, 1);
   }
+  const fragmentIdError = TypeError;
+  method(g.DocumentFragment.prototype, 'getElementById', function (elementId) {
+    if (!arguments.length) throw new fragmentIdError('getElementById requires 1 argument');
+    return native('fragmentById', this, elementId);
+  }, 1);
   const selectors = {
     forms: node => tag.call(node) === 'FORM' && namespace.call(node) === html,
     images: node => tag.call(node) === 'IMG' && namespace.call(node) === html,
@@ -293,6 +298,11 @@
     const value = getAttribute.call(this, 'tabindex'); const found = value == null ? null : /^[\t\n\f\r ]*([+-]?[0-9]+)/.exec(value);
     if (!found) return fallback; const number = Number(found[1]); return number >= -2147483648 && number <= 2147483647 ? number : fallback;
   }, function (value) { check(this, [1]); if (namespace.call(this) !== html) throw new TypeError('Illegal invocation'); setAttribute.call(this, 'tabindex', String((+value) >> 0)); });
+  method(g.Document.prototype, 'importNode', function(node, deep=false) {
+    check(this,[9]); if(!arguments.length) throw new TypeError('importNode requires 1 argument');
+    apply(type,node,[]); const result=native('import',this,node,!!deep);
+    if(typeof result==='string')throw new g.DOMException(result,'NotSupportedError'); return result;
+  },1);
   method(g.Document.prototype, 'adoptNode', function (node) {
     check(this, [9]); if (!arguments.length) throw new TypeError('adoptNode requires 1 argument');
     const result = native('adopt', this, node); if (typeof result === 'string') throw new g.DOMException(result, 'NotSupportedError'); return result;

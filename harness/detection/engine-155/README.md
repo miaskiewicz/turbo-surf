@@ -1,12 +1,27 @@
 # Native Chrome 155 engine profile
 
 The current profile compiles actual V8 **15.5.35.23** from the revision pinned by
-**Chrome155.0.8059.79**, matching the installed oracle's engine version. The macOS
-arm64 source build, native version/archive/binding verification and WindowProxy
-security smoke pass. The current merged renderer passes 231 focused contracts on
-this engine, including all203 library tests, six CSP/base controls and cached,
-frame ownership, input, session and storage checks; strict affected Clippy passes.
-Final workspace/addon and fresh Google validation remain separate.
+**Chrome155.0.8059.79**. Its macOS arm64 source artifact is verified against the
+actual engine version, archive and generated bindings. The current SDK includes
+the native code-generation callback required by CSP eval/Function admission.
+The Trusted Types extension supplies exact branded source and native EvalError
+messages while preserving direct lexical eval. Its independently tested archive
+is `1866b4e3ee649fb1209d0dfb6d7a2dac7f5b8a2033adfdd0e112a7c675de7a9f`;
+matching `src/binding.cc` is
+`e7df09e41ba08f64eaac66ef02b0e6b167018e001ab31c45247d26625575ee5a`
+and generated bindings remain
+`6380313e48769666822636529cf1a6199d6ab676fa6205bbb1cf2d6786375e41`.
+31 fresh production Trusted Types controls and218 merged native binding contracts
+pass with this artifact; the normal build helper still reruns all SDK smoke,
+WindowProxy, module-unit and code-generation gates when accepting it.
+See [Trusted Types controls](../TRUSTED-TYPES.md) for the stock SDK limitations.
+Installed Chrome controls now record155.0.8059.80 with the same V815.5.35.23;
+the exact source-engine profile remains pinned to155.0.8059.79.
+On2026-10-15 the version smoke, WindowProxy/security, original module-source units
+and code-generation regressions all pass with the matching guarded archive.
+Historical renderer cohort counts below apply to their recorded source; the
+new combined renderer/workspace/addon and fresh Google checks remain separate.
+Production Cargo defaults still select the stock150 SDK.
 
 The older155.0.8059.40 / V815.5.35.20 profile and artifacts remain preserved in
 `../engine-154/profiles/155.json`. Select that file explicitly when reproducing a
@@ -48,6 +63,17 @@ The historical profile is [`../engine-154/profiles/155.json`](../engine-154/prof
 V8 155 adds a metagen build step that requires the LLVM libclang library and Python bindings. Preparation installs the official platform package pinned in that engine's DEPS and verifies its SHA-256. These package URLs and hashes are in the profile manifest; `prepare.py --adopt` repairs this dependency in an already prepared destination. Platforms without an official package entry fail explicitly. The build helper also exposes the SDK's own downloaded GN/Ninja tools and a local `python` alias for its active Python interpreter on the subprocess PATH, so metagen reconstructs compile flags using the same GN executable that generated the native build.
 
 The wrapper SDK remains the official rusty-v8 `152.2.0`, `deno_v8 0.4.0`, and `deno_core 0.412.0` with the committed native binding and context/module/inspector patches. Published crates still use their declared SDK; this experimental source profile does not publish a new SDK or establish full browser API, resource-policy or Google outcome parity. Transport is configured and measured separately: upstream `wreq-util` currently ends at Chrome 154, so this helper makes no claim that it provides an upstream Chrome 155 TLS template.
+
+An existing prepared155 destination must receive the current
+`code_generation.patch` and its matching rebuilt native archive before use.
+`prepare.py --adopt` checks the exact applied source; it cannot turn an older
+archive into the new one. The previous2026-10-15 Boolean-callback-only155 artifact had SHA-256
+`56bc5e375399e3912c5f5983dede0a2687ee56439fe5d6a2bcd1b50c0ae27077`.
+Its generated bindings remain
+`6380313e48769666822636529cf1a6199d6ab676fa6205bbb1cf2d6786375e41`.
+Use the build helper's explicit archive/bindings/hash arguments when importing
+an independently verified source artifact. Prior baseline artifacts and receipts
+are retained for regression comparisons.
 
 Preparation records the profile and reverse-verifies every applied patch; building records the actual version, native archive/binding hashes, source revision and test result in the destination's `validated.json`. Raw diagnostics stay ignored. Preserve the 154 destination for regressions and comparisons.
 

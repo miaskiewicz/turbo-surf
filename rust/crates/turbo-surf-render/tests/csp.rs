@@ -179,13 +179,7 @@ async fn unsupported_active_csp_is_reported_from_native_policy_state() {
         ),
     ];
     let mut page=PageSession::open_with_response_headers(r#"<head><meta http-equiv='Content-Security-Policy' content="worker-src 'none'"></head><body><script nonce=good>globalThis.unsupported_csp=[];</script></body>"#,"http://policy.test/page","","",10000,"",ClientHints::default(),&headers).await.unwrap();
-    let expected = vec![
-        "form-action",
-        "frame-ancestors",
-        "script-src: 'strict-dynamic'",
-        "worker-src",
-        "content-security-policy-report-only",
-    ];
+    let expected = vec!["form-action", "script-src: 'strict-dynamic'", "worker-src"];
     assert_eq!(page.hydration_diagnostics().unsupported_csp, expected);
     page.eval("globalThis.hydration_diagnostics={unsupported_csp:[]};")
         .await

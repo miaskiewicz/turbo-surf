@@ -609,6 +609,20 @@ if(typeof __ns.makeNativeFunction==='function'){
     }
     out.push(text.slice(start)); return out;
   };
+  function cssPrelude(text,commas){
+    var out='',quote='',escaped=false,comment=false;
+    for(var i=0;i<text.length;i++){
+      var c=text[i],next=text[i+1];
+      if(comment){if(c==='*'&&next==='/'){comment=false;i++;}continue;}
+      if(quote){out+=c;if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue;}
+      if(c==='\\'){out+=c;if(next!==undefined)out+=text[++i];continue;}
+      if(c==='/'&&next==='*'){comment=true;i++;continue;}
+      if(c==='"'||c==="'"){quote=c;out+=c;continue;}
+      if(commas&&c===','){out=out.replace(/\s*$/,'')+', ';while(i+1<text.length&&/\s/.test(text[i+1]))i++;}
+      else out+=c;
+    }
+    return out.trim();
+  }
   var declarationRecords=cssMap('declaration'),inlineDeclarations=cssMap('inlineDeclaration'),cssPropertyCache=new Map();
   function declarationRecord(style){var record=declarationRecords.get(style);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=appliedInlineRead.call(record.owner);if(text!==record.source){record.source=text;parseDeclaration(record,text);}}if(record.refresh){var fresh=declarationRecords.get(record.refresh());if(fresh){record.values=fresh.values;record.names=fresh.names;}}return record;}
   function cssString(value){if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);}
@@ -665,12 +679,12 @@ if(typeof __ns.makeNativeFunction==='function'){
       if(c==='/'&&next==='*'){comment=true;i++;continue;} if(c==='"'||c==="'"){quote=c;continue;}
       if(c==='{' ){if(depth++===0)open=i;}
       else if(c==='}'&&depth>0&&--depth===0){
-        var head=text.slice(start,open).replace(/\/\*[\s\S]*?\*\//g,'').trim(),body=text.slice(open+1,i);
+        var head=cssPrelude(text.slice(start,open),false),body=text.slice(open+1,i);
         if(head){
           var isAt=head[0]==='@',rule={};
           rule.parentStyleSheet=sheet;rule.parentRule=parent||null;
           if(isAt){rule.prelude=head;rule.type=/^@media\b/i.test(head)?4:/^@supports\b/i.test(head)?12:/^@font-face\b/i.test(head)?5:/^@keyframes\b/i.test(head)?7:0;rule.cssText=head+' { '+body.trim()+' }';if(rule.type===5)rule.style=cssDeclaration(body,null,rule,false,true);else rule.cssRules=parseCssRules(body,sheet,rule,true);}
-          else {rule.type=1;rule.selectorText=head.replace(/\s*,\s*/g,', ');rule.style=cssDeclaration(body,null,rule);rule.cssText=head+' { '+body.trim()+' }';}
+          else {rule.type=1;rule.selectorText=cssPrelude(head,true);rule.style=cssDeclaration(body,null,rule);rule.cssText=head+' { '+body.trim()+' }';}
           cssItems(out).push(finishCssRule(rule));
         }
         start=i+1;
@@ -1080,14 +1094,27 @@ if(typeof __ns.makeNativeFunction==='function'){
           if (hit) selection.emptySelects.delete(this);
         } });
     })();
+    var formValueApply=Reflect.apply,formValueGet=WeakMap.prototype.get,formValueHas=WeakMap.prototype.has;
+    var formValueText=__ns.domAccessor('textContent',false,'Node');
+    __ns.formControlValue=function(element){
+      var tag=formValueApply(sheetTagName,element,[]),type=formValueApply(sheetGetAttribute,element,['type'])||'text';
+      if(tag==='SELECT'){var chosen=selection.selectionOf(element);return chosen.length?chosen[0].value:'';}
+      if(formValueApply(formValueHas,controlValues,[element])&&!/^(hidden|button|submit|reset|image|checkbox|radio)$/.test(type))return formValueApply(formValueGet,controlValues,[element]);
+      return tag==='TEXTAREA'?formValueApply(formValueText,element,[]):formValueApply(sheetGetAttribute,element,['value'])||'';
+    };
     var cloneChildren=__ns.domAccessor('childNodes',false,'Node');
+    var cloneApply=Reflect.apply,cloneDefine=Object.defineProperty;
     __ns.cloneControlState = function cloneControlState(source, clone, deep){
-      if (controlValues.has(source)) clone.value = controlValues.get(source);
-      if (selection.optionStates.has(source)) selection.optionStates.set(clone, selection.optionStates.get(source));
-      if (selection.emptySelects.has(source)) selection.emptySelects.add(clone);
-      if (deep) {
-        var originals = cloneChildren.call(source), copies = cloneChildren.call(clone);
-        for (var i=0;i<originals.length && i<copies.length;i++) cloneControlState(originals[i], copies[i], true);
+      var pending=[[source,clone]];
+      for(var index=0;index<pending.length;index++){
+        var pair=pending[index];source=pair[0];clone=pair[1];
+        if (controlValues.has(source)) clone.value = controlValues.get(source);
+        if (selection.optionStates.has(source)) selection.optionStates.set(clone, selection.optionStates.get(source));
+        if (selection.emptySelects.has(source)) selection.emptySelects.add(clone);
+        if(deep){
+          var originals=cloneApply(cloneChildren,source,[]),copies=cloneApply(cloneChildren,clone,[]);
+          for(var i=0;i<originals.length&&i<copies.length;i++)cloneDefine(pending,pending.length,{__proto__:null,value:[originals[i],copies[i]],writable:true,configurable:true,enumerable:true});
+        }
       }
     };
     // <label>: htmlFor + control resolution. testing-library's getByLabelText filters

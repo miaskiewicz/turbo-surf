@@ -756,11 +756,16 @@ async fn native_key_material_counts_against_queue_admission_before_buffer_transf
 
 #[tokio::test(flavor = "current_thread")]
 async fn cloned_native_key_snapshots_restore_typed_algorithm_metadata_and_operations() {
-    let mut page =
-        turbo_surf_render::PageSession::open("<body></body>", "https://crypto.test/", "", "", 5000)
-            .await
-            .unwrap();
-    let raw=page.eval(r#"(async()=>{
+    let mut page = turbo_surf_render::PageSession::open(
+        "<body></body>",
+        "https://crypto.test/",
+        "",
+        "",
+        20000,
+    )
+    .await
+    .unwrap();
+    let raw=page.eval_json_expression(r#"(async()=>{
       const data=new Uint8Array([7,8]),rows=[];
       const rsa=await crypto.subtle.generateKey({name:'RSA-OAEP',modulusLength:1024,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},false,['encrypt','decrypt']);
       const rsac=structuredClone(rsa),cipher=await crypto.subtle.encrypt('RSA-OAEP',rsac.publicKey,data),plain=await crypto.subtle.decrypt('RSA-OAEP',rsac.privateKey,cipher);
@@ -768,8 +773,8 @@ async fn cloned_native_key_snapshots_restore_typed_algorithm_metadata_and_operat
       const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},ecc.privateKey,data),verified=await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},ecc.publicKey,signature,data);
       const hmac=await crypto.subtle.importKey('raw',new Uint8Array(32),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']),hmacc=structuredClone(hmac);
       const mac=await crypto.subtle.sign('HMAC',hmacc,data),macVerified=await crypto.subtle.verify('HMAC',hmacc,mac,data);
-      globalThis.__RESULT=JSON.stringify({rsa:rsac.privateKey.algorithm,exponent:Array.from(rsac.privateKey.algorithm.publicExponent),rsaBytes:Array.from(new Uint8Array(plain)),ec:ecc.privateKey.algorithm,verified,hmac:hmacc.algorithm,macVerified,privatePermissions:[rsac.privateKey,ecc.privateKey,hmacc].map(key=>key.extractable)});
-    })();"#).await.unwrap();
+      return {rsa:rsac.privateKey.algorithm,exponent:Array.from(rsac.privateKey.algorithm.publicExponent),rsaBytes:Array.from(new Uint8Array(plain)),ec:ecc.privateKey.algorithm,verified,hmac:hmacc.algorithm,macVerified,privatePermissions:[rsac.privateKey,ecc.privateKey,hmacc].map(key=>key.extractable)};
+    })()"#).await.unwrap();
     let value: Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(value["rsa"]["name"], "RSA-OAEP");
     assert_eq!(value["rsa"]["modulusLength"], 1024);

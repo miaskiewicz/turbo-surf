@@ -7,6 +7,8 @@
 use crate::cache::ResponseCache;
 use crate::cookies::CookieJar;
 use crate::http_backend as http; // reqwest (rustls) or wreq (BoringSSL); see lib.rs
+use crate::http_cache::{CacheMode, Cached, HttpCache, PendingStore, TracePrefix};
+use crate::http_cache_ranges::ByteRange;
 use crate::request_context::{ClientHints, RequestContext};
 use bytes::BytesMut;
 use futures_util::StreamExt;
@@ -76,13 +78,272 @@ pub struct FetchResult {
     pub headers: Vec<(String, String)>,
     pub final_url: String,
     pub status: u16,
+    pub status_text: String,
+    pub redirected: bool,
+    pub content_type: String,
+}
+
+type BodyStream =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<bytes::Bytes, HttpError>> + Send>>;
+pub type ResponseChunkObserver = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync>;
+
+/// A live response body, optionally backed by an owner-cancellable native cache fill.
+pub struct ResponseBody {
+    stream: Option<BodyStream>,
+    received: usize,
+    max_bytes: usize,
+    trace_id: u64,
+    url: String,
+    status: u16,
+    content_type: String,
+    trace_body: Option<Vec<u8>>,
+    trace_prefix: usize,
+    trace_skip_prefix: usize,
+    cache_store: Option<PendingStore>,
+    background: Option<std::sync::Arc<BackgroundBody>>,
+}
+struct BackgroundBody {
+    state: std::sync::Mutex<BackgroundState>,
+    ready: tokio::sync::Notify,
+    cancel: tokio::sync::watch::Sender<bool>,
+}
+#[derive(Default)]
+struct BackgroundState {
+    chunks: std::collections::VecDeque<Vec<u8>>,
+    done: bool,
+    error: Option<HttpError>,
+    failed: bool,
+    detached: bool,
+}
+impl BackgroundBody {
+    fn push(&self, bytes: &[u8]) {
+        const CHUNK: usize = 64 * 1024;
+        let mut state = self.state.lock().unwrap();
+        if state.detached {
+            return;
+        }
+        let mut remaining = bytes;
+        while !remaining.is_empty() {
+            if state.chunks.back().is_none_or(|chunk| chunk.len() == CHUNK) {
+                state.chunks.push_back(Vec::new());
+            }
+            let tail = state.chunks.back_mut().unwrap();
+            let count = remaining.len().min(CHUNK - tail.len());
+            tail.extend_from_slice(&remaining[..count]);
+            remaining = &remaining[count..];
+        }
+        drop(state);
+        self.ready.notify_one();
+    }
+    fn detach(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.detached = true;
+        state.chunks.clear();
+    }
+}
+impl ResponseBody {
+    /// Cache-eligible responses continue downloading without guest demand. The
+    /// owner watch remains external: closing it cancels even a collected body.
+    pub fn background_cache(self, owner: tokio::sync::watch::Receiver<bool>) -> Self {
+        self.background_cache_with_observer(owner, None)
+    }
+    pub fn background_cache_with_observer(
+        self,
+        mut owner: tokio::sync::watch::Receiver<bool>,
+        observer: Option<ResponseChunkObserver>,
+    ) -> Self {
+        if self.cache_store.is_none() {
+            return self;
+        }
+        let (cancel, mut canceled) = tokio::sync::watch::channel(false);
+        let background = std::sync::Arc::new(BackgroundBody {
+            state: std::sync::Mutex::new(BackgroundState::default()),
+            ready: tokio::sync::Notify::new(),
+            cancel,
+        });
+        let queued = background.clone();
+        let stream = futures_util::stream::unfold(queued, |queued| async move {
+            loop {
+                let ready = queued.ready.notified();
+                {
+                    let mut state = queued.state.lock().unwrap();
+                    if let Some(bytes) = state.chunks.pop_front() {
+                        return Some((Ok(bytes::Bytes::from(bytes)), queued.clone()));
+                    }
+                    if state.done {
+                        return state.error.take().map(|error| (Err(error), queued.clone()));
+                    }
+                }
+                ready.await;
+            }
+        });
+        let consumer = Self {
+            stream: Some(Box::pin(stream)),
+            received: 0,
+            max_bytes: self.max_bytes,
+            trace_id: self.trace_id,
+            url: self.url.clone(),
+            status: self.status,
+            content_type: self.content_type.clone(),
+            trace_body: None,
+            trace_prefix: self.trace_prefix,
+            trace_skip_prefix: 0,
+            cache_store: None,
+            background: Some(background.clone()),
+        };
+        tokio::spawn(async move {
+            let mut transport = self;
+            let error = loop {
+                let chunk = if *owner.borrow() || *canceled.borrow() {
+                    None
+                } else {
+                    tokio::select! {
+                        biased;
+                        _ = owner.changed() => None,
+                        _ = canceled.changed() => None,
+                        chunk = transport.next_chunk() => Some(chunk),
+                    }
+                };
+                match chunk {
+                    Some(Ok(Some(bytes))) => {
+                        if let Some(observer) = &observer {
+                            observer(&bytes);
+                        }
+                        background.push(&bytes);
+                    }
+                    Some(Ok(None)) => break None,
+                    Some(Err(error)) => break Some(error),
+                    None => {
+                        transport.cancel();
+                        break Some(HttpError::new("Response body canceled", ErrorCode::Network));
+                    }
+                }
+            };
+            let mut state = background.state.lock().unwrap();
+            state.done = true;
+            state.failed = error.is_some();
+            state.error = error;
+            drop(state);
+            background.ready.notify_one();
+        });
+        consumer
+    }
+    /// Collection releases queued guest bytes while the native cache fill keeps
+    /// its creation-owner cancellation watch. No JS or IO occurs here.
+    pub fn detach_cache_consumer(&mut self) -> bool {
+        let Some(background) = &self.background else {
+            return false;
+        };
+        background.detach();
+        true
+    }
+    pub fn background_complete(&self) -> bool {
+        self.background
+            .as_ref()
+            .is_some_and(|body| body.state.lock().unwrap().done)
+    }
+    pub fn has_background_cache(&self) -> bool {
+        self.background.is_some()
+    }
+    /// Completed transport status for host logging; None means still receiving.
+    pub fn background_status(&self) -> Option<bool> {
+        let state = self.background.as_ref()?.state.lock().unwrap();
+        state.done.then_some(!state.failed)
+    }
+    pub async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, HttpError> {
+        let Some(stream) = self.stream.as_mut() else {
+            return Ok(None);
+        };
+        let chunk = loop {
+            match stream.next().await {
+                // HTTP/2 can expose empty DATA frames. They carry no body
+                // bytes and cannot be enqueued into a Web byte stream.
+                Some(Ok(chunk)) if chunk.is_empty() => continue,
+                Some(Ok(chunk)) => break chunk,
+                Some(Err(error)) => {
+                    self.cancel();
+                    return Err(error);
+                }
+                None => {
+                    self.stream = None;
+                    self.finish_trace(false);
+                    if let Some(pending) = self.cache_store.take() {
+                        pending.cache.store(pending.entry);
+                    }
+                    return Ok(None);
+                }
+            }
+        };
+        if chunk.len() > self.max_bytes.saturating_sub(self.received) {
+            self.cancel();
+            return Err(HttpError::new(
+                format!("body exceeds maxBytes (> {})", self.max_bytes),
+                ErrorCode::BodyTooLarge,
+            ));
+        }
+        self.received += chunk.len();
+        if let Some(pending) = self.cache_store.as_mut() {
+            let skip = pending.skip_prefix.min(chunk.len());
+            pending.skip_prefix -= skip;
+            pending.entry.body.extend_from_slice(&chunk[skip..]);
+        }
+        if let Some(body) = self.trace_body.as_mut() {
+            let skip = self.trace_skip_prefix.min(chunk.len());
+            self.trace_skip_prefix -= skip;
+            body.extend_from_slice(&chunk[skip..])
+        }
+        Ok(Some(chunk.to_vec()))
+    }
+    /// Cancel the retained transport and discard an incomplete cache entry.
+    pub fn cancel(&mut self) {
+        if let Some(background) = &self.background {
+            background.cancel.send_replace(true);
+            background.detach();
+        }
+        self.stream = None;
+        self.cache_store = None;
+        self.finish_trace(true);
+    }
+    fn finish_trace(&mut self, incomplete: bool) {
+        let Some(bytes) = self.trace_body.take() else {
+            return;
+        };
+        let charset = detect_charset(&self.content_type, &bytes[..bytes.len().min(1024)]);
+        let html = decode(&bytes, &charset);
+        crate::http_trace::record(
+            || serde_json::json!({"event":"body","id":self.trace_id,"url":self.url,"status":self.status,"content_type":self.content_type,"body":html,"streamed":true,"incomplete":incomplete,"cache_prefix_bytes":self.trace_prefix}),
+        );
+    }
+}
+impl Drop for ResponseBody {
+    fn drop(&mut self) {
+        if let Some(background) = &self.background {
+            background.detach();
+        }
+        self.finish_trace(true)
+    }
+}
+/// Response metadata becomes available before the body has finished downloading.
+pub struct StreamingResult {
+    pub body: ResponseBody,
+    pub headers: Vec<(String, String)>,
+    pub final_url: String,
+    pub status: u16,
+    pub status_text: String,
     pub redirected: bool,
     pub content_type: String,
 }
 
 pub type RequestPolicy<'a> = dyn Fn(&str, bool) -> bool + Send + Sync + 'a;
+pub type ResponseSideEffects<'a> =
+    dyn Fn(&RequestContext, &str, &[(String, String)]) + Send + Sync + 'a;
 pub type ResponsePolicy<'a> =
     dyn Fn(&RequestContext, &str, &[(String, String)]) -> bool + Send + Sync + 'a;
+#[derive(Clone)]
+struct NetworkResponseEffects {
+    url: String,
+    headers: Vec<(String, String)>,
+}
 
 pub type BeforeRequestFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), HttpError>> + Send>>;
@@ -108,6 +369,9 @@ pub struct FetchOptions<'a> {
     pub request_policy: Option<&'a RequestPolicy<'a>>,
     /// A native embedder response policy checked before following redirects.
     pub response_policy: Option<&'a ResponsePolicy<'a>>,
+    /// Pure native effects after credential admission, before guest response policy.
+    /// Raw network headers, including revalidation; cached headers never replay it.
+    pub response_side_effects: Option<&'a ResponseSideEffects<'a>>,
     /// Async native authorization before each request, using the rewritten hop's
     /// context, URL, method and authored headers (for example CORS preflight).
     pub before_request: Option<&'a BeforeRequest<'a>>,
@@ -115,6 +379,10 @@ pub struct FetchOptions<'a> {
     pub client_hints: Option<&'a ClientHints>,
     pub method: Option<String>,
     pub body: Option<String>,
+    /// Binary payload wins over the legacy UTF-8 string when present.
+    pub body_bytes: Option<Vec<u8>>,
+    /// One-shot HTTP/2 request body; never replayed by a redirect or retry.
+    pub upload_body: Option<crate::upload_body::UploadBody>,
     pub max_bytes: Option<usize>,
     pub allow_non_html: bool,
     pub max_redirects: Option<usize>,
@@ -122,6 +390,11 @@ pub struct FetchOptions<'a> {
     pub redirect: Option<RedirectMode>,
     pub jar: Option<&'a mut CookieJar>,
     pub cache: Option<&'a mut ResponseCache>,
+    /// Browser HTTP cache, independent of the crawler's legacy validator cache.
+    pub http_cache: Option<&'a HttpCache>,
+    pub cache_mode: CacheMode,
+    /// Native top-level site / frame site / anonymous-context partition.
+    pub cache_partition: String,
     /// Shared client for connection reuse (see [`build_client`]); built per-call
     /// when `None`.
     pub client: Option<&'a http::Client>,
@@ -373,6 +646,154 @@ pub fn client_builder() -> http::ClientBuilder {
     )
 }
 
+/// Native report client: no redirects or browserless navigation header defaults.
+#[derive(Clone)]
+pub struct ReportClient {
+    legacy: http::Client,
+    #[cfg(not(feature = "impersonate"))]
+    modern: ModernReportClient,
+}
+#[cfg(not(feature = "impersonate"))]
+type ModernReportClient = hyper_util::client::legacy::Client<
+    hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+    http_body_util::Full<bytes::Bytes>,
+>;
+#[cfg(not(feature = "impersonate"))]
+fn report_https_client(der: Option<&[u8]>) -> Result<ModernReportClient, HttpError> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(der) = der {
+        roots
+            .add(rustls::pki_types::CertificateDer::from(der.to_vec()))
+            .map_err(|error| err(error, ErrorCode::Network))?;
+    }
+    let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|error| err(error, ErrorCode::Network))?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let connector = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(config)
+        .https_or_http()
+        .enable_http1()
+        .build();
+    Ok(
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+            .build(connector),
+    )
+}
+pub fn build_report_client() -> ReportClient {
+    ReportClient {
+        legacy: build_browser_client(),
+        #[cfg(not(feature = "impersonate"))]
+        modern: report_https_client(None).expect("native report TLS roots"),
+    }
+}
+/// Native transport builder with an embedder-supplied DER trust anchor.
+/// Certificate verification remains enabled; the factory is never guest-visible.
+pub fn client_builder_with_trust(der: &[u8]) -> Result<http::ClientBuilder, HttpError> {
+    let builder = client_builder().redirect(http::redirect::Policy::none());
+    #[cfg(feature = "impersonate")]
+    let builder = builder.tls_cert_store(
+        http::tls::trust::CertStore::builder()
+            .add_der_cert(der)
+            .build()
+            .map_err(|error| err(error, ErrorCode::Network))?,
+    );
+    #[cfg(not(feature = "impersonate"))]
+    let builder = builder.add_root_certificate(
+        http::Certificate::from_der(der).map_err(|error| err(error, ErrorCode::Network))?,
+    );
+    Ok(builder)
+}
+/// Report client with an embedder-supplied DER trust anchor; verification remains enabled.
+pub fn report_client_with_trust(der: &[u8]) -> Result<ReportClient, HttpError> {
+    Ok(ReportClient {
+        legacy: client_builder_with_trust(der)?
+            .build()
+            .map_err(|error| err(error, ErrorCode::Network))?,
+        #[cfg(not(feature = "impersonate"))]
+        modern: report_https_client(Some(der))?,
+    })
+}
+pub struct ReportResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+}
+/// Send raw native bytes and discard the response at header arrival. Modern
+/// reports use controlled Hyper headers because reqwest always supplies Accept.
+pub async fn send_report_request(
+    client: &ReportClient,
+    method: &str,
+    url: &str,
+    headers: &BTreeMap<String, String>,
+    body: Vec<u8>,
+    modern: bool,
+) -> Result<ReportResponse, HttpError> {
+    let trace_id = crate::http_trace::next_id();
+    crate::http_trace::record(
+        || serde_json::json!({"event":"request","id":trace_id.0,"url":url,"method":method,"explicit_headers":headers,"body_bytes":body,"destination":"report","headerScope":"native report headers; transport-added headers absent"}),
+    );
+    #[cfg(feature = "impersonate")]
+    let _ = modern;
+    #[cfg(not(feature = "impersonate"))]
+    if modern {
+        let mut request = ::http::Request::builder().method(method).uri(url);
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        let request = request
+            .body(http_body_util::Full::new(bytes::Bytes::from(body)))
+            .map_err(|error| err(error, ErrorCode::Network))?;
+        let response = client
+            .modern
+            .request(request)
+            .await
+            .map_err(|error| err(error, ErrorCode::Network))?;
+        crate::http_trace::record(
+            || serde_json::json!({"event":"response","id":trace_id.0,"url":url,"status":response.status().as_u16(),"protocol":format!("{:?}",response.version()),"headers":response.headers().iter().map(|(key,value)|(key.as_str(),value.to_str().unwrap_or("<binary>"))).collect::<Vec<_>>() }),
+        );
+        return Ok(ReportResponse {
+            status: response.status().as_u16(),
+            headers: response
+                .headers()
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.to_string(),
+                        value.to_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect(),
+        });
+    }
+    let method_value = http::Method::from_bytes(method.as_bytes())
+        .map_err(|error| err(error, ErrorCode::Network))?;
+    let response = apply_headers(client.legacy.request(method_value, url), headers)
+        .body(body)
+        .send()
+        .await
+        .map_err(|error| err(error, ErrorCode::Network))?;
+    crate::http_trace::record(
+        || serde_json::json!({"event":"response","id":trace_id.0,"url":url,"final_url":final_url(&response),"status":response.status().as_u16(),"protocol":format!("{:?}",response.version()),"headers":response.headers().iter().map(|(key,value)|(key.as_str(),value.to_str().unwrap_or("<binary>"))).collect::<Vec<_>>() }),
+    );
+    Ok(ReportResponse {
+        status: response.status().as_u16(),
+        headers: response
+            .headers()
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect(),
+    })
+}
+
 pub(crate) fn build_browser_client() -> http::Client {
     emulate(
         http::Client::builder()
@@ -418,10 +839,21 @@ async fn send(
     url: &str,
     headers: &BTreeMap<String, String>,
     body: &Option<String>,
+    body_bytes: &Option<Vec<u8>>,
+    upload: Option<crate::upload_body::UploadBody>,
 ) -> Result<http::Response, HttpError> {
     let m = http::Method::from_bytes(method.as_bytes()).map_err(|e| err(e, ErrorCode::Network))?;
     let mut req = apply_headers(cl.request(m, url), headers);
-    if let Some(b) = body {
+    let streaming_upload = upload.is_some();
+    if let Some(upload) = upload {
+        #[cfg(not(feature = "impersonate"))]
+        {
+            req = req.version(http::Version::HTTP_2);
+        }
+        req = req.body(upload.into_body()?);
+    } else if let Some(bytes) = body_bytes {
+        req = req.body(bytes.clone());
+    } else if let Some(b) = body {
         req = req.body(b.clone());
     }
     // Include the URL in transport errors — reqwest's "builder error" (e.g. a
@@ -430,7 +862,8 @@ async fn send(
     crate::http_trace::record(|| {
         serde_json::json!({
             "event": "request", "id":trace_id.0, "url": url, "method": method,
-            "explicit_headers": headers, "body": body,
+            "explicit_headers": headers, "body": body, "body_bytes": body_bytes,
+            "body_streaming": streaming_upload,
             "headerScope": "application headers including context and hints; transport-added headers absent",
         })
     });
@@ -505,10 +938,15 @@ fn header_value(res: &http::Response, name: &str) -> String {
 fn ingest_set_cookie(opts: &mut FetchOptions, res: &http::Response, final_url: &str) {
     if let Some(hints) = opts.client_hints {
         let accept_ch = list_header(res, "accept-ch");
-        let clear = list_header(res, "clear-site-data")
-            .unwrap_or_default()
-            .split(',')
-            .any(|item| matches!(item.trim(), "\"clientHints\"" | "\"*\""));
+        let sends_credentials = opts
+            .context
+            .as_ref()
+            .is_none_or(|context| context.sends_credentials(final_url));
+        let clear = sends_credentials
+            && list_header(res, "clear-site-data")
+                .unwrap_or_default()
+                .split(',')
+                .any(|item| matches!(item.trim(), "\"clientHints\"" | "\"cache\"" | "\"*\""));
         hints.observe(final_url, accept_ch.as_deref(), clear);
     }
     if opts
@@ -517,6 +955,10 @@ fn ingest_set_cookie(opts: &mut FetchOptions, res: &http::Response, final_url: &
         .is_some_and(|ctx| !ctx.sends_credentials(final_url))
     {
         return;
+    }
+    if let Some(cache) = opts.http_cache {
+        let clear = list_header(res, "clear-site-data").unwrap_or_default();
+        cache.clear_response(final_url, &clear);
     }
     let now = opts.now;
     let Some(jar) = opts.jar.as_mut() else { return };
@@ -542,6 +984,34 @@ fn gate_html_type(opts: &FetchOptions, res: &http::Response) -> Result<(), HttpE
     Ok(())
 }
 
+fn status_text(response: &http::Response) -> String {
+    if let Some(cached) = response.extensions().get::<Cached>() {
+        return cached.0.clone();
+    }
+    if !matches!(
+        response.version(),
+        http::Version::HTTP_09 | http::Version::HTTP_10 | http::Version::HTTP_11
+    ) {
+        return String::new();
+    }
+    #[cfg(feature = "impersonate")]
+    type Phrase = wreq_proto::ext::ReasonPhrase;
+    #[cfg(not(feature = "impersonate"))]
+    type Phrase = hyper::ext::ReasonPhrase;
+    if let Some(phrase) = response.extensions().get::<Phrase>() {
+        return phrase
+            .as_ref()
+            .iter()
+            .map(|byte| char::from(*byte))
+            .collect();
+    }
+    response
+        .status()
+        .canonical_reason()
+        .unwrap_or("")
+        .to_owned()
+}
+
 // Turn a settled response into the FetchResult: gate content-type, then read +
 // charset-decode the body under the byte cap.
 async fn finish(
@@ -551,7 +1021,13 @@ async fn finish(
     redirected: bool,
     max_bytes: usize,
 ) -> Result<FetchResult, HttpError> {
+    let cache_store = res.extensions().get::<PendingStore>().cloned();
+    let trace_prefix = res
+        .extensions()
+        .get::<TracePrefix>()
+        .map_or(0, |prefix| prefix.0);
     let status = res.status().as_u16();
+    let status_text = status_text(&res);
     let headers = res
         .headers()
         .iter()
@@ -577,6 +1053,7 @@ async fn finish(
                 html,
                 final_url,
                 status,
+                status_text,
                 redirected,
                 content_type: header_value(&res, "content-type"),
             });
@@ -587,12 +1064,16 @@ async fn finish(
     let last_modified = opt_header(&res, "last-modified");
     let ct = header_value(&res, "content-type");
     let bytes = read_capped(res, max_bytes).await?;
+    if let Some(mut pending) = cache_store {
+        pending.entry.body = bytes[pending.skip_prefix.min(bytes.len())..].to_vec();
+        pending.cache.store(pending.entry);
+    }
     let charset = detect_charset(&ct, &bytes[..bytes.len().min(1024)]);
     let html = decode(&bytes, &charset);
     crate::http_trace::record(|| {
         serde_json::json!({
             "event": "body", "id":trace_id, "url": final_url, "status": status,
-            "content_type": ct, "body": html,
+            "content_type": ct, "body": if trace_prefix==0 { html.clone() } else { decode(&bytes[trace_prefix.min(bytes.len())..],&charset) }, "cache_prefix_bytes":trace_prefix,
         })
     });
     if let Some(cache) = opts.cache.as_mut() {
@@ -604,6 +1085,7 @@ async fn finish(
         html,
         final_url,
         status,
+        status_text,
         redirected,
         content_type: ct,
     })
@@ -633,6 +1115,7 @@ struct Hop {
     url: String,
     method: String,
     body: Option<String>,
+    body_bytes: Option<Vec<u8>>,
 }
 
 // Manual redirect following (when `max_redirects` is set): re-derives the Cookie
@@ -648,19 +1131,334 @@ async fn follow_manually(
     finish(opts, res, final_url, redirected, max_bytes).await
 }
 
+struct RangeFill {
+    entry: crate::http_cache::Entry,
+    range: ByteRange,
+    prefix: Vec<u8>,
+    is_range: bool,
+    validator: String,
+}
+fn finish_range_response(
+    opts: &FetchOptions<'_>,
+    hop: &Hop,
+    headers: &BTreeMap<String, String>,
+    response: http::Response,
+    fill: RangeFill,
+    generation: u64,
+) -> Result<http::Response, HttpError> {
+    let actual_headers = response
+        .headers()
+        .iter()
+        .filter_map(|(key, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (key.as_str().to_owned(), value.to_owned()))
+        })
+        .collect::<Vec<_>>();
+    let context = opts.context.clone().unwrap_or_default();
+    if opts
+        .response_policy
+        .is_some_and(|allowed| !allowed(&context, &hop.url, &actual_headers))
+    {
+        return Err(HttpError::new(
+            "Response blocked by native document policy",
+            ErrorCode::Network,
+        ));
+    }
+    let expected_start = fill.range.start + fill.prefix.len();
+    let span = ByteRange::content(&header_value(&response, "content-range"));
+    if header_value(&response, "etag") != fill.validator
+        || span.is_none_or(|(range, total)| {
+            range.start != expected_start
+                || range.end != fill.range.end
+                || total != fill.entry.selected_range(None).unwrap().end
+        })
+    {
+        return Err(HttpError::new(
+            "Invalid conditional range response",
+            ErrorCode::Network,
+        ));
+    }
+    let raw_effects = response
+        .extensions()
+        .get::<NetworkResponseEffects>()
+        .cloned();
+    let trace_id = response
+        .extensions()
+        .get::<crate::http_trace::RequestId>()
+        .cloned();
+    let mut pending = opts.http_cache.and_then(|cache| {
+        cache.pending(
+            &opts.cache_partition,
+            &hop.url,
+            headers,
+            &response,
+            status_text(&response),
+            generation,
+        )
+    });
+    if let Some(pending) = &mut pending {
+        pending.skip_prefix = fill.prefix.len();
+    }
+    let mut entry = fill.entry.response_metadata(fill.range, fill.is_range);
+    if fill.prefix.is_empty() {
+        entry.headers = actual_headers;
+        entry = entry.response_metadata(fill.range, fill.is_range);
+    }
+    let prefix_len = fill.prefix.len();
+    let prefix = (!fill.prefix.is_empty()).then_some(Ok::<bytes::Bytes, http::Error>(
+        bytes::Bytes::from(fill.prefix),
+    ));
+    let stream = futures_util::stream::iter(prefix).chain(response.bytes_stream());
+    let mut response = entry.response_body(http::Body::wrap_stream(stream));
+    response.extensions_mut().insert(TracePrefix(prefix_len));
+    if let Some(pending) = pending {
+        response.extensions_mut().insert(pending);
+    }
+    if let Some(effects) = raw_effects {
+        response.extensions_mut().insert(effects);
+    }
+    if let Some(trace_id) = trace_id {
+        response.extensions_mut().insert(trace_id);
+    }
+    Ok(response)
+}
+
+async fn cached_request(
+    opts: &mut FetchOptions<'_>,
+    hop: &Hop,
+    client: &http::Client,
+) -> Result<http::Response, HttpError> {
+    if let Some(before) = opts.before_request {
+        before(
+            opts.context.clone().unwrap_or_default(),
+            hop.url.clone(),
+            hop.method.clone(),
+            opts.headers.clone(),
+        )
+        .await?;
+    }
+    let mut headers = build_headers(&hop.url, &hop.method, opts);
+    let cache = opts.http_cache;
+    let generation = cache.map_or(0, HttpCache::generation);
+    let eligible = matches!(hop.method.as_str(), "GET" | "HEAD");
+    let range_header = (hop.method == "GET")
+        .then(|| headers.get("range").cloned())
+        .flatten();
+    let mode = if opts.http_cache.is_some()
+        && opts.cache_mode == CacheMode::Default
+        && [
+            "if-none-match",
+            "if-modified-since",
+            "if-unmodified-since",
+            "if-match",
+            "if-range",
+        ]
+        .iter()
+        .any(|name| headers.contains_key(*name))
+    {
+        CacheMode::NoStore
+    } else {
+        opts.cache_mode
+    };
+    if mode == CacheMode::OnlyIfCached && (!eligible || range_header.is_some()) {
+        return Err(HttpError::new("HTTP cache miss", ErrorCode::Network));
+    }
+    let candidate = if eligible && !matches!(mode, CacheMode::NoStore | CacheMode::Reload) {
+        cache.and_then(|cache| cache.lookup(&opts.cache_partition, &hop.url, &headers))
+    } else {
+        None
+    };
+    let reusable = candidate.as_ref().and_then(|(entry, matches)| {
+        (*matches
+            && (matches!(mode, CacheMode::ForceCache | CacheMode::OnlyIfCached)
+                || mode == CacheMode::Default && entry.fresh())
+            && !(mode == CacheMode::OnlyIfCached && entry.sparse()))
+        .then(|| entry.range_response(range_header.as_deref()))
+        .flatten()
+    });
+    let fill = candidate.as_ref().and_then(|(entry, matches)| {
+        if !*matches || !entry.sparse() || !entry.fresh() && mode == CacheMode::Default {
+            return None;
+        }
+        let range = entry.selected_range(range_header.as_deref())?;
+        let prefix = entry.prefix(range);
+        (prefix.len() < range.end - range.start).then_some(RangeFill {
+            entry: entry.clone(),
+            range,
+            prefix,
+            is_range: range_header.is_some(),
+            validator: entry.strong_validator()?,
+        })
+    });
+    let mut res = if let Some(mut entry) = reusable {
+        if hop.method == "HEAD" {
+            entry.body.clear();
+        }
+        entry.response()
+    } else {
+        if mode == CacheMode::OnlyIfCached {
+            return Err(HttpError::new("HTTP cache miss", ErrorCode::Network));
+        }
+        if let Some(fill) = &fill {
+            headers.insert(
+                "range".into(),
+                format!(
+                    "bytes={}-{}",
+                    fill.range.start + fill.prefix.len(),
+                    fill.range.end - 1
+                ),
+            );
+            headers.insert("if-range".into(), fill.validator.clone());
+        } else if range_header.is_none() {
+            if let Some((entry, _)) = &candidate {
+                entry.validators(&mut headers);
+            }
+        }
+        match mode {
+            CacheMode::Reload | CacheMode::NoStore => {
+                headers
+                    .entry("cache-control".into())
+                    .or_insert("no-cache".into());
+                headers.entry("pragma".into()).or_insert("no-cache".into());
+            }
+            CacheMode::NoCache => {
+                headers
+                    .entry("cache-control".into())
+                    .or_insert("max-age=0".into());
+            }
+            _ => {}
+        }
+        let mut response = send(
+            client,
+            &hop.method,
+            &hop.url,
+            &headers,
+            &hop.body,
+            &hop.body_bytes,
+            opts.upload_body.take(),
+        )
+        .await?;
+        if opts.response_side_effects.is_some() {
+            let effects = NetworkResponseEffects {
+                url: final_url(&response),
+                headers: response
+                    .headers()
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        value
+                            .to_str()
+                            .ok()
+                            .map(|value| (key.as_str().to_owned(), value.to_owned()))
+                    })
+                    .collect(),
+            };
+            response.extensions_mut().insert(effects);
+        }
+        let raw_effects = response
+            .extensions()
+            .get::<NetworkResponseEffects>()
+            .cloned();
+        ingest_set_cookie(opts, &response, &hop.url);
+        if let Some(fill) = fill.filter(|_| response.status().as_u16() == 206) {
+            return finish_range_response(opts, hop, &headers, response, fill, generation);
+        }
+        if response.status().as_u16() == 304 {
+            if let Some((mut entry, _)) = candidate {
+                let response_headers = response
+                    .headers()
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        value
+                            .to_str()
+                            .ok()
+                            .map(|value| (key.as_str().to_owned(), value.to_owned()))
+                    })
+                    .collect::<Vec<_>>();
+                entry.merge(&response_headers, &headers);
+                let mut prepared =
+                    entry
+                        .range_response(range_header.as_deref())
+                        .ok_or_else(|| {
+                            HttpError::new(
+                                "Incomplete cached response for revalidation",
+                                ErrorCode::Network,
+                            )
+                        })?;
+                if let Some(cache) = cache {
+                    cache.store(entry);
+                }
+                if hop.method == "HEAD" {
+                    prepared.body.clear();
+                }
+                let mut response = prepared.response();
+                if let Some(effects) = raw_effects {
+                    response.extensions_mut().insert(effects);
+                }
+                response
+            } else {
+                response
+            }
+        } else {
+            response
+        }
+    };
+    if !matches!(hop.method.as_str(), "GET" | "HEAD" | "OPTIONS" | "TRACE")
+        && res.status().as_u16() < 400
+    {
+        if let Some(cache) = cache {
+            cache.invalidate(&opts.cache_partition, &hop.url);
+        }
+    }
+    if hop.method == "GET"
+        && eligible
+        && mode != CacheMode::NoStore
+        && res.extensions().get::<Cached>().is_none()
+    {
+        if let Some(pending) = cache.and_then(|cache| {
+            cache.pending(
+                &opts.cache_partition,
+                &hop.url,
+                &headers,
+                &res,
+                status_text(&res),
+                generation,
+            )
+        }) {
+            res.extensions_mut().insert(pending);
+        }
+    }
+    Ok(res)
+}
+
 async fn follow_manually_response(
     opts: &mut FetchOptions<'_>,
     start: &str,
     max_redirects: usize,
 ) -> Result<(http::Response, String, bool), HttpError> {
+    let streaming_upload = opts.upload_body.is_some();
+    if streaming_upload && !start.starts_with("https:") {
+        return Err(HttpError::new(
+            "Streaming requests require secure HTTP/2",
+            ErrorCode::Network,
+        ));
+    }
     let cl = match opts.client_hints {
-        Some(hints) => hints.manual_client(),
+        Some(hints) if streaming_upload => hints.upload_client()?,
+        Some(hints) => hints.manual_client()?,
+        None if streaming_upload => {
+            crate::upload_body::guard(client_builder().redirect(http::redirect::Policy::none()))
+                .build()
+                .map_err(|e| err(e, ErrorCode::Network))?
+        }
         None => client(http::redirect::Policy::none()).map_err(|e| err(e, ErrorCode::Network))?,
     };
     let mut hop = Hop {
         url: start.to_string(),
         method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
         body: opts.body.clone(),
+        body_bytes: opts.body_bytes.clone(),
     };
     for redirects in 0.. {
         if opts
@@ -685,19 +1483,17 @@ async fn follow_manually_response(
                 ErrorCode::Network,
             ));
         }
-        if let Some(before) = opts.before_request {
-            before(
-                opts.context.clone().unwrap_or_default(),
-                hop.url.clone(),
-                hop.method.clone(),
-                opts.headers.clone(),
-            )
-            .await?;
-        }
-        let headers = build_headers(&hop.url, &hop.method, opts);
-        let res = send(&cl, &hop.method, &hop.url, &headers, &hop.body).await?;
+        let mut res = cached_request(opts, &hop, &cl).await?;
         let final_url = final_url(&res);
-        ingest_set_cookie(opts, &res, &final_url);
+        if let (Some(effects), Some(observer)) = (
+            res.extensions().get::<NetworkResponseEffects>(),
+            opts.response_side_effects,
+        ) {
+            let context = opts.context.clone().unwrap_or_default();
+            if context.sends_credentials(&effects.url) {
+                observer(&context, &effects.url, &effects.headers);
+            }
+        }
         if let Some(allowed) = opts.response_policy {
             let context = opts.context.clone().unwrap_or_default();
             let headers = res
@@ -717,6 +1513,11 @@ async fn follow_manually_response(
                 ));
             }
         }
+        if res.status().as_u16() == 204 {
+            if let Some(pending) = res.extensions_mut().remove::<PendingStore>() {
+                pending.cache.store(pending.entry);
+            }
+        }
         match redirect_location(&res) {
             Some(_) if opts.redirect == Some(RedirectMode::Error) => {
                 return Err(HttpError::new(
@@ -729,6 +1530,13 @@ async fn follow_manually_response(
             }
             Some(loc) if redirects < max_redirects => {
                 let next = advance(&hop, &res, &loc)?;
+                if streaming_upload && next.method != "GET" && res.status().as_u16() != 303 {
+                    return Err(HttpError::new(
+                        "Cannot replay a streaming request body",
+                        ErrorCode::Network,
+                    ));
+                }
+
                 if !crate::request_context::same_origin(&hop.url, &next.url) {
                     opts.headers
                         .retain(|name, _| !name.eq_ignore_ascii_case("authorization"));
@@ -755,6 +1563,10 @@ async fn follow_manually_response(
                     }
                     context.follow_redirect(&hop.url, &next.url);
                 }
+                if let Some(mut pending) = res.extensions_mut().remove::<PendingStore>() {
+                    pending.entry.body = read_capped(res, DEFAULT_MAX_BYTES).await?.to_vec();
+                    pending.cache.store(pending.entry);
+                }
                 hop = next;
             }
             Some(_) if opts.redirect == Some(RedirectMode::Follow) => {
@@ -772,9 +1584,13 @@ async fn follow_manually_response(
 fn advance(hop: &Hop, res: &http::Response, loc: &str) -> Result<Hop, HttpError> {
     let status = res.status().as_u16();
     let method = next_method(status, &hop.method);
-    let next = url::Url::parse(&hop.url)
-        .and_then(|b| b.join(loc))
-        .map_err(|e| err(e, ErrorCode::Network))?;
+    let current = url::Url::parse(&hop.url).map_err(|error| err(error, ErrorCode::Network))?;
+    let mut next = current
+        .join(loc)
+        .map_err(|error| err(error, ErrorCode::Network))?;
+    if !loc.contains('#') {
+        next.set_fragment(current.fragment());
+    }
     let body = if method == hop.method {
         hop.body.clone()
     } else {
@@ -782,6 +1598,11 @@ fn advance(hop: &Hop, res: &http::Response, loc: &str) -> Result<Hop, HttpError>
     };
     Ok(Hop {
         url: next.to_string(),
+        body_bytes: if method == hop.method {
+            hop.body_bytes.clone()
+        } else {
+            None
+        },
         method,
         body,
     })
@@ -801,7 +1622,16 @@ async fn follow_auto(
     };
     let method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
     let headers = build_headers(url, &method, opts);
-    let res = send(&cl, &method, url, &headers, &opts.body.clone()).await?;
+    let res = send(
+        &cl,
+        &method,
+        url,
+        &headers,
+        &opts.body,
+        &opts.body_bytes,
+        None,
+    )
+    .await?;
     let final_url = final_url(&res);
     let redirected = final_url != *url;
     ingest_set_cookie(opts, &res, &final_url);
@@ -818,17 +1648,82 @@ pub async fn fetch_html(url: &str, mut opts: FetchOptions<'_>) -> Result<FetchRe
         Some(n) => follow_manually(&mut opts, url, n, max_bytes).await,
         // Negotiated hints and browser context must be re-derived for every
         // redirect origin; a backend's automatic follow cannot do that.
-        None if opts.redirect.is_some()
+        None if opts.upload_body.is_some()
+            || opts.redirect.is_some()
+            || opts.http_cache.is_some()
             || opts.client_hints.is_some()
             || opts.context.is_some()
             || opts.request_policy.is_some()
             || opts.response_policy.is_some()
+            || opts.response_side_effects.is_some()
             || opts.before_request.is_some() =>
         {
             follow_manually(&mut opts, url, 20, max_bytes).await
         }
         None => follow_auto(&mut opts, url, max_bytes).await,
     }
+}
+
+/// Fetch response headers and retain the real reqwest/wreq stream for pull reads.
+/// Redirect, CORS/embedder, cookie and hint policies use the buffered path's exact
+/// manual-hop implementation; no second transport or unchecked redirect path exists.
+pub async fn fetch_stream(
+    url: &str,
+    mut opts: FetchOptions<'_>,
+) -> Result<StreamingResult, HttpError> {
+    let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
+    let redirects = opts.max_redirects.unwrap_or(20);
+    let (res, final_url, redirected) = follow_manually_response(&mut opts, url, redirects).await?;
+    gate_html_type(&opts, &res)?;
+    let status = res.status().as_u16();
+    let status_text = status_text(&res);
+    let content_type = header_value(&res, "content-type");
+    let headers = res
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect();
+    let trace_id = res
+        .extensions()
+        .get::<crate::http_trace::RequestId>()
+        .map(|id| id.0)
+        .unwrap_or(0);
+    let cache_store = res.extensions().get::<PendingStore>().cloned();
+    let trace_prefix = res
+        .extensions()
+        .get::<TracePrefix>()
+        .map_or(0, |prefix| prefix.0);
+    let stream = res
+        .bytes_stream()
+        .map(|chunk| chunk.map_err(|error| HttpError::new(error.to_string(), ErrorCode::Network)));
+    let body = ResponseBody {
+        stream: Some(Box::pin(stream)),
+        received: 0,
+        max_bytes,
+        trace_id,
+        url: final_url.clone(),
+        status,
+        content_type: content_type.clone(),
+        trace_body: (trace_id != 0).then(Vec::new),
+        trace_prefix,
+        trace_skip_prefix: trace_prefix,
+        cache_store,
+        background: None,
+    };
+    Ok(StreamingResult {
+        body,
+        headers,
+        final_url,
+        status,
+        status_text,
+        redirected,
+        content_type,
+    })
 }
 
 /// Fetch a URL and return its **raw** response bytes (no charset decode), the
@@ -844,16 +1739,23 @@ pub async fn fetch_bytes(
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     if opts.redirect.is_some()
         || opts.max_redirects.is_some()
+        || opts.http_cache.is_some()
         || opts.client_hints.is_some()
         || opts.context.is_some()
         || opts.request_policy.is_some()
         || opts.response_policy.is_some()
+        || opts.response_side_effects.is_some()
         || opts.before_request.is_some()
     {
         let redirects = opts.max_redirects.unwrap_or(20);
         let (res, final_url, _) = follow_manually_response(&mut opts, url, redirects).await?;
         let status = res.status().as_u16();
+        let cache_store = res.extensions().get::<PendingStore>().cloned();
         let bytes = read_capped(res, max_bytes).await?;
+        if let Some(mut pending) = cache_store {
+            pending.entry.body = bytes[pending.skip_prefix.min(bytes.len())..].to_vec();
+            pending.cache.store(pending.entry);
+        }
         return Ok((final_url, bytes, status));
     }
     let cl = match opts.client {
@@ -864,7 +1766,16 @@ pub async fn fetch_bytes(
     };
     let method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
     let headers = build_headers(url, &method, &opts);
-    let res = send(&cl, &method, url, &headers, &opts.body.clone()).await?;
+    let res = send(
+        &cl,
+        &method,
+        url,
+        &headers,
+        &opts.body,
+        &opts.body_bytes,
+        None,
+    )
+    .await?;
     let final_url = final_url(&res);
     ingest_set_cookie(&mut opts, &res, &final_url);
     let status = res.status().as_u16();
@@ -1041,6 +1952,174 @@ mod io_tests {
 
     fn url(port: u16, path: &str) -> String {
         format!("http://127.0.0.1:{port}{path}")
+    }
+
+    #[tokio::test]
+    async fn streaming_headers_settle_before_body_and_pull_preserves_binary_chunks() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (first_tx, first_rx) = tokio::sync::oneshot::channel();
+        let (last_tx, last_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(socket.read(&mut request).await.unwrap() > 0);
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nSet-Cookie: sid=stream; HttpOnly; Path=/\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
+            socket.flush().await.unwrap();
+            first_rx.await.unwrap();
+            socket.write_all(b"2\r\n\x00\xff\r\n").await.unwrap();
+            socket.flush().await.unwrap();
+            last_rx.await.unwrap();
+            socket
+                .write_all(b"2\r\n\xc3\xa9\r\n0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let target = format!("http://{address}/binary");
+        let mut jar = CookieJar::new();
+        let mut response = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            fetch_stream(
+                &target,
+                FetchOptions {
+                    allow_non_html: true,
+                    jar: Some(&mut jar),
+                    ..Default::default()
+                },
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(jar.cookie_header(&target, 0.0), "sid=stream");
+        assert!(jar.document_cookie(&target, 0.0).is_empty());
+        first_tx.send(()).unwrap();
+        assert_eq!(
+            response.body.next_chunk().await.unwrap(),
+            Some(vec![0, 255])
+        );
+        last_tx.send(()).unwrap();
+        let mut remaining = Vec::new();
+        while let Some(chunk) = response.body.next_chunk().await.unwrap() {
+            remaining.extend(chunk)
+        }
+        assert_eq!(remaining, vec![195, 169]);
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn streaming_cancel_closes_unread_transport_and_limits_fail_at_read_time() {
+        for limit in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let (send_tx, send_rx) = tokio::sync::oneshot::channel();
+            let task = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = [0; 4096];
+                assert!(socket.read(&mut bytes).await.unwrap() > 0);
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
+                socket.flush().await.unwrap();
+                send_rx.await.unwrap();
+                if limit {
+                    socket.write_all(b"4\r\nbody\r\n").await.unwrap();
+                    socket.flush().await.unwrap()
+                }
+                tokio::time::timeout(std::time::Duration::from_secs(3), socket.read(&mut bytes))
+                    .await
+                    .unwrap()
+                    .unwrap()
+            });
+            let mut response = fetch_stream(
+                &format!("http://{address}/pending"),
+                FetchOptions {
+                    allow_non_html: true,
+                    max_bytes: Some(3),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            send_tx.send(()).unwrap();
+            if limit {
+                assert_eq!(
+                    response.body.next_chunk().await.unwrap_err().code,
+                    ErrorCode::BodyTooLarge
+                )
+            } else {
+                response.body.cancel()
+            }
+            assert!(response.body.next_chunk().await.unwrap().is_none());
+            assert_eq!(task.await.unwrap(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn streaming_redirects_keep_cookie_and_native_request_response_policy_guards() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let target = format!("http://{address}/start");
+        let task = tokio::spawn(async move {
+            for index in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = [0; 4096];
+                let length = socket.read(&mut bytes).await.unwrap();
+                let request = String::from_utf8_lossy(&bytes[..length]);
+                if index == 0 {
+                    socket
+                        .write_all(&http(
+                            "302 Found",
+                            &[("Location", "/finish"), ("Set-Cookie", "hop=yes; Path=/")],
+                            b"",
+                        ))
+                        .await
+                        .unwrap();
+                } else {
+                    assert!(request.to_ascii_lowercase().contains("cookie: hop=yes"));
+                    socket
+                        .write_all(&http("200 OK", &[("Content-Type", "text/plain")], b"ok"))
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+        let policy = |url: &str, _| url.ends_with("/start") || url.ends_with("/finish");
+        let responses = |_: &RequestContext, url: &str, _: &[(String, String)]| {
+            url.ends_with("/start") || url.ends_with("/finish")
+        };
+        let mut jar = CookieJar::new();
+        let mut response = fetch_stream(
+            &target,
+            FetchOptions {
+                allow_non_html: true,
+                jar: Some(&mut jar),
+                request_policy: Some(&policy),
+                response_policy: Some(&responses),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(response.redirected);
+        assert!(response.final_url.ends_with("/finish"));
+        assert_eq!(
+            response.body.next_chunk().await.unwrap(),
+            Some(b"ok".to_vec())
+        );
+        assert!(response.body.next_chunk().await.unwrap().is_none());
+        task.await.unwrap();
+        let refused = |_: &str, _| false;
+        let error = fetch_stream(
+            "http://127.0.0.1:1/refused",
+            FetchOptions {
+                request_policy: Some(&refused),
+                ..Default::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(error.message.contains("native document policy"));
     }
 
     #[tokio::test]
@@ -1378,5 +2457,62 @@ mod io_tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::Network);
+    }
+}
+
+#[cfg(test)]
+mod response_chunk_tests {
+    use super::*;
+
+    fn body(chunks: Vec<Result<bytes::Bytes, HttpError>>) -> ResponseBody {
+        ResponseBody {
+            stream: Some(Box::pin(futures_util::stream::iter(chunks))),
+            received: 0,
+            max_bytes: 3,
+            trace_id: 0,
+            url: "https://transport-frames.test/".into(),
+            status: 200,
+            content_type: "text/plain".into(),
+            trace_body: None,
+            trace_prefix: 0,
+            trace_skip_prefix: 0,
+            cache_store: None,
+            background: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_transport_frames_do_not_reach_the_body_consumer() {
+        let mut response = body(vec![
+            Ok(bytes::Bytes::new()),
+            Ok(bytes::Bytes::from_static(b"a")),
+            Ok(bytes::Bytes::new()),
+            Ok(bytes::Bytes::from_static(b"bc")),
+            Ok(bytes::Bytes::new()),
+        ]);
+        assert_eq!(response.next_chunk().await.unwrap(), Some(b"a".to_vec()));
+        assert_eq!(response.next_chunk().await.unwrap(), Some(b"bc".to_vec()));
+        assert_eq!(response.next_chunk().await.unwrap(), None);
+        assert_eq!(response.received, 3);
+    }
+
+    #[tokio::test]
+    async fn empty_only_transport_closes_without_a_zero_length_byte_chunk() {
+        let mut response = body(vec![Ok(bytes::Bytes::new()), Ok(bytes::Bytes::new())]);
+        assert_eq!(response.next_chunk().await.unwrap(), None);
+        assert_eq!(response.received, 0);
+    }
+
+    #[tokio::test]
+    async fn transport_error_after_empty_frame_is_preserved_and_releases_stream() {
+        let mut response = body(vec![
+            Ok(bytes::Bytes::new()),
+            Err(HttpError::new("authored reset", ErrorCode::Network)),
+        ]);
+        let error = response.next_chunk().await.unwrap_err();
+        assert_eq!(error.message, "authored reset");
+        assert!(matches!(error.code, ErrorCode::Network));
+        assert!(response.stream.is_none());
+        assert_eq!(response.next_chunk().await.unwrap(), None);
     }
 }

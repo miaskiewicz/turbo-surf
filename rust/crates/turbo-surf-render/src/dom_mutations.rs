@@ -559,6 +559,19 @@ fn insert_inputs_mode<'s>(
     remove: &[Handle],
     replace_all: bool,
 ) -> bool {
+    let parent_object = wrap(scope, parent);
+    for input in incoming {
+        if let Incoming::Node(node) = input {
+            if template_contents::host_ancestor(scope, parent_object, *node) {
+                throw_dom_error(
+                    scope,
+                    "HierarchyRequestError",
+                    "A template host cannot enter its content",
+                );
+                return false;
+            }
+        }
+    }
     let owner = DOM_ID.with(|id| id.get());
     let Some(prepared) = prepare(scope, incoming) else {
         return false;

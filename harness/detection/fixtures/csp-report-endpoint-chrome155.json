@@ -1,0 +1,1238 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "bcbf06a5fca7facabf78050d766e8888d9e04b52f16016b660882dadbd46d1af",
+  "probeSha256": "7b496e973d76776e343ac7e3ec95e2c17aaf7ec4ccca14d5b72eb6f01b4aa451",
+  "collectorSha256": "68e99be51b7650259f96b9055a8756eaf1c91ba36accc3b758b018298a371d0a",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "name": "same-origin",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=0"
+    },
+    {
+      "name": "cross-origin",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=0"
+    },
+    {
+      "name": "no-referrer",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=2"
+    },
+    {
+      "name": "redirect307",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=2"
+    },
+    {
+      "name": "redirect302",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=2"
+    },
+    {
+      "name": "multiple",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=5"
+    },
+    {
+      "name": "duplicate-uri",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=6"
+    },
+    {
+      "name": "report-only",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=7"
+    },
+    {
+      "name": "lone-sample",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=8"
+    },
+    {
+      "name": "tamper-json",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=9"
+    },
+    {
+      "name": "meta-ignored",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=9"
+    },
+    {
+      "name": "report-to-missing",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=9"
+    },
+    {
+      "name": "report-to-empty",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=9"
+    },
+    {
+      "name": "modern-same",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=9"
+    },
+    {
+      "name": "modern-cross",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=9"
+    },
+    {
+      "name": "old-report-to-header",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=9"
+    },
+    {
+      "name": "frame-retirement",
+      "eventCount": null,
+      "cookie": "source=1; report_response=16"
+    },
+    {
+      "name": "frame-hold-gc",
+      "eventCount": null,
+      "cookie": "source=1; report_response=16"
+    },
+    {
+      "name": "modern-redirect307",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=16"
+    },
+    {
+      "name": "modern-redirect302",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=16"
+    },
+    {
+      "name": "modern-frame-retirement",
+      "eventCount": null,
+      "cookie": "source=1; report_response=16"
+    },
+    {
+      "name": "modern-meta",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=16"
+    },
+    {
+      "name": "modern-lone-sample",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=16"
+    },
+    {
+      "name": "legacy-nonsample-lone",
+      "eventCount": 1,
+      "cookie": "source=1; report_response=23"
+    },
+    {
+      "name": "report-only-fetch-once",
+      "eventCount": 2,
+      "cookie": "source=1; report_response=24"
+    }
+  ],
+  "wire": [
+    {
+      "case": 0,
+      "url": "/report?case=0",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=0&private=authored",
+        "cookie": "source=1",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTAmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTAmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnICdyZXBvcnQtc2FtcGxlJzsgY29ubmVjdC1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT0wIiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiJjb2xvcjpyZWQifX0=",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=0&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=0&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none' 'report-sample'; connect-src 'none'; report-uri /report?case=0",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": [99, 111, 108, 111, 114, 58, 114, 101, 100]
+        }
+      }
+    },
+    {
+      "case": 1,
+      "url": "/report?case=1",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/",
+        "cookie": null,
+        "sec-fetch-site": "cross-site",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTEmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTEmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnICdyZXBvcnQtc2FtcGxlJzsgcmVwb3J0LXVyaSBodHRwOi8vbG9jYWxob3N0OjU2MzY2L3JlcG9ydD9jYXNlPTEiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6ImNvbG9yOnJlZCJ9fQ==",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=1&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=1&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none' 'report-sample'; report-uri http://localhost:PORT/report?case=1",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": [99, 111, 108, 111, 114, 58, 114, 101, 100]
+        }
+      }
+    },
+    {
+      "case": 2,
+      "url": "/report?case=2",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": null,
+        "cookie": "source=1; report_response=0",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTImcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTImc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT0yIiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=2&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=2&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /report?case=2",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 3,
+      "url": "/redirect307?case=3",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=3&private=authored",
+        "cookie": "source=1; report_response=2",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTMmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTMmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZWRpcmVjdDMwNz9jYXNlPTMiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=3&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=3&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /redirect307?case=3",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 4,
+      "url": "/redirect302?case=4",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=4&private=authored",
+        "cookie": "source=1; report_response=2",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTQmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTQmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZWRpcmVjdDMwMj9jYXNlPTQiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=4&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=4&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /redirect302?case=4",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 5,
+      "url": "/report?case=5&n=a",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=5&private=authored",
+        "cookie": "source=1; report_response=2",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTUmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTUmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT01Jm49YSAvcmVwb3J0P2Nhc2U9NSZuPWIiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=5&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=5&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /report?case=5&n=a /report?case=5&n=b",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 5,
+      "url": "/report?case=5&n=b",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=5&private=authored",
+        "cookie": "source=1; report_response=2",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTUmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTUmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT01Jm49YSAvcmVwb3J0P2Nhc2U9NSZuPWIiLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoyNCwiY29sdW1uLW51bWJlciI6MTcsInNvdXJjZS1maWxlIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=5&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=5&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /report?case=5&n=a /report?case=5&n=b",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 6,
+      "url": "/report?case=6",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=6&private=authored",
+        "cookie": "source=1; report_response=5",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTYmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTYmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT02IC9yZXBvcnQ/Y2FzZT02IiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=6&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=6&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /report?case=6 /report?case=6",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 6,
+      "url": "/report?case=6",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=6&private=authored",
+        "cookie": "source=1; report_response=5",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTYmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTYmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT02IC9yZXBvcnQ/Y2FzZT02IiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiIifX0=",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=6&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=6&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /report?case=6 /report?case=6",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 7,
+      "url": "/report?case=7",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=7&private=authored",
+        "cookie": "source=1; report_response=6",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTcmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTcmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnICdyZXBvcnQtc2FtcGxlJzsgcmVwb3J0LXVyaSAvcmVwb3J0P2Nhc2U9NyIsImRpc3Bvc2l0aW9uIjoicmVwb3J0IiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MjQsImNvbHVtbi1udW1iZXIiOjE3LCJzb3VyY2UtZmlsZSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvY3NwLXJlcG9ydC1lbmRwb2ludC1wcm9iZS5qcyIsInN0YXR1cy1jb2RlIjoyMDAsInNjcmlwdC1zYW1wbGUiOiJjb2xvcjpyZWQifX0=",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=7&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=7&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none' 'report-sample'; report-uri /report?case=7",
+          "disposition": "report",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": [99, 111, 108, 111, 114, 58, 114, 101, 100]
+        }
+      }
+    },
+    {
+      "case": 8,
+      "url": "/report?case=8",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=8&private=authored",
+        "cookie": "source=1; report_response=7",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTgmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTgmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnICdyZXBvcnQtc2FtcGxlJzsgcmVwb3J0LXVyaSAvcmVwb3J0P2Nhc2U9OCIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwOi8vMTI3LjAuMC4xOjU2MzY2L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh7aC9In19",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=8&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=8&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none' 'report-sample'; report-uri /report?case=8",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": [
+            97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97,
+            97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 55357
+          ]
+        }
+      }
+    },
+    {
+      "case": 9,
+      "url": "/report?case=9",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=9&private=authored",
+        "cookie": "source=1; report_response=8",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTkmcHJpdmF0ZT1hdXRob3JlZCIsInJlZmVycmVyIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9zdGFydD9jYXNlPTkmc291cmNlPWF1dGhvcmVkIiwidmlvbGF0ZWQtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJlZmZlY3RpdmUtZGlyZWN0aXZlIjoic3R5bGUtc3JjLWF0dHIiLCJvcmlnaW5hbC1wb2xpY3kiOiJzdHlsZS1zcmMgJ25vbmUnICdyZXBvcnQtc2FtcGxlJzsgcmVwb3J0LXVyaSAvcmVwb3J0P2Nhc2U9OSIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwOi8vMTI3LjAuMC4xOjU2MzY2L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiY29sb3I6cmVkIn19",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=9&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=9&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none' 'report-sample'; report-uri /report?case=9",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": [99, 111, 108, 111, 114, 58, 114, 101, 100]
+        }
+      }
+    },
+    {
+      "case": 16,
+      "url": "/report?case=16",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=16&private=authored",
+        "cookie": "source=1; report_response=9",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTE2JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvc3RhcnQ/Y2FzZT0xNiZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL3JlcG9ydD9jYXNlPTE2IiwiZGlzcG9zaXRpb24iOiJlbmZvcmNlIiwiYmxvY2tlZC11cmkiOiJpbmxpbmUiLCJsaW5lLW51bWJlciI6MSwiY29sdW1uLW51bWJlciI6NzksInNvdXJjZS1maWxlIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=16&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=16&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /report?case=16",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 1,
+          "column-number": 79,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 17,
+      "url": "/hold-report?case=17",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=17&private=authored",
+        "cookie": "source=1; report_response=16",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTE3JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvc3RhcnQ/Y2FzZT0xNyZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZSc7IHJlcG9ydC11cmkgL2hvbGQtcmVwb3J0P2Nhc2U9MTciLCJkaXNwb3NpdGlvbiI6ImVuZm9yY2UiLCJibG9ja2VkLXVyaSI6ImlubGluZSIsImxpbmUtbnVtYmVyIjoxLCJjb2x1bW4tbnVtYmVyIjo3OSwic291cmNlLWZpbGUiOiJodHRwOi8vMTI3LjAuMC4xOjU2MzY2L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoiIn19",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=17&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=17&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none'; report-uri /hold-report?case=17",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 1,
+          "column-number": 79,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    },
+    {
+      "case": 23,
+      "url": "/report?case=23",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=23&private=authored",
+        "cookie": "source=1; report_response=16",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTIzJnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvc3RhcnQ/Y2FzZT0yMyZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJzdHlsZS1zcmMtYXR0ciIsIm9yaWdpbmFsLXBvbGljeSI6InN0eWxlLXNyYyAnbm9uZScgJ3JlcG9ydC1zYW1wbGUnOyByZXBvcnQtdXJpIC9yZXBvcnQ/Y2FzZT0yMyIsImRpc3Bvc2l0aW9uIjoiZW5mb3JjZSIsImJsb2NrZWQtdXJpIjoiaW5saW5lIiwibGluZS1udW1iZXIiOjI0LCJjb2x1bW4tbnVtYmVyIjoxNywic291cmNlLWZpbGUiOiJodHRwOi8vMTI3LjAuMC4xOjU2MzY2L2NzcC1yZXBvcnQtZW5kcG9pbnQtcHJvYmUuanMiLCJzdGF0dXMtY29kZSI6MjAwLCJzY3JpcHQtc2FtcGxlIjoi7aCAXCJcXFxu7bCAIn19",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=23&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=23&source=authored",
+          "violated-directive": "style-src-attr",
+          "effective-directive": "style-src-attr",
+          "original-policy": "style-src 'none' 'report-sample'; report-uri /report?case=23",
+          "disposition": "enforce",
+          "blocked-uri": "inline",
+          "line-number": 24,
+          "column-number": 17,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": [55296, 34, 92, 10, 56320]
+        }
+      }
+    },
+    {
+      "case": 24,
+      "url": "/report?case=24",
+      "method": "POST",
+      "headers": {
+        "content-type": "application/csp-report",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "sec-ch-ua": "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "priority": null,
+        "access-control-request-method": null,
+        "access-control-request-headers": null,
+        "origin": "http://127.0.0.1:PORT",
+        "referer": "http://127.0.0.1:PORT/page?case=24&private=authored",
+        "cookie": "source=1; report_response=23",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-dest": "report",
+        "cache-control": null,
+        "pragma": null,
+        "accept": "*/*"
+      },
+      "rawBodyBase64": "eyJjc3AtcmVwb3J0Ijp7ImRvY3VtZW50LXVyaSI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvcGFnZT9jYXNlPTI0JnByaXZhdGU9YXV0aG9yZWQiLCJyZWZlcnJlciI6Imh0dHA6Ly8xMjcuMC4wLjE6NTYzNjYvc3RhcnQ/Y2FzZT0yNCZzb3VyY2U9YXV0aG9yZWQiLCJ2aW9sYXRlZC1kaXJlY3RpdmUiOiJjb25uZWN0LXNyYyIsImVmZmVjdGl2ZS1kaXJlY3RpdmUiOiJjb25uZWN0LXNyYyIsIm9yaWdpbmFsLXBvbGljeSI6ImNvbm5lY3Qtc3JjICdub25lJzsgcmVwb3J0LXVyaSAvcmVwb3J0P2Nhc2U9MjQiLCJkaXNwb3NpdGlvbiI6InJlcG9ydCIsImJsb2NrZWQtdXJpIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9hbGxvd2VkP2Nhc2U9MjQiLCJsaW5lLW51bWJlciI6MjAsImNvbHVtbi1udW1iZXIiOjUsInNvdXJjZS1maWxlIjoiaHR0cDovLzEyNy4wLjAuMTo1NjM2Ni9jc3AtcmVwb3J0LWVuZHBvaW50LXByb2JlLmpzIiwic3RhdHVzLWNvZGUiOjIwMCwic2NyaXB0LXNhbXBsZSI6IiJ9fQ==",
+      "body": {
+        "csp-report": {
+          "document-uri": "http://127.0.0.1:PORT/page?case=24&private=authored",
+          "referrer": "http://127.0.0.1:PORT/start?case=24&source=authored",
+          "violated-directive": "connect-src",
+          "effective-directive": "connect-src",
+          "original-policy": "connect-src 'none'; report-uri /report?case=24",
+          "disposition": "report",
+          "blocked-uri": "http://127.0.0.1:PORT/allowed?case=24",
+          "line-number": 20,
+          "column-number": 5,
+          "source-file": "http://127.0.0.1:PORT/csp-report-endpoint-probe.js",
+          "status-code": 200,
+          "script-sampleUnits": []
+        }
+      }
+    }
+  ],
+  "closed": [
+    {
+      "case": 17,
+      "canceled": true
+    }
+  ],
+  "reportingEvents": [],
+  "requests": [
+    {
+      "url": "/start?case=0&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=0&source=authored"
+    },
+    {
+      "url": "/page?case=0&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=0&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=0&private=authored"
+    },
+    {
+      "url": "/start?case=1&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=1&source=authored"
+    },
+    {
+      "url": "/page?case=1&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=1&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=1&private=authored"
+    },
+    {
+      "url": "/start?case=2&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=2&source=authored"
+    },
+    {
+      "url": "/page?case=2&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=2&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": ""
+    },
+    {
+      "url": "/start?case=3&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=3&source=authored"
+    },
+    {
+      "url": "/page?case=3&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=3&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=3&private=authored"
+    },
+    {
+      "url": "/start?case=4&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=4&source=authored"
+    },
+    {
+      "url": "/page?case=4&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=4&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=4&private=authored"
+    },
+    {
+      "url": "/start?case=5&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=5&source=authored"
+    },
+    {
+      "url": "/page?case=5&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=5&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=5&private=authored"
+    },
+    {
+      "url": "/start?case=6&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=6&source=authored"
+    },
+    {
+      "url": "/page?case=6&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=6&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=6&private=authored"
+    },
+    {
+      "url": "/start?case=7&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=7&source=authored"
+    },
+    {
+      "url": "/page?case=7&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=7&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=7&private=authored"
+    },
+    {
+      "url": "/start?case=8&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=8&source=authored"
+    },
+    {
+      "url": "/page?case=8&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=8&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=8&private=authored"
+    },
+    {
+      "url": "/start?case=9&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=9&source=authored"
+    },
+    {
+      "url": "/page?case=9&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=9&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=9&private=authored"
+    },
+    {
+      "url": "/start?case=10&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=10&source=authored"
+    },
+    {
+      "url": "/page?case=10&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=10&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=10&private=authored"
+    },
+    {
+      "url": "/start?case=11&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=11&source=authored"
+    },
+    {
+      "url": "/page?case=11&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=11&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=11&private=authored"
+    },
+    {
+      "url": "/start?case=12&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=12&source=authored"
+    },
+    {
+      "url": "/page?case=12&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=12&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=12&private=authored"
+    },
+    {
+      "url": "/start?case=13&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=13&source=authored"
+    },
+    {
+      "url": "/page?case=13&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=13&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=13&private=authored"
+    },
+    {
+      "url": "/start?case=14&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=14&source=authored"
+    },
+    {
+      "url": "/page?case=14&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=14&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=14&private=authored"
+    },
+    {
+      "url": "/start?case=15&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=15&source=authored"
+    },
+    {
+      "url": "/page?case=15&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=15&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=15&private=authored"
+    },
+    {
+      "url": "/start?case=16&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=16&source=authored"
+    },
+    {
+      "url": "/page?case=16&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=16&source=authored"
+    },
+    {
+      "url": "/start?case=17&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=17&source=authored"
+    },
+    {
+      "url": "/page?case=17&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=17&source=authored"
+    },
+    {
+      "url": "/start?case=18&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=18&source=authored"
+    },
+    {
+      "url": "/page?case=18&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=18&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=18&private=authored"
+    },
+    {
+      "url": "/start?case=19&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=19&source=authored"
+    },
+    {
+      "url": "/page?case=19&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=19&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=19&private=authored"
+    },
+    {
+      "url": "/start?case=20&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=20&source=authored"
+    },
+    {
+      "url": "/page?case=20&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=20&source=authored"
+    },
+    {
+      "url": "/start?case=21&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=21&source=authored"
+    },
+    {
+      "url": "/page?case=21&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=21&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=21&private=authored"
+    },
+    {
+      "url": "/start?case=22&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=22&source=authored"
+    },
+    {
+      "url": "/page?case=22&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=22&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=22&private=authored"
+    },
+    {
+      "url": "/start?case=23&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=23&source=authored"
+    },
+    {
+      "url": "/page?case=23&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=23&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=23&private=authored"
+    },
+    {
+      "url": "/start?case=24&source=authored",
+      "referrer": ""
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/start?case=24&source=authored"
+    },
+    {
+      "url": "/page?case=24&private=authored",
+      "referrer": "http://127.0.0.1:PORT/start?case=24&source=authored"
+    },
+    {
+      "url": "/favicon.ico",
+      "referrer": "http://127.0.0.1:PORT/page?case=24&private=authored"
+    },
+    {
+      "url": "/allowed?case=24",
+      "referrer": "http://127.0.0.1:PORT/page?case=24&private=authored"
+    }
+  ]
+}

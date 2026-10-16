@@ -4,12 +4,14 @@
 //! (driven on napi's tokio runtime). The thin `@playwright/test` shim (task #10)
 //! composes these; `goto` = `fetchHtml` then view calls on the cached HTML.
 
+mod document_response;
 mod session;
 // Re-export the live-session napi free functions so they're reachable from the crate
 // root (a `pub fn` in a private module is otherwise dead-code-flagged in the lib build;
 // napi still registers them either way).
 pub use session::{
-    live_close, live_cookies, live_eval, live_network_log, live_open, live_serialize,
+    live_close, live_cookies, live_eval, live_eval_expression, live_network_log, live_open,
+    live_serialize,
 };
 
 use napi::bindgen_prelude::*;
@@ -495,11 +497,13 @@ pub fn render_pooled(html: String, base_url: String, script: String) -> Result<S
 /// current-thread tokio runtime + the non-`Send` V8 isolate, both created and dropped
 /// there), and the Promise resolves with the hydrated HTML.
 pub struct HydrateTask {
+    response: document_response::DocumentResponse,
     html: String,
     base_url: String,
     cookies: String,
     user_agent: String,
     client_hints: ClientHints,
+    storage: turbo_surf_render::BrowserStorage,
 }
 
 #[napi]
@@ -513,7 +517,7 @@ impl Task for HydrateTask {
             .build()
             .map_err(|e| Error::from_reason(e.to_string()))?;
         rt.block_on(async {
-            let page = turbo_surf_render::PageSession::open_with_request_state(
+            let page = turbo_surf_render::PageSession::open_with_document_response(
                 &self.html,
                 &self.base_url,
                 &self.cookies,
@@ -521,6 +525,9 @@ impl Task for HydrateTask {
                 turbo_surf_render::DEFAULT_RENDER_BUDGET_MS,
                 "",
                 self.client_hints.clone(),
+                &self.response.headers,
+                self.storage.clone(),
+                self.response.metadata.clone(),
             )
             .await?;
             let html = page.serialize();
@@ -542,15 +549,19 @@ pub fn hydrate(
     cookies: Option<String>,
     user_agent: Option<String>,
     request_state_id: Option<u32>,
+    document_response: Option<String>,
 ) -> Result<AsyncTask<HydrateTask>> {
     // Parent the V8 platform on the main thread before the libuv worker runs compute().
     ensure_render_init();
+    let state = request_state(request_state_id)?;
     Ok(AsyncTask::new(HydrateTask {
+        response: document_response::parse(document_response)?,
         html,
         base_url,
         cookies: cookies.unwrap_or_default(),
         user_agent: user_agent.unwrap_or_default(),
-        client_hints: request_state(request_state_id)?,
+        client_hints: state.client_hints,
+        storage: state.storage,
     }))
 }
 
@@ -781,23 +792,43 @@ fn shared_client() -> &'static turbo_surf_core::http_backend::Client {
     CLIENT.get_or_init(build_client)
 }
 
-// Hint negotiation belongs to a browser context, independently of its cookie
-// contents. Opaque handles let async fetch and V8 worker threads share that state.
-fn request_states() -> &'static std::sync::Mutex<std::collections::HashMap<u32, ClientHints>> {
+// Opaque native handles share profile state across HTTP and V8 workers.
+#[derive(Clone, Default)]
+pub(crate) struct RequestState {
+    pub(crate) client_hints: ClientHints,
+    pub(crate) storage: turbo_surf_render::BrowserStorage,
+}
+fn request_states() -> &'static std::sync::Mutex<std::collections::HashMap<u32, RequestState>> {
     static STATES: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<u32, ClientHints>>,
+        std::sync::Mutex<std::collections::HashMap<u32, RequestState>>,
     > = std::sync::OnceLock::new();
     STATES.get_or_init(Default::default)
 }
 
 #[napi]
-pub fn request_state_new() -> Result<u32> {
+pub fn request_state_new(parent_context_id: Option<u32>) -> Result<u32> {
+    let state = match parent_context_id {
+        Some(parent) => {
+            let parent = request_state(Some(parent))?;
+            RequestState {
+                client_hints: parent.client_hints,
+                storage: parent.storage.new_tab().map_err(Error::from_reason)?,
+            }
+        }
+        None => RequestState::default(),
+    };
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let id = NEXT
+        .fetch_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |id| id.checked_add(1),
+        )
+        .map_err(|_| Error::from_reason("request state handles exhausted"))?;
     request_states()
         .lock()
         .map_err(|_| Error::from_reason("request state registry poisoned"))?
-        .insert(id, ClientHints::default());
+        .insert(id, state);
     Ok(id)
 }
 
@@ -810,9 +841,9 @@ pub fn request_state_close(id: u32) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn request_state(id: Option<u32>) -> Result<ClientHints> {
+pub(crate) fn request_state(id: Option<u32>) -> Result<RequestState> {
     match id {
-        None => Ok(ClientHints::default()),
+        None => Ok(RequestState::default()),
         Some(id) => request_states()
             .lock()
             .map_err(|_| Error::from_reason("request state registry poisoned"))?
@@ -838,10 +869,17 @@ fn request_context(raw: Option<&str>) -> Result<RequestContext> {
         _ => return Err(Error::from_reason("invalid request destination")),
     };
     if destination == Destination::Document {
-        return Ok(RequestContext::navigation(
+        let mut context = RequestContext::navigation(
             source.map(str::to_owned),
             value["userActivation"].as_bool().unwrap_or(true),
-        ));
+        );
+        if let Some(policy) = value["referrerPolicy"]
+            .as_str()
+            .and_then(turbo_surf_core::referrer_policy::ReferrerPolicy::parse)
+        {
+            context.referrer_policy = policy;
+        }
+        return Ok(context);
     }
     let mode = match value["mode"].as_str() {
         Some("cors") => RequestMode::Cors,
@@ -853,6 +891,30 @@ fn request_context(raw: Option<&str>) -> Result<RequestContext> {
     let mut context = RequestContext::resource(source.unwrap_or(""), destination, mode);
     context.source = source.map(str::to_owned);
     Ok(context)
+}
+
+fn browsing_cache_partition(context: &RequestContext, target: &str) -> String {
+    let top = if context.destination == Destination::Document {
+        target
+    } else {
+        context
+            .top_level_source
+            .as_deref()
+            .or(context.source.as_deref())
+            .unwrap_or(target)
+    };
+    let source = if context.destination == Destination::Document {
+        target
+    } else {
+        context.source.as_deref().unwrap_or(top)
+    };
+    format!(
+        "{}\n{}\n0\n0",
+        turbo_surf_core::request_context::schemeful_site(top).unwrap_or_default(),
+        turbo_surf_core::request_context::schemeful_site(source)
+            .or_else(|| turbo_surf_core::request_context::schemeful_site(top))
+            .unwrap_or_default(),
+    )
 }
 
 async fn do_fetch(
@@ -884,12 +946,34 @@ async fn do_fetch_headers(
         .as_deref()
         .and_then(|h| serde_json::from_str::<BTreeMap<String, String>>(h).ok())
         .unwrap_or_default();
-    let client_hints = request_state(request_state_id)?;
+    let RequestState {
+        client_hints,
+        storage,
+    } = request_state(request_state_id)?;
+    let storage_effects = storage.response_storage_effects();
+    let http_cache = storage.http_cache();
+    // Network jobs need native backing, not the tab/profile owner.
+    drop(storage);
+    let context = request_context(context_json.as_deref())?;
+    let cache_partition = browsing_cache_partition(&context, url);
+    let response_metadata = std::sync::Mutex::new(
+        turbo_surf_render::DocumentResponseMetadata::from_request(200, &context, url),
+    );
+    let response_policy =
+        |context: &RequestContext, target: &str, _headers: &[(String, String)]| {
+            *response_metadata.lock().unwrap() =
+                turbo_surf_render::DocumentResponseMetadata::from_request(200, context, target);
+            true
+        };
     let opts = FetchOptions {
         method,
         body,
         headers,
-        context: Some(request_context(context_json.as_deref())?),
+        context: Some(context),
+        response_policy: Some(&response_policy),
+        response_side_effects: Some(storage_effects.as_ref()),
+        http_cache: Some(&http_cache),
+        cache_partition,
         client_hints: Some(&client_hints),
         allow_non_html: true,
         jar: jar.as_mut(),
@@ -908,6 +992,8 @@ async fn do_fetch_headers(
         "html": res.html,
         "finalUrl": res.final_url,
         "status": res.status,
+        "referrer": response_metadata.lock().unwrap().referrer,
+        "headers": res.headers,
         "redirected": res.redirected,
         "contentType": res.content_type,
         "cookies": cookie_state,
@@ -942,7 +1028,13 @@ pub async fn fetch_bytes(
         "accept".to_string(),
         "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8".to_string(),
     );
-    let client_hints = request_state(request_state_id)?;
+    let RequestState {
+        client_hints,
+        storage,
+    } = request_state(request_state_id)?;
+    let storage_effects = storage.response_storage_effects();
+    let http_cache = storage.http_cache();
+    drop(storage);
     let mut jar = cookies
         .as_deref()
         .map(turbo_surf_core::cookies::CookieJar::from_storage_state);
@@ -952,11 +1044,15 @@ pub async fn fetch_bytes(
         RequestMode::NoCors,
     );
     context.source = source_url;
+    let cache_partition = browsing_cache_partition(&context, &url);
     let opts = FetchOptions {
         allow_non_html: true,
         client: Some(shared_client()),
         headers,
         client_hints: Some(&client_hints),
+        response_side_effects: Some(storage_effects.as_ref()),
+        http_cache: Some(&http_cache),
+        cache_partition,
         context: Some(context),
         jar: jar.as_mut(),
         ..Default::default()

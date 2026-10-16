@@ -85,7 +85,12 @@ pub(super) fn refresh(scope: &mut v8::PinScope, node: Handle, name: &str) {
     });
     let root = with_tree(Tree::root).unwrap();
     let document = wrap(scope, root);
-    let function = source.and_then(|text| {
+    let active = DOM.with(|dom| {
+        dom.borrow()
+            .as_ref()
+            .is_some_and(|state| state.browsing_context)
+    });
+    let function = source.filter(|_| active).and_then(|text| {
         if let Some(policy) = policy {
             let callback = dom_ownership::local(scope, policy);
             let kind = v8::String::new(scope, "script-src-attr").unwrap();

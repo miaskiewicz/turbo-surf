@@ -37,6 +37,10 @@ pub(crate) fn element_geometry(
     if source.excluded_from_layout {
         return Ok(empty_geometry());
     }
+    if snapshot.unsupported_svg_source_geometry(id) {
+        return Err("native SVG descendant geometry is unsupported".into());
+    }
+
     let boxes: Vec<_> = source
         .fragment_indices
         .iter()
@@ -98,12 +102,15 @@ pub(crate) fn empty_geometry() -> ElementGeometry {
         },
     }
 }
-fn bounding_box(rects: &[Rect]) -> Rect {
+pub(crate) fn bounding_box(rects: &[Rect]) -> Rect {
     let mut visible = rects
         .iter()
         .filter(|rect| rect.width != 0.0 && rect.height != 0.0);
     let Some(first) = visible.next() else {
-        return rects[0];
+        return rects
+            .first()
+            .copied()
+            .unwrap_or_else(|| empty_geometry().bounds);
     };
     let mut left = first.x;
     let mut top = first.y;
@@ -152,7 +159,10 @@ pub(crate) fn offset_position(
         top: 0,
         parent: None,
     };
-    if source.excluded_from_layout || matches!(style.tag.as_str(), "html" | "body") {
+    if source.excluded_from_layout
+        || style.style.get("display") == Some("contents")
+        || matches!(style.tag.as_str(), "html" | "body")
+    {
         return Ok(zero);
     }
     let border = source
@@ -174,6 +184,10 @@ pub(crate) fn offset_position(
         let parent_style = styles
             .get(&parent)
             .ok_or("native offset parent computed style missing")?;
+        if parent_style.style.get("display") == Some("contents") {
+            next = parent_style.parent;
+            continue;
+        }
         // The statically positioned BODY fallback uses document coordinates,
         // while actual positioned/transform/table parents use their padding edge.
         let positioned = parent_style

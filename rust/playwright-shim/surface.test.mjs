@@ -838,6 +838,45 @@ test("request metadata and client hints survive hydration and stay context scope
   } finally {
     await context.close();
     await isolated.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("live hydration retains native response policy, status and selected referrer", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/source") {
+      res.writeHead(200, { "content-type": "text/html", "referrer-policy": "no-referrer" });
+      res.end("<title>source</title>");
+      return;
+    }
+    res.writeHead(404, {
+      "content-type": "text/html",
+      "content-security-policy": "script-src 'nonce-good'; style-src 'none'",
+    });
+    res.end(`<head></head><body><script>document.body.setAttribute('data-denied','ran')</script><script nonce=good>
+      document.body.setAttribute('data-referrer',document.referrer);
+      document.body.setAttribute('data-init',String(globalThis.trustedInit));
+      document.addEventListener('securitypolicyviolation',event=>document.body.setAttribute('data-report',event.statusCode+' '+event.referrer));
+      const style=document.createElement('style');style.textContent='.denied{}';document.head.append(style);
+    </script></body>`);
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.addInitScript(() => {
+      globalThis.trustedInit = true;
+    });
+    await page.goto(`${base}/source`, { waitUntil: "commit" });
+    const response = await page.goto(`${base}/target`, { waitUntil: "networkidle" });
+    assert.equal(response.status(), 404);
+    assert.equal(await page.locator("body").getAttribute("data-denied"), null);
+    assert.equal(await page.locator("body").getAttribute("data-referrer"), "");
+    assert.equal(await page.locator("body").getAttribute("data-report"), "404 ");
+    assert.equal(await page.locator("body").getAttribute("data-init"), "true");
+  } finally {
+    await page.close();
+    server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
 });

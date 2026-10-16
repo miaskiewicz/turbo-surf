@@ -1,0 +1,69 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "widgetSha256": "8ffa669ec40b02c0730e4e67be226c30afdc2ed05782497359fb46e918845a1d",
+  "probeSha256": "4daf41b3a67afa21cdbafe8876a755ebf67401788bc4430b6c7a2e358c5b9707",
+  "collectorSha256": "83d9c54825884949caaff45e61e5badd26b9cb3ec14432d698fdb383ca286f73",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "wire": [
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/favicon.ico",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear-register",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear-register",
+      "case": null,
+      "cookie": null
+    }
+  ],
+  "result": {
+    "fetch": {
+      "root": ["local", "session"],
+      "peer": [],
+      "local": null,
+      "session": null
+    },
+    "classic": {
+      "root": ["local", "session"],
+      "peer": [],
+      "local": null,
+      "session": null
+    },
+    "module": {
+      "root": ["local", "session"],
+      "peer": [],
+      "local": null,
+      "session": null
+    }
+  }
+}

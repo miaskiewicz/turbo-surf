@@ -31,11 +31,15 @@ deno_core::extension!(
     turbo_geometry,
     ops = [
         op_geometry_object,
+        crate::live_layout_supports::op_native_css_supports,
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,
         crate::live_layout_backend::op_live_element_scroll,
         crate::live_layout_backend::op_live_elements_at_point,
-        crate::live_layout_backend::op_live_element_offset
+        crate::live_layout_backend::op_live_element_offset,
+        crate::live_layout_backend::op_live_range_geometry,
+        crate::live_layout_backend::op_live_caret_at_point,
+        crate::live_layout_backend::op_live_caret_geometry
     ]
 );
 pub(crate) fn extension() -> Extension {

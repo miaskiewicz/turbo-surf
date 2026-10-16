@@ -3,6 +3,34 @@
 struct RangeAccessor(v8::Weak<v8::Function>);
 struct RangeExceptionUpdater(v8::Weak<v8::Function>);
 
+// Static boundaries own their nodes through the wrapper's private V8 edge. They
+// deliberately never enter the live-boundary mutation registry.
+fn static_record(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let name = v8::String::new(scope, "turbo-dom.StaticRange.record").unwrap();
+    let key = v8::Private::for_api(scope, Some(name));
+    let receiver = if args.get(0).is_undefined() && args.get(1).is_object() {
+        let template = v8::ObjectTemplate::new(scope);
+        template.set_internal_field_count(1);
+        let object = template.new_instance(scope).unwrap();
+        object.set_prototype(scope, args.get(2));
+        Some(object)
+    } else {
+        v8::Local::<v8::Object>::try_from(args.get(0)).ok()
+    };
+    if let Some(receiver) = receiver {
+        if args.get(1).is_object() {
+            receiver.set_private(scope, key, args.get(1));
+            rv.set(receiver.into());
+        } else if let Some(record) = receiver.get_private(scope, key) {
+            rv.set(record);
+        }
+    }
+}
+
 pub(super) fn capture(scope: &mut v8::PinScope) {
     let global = scope.get_current_context().global(scope);
     let Some(name) = v8::String::new(scope, "__nativeRangeRecord") else {
@@ -52,12 +80,20 @@ pub(super) fn install(scope: &mut v8::PinScope) {
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     {
         let marker = v8::Function::new(scope, super::script_state::contextual_fragment).unwrap();
+        let convert = v8::Function::new(scope, super::trusted_types::convert_call).unwrap();
+        let static_accessor = v8::Function::new(scope, static_record).unwrap();
         let receiver = v8::undefined(scope);
         if let Some(updater) = initializer
             .call(
                 scope,
                 receiver.into(),
-                &[accessor.into(), factory, marker.into()],
+                &[
+                    accessor.into(),
+                    factory,
+                    marker.into(),
+                    convert.into(),
+                    static_accessor.into(),
+                ],
             )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         {
@@ -99,6 +135,55 @@ mod tests {
     use super::super::{
         capture_window_event_interfaces, install_with_html, parse_html_document, reset, run_js,
     };
+
+    #[test]
+    fn abstract_node_and_static_ranges_match_chrome_boundaries_and_ownership() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("abstract_ranges_chrome155.json")).unwrap();
+        let probe = include_str!("abstract_ranges_probe.js")
+            .trim()
+            .trim_end_matches(';');
+        let expected = serde_json::to_string(&fixture["result"]).unwrap();
+        let source = format!("(()=>{{const actual=({probe});const expected={expected};const normalize=value=>Array.isArray(value)?value.map(normalize):value&&typeof value===\"object\"?Object.fromEntries(Object.keys(value).sort().map(key=>[key,normalize(value[key])])):value;if(JSON.stringify(normalize(actual))!==JSON.stringify(normalize(expected)))throw new Error(JSON.stringify(actual));return true;}})()");
+        check_script(&source, None);
+    }
+
+    #[test]
+    fn borrowed_static_range_accessors_keep_foreign_native_boundary_owners() {
+        super::super::tests::init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let main = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, main);
+        install_with_html(scope, "<!doctype html><body>main</body>");
+        let foreign = v8::Context::new(scope, Default::default());
+        let foreign_range = {
+            let child_scope = &mut v8::ContextScope::new(scope, foreign);
+            super::super::install_independent_html(
+                child_scope,
+                "<!doctype html><body>foreign</body>",
+            );
+            let code = v8::String::new(child_scope, "new StaticRange({startContainer:document.body.firstChild,startOffset:2,endContainer:document.body.firstChild,endOffset:5})").unwrap();
+            let value = v8::Script::compile(child_scope, code, None)
+                .unwrap()
+                .run(child_scope)
+                .unwrap();
+            v8::Global::new(child_scope, value)
+        };
+        let foreign_range = v8::Local::new(scope, foreign_range);
+        let key = v8::String::new(scope, "foreignStaticRange").unwrap();
+        main.global(scope).set(scope, key.into(), foreign_range);
+        let code = v8::String::new(scope, "(()=>{const r=foreignStaticRange,get=Object.getOwnPropertyDescriptor(NodeRange.prototype,'startContainer').get;const node=get.call(r);node.deleteData(0,3);return JSON.stringify([r.startOffset,r.endOffset,node.data,r.collapsed,Object.getPrototypeOf(r)!==StaticRange.prototype]);})()").unwrap();
+        let result = v8::Script::compile(scope, code, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        assert_eq!(
+            result.to_rust_string_lossy(scope),
+            "[2,5,\"eign\",false,true]"
+        );
+        reset();
+    }
 
     fn check_script(source: &str, refresh: Option<&str>) {
         super::super::tests::init_v8();

@@ -33,7 +33,8 @@ pub(super) fn put_isolation_state(state: IsolationState) {
     SUPPRESSED.with(|rows| *rows.borrow_mut() = state.suppressed);
 }
 pub(super) fn recording() -> bool {
-    ENABLED.with(std::cell::Cell::get)
+    custom_elements::recording()
+        || ENABLED.with(std::cell::Cell::get)
         || script_state::recording()
         || DOM.with(|state| {
             state
@@ -124,6 +125,7 @@ pub(super) fn child_list(
     let native_event = event;
     shadow_slots::mutation(scope, &native_event);
     let event = payload(scope, &native_event);
+    custom_elements::mutation(scope, event);
     for observer in observers {
         if let Some(queue) = function(scope, observer, "queue") {
             let receiver = v8::undefined(scope);
@@ -497,16 +499,26 @@ pub(super) fn flush(scope: &mut v8::PinScope) {
     let current = DOM_ID.with(std::cell::Cell::get);
     let mut ids = OTHER_DOMS.with(|doms| doms.borrow().keys().copied().collect::<Vec<_>>());
     ids.push(current);
-    // Tree borrows end before wrapping or invoking the trusted queue function.
-    for id in ids {
+    // Claim every document's pending batch before invoking any consumer. A
+    // consumer can query another document, which reenters this fanout. Leaving
+    // its old events in Tree would move them into the inner CE reaction scope
+    // and run adoption callbacks before ownerDocument has been updated.
+    let batches = ids
+        .into_iter()
+        .map(|id| {
+            let _owner = DomScope::enter(id);
+            let events = DOM
+                .with(|dom| {
+                    dom.borrow_mut()
+                        .as_mut()
+                        .map(|state| state.tree.take_mutation_events_utf16())
+                })
+                .unwrap_or_default();
+            (id, events)
+        })
+        .collect::<Vec<_>>();
+    for (id, events) in batches {
         let _owner = DomScope::enter(id);
-        let events = DOM
-            .with(|dom| {
-                dom.borrow_mut()
-                    .as_mut()
-                    .map(|state| state.tree.take_mutation_events_utf16())
-            })
-            .unwrap_or_default();
         for native_event in events {
             shadow_slots::mutation(scope, &native_event.event);
             let event = payload(scope, &native_event.event);
@@ -521,6 +533,7 @@ pub(super) fn flush(scope: &mut v8::PinScope) {
                 };
                 set_prop(scope, event, name, value);
             }
+            custom_elements::mutation(scope, event);
             for observer in &observers {
                 if let Some(queue) = function(scope, *observer, "queue") {
                     let receiver = v8::undefined(scope);

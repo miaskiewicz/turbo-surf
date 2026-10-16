@@ -65,6 +65,8 @@ pub(crate) fn boundary(isolate: &mut v8::Isolate) {
         return;
     };
     let scope = &mut v8::ContextScope::new(scope, context);
+    crate::web_streams_backend::sweep(scope);
+    crate::runtime::fetch_streams::sweep(scope);
     match crate::browser_env::collect_native_storage(scope, BUDGET, MAX_DOCUMENTS) {
         Ok(report) => {
             let reclaimed = report

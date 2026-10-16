@@ -1,0 +1,559 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "widgetSha256": "ae17b6b0a4f31f8b57043f445b2f6875a1f61cac4ddf41901a63b453d01600ef",
+  "probeSha256": "a8a5d31f34a5008d5820ba01ea19782100011f7b3a6cba7eaf854250aabbc31d",
+  "collectorSha256": "9ee3295507c842f430eaa1bf3460ed033d620a05f4c816ba23e5507713a4d490",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "quota": [
+        {
+          "length": 2621439,
+          "result": "stored"
+        },
+        {
+          "length": 2621440,
+          "result": "stored"
+        },
+        {
+          "length": 5242879,
+          "result": "stored"
+        },
+        {
+          "length": 5242880,
+          "result": "QuotaExceededError"
+        }
+      ],
+      "quotaAtomic": {
+        "failure": "QuotaExceededError",
+        "value": "before",
+        "length": 1
+      },
+      "lossless": {
+        "key": [107, 55296],
+        "value": [118, 56320, 0],
+        "property": [118, 56320, 0],
+        "keys": [[107, 55296]],
+        "length": 1
+      },
+      "conversion": {
+        "keySymbol": "TypeError",
+        "valueSymbol": "TypeError",
+        "missing": "TypeError",
+        "unchanged": 1
+      },
+      "order": {
+        "keys": ["a", "b"],
+        "length": 2,
+        "value": "3",
+        "same": true,
+        "tag": "[object Storage]"
+      },
+      "surface": {
+        "names": ["length", "clear", "getItem", "key", "removeItem", "setItem", "constructor"],
+        "native": true,
+        "members": {
+          "length": {
+            "native": true,
+            "length": 0,
+            "enumerable": true,
+            "configurable": true,
+            "writable": null
+          },
+          "key": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "getItem": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "setItem": {
+            "native": true,
+            "length": 2,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "removeItem": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "clear": {
+            "native": true,
+            "length": 0,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          }
+        }
+      },
+      "access": {
+        "hasType": "function",
+        "requestType": "function",
+        "has": true,
+        "request": "resolved",
+        "options": [
+          {
+            "error": "SecurityError"
+          },
+          {
+            "error": "SecurityError"
+          },
+          {
+            "tag": "[object Undefined]",
+            "hasLocal": "undefined",
+            "hasSession": "undefined",
+            "localSame": false
+          },
+          {
+            "tag": "[object Undefined]",
+            "hasLocal": "undefined",
+            "hasSession": "undefined",
+            "localSame": false
+          }
+        ],
+        "hasStorageAccessInactive": "InvalidStateError",
+        "requestStorageAccessInactive": "InvalidStateError",
+        "foreignPromise": {
+          "parent": false,
+          "child": true
+        },
+        "invalidReceiver": "rejected TypeError",
+        "tamper": {
+          "value": "456",
+          "symbol": "TypeError",
+          "has": true,
+          "failure": "SecurityError"
+        }
+      },
+      "partition": {
+        "previous": null,
+        "value": "widget",
+        "has": true,
+        "request": "resolved",
+        "handle": {
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": null,
+          "sameObject": true
+        }
+      },
+      "nested": {
+        "previous": "widget",
+        "value": "widget",
+        "has": true,
+        "request": "resolved",
+        "handle": {
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": null,
+          "sameObject": true
+        }
+      },
+      "policies": [
+        {
+          "hasStorageAccess": false,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "resolved"
+        },
+        {
+          "hasStorageAccess": false,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "NotAllowedError"
+        }
+      ]
+    },
+    {
+      "quota": [
+        {
+          "length": 2621439,
+          "result": "stored"
+        },
+        {
+          "length": 2621440,
+          "result": "stored"
+        },
+        {
+          "length": 5242879,
+          "result": "stored"
+        },
+        {
+          "length": 5242880,
+          "result": "QuotaExceededError"
+        }
+      ],
+      "quotaAtomic": {
+        "failure": "QuotaExceededError",
+        "value": "before",
+        "length": 1
+      },
+      "lossless": {
+        "key": [107, 55296],
+        "value": [118, 56320, 0],
+        "property": [118, 56320, 0],
+        "keys": [[107, 55296]],
+        "length": 1
+      },
+      "conversion": {
+        "keySymbol": "TypeError",
+        "valueSymbol": "TypeError",
+        "missing": "TypeError",
+        "unchanged": 1
+      },
+      "order": {
+        "keys": ["a", "b"],
+        "length": 2,
+        "value": "3",
+        "same": true,
+        "tag": "[object Storage]"
+      },
+      "surface": {
+        "names": ["length", "clear", "getItem", "key", "removeItem", "setItem", "constructor"],
+        "native": true,
+        "members": {
+          "length": {
+            "native": true,
+            "length": 0,
+            "enumerable": true,
+            "configurable": true,
+            "writable": null
+          },
+          "key": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "getItem": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "setItem": {
+            "native": true,
+            "length": 2,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "removeItem": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "clear": {
+            "native": true,
+            "length": 0,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          }
+        }
+      },
+      "access": {
+        "hasType": "function",
+        "requestType": "function",
+        "has": true,
+        "request": "resolved",
+        "options": [
+          {
+            "error": "SecurityError"
+          },
+          {
+            "error": "SecurityError"
+          },
+          {
+            "tag": "[object Undefined]",
+            "hasLocal": "undefined",
+            "hasSession": "undefined",
+            "localSame": false
+          },
+          {
+            "tag": "[object Undefined]",
+            "hasLocal": "undefined",
+            "hasSession": "undefined",
+            "localSame": false
+          }
+        ],
+        "hasStorageAccessInactive": "InvalidStateError",
+        "requestStorageAccessInactive": "InvalidStateError",
+        "foreignPromise": {
+          "parent": false,
+          "child": true
+        },
+        "invalidReceiver": "rejected TypeError",
+        "tamper": {
+          "value": "456",
+          "symbol": "TypeError",
+          "has": true,
+          "failure": "SecurityError"
+        }
+      },
+      "partition": {
+        "previous": null,
+        "value": "widget",
+        "has": true,
+        "request": "resolved",
+        "handle": {
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": "widget",
+          "sameObject": true
+        }
+      },
+      "nested": {
+        "previous": null,
+        "value": "widget",
+        "has": true,
+        "request": "resolved",
+        "handle": {
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": "widget",
+          "sameObject": true
+        }
+      },
+      "policies": [
+        {
+          "hasStorageAccess": false,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "resolved"
+        },
+        {
+          "hasStorageAccess": false,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "NotAllowedError"
+        }
+      ]
+    },
+    {
+      "quota": [
+        {
+          "length": 2621439,
+          "result": "stored"
+        },
+        {
+          "length": 2621440,
+          "result": "stored"
+        },
+        {
+          "length": 5242879,
+          "result": "stored"
+        },
+        {
+          "length": 5242880,
+          "result": "QuotaExceededError"
+        }
+      ],
+      "quotaAtomic": {
+        "failure": "QuotaExceededError",
+        "value": "before",
+        "length": 1
+      },
+      "lossless": {
+        "key": [107, 55296],
+        "value": [118, 56320, 0],
+        "property": [118, 56320, 0],
+        "keys": [[107, 55296]],
+        "length": 1
+      },
+      "conversion": {
+        "keySymbol": "TypeError",
+        "valueSymbol": "TypeError",
+        "missing": "TypeError",
+        "unchanged": 1
+      },
+      "order": {
+        "keys": ["a", "b"],
+        "length": 2,
+        "value": "3",
+        "same": true,
+        "tag": "[object Storage]"
+      },
+      "surface": {
+        "names": ["length", "clear", "getItem", "key", "removeItem", "setItem", "constructor"],
+        "native": true,
+        "members": {
+          "length": {
+            "native": true,
+            "length": 0,
+            "enumerable": true,
+            "configurable": true,
+            "writable": null
+          },
+          "key": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "getItem": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "setItem": {
+            "native": true,
+            "length": 2,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "removeItem": {
+            "native": true,
+            "length": 1,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          },
+          "clear": {
+            "native": true,
+            "length": 0,
+            "enumerable": true,
+            "configurable": true,
+            "writable": true
+          }
+        }
+      },
+      "access": {
+        "hasType": "function",
+        "requestType": "function",
+        "has": true,
+        "request": "resolved",
+        "options": [
+          {
+            "error": "SecurityError"
+          },
+          {
+            "error": "SecurityError"
+          },
+          {
+            "tag": "[object Undefined]",
+            "hasLocal": "undefined",
+            "hasSession": "undefined",
+            "localSame": false
+          },
+          {
+            "tag": "[object Undefined]",
+            "hasLocal": "undefined",
+            "hasSession": "undefined",
+            "localSame": false
+          }
+        ],
+        "hasStorageAccessInactive": "InvalidStateError",
+        "requestStorageAccessInactive": "InvalidStateError",
+        "foreignPromise": {
+          "parent": false,
+          "child": true
+        },
+        "invalidReceiver": "rejected TypeError",
+        "tamper": {
+          "value": "456",
+          "symbol": "TypeError",
+          "has": true,
+          "failure": "SecurityError"
+        }
+      },
+      "partition": {
+        "previous": "widget",
+        "value": "widget",
+        "has": true,
+        "request": "resolved",
+        "handle": {
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": "widget",
+          "sameObject": true
+        }
+      },
+      "nested": {
+        "previous": "widget",
+        "value": "widget",
+        "has": true,
+        "request": "resolved",
+        "handle": {
+          "tag": "[object StorageAccessHandle]",
+          "hasLocal": "object",
+          "localSame": false,
+          "unpartitionedValue": "widget",
+          "sameObject": true
+        }
+      },
+      "policies": [
+        {
+          "hasStorageAccess": false,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "resolved"
+        },
+        {
+          "hasStorageAccess": false,
+          "requestStorageAccess": "NotAllowedError"
+        },
+        {
+          "hasStorageAccess": true,
+          "requestStorageAccess": "NotAllowedError"
+        }
+      ]
+    }
+  ]
+}

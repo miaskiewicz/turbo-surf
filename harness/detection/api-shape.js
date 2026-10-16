@@ -46,6 +46,15 @@
     }
     return result;
   };
+  const members = (prototype) =>
+    Object.fromEntries(
+      Reflect.ownKeys(prototype).map((key) => {
+        const own = Object.getOwnPropertyDescriptor(prototype, key);
+        const entry = descriptor(own);
+        if (typeof own.value === "function") entry.function = shape(own.value);
+        return [String(key), entry];
+      }),
+    );
   const owner = (object, property) => {
     let depth = 0;
     for (let current = object; current; current = Object.getPrototypeOf(current), depth++) {
@@ -117,9 +126,21 @@
     "Date",
     "Node",
     "Element",
+    "DocumentFragment",
+    "ShadowRoot",
     "HTMLElement",
     "HTMLCanvasElement",
+    "HTMLFormElement",
+    "HTMLInputElement",
+    "HTMLButtonElement",
     "Document",
+    "Range",
+    "AbstractRange",
+    "NodeRange",
+    "StaticRange",
+    "CustomElementRegistry",
+    "ElementInternals",
+    "MutationObserver",
     "Navigator",
     "Performance",
     "Storage",
@@ -127,6 +148,24 @@
     "Request",
     "Response",
     "Event",
+    "EventTarget",
+    "MessageEvent",
+    "MessageChannel",
+    "MessagePort",
+    "SubmitEvent",
+    "AbortController",
+    "AbortSignal",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+    "ReadableStreamBYOBReader",
+    "WritableStream",
+    "WritableStreamDefaultWriter",
+    "TransformStream",
+    "TrustedHTML",
+    "TrustedScript",
+    "TrustedScriptURL",
+    "TrustedTypePolicy",
+    "TrustedTypePolicyFactory",
     "ErrorEvent",
     "DOMException",
     "CSSStyleSheet",
@@ -151,6 +190,7 @@
         prototypeDescriptor: descriptor(Object.getOwnPropertyDescriptor(ctor, "prototype")),
         prototypeTag: Object.prototype.toString.call(ctor.prototype),
         prototypeKeys: keys(ctor.prototype),
+        prototypeMembers: members(ctor.prototype),
       };
     });
   }

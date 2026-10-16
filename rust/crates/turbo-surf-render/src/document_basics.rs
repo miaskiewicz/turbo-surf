@@ -26,10 +26,16 @@ pub fn clone_nonces(source: Handle, target: Handle, deep: bool) {
         deep: bool,
         out: &mut Vec<(Handle, Handle)>,
     ) {
-        out.push((source, target));
-        if deep {
-            for (source, target) in tree.children(source).into_iter().zip(tree.children(target)) {
-                pairs(tree, source, target, true, out);
+        let mut pending = vec![(source, target)];
+        while let Some(pair) = pending.pop() {
+            out.push(pair);
+            if deep {
+                pending.extend(
+                    tree.children(pair.0)
+                        .into_iter()
+                        .zip(tree.children(pair.1))
+                        .rev(),
+                );
             }
         }
     }
@@ -57,10 +63,11 @@ pub fn copy_nonces(
     deep: bool,
 ) {
     fn flatten(tree: &Tree, node: Handle, deep: bool, out: &mut Vec<Handle>) {
-        out.push(node);
-        if deep {
-            for node in tree.children(node) {
-                flatten(tree, node, true, out);
+        let mut pending = vec![node];
+        while let Some(node) = pending.pop() {
+            out.push(node);
+            if deep {
+                pending.extend(tree.children(node).into_iter().rev());
             }
         }
     }
@@ -105,104 +112,119 @@ struct Snapshot {
     value: Vec<u16>,
     doctype: Option<(Vec<u16>, Vec<u16>)>,
     attributes: Vec<(Handle, turbo_dom_parser::rtdom::tree::AttributeDataUtf16)>,
-    children: Vec<Snapshot>,
-    shadow: Option<Box<Snapshot>>,
+    parent: Option<usize>,
+    shadow: bool,
 }
-fn capture(tree: &mut Tree, node: Handle) -> Result<Snapshot, &'static str> {
-    let kind = tree.node_type_id(node);
-    if !matches!(kind, 1 | 2 | 3 | 7 | 8 | 10 | 11) {
-        return Err("Adopting this native node kind is unsupported");
-    }
-    if kind == 1 && tree.local_name(node) == Some("template") {
-        return Err("Adopting template content is unsupported");
-    }
-    let attributes = tree
-        .attributes_units(node)
-        .into_iter()
-        .map(|attribute| {
-            let handle = tree
-                .attribute_node_units(node, attribute.namespace.as_deref(), &attribute.local_name)
-                .unwrap();
-            (handle, attribute)
-        })
-        .collect();
-    let attr = tree.attribute_data_units(node);
-    let doctype = (kind == 10).then(|| {
-        (
-            tree.doctype_public_id_utf16(node).unwrap_or_default(),
-            tree.doctype_system_id_utf16(node).unwrap_or_default(),
-        )
-    });
-    let name = tree
-        .qualified_name_utf16(node)
-        .or_else(|| tree.processing_instruction_target_utf16(node))
-        .or_else(|| tree.doctype_name_utf16(node))
-        .unwrap_or_default();
-    let namespace = attr
-        .as_ref()
-        .and_then(|attr| attr.namespace.clone())
-        .or_else(|| tree.namespace_uri_utf16(node));
-    let value = tree.node_value_utf16(node).unwrap_or_default();
-    let children = tree
-        .children(node)
-        .into_iter()
-        .map(|node| capture(tree, node))
-        .collect::<Result<_, _>>()?;
-    let shadow = tree
-        .shadow_root(node)
-        .map(|node| capture(tree, node).map(Box::new))
-        .transpose()?;
-    Ok(Snapshot {
-        old: node,
-        kind,
-        name,
-        namespace,
-        value,
-        doctype,
-        attributes,
-        children,
-        shadow,
-    })
-}
+fn capture(tree: &mut Tree, node: Handle) -> Result<Vec<Snapshot>, &'static str> {
+    let mut records = Vec::new();
+    let mut pending = vec![(node, None, false)];
+    while let Some((node, parent, shadow)) = pending.pop() {
+        let kind = tree.node_type_id(node);
+        if !matches!(kind, 1 | 2 | 3 | 7 | 8 | 10 | 11) {
+            return Err("Adopting this native node kind is unsupported");
+        }
+        let attributes = tree
+            .attributes_units(node)
+            .into_iter()
+            .map(|attribute| {
+                let handle = tree
+                    .attribute_node_units(
+                        node,
+                        attribute.namespace.as_deref(),
+                        &attribute.local_name,
+                    )
+                    .unwrap();
+                (handle, attribute)
+            })
+            .collect();
+        let attr = tree.attribute_data_units(node);
+        let doctype = (kind == 10).then(|| {
+            (
+                tree.doctype_public_id_utf16(node).unwrap_or_default(),
+                tree.doctype_system_id_utf16(node).unwrap_or_default(),
+            )
+        });
+        let name = tree
+            .qualified_name_utf16(node)
+            .or_else(|| tree.processing_instruction_target_utf16(node))
+            .or_else(|| tree.doctype_name_utf16(node))
+            .unwrap_or_default();
+        let namespace = attr
+            .as_ref()
+            .and_then(|attr| attr.namespace.clone())
+            .or_else(|| tree.namespace_uri_utf16(node));
+        let value = tree.node_value_utf16(node).unwrap_or_default();
 
+        let index = records.len();
+        records.push(Snapshot {
+            old: node,
+            kind,
+            name,
+            namespace,
+            value,
+            doctype,
+            attributes,
+            parent,
+            shadow,
+        });
+        if let Some(shadow) = tree.shadow_root(node) {
+            pending.push((shadow, Some(index), true))
+        }
+        for child in tree.children(node).into_iter().rev() {
+            pending.push((child, Some(index), false))
+        }
+    }
+    Ok(records)
+}
 fn materialize(
     tree: &mut Tree,
-    source: Snapshot,
+    source: Vec<Snapshot>,
     supplied: Option<Handle>,
     mapping: &mut Vec<(Handle, Handle)>,
 ) -> Handle {
-    let target = supplied.unwrap_or_else(|| match source.kind {
-        2 => tree.create_attribute_units(source.namespace.as_deref(), &source.name, &source.value),
-        3 => tree.create_text_node_utf16(&source.value),
-        7 => tree.create_processing_instruction_units(&source.name, &source.value),
-        8 => tree.create_comment_utf16(&source.value),
-        10 => {
-            let (public_id, system_id) = source.doctype.as_ref().unwrap();
-            tree.create_document_type_units(&source.name, public_id, system_id)
+    let mut nodes = Vec::with_capacity(source.len());
+    for record in source {
+        let target = if record.shadow {
+            tree.attach_shadow(nodes[record.parent.expect("shadow host snapshot")])
+        } else if record.parent.is_none() && supplied.is_some() {
+            supplied.expect("supplied snapshot root")
+        } else {
+            match record.kind {
+                2 => tree.create_attribute_units(
+                    record.namespace.as_deref(),
+                    &record.name,
+                    &record.value,
+                ),
+                3 => tree.create_text_node_utf16(&record.value),
+                7 => tree.create_processing_instruction_units(&record.name, &record.value),
+                8 => tree.create_comment_utf16(&record.value),
+                10 => {
+                    let (public_id, system_id) = record.doctype.as_ref().expect("doctype snapshot");
+                    tree.create_document_type_units(&record.name, public_id, system_id)
+                }
+                11 => tree.create_document_fragment(),
+                _ => tree.create_element_namespace_units(record.namespace.as_deref(), &record.name),
+            }
+        };
+        mapping.push((record.old, target));
+        for (old, attribute) in record.attributes {
+            let node = tree.create_attribute_units(
+                attribute.namespace.as_deref(),
+                &attribute.qualified_name,
+                &attribute.value,
+            );
+            tree.set_attribute_node(target, node)
+                .expect("validated element attribute");
+            mapping.push((old, node));
         }
-        11 => tree.create_document_fragment(),
-        _ => tree.create_element_namespace_units(source.namespace.as_deref(), &source.name),
-    });
-    mapping.push((source.old, target));
-    for (old, attribute) in source.attributes {
-        let node = tree.create_attribute_units(
-            attribute.namespace.as_deref(),
-            &attribute.qualified_name,
-            &attribute.value,
-        );
-        tree.set_attribute_node(target, node)
-            .expect("validated element attribute");
-        mapping.push((old, node));
+        if !record.shadow {
+            if let Some(parent) = record.parent {
+                tree.append_child(nodes[parent], target)
+            }
+        }
+        nodes.push(target);
     }
-    for child in source.children {
-        let child = materialize(tree, child, None, mapping);
-        tree.append_child(target, child);
-    }
-    if let Some(shadow) = source.shadow {
-        let root = tree.attach_shadow(target);
-        materialize(tree, *shadow, Some(root), mapping);
-    }
-    target
+    nodes[0]
 }
 
 // Every already-visible node remains the SAME V8 object. Uncached handles are
@@ -359,6 +381,8 @@ pub fn adopt<'s>(
         state.nonces.extend(nonces);
         state.shadow_modes.extend(modes);
     });
+    template_contents::relocate(scope, node);
+    custom_elements::adopted(scope, node);
     Ok(node)
 }
 
@@ -422,6 +446,27 @@ fn move_node(
     Ok(child)
 }
 
+fn fragment_by_id(tree: &Tree, root: Handle, id: &[u16]) -> Option<Handle> {
+    if id.is_empty() {
+        return None;
+    }
+    let scalar = String::from_utf16_lossy(id);
+    let mut pending = tree.children(root);
+    pending.reverse();
+    while let Some(node) = pending.pop() {
+        if tree.get_attribute_ns_borrowed(node, None, "id") == Some(scalar.as_str())
+            && tree
+                .get_attribute_utf16(node, "id")
+                .is_some_and(|value| value == id)
+        {
+            return Some(node);
+        }
+        // DOM ancestry excludes a nested shadow root and inert template contents.
+        pending.extend(tree.children(node).into_iter().rev());
+    }
+    None
+}
+
 pub fn dispatch<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
@@ -437,6 +482,17 @@ pub fn dispatch<'s>(
     };
     let kind = with_tree(|tree| tree.node_type_id(handle)).unwrap_or(0);
     match operation.as_str() {
+        "fragmentById" if kind == 11 => {
+            let Some(id) = dom_units(scope, args.get(2)) else {
+                return;
+            };
+            let found = with_tree(|tree| fragment_by_id(tree, handle, &id)).flatten();
+            if let Some(found) = found {
+                rv.set(wrap(scope, found).into());
+            } else {
+                rv.set(v8::null(scope).into());
+            }
+        }
         "normalize" => range_live::normalize(scope, handle),
         "replaceCharacterData" if matches!(kind, 3 | 4 | 7 | 8) => {
             let Some(offset) = args.get(2).uint32_value(scope) else {
@@ -517,6 +573,7 @@ pub fn dispatch<'s>(
                         .unwrap_or(0);
                         range_live::inserting(scope, handle, index, 1);
                         with_tree_mut(|tree| tree.insert_before(handle, moved_handle, reference));
+                        custom_elements::moved(scope, moved);
                     }
                     Some(Err(name)) => error = Some(name),
                     None => return,
@@ -591,6 +648,19 @@ pub fn dispatch<'s>(
                     .insert(handle, value);
             });
         }
+        "import" if kind == 9 => {
+            let Ok(source) = v8::Local::<v8::Object>::try_from(args.get(2)) else {
+                return type_error(scope);
+            };
+            match import_document_node(scope, node, source, args.get(3).boolean_value(scope)) {
+                Ok(node) => rv.set(node.into()),
+                Err(error) => {
+                    if let Some(message) = v8::String::new(scope, error) {
+                        rv.set(message.into())
+                    }
+                }
+            }
+        }
         "adopt" if kind == 9 => {
             let Ok(source) = v8::Local::<v8::Object>::try_from(args.get(2)) else {
                 return type_error(scope);
@@ -613,6 +683,50 @@ fn type_error(scope: &mut v8::PinScope) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn fragment_id_lookup_is_iterative_and_distinguishes_repaired_scalar_ids() {
+        let mut tree = Tree::parse("<body></body>");
+        let root = tree.create_document_fragment();
+        let mut parent = root;
+        for _ in 0..8192 {
+            let child = tree.create_element("div");
+            tree.append_child(parent, child);
+            parent = child;
+        }
+        tree.set_attribute_utf16(parent, "id", &[0xd800]);
+        let replacement = tree.create_element("span");
+        tree.set_attribute_utf16(replacement, "id", &[0xfffd]);
+        tree.append_child(root, replacement);
+        assert_eq!(fragment_by_id(&tree, root, &[0xd800]), Some(parent));
+        assert_eq!(fragment_by_id(&tree, root, &[0xfffd]), Some(replacement));
+        assert_eq!(fragment_by_id(&tree, root, &[]), None);
+    }
+
+    #[test]
+    fn native_deep_adoption_snapshot_keeps_shadow_namespace_and_original_units_without_recursion() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let source = format!("{}x{}", "<div>".repeat(8192), "</div>".repeat(8192));
+                let mut tree = Tree::parse(&source);
+                let root = tree.query_selector("body").unwrap();
+                let node = tree.first_child(root).unwrap();
+                let snapshot = capture(&mut tree, node).unwrap();
+                assert_eq!(snapshot.len(), 8193);
+                let mut target = Tree::parse("<body>");
+                let mut mapping = Vec::new();
+                let moved = materialize(&mut target, snapshot, None, &mut mapping);
+                assert_eq!(mapping.len(), 8193);
+                assert_eq!(target.text_content(moved), "x");
+                assert_eq!(
+                    turbo_dom_parser::rtdom::serialize::serialize_outer_utf16(&target, moved),
+                    source.encode_utf16().collect::<Vec<_>>()
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
     fn check_script(source: &str) {
         super::super::tests::init_v8();
         let isolate = &mut v8::Isolate::new(Default::default());

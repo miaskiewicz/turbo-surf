@@ -1,0 +1,383 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "widgetSha256": "8ffa669ec40b02c0730e4e67be226c30afdc2ed05782497359fb46e918845a1d",
+  "probeSha256": "c2c532d65477c662a4ca9d279b82c7fb3ce39ae8f4704ae4487174a2efee7298",
+  "collectorSha256": "23d606a0d99b77a53b6a1405f3cd5efa11544808eec619746c8d1f166a646fff",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "wire": [
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/favicon.ico",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "storage",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "omit",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "cacheOnly",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "invalid",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "wildcard",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "empty",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "emptyAgain",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/resource-clear",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/resource-clear",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/resource-clear",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/resource-clear",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "replay",
+      "cookie": null
+    },
+    {
+      "host": "localhost:PORT",
+      "path": "/widget",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "localhost:PORT",
+      "path": "/clear",
+      "case": "corsAllowed",
+      "cookie": null
+    },
+    {
+      "host": "localhost:PORT",
+      "path": "/clear",
+      "case": "corsDenied",
+      "cookie": null
+    },
+    {
+      "host": "localhost:PORT",
+      "path": "/clear",
+      "case": "corpDenied",
+      "cookie": null
+    },
+    {
+      "host": "localhost:PORT",
+      "path": "/clear",
+      "case": "widgetSelf",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/widget",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "sameSiteAllowed",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "sameSiteDenied",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "sameSiteCorpDenied",
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/clear",
+      "case": "sameSiteOmit",
+      "cookie": null
+    },
+    {
+      "host": "localhost:PORT",
+      "path": "/widget",
+      "case": null,
+      "cookie": null
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "path": "/widget",
+      "case": null,
+      "cookie": null
+    }
+  ],
+  "result": {
+    "storage": {
+      "status": 200,
+      "local": null,
+      "session": null,
+      "same": true,
+      "clearEvents": {
+        "local": [
+          {
+            "key": null,
+            "url": "",
+            "area": "local",
+            "trusted": true
+          }
+        ],
+        "session": [
+          {
+            "key": null,
+            "url": "",
+            "area": "session",
+            "trusted": true
+          }
+        ]
+      }
+    },
+    "omit": {
+      "status": 200,
+      "local": "omit",
+      "session": "omit",
+      "same": true,
+      "clearEvents": {
+        "local": [],
+        "session": []
+      }
+    },
+    "cacheOnly": {
+      "status": 200,
+      "local": "cacheOnly",
+      "session": "cacheOnly",
+      "same": true,
+      "clearEvents": {
+        "local": [],
+        "session": []
+      }
+    },
+    "invalid": {
+      "status": 200,
+      "local": "invalid",
+      "session": "invalid",
+      "same": true,
+      "clearEvents": {
+        "local": [],
+        "session": []
+      }
+    },
+    "wildcard": {
+      "status": 200,
+      "local": null,
+      "session": null,
+      "same": true,
+      "clearEvents": {
+        "local": [
+          {
+            "key": null,
+            "url": "",
+            "area": "local",
+            "trusted": true
+          }
+        ],
+        "session": [
+          {
+            "key": null,
+            "url": "",
+            "area": "session",
+            "trusted": true
+          }
+        ]
+      }
+    },
+    "empty": {
+      "status": 200,
+      "clearEvents": {
+        "local": [],
+        "session": [
+          {
+            "key": null,
+            "url": "",
+            "area": "session",
+            "trusted": true
+          }
+        ]
+      }
+    },
+    "emptyAgain": {
+      "status": 200,
+      "clearEvents": {
+        "local": [],
+        "session": [
+          {
+            "key": null,
+            "url": "",
+            "area": "session",
+            "trusted": true
+          }
+        ]
+      }
+    },
+    "classic": {
+      "local": null,
+      "session": null
+    },
+    "module": {
+      "local": null,
+      "session": null
+    },
+    "style": {
+      "local": null,
+      "session": null
+    },
+    "image": {
+      "local": null,
+      "session": null
+    },
+    "replay": {
+      "status": 200,
+      "local": "after",
+      "session": "after"
+    },
+    "corsAllowed": {
+      "status": 200,
+      "root": {
+        "local": "corsAllowed",
+        "session": "corsAllowed"
+      },
+      "child": {
+        "local": "child",
+        "session": "child"
+      }
+    },
+    "corsDenied": {
+      "status": "TypeError",
+      "root": {
+        "local": "corsDenied",
+        "session": "corsDenied"
+      },
+      "child": {
+        "local": "child",
+        "session": "child"
+      }
+    },
+    "corpDenied": {
+      "status": "TypeError",
+      "root": {
+        "local": "corpDenied",
+        "session": "corpDenied"
+      },
+      "child": {
+        "local": "child",
+        "session": "child"
+      }
+    },
+    "widgetSelf": {
+      "child": {
+        "local": null,
+        "session": null
+      },
+      "root": {
+        "local": "widgetSelf",
+        "session": "widgetSelf"
+      }
+    },
+    "sameSiteAllowed": {
+      "status": 200,
+      "child": {
+        "local": null,
+        "session": null
+      }
+    },
+    "sameSiteDenied": {
+      "status": "TypeError",
+      "child": {
+        "local": null,
+        "session": null
+      }
+    },
+    "sameSiteCorpDenied": {
+      "status": "TypeError",
+      "child": {
+        "local": null,
+        "session": null
+      }
+    },
+    "sameSiteOmit": {
+      "status": 200,
+      "child": {
+        "local": "child",
+        "session": "child"
+      }
+    },
+    "iframeCrossSite": {
+      "local": null,
+      "session": null
+    },
+    "iframeSameSite": {
+      "local": null,
+      "session": null
+    }
+  }
+}

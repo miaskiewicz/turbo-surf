@@ -1,60 +1,134 @@
 # Google detection audit — 2026-10-09; follow-up 2026-10-14
 
+The canonical pending-work checklist is [PARITY-GAPS.md](./PARITY-GAPS.md).
+Residual work beyond PR26 is tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28),
+with deferred audio in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+
 Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
-## Remaining checklist — 2026-10-14
+## Current integration checklist — 2026-10-16
 
-This is the current work list, not a claim of complete browser parity. The
-source/UTF-16 checkpoint is `118a754`, with canonical binding `dfaff47`; the current
-integration adds CSP reporting and native Window task ordering. Isolated candidates
-and their private dependency overrides are not integrated or registry-release proof.
+The working branch integrates genuine native geometry, DOM ownership, CSP/reporting,
+request/response streams, cache/storage and current profile controls. Final gates
+remain pending. Older checkpoint counts below describe their recorded sources.
 
-1. **Messaging / reclamation:** complete broader frame/realm retirement and
-   reclamation coverage. The merged 68-contract lifetime cohort covers frame GC,
-   frame retirement, host budgets, transfers, native storage and independent sessions
-   on both engines; it does not prove every browser lifetime edge.
-2. **Layout / Range / caret:** integrate the pending geometry consumer and finish
-   scrolling, point hit testing and caret coverage. The producer candidate addresses
-   fractional layout and paint transforms, including ordinary rotated elements.
-   The isolated original-unit/CoreText candidate now matches all 26 mixed-text
-   Range controls and 12 additional font/size controls; full producer gates and
-   production integration remain pending. Image/font/SVG/resource coverage is
-   still incomplete.
-3. **Template ownership:** integrate the real associated inert-document candidate
-   through the production page runtime. The merged isolated binding passes 188 standalone
-   contracts; the unpublished additive backend seam passed independent review and
-   nine backend contracts. Both isolated genuine155 page-runtime contracts now pass
-   after fixing cross-Window timer ordering, including retained content identity
-   and original units after frame adoption. Those results do not certify a public
-   dependency release or the production consumer.
-4. **DOM / lifecycle:** finish genuine custom-element construction, upgrade,
-   reactions and scoped registry behavior; broader parsing and observer behavior
-   also remain. A registry shape alone is not an implementation. Existing slots,
-   live Range boundaries and original DOM/source UTF-16 preservation are integrated.
-5. **Audio:** deferred as requested in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
-6. **Security / resources:** finish CSP violations/reporting and remaining policy
-   effects, including sandbox forms, popup/navigation behavior and wider resource
-   coverage. The integrated reporting batch passes 44 focused contracts on each
-   engine and delivers parser reports after the existing script-before-timer fix;
-   parser source positions remain a measured gap.
-7. **Fetch / storage:** integrate genuine response streaming and network cancellation,
-   dependent Request signals, cache/referrer effects, upload/body behavior and broader
-   partitioning/storage-access behavior. Validating Request.cache without applying it
-   to transport does not establish parity.
-8. **Validation:** run final combined workspace/default/native checks and rebuild
-   addons before shim/E2E certification after the remaining integrations. The
-   verified experimental155 SDK does not replace the production default150 build.
-9. **API inventory:** freshly compare own members, descriptors and behavior against
-   Chrome. **94 is historical**, not a current missing-member count.
-10. **PR housekeeping:** commit/push each tested integration and refresh the changelog,
-    PR description and source-pinned findings; do not describe isolated work as shipped.
-11. **Live Google:** capture a fresh native run with the GPU bridge and wreq transport,
-    a fresh native cookie jar and consent handling, without importing sidecar cookies.
-    Remeasure actual GPU identity and transport behavior: the155 HTTP identity still
-    uses the pinned upstream154 TLS/H2 recipe. Successful native SERP clearance
-    remains unverified.
+1. **Messaging / reclamation:** private endpoint ownership, retired-frame cleanup,
+   queued key snapshots and real stream transfers are integrated. The latest actual
+   native155+wreq run passes all9 stream transfer tests, including retirement and
+   completed-realm GC. The linked-workspace fixture startup failure is fixed without
+   weakening assertions. Broader reclamation/lifecycle coverage remains tracked.
+2. **Layout / Range / caret:**22 geometry and8 shadow/public-CSS controls passed
+   together. Composed slots, original UTF-16 text, rotated div/img, real CSP-applied
+   styles and per-session cache identities are integrated. The latest native run
+   adds3 passing resource-admission tests: font/keyframe definitions are accepted
+   only when native matched styles prove them unused. Used/unresolved resources,
+   decorated/empty/mixed-font inline boxes and broader layout remain bounded.
+   Public Git-pinned producer0.3.8 candidate9d7f02fb has730 Core tests, strict
+   checks and green CI with100% line coverage; it is not a published registry release.
+3. **DOM / forms:** published turbo-dom0.5.6 and canonical turbo-test4aeb295 are
+   integrated through the official vendor script. Genuine AbstractRange/NodeRange/
+   StaticRange behavior passes3 native tests, including real iframe and GC controls.
+   Form validation/retained-realm2, encoding2 and real HTTP navigation6 tests pass
+   on actual155+wreq. Top-document text GET/POST uses the real jar, profile and
+   response document, preserving303 redirects, consent cookies and fragments.
+   ElementInternals/FormData event integration is still in progress; other targets,
+   file-input/multipart and complete successful-controls semantics remain open.
+4. **Audio:** deferred in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+5. **Security / resources:** native Trusted Types, original parser/report samples,
+   HTTP report delivery, sandbox/navigation and tested COOP/COEP/permissions-policy
+   behavior are integrated. Actual155 WindowProxy/module/codegen acceptance passes.
+   Broader sinks/default reentrancy, directives/popups/deep policy remain open.
+   Stock150 lacks the native155 callback contracts.
+6. **Fetch / storage:** bounded HTTPS/HTTP2 uploads, response streams/cancellation,
+   BodyInit/cache/referrer/partition and peer/clear tasks are integrated. Three
+   combined native upload controls previously passed. Genuine stream transfers
+   retain source-pinned Chrome scenarios and rollback/partial-commit/GC controls;
+   the latest combined9 stream tests pass. Remaining storage-access and Fetch
+   behavior, including genuine multipart BodyInit, stays on the backlog.
+7. **Validation:** the latest named combined actual155+wreq batch passes25 tests:
+   Range3, encoding2, form validation/GC2, form navigation6, resources3 and streams9.
+   Full workspace/default/native, rebuilt addon and shim/E2E gates remain pending.
+   The layout dependency uses a public immutable Git pin, without private source
+   patches in production manifests. Registry publication and stock-engine alignment
+   remain separate requirements.
+8. **API inventory:** [API-INVENTORY.json](./API-INVENTORY.json) preserves a frozen
+   Chrome155.80/native155.23 pair:66 missing own members on the original interfaces,
+   147 across expanded measured interfaces. That executable predates Range/forms/
+   selector/stream changes; absent interfaces in that capture are historical
+   observations. Fresh measurement after integration is still required.
+9. **Housekeeping:** tested integrations need committing/pushing with final gate
+   evidence and refreshed PR description. The changelog is consolidated by final
+   capability; [PARITY-GAPS.md](./PARITY-GAPS.md) and
+   [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) track every residual
+   category outside completed PR26 scope. No Surf release is tagged.
+10. **Live Google:** rebuild the all-feature driver, then run fresh GPU+wreq/native
+    cookies and consent handling. Successful native SERP remains unverified.
+    Measured localhost transport/GPU fields do not certify complete parity. Chrome
+    oracle cookies are never imported; the155 HTTP identity uses the154 recipe.
+
+## Isolated CSP navigation checkpoint — 2026-10-14
+
+The resources candidate carries actual response status and selected navigation
+referrer through private document ownership and ignores overridden public getters.
+MCP, NAPI and shim callers preserve response headers before authored execution.
+Trusted shim init scripts use the native entry point and preserve original HTML
+source positions. A fresh normal Chrome155 control contains21 root/frame cases
+covering HTTP error responses, header referrer policies, redirects, local frame
+inheritance and fragment-bearing root/same/cross-frame URLs. The complete21-case
+control passes three contracts on both default150 and genuine155. The isolated
+rebuilt wreq addon passes the metadata/initScript contract and84 combined shim
+tests, with one intentional skipped-test demonstration. Production addon/E2E
+and full-workspace certification remain separate integration gates. The affected
+resource/lifetime/GC/host cohort passes71 genuine155 controls with zero ignores
+and68 default150 controls with3 explicit native-only skips. The new metadata
+contracts add3 passing controls on each engine; affected strict checks pass. The independent
+collector pins all authored sources; no oracle cookies are imported.
+
+Native eval/Function reporting has a separate immutable90538a38 SDK/consumer
+packet:71 actual155 contracts pass with a matching rebuilt guarded archive.
+The default150 cohort passes68 and retains3 explicit unsupported-native guards.
+These isolated results require production integration and do not certify final
+workspace gates or live Google acceptance. HTTP report delivery, broader request
+lifecycle reports and remaining sandbox/navigation effects are still unfinished.
+
+The subsequent isolated iframe attribute control adds7 cases (28 total). A saved
+pre-fix actual155 mismatch shows the parent unsafe-url policy incorrectly leaking
+the full referrer when iframe referrerpolicy=no-referrer. The native fix reads the
+real attribute, matches HTML keyword case handling and preserves measured local
+document behavior. Both default150 and genuine155 pass all28;8 frame
+GC/retirement contracts and strict affected checks pass on each engine. HTTP report delivery and remaining security/resource work are open.
+
+The isolated meta-referrer batch adds20 independent cases and passes them on
+both runtimes. The true associated-template prerequisite is combined with parser
+provenance: backendd13f82b passes14 source/template contracts and strict checks;
+canonical d0163aff passes 214 standalone contracts. These are unpublished candidates.
+The full canonical Clippy attempt still reports 30 inherited runner/NAPI/dead-code
+errors, so it is not certified green; affected renderer checks are separate.
+The combined template dependency exposed a real parser CSP regression: template
+style attributes disappeared from the root scan. Native traversal now follows
+actual private template contents and keeps the parsing document's policy, while
+inert stylesheets remain inactive. Fresh normal Chrome reconfirms all 14 unchanged
+parser controls, including the document-targeted template report with zero source
+position. The combined policy cohorts pass 71 genuine 155 and 68 default 150 with
+three explicit native capability guards.
+The stream integration exposed an actual Blob timing mismatch: its first request
+lost the original unsafe-url referrer after an immediate no-referrer meta change.
+The retained pre-fix receipt contrasts with the unchanged Chrome control. Native
+request jobs now own typed initiating policy snapshots, captured before the body
+await, with immutable shared backing and no guest realm roots. Ten independent
+Chrome cases additionally prove parser phases, explicit Request policies and
+CSP admission before and after a meta change. Two further fresh controls expose and cover inert template handling: its script
+cannot shift active parser phases, and its CSP metadata cannot block an active
+request. Native policy walks now stop at inactive parser fragments.
+The final combined candidate passes 86 contracts on genuine 155 and 82 on
+stock 150 with three explicit native capability guards; strict renderer checks,
+formatting and source pins pass on both. Stock template frame adoption still
+has its explicit native-only body guard; the genuine 155 run executes it. These
+results require both the prior meta/template prerequisites and the separate
+stream packet. HTTP report endpoints, broader upload/navigation/resource effects
+and final production/Google gates remain open.
 
 ## Local integration checkpoint — 2026-10-14
 
@@ -68,7 +142,7 @@ contracts on both Surf engines, followed by42 API/policy/Window controls on each
 The subsequent full renderer library checkpoint passes222 contracts on both
 engines, with ten source/script/microtask contracts on genuine155.23. Strict
 affected checks pass on both; all42 offline harness tests pass.
-The current native SDK matches installed Chrome155.0.8059.79's V8 source pin;
+The current native SDK matches installed Chrome 155.0.8059.79's V8 source pin;
 the earlier155.20/SDK152 results below are historical checkpoints. Full gates,
 rebuilt addon/shim/E2E, prototype inventory and fresh Google artifacts remain pending.
 
@@ -207,7 +281,7 @@ Surf consumer integration remains in progress. The
 historical missing-own-member count is **94**, not a current measurement. The prior
 848-test workspace gate is historical and does not certify these changes.
 
-Current default HTTP/high-entropy JS profile fields use Chrome155.0.8059.79;
+Current default HTTP/high-entropy JS profile fields use Chrome 155.0.8059.79;
 older Chrome controls retain their original captured version. The additional
 source profile pins the official installed-release V8 revision
 `d89479ac5446a374c55a35be19b5a23437558d99` / 15.5.35.23. Its independent
@@ -218,7 +292,7 @@ Cargo regressions verify production lock preservation and source/manifest update
 The detection harness now passes 41 offline contracts.
 
 The current experimental native155 engine is15.5.35.23-rusty, matching installed
-Chrome155.0.8059.79 / V815.5.35.23. The preserved155.20 engine previously passed39 focused
+Chrome 155.0.8059.79 / V815.5.35.23. The preserved155.20 engine previously passed39 focused
 contracts, with strict affected owned-code Clippy. Native WindowProxy/Location
 lookups are weak and their private capabilities belong to the genuine lexical
 JSGlobalObject, independent of proxy navigation. Per-caller weak caches preserve
@@ -1045,7 +1119,7 @@ Retained native cross-context Window snapshots are bounded by count and actual f
 
 ## Permission status and container policy checkpoint — 2026-10-14
 
-Fresh normal Chrome155.0.8059.79 / V8 15.5.35.23 controls measure the unsorted79-feature enumeration order,12 wildcard/default-port/duplicate origin policies, PermissionStatus receiver and prototype brands, constructor identity, own descriptors and change-event dispatch. Native permission query results now inherit an authentic EventTarget and retain private document-owned records. Fake/proxied receivers cannot read them. Dynamic iframe featurePolicy reflects its current allow attribute and source origin without rewriting the policy captured when its child document committed; four header/delegation controls cover this distinction.
+Fresh normal Chrome 155.0.8059.79 / V8 15.5.35.23 controls measure the unsorted79-feature enumeration order,12 wildcard/default-port/duplicate origin policies, PermissionStatus receiver and prototype brands, constructor identity, own descriptors and change-event dispatch. Native permission query results now inherit an authentic EventTarget and retain private document-owned records. Fake/proxied receivers cannot read them. Dynamic iframe featurePolicy reflects its current allow attribute and source origin without rewriting the policy captured when its child document committed; four header/delegation controls cover this distinction.
 
 This isolated batch passes31 focused default SDK150 policy/resource/Window/lifecycle contracts and strict affected Clippy. It adds no queued native DOM handles: permission status and iframe interface records retain genuine document/element wrappers through ordinary private V8 edges, with existing native ownership accounting. Genuine native155 integrated validation remains separate. Deep descendants, popup group transitions, automatic permission changes, complete OS-controlled permission effects and wider CSP/fetch/storage remain open.
 
@@ -1059,7 +1133,7 @@ The policy-deep controls exercise twelve real two-level document trees: ancestor
 
 Native iframe document admission now enforces response CSP frame-ancestors and X-Frame-Options before authenticated response bytes reach the new document. It reads every genuine native parent context/origin, fails closed for retired/missing ancestors and uses a bounded context walk. Enforced frame-ancestors headers intersect and replace legacy framing fields; default-src and report-only headers do not supply this directive. Credentialless exemption for COEP does not exempt framing restrictions. Blocked documents use the existing opaque, script-disabled admission state.
 
-Fresh normal Chrome155.0.8059.79/V8.23 controls cover40 direct cases: self/wildcard/scheme/explicit origins, source path behavior, duplicate/header intersections, report-only non-enforcement, legacy invalid/conflicting tokens, and credentialless denial. Eight real two-level trees prove same-origin with the immediate parent is insufficient when a grandparent is foreign. Regression tests verify exact source/case/collector/child hashes, zero collector errors and complete case counts before comparing results. The isolated defaultSDK150 batch passes35 focused policy/resource/Window/frame contracts and strict affected Clippy. Genuine native155 integrated validation remains required. CSP violation events/reporting, CSP sandbox, full form/navigation policy and popup transitions remain pending.
+Fresh normal Chrome 155.0.8059.79/V8.23 controls cover40 direct cases: self/wildcard/scheme/explicit origins, source path behavior, duplicate/header intersections, report-only non-enforcement, legacy invalid/conflicting tokens, and credentialless denial. Eight real two-level trees prove same-origin with the immediate parent is insufficient when a grandparent is foreign. Regression tests verify exact source/case/collector/child hashes, zero collector errors and complete case counts before comparing results. The isolated defaultSDK150 batch passes35 focused policy/resource/Window/frame contracts and strict affected Clippy. Genuine native155 integrated validation remains required. CSP violation events/reporting, CSP sandbox, full form/navigation policy and popup transitions remain pending.
 
 ## CSP sandbox script/origin checkpoint — 2026-10-14
 
@@ -1068,3 +1142,143 @@ Native response CSP sandbox flags now restrict scripts and origins for top and c
 The module loader retains only private Rust boolean origin/site cells and snapshots them before each request; it cannot keep the old nominal document origin across a sandboxed installation. Four real module transport controls compare HTTP Origin and Cookie headers. Same-origin CORS script requests carry Origin; sandboxed opaque module requests carry null and omit the normal jar cookie. Thirteen real iframe and nine top-document controls measure script/handler blocking, storage/cookie errors, native principal/message origins, policy reflection and shared-memory behavior. Completed controls have zero errors and exact source hashes. The isolated defaultSDK150 checkpoint passes39 render/script/frame/input contracts plus8 core request-context checks, with strict affected Clippy/fmt; native155 integration remains required.
 
 Full sandbox form, popup, navigation and download flags remain unsupported and the unsupported-directive diagnostic continues to list sandbox honestly. CSP violation events/reporting remain open. This work also exposed the independent missing HTMLScriptElement.text setter: assigning it creates an own data property rather than updating native source/text children, so the appended script does not execute. Its source-pinned script-text control and native mismatch receipt are retained; a canonical fix is being prepared separately.
+
+
+## Original parser CSP source positions checkpoint — 2026-10-14
+
+The additive turbo-dom provenance seam records actual tokenizer consumption in
+original UTF-16 units and actual node/attribute installation identity. Ordinary
+parse calls remain unchanged. Synthetic and reconstructed nodes have no invented
+lexical span; reconstructed attributes record their real triggering token.
+Metadata participates in native GC accounting and is pruned without retaining
+nodes or the original input.
+
+Fourteen fresh normal Chrome 155.0.8059.79/V815.5.35.23 controls now match complete
+native stylesheet/attribute violation events: source URI, line/column, target,
+directive, policy text, trust and order. Coverage includes CRLF, non-BMP prefixes,
+duplicate styles/attributes, foster parenting, later body attributes, formatting
+reconstruction and inert template attributes/styles. Private bootstrap tasks
+preserve stable original-offset order after DOM reordering. Inert stylesheets
+stay unprepared until active adoption, which reauthorizes them dynamically.
+
+Backend workspace/three strict feature gates and204 canonical binding contracts
+pass independently. The isolated current Surf runtime passes45 policy/ownership/
+input contracts plus strict affected Clippy and formatting. These are default SDK
+proofs; genuine155 integration, final release gates, refreshed broad API inventory
+and live native Google clearance remain separate. Wider CSP endpoint delivery,
+resource/eval/module/redirect reports, Unicode samples and sandbox navigation
+policies remain explicit open work in CSP-REPORTING.md.
+
+
+## CSP external resources and original samples checkpoint — 2026-10-14
+
+A dedicated fresh Chrome155.79/V8.23 control measures seventeen events with the
+DevTools unsafe-eval bypass explicitly disabled. At that isolated checkpoint, native external classic/module and image failures
+plus twelve exact original-unit sample events matched fifteen covered rows;
+eval/Function rejection errors also matched. The two then-missing native events
+were preserved in an exact ignored diagnostic; the subsequent native callback
+checkpoint below resolves them while retaining the independent control. Samples use forty UTF-16 code units,
+retain lone/split surrogates and NBSP/FEFF, and trim measured ASCII whitespace
+including vertical tab. The prefix converter has bounded128-unit scratch.
+Native image ownership ignores a throwing public ownerDocument getter.
+
+Canonical style source callbacks preserve original code units and pass205
+standalone contracts. The affected default CSP/resource cohort passes51 tests
+with one explicit ignored eval-event diagnostic; strict/fmt gates pass. Broader
+report-only module/request stages, endpoint delivery, status/referrer metadata,
+redirects, full sandbox policies and native155 integrated gates remain pending.
+
+
+## Native V8 code-generation callback checkpoint — 2026-10-14
+
+Actual155.79/V8.23 now produces the full independently collected resource/eval
+control, including the previously missing eval/Function violation events. The
+private SDK bridge calls a per-context native V8 Function with the original
+source and leaves lexical compilation untouched. SDK smoke controls prove that
+public Symbol.for entries cannot forge it, and registration rejects bound, proxy
+and foreign-realm callbacks. Routing is enabled after trusted
+bootstrap and persists through parser/meta policy changes.
+
+Seven normal Chrome cases match exact events and results for direct/indirect eval,
+Function/AsyncFunction/GeneratorFunction, report-only execution, unsafe-eval,
+default-src fallback, source-elem independence, header intersections and live meta
+insertion. Non-string/boxed objects preserve identity and coercion failure occurs
+before CSP admission. Eval samples trim an already limited raw40-unit prefix;
+inline samples trim first and preserve whitespace at the truncated boundary.
+The collector disables DevTools' default unsafe-eval bypass and pins all inputs.
+
+Genuine native renderer policy/resource/GC/retirement/input contracts and actual
+4097th-attempt eval termination/reentrant recovery pass. Default SDK150 has no
+new callback and keeps explicit guarded regressions. Production SDK alignment,
+remaining CSP/endpoints/navigation policies and the live native Google run stay
+open; this checkpoint does not establish complete browser parity.
+
+
+## Native report/request integration checkpoint — 2026-10-15
+
+The isolated integration combines native legacy/modern report delivery with
+immutable initiating CSP/referrer/embedder snapshots and genuine template parser
+phases. Report records retain original policy, sample eligibility and authentic
+header/meta endpoint provenance with copy-on-write updates. Endpoint controls
+compare25 HTTP plus22 HTTPS cases per transport; three HTTPS frame-navigation
+rows still need test-trust ingress and are explicitly excluded. Report jobs
+retain primitive native data, survive reporting-frame removal, allow retired
+realm collection and cancel an actual stalled connection at profile disposal.
+Batching, retries, weighted endpoint selection and persistent deprecated Report-To
+lifetime remain open; storage/cache raw callbacks require separate integration.
+
+Fresh normal Chrome155/.23 controls also establish that replacing the public
+Request URL prototype getter must neither invoke it nor redirect fetch. A
+source-pinned native pre-fix run sent the poisoned destination and invoked the
+getter; the transport now uses the previously captured private request target.
+Two new controls extend the request-policy matrix to12, preserving the original
+10 Blob/referrer/CSP/parser cases. The final combined cohort passes89 genuine155 contracts with zero ignored,
+and85 stock150 contracts with three explicit native capability guards. This
+includes reporting47 wire cases, all12 requests, streams, meta20 and both actual
+native template controls. Stock template frame adoption retains its separate
+explicit body guard. Both Core/render all-target strict checks, formatting and
+original source pins pass; policy snapshot/report provenance has a dedicated
+regression on each runtime. Full workspace/addon/release, missing API
+inventory and fresh native Google SERP success remain separate pending work.
+
+
+### 2026-10-16: bounded request uploads and fresh transport evidence
+
+The isolated upload integration now sends genuine HTTPS/HTTP2 request bodies
+through a queue of two 64 KiB chunks, with a 64 MiB total host budget, instead of
+awaiting the full JS stream before networking. Native wreq and rustls, plus stock
+V8 150/rustls, match the fresh normal Chrome 155.0.8059.80 controls for streaming
+before EOF, cross-origin preflight, HTTP/1 rejection, 303 GET/307 rejection,
+source errors, backpressure and early response timing. A real wire difference
+was found and fixed: user abort gracefully ends Chrome's upload rather than
+resetting it. Guest rejection is independent of the bounded 100 ms native EOF
+cleanup; the stalled-peer control verifies the original reason identity.
+
+The wreq connector API needed for H2 admission was private. Controlled fork
+commit `4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762` exposes existing metadata only;
+[upstream PR #1327](https://github.com/0x676e67/wreq/pull/1327) contains the minimal
+public API and external regression. It changes no TLS/ALPN/HTTP implementation.
+The immutable Git consumer passes the native focused cohort and core 171 tests;
+registry compatibility remains unestablished and is documented in PUBLISHING.md.
+
+The HTTP/2 native control calls production `client_builder` and default `FetchOptions`; the harness supplies only localhost fixture certificate trust and does not override UA or client hints. Reduced UA reports `155.0.0.0` and low-entropy client hints report major 155. High-entropy full-version hints were not exercised.
+
+Fresh paired localhost TLS ClientHello and HTTPS/H2 controls have zero normalized
+differences in the measured capabilities/settings/window/navigation-header fields.
+The underlying recipe remains upstream 154. Raw ClientHello records and hashes
+now preserve original order, randoms, GREASE, key shares and ECH bytes alongside
+parsed TLS versions, ALPN order and key-share metadata. This strengthens the
+local evidence and preserves the exact inputs; it does not establish full
+transport/browser parity or Google's acceptance.
+
+The installed Chrome patch version is now .80 while the native SDK remains
+source-pinned to .79 with the same measured V8 .23. This transport measurement
+does not silently update SDK provenance or prove full-version client-hint/API
+identity; those remain part of the combined profile and API inventory checks.
+
+A fresh 20-case source-pinned Chrome stream-transfer oracle now covers genuine
+Readable/Writable/Transform transfer, acknowledged writes and close, cloned
+cancel/abort reasons, errors, Window/MessagePort delivery, unreachable transfers
+and late-lock failure atomicity. Production stream-transfer integration is still
+open. Native successful Google SERP, fresh full API inventory and final combined
+workspace/addon/shim/E2E validation remain separate required work.

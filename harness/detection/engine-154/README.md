@@ -51,3 +51,23 @@ SDK destination, with current source/fixtures linked from the repository. Cargo'
 experimental SDK resolution cannot overwrite the production lockfile. The
 `engine-workspace.test.mjs` offline gate verifies actual workspace resolution and
 preserves source/manifest updates without resetting the profile-owned lock.
+
+
+### Native code-generation callback
+
+`code_generation.patch` adds a private per-context native V8 Function callback
+for actual eval/Function admission, with original source and lexical semantics
+preserved. Runtime registration forces callback routing after trusted bootstrap;
+CSP parser/meta updates keep that routing while the private callback exists.
+The code-generation smoke test verifies lexical context, ordinary object identity,
+denial, public-symbol forgery and rejection of foreign-realm, bound or proxy
+callbacks. The build helper records its successful gate.
+Both new and existing SDK patches are checked with reverse application at zero
+fuzz before an experiment is accepted. An older prepared SDK must receive the
+new patch and a matching native archive; the previous archive cannot supply the
+added C++ symbol. Production's stock SDK150 remains a separate unsupported mode.
+
+The source-pinned Chrome CSP collector disables DevTools' default unsafe-eval
+bypass. Exact native controls cover enforced/report-only policies, direct and
+indirect eval, Function/AsyncFunction/GeneratorFunction, sample truncation,
+directive fallback/intersection, live meta changes and actual task-quota recovery.

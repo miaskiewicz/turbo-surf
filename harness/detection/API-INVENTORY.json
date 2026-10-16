@@ -1,0 +1,1365 @@
+{
+  "schemaVersion": 1,
+  "collectedAt": "2026-10-16T09:15:52.791Z",
+  "note": "Uninstrumented localhost API contract queries; no site detection conclusion.",
+  "build": {
+    "version": "0.5.4",
+    "features": {
+      "impersonate": true,
+      "trustAnchors": true,
+      "gpuMetal": true,
+      "coretext": true
+    },
+    "engine": {
+      "v8Version": "15.5.35.23-rusty",
+      "stableWindowProxy": true,
+      "transportChromeMajor": 155,
+      "transportBaseChromeMajor": 154,
+      "reportedChromeMajor": 155,
+      "reportedFullVersion": "155.0.8059.80"
+    }
+  },
+  "chromeVersion": "Chrome/155.0.8059.80",
+  "binaryHash": "42ee8017619b6a3f124db2e0c8a1862b2e5fb4ecdd0a1077c322449a7ce57275",
+  "collectorHash": "0a6ca912aaacc3eca09390b32ae6488c11d9a3695f70fbfefce0f3187f6b41d1",
+  "totals": {
+    "originalFourMissing": 66,
+    "expandedMeasuredMissing": 147,
+    "unmeasuredInterfaces": ["AbstractRange", "ElementInternals", "StaticRange"]
+  },
+  "interfaces": {
+    "AbortController": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "AbortSignal": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "AbstractRange": {
+      "measured": false,
+      "chrome": true,
+      "native": false
+    },
+    "CSSStyleSheet": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "Crypto": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "CustomElementRegistry": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "DOMException": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "DOMMatrix": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "invertSelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "multiplySelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "preMultiplySelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "rotateAxisAngleSelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "rotateFromVectorSelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "rotateSelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "scale3dSelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "scaleSelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "setMatrixValue.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "skewXSelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "skewYSelf.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "translateSelf.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "DOMMatrixReadOnly": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "flipX.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "flipY.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "inverse.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "is2D.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "isIdentity.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "multiply.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "rotate.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "rotateAxisAngle.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "rotateFromVector.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "scale.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "scale3d.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "scaleNonUniform.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "skewX.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "skewY.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "toFloat32Array.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "toFloat64Array.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "toJSON.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "toString.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "transformPoint.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "translate.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "DOMPoint": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "DOMPointReadOnly": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "matrixTransform.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "toJSON.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "Date": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "Document": {
+      "measured": true,
+      "missing": [
+        "all",
+        "ariaNotify",
+        "browsingTopics",
+        "domain",
+        "execCommand",
+        "exitPictureInPicture",
+        "exitPointerLock",
+        "fragmentDirective",
+        "fullscreen",
+        "fullscreenEnabled",
+        "getAnimations",
+        "hasPrivateToken",
+        "hasRedemptionRecord",
+        "lastModified",
+        "pictureInPictureElement",
+        "pictureInPictureEnabled",
+        "pointerLockElement",
+        "prerendering",
+        "queryCommandEnabled",
+        "queryCommandIndeterm",
+        "queryCommandState",
+        "queryCommandSupported",
+        "queryCommandValue",
+        "startViewTransition",
+        "timeline",
+        "wasDiscarded",
+        "webkitCancelFullScreen",
+        "webkitExitFullscreen",
+        "webkitFullscreenEnabled"
+      ],
+      "extra": [],
+      "changed": [
+        {
+          "path": "activeViewTransition.function",
+          "chrome": {
+            "absent": true
+          },
+          "native": {
+            "name": "",
+            "length": 0,
+            "ownKeys": ["length", "name", "prototype"],
+            "constructible": true,
+            "source": "function () {}",
+            "functionPrototype": true,
+            "nameDescriptor": {
+              "configurable": true,
+              "enumerable": false,
+              "kind": "data",
+              "writable": false,
+              "valueType": "string"
+            },
+            "lengthDescriptor": {
+              "configurable": true,
+              "enumerable": false,
+              "kind": "data",
+              "writable": false,
+              "valueType": "number"
+            },
+            "prototypeDescriptor": {
+              "configurable": false,
+              "enumerable": false,
+              "kind": "data",
+              "writable": true,
+              "valueType": "object"
+            }
+          }
+        },
+        {
+          "path": "activeViewTransition.get",
+          "chrome": {
+            "name": "get activeViewTransition",
+            "length": 0,
+            "ownKeys": ["length", "name"],
+            "constructible": false,
+            "source": "function get activeViewTransition() { [native code] }",
+            "functionPrototype": true,
+            "nameDescriptor": {
+              "configurable": true,
+              "enumerable": false,
+              "kind": "data",
+              "writable": false,
+              "valueType": "string"
+            },
+            "lengthDescriptor": {
+              "configurable": true,
+              "enumerable": false,
+              "kind": "data",
+              "writable": false,
+              "valueType": "number"
+            },
+            "prototypeDescriptor": null
+          },
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "activeViewTransition.kind",
+          "chrome": "accessor",
+          "native": "data"
+        },
+        {
+          "path": "activeViewTransition.set",
+          "chrome": {
+            "type": "undefined"
+          },
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "activeViewTransition.valueType",
+          "chrome": {
+            "absent": true
+          },
+          "native": "function"
+        },
+        {
+          "path": "activeViewTransition.writable",
+          "chrome": {
+            "absent": true
+          },
+          "native": true
+        },
+        {
+          "path": "createNodeIterator.function.length",
+          "chrome": 1,
+          "native": 3
+        },
+        {
+          "path": "createTreeWalker.function.length",
+          "chrome": 1,
+          "native": 3
+        },
+        {
+          "path": "exitFullscreen.function.constructible",
+          "chrome": false,
+          "native": true
+        },
+        {
+          "path": "exitFullscreen.function.name",
+          "chrome": "exitFullscreen",
+          "native": ""
+        },
+        {
+          "path": "exitFullscreen.function.ownKeys",
+          "chrome": ["length", "name"],
+          "native": ["length", "name", "prototype"]
+        },
+        {
+          "path": "exitFullscreen.function.prototypeDescriptor",
+          "chrome": null,
+          "native": {
+            "configurable": false,
+            "enumerable": false,
+            "kind": "data",
+            "writable": true,
+            "valueType": "object"
+          }
+        },
+        {
+          "path": "exitFullscreen.function.source",
+          "chrome": "function exitFullscreen() { [native code] }",
+          "native": "function(){ return Promise.resolve(); }"
+        },
+        {
+          "path": "fullscreenElement.set.constructible",
+          "chrome": false,
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.functionPrototype",
+          "chrome": true,
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.length",
+          "chrome": 1,
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.lengthDescriptor",
+          "chrome": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.name",
+          "chrome": "set fullscreenElement",
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.nameDescriptor",
+          "chrome": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.ownKeys",
+          "chrome": ["length", "name"],
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.prototypeDescriptor",
+          "chrome": null,
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.source",
+          "chrome": "function set fullscreenElement() { [native code] }",
+          "native": {
+            "absent": true
+          }
+        },
+        {
+          "path": "fullscreenElement.set.type",
+          "chrome": {
+            "absent": true
+          },
+          "native": "undefined"
+        },
+        {
+          "path": "plugins.get.name",
+          "chrome": "get plugins",
+          "native": "get embeds"
+        },
+        {
+          "path": "plugins.get.source",
+          "chrome": "function get plugins() { [native code] }",
+          "native": "function get embeds() { [native code] }"
+        }
+      ]
+    },
+    "DocumentFragment": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "Element": {
+      "measured": true,
+      "missing": [
+        "activeViewTransition",
+        "animate",
+        "ariaNotify",
+        "checkVisibility",
+        "computedStyleMap",
+        "currentCSSZoom",
+        "customElementRegistry",
+        "getAnimations",
+        "getHTML",
+        "hasPointerCapture",
+        "onbeforecopy",
+        "onbeforecut",
+        "onbeforepaste",
+        "onfullscreenchange",
+        "onfullscreenerror",
+        "onsearch",
+        "onwebkitfullscreenchange",
+        "onwebkitfullscreenerror",
+        "pseudo",
+        "releasePointerCapture",
+        "requestPointerLock",
+        "scroll",
+        "scrollIntoViewIfNeeded",
+        "setHTML",
+        "setHTMLUnsafe",
+        "setPointerCapture",
+        "startViewTransition",
+        "webkitMatchesSelector",
+        "webkitRequestFullScreen",
+        "webkitRequestFullscreen"
+      ],
+      "extra": [],
+      "changed": []
+    },
+    "ElementInternals": {
+      "measured": false,
+      "chrome": true,
+      "native": false
+    },
+    "ErrorEvent": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "Event": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "EventTarget": {
+      "measured": true,
+      "missing": ["when"],
+      "extra": [],
+      "changed": []
+    },
+    "HTMLButtonElement": {
+      "measured": true,
+      "missing": [
+        "command",
+        "commandForElement",
+        "formAction",
+        "formEnctype",
+        "formMethod",
+        "formNoValidate",
+        "formTarget",
+        "interestForElement",
+        "labels",
+        "popoverTargetAction",
+        "popoverTargetElement",
+        "validationMessage",
+        "validity",
+        "willValidate"
+      ],
+      "extra": [
+        "accept",
+        "autoFocus",
+        "autocomplete",
+        "checked",
+        "click",
+        "max",
+        "min",
+        "multiple",
+        "pattern",
+        "placeholder",
+        "readOnly",
+        "required",
+        "step"
+      ],
+      "changed": [
+        {
+          "path": "disabled.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "form.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "name.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "type.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "value.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "HTMLCanvasElement": {
+      "measured": true,
+      "missing": ["captureStream", "transferControlToOffscreen"],
+      "extra": [],
+      "changed": [
+        {
+          "path": "toBlob.function.length",
+          "chrome": 1,
+          "native": 2
+        }
+      ]
+    },
+    "HTMLElement": {
+      "measured": true,
+      "missing": [
+        "attachInternals",
+        "attributeStyleMap",
+        "editContext",
+        "focusGroup",
+        "focusGroupStart"
+      ],
+      "extra": [],
+      "changed": []
+    },
+    "HTMLFormElement": {
+      "measured": true,
+      "missing": [
+        "Symbol(Symbol.iterator)",
+        "acceptCharset",
+        "action",
+        "autocomplete",
+        "elements",
+        "encoding",
+        "enctype",
+        "length",
+        "method",
+        "name",
+        "noValidate",
+        "rel",
+        "relList",
+        "requestSubmit",
+        "reset",
+        "submit",
+        "target"
+      ],
+      "extra": [],
+      "changed": []
+    },
+    "HTMLInputElement": {
+      "measured": true,
+      "missing": [
+        "align",
+        "alt",
+        "createValueRange",
+        "defaultChecked",
+        "dirName",
+        "files",
+        "formAction",
+        "formEnctype",
+        "formMethod",
+        "formNoValidate",
+        "formTarget",
+        "height",
+        "incremental",
+        "indeterminate",
+        "labels",
+        "list",
+        "maxLength",
+        "minLength",
+        "popoverTargetAction",
+        "popoverTargetElement",
+        "showPicker",
+        "size",
+        "stepDown",
+        "stepUp",
+        "useMap",
+        "validationMessage",
+        "validity",
+        "valueAsDate",
+        "webkitEntries",
+        "webkitdirectory",
+        "width",
+        "willValidate"
+      ],
+      "extra": ["autoFocus", "click"],
+      "changed": [
+        {
+          "path": "accept.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "autocomplete.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "checked.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "defaultValue.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "disabled.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "form.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "max.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "min.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "multiple.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "name.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "pattern.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "placeholder.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "readOnly.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "required.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "selectionDirection.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "selectionEnd.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "selectionStart.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "setRangeText.function.length",
+          "chrome": 1,
+          "native": 0
+        },
+        {
+          "path": "setSelectionRange.function.length",
+          "chrome": 2,
+          "native": 3
+        },
+        {
+          "path": "step.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "type.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "value.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "Headers": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "append.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "delete.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "entries.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "forEach.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "get.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "getSetCookie.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "has.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "keys.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "set.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "values.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "MediaList": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "MessageChannel": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "MessageEvent": {
+      "measured": true,
+      "missing": ["userActivation"],
+      "extra": [],
+      "changed": []
+    },
+    "MessagePort": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "MutationObserver": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "Navigator": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "adAuctionComponents.function.length",
+          "chrome": 1,
+          "native": 0
+        },
+        {
+          "path": "clearOriginJoinedAdInterestGroups.function.length",
+          "chrome": 1,
+          "native": 0
+        },
+        {
+          "path": "deprecatedReplaceInURN.function.length",
+          "chrome": 2,
+          "native": 0
+        },
+        {
+          "path": "deprecatedURNToURL.function.length",
+          "chrome": 1,
+          "native": 0
+        },
+        {
+          "path": "getInterestGroupAdAuctionData.function.length",
+          "chrome": 1,
+          "native": 0
+        },
+        {
+          "path": "joinAdInterestGroup.function.length",
+          "chrome": 1,
+          "native": 0
+        },
+        {
+          "path": "registerProtocolHandler.function.length",
+          "chrome": 2,
+          "native": 0
+        },
+        {
+          "path": "requestMediaKeySystemAccess.function.length",
+          "chrome": 2,
+          "native": 0
+        },
+        {
+          "path": "requestMediaKeySystemAccess.function.name",
+          "chrome": "requestMediaKeySystemAccess",
+          "native": "requestMIDIAccess"
+        },
+        {
+          "path": "requestMediaKeySystemAccess.function.source",
+          "chrome": "function requestMediaKeySystemAccess() { [native code] }",
+          "native": "function requestMIDIAccess() { [native code] }"
+        },
+        {
+          "path": "runAdAuction.function.length",
+          "chrome": 1,
+          "native": 0
+        },
+        {
+          "path": "setAppBadge.function.name",
+          "chrome": "setAppBadge",
+          "native": "clearAppBadge"
+        },
+        {
+          "path": "setAppBadge.function.source",
+          "chrome": "function setAppBadge() { [native code] }",
+          "native": "function clearAppBadge() { [native code] }"
+        },
+        {
+          "path": "share.function.name",
+          "chrome": "share",
+          "native": "requestMIDIAccess"
+        },
+        {
+          "path": "share.function.source",
+          "chrome": "function share() { [native code] }",
+          "native": "function requestMIDIAccess() { [native code] }"
+        },
+        {
+          "path": "unregisterProtocolHandler.function.length",
+          "chrome": 2,
+          "native": 0
+        },
+        {
+          "path": "vibrate.function.length",
+          "chrome": 1,
+          "native": 0
+        }
+      ]
+    },
+    "Node": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "Performance": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "Range": {
+      "measured": true,
+      "missing": ["expand"],
+      "extra": ["collapsed", "endContainer", "endOffset", "startContainer", "startOffset"],
+      "changed": [
+        {
+          "path": "constructor.function.functionPrototype",
+          "chrome": false,
+          "native": true
+        }
+      ]
+    },
+    "ReadableStream": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "ReadableStreamBYOBReader": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "ReadableStreamDefaultReader": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "Request": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "clone.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "Response": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "clone.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "ShadowRoot": {
+      "measured": true,
+      "missing": [
+        "activeElement",
+        "clonable",
+        "delegatesFocus",
+        "fullscreenElement",
+        "getAnimations",
+        "getHTML",
+        "getSelection",
+        "onslotchange",
+        "pictureInPictureElement",
+        "pointerLockElement",
+        "referenceTarget",
+        "serializable",
+        "setHTML",
+        "setHTMLUnsafe",
+        "styleSheets"
+      ],
+      "extra": [],
+      "changed": []
+    },
+    "StaticRange": {
+      "measured": false,
+      "chrome": true,
+      "native": false
+    },
+    "Storage": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "StyleSheet": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "SubmitEvent": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "SubtleCrypto": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "TextDecoder": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "decode.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "encoding.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "fatal.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "ignoreBOM.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "TextEncoder": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "encode.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "encodeInto.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "encoding.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "TransformStream": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "TrustedHTML": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "TrustedScript": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "TrustedScriptURL": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "TrustedTypePolicy": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "TrustedTypePolicyFactory": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "URL": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "href.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "origin.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "search.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "searchParams.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "toJSON.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "toString.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "URLSearchParams": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": [
+        {
+          "path": "append.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "delete.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "entries.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "forEach.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "get.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "getAll.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "has.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "keys.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "set.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "size.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "sort.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "toString.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "values.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "WritableStream": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    },
+    "WritableStreamDefaultWriter": {
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
+    }
+  }
+}

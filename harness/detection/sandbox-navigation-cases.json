@@ -1,0 +1,69 @@
+[
+  {
+    "id": "unrestricted",
+    "headers": [],
+    "html": "<!doctype html><body><iframe srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "sandbox-blocked",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "sandbox-top-allowed",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-top-navigation\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "sandbox-activation-required",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-top-navigation-by-user-activation\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "sandbox-uppercase-top",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"ALLOW-SCRIPTS ALLOW-SAME-ORIGIN ALLOW-TOP-NAVIGATION\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "csp-intersects-attribute",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-top-navigation\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "csp-top-allowed",
+    "headers": [
+      ["Content-Security-Policy", "sandbox allow-scripts allow-same-origin allow-top-navigation"]
+    ],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-top-navigation\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "opaque-blocked",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "opaque-top-allowed",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-top-navigation\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "nested-inherited-block",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin\" srcdoc=\"&lt;iframe sandbox=&quot;allow-scripts allow-same-origin allow-top-navigation&quot; srcdoc=&quot;&amp;lt;script>addEventListener(&amp;quot;message&amp;quot;,function(event){if(event.data!==&amp;quot;sandbox-navigation-run&amp;quot;)return;let error=null;try{top.location.href=&amp;quot;#sandbox-navigation-check&amp;quot;;}catch(value){error=value.name;}parent.postMessage({kind:&amp;quot;sandbox-navigation-result&amp;quot;,error},&amp;quot;*&amp;quot;);});&amp;lt;/script>&quot;>&lt;/iframe>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data===&quot;sandbox-navigation-run&quot;)document.querySelector(&quot;iframe&quot;).contentWindow.postMessage(event.data,&quot;*&quot;);else if(event.data?.kind===&quot;sandbox-navigation-result&quot;)parent.postMessage(event.data,&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "nested-inner-block",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-top-navigation\" srcdoc=\"&lt;iframe sandbox=&quot;allow-scripts allow-same-origin&quot; srcdoc=&quot;&amp;lt;script>addEventListener(&amp;quot;message&amp;quot;,function(event){if(event.data!==&amp;quot;sandbox-navigation-run&amp;quot;)return;let error=null;try{top.location.href=&amp;quot;#sandbox-navigation-check&amp;quot;;}catch(value){error=value.name;}parent.postMessage({kind:&amp;quot;sandbox-navigation-result&amp;quot;,error},&amp;quot;*&amp;quot;);});&amp;lt;/script>&quot;>&lt;/iframe>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data===&quot;sandbox-navigation-run&quot;)document.querySelector(&quot;iframe&quot;).contentWindow.postMessage(event.data,&quot;*&quot;);else if(event.data?.kind===&quot;sandbox-navigation-result&quot;)parent.postMessage(event.data,&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "nested-both-allowed",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-top-navigation\" srcdoc=\"&lt;iframe sandbox=&quot;allow-scripts allow-same-origin allow-top-navigation&quot; srcdoc=&quot;&amp;lt;script>addEventListener(&amp;quot;message&amp;quot;,function(event){if(event.data!==&amp;quot;sandbox-navigation-run&amp;quot;)return;let error=null;try{top.location.href=&amp;quot;#sandbox-navigation-check&amp;quot;;}catch(value){error=value.name;}parent.postMessage({kind:&amp;quot;sandbox-navigation-result&amp;quot;,error},&amp;quot;*&amp;quot;);});&amp;lt;/script>&quot;>&lt;/iframe>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data===&quot;sandbox-navigation-run&quot;)document.querySelector(&quot;iframe&quot;).contentWindow.postMessage(event.data,&quot;*&quot;);else if(event.data?.kind===&quot;sandbox-navigation-result&quot;)parent.postMessage(event.data,&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "guest-forged-activation-does-not-authorize",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-top-navigation-by-user-activation\" srcdoc=\"&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-navigation-run&quot;)return;Object.defineProperty(navigator,&quot;userActivation&quot;,{value:{isActive:true,hasBeenActive:true}});let error=null;try{top.location.href=&quot;#sandbox-navigation-check&quot;;}catch(value){error=value.name;}parent.postMessage({kind:&quot;sandbox-navigation-result&quot;,error},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  }
+]

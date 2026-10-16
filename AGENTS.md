@@ -28,10 +28,10 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   `rust/playwright-shim/` (a drop-in `@playwright/test` façade over the
   `turbo-surf-napi` addon — Page/Locator/expect/context/fixtures, no browser;
   see its [`LIMITATIONS.md`](./rust/playwright-shim/LIMITATIONS.md)).
-- **Vendored, never hand-edit:** `rust/crates/turbo-surf-render/src/browser_env{.rs,_upstream.rs,.js}`, `src/cssom_parser.rs`, `src/html_documents.rs`, `src/document_basics.rs`, `src/document_basics.js`, `src/dom_implementation{.rs,.js}`, its tests/probe/control, `src/element_tokens.js`, `src/element_relations.js`,
+- **Vendored, never hand-edit:** `rust/crates/turbo-surf-render/src/browser_env{.rs,_upstream.rs,.js}`, `src/cssom_parser.rs`, its selector-lexeme probe/Chrome control, `src/html_documents.rs`, `src/document_basics.rs`, `src/document_basics.js`, `src/dom_implementation{.rs,.js}`, its tests/probe/control, `src/element_tokens.js`, `src/element_relations.js`,
   `src/element_relations.rs`, `src/html_text.rs`, `src/html_text.js`,
   `src/html_popover.js`, `src/html_popover.rs`, `src/collection_records.rs`, `src/css_policy.rs`, `src/event_handlers.rs`, `src/event_brands.rs`, `src/event_listeners.rs`, `src/event_listeners.js`,
-  `src/dom_mutations.rs`, `src/dom_adoption_probe.js`, `src/dom_adoption_chrome155.json`, `src/dom_variadic_errors_probe.js`, `src/dom_variadic_errors_chrome155.json`, `src/dom_projection_tests.rs`, its element-interface probe/Chrome control, `src/range_contents{.rs,.js}`, `src/range_probe.js`, `src/range_chrome155.json`, `src/css_adoption_tests.rs`, `src/css_adoption_probe.js`, `src/css_adoption_ownership_probe.js`, `src/css_adoption_chrome155.json`, `src/css_adoption_ownership_chrome155.json`, `src/css_live_tests.rs`, `src/css_live_probe.js`, `src/css_live_chrome155.json`, `src/range_live.rs`, `src/range_live_probe.js`, `src/range_live_chrome155.json`, `src/document_xpath{.rs,.js}`, `src/xpath_provider/` and `src/browser_sanitizer_default.json`
+  `src/dom_mutations.rs`, `src/dom_adoption_probe.js`, `src/dom_adoption_chrome155.json`, `src/dom_variadic_errors_probe.js`, `src/dom_variadic_errors_chrome155.json`, `src/dom_projection_tests.rs`, its element-interface probe/Chrome control, `src/range_contents{.rs,.js}`, its abstract/static Range interface and frame probes/Chrome controls, `src/range_probe.js`, `src/range_chrome155.json`, `src/css_adoption_tests.rs`, `src/css_adoption_probe.js`, `src/css_adoption_ownership_probe.js`, `src/css_adoption_chrome155.json`, `src/css_adoption_ownership_chrome155.json`, `src/css_live_tests.rs`, `src/css_live_probe.js`, `src/css_live_chrome155.json`, `src/range_live.rs`, `src/range_live_probe.js`, `src/range_live_chrome155.json`, `src/document_xpath{.rs,.js}`, `src/xpath_provider/` and `src/browser_sanitizer_default.json`
   and `src/dom_ownership.rs`, `src/realm_ownership.rs`, `src/storage_ownership.rs`,
   `src/dom_isolation.rs`, `src/ownership_guard_tests.rs`, its computed-color probe/Chrome control,
   `src/html_meta_tests.rs`, its meta-reflection probe/Chrome control,
@@ -41,6 +41,11 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   `src/shadow_slots{.rs,.js}`, its tests/probe/Chrome control, iframe
   credentialless tests/probe/Chrome control, and `src/utf16_contract_tests.rs`
   with its `src/utf16_*` probes/controls and `src/script_text*.js`/Chrome control
+  and `src/template_contents{.rs,.js}` with its ownership/lifecycle probes/controls
+  and `src/custom_elements{.rs,.js}` with its main, extended, reactions, IDL, realm
+  and move probes/Chrome controls
+  and `src/trusted_types{.rs,.js}`, its native mapping, tests/probes/Chrome controls
+  and `src/form_entrylist_{cases.json,probe.js,chrome155.json}`, `src/formdata_constructor_{cases.json,probe.js,chrome155.json}`, `src/form_controls.js` with its form-methods cases/probe/Chrome control
   — re-vendor from turbo-test's committed HEAD via
   `rust/crates/turbo-surf-render/scripts/vendor-browser-env.sh`.
 

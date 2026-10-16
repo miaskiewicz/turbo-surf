@@ -15,7 +15,8 @@ export function fetchBytes(
   cookies?: string,
 ): Promise<Buffer>;
 /** Create/close origin-scoped client-hint state shared by a browsing context. */
-export function requestStateNew(): number;
+/** Derive a tab sharing a parent's local storage, HTTP cache and client hints. */
+export function requestStateNew(parentContextId?: number): number;
 export function requestStateClose(id: number): void;
 
 /** Crawl from a JSON options string → JSON array of page records. */
@@ -37,9 +38,12 @@ export function hydrate(
   cookies?: string,
   userAgent?: string,
   requestStateId?: number,
+  documentResponse?: string,
 ): Promise<string>;
 
-/** Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
+/** documentResponse is host JSON {status, referrer, headers: [[name, value], ...]}.
+ * initScript runs through the trusted native entry before authored scripts.
+ * Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
  * real DOM events into the running app. Returns a session id. */
 export function liveOpen(
   html: string,
@@ -47,9 +51,13 @@ export function liveOpen(
   cookies?: string,
   userAgent?: string,
   requestStateId?: number,
+  documentResponse?: string,
+  initScript?: string,
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;
+/** Await an expression’s actual native Promise completion. */
+export function liveEvalExpression(id: number, expression: string): Promise<string>;
 /** Serialize the live session's current DOM to HTML. */
 export function liveSerialize(id: number): string;
 /** The live session's cookies (storageState JSON), incl. HttpOnly session cookies. */

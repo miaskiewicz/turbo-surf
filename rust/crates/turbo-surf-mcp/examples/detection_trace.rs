@@ -241,7 +241,7 @@ async fn capture(
     )
     .await?;
     save(&out.join("home-response.html"), &response.html)?;
-    let mut page = PageSession::open_with_browsing_state(
+    let mut page = PageSession::open_with_document_response(
         &response.html,
         &response.final_url,
         &jar.storage_state(),
@@ -251,6 +251,10 @@ async fn capture(
         hints.clone(),
         &response.headers,
         storage.clone(),
+        turbo_surf_render::DocumentResponseMetadata {
+            status: response.status,
+            referrer: String::new(),
+        },
     )
     .await?;
     trace["pages"]
@@ -347,9 +351,18 @@ async fn capture(
         if target == referer {
             break;
         }
+        let navigation_metadata =
+            std::sync::Mutex::new(turbo_surf_render::DocumentResponseMetadata::default());
+        let response_policy =
+            |context: &RequestContext, target: &str, _headers: &[(String, String)]| {
+                *navigation_metadata.lock().unwrap() =
+                    turbo_surf_render::DocumentResponseMetadata::from_request(200, context, target);
+                true
+            };
         let search = fetch_html(
             &target,
             FetchOptions {
+                response_policy: Some(&response_policy),
                 context: Some(RequestContext::navigation(Some(referer.clone()), hop == 0)),
                 client_hints: Some(&hints),
                 allow_non_html: true,
@@ -363,7 +376,11 @@ async fn capture(
             &out.join(format!("navigation-{hop}-response.html")),
             &search.html,
         )?;
-        let next = PageSession::open_with_browsing_state(
+        let document_response = turbo_surf_render::DocumentResponseMetadata {
+            status: search.status,
+            referrer: navigation_metadata.lock().unwrap().referrer.clone(),
+        };
+        let next = PageSession::open_with_document_response(
             &search.html,
             &search.final_url,
             &jar.storage_state(),
@@ -373,6 +390,7 @@ async fn capture(
             hints.clone(),
             &search.headers,
             storage.clone(),
+            document_response,
         )
         .await;
         let mut next = match next {

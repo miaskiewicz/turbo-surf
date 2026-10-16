@@ -327,9 +327,9 @@ fn set_outer(scope: &mut v8::PinScope, node: Handle, text: &[u16]) -> Result<(),
     }
     Ok(())
 }
-pub fn dispatch(
-    scope: &mut v8::PinScope,
-    args: v8::FunctionCallbackArguments,
+pub fn dispatch<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue,
 ) {
     let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
@@ -356,7 +356,9 @@ pub fn dispatch(
             rv.set(unit_string(scope, &value).into());
         }
         "inner" => {
-            let Some(value) = dom_units(scope, args.get(2)) else {
+            let Some(value) =
+                trusted_types::script_units(scope, object, args.get(2), "innerText", false)
+            else {
                 return;
             };
             html_popover::disconnect(scope, node, false);

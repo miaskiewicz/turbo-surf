@@ -156,12 +156,13 @@ pub fn preflight_allowed(
 }
 
 /// Negotiate the actual rewritten hop before any unsafe cross-origin request.
-pub async fn authorize_request(
+pub async fn authorize_streaming_request(
     context: RequestContext,
     target: String,
     method: String,
     mut headers: BTreeMap<String, String>,
     hints: turbo_surf_core::request_context::ClientHints,
+    force_preflight: bool,
 ) -> Result<(), turbo_surf_core::net::HttpError> {
     use turbo_surf_core::net::{fetch_html, ErrorCode, FetchOptions, HttpError};
     use turbo_surf_core::request_context::{same_origin, RequestMode};
@@ -177,7 +178,7 @@ pub async fn authorize_request(
     // The host inserts this identity after stripping forbidden guest headers.
     headers.retain(|name, _| !name.eq_ignore_ascii_case("user-agent"));
     let names = unsafe_headers(&headers);
-    if matches!(method.as_str(), "GET" | "HEAD" | "POST") && names.is_empty() {
+    if !force_preflight && matches!(method.as_str(), "GET" | "HEAD" | "POST") && names.is_empty() {
         return Ok(());
     }
     let mut preflight_context = context.clone();

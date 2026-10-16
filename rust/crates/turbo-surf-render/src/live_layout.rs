@@ -1,5 +1,6 @@
 //! Native live-tree input for the public layout/provenance seam. No serializer,
 //! selectors, guest properties or identity attributes participate in this copy.
+use std::collections::HashMap;
 use turbo_dom_parser::rtdom::tree::{Handle, NodeType};
 use turbo_dom_parser::rtdom::{NodeRef, Tree};
 use turbo_html2pdf_core::layout_snapshot::{
@@ -17,60 +18,104 @@ pub(crate) struct LiveTreeInput {
     pub(crate) tree_version: u64,
     pub(crate) nodes: Vec<Node>,
     pub(crate) identities: Vec<SourceIdentity>,
+    pub(crate) svg_viewports: Vec<SourceId>,
+    pub(crate) original_text: HashMap<SourceId, Vec<u16>>,
+    pub(crate) composition: Option<crate::live_layout_composed::Composition>,
 }
 
 pub(crate) fn source_id(document_id: u32, handle: Handle) -> SourceId {
     SourceId((u64::from(document_id) << 32) | u64::from(handle.raw()))
 }
 
+#[cfg(test)]
 pub(crate) fn capture_tree(tree: &Tree, document_id: u32) -> Result<LiveTreeInput, String> {
+    capture_composed_tree(tree, document_id, None)
+}
+
+pub(crate) fn capture_composed_tree(
+    tree: &Tree,
+    document_id: u32,
+    composition: Option<crate::live_layout_composed::Composition>,
+) -> Result<LiveTreeInput, String> {
     let mut copy = Copier {
+        composition: composition.as_ref(),
         document_id,
         identities: Vec::new(),
+        svg_viewports: Vec::new(),
+        original_text: HashMap::new(),
         nodes_left: MAX_NODES,
         text_left: MAX_TEXT_BYTES,
         attributes_left: MAX_TEXT_BYTES,
     };
-    let nodes = copy.children(NodeRef::new(tree, tree.root()), &[])?;
+    let nodes = copy.children(NodeRef::new(tree, tree.root()), &[], false)?;
     Ok(LiveTreeInput {
         document_id,
         tree_version: tree.version,
         nodes,
         identities: copy.identities,
+        svg_viewports: copy.svg_viewports,
+        original_text: copy.original_text,
+        composition,
     })
 }
 
-struct Copier {
+struct Copier<'a> {
+    composition: Option<&'a crate::live_layout_composed::Composition>,
     document_id: u32,
     identities: Vec<SourceIdentity>,
+    svg_viewports: Vec<SourceId>,
+    original_text: HashMap<SourceId, Vec<u16>>,
     nodes_left: usize,
     text_left: usize,
     attributes_left: usize,
 }
 
-impl Copier {
-    fn children(&mut self, parent: NodeRef, path: &[usize]) -> Result<Vec<Node>, String> {
+impl Copier<'_> {
+    fn children(
+        &mut self,
+        parent: NodeRef,
+        path: &[usize],
+        in_svg: bool,
+    ) -> Result<Vec<Node>, String> {
         if path.len() > MAX_DEPTH {
             return Err("native layout source exceeds depth budget".into());
         }
         let mut nodes = Vec::new();
-        for child in parent.children() {
+        let children = match self.composition {
+            Some(graph) => graph
+                .children
+                .get(&parent.handle())
+                .cloned()
+                .unwrap_or_default(),
+            None => parent
+                .children()
+                .into_iter()
+                .map(|node| node.handle())
+                .collect(),
+        };
+        for handle in children {
+            let child = NodeRef::new(parent.tree(), handle);
             let mut child_path = path.to_vec();
             child_path.push(nodes.len());
-            if let Some(node) = self.node(child, &child_path)? {
+            if let Some(node) = self.node(child, &child_path, in_svg)? {
                 nodes.push(node);
             }
         }
         Ok(nodes)
     }
 
-    fn node(&mut self, node: NodeRef, path: &[usize]) -> Result<Option<Node>, String> {
+    fn node(
+        &mut self,
+        node: NodeRef,
+        path: &[usize],
+        in_svg: bool,
+    ) -> Result<Option<Node>, String> {
         self.nodes_left = self
             .nodes_left
             .checked_sub(1)
             .ok_or("native layout source exceeds node budget")?;
         let value = match node.node_type() {
-            NodeType::Element => Node::Element(self.element(node, path)?),
+            NodeType::Element => Node::Element(self.element(node, path, in_svg)?),
             NodeType::Text => Node::Text(self.text(node)?),
             _ => return Ok(None), // Comments/doctype/PI have no CSS layout boxes.
         };
@@ -81,11 +126,15 @@ impl Copier {
         Ok(Some(value))
     }
 
-    fn element(&mut self, node: NodeRef, path: &[usize]) -> Result<Element, String> {
-        if node.tree().namespace_uri(node.handle()) != Some("http://www.w3.org/1999/xhtml") {
-            return Err(
-                "native live layout does not yet support non-HTML element namespaces".into(),
-            );
+    fn element(&mut self, node: NodeRef, path: &[usize], in_svg: bool) -> Result<Element, String> {
+        let namespace = node.tree().namespace_uri(node.handle());
+        let svg = namespace == Some("http://www.w3.org/2000/svg");
+        if namespace != Some("http://www.w3.org/1999/xhtml") && !svg {
+            return Err("native live layout does not yet support this element namespace".into());
+        }
+        if svg && node.local_name() == Some("svg") && !in_svg {
+            self.svg_viewports
+                .push(source_id(self.document_id, node.handle()));
         }
         let mut attrs = Vec::new();
         for (name, value) in node.attributes() {
@@ -99,15 +148,29 @@ impl Copier {
                 .ok_or("native layout source exceeds attribute budget")?;
             attrs.push(Attr { name, value });
         }
+        if let Some(applied) = self
+            .composition
+            .and_then(|graph| graph.inline_overrides.get(&node.handle()))
+        {
+            if let Some(attribute) = attrs.iter_mut().find(|attribute| attribute.name == "style") {
+                attribute.value.clone_from(applied);
+            }
+        }
         Ok(Element {
             tag: Tag::Html(node.local_name().unwrap_or("").to_owned()),
             attrs,
-            children: self.children(node, path)?,
+            children: self.children(node, path, in_svg || svg)?,
         })
     }
 
     fn text(&mut self, node: NodeRef) -> Result<String, String> {
-        let text = node.text_content();
+        let units = node
+            .tree()
+            .node_value_utf16(node.handle())
+            .unwrap_or_default();
+        let text = String::from_utf16_lossy(&units);
+        self.original_text
+            .insert(source_id(self.document_id, node.handle()), units);
         self.text_left = self
             .text_left
             .checked_sub(text.len())
@@ -118,7 +181,7 @@ impl Copier {
 
 // This is a UA-origin supplement, not author CSS or a DOM rewrite. Universal
 // author rules must be able to override it regardless of selector specificity.
-const LIVE_UA: &str = "body{margin:8px;font-family:serif}head,style,script,title,meta,link,base,noscript{display:none}";
+pub(crate) const LIVE_UA: &str = "body{margin:8px;font-family:serif}head,style,script,title,meta,link,base,noscript{display:none}";
 
 pub(crate) fn live_cascade(css: &str, width: f32, height: f32) -> Cascade {
     turbo_html2pdf_core::set_media_viewport_height(height);
@@ -167,17 +230,42 @@ pub(crate) fn layout_rules(
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
 ) -> Result<LayoutSnapshot, String> {
-    Ok(layout_rules_resolved(input, rules, inputs, diagnostics)?.0)
+    Ok(layout_rules_resolved(input, rules, 2.0, inputs, diagnostics)?.0)
 }
 
+#[cfg(test)]
 pub(crate) fn layout_rules_resolved(
     input: &LiveTreeInput,
     rules: &[String],
+    layout_scale: f32,
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
 ) -> Result<(LayoutSnapshot, crate::live_layout_scroll::SourceStyles), String> {
+    let active = rules
+        .iter()
+        .map(|text| crate::live_stylesheets::ActiveRule {
+            text: text.clone(),
+            scoped: None,
+            resource: None,
+        })
+        .collect::<Vec<_>>();
+    layout_active_rules_resolved(input, &active, layout_scale, inputs, diagnostics)
+}
+pub(crate) fn layout_active_rules_resolved(
+    input: &LiveTreeInput,
+    rules: &[crate::live_stylesheets::ActiveRule],
+    layout_scale: f32,
+    inputs: &SnapshotInputs,
+    diagnostics: &mut Diagnostics,
+) -> Result<(LayoutSnapshot, crate::live_layout_scroll::SourceStyles), String> {
+    let qualified = rules
+        .iter()
+        .filter(|rule| rule.resource.is_none())
+        .cloned()
+        .collect::<Vec<_>>();
     let mut cascade = live_cascade("", inputs.width, inputs.height);
-    for text in rules {
+    for rule in &qualified {
+        let text = &rule.text;
         let sheet = turbo_html2pdf_core::style::parse_stylesheet(text);
         if !sheet.at_rules.is_empty() {
             return Err(
@@ -192,15 +280,37 @@ pub(crate) fn layout_rules_resolved(
             });
         }
     }
-    let styled = turbo_html2pdf_core::style_tree(&input.nodes, &cascade);
+    let styled = if input.composition.is_some() {
+        crate::live_layout_scoped::style_composed_tree(input, &qualified)?
+    } else {
+        turbo_html2pdf_core::style_tree(&input.nodes, &cascade)
+    };
+    crate::live_layout_resources::validate(&styled, rules)?;
     let styles = crate::live_layout_scroll::collect_styles(input, &styled);
-    let snapshot = turbo_html2pdf_core::layout_snapshot::snapshot_styled_tree(
-        &styled,
-        &input.identities,
-        inputs,
-        diagnostics,
-    )
-    .map_err(|error| error.to_string())?;
+    let original: Vec<_> = input
+        .original_text
+        .iter()
+        .map(
+            |(source_id, units)| turbo_html2pdf_core::layout_snapshot::SourceTextUnits {
+                source_id: *source_id,
+                units,
+            },
+        )
+        .collect();
+    let options = turbo_html2pdf_core::layout_snapshot::NativeTextOptions {
+        original_text: &original,
+        svg_viewports: &input.svg_viewports,
+        layout_scale,
+    };
+    let snapshot =
+        turbo_html2pdf_core::layout_snapshot::snapshot_html_styled_tree_with_native_text(
+            &styled,
+            &input.identities,
+            &options,
+            inputs,
+            diagnostics,
+        )
+        .map_err(|error| error.to_string())?;
     Ok((snapshot, styles))
 }
 
@@ -360,8 +470,8 @@ mod tests {
 
     #[test]
     fn source_copy_refuses_unimplemented_namespace_and_excess_depth_or_text() {
-        let tree = Tree::parse("<svg><rect/></svg>");
-        assert!(capture_tree(&tree, 1).err().unwrap().contains("non-HTML"));
+        let tree = Tree::parse("<math><mi>x</mi></math>");
+        assert!(capture_tree(&tree, 1).err().unwrap().contains("namespace"));
         let html = format!(
             "{}x{}",
             "<div>".repeat(MAX_DEPTH + 2),

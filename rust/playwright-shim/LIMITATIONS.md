@@ -75,6 +75,13 @@ values, defaults, cloning and select selection state work in the live runtime. I
 sanitization, validation/reset and persistence of live values through an HTML snapshot
 remain incomplete. Style text exposes grammar-validated CSSOM rules and live branded
 CSSRuleList/StyleSheetList collections with receiver-checked native list operations.
+Live hydration retains the authentic HTTP policy headers, response status and
+selected navigation referrer. Context/page init scripts run through the trusted
+native initializer rather than added HTML tokens. Source header referrer policy
+and final redirect request metadata are forwarded before page scripts execute.
+Dynamic meta referrer changes and complete browser navigation/resource reporting
+lifecycle remain separate coverage work.
+
 Live hydration loads linked/imported stylesheets, enforces inline style CSP against native
 attributes, and protects opaque stylesheet rules from script access. Same-origin cross-realm
 CSS getters share private interface brands. It decodes PNG/JPEG/GIF/WebP image resources with load/error events; responsive images,

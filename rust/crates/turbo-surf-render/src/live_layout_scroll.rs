@@ -121,7 +121,11 @@ pub(crate) fn scroll_metrics(
     id: SourceId,
 ) -> Result<ScrollMetrics, String> {
     let source = snapshot.source(id).ok_or("native scroll source missing")?;
-    if source.excluded_from_layout {
+    if source.excluded_from_layout
+        || styles
+            .get(&id)
+            .is_some_and(|entry| entry.style.get("display") == Some("contents"))
+    {
         return Ok(ScrollMetrics {
             width: 0,
             height: 0,
@@ -130,6 +134,9 @@ pub(crate) fn scroll_metrics(
             max_x: 0.0,
             max_y: 0.0,
         });
+    }
+    if snapshot.unsupported_svg_source_geometry(id) {
+        return Err("native SVG descendant scroll geometry is unsupported".into());
     }
     let first = source
         .fragment_indices
@@ -152,7 +159,9 @@ pub(crate) fn scroll_metrics(
     {
         return Err("native scroll RTL/vertical writing provenance pending".into());
     }
-    let matrix = first.world_transform.map(f64::from);
+    let matrix = snapshot
+        .native_world_transform(first.index)
+        .ok_or("native scroll transform unavailable")?;
     let determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
     if determinant == 0.0 || !determinant.is_finite() {
         return Err(
@@ -183,7 +192,10 @@ pub(crate) fn scroll_metrics(
     let mut bottom = padding.y + padding.height;
     for &index in &source.descendant_fragment_indices {
         let fragment = &snapshot.fragments()[index];
-        if fragment.kind != GeometryKind::BorderBox {
+        if !matches!(
+            fragment.kind,
+            GeometryKind::BorderBox | GeometryKind::TextLineContainer
+        ) {
             continue;
         }
         // A nested clipping ancestor owns its descendants' overflow. Its own
@@ -200,6 +212,9 @@ pub(crate) fn scroll_metrics(
                 continue;
             }
             if let Some(ancestor) = styles.get(ancestor) {
+                if ancestor.style.get("display") == Some("contents") {
+                    continue;
+                }
                 blocked_x |= clips(overflow(&ancestor.style, "overflow-x"));
                 blocked_y |= clips(overflow(&ancestor.style, "overflow-y"));
             }
@@ -254,11 +269,18 @@ pub(crate) fn scroll_translation(
         .iter()
         .map(|&i| &snapshot.fragments()[i])
         .find(|fragment| fragment.kind == GeometryKind::BorderBox)
-        .ok_or("native scroll requires inline border provenance")?;
+        .or_else(|| {
+            snapshot
+                .text_runs()
+                .iter()
+                .find(|run| run.source_id == Some(id) || run.source_ancestors.contains(&id))
+                .map(|run| &snapshot.fragments()[run.fragment_index])
+        })
+        .ok_or("native scroll requires placed source provenance")?;
     let position = fragment
         .used_box
-        .ok_or("native scroll used box missing")?
-        .position;
+        .map(|used| used.position)
+        .unwrap_or(turbo_html2pdf_core::layout::value::Position::Static);
     use turbo_html2pdf_core::layout::value::Position;
     if position == Position::Fixed {
         return Ok([0.0; 2]);
@@ -266,10 +288,11 @@ pub(crate) fn scroll_translation(
     let containing = if position == Position::Absolute {
         fragment.source_ancestors.iter().rposition(|ancestor| {
             styles.get(ancestor).is_some_and(|style| {
-                style
-                    .style
-                    .get("position")
-                    .is_some_and(|value| value != "static")
+                style.style.get("display") != Some("contents")
+                    && style
+                        .style
+                        .get("position")
+                        .is_some_and(|value| value != "static")
             })
         })
     } else {
@@ -376,6 +399,7 @@ mod tests {
             let (snapshot, styles) = layout_rules_resolved(
                 &input,
                 &[],
+                2.0,
                 &SnapshotInputs {
                     width: 800.0,
                     height: 600.0,

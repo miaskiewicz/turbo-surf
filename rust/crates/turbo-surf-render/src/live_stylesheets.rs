@@ -18,6 +18,8 @@ pub(crate) struct SheetSnapshot {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuleSnapshot {
+    #[serde(skip)]
+    pub(crate) scoped: Option<crate::live_layout_scoped::ScopedRule>,
     #[serde(rename = "type")]
     pub(crate) kind: u32,
     pub(crate) css_text: String,
@@ -31,6 +33,13 @@ pub(crate) struct RuleSnapshot {
     pub(crate) style_sheet: Option<SheetSnapshot>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ActiveRule {
+    pub(crate) text: String,
+    pub(crate) scoped: Option<crate::live_layout_scoped::ScopedRule>,
+    pub(crate) resource: Option<crate::live_layout_resources::Definition>,
+}
+
 pub(crate) trait Conditions {
     fn media(&self, query: &str) -> Result<bool, String>;
     fn supports(&self, condition: &str) -> Result<bool, String>;
@@ -38,10 +47,21 @@ pub(crate) trait Conditions {
 
 /// Qualified CSS rules are kept separate so a grouping block before a following
 /// ordinary rule cannot be moved after it by a parser's at-rule side list.
+#[cfg(test)]
 pub(crate) fn active_rules(
     sheets: &[SheetSnapshot],
     conditions: &impl Conditions,
 ) -> Result<Vec<String>, String> {
+    Ok(active_rule_snapshots(sheets, conditions)?
+        .into_iter()
+        .map(|rule| rule.text)
+        .collect())
+}
+
+pub(crate) fn active_rule_snapshots(
+    sheets: &[SheetSnapshot],
+    conditions: &impl Conditions,
+) -> Result<Vec<ActiveRule>, String> {
     let mut result = Vec::new();
     for sheet in sheets {
         append_sheet(sheet, conditions, &mut result)?;
@@ -52,7 +72,7 @@ pub(crate) fn active_rules(
 fn append_sheet(
     sheet: &SheetSnapshot,
     conditions: &impl Conditions,
-    result: &mut Vec<String>,
+    result: &mut Vec<ActiveRule>,
 ) -> Result<(), String> {
     if !sheet.cycle && !sheet.disabled && conditions.media(&sheet.media)? {
         append_rules(&sheet.rules, conditions, result)?;
@@ -63,7 +83,7 @@ fn append_sheet(
 fn append_rules(
     rules: &[RuleSnapshot],
     conditions: &impl Conditions,
-    result: &mut Vec<String>,
+    result: &mut Vec<ActiveRule>,
 ) -> Result<(), String> {
     for rule in rules {
         match rule.kind {
@@ -99,13 +119,16 @@ fn append_rules(
                     )?;
                 }
             }
-            1 => result.push(rule.css_text.clone()),
-            5 | 7 | 8 => {
-                return Err(format!(
-                    "native live layout requires resource/animation support for CSS rule type {}",
-                    rule.kind
-                ))
-            }
+            1 => result.push(ActiveRule {
+                text: rule.css_text.clone(),
+                scoped: rule.scoped.clone(),
+                resource: None,
+            }),
+            5 | 7 => result.push(ActiveRule {
+                text: rule.css_text.clone(),
+                scoped: None,
+                resource: Some(crate::live_layout_resources::definition(&rule.css_text)?),
+            }),
             _ => {
                 return Err(format!(
                     "native live layout does not support CSS rule type {}",

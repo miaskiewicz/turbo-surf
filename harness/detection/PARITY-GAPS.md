@@ -33,26 +33,26 @@ reading source alone.
 | Native control labels and receiver-realm NodeList | Pushed5c0b886/canonical1e93cae; actual155 and stock production behavior/GC2 pass | Integrated; full Rust gates pass, label activation open |
 | Real native deadlines vs virtual Window timers | Pushed5c0b886; source-pinned Chrome4 outcomes, actual155 affected14 and MCP73 pass | Integrated; full Rust gates pass |
 | Private abort/controller conversion | Actual155 privacy2 and stock privacy2/adapter2 pass; original hostile-hook reproductions retained | Concrete exposed paths fixed; broader hooks/array fast-path count remain in#28 |
-| Native XHR identity and receivers | Independent Chrome control1/default existing HTTP-frame4 and strict pass | Bounded fix; actual155 checks pending, broader XHR remains#28 |
-| API inventory | Frozen70-interface capture predates these repairs;75-interface collector expansion tested | Rebuild and fresh pair required; no predicted counts |
+| Native XHR identity and receivers | Independent Chrome control1 + existing HTTP-frame4 pass on both engines; strict and both detector captures pass | Bounded fix validated; broader XHR remains#28 |
+| API inventory | Fresh75-interface Chrome155.80/native155 pair:64 original/142 expanded missing,374 paths, all interfaces measured | Measured; all residual paths tracked in#28 |
 | Google acceptance | Last frozen544180d baseline0/2 native SERP | Rebuilt fresh GPU/wreq run pending |
 
 ### Final full workspace checkpoint
 
-The final default full-workspace command exits0 with1,374 passing tests and nine
-explicit ignores (three unavailable stock-SDK native callbacks and six generated
-doctests). The actual155 full-workspace command exits0 with1,413 passing tests,
-zero failures/filtered cases and six generated doctest ignores. Both commands
-include the corrected cancellation observation from the start. A subsequent
-test-only font-scope correction preserves the full macOS Chrome comparison and
-font-independent shadow Range/retirement assertions on Linux; its whole nine-test
-suite passes on both stock and actual155. Both engines pass workspace all-target
-Clippy with `-D warnings` and formatting. The rebuilt stock debug addon passes
-95 shim tests (one intentional skip) and20 E2E tests. Native optimized addon
-checks and fresh optimized API/Google captures remain separate gates. These full
-runs precede the equivalent HostMedia initializer and bounded XHR follow-up;
-default affected controls and strict checks pass, with final actual155 affected
-controls and the complete six-feature strict check required before delivery.
+The current-source default full-workspace command exits0 with1,376 passing tests,
+zero failures and nine explicit ignores (three unavailable stock-SDK native
+callbacks and six generated doctests). The earlier actual155 full command exits0
+with1,413 passing tests and six generated doctest ignores, before the last XHR
+follow-up. Its final current-source full six-feature command is running separately.
+Both engines pass the final XHR5 and shadow9 controls, workspace all-target strict
+Clippy with `-D warnings`, and formatting. Both rebuilt addons pass95 shim tests
+(one intentional test-framework skip),20 E2E tests and88 detection controls with
+zero skips, plus2 Python SDK-helper tests. The native addon actually renders the
+shared GPU triangle: pixelHash3630084024 and centerRGBA[128,128,153,255].
+
+The fresh75-interface pair is recorded below. The remaining full native and
+fresh native-cookie Google commands must finish before delivery; prior passes
+or deferred issue coverage do not substitute for them.
 
 ## Required PR26 completion work
 
@@ -61,12 +61,15 @@ following delivery and validation work remains required for this PR:
 
 - [x] Push tested labels, clock, privacy, driver and conformance fixes:5c0b886/95e4c5c.
 - [x] Pass full default/native workspace and both strict/format checkpoint gates.
-- [ ] Pass final XHR affected controls and all-target strict checks with the complete
-  native CLI/addon feature combination (the preceding full runs are recorded above).
-- [ ] Rebuild both addons and pass shim/E2E controls with recorded engine/features;
-  default debug passes95 shim/20 E2E, optimized actual155 is building.
-- [ ] Rebuild the optimized native executable with wreq, trust anchors, Metal and CoreText.
-- [ ] Capture the fresh75-interface pair and update every measured inventory count.
+- [x] Pass final XHR affected controls and all-target strict checks with the complete
+  native CLI/addon feature combination.
+- [ ] Finish the final current-source full native workspace command; current default
+  full workspace passes1,376 tests with nine documented skips.
+- [x] Rebuild both addons and pass shim/E2E controls with recorded engine/features;
+  each passes95 shim/20 E2E and88 detection controls plus2 Python tests.
+- [x] Rebuild the optimized native executable with wreq, trust anchors, Metal and CoreText.
+- [x] Capture the fresh75-interface pair and record64 original/142 expanded missing
+  members and374 paths; every unresolved path remains open in#28.
 - [ ] Run fresh native-cookie Google controls with actual consent and genuine forms;
   record the accepted/rejected outcome without importing Chrome cookies.
 - [ ] Refresh changelog, findings and PR description; retain evidence and remove
@@ -322,61 +325,54 @@ path matters to the target; no Google-audio cause is established by these contro
 
 ## Fresh own-member inventory (2026-10-16)
 
-[API-INVENTORY.json](./API-INVENTORY.json) retains full missing/extra and descriptor
-lists, actual Chrome/native versions and source/executable hashes. The frozen
-localhost pair uses Chrome155.0.8059.80/native V815.5.35.23 with all GPU/wreq features.
-It predates the implemented collection/label repairs; its absent-interface/member
-counts are historical evidence until the rebuilt75-interface capture replaces it.
-The original four interfaces have **65** missing own members (Document29,
-Element30, HTMLElement4, Canvas2); the expanded70-interface capture has **134**
-missing own members among measured interfaces. Two native interfaces are absent:
-HTMLFormControlsCollection and RadioNodeList. AbstractRange, NodeRange, StaticRange,
-ElementInternals, CustomStateSet, File, FormData, FormDataEvent and UserActivation have zero measured
-own-member/descriptor differences. There are349 total difference paths, including
-raw own-key order and descriptors. Existing Blob, ValidityState, form, input and
-button members now have zero measured descriptor differences. Blob.textStream
-and the listed missing form/control members remain open.
+[API-INVENTORY.json](./API-INVENTORY.json) retains all measured missing/extra,
+descriptor, inheritance, callable and key-order paths. The new paired localhost
+capture uses Chrome155.0.8059.80 and actual native V815.5.35.23-rusty with all
+wreq/trust-anchor/Metal/CoreText features. Executable SHA256 is
+`84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50`.
 
-Historical counts were94, then66 original/147 expanded. The preceding58-interface
-snapshot measured133 expanded members and304 paths; growing the constructor scope
-and adding raw key order changes the denominator. The prior69-interface capture
-had359 paths before the ten descriptor/order repairs; the new70-interface scope
-adds UserActivation with no measured differences and retains349 paths. Real form reflection and existing
-input/button descriptor repairs are integrated. Every remaining named path is
-tracked under issue28; none of these measurements certifies browser conformance.
+All **75 interfaces are measured**. There are **64** missing own members in the
+original four (Document29, Element29, HTMLElement4, Canvas2), **142** across the
+expanded scope, and **374** total difference paths. HTMLFormControlsCollection and
+RadioNodeList are now present with zero missing/extra/listed-descriptor differences.
+A measured own-member match does not certify complete behavior or key-order parity.
+
+Across the same **68 previously measured interfaces**, missing own members fall
+from **134 to119**, with **15 resolved and none introduced**. The five added
+interfaces contribute23 additional missing members; the overall expanded totals
+therefore have a different denominator. The two formerly absent interfaces are
+measured separately from that same-scope comparison. The prior70-interface
+snapshot (65 original/134 expanded,349 paths) remains in
+[commit95e4c5c](https://github.com/miaskiewicz/turbo-surf/blob/95e4c5c/harness/detection/API-INVENTORY.json).
+Historical94 and earlier66/147 counts are not current measurements.
 
 ## Current measured missing members
 
-Generated from the latest `API-INVENTORY.json` snapshot. A listed missing own
-member is a measured shape difference; existing inherited/instance behavior may
-already exist. Zero missing members does not certify full behavior. Descriptor
-and key-order differences remain separately recorded in the JSON.
+Generated from the fresh snapshot. A missing own member can still have inherited
+or instance behavior; zero missing members does not prove conformance. All extra,
+descriptor, callable and raw key-order differences remain itemized in the JSON.
+Every unresolved path is tracked in issue28.
 
 | Interface | Missing own prototype members |
 |---|---|
 | Blob | `textStream` |
 | Document | `all`, `ariaNotify`, `browsingTopics`, `domain`, `execCommand`, `exitPictureInPicture`, `exitPointerLock`, `fragmentDirective`, `fullscreen`, `fullscreenEnabled`, `getAnimations`, `hasPrivateToken`, `hasRedemptionRecord`, `lastModified`, `pictureInPictureElement`, `pictureInPictureEnabled`, `pointerLockElement`, `prerendering`, `queryCommandEnabled`, `queryCommandIndeterm`, `queryCommandState`, `queryCommandSupported`, `queryCommandValue`, `startViewTransition`, `timeline`, `wasDiscarded`, `webkitCancelFullScreen`, `webkitExitFullscreen`, `webkitFullscreenEnabled` |
-| Element | `activeViewTransition`, `animate`, `ariaNotify`, `checkVisibility`, `computedStyleMap`, `currentCSSZoom`, `customElementRegistry`, `getAnimations`, `getHTML`, `hasPointerCapture`, `onbeforecopy`, `onbeforecut`, `onbeforepaste`, `onfullscreenchange`, `onfullscreenerror`, `onsearch`, `onwebkitfullscreenchange`, `onwebkitfullscreenerror`, `pseudo`, `releasePointerCapture`, `requestPointerLock`, `scroll`, `scrollIntoViewIfNeeded`, `setHTML`, `setHTMLUnsafe`, `setPointerCapture`, `startViewTransition`, `webkitMatchesSelector`, `webkitRequestFullScreen`, `webkitRequestFullscreen` |
+| Element | `activeViewTransition`, `animate`, `ariaNotify`, `checkVisibility`, `computedStyleMap`, `currentCSSZoom`, `getAnimations`, `getHTML`, `hasPointerCapture`, `onbeforecopy`, `onbeforecut`, `onbeforepaste`, `onfullscreenchange`, `onfullscreenerror`, `onsearch`, `onwebkitfullscreenchange`, `onwebkitfullscreenerror`, `pseudo`, `releasePointerCapture`, `requestPointerLock`, `scroll`, `scrollIntoViewIfNeeded`, `setHTML`, `setHTMLUnsafe`, `setPointerCapture`, `startViewTransition`, `webkitMatchesSelector`, `webkitRequestFullScreen`, `webkitRequestFullscreen` |
 | EventTarget | `when` |
-| HTMLButtonElement | `command`, `commandForElement`, `formAction`, `formEnctype`, `formMethod`, `formTarget`, `interestForElement`, `labels`, `popoverTargetAction`, `popoverTargetElement` |
+| HTMLButtonElement | `command`, `commandForElement`, `interestForElement`, `popoverTargetAction`, `popoverTargetElement` |
 | HTMLCanvasElement | `captureStream`, `transferControlToOffscreen` |
 | HTMLElement | `attributeStyleMap`, `editContext`, `focusGroup`, `focusGroupStart` |
-| HTMLFormElement | `Symbol(Symbol.iterator)`, `elements`, `length` |
-| HTMLInputElement | `align`, `alt`, `createValueRange`, `dirName`, `files`, `formAction`, `formEnctype`, `formMethod`, `formTarget`, `height`, `incremental`, `indeterminate`, `labels`, `list`, `maxLength`, `minLength`, `popoverTargetAction`, `popoverTargetElement`, `showPicker`, `size`, `stepDown`, `stepUp`, `useMap`, `valueAsDate`, `webkitEntries`, `webkitdirectory`, `width` |
-| HTMLTextAreaElement | `cols`, `createValueRange`, `dirName`, `labels`, `maxLength`, `minLength`, `rows`, `textLength`, `type`, `wrap` |
+| HTMLInputElement | `align`, `alt`, `createValueRange`, `dirName`, `files`, `height`, `incremental`, `indeterminate`, `list`, `maxLength`, `minLength`, `popoverTargetAction`, `popoverTargetElement`, `showPicker`, `size`, `stepDown`, `stepUp`, `useMap`, `valueAsDate`, `webkitEntries`, `webkitdirectory`, `width` |
+| HTMLMeterElement | `high`, `low`, `max`, `min`, `optimum`, `value` |
+| HTMLOutputElement | `defaultValue`, `htmlFor`, `name`, `type`, `value` |
+| HTMLProgressElement | `max`, `position`, `value` |
+| HTMLSelectElement | `Symbol(Symbol.iterator)`, `add`, `item`, `length`, `namedItem`, `remove`, `showPicker`, `size`, `type` |
+| HTMLTextAreaElement | `cols`, `createValueRange`, `dirName`, `maxLength`, `minLength`, `rows`, `textLength`, `type`, `wrap` |
 | MessageEvent | `userActivation` |
 | Range | `expand` |
 | ShadowRoot | `activeElement`, `clonable`, `delegatesFocus`, `fullscreenElement`, `getAnimations`, `getHTML`, `getSelection`, `onslotchange`, `pictureInPictureElement`, `pointerLockElement`, `referenceTarget`, `serializable`, `setHTML`, `setHTMLUnsafe`, `styleSheets` |
 
-Absent native interfaces in this expanded capture:
-- `HTMLFormControlsCollection`: Chrome declares `namedItem`, `constructor`, `Symbol(Symbol.toStringTag)`, `Symbol(Symbol.iterator)`.
-- `RadioNodeList`: Chrome declares `value`, `constructor`, `Symbol(Symbol.toStringTag)`, `Symbol(Symbol.iterator)`.
-
-Historical counts were94 original-interface members, then66/147 on an earlier
-snapshot. The latest original-four count is65. Expanded counts now cover70
-interfaces and134 missing own members; the domain grew by11 interfaces, so the
-expanded count is not directly comparable to the preceding133-member snapshot.
-[API-SHAPE.json](./API-SHAPE.json) and Git history retain the earlier evidence.
+No native interface is absent in this75-interface capture. This does not enumerate every browser interface.
 
 ## Behavior and architecture gaps beyond member names
 
@@ -451,7 +447,9 @@ An independent Chrome155.80/V815.5.35.23 control pins the probe/collector/server
 sources and matches descriptors, forged/proxy/subclass/detached receivers,
 hostile WeakMap hooks and actual HTTP state1/2/3/4/body delivery. The default
 control plus four existing HTTP/frame tests and full all-target strict/fmt pass.
-Actual155 validation and a repeated detector capture remain required.
+Actual155 also passes all five affected tests. Both current default and native155
+Botto captures report zero strong findings, with only the weak unsupported
+service-worker finding. These bounded detector results do not establish Google acceptance.
 
 Broader XHR writable/public state, EventTarget hierarchy, upload/progress,
 synchronous/timeout/transport-abort behavior, cross-realm borrowed receivers and

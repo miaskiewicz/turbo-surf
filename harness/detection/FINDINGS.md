@@ -10,30 +10,40 @@ its retry. Chrome oracle cookies were never reused in native tests.
 
 ## Latest validation checkpoint — 2026-10-16
 
-Pushed5c0b886 integrates canonical turbo-test1e93cae labels, native/Window clock
-ordering, actual human-driver Promise completion and private abort/controller
-boundaries. The final default full workspace passes1,374 tests; actual155 passes
-1,413. Both commands exit0 with no failures. Default has three explicit
-stock-native callback skips plus six generated doctest ignores; actual155 has
-only the six doctest ignores. The test-only cancellation observation correction
-is included from each command's start. A further Linux font-scope correction
-keeps exact macOS Chrome shadow Range metrics and all-platform structural and
-retirement assertions; the whole nine-test shadow suite passes on both engines.
-Both full-workspace all-target strict Clippy and formatting gates pass. The rebuilt stock debug addon passes95 shim tests (one
-intentional skip) and20 E2E tests.
+Pushed26bd0f4 includes canonical turbo-test1e93cae labels, actual native/Window
+clock ordering, awaited human input, private abort/controller boundaries and
+bounded XHR identity/receiver fixes. The final current-source default workspace
+passes **1,376 tests**, zero failures, with three explicit stock-native callback
+skips and six generated doctest ignores. Both engines pass the final five XHR
+controls and all-target strict/format checks. The actual155 full-workspace
+checkpoint passed1,413 tests before the last XHR follow-up; its current-source
+full command is running separately. No sum of focused passes replaces that gate.
 
-Native optimized artifacts and their addon/shim/E2E checks are still in progress.
-The75-interface collector is ready; current API and Google counts still
-describe the older frozen executable, not these source changes. Deferred behavior
-remains itemized in#27/#28. No complete parity or reliable SERP claim is made.
+Both rebuilt addons pass **95 shim tests** (one intentional test-framework skip),
+**20 E2E tests**, **88 detection tests** without skips and **two Python SDK-helper
+tests**. The native artifact uses actual V815.5.35.23-rusty, wreq, trust anchors,
+Metal and CoreText. Its real addon GPU triangle produces pixel hash3630084024,
+130,944 nonzero bytes out of131,072, and centerRGBA[128,128,153,255]. This is the
+shared scene's bounded result, not complete rendering conformance. Both actual
+Botto detector captures have zero strong findings; only unsupported service-worker
+registration remains a weak finding. That does not establish Google acceptance.
 
-The subsequent HostMedia initializer correction changes construction syntax only
-and passes focused media/strict checks. A real Botto detector run then identifies
-XHR's wrong tag. Its bounded correction matches a source-pinned independent
-Chrome control and four existing HTTP/frame tests on default; actual155 checks
-and a fresh detector capture are required. The preceding full-workspace counts
-are checkpoints before those last follow-ups. XHR state, hierarchy/upload and
-broader lifecycle behavior remain in#28.
+The fresh **75-interface** Chrome155.80/native155 comparison measures every
+listed interface: **64 original-scope /142 expanded missing own members and374
+difference paths**. On the same68 previously measured interfaces, missing members
+drop134→119 (15 resolved, none introduced). The two previously absent collection
+interfaces are now present and match listed member/descriptors. The five added
+interfaces contribute23 missing members, so expanded totals across different
+scopes cannot be compared directly. All unresolved missing/extra/descriptor paths
+are saved in API-INVENTORY.json and tracked in#28.
+
+The new optimized CLI SHA256 is
+`84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50`.
+Fresh Google validation waits until heavy validation is idle. GOOGLE-LAST-RUN.json
+still describes the older544180d run with zero native baseline SERP successes in
+two repetitions. Chrome cookies are never imported. Audio remains in#27; every
+other deferred behavior is explicitly recorded in#28. No complete parity claim
+or turbo-surf publication is made.
 
 ## Earlier integration snapshot — 544180d / 26a08b5
 

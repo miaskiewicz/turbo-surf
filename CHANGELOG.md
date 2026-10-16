@@ -25,17 +25,14 @@ residual work beyond this PR, with audio separately deferred in
   asynchronous probe results privately instead of reading a guest-controlled
   global slot. Optional capability, crypto, integrity and GPU probes run after
   the recorded verdict. Offline harness tests are part of the standard CI gate.
-- Expand the API audit with exact missing/extra members, callable shapes,
-  descriptors, inheritance, collector/executable hashes and separately unmeasured
-  interfaces. The latest2026-10-16 snapshot reports65 missing own members across the
-  original four interfaces and134 across an expanded70-interface scope. Two native
-  collection interfaces remain absent. Preserve raw own-key order as well as sorted
-  inventories. AbstractRange, NodeRange, StaticRange and ElementInternals have zero
-  own-member/descriptor differences in this snapshot. Broader behavior remains bounded.
-- Expand the next paired API audit to75 interfaces, including Select, Output,
-  Meter, Progress and Label. Collect descriptors without invoking constructors
-  or getters; preserve the historical70-interface snapshot until a fresh rebuilt
-  pair measures the new scope.
+- Expand the API audit to75 interfaces with exact missing/extra members, callable
+  shapes, descriptors, inheritance, raw key order and collector/executable hashes.
+  The fresh Chrome155.80/native155 pair measures all interfaces:64 missing own
+  members across the original four,142 in the expanded scope and374 difference
+  paths. On the same68 previously measured interfaces, missing members fall134→119
+  with15 resolved and none introduced. Both formerly absent collection interfaces
+  are now present; the five added interfaces contribute23 additional missing
+  members. Historical counts and smaller scopes remain explicitly dated.
 - Refresh JS/HTTP identity to independently measured Chrome155.0.8059.80.
   Preserve historical controls and SDK source provenance155.0.8059.79. The tested
   native engine is15.5.35.23-rusty; the stock production SDK remains V8150.4.0
@@ -372,23 +369,24 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Validation status
 
-The full default workspace checkpoint passes1,374 tests with three explicit
-stock-native callback skips and six generated doctest ignores. The actual155
-checkpoint passes1,413 tests with only the six doctest ignores. Both full commands
-exit0; final shadow9 and both all-target strict/fmt gates pass. These full runs
-precede the equivalent HostMedia initializer correction and the bounded XHR
-follow-up; default affected controls and strict checks pass, with final actual155
-XHR/feature checks in progress. The stock debug addon passes95 shim tests (one
-intentional skip) and20 E2E tests.
+The final current-source default workspace passes1,376 tests with three explicit
+stock-native callback skips and six generated doctest ignores. The earlier actual155
+full checkpoint passes1,413 tests with six doctest ignores; the final current-source
+full native command is running separately. Both engines pass final XHR5, shadow9,
+all-target strict Clippy and formatting. Both rebuilt addons pass95 shim tests
+(one intentional test-framework skip),20 E2E tests,88 detection controls without
+skips and2 Python SDK-helper tests.
 
-The optimized native CLI/addon build includes wreq, trust anchors, Metal and
-CoreText. Its fresh75-interface comparison, native addon controls and native-cookie
-Google run are still pending. The prior frozen70-interface audit and optimized
-544180d Google matrix remain historical:65 original/134 expanded missing members,
-349 difference paths, and zero native baseline SERP successes in two repetitions.
-Those counts do not describe the new source. Broader residual behavior stays in
-issue28; advanced audio stays in issue27. See FINDINGS.md and PARITY-GAPS.md for
-current evidence and bounds. No turbo-surf publication tag is created here.
+The optimized native CLI/addon includes wreq, trust anchors, Metal and CoreText.
+The fresh75-interface comparison records64 original/142 expanded missing members
+and374 paths. On the same68 previously measured interfaces, missing members fall
+134→119 without additions; both formerly absent collection interfaces are present.
+Both actual detector captures have no strong findings. The final current-source
+full native workspace and fresh native-cookie Google run remain pending. The prior
+544180d Google matrix is historical, with zero native baseline SERP successes in
+two repetitions; it does not describe the new executable. Broader residual behavior
+stays in issue28; advanced audio stays in issue27. See FINDINGS.md and PARITY-GAPS.md
+for current evidence and bounds. No turbo-surf publication tag is created here.
 
 ## [0.5.3] — 2026-09-29 — hide internal globals from window fingerprint
 

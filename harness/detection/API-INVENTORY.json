@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "collectedAt": "2026-10-16T13:33:12.866Z",
+  "collectedAt": "2026-10-16T17:47:41.229Z",
   "note": "Uninstrumented localhost API contract queries; no site detection conclusion.",
   "build": {
     "version": "0.5.4",
@@ -21,14 +21,14 @@
     }
   },
   "chromeVersion": "Chrome/155.0.8059.80",
-  "binaryHash": "981ec2b043fcdad957cd12116f11d54fa1ba7e18937030536ebce74333072508",
-  "collectorHash": "7ec6d216db08da51e25e0c61a237ed4dde93247b2de1ed3c1aaf73407e5fc8f8",
+  "binaryHash": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50",
+  "collectorHash": "21d5aafbdf94c61e6f8a7216b51d448b750ff099688e1a26ff9c3d31e1975bae",
   "totals": {
-    "interfaceCount": 70,
-    "originalFourMissing": 65,
-    "expandedMeasuredMissing": 134,
-    "unmeasuredInterfaces": ["HTMLFormControlsCollection", "RadioNodeList"],
-    "differencePaths": 349
+    "interfaceCount": 75,
+    "originalFourMissing": 64,
+    "expandedMeasuredMissing": 142,
+    "unmeasuredInterfaces": [],
+    "differencePaths": 374
   },
   "interfaces": {
     "AbortController": {
@@ -617,7 +617,6 @@
         "checkVisibility",
         "computedStyleMap",
         "currentCSSZoom",
-        "customElementRegistry",
         "getAnimations",
         "getHTML",
         "hasPointerCapture",
@@ -692,12 +691,7 @@
       "missing": [
         "command",
         "commandForElement",
-        "formAction",
-        "formEnctype",
-        "formMethod",
-        "formTarget",
         "interestForElement",
-        "labels",
         "popoverTargetAction",
         "popoverTargetElement"
       ],
@@ -729,13 +723,14 @@
       "changed": []
     },
     "HTMLFormControlsCollection": {
-      "measured": false,
-      "chrome": true,
-      "native": false
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
     },
     "HTMLFormElement": {
       "measured": true,
-      "missing": ["Symbol(Symbol.iterator)", "elements", "length"],
+      "missing": [],
       "extra": [],
       "changed": []
     },
@@ -747,14 +742,9 @@
         "createValueRange",
         "dirName",
         "files",
-        "formAction",
-        "formEnctype",
-        "formMethod",
-        "formTarget",
         "height",
         "incremental",
         "indeterminate",
-        "labels",
         "list",
         "maxLength",
         "minLength",
@@ -773,13 +763,88 @@
       "extra": [],
       "changed": []
     },
+    "HTMLLabelElement": {
+      "measured": true,
+      "missing": [],
+      "extra": [
+        "accept",
+        "autocomplete",
+        "disabled",
+        "max",
+        "min",
+        "multiple",
+        "name",
+        "pattern",
+        "placeholder",
+        "readOnly",
+        "required",
+        "step",
+        "value"
+      ],
+      "changed": [
+        {
+          "path": "htmlFor.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
+    "HTMLMeterElement": {
+      "measured": true,
+      "missing": ["high", "low", "max", "min", "optimum", "value"],
+      "extra": [],
+      "changed": []
+    },
+    "HTMLOutputElement": {
+      "measured": true,
+      "missing": ["defaultValue", "htmlFor", "name", "type", "value"],
+      "extra": [],
+      "changed": []
+    },
+    "HTMLProgressElement": {
+      "measured": true,
+      "missing": ["max", "position", "value"],
+      "extra": [],
+      "changed": []
+    },
+    "HTMLSelectElement": {
+      "measured": true,
+      "missing": [
+        "Symbol(Symbol.iterator)",
+        "add",
+        "item",
+        "length",
+        "namedItem",
+        "remove",
+        "showPicker",
+        "size",
+        "type"
+      ],
+      "extra": ["accept", "max", "min", "pattern", "placeholder", "readOnly", "step"],
+      "changed": [
+        {
+          "path": "options.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "selectedIndex.enumerable",
+          "chrome": true,
+          "native": false
+        },
+        {
+          "path": "selectedOptions.enumerable",
+          "chrome": true,
+          "native": false
+        }
+      ]
+    },
     "HTMLTextAreaElement": {
       "measured": true,
       "missing": [
         "cols",
         "createValueRange",
         "dirName",
-        "labels",
         "maxLength",
         "minLength",
         "rows",
@@ -994,9 +1059,10 @@
       "changed": []
     },
     "RadioNodeList": {
-      "measured": false,
-      "chrome": true,
-      "native": false
+      "measured": true,
+      "missing": [],
+      "extra": [],
+      "changed": []
     },
     "Range": {
       "measured": true,
@@ -1322,20 +1388,7 @@
       "changed": []
     }
   },
-  "unmeasuredChromeMembers": {
-    "HTMLFormControlsCollection": [
-      "namedItem",
-      "constructor",
-      "Symbol(Symbol.toStringTag)",
-      "Symbol(Symbol.iterator)"
-    ],
-    "RadioNodeList": [
-      "value",
-      "constructor",
-      "Symbol(Symbol.toStringTag)",
-      "Symbol(Symbol.iterator)"
-    ]
-  },
+  "unmeasuredChromeMembers": {},
   "differences": [
     {
       "path": "constructors.AbortController.globalDescriptor.enumerable",
@@ -4654,6 +4707,7 @@
         "clientWidth",
         "closest",
         "constructor",
+        "customElementRegistry",
         "elementTiming",
         "firstElementChild",
         "getAttribute",
@@ -4911,44 +4965,6 @@
           "ownKeyOrder": ["length", "name"],
           "constructible": false,
           "source": "function get currentCSSZoom() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "type": "undefined"
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.Element.prototypeMembers.customElementRegistry",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get customElementRegistry",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get customElementRegistry() { [native code] }",
           "functionPrototype": true,
           "nameDescriptor": {
             "configurable": true,
@@ -6276,6 +6292,7 @@
         "getElementsByTagNameNS",
         "moveBefore",
         "assignedSlot",
+        "customElementRegistry",
         "clientLeft",
         "clientTop",
         "clientWidth",
@@ -6469,7 +6486,12 @@
         "constructor",
         "disabled",
         "form",
+        "formAction",
+        "formEnctype",
+        "formMethod",
         "formNoValidate",
+        "formTarget",
+        "labels",
         "name",
         "reportValidity",
         "setCustomValidity",
@@ -6599,242 +6621,6 @@
       }
     },
     {
-      "path": "constructors.HTMLButtonElement.prototypeMembers.formAction",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get formAction",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get formAction() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "name": "set formAction",
-          "length": 1,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function set formAction() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLButtonElement.prototypeMembers.formEnctype",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get formEnctype",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get formEnctype() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "name": "set formEnctype",
-          "length": 1,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function set formEnctype() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLButtonElement.prototypeMembers.formMethod",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get formMethod",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get formMethod() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "name": "set formMethod",
-          "length": 1,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function set formMethod() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLButtonElement.prototypeMembers.formTarget",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get formTarget",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get formTarget() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "name": "set formTarget",
-          "length": 1,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function set formTarget() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
       "path": "constructors.HTMLButtonElement.prototypeMembers.interestForElement",
       "chrome": {
         "configurable": true,
@@ -6887,44 +6673,6 @@
             "valueType": "number"
           },
           "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLButtonElement.prototypeMembers.labels",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get labels",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get labels() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "type": "undefined"
         }
       },
       "native": {
@@ -7090,7 +6838,12 @@
         "willValidate",
         "validity",
         "validationMessage",
+        "formAction",
+        "formEnctype",
+        "formMethod",
+        "formTarget",
         "formNoValidate",
+        "labels",
         "Symbol(Symbol.toStringTag)"
       ]
     },
@@ -8045,379 +7798,6 @@
       ]
     },
     {
-      "path": "constructors.HTMLFormControlsCollection.error",
-      "chrome": {
-        "absent": true
-      },
-      "native": "TypeError"
-    },
-    {
-      "path": "constructors.HTMLFormControlsCollection.globalDescriptor",
-      "chrome": {
-        "configurable": true,
-        "enumerable": false,
-        "kind": "data",
-        "writable": true,
-        "valueType": "function"
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormControlsCollection.prototypeDescriptor",
-      "chrome": {
-        "configurable": false,
-        "enumerable": false,
-        "kind": "data",
-        "writable": false,
-        "valueType": "object"
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormControlsCollection.prototypeKeys",
-      "chrome": [
-        "Symbol(Symbol.iterator)",
-        "Symbol(Symbol.toStringTag)",
-        "constructor",
-        "namedItem"
-      ],
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormControlsCollection.prototypeMembers",
-      "chrome": {
-        "namedItem": {
-          "configurable": true,
-          "enumerable": true,
-          "kind": "data",
-          "writable": true,
-          "valueType": "function",
-          "function": {
-            "name": "namedItem",
-            "length": 1,
-            "ownKeys": ["length", "name"],
-            "ownKeyOrder": ["length", "name"],
-            "constructible": false,
-            "source": "function namedItem() { [native code] }",
-            "functionPrototype": true,
-            "nameDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "string"
-            },
-            "lengthDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "number"
-            },
-            "prototypeDescriptor": null
-          }
-        },
-        "constructor": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": true,
-          "valueType": "function",
-          "function": {
-            "name": "HTMLFormControlsCollection",
-            "length": 0,
-            "ownKeys": ["length", "name", "prototype"],
-            "ownKeyOrder": ["length", "name", "prototype"],
-            "constructible": true,
-            "source": "function HTMLFormControlsCollection() { [native code] }",
-            "functionPrototype": false,
-            "nameDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "string"
-            },
-            "lengthDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "number"
-            },
-            "prototypeDescriptor": {
-              "configurable": false,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "object"
-            }
-          }
-        },
-        "Symbol(Symbol.toStringTag)": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": false,
-          "valueType": "string"
-        },
-        "Symbol(Symbol.iterator)": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": true,
-          "valueType": "function",
-          "function": {
-            "name": "values",
-            "length": 0,
-            "ownKeys": ["length", "name"],
-            "ownKeyOrder": ["length", "name"],
-            "constructible": false,
-            "source": "function values() { [native code] }",
-            "functionPrototype": true,
-            "nameDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "string"
-            },
-            "lengthDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "number"
-            },
-            "prototypeDescriptor": null
-          }
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormControlsCollection.prototypeOwnKeyOrder",
-      "chrome": [
-        "namedItem",
-        "constructor",
-        "Symbol(Symbol.toStringTag)",
-        "Symbol(Symbol.iterator)"
-      ],
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormControlsCollection.prototypeTag",
-      "chrome": "[object HTMLFormControlsCollection]",
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormControlsCollection.shape",
-      "chrome": {
-        "name": "HTMLFormControlsCollection",
-        "length": 0,
-        "ownKeys": ["length", "name", "prototype"],
-        "ownKeyOrder": ["length", "name", "prototype"],
-        "constructible": true,
-        "source": "function HTMLFormControlsCollection() { [native code] }",
-        "functionPrototype": false,
-        "nameDescriptor": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": false,
-          "valueType": "string"
-        },
-        "lengthDescriptor": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": false,
-          "valueType": "number"
-        },
-        "prototypeDescriptor": {
-          "configurable": false,
-          "enumerable": false,
-          "kind": "data",
-          "writable": false,
-          "valueType": "object"
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormElement.prototypeKeys",
-      "chrome": [
-        "Symbol(Symbol.iterator)",
-        "Symbol(Symbol.toStringTag)",
-        "acceptCharset",
-        "action",
-        "autocomplete",
-        "checkValidity",
-        "constructor",
-        "elements",
-        "encoding",
-        "enctype",
-        "length",
-        "method",
-        "name",
-        "noValidate",
-        "rel",
-        "relList",
-        "reportValidity",
-        "requestSubmit",
-        "reset",
-        "submit",
-        "target"
-      ],
-      "native": [
-        "Symbol(Symbol.toStringTag)",
-        "acceptCharset",
-        "action",
-        "autocomplete",
-        "checkValidity",
-        "constructor",
-        "encoding",
-        "enctype",
-        "method",
-        "name",
-        "noValidate",
-        "rel",
-        "relList",
-        "reportValidity",
-        "requestSubmit",
-        "reset",
-        "submit",
-        "target"
-      ]
-    },
-    {
-      "path": "constructors.HTMLFormElement.prototypeMembers.Symbol(Symbol.iterator)",
-      "chrome": {
-        "configurable": true,
-        "enumerable": false,
-        "kind": "data",
-        "writable": true,
-        "valueType": "function",
-        "function": {
-          "name": "values",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function values() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormElement.prototypeMembers.elements",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get elements",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get elements() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "type": "undefined"
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLFormElement.prototypeMembers.length",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get length",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get length() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "type": "undefined"
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
       "path": "constructors.HTMLFormElement.prototypeOwnKeyOrder",
       "chrome": [
         "acceptCharset",
@@ -8460,7 +7840,10 @@
         "requestSubmit",
         "submit",
         "noValidate",
-        "Symbol(Symbol.toStringTag)"
+        "elements",
+        "length",
+        "Symbol(Symbol.toStringTag)",
+        "Symbol(Symbol.iterator)"
       ]
     },
     {
@@ -8540,7 +7923,12 @@
         "defaultValue",
         "disabled",
         "form",
+        "formAction",
+        "formEnctype",
+        "formMethod",
         "formNoValidate",
+        "formTarget",
+        "labels",
         "max",
         "min",
         "multiple",
@@ -8841,242 +8229,6 @@
       }
     },
     {
-      "path": "constructors.HTMLInputElement.prototypeMembers.formAction",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get formAction",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get formAction() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "name": "set formAction",
-          "length": 1,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function set formAction() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLInputElement.prototypeMembers.formEnctype",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get formEnctype",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get formEnctype() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "name": "set formEnctype",
-          "length": 1,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function set formEnctype() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLInputElement.prototypeMembers.formMethod",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get formMethod",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get formMethod() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "name": "set formMethod",
-          "length": 1,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function set formMethod() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLInputElement.prototypeMembers.formTarget",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get formTarget",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get formTarget() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "name": "set formTarget",
-          "length": 1,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function set formTarget() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
       "path": "constructors.HTMLInputElement.prototypeMembers.height",
       "chrome": {
         "configurable": true,
@@ -9247,44 +8399,6 @@
             "valueType": "number"
           },
           "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLInputElement.prototypeMembers.labels",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get labels",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get labels() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "type": "undefined"
         }
       },
       "native": {
@@ -10109,7 +9223,2648 @@
         "willValidate",
         "validity",
         "validationMessage",
+        "formAction",
+        "formEnctype",
+        "formMethod",
+        "formTarget",
         "formNoValidate",
+        "labels",
+        "Symbol(Symbol.toStringTag)"
+      ]
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeKeys",
+      "chrome": ["Symbol(Symbol.toStringTag)", "constructor", "control", "form", "htmlFor"],
+      "native": [
+        "Symbol(Symbol.toStringTag)",
+        "accept",
+        "autocomplete",
+        "constructor",
+        "control",
+        "disabled",
+        "form",
+        "htmlFor",
+        "max",
+        "min",
+        "multiple",
+        "name",
+        "pattern",
+        "placeholder",
+        "readOnly",
+        "required",
+        "step",
+        "value"
+      ]
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.accept",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get accept",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get accept() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set accept",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set accept() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.autocomplete",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get autocomplete",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get autocomplete() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set autocomplete",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set autocomplete() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.disabled",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get disabled",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get disabled() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set disabled",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set disabled() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.htmlFor.enumerable",
+      "chrome": true,
+      "native": false
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.max",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get max",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get max() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set max",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set max() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.min",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get min",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get min() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set min",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set min() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.multiple",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get multiple",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get multiple() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set multiple",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set multiple() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.name",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get name",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get name() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set name",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set name() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.pattern",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get pattern",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get pattern() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set pattern",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set pattern() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.placeholder",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get placeholder",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get placeholder() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set placeholder",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set placeholder() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.readOnly",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get readOnly",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get readOnly() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set readOnly",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set readOnly() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.required",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get required",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get required() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set required",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set required() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.step",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get step",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get step() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set step",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set step() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeMembers.value",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get value",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get value() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set value",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set value() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLLabelElement.prototypeOwnKeyOrder",
+      "chrome": ["form", "htmlFor", "control", "constructor", "Symbol(Symbol.toStringTag)"],
+      "native": [
+        "value",
+        "form",
+        "name",
+        "placeholder",
+        "accept",
+        "min",
+        "max",
+        "step",
+        "pattern",
+        "autocomplete",
+        "disabled",
+        "multiple",
+        "required",
+        "readOnly",
+        "htmlFor",
+        "control",
+        "constructor",
+        "Symbol(Symbol.toStringTag)"
+      ]
+    },
+    {
+      "path": "constructors.HTMLMeterElement.prototypeKeys",
+      "chrome": [
+        "Symbol(Symbol.toStringTag)",
+        "constructor",
+        "high",
+        "labels",
+        "low",
+        "max",
+        "min",
+        "optimum",
+        "value"
+      ],
+      "native": ["Symbol(Symbol.toStringTag)", "constructor", "labels"]
+    },
+    {
+      "path": "constructors.HTMLMeterElement.prototypeMembers.high",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get high",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get high() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set high",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set high() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLMeterElement.prototypeMembers.low",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get low",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get low() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set low",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set low() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLMeterElement.prototypeMembers.max",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get max",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get max() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set max",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set max() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLMeterElement.prototypeMembers.min",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get min",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get min() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set min",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set min() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLMeterElement.prototypeMembers.optimum",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get optimum",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get optimum() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set optimum",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set optimum() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLMeterElement.prototypeMembers.value",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get value",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get value() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set value",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set value() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLMeterElement.prototypeOwnKeyOrder",
+      "chrome": [
+        "value",
+        "min",
+        "max",
+        "low",
+        "high",
+        "optimum",
+        "labels",
+        "constructor",
+        "Symbol(Symbol.toStringTag)"
+      ],
+      "native": ["constructor", "labels", "Symbol(Symbol.toStringTag)"]
+    },
+    {
+      "path": "constructors.HTMLOutputElement.prototypeKeys",
+      "chrome": [
+        "Symbol(Symbol.toStringTag)",
+        "checkValidity",
+        "constructor",
+        "defaultValue",
+        "form",
+        "htmlFor",
+        "labels",
+        "name",
+        "reportValidity",
+        "setCustomValidity",
+        "type",
+        "validationMessage",
+        "validity",
+        "value",
+        "willValidate"
+      ],
+      "native": [
+        "Symbol(Symbol.toStringTag)",
+        "checkValidity",
+        "constructor",
+        "form",
+        "labels",
+        "reportValidity",
+        "setCustomValidity",
+        "validationMessage",
+        "validity",
+        "willValidate"
+      ]
+    },
+    {
+      "path": "constructors.HTMLOutputElement.prototypeMembers.defaultValue",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get defaultValue",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get defaultValue() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set defaultValue",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set defaultValue() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLOutputElement.prototypeMembers.htmlFor",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get htmlFor",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get htmlFor() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set htmlFor",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set htmlFor() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLOutputElement.prototypeMembers.name",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get name",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get name() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set name",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set name() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLOutputElement.prototypeMembers.type",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get type",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get type() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "type": "undefined"
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLOutputElement.prototypeMembers.value",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get value",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get value() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set value",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set value() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLOutputElement.prototypeOwnKeyOrder",
+      "chrome": [
+        "htmlFor",
+        "form",
+        "name",
+        "type",
+        "defaultValue",
+        "value",
+        "willValidate",
+        "validity",
+        "validationMessage",
+        "labels",
+        "checkValidity",
+        "reportValidity",
+        "setCustomValidity",
+        "constructor",
+        "Symbol(Symbol.toStringTag)"
+      ],
+      "native": [
+        "constructor",
+        "checkValidity",
+        "reportValidity",
+        "setCustomValidity",
+        "form",
+        "willValidate",
+        "validity",
+        "validationMessage",
+        "labels",
+        "Symbol(Symbol.toStringTag)"
+      ]
+    },
+    {
+      "path": "constructors.HTMLProgressElement.prototypeKeys",
+      "chrome": ["Symbol(Symbol.toStringTag)", "constructor", "labels", "max", "position", "value"],
+      "native": ["Symbol(Symbol.toStringTag)", "constructor", "labels"]
+    },
+    {
+      "path": "constructors.HTMLProgressElement.prototypeMembers.max",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get max",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get max() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set max",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set max() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLProgressElement.prototypeMembers.position",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get position",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get position() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "type": "undefined"
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLProgressElement.prototypeMembers.value",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get value",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get value() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set value",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set value() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLProgressElement.prototypeOwnKeyOrder",
+      "chrome": ["value", "max", "position", "labels", "constructor", "Symbol(Symbol.toStringTag)"],
+      "native": ["constructor", "labels", "Symbol(Symbol.toStringTag)"]
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeKeys",
+      "chrome": [
+        "Symbol(Symbol.iterator)",
+        "Symbol(Symbol.toStringTag)",
+        "add",
+        "autocomplete",
+        "checkValidity",
+        "constructor",
+        "disabled",
+        "form",
+        "item",
+        "labels",
+        "length",
+        "multiple",
+        "name",
+        "namedItem",
+        "options",
+        "remove",
+        "reportValidity",
+        "required",
+        "selectedIndex",
+        "selectedOptions",
+        "setCustomValidity",
+        "showPicker",
+        "size",
+        "type",
+        "validationMessage",
+        "validity",
+        "value",
+        "willValidate"
+      ],
+      "native": [
+        "Symbol(Symbol.toStringTag)",
+        "accept",
+        "autocomplete",
+        "checkValidity",
+        "constructor",
+        "disabled",
+        "form",
+        "labels",
+        "max",
+        "min",
+        "multiple",
+        "name",
+        "options",
+        "pattern",
+        "placeholder",
+        "readOnly",
+        "reportValidity",
+        "required",
+        "selectedIndex",
+        "selectedOptions",
+        "setCustomValidity",
+        "step",
+        "validationMessage",
+        "validity",
+        "value",
+        "willValidate"
+      ]
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.Symbol(Symbol.iterator)",
+      "chrome": {
+        "configurable": true,
+        "enumerable": false,
+        "kind": "data",
+        "writable": true,
+        "valueType": "function",
+        "function": {
+          "name": "values",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function values() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.accept",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get accept",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get accept() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set accept",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set accept() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.add",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "data",
+        "writable": true,
+        "valueType": "function",
+        "function": {
+          "name": "add",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function add() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.item",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "data",
+        "writable": true,
+        "valueType": "function",
+        "function": {
+          "name": "item",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function item() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.length",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get length",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get length() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set length",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set length() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.max",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get max",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get max() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set max",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set max() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.min",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get min",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get min() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set min",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set min() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.namedItem",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "data",
+        "writable": true,
+        "valueType": "function",
+        "function": {
+          "name": "namedItem",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function namedItem() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.options.enumerable",
+      "chrome": true,
+      "native": false
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.pattern",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get pattern",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get pattern() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set pattern",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set pattern() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.placeholder",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get placeholder",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get placeholder() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set placeholder",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set placeholder() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.readOnly",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get readOnly",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get readOnly() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set readOnly",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set readOnly() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.remove",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "data",
+        "writable": true,
+        "valueType": "function",
+        "function": {
+          "name": "remove",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function remove() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.selectedIndex.enumerable",
+      "chrome": true,
+      "native": false
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.selectedOptions.enumerable",
+      "chrome": true,
+      "native": false
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.showPicker",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "data",
+        "writable": true,
+        "valueType": "function",
+        "function": {
+          "name": "showPicker",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function showPicker() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.size",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get size",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get size() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set size",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set size() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.step",
+      "chrome": {
+        "absent": true
+      },
+      "native": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get step",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get step() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "name": "set step",
+          "length": 1,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function set step() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        }
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeMembers.type",
+      "chrome": {
+        "configurable": true,
+        "enumerable": true,
+        "kind": "accessor",
+        "get": {
+          "name": "get type",
+          "length": 0,
+          "ownKeys": ["length", "name"],
+          "ownKeyOrder": ["length", "name"],
+          "constructible": false,
+          "source": "function get type() { [native code] }",
+          "functionPrototype": true,
+          "nameDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "string"
+          },
+          "lengthDescriptor": {
+            "configurable": true,
+            "enumerable": false,
+            "kind": "data",
+            "writable": false,
+            "valueType": "number"
+          },
+          "prototypeDescriptor": null
+        },
+        "set": {
+          "type": "undefined"
+        }
+      },
+      "native": {
+        "absent": true
+      }
+    },
+    {
+      "path": "constructors.HTMLSelectElement.prototypeOwnKeyOrder",
+      "chrome": [
+        "autocomplete",
+        "disabled",
+        "form",
+        "multiple",
+        "name",
+        "required",
+        "size",
+        "type",
+        "options",
+        "length",
+        "selectedOptions",
+        "selectedIndex",
+        "value",
+        "willValidate",
+        "validity",
+        "validationMessage",
+        "labels",
+        "add",
+        "checkValidity",
+        "item",
+        "namedItem",
+        "remove",
+        "reportValidity",
+        "setCustomValidity",
+        "showPicker",
+        "constructor",
+        "Symbol(Symbol.toStringTag)",
+        "Symbol(Symbol.iterator)"
+      ],
+      "native": [
+        "value",
+        "form",
+        "name",
+        "placeholder",
+        "accept",
+        "min",
+        "max",
+        "step",
+        "pattern",
+        "autocomplete",
+        "disabled",
+        "multiple",
+        "required",
+        "readOnly",
+        "options",
+        "selectedOptions",
+        "selectedIndex",
+        "constructor",
+        "checkValidity",
+        "reportValidity",
+        "setCustomValidity",
+        "willValidate",
+        "validity",
+        "validationMessage",
+        "labels",
         "Symbol(Symbol.toStringTag)"
       ]
     },
@@ -10159,6 +11914,7 @@
         "defaultValue",
         "disabled",
         "form",
+        "labels",
         "max",
         "min",
         "multiple",
@@ -10390,44 +12146,6 @@
             "valueType": "number"
           },
           "prototypeDescriptor": null
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.HTMLTextAreaElement.prototypeMembers.labels",
-      "chrome": {
-        "configurable": true,
-        "enumerable": true,
-        "kind": "accessor",
-        "get": {
-          "name": "get labels",
-          "length": 0,
-          "ownKeys": ["length", "name"],
-          "ownKeyOrder": ["length", "name"],
-          "constructible": false,
-          "source": "function get labels() { [native code] }",
-          "functionPrototype": true,
-          "nameDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "string"
-          },
-          "lengthDescriptor": {
-            "configurable": true,
-            "enumerable": false,
-            "kind": "data",
-            "writable": false,
-            "valueType": "number"
-          },
-          "prototypeDescriptor": null
-        },
-        "set": {
-          "type": "undefined"
         }
       },
       "native": {
@@ -11107,6 +12825,7 @@
         "willValidate",
         "validity",
         "validationMessage",
+        "labels",
         "Symbol(Symbol.toStringTag)"
       ]
     },
@@ -11795,232 +13514,6 @@
         "memory",
         "Symbol(Symbol.toStringTag)"
       ]
-    },
-    {
-      "path": "constructors.RadioNodeList.error",
-      "chrome": {
-        "absent": true
-      },
-      "native": "TypeError"
-    },
-    {
-      "path": "constructors.RadioNodeList.globalDescriptor",
-      "chrome": {
-        "configurable": true,
-        "enumerable": false,
-        "kind": "data",
-        "writable": true,
-        "valueType": "function"
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.RadioNodeList.prototypeDescriptor",
-      "chrome": {
-        "configurable": false,
-        "enumerable": false,
-        "kind": "data",
-        "writable": false,
-        "valueType": "object"
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.RadioNodeList.prototypeKeys",
-      "chrome": ["Symbol(Symbol.iterator)", "Symbol(Symbol.toStringTag)", "constructor", "value"],
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.RadioNodeList.prototypeMembers",
-      "chrome": {
-        "value": {
-          "configurable": true,
-          "enumerable": true,
-          "kind": "accessor",
-          "get": {
-            "name": "get value",
-            "length": 0,
-            "ownKeys": ["length", "name"],
-            "ownKeyOrder": ["length", "name"],
-            "constructible": false,
-            "source": "function get value() { [native code] }",
-            "functionPrototype": true,
-            "nameDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "string"
-            },
-            "lengthDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "number"
-            },
-            "prototypeDescriptor": null
-          },
-          "set": {
-            "name": "set value",
-            "length": 1,
-            "ownKeys": ["length", "name"],
-            "ownKeyOrder": ["length", "name"],
-            "constructible": false,
-            "source": "function set value() { [native code] }",
-            "functionPrototype": true,
-            "nameDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "string"
-            },
-            "lengthDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "number"
-            },
-            "prototypeDescriptor": null
-          }
-        },
-        "constructor": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": true,
-          "valueType": "function",
-          "function": {
-            "name": "RadioNodeList",
-            "length": 0,
-            "ownKeys": ["length", "name", "prototype"],
-            "ownKeyOrder": ["length", "name", "prototype"],
-            "constructible": true,
-            "source": "function RadioNodeList() { [native code] }",
-            "functionPrototype": false,
-            "nameDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "string"
-            },
-            "lengthDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "number"
-            },
-            "prototypeDescriptor": {
-              "configurable": false,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "object"
-            }
-          }
-        },
-        "Symbol(Symbol.toStringTag)": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": false,
-          "valueType": "string"
-        },
-        "Symbol(Symbol.iterator)": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": true,
-          "valueType": "function",
-          "function": {
-            "name": "values",
-            "length": 0,
-            "ownKeys": ["length", "name"],
-            "ownKeyOrder": ["length", "name"],
-            "constructible": false,
-            "source": "function values() { [native code] }",
-            "functionPrototype": true,
-            "nameDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "string"
-            },
-            "lengthDescriptor": {
-              "configurable": true,
-              "enumerable": false,
-              "kind": "data",
-              "writable": false,
-              "valueType": "number"
-            },
-            "prototypeDescriptor": null
-          }
-        }
-      },
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.RadioNodeList.prototypeOwnKeyOrder",
-      "chrome": ["value", "constructor", "Symbol(Symbol.toStringTag)", "Symbol(Symbol.iterator)"],
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.RadioNodeList.prototypeTag",
-      "chrome": "[object RadioNodeList]",
-      "native": {
-        "absent": true
-      }
-    },
-    {
-      "path": "constructors.RadioNodeList.shape",
-      "chrome": {
-        "name": "RadioNodeList",
-        "length": 0,
-        "ownKeys": ["length", "name", "prototype"],
-        "ownKeyOrder": ["length", "name", "prototype"],
-        "constructible": true,
-        "source": "function RadioNodeList() { [native code] }",
-        "functionPrototype": false,
-        "nameDescriptor": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": false,
-          "valueType": "string"
-        },
-        "lengthDescriptor": {
-          "configurable": true,
-          "enumerable": false,
-          "kind": "data",
-          "writable": false,
-          "valueType": "number"
-        },
-        "prototypeDescriptor": {
-          "configurable": false,
-          "enumerable": false,
-          "kind": "data",
-          "writable": false,
-          "valueType": "object"
-        }
-      },
-      "native": {
-        "absent": true
-      }
     },
     {
       "path": "constructors.Range.prototypeKeys",

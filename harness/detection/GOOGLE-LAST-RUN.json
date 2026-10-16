@@ -1,0 +1,313 @@
+{
+  "schemaVersion": 1,
+  "collectedAt": "2026-10-16T12:02:12.250Z",
+  "baseCommit": "93bcacd3a6358789443a3af95c2f4e5e8487671e",
+  "dirtyDiffHash": "71c365743f42cde2fd62b3cde27badee7ead7ba542b1bae8c0a444625bc79509",
+  "binaryHash": "7ab91fab1cee5b6510ee60a6652bfb5b74ae1798c22e118c4178359df70b0f19",
+  "build": {
+    "version": "0.5.4",
+    "features": {
+      "impersonate": true,
+      "trustAnchors": true,
+      "gpuMetal": true,
+      "coretext": true
+    },
+    "engine": {
+      "v8Version": "15.5.35.23-rusty",
+      "stableWindowProxy": true,
+      "transportChromeMajor": 155,
+      "transportBaseChromeMajor": 154,
+      "reportedChromeMajor": 155,
+      "reportedFullVersion": "155.0.8059.80"
+    }
+  },
+  "harnessHashes": {
+    "run.mjs": "5222da3de26cb5faef712bcbefa477ac539012a5dc2adb7815cf9d49a350c36c",
+    "chrome-trace.mjs": "0b274768d9505cfcbaee162c0307f4cf85740efd0806154f3c1d7e11ad5d712a",
+    "chrome-cdp-trace.mjs": "ae27ad725fe0fa3d03e9311813895bc38eae384c66bb0b49c0a121f702177c34",
+    "cdp-connection.mjs": "7b9f522db23484f79575ee46cf320277a4a516de53becba1eef5730d5a5549a0",
+    "interface-trace.js": "4f6fe13e866d8f6f26d84fb8c3cf9a426b62b78be283e91bfb705517f9e1f88f",
+    "capabilities.js": "787246288936c57d61b5ad4920ed69184891d38e79908cdcf4ca45b831092b84",
+    "api-shape.js": "bf6834734647ccb368d5bc1f372b875ab5939fa2d89feaa3b348b7e724a4fdae",
+    "compare.mjs": "b07cda7cf11beb6f9ce6a337d6ddfbf4f38797237c2b471df35f12b72200d2d7",
+    "protocol-headers.mjs": "353fcfb1ee19cbb16f4dc62d7e2e86a42156b57d063ec49c66b3148853c9b1c5",
+    "checkout-provenance.mjs": "48ba6b48298454542d134055d4560c7d380962f27d7d98695ccdf8e11373a6a2"
+  },
+  "rawArtifactDirectory": ".native-builds/recovery/root/google-modern-rules-20261016",
+  "repeats": 1,
+  "chromeCookieReuse": false,
+  "synthesizedFormFallback": false,
+  "verdict": "Native baseline completes genuine form submission, receives search200 and follows page-script retry to sorry429; reliable native SERP not established. Instrumented native does not navigate and remains hydration-incomplete.",
+  "runs": {
+    "native-baseline": {
+      "collectorComplete": true,
+      "collectorErrorCount": 0,
+      "navigationSource": "native-form",
+      "formFallbackUsed": false,
+      "traceSha256": "e2af9de2722ee5875432326b7f741bcfaa080b04507585947955c1dd4afa050f",
+      "pages": [
+        {
+          "phase": "home",
+          "path": "/",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "loading",
+          "hydrationBudgetExceeded": true
+        },
+        {
+          "phase": "dismiss",
+          "path": "/",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "loading",
+          "hydrationBudgetExceeded": true
+        },
+        {
+          "phase": "interaction",
+          "path": "/search",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 1,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "native-final",
+          "path": "/search",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 1,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "navigation-0",
+          "path": "/sorry/index",
+          "status": 429,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": false
+        }
+      ]
+    },
+    "chrome-baseline": {
+      "collectorComplete": null,
+      "collectorErrorCount": 1,
+      "navigationSource": null,
+      "formFallbackUsed": false,
+      "traceSha256": "80ae5327e4b246a15f3e03eb21ad7e479e02c8c08850d2f1257bb0f6be5d55ca",
+      "pages": [
+        {
+          "phase": "home",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "dismiss",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-0",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-1",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-2",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-3",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-4",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-5",
+          "path": "/search",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "search",
+          "path": "/search",
+          "status": null,
+          "results": 7,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        }
+      ]
+    },
+    "native-interfaces": {
+      "collectorComplete": true,
+      "collectorErrorCount": 0,
+      "navigationSource": "none",
+      "formFallbackUsed": false,
+      "traceSha256": "b747102be4f50730c070537f36e32c629c5161aa305d105538172cca4160d4e5",
+      "pages": [
+        {
+          "phase": "home",
+          "path": "/",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "loading",
+          "hydrationBudgetExceeded": true
+        },
+        {
+          "phase": "dismiss",
+          "path": "/",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "loading",
+          "hydrationBudgetExceeded": true
+        },
+        {
+          "phase": "interaction",
+          "path": "/",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "loading",
+          "hydrationBudgetExceeded": true
+        }
+      ]
+    },
+    "chrome-interfaces": {
+      "collectorComplete": null,
+      "collectorErrorCount": 1,
+      "navigationSource": null,
+      "formFallbackUsed": false,
+      "traceSha256": "129a77511253e18899420101629d1903b0ce9dc78e07a35bb4fd1e959ebec0ad",
+      "pages": [
+        {
+          "phase": "home",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "dismiss",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-0",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-1",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-2",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-3",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-4",
+          "path": "/",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "step-5",
+          "path": "/search",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        },
+        {
+          "phase": "search",
+          "path": "/sorry/index",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": false
+        }
+      ]
+    }
+  }
+}

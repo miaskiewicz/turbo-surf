@@ -31,6 +31,7 @@ deno_core::extension!(
     turbo_geometry,
     ops = [
         op_geometry_object,
+        crate::live_layout_backend::op_live_media_match,
         crate::live_layout_supports::op_native_css_supports,
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,

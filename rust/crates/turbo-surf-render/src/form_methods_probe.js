@@ -9,6 +9,16 @@
       return { error: describe(error) };
     }
   };
+  const validityDescriptor = Object.getOwnPropertyDescriptor(ValidityState, "prototype");
+  const validity = document.createElement("input").validity;
+  const validGetter = Object.getOwnPropertyDescriptor(ValidityState.prototype, "valid").get;
+  result.validityState = {
+    prototypeDescriptor: [validityDescriptor.writable, validityDescriptor.enumerable, validityDescriptor.configurable],
+    brand: [validity instanceof ValidityState, Object.getPrototypeOf(validity) === ValidityState.prototype, Object.prototype.toString.call(validity)],
+    valid: attempt(() => validGetter.call(validity)),
+    illegalReceiver: attempt(() => validGetter.call({})),
+    illegalConstructor: attempt(() => new ValidityState()),
+  };
   function fixture(content = '<input id="field"><button id="send">Send</button>') {
     const host = document.createElement("div");
     host.innerHTML = "<form>" + content + "</form>";

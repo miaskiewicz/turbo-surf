@@ -135,6 +135,15 @@ mod tests {
         let scope = &mut v8::ContextScope::new(scope, context);
         let cases_value: serde_json::Value = serde_json::from_slice(cases).unwrap();
         install_independent_html(scope, cases_value[0]["html"].as_str().unwrap());
+        if let Some(base) = cases_value[0]["documentBase"].as_str() {
+            let id = scope
+                .get_current_context()
+                .get_slot::<DomContextId>()
+                .unwrap()
+                .0;
+            let _dom = DomScope::enter(id);
+            event_handlers::install(scope, None, base);
+        }
         if adapter {
             form_data_adapter(scope);
         }
@@ -168,6 +177,15 @@ mod tests {
         );
         assert_eq!(actual, control["result"][0]["result"]);
         reset();
+    }
+    #[test]
+    fn native_form_reflection_matches_independent_chrome() {
+        assert_control(
+            include_bytes!("form_reflection_cases.json"),
+            include_str!("form_reflection_probe.js"),
+            include_str!("form_reflection_chrome155.json"),
+            false,
+        );
     }
     #[test]
     fn native_form_connectivity_matches_independent_chrome() {

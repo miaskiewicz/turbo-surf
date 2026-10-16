@@ -216,8 +216,9 @@ node harness/detection/document-parser.mjs --run --binary /path/to/detection_tra
 `--chrome-only` records an independent browser reference. Each run freezes the native
 executable and records its build information, source hash, traces, and a field comparison.
 HTML parsing is implemented; XML and custom sanitizer configurations throw explicit
-`NotSupportedError`s. Imports of template content and unsupported node kinds also
-fail explicitly. This fixture does not certify arbitrary HTML sanitization or XML support.
+`NotSupportedError`s. Native template-content imports now preserve ownership;
+unsupported imported node kinds still fail explicitly. This fixture does not
+certify arbitrary HTML sanitization or XML support.
 
 Native follows up to five JS navigation hops and ten HTTP redirects per fetch.
 Where Enter does not perform browser default submission, it records a GET form
@@ -619,6 +620,18 @@ category outside completed PR26 scope is tracked in
 descriptor paths for its frozen executable; rerun `api-shape.mjs` after integration
 before using its historical counts as current results.
 
+After the paired capture, regenerate the complete durable backlog, including global
+ownership, callable descriptors and raw property order:
+
+```bash
+node harness/detection/api-inventory.mjs /tmp/turbo-api-shape/comparison.json harness/detection/API-INVENTORY.json
+```
+
+The expanded audit also measures forms, collections, Blob/File, FormData,
+CustomStateSet and ValidityState. Absent interfaces remain separate from missing
+members on measured interfaces. [HOST-MEDIA.md](./HOST-MEDIA.md) describes the
+independent OS-preference/media-query control and its platform-specific bounds.
+
 The reusable authored GC collector runs a localhost probe in a fresh normal
 Chrome profile, invokes actual CDP heap collection between jobs, then compares
 retained objects before and after releasing guest roots:
@@ -646,3 +659,10 @@ disabling synthesized GET serialization. Use it for a native search verdict when
 the site may choose either legitimate navigation path. The stronger
 `--require-native-form-navigation` is useful when testing specifically the native
 form default action. Neither option imports Chrome cookies.
+
+Interface rows include the first synchronous call's `durationMs`, cumulative
+`totalDurationMs` and `maxDurationMs`; retained samples include their own duration.
+The captured performance clock brackets the original function/getter/setter,
+including throws, before argument/stack recording. Nested calls are inclusive, so
+aggregate durations may overlap. Promise results retain identity and are never
+awaited; these measurements cover synchronous invocation only.

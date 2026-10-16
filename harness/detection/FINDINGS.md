@@ -20,10 +20,11 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
 2. **Layout / Range / caret:**22 geometry,8 shadow/public-CSS and3 resource-admission
    controls pass. Actual shaped UTF-16 text, rotation, composed slots and per-session
    caches are integrated. Unused font/keyframe definitions are admitted only when
-   native matching proves them unused. The new live Google run found a real input
-   failure: missing ForcedColors media capability. That repair is in flight.
+   native matching proves them unused. The first live run found a missing
+   ForcedColors host capability. Real macOS preferences/input-driver media now
+   match31 Chrome queries and actual CSS; the next run stops on modern CSS rule0.
    Decorated/mixed-font inline boxes and broader resource/layout behavior remain open.
-3. **DOM / forms:** canonical turbo-test34ca9a8 is officially vendored. All six DOM
+3. **DOM / forms:** canonical turbo-test0ec37f5 is officially vendored. All six DOM
    consumers use public immutable0.5.7 candidatefb60e6f (registry latest0.5.6).
    Native AbstractRange/NodeRange/StaticRange, ElementInternals/CustomStateSet,
    checked/defaultChecked/reset/clone and genuine FormData events are integrated.
@@ -42,33 +43,36 @@ Complete Chrome parity and reliable native Google SERP acceptance remain unverif
    ownership fixes remove a real parent-to-child realm retention edge; existing
    Fetch/form GC regressions now pass. Genuine multipart FormData BodyInit and
    broader storage-access/Fetch behavior remain explicit unsupported work.
-7. **Validation:** the final integrated actual155 cohort passes335 tests (library299,
-   production36), with no failures/ignores. Strict all-target native workspace checks
-   pass, as do66 offline harness tests and2 actual full-feature driver localhost
-   regressions. Interrupted iframe bootstrap returns errors instead of aborting;
-   all9 host-input tests pass unchanged in budget. Full workspace/default/native
-   test coverage, rebuilt addon/shim/E2E and release/distribution gates remain pending.
-8. **API inventory:** the fresh Chrome155.80/native155.23 pair now reports65 missing
-   own members across the original four interfaces (Document29, Element30,
-   HTMLElement4, Canvas2),133 across expanded interfaces and304 total difference
-   paths. All measured interfaces are present. AbstractRange, NodeRange, StaticRange
-   and ElementInternals have zero measured member/descriptor differences; this
-   certifies the captured shapes, not universal behavior.
-   [API-INVENTORY.json](./API-INVENTORY.json) retains exact names and source/binary
-   hashes. Form reflection and input/button descriptor repairs are in flight.
-9. **Housekeeping:** base integration66dab51 is pushed to PR26; the subsequent
-   tested forms/internals/runtime batch needs its follow-up commit/push and CI.
-   Changelog/docs and [PARITY-GAPS.md](./PARITY-GAPS.md) reflect current bounded scope.
-   [Issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) tracks residual
-   work beyond completed PR26 scope. No Surf release tag is created.
-10. **Live Google:** the fresh all-feature, fresh-cookie matrix ran twice with
-    synthesized form fallback disabled. Both Chrome baseline passes obtained9
-    result markers; both instrumented Chrome passes reached /sorry and had capture
-    errors. All four native passes failed during input geometry on ForcedColors,
-    before search submission, with20s hydration-budget diagnostics. This is a
-    runtime failure, not evidence of a completed native BotGuard rejection/clearance.
-    Repair the media capability, rebuild and repeat. Native successful SERP remains
-    unverified; Chrome cookies are never imported.
+7. **Validation:** the integrated actual155 affected cohort passes416 tests:
+   renderer library308, production geometry/media36 and native MCP72 (default71).
+   The earlier337-test renderer/API/forms/media rerun also passed after Blob and
+   ValidityState repairs. The68 offline harness tests pass. Strict all-target actual155 workspace checks pass. Full final
+   workspace tests/default/native/addon/shim/E2E and distribution gates remain pending.
+8. **API inventory:** the fresh69-interface Chrome155.80/native155.23 capture
+   reports65 missing own members in the original four and134 in the expanded
+   measured set, with349 difference paths. Two collection interfaces are absent.
+   Same-scope paths fell from359 after descriptor/order repairs; growing the earlier
+   scope from58 interfaces prevents direct comparison with its304-path snapshot.
+   Existing Blob, ValidityState, form, input and button descriptor controls now match.
+   Missing members and broader behavior remain open. The reproducible
+   [API-INVENTORY.json](./API-INVENTORY.json) retains every observed path and hashes.
+9. **Housekeeping:** integrations66dab51 and93bcacd are pushed. Canonical0ec37f5
+   and authored modern-CSS/MCP/media repairs are integrated and tested; their Surf
+   follow-up commit/push and final CI remain pending. Every remaining category has
+   durable coverage in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28).
+   No Surf release tag is created.
+10. **Live Google:** after host-media and typed-CSS repairs, the new all-feature
+    baseline completes genuine native form submission, obtains /search200 and
+    follows the page-script retry to /sorry429. It has zero collector errors and no
+    synthesized fallback. Native home/consent still exhaust the20s hydration budget;
+    instrumented native remains on home with no submission. Chrome baseline has7
+    result markers but one collector error; instrumented Chrome reaches /sorry with
+    one error. This single matrix does not establish reliable acceptance.
+    [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json) saves sanitized paths/statuses,
+    exact binary/harness/trace hashes and readiness diagnostics. Raw private artifacts
+    retain payloads; Chrome cookies are never imported. The prior input runtime
+    failures are cleared. Active investigation covers incomplete consent/hydration,
+    internal computed-style work and the observed navigation activation mismatch.
 
 ## Isolated CSP navigation checkpoint — 2026-10-14
 

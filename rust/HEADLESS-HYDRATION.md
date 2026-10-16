@@ -176,8 +176,9 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   childNodes are live NodeLists, while querySelectorAll returns static NodeLists.
   ParentNode.children retains stable collection identity. Native property handlers
   implement indexed/named reflection and supported read-only entries; a private shared
-  V8 WeakMap gives borrowed getters their actual cross-realm records without accepting
-  fabricated dispatchers. Tree ownership/version stamps refresh query results after
+  V8 Private record gives borrowed getters their actual cross-realm records without accepting
+  fabricated dispatchers or retaining creation contexts on the host. Tree ownership/version
+  stamps refresh query results after
   mutations and adoption. DocumentType metadata and compatMode use actual native parser state;
   designMode, title, direction and legacy colors store or reflect real supported state.
   Document event-handler properties retain native listener ordering and cancellation.
@@ -291,8 +292,10 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 The reusable [detection harness](../harness/detection/README.md) records baseline and
 instrumented Chrome/native runs separately. The corrected CSSOM sentinel, iframe
 intrinsics and shared GPU probe now match in the measured tests, but the fresh native
-Google baseline still reaches `/sorry` with HTTP 429. These checks do not establish
-complete Chrome parity or identify Google's decisive rejection signal.
+Google runs remain unsuccessful. Earlier baselines reached `/sorry` with HTTP 429;
+the latest run, after the ForcedColors media fix, fails on CSS rule type0 before
+form submission. These checks do not establish complete Chrome parity or identify
+Google's decisive rejection signal.
 
 ## 3. Driving an authenticated SPA (live sessions)
 
@@ -1396,20 +1399,57 @@ The current candidate includes native AbstractRange/NodeRange/StaticRange,
 real Readable/Writable/TransformStream transfers through private ports, composed
 shadow geometry, original UTF-16 Range/caret controls, Trusted Types/native155
 code-generation admission, parser/HTTP reporting, response/upload streams and
-profile-owned cache/storage effects. Top-document text GET/POST form submissions
-use the actual network profile and replace the response document only after the
-prior isolate activation exits. Native155 tests cover real response scripts/status,
-redirect cookies, fragments, cancellation/CSP and retained form/Range GC.
+profile-owned cache/storage effects. The committed canonical binding is turbo-test
+`0ec37f5`; generated consumer files are copied through the normal vendor script.
+
+Genuine ElementInternals and CustomStateSet now provide native custom-element
+admission, form association/validation, live labels, association/disabled/reset
+callbacks, default ARIA, closed-shadow access and native `:state()` matching.
+Cloning/importing starts fresh state; adoption migrates exact UTF-16 membership.
+Private guest-owned records preserve borrowed cross-realm brands and collect
+retired realms after their last retained internals, state set or iterator is released.
+Both live and exhausted state iterators have independent Chrome lifetime controls.
+
+Native SubmitEvent, FormDataEvent, validation and guarded entry-list construction
+are integrated with the runtime's private File/FormData records. Constructor and
+submission events use distinct genuine FormData wrappers sharing the actual mutable
+entries; listener edits affect submitted data. Metadata is captured before the event,
+and form-action CSP admission follows it. Reentrant construction is guarded, canceled
+or invalid submissions produce no wire request, and disconnected forms are checked
+before validation and again after submit listeners. Top-document text GET/POST
+submissions use the actual network profile and replace the response document only
+after the prior isolate activation exits. Native tests cover real response
+scripts/status, redirect cookies, fragments, cancellation/CSP and retained form/Range GC.
+Multipart FormData BodyInit and broader target routing remain unsupported.
+
+Form reflection now includes action/method/enctype/encoding/target/name/acceptCharset/
+autocomplete/rel and a live branded relList. Action URL resolution uses the native
+host-installed document URL; CSP approval of reflected base URLs remains open, and
+wider malformed-URL serialization is unverified. Input/Button prototype placement, control descriptors
+and actual text-selection/replacement behavior have measured Chrome controls.
+ValidityState's genuine constructor prototype is read-only. Live form controls
+collections/RadioNodeList and form elements/length/iterator remain open.
+
+Host media evaluation now supplies the measured forced-colors, contrast, color-scheme,
+reduced-motion/transparency, pointer and hover capabilities. The last recorded combined
+native cohort passed 371 tests before the subsequent Blob/ValidityState descriptor
+corrections. The subsequent actual155 renderer/API/forms/media337 cohort passes;
+full final consumer gates remain pending.
+Standalone canonical validation at `72da6ea` passes 237 native155 and 236 default-engine
+contracts plus both all-target strict Clippy gates. These are separate validation scopes.
 
 The public layout dependency is a Git-pinned0.3.8 candidate from producer PR23;
 registry0.3.7 is published. The stock production engine remains V8150, while the
 experimental155 configuration uses actual15.5.35.23 and matching patched native
 callbacks. A newer JS/HTTP profile does not establish native engine alignment.
 
-Earlier dated checkpoints above preserve their historical scope. Current open
-work, including ElementInternals/FormData lifecycle integration, decorated inline
-production, broader security/Fetch/resource behavior, final combined gates and a
-fresh native Google run, is maintained in
+The latest fresh Google baseline passes both former host-media/CSS runtime failures,
+completes a genuine form submission and receives search200, then follows a page-script
+retry to sorry429. Homepage/consent hydration still exceeds20s; instrumented native
+does not submit. Successful native SERP loading and transport/GPU parity remain
+unverified. Earlier dated checkpoints above preserve
+their historical scope. Broader DOM/security/Fetch/resource behavior and final
+combined/live validation remain tracked in
 [PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md) and
 [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28). Deferred audio
 remains in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).

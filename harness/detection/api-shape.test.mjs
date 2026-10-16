@@ -73,6 +73,11 @@ test("collector tests construction without invoking the constructor or network A
   assert.equal(data.networkCalls, 0);
   assert.equal(data.report.constructors.URL.shape.constructible, true);
   assert.equal(data.report.methods["canvas.getContext"].shape.constructible, false);
+  assert.deepEqual(data.report.constructors.Element.prototypeOwnKeyOrder, [
+    "constructor",
+    "hostile",
+    "getAttribute",
+  ]);
   assert.equal(data.report.constructors.Element.prototypeMembers.hostile.kind, "accessor");
   assert.equal(data.report.constructors.Element.prototypeMembers.getAttribute.function.length, 1);
   assert.deepEqual(data.report.methods["document.querySelector"].invalidReceiver, {

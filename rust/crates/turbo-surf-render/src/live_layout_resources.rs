@@ -10,6 +10,9 @@ pub(crate) enum Definition {
     Font(String),
     Animation(String),
     Inert,
+    Container(String),
+    RegisteredColor(String),
+    ViewTransition,
 }
 
 pub(crate) fn definition(source: &str) -> Result<Definition, String> {
@@ -38,6 +41,33 @@ pub(crate) fn definition(source: &str) -> Result<Definition, String> {
             KeyframesName::Ident(name) => name.0.to_string(),
             KeyframesName::Custom(name) => name.to_string(),
         })),
+        [CssRule::Container(rule)] => rule
+            .name
+            .as_ref()
+            .map(|name| Definition::Container(name.0 .0.to_string()))
+            .ok_or_else(|| "native layout unnamed container queries are unsupported".into()),
+        [CssRule::Property(rule)]
+            if rule
+                .syntax
+                .to_css_string(PrinterOptions::default())
+                .is_ok_and(|syntax| syntax == "\"<color>\"")
+                && matches!(
+                    rule.initial_value,
+                    Some(lightningcss::values::syntax::ParsedComponent::Color(_))
+                ) =>
+        {
+            Ok(Definition::RegisteredColor(rule.name.0.to_string()))
+        }
+        [CssRule::ViewTransition(rule)]
+            if rule.properties.iter().all(|property| {
+                matches!(
+                    property,
+                    lightningcss::rules::view_transition::ViewTransitionProperty::Navigation(_)
+                )
+            }) =>
+        {
+            Ok(Definition::ViewTransition)
+        }
         _ => Err("native layout resource definition has an unexpected rule kind".into()),
     }
 }
@@ -78,7 +108,10 @@ impl Definitions {
                 Definition::Animation(name) => {
                     result.animations.insert(name.clone());
                 }
-                Definition::Inert => {}
+                Definition::Inert
+                | Definition::Container(_)
+                | Definition::RegisteredColor(_)
+                | Definition::ViewTransition => {}
             }
         }
         result

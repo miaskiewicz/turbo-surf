@@ -75,6 +75,7 @@ fn valid_rule(source: &str) -> bool {
 struct CssParser {
     keyframes: bool,
     font_face: bool,
+    raw_descriptors: bool,
 }
 
 fn consume(input: &mut Parser<'_, '_>) -> String {
@@ -172,6 +173,13 @@ impl<'i> DeclarationParser<'i> for CssParser {
         _: &ParserState,
     ) -> Result<String, ParseError<'i, ()>> {
         let start = input.position();
+        if self.raw_descriptors {
+            return Ok(format!(
+                "{}: {};",
+                name.to_ascii_lowercase(),
+                consume(input)
+            ));
+        }
         if self.font_face {
             let value = consume(input);
             return font_descriptor(&name.to_ascii_lowercase(), &value)
@@ -204,6 +212,52 @@ impl<'i> DeclarationParser<'i> for CssParser {
     }
 }
 
+// These rules require descriptors to validate the rule itself. Testing an empty
+// shell loses valid @property rules, while ordinary CSS properties lose navigation.
+fn typed_descriptor_rule(name: &str, prelude: &str, body: &str) -> Option<String> {
+    use lightningcss::rules::view_transition::ViewTransitionProperty;
+    let source = format!("@{name} {prelude} {{ {body} }}");
+    let sheet = StyleSheet::parse(&source, ParserOptions::default()).ok()?;
+    match sheet.rules.0.first()? {
+        CssRule::Property(rule) => {
+            let mut source = ParserInput::new(body);
+            let mut input = Parser::new(&mut source);
+            let mut parser = CssParser {
+                raw_descriptors: true,
+                ..Default::default()
+            };
+            let descriptors: Vec<_> = RuleBodyParser::new(&mut input, &mut parser)
+                .filter_map(Result::ok)
+                .collect();
+            let initial = descriptors
+                .iter()
+                .rev()
+                .find(|value| value.starts_with("initial-value:"));
+            let syntax = rule.syntax.to_css_string(PrinterOptions::default()).ok()?;
+            Some(format!(
+                "@property {prelude} {{ syntax: {syntax}; inherits: {};{} }}",
+                rule.inherits,
+                initial.map_or(String::new(), |value| format!(" {value}"))
+            ))
+        }
+        CssRule::ViewTransition(rule) => {
+            let descriptors: Vec<_> = rule
+                .properties
+                .iter()
+                .filter(|value| !matches!(value, ViewTransitionProperty::Custom(_)))
+                .filter_map(|value| {
+                    value
+                        .to_css_string(PrinterOptions::default())
+                        .ok()
+                        .map(|value| format!("{value};"))
+                })
+                .collect();
+            Some(format!("@view-transition {{ {} }}", descriptors.join(" ")))
+        }
+        _ => None,
+    }
+}
+
 impl<'i> AtRuleParser<'i> for CssParser {
     type Prelude = (String, String);
     type AtRule = String;
@@ -233,6 +287,11 @@ impl<'i> AtRuleParser<'i> for CssParser {
         _: &ParserState,
         input: &mut Parser<'i, 't>,
     ) -> Result<String, ParseError<'i, ()>> {
+        if matches!(name.as_str(), "property" | "view-transition") {
+            let body = consume(input);
+            return typed_descriptor_rule(&name, &prelude, &body)
+                .ok_or_else(|| input.new_custom_error(()));
+        }
         let test = format!("@{name} {prelude} {{}}");
         if !valid_rule(&test) {
             return Err(input.new_custom_error(()));
@@ -358,6 +417,20 @@ mod tests {
         assert!(parse_one("a { width: nonsense; color: blue }")
             .unwrap()
             .contains("color: blue"));
+    }
+
+    #[test]
+    fn full_typed_descriptors_validate_before_empty_shells() {
+        let property = parse_one(
+            r#"@property --paint {syntax:"<color>";initial-value:transparent;inherits:false}"#,
+        )
+        .unwrap();
+        assert!(property.contains("initial-value: transparent;"));
+        assert!(property.contains("inherits: false;"));
+        assert!(parse_one(r#"@property --paint {syntax:"<color>";inherits:false}"#).is_none());
+        let transition = parse_one("@view-transition {navigation:auto;width:20px}").unwrap();
+        assert!(transition.contains("navigation: auto;"));
+        assert!(!transition.contains("width"));
     }
 
     #[test]

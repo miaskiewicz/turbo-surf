@@ -160,6 +160,7 @@
   }
   const ValidityState=native(function(){throw new ErrorType('Illegal constructor');},'ValidityState',0,true);
   define(ValidityState.prototype,Symbol.toStringTag,{value:'ValidityState',configurable:true});
+  define(ValidityState,'prototype',{writable:false});
   for (const key of ['valueMissing','typeMismatch','patternMismatch','tooLong','tooShort','rangeUnderflow','rangeOverflow','stepMismatch','badInput','customError','valid']) {
     define(ValidityState.prototype,key,{get:native(function(){const element=validityGet(this);if(!element)throw new ErrorType('Illegal invocation');return flags(element)[key];},'get '+key,0),enumerable:true,configurable:true});
   }
@@ -283,6 +284,20 @@
     for(const methodName of ['checkValidity','reportValidity'])method(proto,methodName,function(){checkInterface(this);return validate(this);},0);
   }
   const formPrototype=HTMLFormElement.prototype;
+  const reflectedSetAttribute=Element.prototype.setAttribute;
+  const wellFormed=String.prototype.toWellFormed;
+  for(const [property,attributeName,choices,fallback] of [
+    ['action','action',null,null],['method','method',['get','post','dialog'],'get'],
+    ['enctype','enctype',['application/x-www-form-urlencoded','multipart/form-data','text/plain'],'application/x-www-form-urlencoded'],
+    ['encoding','enctype',['application/x-www-form-urlencoded','multipart/form-data','text/plain'],'application/x-www-form-urlencoded'],
+    ['target','target',null,''],['name','name',null,''],['acceptCharset','accept-charset',null,''],
+    ['autocomplete','autocomplete',['on','off'],'on'],['rel','rel',null,'']]) {
+    define(formPrototype,property,{
+      get:native(function(){checkForm(this);if(property==='action')return bridge('action-url',this);const value=attr(this,attributeName)||'';if(!choices)return value;const normalized=lower(value);return choices.indexOf(normalized)>=0?normalized:fallback;},'get '+property,0),
+      set:native(function(value){checkForm(this);if(typeof value==='symbol')throw new ErrorType('Cannot convert a Symbol to a string');value=string(value);if(property==='action')value=apply(wellFormed,value,[]);apply(reflectedSetAttribute,this,[attributeName,value]);},'set '+property,1),enumerable:true,configurable:true
+    });
+  }
+
   for(const methodName of ['checkValidity','reportValidity'])method(formPrototype,methodName,function(){checkForm(this);return validate(this);},0);
   method(formPrototype,'reset',function(){checkForm(this);const event=new EventClass('reset',{bubbles:true,cancelable:true});if(!bridge('emit',this,event))return;const controls=formControls(this);for(let i=0;i<controls.length;i++){const record=associatedGet(controls[i]);if(record){if(record.reset)record.reset();}else resetControl(controls[i]);}},0);
   method(formPrototype,'requestSubmit',function(submitter){return request(this,submitter);},0);

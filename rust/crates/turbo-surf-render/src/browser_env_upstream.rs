@@ -4861,6 +4861,42 @@ fn form_checked_native(
     );
 }
 
+// Chromium retains a canonical serialization even when a special URL is invalid.
+fn invalid_form_action(raw: &str) -> String {
+    let Some((scheme, rest)) = raw.split_once("://") else {
+        return raw.to_owned();
+    };
+    if !matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "ftp" | "ws" | "wss"
+    ) {
+        return raw.to_owned();
+    }
+    if rest.is_empty() {
+        return format!("{}:", scheme.to_ascii_lowercase());
+    }
+    let split = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, suffix) = rest.split_at(split);
+    let bytes = authority.as_bytes();
+    let mut result = format!("{}://", scheme.to_ascii_lowercase());
+    for (index, ch) in authority.char_indices() {
+        if ch == ' ' {
+            result.push_str("%20");
+        } else if ch == '%'
+            && !(bytes.get(index + 1).is_some_and(u8::is_ascii_hexdigit)
+                && bytes.get(index + 2).is_some_and(u8::is_ascii_hexdigit))
+        {
+            result.push_str("%25");
+        } else {
+            result.push(ch);
+        }
+    }
+    if !suffix.starts_with('/') {
+        result.push('/');
+    }
+    result.push_str(suffix);
+    result
+}
 fn form_controls_native(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -4963,6 +4999,26 @@ fn form_controls_native(
             if let Some(value) = callback.call(scope, receiver.into(), &values) {
                 rv.set(value);
             }
+        }
+        "action-url" => {
+            let document_url = event_handlers::document_url();
+            let raw = with_tree(|tree| {
+                tree.get_attribute(handle, "action")
+                    .map(|value| value.to_string())
+            })
+            .flatten()
+            .unwrap_or_default();
+            let value = if raw.is_empty() {
+                document_url
+            } else {
+                let base = form_submission_base_href(scope, node)
+                    .and_then(|base| url::Url::parse(&document_url).ok()?.join(&base).ok())
+                    .or_else(|| url::Url::parse(&document_url).ok());
+                base.and_then(|base| base.join(&raw).ok())
+                    .map(|url| url.to_string())
+                    .unwrap_or_else(|| invalid_form_action(&raw))
+            };
+            rv.set(v8::String::new(scope, &value).unwrap().into());
         }
         "absolute-url" => {
             let value = args.get(2).to_rust_string_lossy(scope);
@@ -7339,6 +7395,47 @@ mod tests {
         assert_eq!(
             result,
             r#"[[["NotSupportedError",9,true],["InvalidCharacterError",5,true],["InvalidCharacterError",5,true],["IndexSizeError",1,true]],null,true,"1.0",null]"#
+        );
+        reset();
+    }
+
+    #[test]
+    fn native_control_prototypes_match_independent_chrome() {
+        init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope,isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_independent_html(scope, "<!doctype html><body>");
+        v8::tc_scope!(let scope,scope);
+        let source = v8::String::new(scope, include_str!("control_prototypes_probe.js")).unwrap();
+        let script = v8::Script::compile(scope, source, None).unwrap();
+        let result = script.run(scope);
+        assert!(
+            result.is_some(),
+            "{}",
+            scope
+                .exception()
+                .map(|value| value.to_rust_string_lossy(scope))
+                .unwrap_or_default()
+        );
+        let actual = v8::json::stringify(scope, result.unwrap())
+            .unwrap()
+            .to_rust_string_lossy(scope);
+        let control: serde_json::Value =
+            serde_json::from_str(include_str!("control_prototypes_chrome155.json")).unwrap();
+        use sha2::{Digest, Sha256};
+        assert_eq!(
+            control["probeSha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!("control_prototypes_probe.js"))
+            )
+        );
+        assert_eq!(control["errors"], serde_json::json!([]));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+            control["result"]
         );
         reset();
     }

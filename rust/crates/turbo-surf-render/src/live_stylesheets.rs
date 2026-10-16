@@ -124,6 +124,15 @@ fn append_rules(
                 scoped: rule.scoped.clone(),
                 resource: None,
             }),
+            0 => result.push(ActiveRule {
+                text: rule.css_text.clone(),
+                scoped: None,
+                resource: Some(
+                    crate::live_layout_resources::definition(&rule.css_text).map_err(|error| {
+                        format!("native live layout does not support CSS rule type 0: {error}")
+                    })?,
+                ),
+            }),
             5 | 7 => result.push(ActiveRule {
                 text: rule.css_text.clone(),
                 scoped: None,

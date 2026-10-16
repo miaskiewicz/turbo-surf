@@ -6491,6 +6491,10 @@ fn install_environment<'s>(
         .unwrap_or_else(|| "Native environment initialization failed".into()))
 }
 
+pub(crate) fn native_pointer_media_capability(context: v8::Local<v8::Context>) -> bool {
+    context.get_slot::<HostInputDriver>().is_some()
+}
+
 struct HostInputDriver {
     input: v8::Weak<v8::Function>,
     cancel: v8::Weak<v8::Function>,
@@ -8089,6 +8093,7 @@ globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
     return ok;
   };
   const __evalMedia = (q) => {
+    if (/(?:forced-colors|prefers-contrast|prefers-color-scheme|prefers-reduced-motion|prefers-reduced-transparency|(?:any-)?pointer|(?:any-)?hover)/i.test(String(q || ""))) return ops.op_live_media_match(String(q || ""));
     const query = String(q || "").toLowerCase().trim();
     if (!query || query === "all") return true;
     return query.split(",").some((c) => __mqClause(c.trim()));
@@ -8174,12 +8179,14 @@ if (typeof globalThis.Blob === "undefined") {
     }
     get size(){return read(this).bytes.length;}
     get type(){return read(this).type;}
-    async text(){return new TextDecoder().decode(read(this).bytes);}
     async arrayBuffer(){return read(this).bytes.slice().buffer;}
-    async bytes(){return read(this).bytes.slice();}
     slice(start=0,end=undefined,type=""){const value=read(this),size=value.bytes.length;start=Number(start)||0;end=end===undefined?size:Number(end)||0;start=start<0?Math.max(size+start,0):Math.min(start,size);end=end<0?Math.max(size+end,0):Math.min(end,size);return new Blob([value.bytes.slice(start,Math.max(start,end))],{type});}
     stream(){const bytes=read(this).bytes.slice();return new ReadableStream({start(controller){controller.enqueue(bytes);controller.close();}});}
+    async text(){return new TextDecoder().decode(read(this).bytes);}
+    async bytes(){return read(this).bytes.slice();}
   };
+  for(const name of ["size","type","arrayBuffer","slice","stream","text","bytes"])Object.defineProperty(Blob.prototype,name,{...Object.getOwnPropertyDescriptor(Blob.prototype,name),enumerable:true});
+  const constructor=Object.getOwnPropertyDescriptor(Blob.prototype,"constructor");delete Blob.prototype.constructor;Object.defineProperty(Blob.prototype,"constructor",constructor);
   Object.defineProperty(Blob.prototype,Symbol.toStringTag,{value:"Blob",configurable:true});
 }
 const __fileStates=__interfaceMap("File");
@@ -14416,6 +14423,16 @@ impl PageSession {
             state.borrow::<Base>().0.clone(),
             state.borrow::<crate::DocumentResponseMetadata>().clone(),
         )
+    }
+
+    /// Snapshot the host-owned headers of the installed response after navigation.
+    pub fn response_headers_snapshot(&self) -> Vec<(String, String)> {
+        self.rt
+            .op_state()
+            .borrow()
+            .borrow::<ResponseHeaders>()
+            .0
+            .clone()
     }
 
     /// Serialize the CURRENT live DOM to HTML (no reset — the page stays alive).

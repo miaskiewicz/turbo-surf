@@ -24,9 +24,10 @@ residual work beyond this PR, with audio separately deferred in
 - Expand the API audit with exact missing/extra members, callable shapes,
   descriptors, inheritance, collector/executable hashes and separately unmeasured
   interfaces. The latest2026-10-16 snapshot reports65 missing own members across the
-  original four interfaces and133 across expanded measured interfaces. All measured
-  interfaces are present; AbstractRange, NodeRange, StaticRange and ElementInternals
-  have zero own-member/descriptor differences. Broader behavior remains bounded.
+  original four interfaces and134 across an expanded69-interface scope. Two native
+  collection interfaces remain absent. Preserve raw own-key order as well as sorted
+  inventories. AbstractRange, NodeRange, StaticRange and ElementInternals have zero
+  own-member/descriptor differences in this snapshot. Broader behavior remains bounded.
 - Refresh JS/HTTP identity to independently measured Chrome155.0.8059.80.
   Preserve historical controls and SDK source provenance155.0.8059.79. The tested
   native engine is15.5.35.23-rusty; the stock production SDK remains V8150.4.0
@@ -72,7 +73,7 @@ residual work beyond this PR, with audio separately deferred in
 ### Native DOM, scripts and ownership
 
 - Consume public Git-pinned turbo-dom0.5.7 candidatefb60e6f (latest registry
-  release0.5.6) and re-vendor committed turbo-test34ca9a8. Native per-isolate node state preserves
+  release0.5.6) and re-vendor committed turbo-test0ec37f5. Native per-isolate node state preserves
   original UTF-16 payloads, names, parser positions and mutation-time ancestry.
   GC callbacks schedule bounded storage scans outside collection; genuine weak
   wrapper/guest edges and native job pins preserve retained identities without
@@ -199,16 +200,61 @@ residual work beyond this PR, with audio separately deferred in
   compilation, linking and delay PCM checks cover the Linux CI build failure;
   upstream audio kernels/source hashes remain unchanged.
 
+- Read genuine macOS accessibility preferences and system appearance for live CSS
+  and matching media queries; derive pointer/hover from the installed input driver.
+  Include captured host media in the layout cache key. Source-pinned independent
+  Chrome controls cover31 queries and real CSS rectangles. Dynamic preference
+  events and other platform backends remain tracked in issue28.
+- Reflect real form attributes with native conversion and receiver behavior; repair
+  input/button prototype placement and text-range editing, storage enumerable flags
+  and ValidityState's readonly constructor prototype. Existing Blob members now use
+  the measured enumerable flags and key order; absent textStream remains tracked.
+
+- Preserve genuine native form navigation in MCP using host-owned URL, response
+  headers/status/referrer and commit count. Keep same-URL POST responses, cookies
+  and history without replaying a GET; destination CSP remains effective on later
+  renders. Preserve committed state before returning a later guest exception. Remove
+  synthetic-form fallback so canceled, invalid and CSP-blocked submissions produce
+  no request, while explicit JavaScript navigation remains supported. The full MCP71
+  suite covers existing GET and new POST, error, admission and lifecycle controls.
+- Regenerate the complete durable API backlog from frozen paired evidence with
+  `api-inventory.mjs`, retaining all observed paths as well as member summaries.
+
+- Retain valid typed `@property` and `@view-transition` descriptor blocks in CSSOM
+  and private native stylesheet exports. Descriptor rules omit child `cssRules`;
+  fresh Chrome shape controls and poisoned-public-getter tests cover both seams.
+  Full property registration and transition lifecycle remain tracked in issue28.
+
+- Admit parsed modern at-rules only after a bounded geometry proof: named container
+  queries with no eligible authored container declarations, color registrations
+  whose transitive variable uses affect only background/color, and navigation-only
+  static transition metadata. Unknown rules and geometry-changing dependencies still
+  error. Fourteen Chrome cases, actual inline/sheet cache mutations and an offline
+  replay of the saved Google declaration graph cover admission and counterexamples.
+
+- Record synchronous interface call durations, cumulative/max time and timed samples
+  using captured clocks, including throws. Preserve guest return/Promise/error
+  identity and exclude trace serialization/stack work from the measured call span.
+
 ### Validation status
 
-The integrated actual155 cohort passes335 tests (library299 plus36 production
-contracts); strict all-target native workspace checks,66 offline harness tests and
-two actual full-driver localhost regressions pass. Focused Chrome/default controls are recorded in
-[FINDINGS.md](harness/detection/FINDINGS.md) and feature documents. Test totals
-from earlier checkpoints are historical, not a final combined gate. Final
-workspace/default/native/addon/shim/E2E validation, a rebuilt API inventory and a
-fresh native-cookie GPU/wreq Google consent/SERP run remain required. Complete
-Chrome parity and reliable native Google SERP acceptance are not established.
+The current actual155 affected cohort passes416 tests: renderer library308,
+production geometry/media36 and native MCP72 (default71). The earlier337-test
+renderer/API/forms/media rerun passed after Blob/ValidityState repairs. All68
+offline harness tests pass. The fresh69-interface API audit preserves349 difference
+paths, down from359 in the same scope;65 original/134 expanded missing members
+and two absent native collection interfaces remain. Strict all-target actual155 workspace checks pass. Full final workspace
+tests/default/native/addon/shim/E2E gates and reliable native Google acceptance
+remain pending. See [FINDINGS.md](harness/detection/FINDINGS.md) for exact capture
+outcomes and earlier checkpoints; bounded tests do not establish complete Chrome
+conformance.
+
+The fresh native Google baseline now completes genuine form submission: search200,
+then page-script retry to sorry429, with zero collector errors and no synthesized
+fallback. Homepage/consent hydration still exceeds20s. Chrome baseline has7 result
+markers with one collector error; instrumented native does not submit. Persist
+sanitized run metadata and hashes in GOOGLE-LAST-RUN.json; reliable native SERP
+acceptance remains unverified.
 
 ## [0.5.3] — 2026-09-29 — hide internal globals from window fingerprint
 

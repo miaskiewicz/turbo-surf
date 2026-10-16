@@ -20,7 +20,7 @@
     // Do not enumerate arbitrary returned objects or call their getters/toString.
     return { type: typeof v };
   };
-  const record = (name, kind, args, result, error) => {
+  const record = (name, kind, args, result, error, durationMs) => {
     if (recording) return;
     recording = true;
     try {
@@ -38,7 +38,10 @@
       const old = rows.get(id);
       if (old) {
         old.count++;
+        old.totalDurationMs += durationMs;
+        old.maxDurationMs = Math.max(old.maxDurationMs, durationMs);
         const sample = {
+          durationMs,
           args: args.map(describe),
           result: describe(result),
           error: error ? String(error) : null,
@@ -52,6 +55,9 @@
           kind,
           origin,
           count: 1,
+          durationMs,
+          totalDurationMs: durationMs,
+          maxDurationMs: durationMs,
           at: now(),
           args: args.map(describe),
           result: describe(result),
@@ -69,13 +75,19 @@
     const out = {
       invoke(...args) {
         let result;
+        let durationMs;
+        const started = now();
         try {
-          result = apply(fn, this, args);
+          try {
+            result = apply(fn, this, args);
+          } finally {
+            durationMs = now() - started;
+          }
         } catch (error) {
-          record(name, kind, args, undefined, error);
+          record(name, kind, args, undefined, error, durationMs);
           throw error;
         }
-        record(name, kind, args, result, null);
+        record(name, kind, args, result, null, durationMs);
         if (
           result &&
           typeof result === "object" &&

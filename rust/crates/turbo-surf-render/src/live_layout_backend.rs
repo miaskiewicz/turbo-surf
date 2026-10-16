@@ -1,6 +1,6 @@
 //! Actual native layout behind CSSOM reads. Each read captures current native
 //! tree/CSS state; no public getters or page-installed layout cache participates.
-use crate::live_layout_media::ViewportMedia;
+use crate::live_layout_media::{HostMedia, ViewportMedia};
 use crate::live_layout_metrics::{ClientMetrics, OffsetSize};
 use deno_core::{op2, v8};
 use deno_error::JsErrorBox;
@@ -20,6 +20,7 @@ struct CacheKey {
     width: u32,
     height: u32,
     layout_scale: u32,
+    host: HostMedia,
     rules: Vec<crate::live_stylesheets::ActiveRule>,
     composition: Vec<(u32, Vec<u32>)>,
     inline_policy: Vec<(u32, String)>,
@@ -41,6 +42,7 @@ pub(crate) struct Viewport {
     pub(crate) height: f32,
     pub(crate) device_scale: f64,
     pub(crate) layout_scale: f32,
+    host: HostMedia,
 }
 impl crate::live_stylesheets::Conditions for Viewport {
     fn media(&self, query: &str) -> Result<bool, String> {
@@ -48,6 +50,7 @@ impl crate::live_stylesheets::Conditions for Viewport {
             width: self.width,
             height: self.height,
             initial_font_size: 16.0,
+            host: self.host,
         }
         .matches(query)
     }
@@ -166,6 +169,7 @@ fn resolve(
         width: viewport.width.to_bits(),
         height: viewport.height.to_bits(),
         layout_scale: viewport.layout_scale.to_bits(),
+        host: viewport.host,
         rules,
         composition: tree
             .composition
@@ -400,6 +404,7 @@ pub(crate) fn capture_viewport(scope: &mut v8::PinScope) -> Result<(), String> {
         device_scale,
         // Calibrated by independent fractional Chrome155 controls; JS DPR is separate.
         layout_scale: 2.0,
+        host: HostMedia::capture(crate::runtime::native_pointer_media_capability(context)),
     }));
     Ok(())
 }
@@ -750,4 +755,17 @@ fn caret_geometry<'s>(
         rect.width,
         rect.height,
     ])
+}
+
+#[op2(nofast)]
+pub(crate) fn op_live_media_match(
+    scope: &mut v8::PinScope,
+    #[string] source: &str,
+) -> Result<bool, JsErrorBox> {
+    let context = scope.get_current_context();
+    let viewport = context
+        .get_slot::<Viewport>()
+        .ok_or_else(|| JsErrorBox::generic("Native media environment was not captured"))?;
+    crate::live_stylesheets::Conditions::media(viewport.as_ref(), source)
+        .map_err(JsErrorBox::generic)
 }

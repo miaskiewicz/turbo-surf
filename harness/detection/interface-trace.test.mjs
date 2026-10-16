@@ -84,3 +84,56 @@ test("interface tracing installs in worker globals without DOM interfaces", () =
   );
   assert.equal(snapshot.accesses.find((row) => row.name === "window.fetch").count, 1);
 });
+
+test("interface durations bracket synchronous calls, getters and throws without changing results", () => {
+  const context = vm.createContext({});
+  vm.runInContext(
+    `globalThis.clock=0;globalThis.order=[];globalThis.value={};globalThis.failure={};
+    globalThis.promise=Promise.resolve(value);
+    class Document {
+      querySelectorAll(){order.push('call');clock+=7;return value;}
+      get URL(){order.push('get');clock+=3;return 'document';}
+      set cookie(value){order.push('set');clock+=5;throw failure;}
+    }
+    globalThis.Document=Document;globalThis.document=new Document();
+    globalThis.navigator={};globalThis.screen={};
+    globalThis.fetch=()=>{order.push('promise');clock+=2;return promise;};
+    globalThis.performance={now:()=>{order.push('clock');return clock;}};
+    globalThis.Error=class {get stack(){clock+=100;return 'Error\\nframe\\nframe\\npage';}};`,
+    context,
+  );
+  vm.runInContext(readFileSync(new URL("./interface-trace.js", import.meta.url), "utf8"), context);
+  assert.equal(
+    vm.runInContext(
+      `performance.now=()=>{throw failure;};order.length=0;
+      const returned=document.querySelectorAll();
+      globalThis.firstOrder=order.slice();returned===value`,
+      context,
+    ),
+    true,
+  );
+  assert.deepEqual(Array.from(context.firstOrder), ["clock", "call", "clock", "clock"]);
+  assert.equal(vm.runInContext(`document.querySelectorAll()===value`, context), true);
+  assert.equal(vm.runInContext(`document.URL`, context), "document");
+  assert.equal(
+    vm.runInContext(`try{document.cookie='other';false}catch(error){error===failure}`, context),
+    true,
+  );
+  assert.equal(vm.runInContext(`fetch()===promise`, context), true);
+  const rows = JSON.parse(
+    vm.runInContext(
+      `JSON.stringify(globalThis[Symbol.for('turbo-surf.interface-trace')].snapshot().accesses)`,
+      context,
+    ),
+  );
+  const call = rows.find((row) => row.name === "Document.querySelectorAll");
+  assert.equal(call.durationMs, 7);
+  assert.equal(call.totalDurationMs, 14);
+  assert.equal(call.maxDurationMs, 7);
+  assert.equal(call.samples[0].durationMs, 7);
+  assert.equal(rows.find((row) => row.name === "Document.URL" && row.kind === "get").durationMs, 3);
+  const setter = rows.find((row) => row.name === "Document.cookie" && row.kind === "set");
+  assert.equal(setter.durationMs, 5);
+  assert.notEqual(setter.error, null);
+  assert.equal(rows.find((row) => row.name === "window.fetch").durationMs, 2);
+});

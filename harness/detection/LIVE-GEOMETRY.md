@@ -17,6 +17,13 @@ visibility, pointer-events and paint order. Inert documents and disconnected nod
 return empty regions before requiring active layout capabilities. Unsupported
 active layout paths reject rather than return invented dimensions.
 
+[Host media](./HOST-MEDIA.md) supplies real platform preferences and installed
+input-driver capabilities to both live CSS and relevant media queries; cache keys
+include that captured environment. [Modern at-rule admission](./NEUTRAL-AT-RULES.md)
+uses typed rules and a transitive variable/declaration proof for bounded static
+geometry. Unknown or potentially geometry-changing uses still reject. Retained
+descriptor blocks alone do not implement CSS property registration or transitions.
+
 The reusable `*-chrome-control.mjs` runners serve independent authored localhost
 fixtures. The older controls retain their original Chrome155.0.8059.79 metadata;
 new shadow/scoped controls record Chrome155.0.8059.80. Both use V815.5.35.23.

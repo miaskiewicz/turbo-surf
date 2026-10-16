@@ -258,6 +258,7 @@ pub(crate) fn layout_active_rules_resolved(
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
 ) -> Result<(LayoutSnapshot, crate::live_layout_scroll::SourceStyles), String> {
+    crate::live_layout_neutral::validate(input, rules)?;
     let qualified = rules
         .iter()
         .filter(|rule| rule.resource.is_none())

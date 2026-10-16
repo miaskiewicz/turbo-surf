@@ -683,7 +683,7 @@ if(typeof __ns.makeNativeFunction==='function'){
         if(head){
           var isAt=head[0]==='@',rule={};
           rule.parentStyleSheet=sheet;rule.parentRule=parent||null;
-          if(isAt){rule.prelude=head;rule.type=/^@media\b/i.test(head)?4:/^@supports\b/i.test(head)?12:/^@font-face\b/i.test(head)?5:/^@keyframes\b/i.test(head)?7:0;rule.cssText=head+' { '+body.trim()+' }';if(rule.type===5)rule.style=cssDeclaration(body,null,rule,false,true);else rule.cssRules=parseCssRules(body,sheet,rule,true);}
+          if(isAt){rule.prelude=head;rule.type=/^@media\b/i.test(head)?4:/^@supports\b/i.test(head)?12:/^@font-face\b/i.test(head)?5:/^@keyframes\b/i.test(head)?7:0;rule.cssText=head+' { '+body.trim()+' }';if(rule.type===5)rule.style=cssDeclaration(body,null,rule,false,true);else if(!/^@(property|view-transition)\b/i.test(head))rule.cssRules=parseCssRules(body,sheet,rule,true);}
           else {rule.type=1;rule.selectorText=cssPrelude(head,true);rule.style=cssDeclaration(body,null,rule);rule.cssText=head+' { '+body.trim()+' }';}
           cssItems(out).push(finishCssRule(rule));
         }
@@ -876,9 +876,11 @@ if(typeof __ns.makeNativeFunction==='function'){
         return validForType(this, value);
       },
       set: function(v){
+        var oldValue=selectionApply(valDesc.get,this,[]);
         v = v == null ? '' : String(v);
         if (reflectedValue(this)) this.setAttribute('value', v);
         else controlValues.set(this, validForType(this, v));
+        selectionValueChanged(this,oldValue,selectionApply(valDesc.get,this,[]));
       }
     };
     var defaultValueDesc = { configurable: true, get: function(){ return defaultValueOf(this); }, set: function(v){
@@ -894,11 +896,31 @@ if(typeof __ns.makeNativeFunction==='function'){
     var mkTypeDesc = function(def){ return { configurable: true, get: function(){ return (this.getAttribute('type') || def).toLowerCase(); }, set: function(v){ this.setAttribute('type', v); } }; };
     // `form` → the nearest ancestor <form> (userEvent fires submit on a submit-button's form).
     var formDesc = { configurable: true, get: function(){ return this.closest ? this.closest('form') : null; } };
-    // text-cursor selection (userEvent.type inserts at selectionStart..selectionEnd; undefined -> NaN
-    // -> nothing gets typed). Default the cursor to the end of the value.
-    var selStartDesc = { configurable: true, get: function(){ return this.__selStart == null ? String(this.value||'').length : this.__selStart; }, set: function(v){ this.__selStart = v; } };
-    var selEndDesc = { configurable: true, get: function(){ return this.__selEnd == null ? String(this.value||'').length : this.__selEnd; }, set: function(v){ this.__selEnd = v; } };
-    var selDirDesc = { configurable: true, get: function(){ return this.__selDir || 'none'; }, set: function(v){ this.__selDir = v; } };
+    var controlSelections=new WeakMap(),selectionApply=Reflect.apply,selectionGet=WeakMap.prototype.get,selectionSet=WeakMap.prototype.set;
+    var selectionString=String,selectionTypeError=TypeError,selectionException=g.DOMException;
+    function selectionText(value){if(typeof value==='symbol')throw new selectionTypeError('Cannot convert a Symbol value to a string');return selectionString(value);}
+    function selectionAvailable(element){var tag=selectionApply(sheetTagName,element,[]);if(tag==='TEXTAREA')return true;var type=sheetNativeAttribute(element,'type')||'text';return /^(text|search|url|tel|password)$/.test(type.toLowerCase());}
+    function selectionValue(element){return selectionApply(valDesc.get,element,[]);}
+    function selectionState(element){var state=selectionApply(selectionGet,controlSelections,[element]);if(!state){state={start:0,end:0,direction:'none'};selectionApply(selectionSet,controlSelections,[element,state]);}return state;}
+    function selectionRequire(element){if(!selectionAvailable(element))throw new selectionException('The input type does not support selection','InvalidStateError');}
+    function selectionUpdate(element,start,end,direction){var length=selectionValue(element).length;end=Math.min(end,length);start=Math.min(start,end);var state=selectionState(element);state.start=start;state.end=end;state.direction=direction==='forward'||direction==='backward'?direction:'none';}
+    function selectionValueChanged(element,oldValue,newValue){if(oldValue!==newValue&&selectionAvailable(element))selectionUpdate(element,newValue.length,newValue.length,'none');}
+    var selStartDesc={configurable:true,get:function(){return selectionAvailable(this)?selectionState(this).start:null;},set:function(value){selectionRequire(this);var state=selectionState(this),start=value===null?0:+value>>>0;selectionUpdate(this,start,Math.max(start,state.end),state.direction);}};
+    var selEndDesc={configurable:true,get:function(){return selectionAvailable(this)?selectionState(this).end:null;},set:function(value){selectionRequire(this);var state=selectionState(this),end=value===null?0:+value>>>0;selectionUpdate(this,Math.min(state.start,end),end,state.direction);}};
+    var selDirDesc={configurable:true,get:function(){return selectionAvailable(this)?selectionState(this).direction:null;},set:function(value){selectionRequire(this);var state=selectionState(this);selectionUpdate(this,state.start,state.end,value===null?'none':selectionText(value));}};
+    function setControlSelectionRange(start,end){if(arguments.length<2)throw new selectionTypeError('setSelectionRange requires two arguments');start=+start>>>0;end=+end>>>0;var direction=arguments.length<3||arguments[2]===undefined?'none':selectionText(arguments[2]);selectionRequire(this);selectionUpdate(this,start,end,direction);}
+    function setControlRangeText(replacement){
+      if(arguments.length===0||arguments.length===2)throw new selectionTypeError('setRangeText requires one or at least three arguments');
+      replacement=selectionText(replacement);var state=selectionState(this),start=state.start,end=state.end;
+      if(arguments.length>=3){start=+arguments[1]>>>0;end=+arguments[2]>>>0;}
+      var mode=arguments.length<4||arguments[3]===undefined?'preserve':selectionText(arguments[3]);
+      if(mode!=='select'&&mode!=='start'&&mode!=='end'&&mode!=='preserve')throw new selectionTypeError('Invalid selection mode');
+      selectionRequire(this);if(start>end)throw new selectionException('The start exceeds the end','IndexSizeError');
+      var value=selectionValue(this),length=value.length;start=Math.min(start,length);end=Math.min(end,length);
+      var oldStart=state.start,oldEnd=state.end,next=start+replacement.length;
+      selectionApply(valDesc.set,this,[value.slice(0,start)+replacement+value.slice(end)]);
+      if(mode==='select')selectionUpdate(this,start,next,'none');else if(mode==='start')selectionUpdate(this,start,start,'none');else if(mode==='end')selectionUpdate(this,next,next,'none');else{var delta=replacement.length-(end-start);selectionUpdate(this,oldStart>end?oldStart+delta:oldStart>start?start:oldStart,oldEnd>end?oldEnd+delta:oldEnd>start?next:oldEnd,'none');}
+    }
     var baseProto = compatibilityElementPrototype = Object.getPrototypeOf(orig.call(d,'span'));
     // Reflected IDL attributes on every element: setting el.src / el.href (script/img/link/a — a DOM
     // property) must show as the content attribute so attribute selectors like script[src*="maps"]
@@ -1001,28 +1023,21 @@ if(typeof __ns.makeNativeFunction==='function'){
     var protoFor = {};
     var defType = { HTMLInputElement:'text', HTMLButtonElement:'submit' };
     ['HTMLInputElement','HTMLTextAreaElement','HTMLSelectElement','HTMLOptionElement','HTMLButtonElement','HTMLLabelElement','HTMLCanvasElement'].forEach(function(n){ if (typeof g[n] !== 'function') g[n] = function(){}; var p = Object.create(baseProto); try {
-      Object.defineProperty(p, 'value', valDesc); Object.defineProperty(p, 'checked', checkedDesc); if(n==='HTMLInputElement')Object.defineProperty(p,'defaultChecked',defaultCheckedDesc); Object.defineProperty(p, 'form', formDesc);
-      if (defType[n]) Object.defineProperty(p, 'type', mkTypeDesc(defType[n]));
+      var defineControl=function(name,descriptor){Object.defineProperty(p,name,Object.assign({},descriptor,{enumerable:true}));};
+      defineControl('value',valDesc);if(n==='HTMLInputElement'){defineControl('checked',checkedDesc);defineControl('defaultChecked',defaultCheckedDesc);}defineControl('form',formDesc);
+      if (defType[n]) defineControl('type',mkTypeDesc(defType[n]));
       // Reflected IDL string attributes: a library setting `input.name = 'x'` (e.g. react-number-
       // format, MUI) must show up as the `name` content attribute (toHaveAttribute, [name] selectors).
-      ['name','placeholder','accept','min','max','step','pattern','autocomplete'].forEach(function(a){ Object.defineProperty(p, a, { configurable: true, get: function(){ return this.getAttribute(a) || ''; }, set: function(v){ this.setAttribute(a, v == null ? '' : String(v)); } }); });
+      (n==='HTMLButtonElement'?['name']:['name','placeholder','accept','min','max','step','pattern','autocomplete']).forEach(function(a){ Object.defineProperty(p, a, { configurable: true, enumerable:true, get: function(){ return this.getAttribute(a) || ''; }, set: function(v){ this.setAttribute(a, v == null ? '' : String(v)); } }); });
       // Reflected BOOLEAN IDL attributes (presence): el.disabled = true -> the `disabled` content
       // attribute; reading returns hasAttribute. Tests read el.disabled / [disabled] / multiple.
-      [['disabled','disabled'],['multiple','multiple'],['required','required'],['readOnly','readonly'],['autoFocus','autofocus']].forEach(function(pair){ Object.defineProperty(p, pair[0], { configurable: true, get: function(){ return this.hasAttribute(pair[1]); }, set: function(v){ if (v) this.setAttribute(pair[1], ''); else this.removeAttribute(pair[1]); } }); });
+      (n==='HTMLButtonElement'?[['disabled','disabled']]:[['disabled','disabled'],['multiple','multiple'],['required','required'],['readOnly','readonly']]).forEach(function(pair){ Object.defineProperty(p, pair[0], { configurable: true, enumerable:true, get: function(){ return this.hasAttribute(pair[1]); }, set: function(v){ if (v) this.setAttribute(pair[1], ''); else this.removeAttribute(pair[1]); } }); });
       if (n === 'HTMLInputElement' || n === 'HTMLTextAreaElement') {
-        Object.defineProperty(p, 'defaultValue', defaultValueDesc);
-        Object.defineProperty(p, 'selectionStart', selStartDesc); Object.defineProperty(p, 'selectionEnd', selEndDesc); Object.defineProperty(p, 'selectionDirection', selDirDesc);
-        p.setSelectionRange = function(s, e, dir){ this.__selStart = s; this.__selEnd = e; this.__selDir = dir || 'none'; };
-        p.select = function(){ this.__selStart = 0; this.__selEnd = String(this.value||'').length; };
-        p.setRangeText = function(){};
-      }
-      // click() on the interface prototype (input/textarea/button) so tests can spy on
-      // HTMLInputElement.prototype.click (e.g. opening a file picker via inputRef.click()); the own
-      // native click is dropped in createElement. NOT for select/option (their own click is
-      // load-bearing for native dropdown behavior). Dispatches a bubbling click (checkbox/radio
-      // activation + React onClick still run via el_dispatch_event).
-      if (n === 'HTMLInputElement' || n === 'HTMLTextAreaElement' || n === 'HTMLButtonElement') {
-        p.click = function(){ try { var C = g.MouseEvent || g.PointerEvent || g.Event; this.dispatchEvent(new C('click', { bubbles: true, cancelable: true })); } catch(e){} };
+        defineControl('defaultValue',defaultValueDesc);
+        defineControl('selectionStart',selStartDesc);defineControl('selectionEnd',selEndDesc);defineControl('selectionDirection',selDirDesc);
+        p.setSelectionRange=setControlSelectionRange;
+        p.select=function(){if(selectionAvailable(this))selectionUpdate(this,0,selectionValue(this).length,'none');};
+        p.setRangeText=setControlRangeText;
       }
     } catch(e){} g[n].prototype = p; protoFor[n] = p; });
     // Descendant <option>s. Prefer querySelectorAll (document order); fall back to a `children` walk

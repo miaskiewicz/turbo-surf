@@ -53,6 +53,12 @@ done
 for file in form_connectivity_cases.json form_connectivity_probe.js form_connectivity_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
+for file in form_reflection_cases.json form_reflection_probe.js form_reflection_chrome155.json control_prototypes_probe.js control_prototypes_chrome155.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
+for file in css_descriptor_cases.json css_descriptor_probe.js css_descriptor_chrome155.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
 git -C "$repo" show "${source_rev}:src/event_handlers.rs" > "$dest/event_handlers.rs"
 git -C "$repo" show "${source_rev}:src/event_brands.rs" > "$dest/event_brands.rs"
 git -C "$repo" show "${source_rev}:src/event_listeners.rs" > "$dest/event_listeners.rs"

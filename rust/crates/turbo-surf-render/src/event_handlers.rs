@@ -247,3 +247,14 @@ impl State {
         self.sources.retain(|(node, _), _| tree.is_live(*node));
     }
 }
+
+/// Host-installed document URL, never read through guest location accessors.
+pub(super) fn document_url() -> String {
+    DOM.with(|dom| {
+        dom.borrow()
+            .as_ref()
+            .map(|dom| dom.event_handlers.base.clone())
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| "about:blank".to_owned())
+    })
+}

@@ -87,8 +87,8 @@ fn serp_marker(html: &str) -> &'static str {
 
 // In-page driver: resolves each step's CSS `selector` to an element + its box center (or uses
 // explicit coords), maps to the render-tier `__hi.sequence` step shape, plays it, and marks the
-// DOM done. `__STEPS__` / `__OPTS__` are substituted with JSON. (No real layout → a selector's
-// box center is best-effort; events still target the resolved element, which is what matters.)
+// DOM done. Steps/options are passed as JSON expressions. Selector targets use the
+// available native geometry and retain their resolved element as the event target.
 const HUMAN_DRIVER_TMPL: &str = r#"((raw, __opts) => {
   const q = (s) => { try { return s ? document.querySelector(s) : null; } catch (e) { return null; } };
   const center = (el) => { try { const r = el.getBoundingClientRect(); return { x: Math.round((r.left || 0) + (r.width || 0) / 2), y: Math.round((r.top || 0) + (r.height || 0) / 2) }; } catch (e) { return { x: 0, y: 0 }; } };
@@ -102,48 +102,13 @@ const HUMAN_DRIVER_TMPL: &str = r#"((raw, __opts) => {
     if (st.wait != null) return { wait: st.wait };
     return {};
   });
-  // After the gesture sequence resolves, capture any resulting navigation so the caller can
-  // FOLLOW it (fill-a-form-then-submit only produces a SERP if someone loads the target). Two
-  // sources, general (not page-specific): (1) a JS navigation — location.href the page set on
-  // submit; (2) the enclosing form's serialized GET target — action + every named field's value
-  // (so hidden tokens the page baked into the form, e.g. a search form's session params, ride
-  // along exactly as a browser submit would carry them). A trailing macrotask lets an async
-  // submit handler settle before we read location.
+  // Native form commits are captured by the host. Preserve only an explicit JS
+  // location change when this gesture realm remains alive after its sequence.
   const captureNav = () => {
     try {
       let jsNav = "";
       try { jsNav = String(location.href || ""); } catch (e) {}
       document.body.setAttribute("data-hi-location", jsNav);
-      // Form target: the form holding the last-focused text field, else the first form.
-      let formUrl = "";
-      try {
-        const field = document.querySelector("textarea[name],input[name]");
-        const form = (field && field.form) || document.querySelector("form");
-        if (form) {
-          const method = String(form.getAttribute("method") || "get").toLowerCase();
-          const action = form.getAttribute("action") || location.pathname || "/";
-          const params = new URLSearchParams();
-          const fields = form.querySelectorAll("input[name],textarea[name],select[name]");
-          for (let i = 0; i < fields.length; i++) {
-            const el = fields[i];
-            const name = el.getAttribute("name");
-            if (!name || el.disabled) continue;
-            const type = String(el.getAttribute("type") || "").toLowerCase();
-            if ((type === "checkbox" || type === "radio") && !el.checked) continue;
-            const val = el.value != null ? String(el.value) : "";
-            if (val === "") continue;
-            params.append(name, val);
-          }
-          if (method === "get") {
-            const sep = action.indexOf("?") >= 0 ? "&" : "?";
-            const qs = params.toString();
-            formUrl = new URL(action + (qs ? sep + qs : ""), location.href).href;
-          } else {
-            formUrl = new URL(action, location.href).href;
-          }
-        }
-      } catch (e) {}
-      document.body.setAttribute("data-hi-form-nav", formUrl);
     } catch (e) {}
     try { document.body.setAttribute("data-hi-done", "1"); } catch (e) {}
   };
@@ -248,11 +213,12 @@ pub struct Session {
     response_headers: Vec<(String, String)>,
     response_metadata: turbo_surf_render::DocumentResponseMetadata,
     browsing_storage: turbo_surf_render::BrowserStorage,
+    last_render_navigation_count: u64,
     /// "" / "no-js" = Lane A; "fast" / "secure" / "js" = render page JS after fetch.
     mode: String,
     /// Hydrated-HTML trail (one entry per render/inject), newest last.
     dom_history: Vec<String>,
-    /// Every URL fetched this session (navigations + direct fetches).
+    /// Session request targets and final native document-navigation destinations.
     requests: Vec<String>,
     /// Optional challenge solver (Hyper/Scrapfly), configured from env / `.env`.
     /// `None` (the default) leaves the solve path inert.
@@ -359,6 +325,7 @@ impl Session {
         self.tree = Some(Tree::parse(html));
         self.response_headers.clear();
         self.response_metadata = turbo_surf_render::DocumentResponseMetadata::default();
+        self.last_render_navigation_count = 0;
     }
 
     fn load_response(
@@ -449,7 +416,7 @@ impl Session {
             self.render_current().await?;
         }
         Ok(
-            json!({ "url": cur_url, "status": status, "title": title_of(self.tree.as_ref().unwrap()) }),
+            json!({ "url": self.url, "status": if self.last_render_navigation_count > 0 { self.response_metadata.status } else { status }, "title": title_of(self.tree.as_ref().unwrap()) }),
         )
     }
 
@@ -655,20 +622,50 @@ impl Session {
         base: &str,
         script: &str,
     ) -> Result<String, String> {
-        let (html, cookies) = turbo_surf_render::render_capture_cookies_with_document_response(
+        let mut page = turbo_surf_render::PageSession::open_with_document_response(
             html,
             base,
-            self.ua.as_deref().unwrap_or(""),
             &self.jar.storage_state(),
-            script,
+            self.ua.as_deref().unwrap_or(""),
             turbo_surf_render::DEFAULT_RENDER_BUDGET_MS,
+            "",
             self.client_hints.clone(),
             &self.response_headers,
             self.browsing_storage.clone(),
             self.response_metadata.clone(),
         )
         .await?;
+        let mut program_error = None;
+        for program in script.split(turbo_surf_render::SCRIPT_BOUNDARY) {
+            if !program.trim().is_empty() {
+                if let Err(error) = page.eval(program).await {
+                    program_error = Some(error);
+                    break;
+                }
+            }
+        }
+        let (count, url, metadata) = page.navigation_snapshot();
+        let headers = page.response_headers_snapshot();
+        let html = page.serialize();
+        let cookies = page.cookies();
+        page.close();
         self.jar = CookieJar::from_storage_state(&cookies);
+        self.last_render_navigation_count = count;
+        if count > 0 {
+            self.back.push(base.to_string());
+            self.forward.clear();
+            self.url = url;
+            self.response_headers = headers;
+            self.response_metadata = metadata;
+            self.requests.push(self.url.clone());
+        }
+        if let Some(error) = program_error {
+            if count > 0 {
+                self.dom_history.push(html.clone());
+                self.tree = Some(Tree::parse(&html));
+            }
+            return Err(error);
+        }
         Ok(html)
     }
 
@@ -776,11 +773,9 @@ impl Session {
     // to elements + their box centers) or explicit coords. `steps` is inline, or a saved `routine`
     // (e.g. "google-serp") with `params` substituted. This is the general "string interactions
     // together on a loaded page" capability; the google flow is just one saved routine.
-    // The navigation an interaction triggered, if any: the driver records both the page's JS
-    // navigation (`data-hi-location`) and the enclosing form's serialized GET target
-    // (`data-hi-form-nav`). Return a target only when it's a REAL navigation away from `base`
-    // (different resolved URL, http(s)). JS navigation wins; the serialized form is the fallback
-    // (a plain submit that our isolate doesn't auto-follow). General — not page-specific.
+    // Native form commits are handled before this lookup. Only follow a JS
+    // location change; serializing a form would bypass canceled/invalid/CSP-blocked
+    // submission and could replay a POST as an unrelated GET.
     fn interaction_nav_target(&self, base: &str) -> Option<String> {
         let tree = self.tree.as_ref()?;
         let body = *tree.query_selector_all("body").first()?;
@@ -804,7 +799,7 @@ impl Session {
                 return Some(loc);
             }
         }
-        attr("data-hi-form-nav").filter(|u| is_nav(u))
+        None
     }
 
     async fn human_interact(&mut self, args: &Value) -> Result<Value, String> {
@@ -835,6 +830,15 @@ impl Session {
         self.dom_history.push(hydrated.clone());
         self.tree = Some(Tree::parse(&hydrated));
         let n_steps = steps.as_array().map(|a| a.len()).unwrap_or(0);
+        // A native form commit retires the gesture realm before its completion markers
+        // can run. The response is already installed; replaying it would lose POST data
+        // or submit twice, including when the destination URL did not change.
+        if self.last_render_navigation_count > 0 {
+            return Ok(json!({
+                "ok": true, "completed": completed, "steps": n_steps,
+                "navigated": true, "navigated_to": self.url.clone(),
+            }));
+        }
         // FOLLOW a navigation the interaction triggered (fill-a-form-then-submit only yields a
         // result page if someone actually loads the target). Fetch it natively THROUGH the session
         // — the jar carries the cookies the page just set (e.g. a freshly-minted session cookie),
@@ -3633,8 +3637,8 @@ mod tests {
     }
 
     // human_interact FOLLOWS the navigation a form-submit interaction triggers: filling the
-    // search box + clicking submit serializes the form's GET target and loads it natively
-    // through the session (jar/cookies carried), so the result page is what ends up loaded —
+    // search box + clicking submit loads the native form response and retains its actual
+    // navigation URL (jar/cookies carried), so the result page is what ends up loaded —
     // the typed query rides along on the URL. This is the fill-then-submit → SERP loop.
     #[tokio::test]
     async fn human_interact_follows_form_navigation() {
@@ -3670,6 +3674,291 @@ mod tests {
             dom.contains("Results for weather"),
             "loaded the results page for the typed query: {dom}"
         );
+    }
+
+    type PostRequests = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
+    async fn spawn_post_lifecycle_server() -> (String, PostRequests, tokio::task::JoinHandle<()>) {
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let wire = requests.clone();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let wire = wire.clone();
+                tokio::spawn(async move {
+                    let mut bytes = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    let (header_end, length) = loop {
+                        let count = socket.read(&mut chunk).await.unwrap();
+                        assert_ne!(count, 0, "request headers must finish");
+                        bytes.extend_from_slice(&chunk[..count]);
+                        if let Some(end) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
+                            let headers = String::from_utf8_lossy(&bytes[..end]);
+                            let length = headers
+                                .lines()
+                                .filter_map(|line| line.split_once(':'))
+                                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                                .map_or(0, |(_, value)| value.trim().parse::<usize>().unwrap());
+                            break (end + 4, length);
+                        }
+                    };
+                    while bytes.len() < header_end + length {
+                        let count = socket.read(&mut chunk).await.unwrap();
+                        assert_ne!(count, 0, "request body must finish");
+                        bytes.extend_from_slice(&chunk[..count]);
+                    }
+                    let headers = String::from_utf8_lossy(&bytes[..header_end]);
+                    let method = headers.split_whitespace().next().unwrap().to_string();
+                    let body = String::from_utf8_lossy(&bytes[header_end..header_end + length])
+                        .into_owned();
+                    wire.lock().unwrap().push((method.clone(), body));
+                    let (status, extra, html) = if method == "POST" {
+                        ("201 Created", "Content-Security-Policy: script-src 'none'\r\nReferrer-Policy: no-referrer\r\nSet-Cookie: receipt=post; Path=/; HttpOnly\r\n", "<html><body id=posted>Posted<script>document.body.setAttribute('data-executed','yes')</script></body></html>")
+                    } else {
+                        ("200 OK", "", "<html><body><form action=/ method=post><input name=q><button type=submit>Go</button></form></body></html>")
+                    };
+                    let response = format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{html}", html.len());
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        (base, requests, server)
+    }
+
+    #[tokio::test]
+    async fn human_interact_keeps_same_url_post_response_without_replaying_navigation() {
+        let (base, requests, server) = spawn_post_lifecycle_server().await;
+        let mut session = Session::new();
+        session.goto(&base).await.unwrap();
+        session.forward.push("http://unused.test/".into());
+        let result = call_tool(&mut session, "human_interact", &json!({
+            "steps":[{"focus":"input[name=q]"},{"type":"weather"},{"click":"button[type=submit]"}],
+            "startDelay":0,"startJitter":0
+        })).await.unwrap();
+        assert_eq!(result["navigated"], true, "{result}");
+        assert_eq!(result["navigated_to"], base);
+        assert_eq!(session.url, base);
+        assert_eq!(session.response_metadata.status, 201);
+        assert_eq!(session.response_metadata.referrer, base);
+        assert!(session.response_headers.iter().any(|(name, value)| name
+            .eq_ignore_ascii_case("content-security-policy")
+            && value == "script-src 'none'"));
+        assert!(session
+            .jar
+            .cookie_header(&base, 0.0)
+            .contains("receipt=post"));
+        assert_eq!(session.back, vec![base.clone()]);
+        assert_eq!(session.forward, Vec::<String>::new());
+        let posted = session.tree().unwrap().query_selector("#posted").unwrap();
+        assert_eq!(
+            session
+                .tree()
+                .unwrap()
+                .get_attribute(posted, "data-executed"),
+            None
+        );
+        session.render_current().await.unwrap();
+        let posted = session.tree().unwrap().query_selector("#posted").unwrap();
+        assert_eq!(
+            session
+                .tree()
+                .unwrap()
+                .get_attribute(posted, "data-executed"),
+            None,
+            "destination CSP must survive another render"
+        );
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![
+                ("GET".into(), String::new()),
+                ("POST".into(), "q=weather".into())
+            ],
+            "native POST must never be replayed as a GET or submitted twice"
+        );
+        assert_eq!(session.requests, vec![base.clone(), base.clone()]);
+        session.load(&base, "<body><form method=post action=/><input name=q value=auto></form><script>document.querySelector('form').requestSubmit()</script>");
+        assert_eq!(
+            session.last_render_navigation_count, 0,
+            "ordinary loads clear the previous render outcome"
+        );
+        session.render_current().await.unwrap();
+        assert_eq!(session.last_render_navigation_count, 1);
+        assert_eq!(
+            session.back,
+            vec![base.clone(), base.clone()],
+            "two distinct same-URL POST commits add exactly two history entries"
+        );
+        assert_eq!(session.requests, vec![base.clone(), base.clone(), base]);
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![
+                ("GET".into(), String::new()),
+                ("POST".into(), "q=weather".into()),
+                ("POST".into(), "q=auto".into())
+            ]
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn render_program_error_preserves_an_already_committed_form_response() {
+        let (base, requests, server) = spawn_post_lifecycle_server().await;
+        let mut session = Session::new();
+        session.load(
+            &base,
+            "<body><form action=/ method=post><input name=q value=throw></form></body>",
+        );
+        let html = serialize_doc(session.tree().unwrap());
+        let error = session
+            .render_script(
+                &html,
+                &base,
+                "document.querySelector('form').submit();throw Error('after-submit')",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.contains("after-submit"),
+            "preserve the original guest exception: {error}"
+        );
+        assert_eq!(session.last_render_navigation_count, 1);
+        assert_eq!(session.url, base);
+        assert_eq!(session.response_metadata.status, 201);
+        assert_eq!(session.response_metadata.referrer, base);
+        assert!(session.response_headers.iter().any(|(name, value)| name
+            .eq_ignore_ascii_case("content-security-policy")
+            && value == "script-src 'none'"));
+        assert!(session
+            .jar
+            .cookie_header(&base, 0.0)
+            .contains("receipt=post"));
+        assert!(session.tree().unwrap().query_selector("#posted").is_some());
+        assert_eq!(session.back, vec![base.clone()]);
+        assert_eq!(session.requests, vec![base]);
+        assert_eq!(session.dom_history.len(), 1);
+        session.render_current().await.unwrap();
+        let posted = session.tree().unwrap().query_selector("#posted").unwrap();
+        assert_eq!(
+            session
+                .tree()
+                .unwrap()
+                .get_attribute(posted, "data-executed"),
+            None
+        );
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![("POST".into(), "q=throw".into())],
+            "the failed program must not restore or resubmit its retired source form"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn human_interact_does_not_bypass_form_submission_admission() {
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let wire = requests.clone();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let wire = wire.clone();
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    while !request.windows(4).any(|value| value == b"\r\n\r\n") {
+                        let count = socket.read(&mut chunk).await.unwrap();
+                        assert_ne!(count, 0);
+                        request.extend_from_slice(&chunk[..count]);
+                    }
+                    let request = String::from_utf8_lossy(&request);
+                    let line = request.lines().next().unwrap();
+                    let path = line.split_whitespace().nth(1).unwrap();
+                    let method = line.split_whitespace().next().unwrap();
+                    wire.lock().unwrap().push(format!("{method} {path}"));
+                    let (extra, attributes, control) = match path {
+                        "/canceled" => (
+                            "",
+                            "onsubmit=\"event.preventDefault()\"",
+                            "<input name=q value=weather>",
+                        ),
+                        "/invalid" => ("", "", "<input name=q required>"),
+                        "/javascript" => (
+                            "",
+                            "onsubmit=\"event.preventDefault();location.href='/client-target'\"",
+                            "<input name=q value=weather>",
+                        ),
+                        "/policy" => (
+                            "Content-Security-Policy: form-action 'none'\r\n",
+                            "",
+                            "<input name=q value=weather>",
+                        ),
+                        _ => ("", "", "<input name=q value=unexpected>"),
+                    };
+                    let html = format!("<body><form action=/action method=post {attributes}>{control}<button type=submit>Go</button></form></body>");
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{html}", html.len());
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        for path in ["/canceled", "/invalid", "/policy"] {
+            let base = format!("{origin}{path}");
+            let mut session = Session::new();
+            session.goto(&base).await.unwrap();
+            let result = call_tool(
+                &mut session,
+                "human_interact",
+                &json!({
+                    "steps":[{"click":"button[type=submit]"}],"startDelay":0,"startJitter":0
+                }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(result["navigated"], false, "{path}: {result}");
+            assert_eq!(session.last_render_navigation_count, 0, "{path}");
+            assert_eq!(session.url, base);
+            assert_eq!(session.requests, vec![base]);
+            assert_eq!(session.back, Vec::<String>::new());
+        }
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec!["GET /canceled", "GET /invalid", "GET /policy"],
+            "canceled, invalid and policy-blocked submissions must issue no action request"
+        );
+        let mut session = Session::new();
+        session.goto(&format!("{origin}/javascript")).await.unwrap();
+        let result = call_tool(
+            &mut session,
+            "human_interact",
+            &json!({
+                "steps":[{"click":"button[type=submit]"}],"startDelay":0,"startJitter":0
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result["navigated"], true,
+            "explicit JavaScript location navigation remains supported: {result}"
+        );
+        assert_eq!(session.url, format!("{origin}/client-target"));
+        assert_eq!(session.last_render_navigation_count, 0);
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![
+                "GET /canceled",
+                "GET /invalid",
+                "GET /policy",
+                "GET /javascript",
+                "GET /client-target"
+            ]
+        );
+        server.abort();
     }
 
     // The synthesizer fires the FULL, realistic key-event sequence: per typed char

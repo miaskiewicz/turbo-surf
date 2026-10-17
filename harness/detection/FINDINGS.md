@@ -33,7 +33,22 @@ identical to93fbdd3; its changes add coverage tests, including a cfg(test) suffi
 A final review reproduced mixed-case font units producing NaNpx and scalar calc
 line-height losing inheritance. Canonical3ed91fb repairs both with real negative
 controls; the75-test production cohort above precedes that final correction.
-Full workspace/addon gates and fresh API/Google measurements remain pending. The
+The source9028bf4 genuine-native155 workspace run passes1,452 tests across134
+suites, zero failures and6 generated-doctest ignores, with all1,446 selected source
+hashes unchanged. This precedes the crypto ownership repair below and does not
+certify that repair.
+
+Linux stock-V8150 CI exposed retained old-realm Array ownership in a new
+reentrant-clone navigation control. Actual heap traces identify two isolate-shared
+roots initialized by the first markup iframe: WebCrypto error builders and native
+interface descriptor metadata. Capturing both in the main realm before any frame
+bootstrap passes76 stock focused controls and strict workspace Clippy with the
+original3 collections and assertion. Genuine-native155 passes20 focused
+lifetime/crypto controls with all1447 selected source hashes unchanged. An additional initial-markup retirement control covers
+the earlier initial realm that the native155 navigation test did not measure.
+Independent review and focused crypto/error-realm controls pass; final
+default/native workspace/addon gates remain pending, followed by fresh API/Google
+measurements. The
 separate BackCompat body-strut difference remains in issue28. See the
 [active checklist](./PARITY-GAPS.md#requested-pr26-implementation-batch--messaging-layoutrange-and-dom).
 

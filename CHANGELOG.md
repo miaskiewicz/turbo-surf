@@ -28,6 +28,13 @@ residual work beyond this PR, with audio separately deferred in
   callbacks. Add independent nested-frame/retained-constructor ownership controls,
   exact registry reclamation and reentrant Window transfer retirement regressions.
   Vector backing capacity retains its high-water mark; this is not full OS-memory reclamation.
+  Capture isolate-shared WebCrypto descriptors and native DOMException builders in
+  the main realm before any initial markup iframe can bootstrap. Preserve child
+  crypto/clone exception identity while allowing the first child realm to collect;
+  actual heap traces identify both former strong-root paths. The unchanged
+  reentrant navigation assertion and initial-markup retirement/realm controls pass
+  in the76-test stock focused cohort and20-test genuine-native155 lifetime/crypto
+  cohort; final complete gates remain separate.
 
 - Roll back native ownership when iframe initialization fails before publication,
   without calling guest helpers in partially installed or terminating realms.
@@ -473,18 +480,21 @@ residual work beyond this PR, with audio separately deferred in
   global registry. Forty-four independent Chrome controls pass in the canonical
   binding; final Surf integration checks remain separate.
 
-### Validation status
+### Historical validation checkpoint — source a057a3a
 
-The final current-source default workspace passes1,376 tests with three explicit
+These results describe the earlier source-bound checkpoint; the current follow-up
+requires its own complete gates and fresh measurements.
+
+That default workspace passed1,376 tests with three explicit
 stock-native callback skips and six generated doctest ignores. The final actual155
 six-feature workspace passes1,415 tests with zero failures and six generated
 doctest ignores. Both complete commands cover129 component suites. Both engines pass final XHR5, shadow9,
-all-target strict Clippy and formatting. Both rebuilt addons pass95 shim tests
+all-target strict Clippy and formatting. Both rebuilt addons passed95 shim tests
 (one intentional test-framework skip),20 E2E tests,89 detection controls without
 skips and2 Python SDK-helper tests.
 
 The optimized native CLI/addon includes wreq, trust anchors, Metal and CoreText.
-The fresh75-interface comparison records64 original/142 expanded missing members
+That75-interface comparison records64 original/142 expanded missing members
 and374 paths. On the same68 previously measured interfaces, missing members fall
 134→119 without additions; both formerly absent collection interfaces are present.
 Both actual detector captures have no strong findings. The fresh two-repeat
@@ -499,8 +509,9 @@ Google jc/lc stylesheet telemetry before search; Chrome emits neither. The
 constant-code diagnostic snapshot records this residual without asserting a
 rejection cause.
 
-Full local gates and hashes are recorded in VALIDATION-LAST-RUN.json; sanitized
-live results are in GOOGLE-LAST-RUN.json. Broader residual behavior and reliable
+Source-pinned receipts retain their own measurement dates and commits; newer
+VALIDATION-LAST-RUN.json and GOOGLE-LAST-RUN.json captures supersede this historical
+checkpoint without changing its recorded results. Broader residual behavior and reliable
 native SERP acceptance stay in issue28; advanced audio stays in issue27. See
 FINDINGS.md and PARITY-GAPS.md for current evidence and bounds. No turbo-surf
 publication tag is created here.

@@ -5,10 +5,8 @@
   "use strict";
   const ops = core.ops;
   const rawCrypto = ops.Crypto,
-    rawSubtle = ops.SubtleCrypto,
-    rawKey = ops.CryptoKey;
-  const define = Object.defineProperty,
-    descriptors = Object.getOwnPropertyDescriptors;
+    rawSubtle = ops.SubtleCrypto;
+  const define = Object.defineProperty;
   const create = Object.create,
     setPrototype = Object.setPrototypeOf,
     own = Object.hasOwn;
@@ -23,25 +21,8 @@
   const bufferPrototype = ArrayBuffer.prototype;
   const get = ops.op_interface_record_get,
     set = ops.op_interface_record_set;
-  // Captured on the first bootstrap and never installed on a public constructor.
-  let shared = get(rawCrypto);
-  if (!shared) {
-    shared = create(null);
-    shared.kind = "NativeCryptoBackend";
-    set(rawCrypto, shared);
-  }
-  if (!own(shared, "cryptoBackend")) {
-    const backend = create(null);
-    backend.createCrypto = rawCrypto.create;
-    backend.createSubtle = rawSubtle.create;
-    backend.crypto = descriptors(rawCrypto.prototype);
-    backend.subtle = descriptors(rawSubtle.prototype);
-    backend.key = descriptors(rawKey.prototype);
-    backend.supports = rawSubtle.supports;
-    backend.typeErrorPrototype = Object.getPrototypeOf(core.buildCustomError("TypeError", ""));
-    define(shared, "cryptoBackend", { value: backend });
-  }
-  const backend = shared.cryptoBackend;
+  // Isolate-owned metadata is captured in the main realm before any iframe.
+  const backend = get(rawCrypto).cryptoBackend;
   const isPrototypeOf = Object.prototype.isPrototypeOf;
   const domName = Object.getOwnPropertyDescriptor(NativeDOMException.prototype, "name").get;
   const domMessage = Object.getOwnPropertyDescriptor(NativeDOMException.prototype, "message").get;
@@ -58,20 +39,6 @@
     } catch {
       return error;
     }
-  }
-  for (const name of [
-    "DataCloneError",
-    "DataError",
-    "InvalidAccessError",
-    "NotSupportedError",
-    "OperationError",
-    "SyntaxError",
-    "QuotaExceededError",
-    "TypeMismatchError",
-  ]) {
-    const nativeName = "DOMException" + name;
-    if (core.buildCustomError(nativeName, "") === undefined)
-      core.registerErrorBuilder(nativeName, (message) => new NativeDOMException(message, name));
   }
   const hybrid = hybridFactory(ops.NativeHybridKey, backend, apply, NativeDOMException);
   const nativeKeyGet = (name, key) => hybrid.get(name, key);

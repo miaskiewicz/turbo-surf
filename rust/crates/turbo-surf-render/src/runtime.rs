@@ -6995,6 +6995,27 @@ for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:
   for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true});
 }
 
+// Deno's error builders live for the whole isolate. Register them in the main
+// realm before frame bootstrap can install crypto, so an initial iframe never
+// becomes a permanent constructor/context root in the shared native core.
+if (!__G.isFrame) {
+  const NativeDOMException = globalThis.DOMException;
+  for (const name of [
+    "DataCloneError",
+    "DataError",
+    "InvalidAccessError",
+    "NotSupportedError",
+    "OperationError",
+    "SyntaxError",
+    "QuotaExceededError",
+    "TypeMismatchError",
+  ]) {
+    const nativeName = "DOMException" + name;
+    if (__core.buildCustomError(nativeName, "") === undefined)
+      __core.registerErrorBuilder(nativeName, (message) => new NativeDOMException(message, name));
+  }
+}
+
 // Present a real Chrome (macOS) navigator so page JS that profiles the browser
 // (consistency-only anti-bot gates, feature detection) sees Chrome, not the old
 // `turbo-surf`/`turbo-test` tell. Kept in sync with the tier-1 HTTP UA in
@@ -12435,6 +12456,7 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
             .get_slot::<RuntimeCore>()
             .ok_or("Native crypto core unavailable")?;
         let core = crate::context_ownership::local(scope, &core.0);
+        crate::crypto_backend::capture_shared(scope, core)?;
         install_environment(scope, core.into())?;
         crate::crypto_backend::install(scope, core, trustworthy_url(base))?;
         crate::audio_backend::install(scope, core)?;

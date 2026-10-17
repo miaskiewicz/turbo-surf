@@ -40,8 +40,11 @@ hashes are unchanged during the140.32s run on canonical e8152d3/public layout93f
 The final pinned producer2eac7f6 adds coverage tests with identical production
 bytes. The final canonical3ed91fb separately passes74 focused tests on rusty_v8 149.3.0,
 including the40-case Chrome font oracle and repaired mixed-case/scalar calc paths.
-The75-test production cohort above precedes that last font correction. Complete workspace/addon gates are still
-pending; the focused cohort does not replace them. Earlier22/49/52-control runs
+The75-test production cohort above precedes that last font correction. The later
+source9028bf4 genuine-native155 workspace passes1,452 tests across134 suites, zero
+failures and6 generated-doctest ignores, with1,446 selected source hashes unchanged.
+It precedes the newly identified shared-crypto iframe ownership repair; complete
+post-repair workspace/addon gates remain pending. Focused controls do not replace them. Earlier22/49/52-control runs
 remain historical checkpoints.
 
 The new authored probes are reusable through the paired localhost collector:

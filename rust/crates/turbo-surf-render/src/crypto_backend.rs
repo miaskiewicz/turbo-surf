@@ -7,6 +7,23 @@ pub(crate) const BOOTSTRAP: &str = include_str!("crypto_backend.js");
 const ALGORITHMS: &str = include_str!("crypto_algorithms.js");
 const HYBRID: &str = include_str!("crypto_hybrid.js");
 
+pub(crate) fn capture_shared<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    core: v8::Local<'s, v8::Object>,
+) -> Result<(), String> {
+    v8::tc_scope!(let scope, scope);
+    let source = v8::String::new(scope, include_str!("crypto_backend_shared.js")).unwrap();
+    let function = v8::Script::compile(scope, source, None)
+        .and_then(|script| script.run(scope))
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+        .ok_or("native WebCrypto shared metadata capture failed")?;
+    let receiver = v8::undefined(scope);
+    function
+        .call(scope, receiver.into(), &[core.into()])
+        .ok_or_else(|| "native WebCrypto shared metadata initialization failed".to_owned())?;
+    Ok(())
+}
+
 pub(crate) fn install<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Object>,

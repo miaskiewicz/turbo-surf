@@ -215,12 +215,20 @@ async fn navigation_during_clone_discards_only_the_old_window_transfer_snapshot(
     for _ in 0..3 {
         page.collect_message_port_garbage_for_testing();
     }
-    assert_eq!(
-        page.eval_expression("String(oldArray.deref()===undefined)")
-            .await
-            .unwrap(),
-        "true"
-    );
+    let old_array_collected = page
+        .eval_expression("String(oldArray.deref()===undefined)")
+        .await
+        .unwrap();
+    if old_array_collected != "true" {
+        if let Some(path) = std::env::var_os("TURBO_SURF_NAVIGATION_CLONE_HEAP") {
+            eprintln!(
+                "navigation clone diagnostic V8 {}",
+                turbo_surf_render::v8_version()
+            );
+            std::fs::write(path, page.native_heap_snapshot_for_testing()).unwrap();
+        }
+    }
+    assert_eq!(old_array_collected, "true");
     let ports = page.message_port_diagnostics_for_testing();
     assert_eq!(ports["endpoints"], 1, "{ports}");
     assert_eq!(ports["queuedMessages"], 0, "{ports}");
@@ -232,4 +240,53 @@ async fn navigation_during_clone_discards_only_the_old_window_transfer_snapshot(
         page.collect_message_port_garbage_for_testing();
     }
     assert_eq!(page.message_port_diagnostics_for_testing()["endpoints"], 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn initial_markup_frame_cannot_own_isolate_lifetime_crypto_metadata() {
+    let mut page = turbo_surf_render::PageSession::open(
+        "<iframe id=f></iframe>",
+        "https://lifetime.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let realms = page
+        .eval_json_expression(r#"(async()=>{
+          const child=document.getElementById('f').contentWindow;
+          const constructorError=(Constructor,ErrorClass)=>{try{new Constructor();return false}catch(error){return error instanceof ErrorClass}};
+          const cloneError=(clone,ErrorClass,Other)=>{try{clone(()=>{});return false}catch(error){return error instanceof ErrorClass&&!(error instanceof Other)&&error.name==='DataCloneError'}};
+          const key=await crypto.subtle.generateKey({name:'AES-GCM',length:128},false,['encrypt']);
+          const permissionError=async(subtle,ErrorClass,Other)=>{try{await subtle.exportKey('raw',key);return false}catch(error){return error instanceof ErrorClass&&!(error instanceof Other)&&error.name==='InvalidAccessError'}};
+          return {
+            constructors:child.Crypto!==Crypto&&child.Crypto.prototype!==Crypto.prototype,
+            objects:crypto instanceof Crypto&&child.crypto instanceof child.Crypto&&!(child.crypto instanceof Crypto)&&!(crypto instanceof child.Crypto),
+            parentConstructor:constructorError(Crypto,TypeError),
+            childConstructor:constructorError(child.Crypto,child.TypeError),
+            parentClone:cloneError(structuredClone,DOMException,child.DOMException),
+            childClone:cloneError(child.structuredClone,child.DOMException,DOMException),
+            parentPermission:await permissionError(crypto.subtle,DOMException,child.DOMException),
+            childPermission:await permissionError(child.crypto.subtle,child.DOMException,DOMException)
+          };
+        })()"#)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&realms).unwrap(),
+        json!({"constructors":true,"objects":true,"parentConstructor":true,"childConstructor":true,"parentClone":true,"childClone":true,"parentPermission":true,"childPermission":true})
+    );
+    page.eval("document.getElementById('f').remove();globalThis.__RESULT='removed';")
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    let contexts = page.context_registry_diagnostics_for_testing();
+    assert_eq!(contexts["live"], 1, "{contexts}");
+    assert_eq!(
+        page.frame_lifecycle_diagnostics_for_testing()["hostContexts"],
+        0
+    );
 }

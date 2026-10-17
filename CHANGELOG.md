@@ -17,12 +17,19 @@ residual work beyond this PR, with audio separately deferred in
   whole/split runs, decorated boxes, partial Ranges and eleven transform contexts,
   retaining the explicit unsupported fixed-containing-block boundary. Bound
   WebSocket startup and cover timeout, early-close and error cleanup offline.
-- Pin public layout5a602097 for native source-run advance admission before
+  Add a fifteen-scene leading-space control with individual collapsed-space and
+  caret Ranges, plus an exact end-to-end DOM/CSS regression. Genuinely recapture
+  all three modes after collector changes; preserve previous geometry exactly.
+- Pin public layout0850383, including native source-run advance admission before
   wrapping and placement, preserving raw glyph intervals for partial Ranges.
   Apply Chrome's float transform stages to native text selections and actual
   block/replaced border quads; retain ordinary inline and PDF mapping. Keep
   same-source merges within compatible projection contexts and collect containing
-  blocks in one pass. Producer762-test and exact focused controls pass; final
+  blocks in one pass. Preserve leading spaces inside their real inline boundary,
+  place collapsed successor offsets after the rendered space, and carry collapsed
+  source prefixes with wrapped spans or bare text. Generic/PDF mapping is unchanged.
+  Producer765-test and corrected bare-text/host-box supplement pass. Both stock and
+  native155 inline targets pass5/5 with unchanged source hashes; final complete
   consumer gates remain separate.
 
 - Preserve per-element custom-element reaction order across reentrant adoption,

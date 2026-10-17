@@ -45,7 +45,16 @@ node harness/detection/font-run-geometry-chrome-control.mjs \
   --out /private/tmp/range-transform-oracle.json
 ```
 
-Both modes bound WebSocket startup, retain unexpected errors, pin the shared
+A third mode captures leading-space ownership after images and inline blocks,
+including direct text, nested/decorated spans, wrapping, paragraph starts and BRs:
+
+```sh
+node harness/detection/font-run-geometry-chrome-control.mjs \
+  --producer /path/to/turbo-html2pdf --probe leading-spaces \
+  --out /private/tmp/leading-space-oracle.json
+```
+
+All three modes bound WebSocket startup, retain unexpected errors, pin the shared
 socket helper source, and reject changed font/probe/collector inputs. Exact Range
 and Element observations stay separate; equal final screen positions do not
 justify collapsing their different transform stages.

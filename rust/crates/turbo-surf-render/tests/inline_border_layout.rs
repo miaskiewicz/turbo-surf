@@ -37,15 +37,10 @@ fn bundled_inline_advances_preserve_exact_decoration_and_offset_contracts() {
     }
 }
 
-#[test]
-fn bundled_font_runs_partial_ranges_splits_and_rotation_match_normal_chrome() {
+fn bundled_geometry_matches_chrome(source: &str, expected: &str, families: &[&str]) {
     use serde_json::Value;
     use sha2::{Digest, Sha256};
-    let source = include_str!("../../../../harness/detection/font-run-geometry-probe.js");
-    let expected: Value = serde_json::from_str(include_str!(
-        "../../../../harness/detection/fixtures/font-run-geometry-chrome155.json"
-    ))
-    .unwrap();
+    let expected: Value = serde_json::from_str(expected).unwrap();
     assert_eq!(expected["mode"], "headed-direct-cdp");
     assert_eq!(expected["errors"], serde_json::json!([]));
     assert_eq!(
@@ -62,7 +57,7 @@ fn bundled_font_runs_partial_ranges_splits_and_rotation_match_normal_chrome() {
         )
     );
     let rows = expected["result"].as_array().unwrap();
-    for family in ["IBM Plex Mono", "Fira Code"] {
+    for &family in families {
         let matching: Vec<_> = rows
             .iter()
             .filter(|row| row["viewportMode"] == "natural" && row["geometry"]["family"] == family)
@@ -92,6 +87,26 @@ fn bundled_font_runs_partial_ranges_splits_and_rotation_match_normal_chrome() {
             .is_some());
         assert_eq!(actual, geometry, "{family}: {actual}");
     }
+}
+
+#[test]
+fn bundled_font_runs_partial_ranges_splits_and_rotation_match_normal_chrome() {
+    bundled_geometry_matches_chrome(
+        include_str!("../../../../harness/detection/font-run-geometry-probe.js"),
+        include_str!("../../../../harness/detection/fixtures/font-run-geometry-chrome155.json"),
+        &["IBM Plex Mono", "Fira Code"],
+    );
+}
+
+#[test]
+fn leading_spaces_preserve_inline_boundaries_source_ranges_and_wrapping_like_chrome() {
+    bundled_geometry_matches_chrome(
+        include_str!("../../../../harness/detection/leading-space-geometry-probe.js"),
+        include_str!(
+            "../../../../harness/detection/fixtures/leading-space-geometry-chrome155.json"
+        ),
+        &["IBM Plex Mono"],
+    );
 }
 
 #[cfg(target_os = "macos")]

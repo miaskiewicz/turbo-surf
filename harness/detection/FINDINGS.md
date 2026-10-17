@@ -73,7 +73,24 @@ tolerance replaces the exact assertions. The actual V8155 component rerun also
 passes78/78 tests, zero ignored, with the same1455 source hashes unchanged.
 Producer CI passes runtime, strict and binding checks; coverage9656/9658 (99.98%)
 identifies only two untested lines, now receiving targeted controls without
-changing thresholds or exclusions.
+changing thresholds or exclusions. The coverage controls expose a further real
+leading-whitespace ownership bug after an image/inline block: the span boundary
+and text-source origin exclude a space that normal Chrome renders inside the
+span. A source-bound negative is preserved. Fifteen frozen Chrome scenes now
+cover direct text, nested/decorated spans, wrapped spans/bare text, paragraph starts and BRs;
+individual Ranges prove the second collapsed space maps after the first rendered
+space. The reusable collector's third mode and exact end-to-end regression are
+saved. All three modes were genuinely recaptured with their final collector hash,
+with previous geometry exactly unchanged. Public layout0850383 now repairs native
+boundary/source ownership and moves collapsed prefixes with wrapped spans and bare
+text. Its full core/PDF suite passes765 tests/56 suites with204 source hashes
+unchanged; a stronger test-only supplement verifies actual bare-text construction
+and host boxes. Strict Clippy, formatting, complexity and independent reviews pass.
+Both Surf manifests and Cargo.lock pin this revision. Its stock and genuine-native155
+inline targets each pass5/5 tests with the same1457 source hashes unchanged. The
+new test compares all fifteen scenes through actual DOM/CSS, including complete
+Range vectors. Complete workspace/addon validation and producer CI coverage remain
+pending.
 
 These complete native gates describe the source before that precision repair.
 Final post-repair default/native workspace/addon gates and fresh API/Google

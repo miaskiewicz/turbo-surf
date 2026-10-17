@@ -1,14 +1,17 @@
 # Native live geometry
 
 The renderer uses the public Git-pinned `turbo-html2pdf-core 0.3.8` candidate
-`5a602097` from producer PR #23. The latest published registry release is 0.3.7.
-This revision repairs source-run advance admission and distinguishes staged native
-Range/block/replaced projection from accumulated ordinary inline mapping. Producer
-762-test validation plus strict checks pass, with an equivalent test/fixture-only
-supplement. Surf's stock inline target passes4/4 and its genuine-native155
-messaging/layout/DOM cohort passes78/78, with all1455 source hashes unchanged.
-Producer coverage needs two additional controls after9656/9658 covered lines;
-other CI checks pass. Final full consumer gates remain pending. The current
+`0850383` from producer PR #23. The latest published registry release is 0.3.7.
+It includes source-run advance admission and staged native Range/block/replaced
+projection, plus leading-space boundary ownership and wrapped source-prefix fixes.
+Ordinary inline/PDF projection and generic/PDF whitespace behavior stay unchanged.
+Producer765 full core/PDF tests and the stronger actual-bare-text/host-box supplement
+pass, alongside strict Clippy, formatting, complexity and independent reviews.
+Surf's stock and genuine-native155 inline targets each pass5/5 tests, including all
+fifteen leading-space scenes through actual DOM/CSS bindings, with the same1457
+selected source hashes unchanged. Producer coverage and final complete consumer
+workspace/addon gates remain pending. The earlier5a602097 component cohort78/78
+and stock4/4 results at1455 source hashes are predecessor evidence. The current
 follow-up also integrates default/zero iframe corrections and officially
 re-vendored computed-font resolution;
 the implementation and exact tested source are tracked in [PARITY-GAPS.md](./PARITY-GAPS.md).

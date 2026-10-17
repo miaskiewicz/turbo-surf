@@ -118,3 +118,51 @@ test("Range transform sibling retains exact source provenance and distinct real 
   assert.deepEqual(full("padding-flow"), full("absolute"));
   assert.notEqual(full("margin-flow").width, full("padding-flow").width);
 });
+
+test("leading-space oracle preserves real inline ownership and collapsed source offsets", () => {
+  const control = JSON.parse(
+    readFileSync(new URL("./fixtures/leading-space-geometry-chrome155.json", import.meta.url)),
+  );
+  assert.equal(control.mode, "headed-direct-cdp");
+  assert.equal(control.probeKind, "leading-spaces");
+  assert.equal(control.probeSha256, sha("./leading-space-geometry-probe.js"));
+  assert.equal(control.collectorSha256, sha("./font-run-geometry-chrome-control.mjs"));
+  assert.equal(control.socketHelperSha256, sha("./websocket-open.mjs"));
+  assert.deepEqual(control.errors, []);
+  assert.deepEqual(control.fonts, fixture.fonts);
+  assert.equal(control.result.length, 1);
+  const row = control.result[0];
+  assert.equal(row.geometry.family, "IBM Plex Mono");
+  assert.ok(
+    row.platformFonts.some((font) => font.isCustomFont && font.familyName === "IBM Plex Mono"),
+  );
+  const cases = row.geometry.cases;
+  assert.equal(cases.length, 15);
+  for (const atom of ["image", "inline-block"]) {
+    const one = cases.find((entry) => entry.atom === atom && entry.prefix === " " && !entry.mode);
+    const two = cases.find((entry) => entry.atom === atom && entry.prefix === "  " && !entry.mode);
+    assert.equal(one.captionBox.x, 10);
+    assert.equal(one.captionBox.width, 38.40625);
+    assert.deepEqual(two.captionBox, one.captionBox);
+    assert.equal(two.individualRanges[0].rect.width, 9.6015625);
+    for (const range of two.individualRanges.slice(1)) {
+      assert.equal(range.rect.x, 19.59375);
+      assert.equal(range.rect.width, 0);
+    }
+  }
+  for (const mode of ["line-wrapped", "paragraph-start", "after-br"]) {
+    const entry = cases.find((candidate) => candidate.mode === mode);
+    assert.equal(entry.prefixRange.rect.width, 0);
+    assert.deepEqual(entry.fullRange.rect, entry.visibleRange.rect);
+  }
+  assert.equal(cases.filter((entry) => entry.mode === "direct").length, 2);
+  const wrappedDirect = cases.filter((entry) => entry.mode === "direct-wrapped");
+  assert.equal(wrappedDirect.length, 2);
+  for (const entry of wrappedDirect) {
+    assert.equal(entry.prefixRange.rect.width, 0);
+    assert.equal(entry.prefixRange.rect.y, 25.5);
+    assert.deepEqual(entry.fullRange.rect, entry.visibleRange.rect);
+  }
+  assert.ok(cases.some((entry) => entry.mode === "nested-wrapper"));
+  assert.ok(cases.some((entry) => entry.mode === "decorated"));
+});

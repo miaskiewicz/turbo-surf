@@ -14,7 +14,7 @@ description = "turbo-surf synthetic screenshot tier: HTML snapshot â†’ layout â†
 # `min-height` (0.2.10); `linear-gradient` (0.2.9); box-shadow (0.2.8);
 # border-radius (0.2.7).
 # Tested PR23 candidate; switch to the registry only after0.3.8 is published.
-turbo-html2pdf-core = { version = "0.3.8", git = "https://github.com/miaskiewicz/turbo-html2pdf", rev = "5a602097276b9b87b780309ef656e283c6f485db" }
+turbo-html2pdf-core = { version = "0.3.8", git = "https://github.com/miaskiewicz/turbo-html2pdf", rev = "0850383fc2505295e34a3c34ddd2ede3bbc2dc84" }
 # Raster canvas + PNG encode (Pixmap::encode_png, default `png-format` feature).
 tiny-skia = "0.11"
 # Glyph outlines: we parse `FontFace::data()` bytes independently to trace each

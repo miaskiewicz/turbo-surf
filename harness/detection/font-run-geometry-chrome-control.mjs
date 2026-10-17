@@ -42,12 +42,23 @@ const fonts = [
   if (!bytes.equals(pinned)) throw Error(`Font differs from public producer pin: ${path}`);
   return { family, path, route: `/font-${index}.ttf`, bytes, sha256: sha(bytes) };
 });
-const transformStages = values.probe === "range-transforms";
-if (!transformStages && values.probe !== "font-runs") throw Error("Unknown font geometry probe");
-const probePath = join(
-    root,
-    `harness/detection/${transformStages ? "range-transform-stages" : "font-run-geometry"}-probe.js`,
-  ),
+const probes = {
+  "font-runs": {
+    name: "font-run-geometry",
+    dprs: [null, 1, 2],
+    families: [...fonts, { family: "monospace" }],
+  },
+  "range-transforms": { name: "range-transform-stages", dprs: [null], families: fonts, cases: 11 },
+  "leading-spaces": {
+    name: "leading-space-geometry",
+    dprs: [null],
+    families: fonts.slice(0, 1),
+    cases: 15,
+  },
+};
+const selectedProbe = probes[values.probe];
+if (!Object.hasOwn(probes, values.probe)) throw Error("Unknown font geometry probe");
+const probePath = join(root, `harness/detection/${selectedProbe.name}-probe.js`),
   probe = readFileSync(probePath, "utf8"),
   collectorPath = fileURLToPath(import.meta.url),
   collectorSource = readFileSync(collectorPath),
@@ -127,8 +138,8 @@ try {
   );
   const version = await connection.call("Browser.getVersion"),
     result = [];
-  for (const requestedDpr of transformStages ? [null] : [null, 1, 2]) {
-    for (const font of transformStages ? fonts : [...fonts, { family: "monospace" }]) {
+  for (const requestedDpr of selectedProbe.dprs) {
+    for (const font of selectedProbe.families) {
       const { targetId } = await connection.call("Target.createTarget", { url: "about:blank" }),
         { sessionId } = await connection.call("Target.attachToTarget", { targetId, flatten: true });
       await connection.call("Runtime.enable", {}, sessionId);
@@ -169,8 +180,8 @@ try {
       if (
         !geometry ||
         geometry.family !== font.family ||
-        (transformStages
-          ? geometry.cases?.length !== 11
+        (selectedProbe.cases
+          ? geometry.cases?.length !== selectedProbe.cases
           : Object.keys(geometry.decoration.checks).length !== 7)
       )
         throw Error("Incomplete font geometry result");

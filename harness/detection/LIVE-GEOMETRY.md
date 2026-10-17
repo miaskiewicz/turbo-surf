@@ -1,9 +1,16 @@
 # Native live geometry
 
 The renderer uses the public Git-pinned `turbo-html2pdf-core 0.3.8` candidate
-`2eac7f6` from producer PR #23. The latest published registry release is 0.3.7.
-The current follow-up integrates default/zero iframe corrections; computed-font
-resolution is officially re-vendored; final production gates remain pending;
+`5a602097` from producer PR #23. The latest published registry release is 0.3.7.
+This revision repairs source-run advance admission and distinguishes staged native
+Range/block/replaced projection from accumulated ordinary inline mapping. Producer
+762-test validation plus strict checks pass, with an equivalent test/fixture-only
+supplement. Surf's stock inline target passes4/4 and its genuine-native155
+messaging/layout/DOM cohort passes78/78, with all1455 source hashes unchanged.
+Producer coverage needs two additional controls after9656/9658 covered lines;
+other CI checks pass. Final full consumer gates remain pending. The current
+follow-up also integrates default/zero iframe corrections and officially
+re-vendored computed-font resolution;
 the implementation and exact tested source are tracked in [PARITY-GAPS.md](./PARITY-GAPS.md).
 It copies the actual native DOM through public rtdom methods and assigns external
 source identities. Native CSSOM exports supply current inline, linked, imported
@@ -43,9 +50,13 @@ including the40-case Chrome font oracle and repaired mixed-case/scalar calc path
 The75-test production cohort above precedes that last font correction. The later
 source9028bf4 genuine-native155 workspace passes1,452 tests across134 suites, zero
 failures and6 generated-doctest ignores, with1,446 selected source hashes unchanged.
-It precedes the newly identified shared-crypto iframe ownership repair; complete
-post-repair workspace/addon gates remain pending. Focused controls do not replace them. Earlier22/49/52-control runs
-remain historical checkpoints.
+That result precedes the shared-crypto iframe ownership repair. Source31bf6fe
+then passes the complete genuine-native155 workspace:1,453 tests, zero failures
+and6 generated-doctest ignores across134 suites, strict all-target Clippy and
+formatting, with all1,447 selected source hashes unchanged. Subsequent Linux CI
+passes all eight frame-lifetime tests but exposes a bundled-font inline advance
+mismatch. The new production geometry candidate requires renewed complete gates
+and rebuilt addons. Earlier22/49/52-control runs remain historical checkpoints.
 
 The new authored probes are reusable through the paired localhost collector:
 
@@ -80,6 +91,18 @@ Viewport accessors and media queries preserve measured receiver/origin/error
 behavior. Cross-document shadow adoption clears constructed sheet lists before
 callbacks; frame retirement empties retained Element/Range geometry.
 
+The reusable same-font control now serves the exact pinned IBM Plex Mono and
+Fira Code bytes to normal headed Chrome, recording font/source hashes and actual
+selected platform fonts. Whole and split source nodes, spaces, partial ranges and
+rotation remain separate observations. The native candidate fixes source-run
+admission before wrapping and placement. Its original rotated Range control now
+matches exactly, as do the admitted nested block-Element contexts. The22 focused
+producer tests pass with exact assertions; full gates and public dependency
+integration remain pending. The sibling retains eleven Chrome contexts, with
+native fixed children under a
+transformed containing block still explicitly rejected and tracked in issue28. A headless capture has different font metrics and is preserved
+separately. See the collector command in [README.md](./README.md).
+
 Remaining bounds:
 
 - Computed font resolution has40 independent Chrome cases plus owner/lifecycle
@@ -92,6 +115,11 @@ Remaining bounds:
   defaults also need separate controls beyond the measured body/inheritance cases.
   Preserve unresolved state through
   inheritance instead of converting it to zero or an undefined value (issue28).
+
+- Native glyph advances now have a source-audited, same-font control candidate.
+  Broader GPOS adjustment ordering and macOS AAT/trak font backend behavior still
+  need independent controls; matching IBM/Fira and existing Times/Menlo cases does
+  not establish complete shaping/backend conformance (issue28).
 
 - BackCompat/quirks inline strut geometry needs real document-mode input. The
   retained zero-viewport about:blank control measures native body height34px versus

@@ -11,6 +11,20 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Reusable diagnostics and browser identity
 
+- Add reusable normal headed Chrome controls using the producer's exact bundled
+  IBM Plex Mono and Fira Code bytes. Pin font, probe, collector and socket-helper
+  hashes; record selected fonts and preserve separate headless metrics. Capture
+  whole/split runs, decorated boxes, partial Ranges and eleven transform contexts,
+  retaining the explicit unsupported fixed-containing-block boundary. Bound
+  WebSocket startup and cover timeout, early-close and error cleanup offline.
+- Pin public layout5a602097 for native source-run advance admission before
+  wrapping and placement, preserving raw glyph intervals for partial Ranges.
+  Apply Chrome's float transform stages to native text selections and actual
+  block/replaced border quads; retain ordinary inline and PDF mapping. Keep
+  same-source merges within compatible projection contexts and collect containing
+  blocks in one pass. Producer762-test and exact focused controls pass; final
+  consumer gates remain separate.
+
 - Preserve per-element custom-element reaction order across reentrant adoption,
   including definition-realm callbacks and error routing. Parse Range fragments in
   their actual post-conversion context with native namespace, form-ancestor,

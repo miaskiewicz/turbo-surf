@@ -5848,7 +5848,7 @@ dependencies = [
 [[package]]
 name = "turbo-html2pdf-core"
 version = "0.3.8"
-source = "git+https://github.com/miaskiewicz/turbo-html2pdf?rev=2eac7f64142d8e6bde37f7ae46006c991b6f2347#2eac7f64142d8e6bde37f7ae46006c991b6f2347"
+source = "git+https://github.com/miaskiewicz/turbo-html2pdf?rev=5a602097276b9b87b780309ef656e283c6f485db#5a602097276b9b87b780309ef656e283c6f485db"
 dependencies = [
  "chrono",
  "core-foundation",

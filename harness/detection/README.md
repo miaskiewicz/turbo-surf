@@ -16,6 +16,40 @@ active work separately from historical full-gate and live Google measurements.
 The [compression dictionary controls](./COMPRESSION-DICTIONARIES.md) document genuine
 discovery, policy/lifecycle, independent codec fixtures and current streaming bounds.
 
+## Same-font geometry control
+
+Compare run advances, decorated inline boxes, partial text Ranges and rotation
+using the exact bundled IBM Plex Mono and Fira Code font bytes:
+
+```sh
+node harness/detection/font-run-geometry-chrome-control.mjs \
+  --producer /path/to/turbo-html2pdf --out /private/tmp/font-run-oracle.json
+```
+
+Use Node22 or newer and a fresh output path. The producer checkout must contain
+commit2eac7f6; the collector verifies its pinned font bytes before serving them.
+It launches fresh normal headed Chrome with the established direct-CDP policy,
+records actual selected fonts, source/font hashes and natural/emulated device
+scales, and closes the browser/server afterward. Optional `--headless` records a
+separate mode with potentially different metrics; it cannot replace the headed
+oracle. The saved [control](./fixtures/font-run-geometry-chrome155.json) preserves
+all measured values, including unequal widths for adjacent partial intervals.
+
+The sibling [Range transform control](./fixtures/range-transform-stages-chrome155.json)
+separates body-margin, padding, absolute/fixed positioning, nested rotation,
+transform origins and identity/integer-translation stages:
+
+```sh
+node harness/detection/font-run-geometry-chrome-control.mjs \
+  --producer /path/to/turbo-html2pdf --probe range-transforms \
+  --out /private/tmp/range-transform-oracle.json
+```
+
+Both modes bound WebSocket startup, retain unexpected errors, pin the shared
+socket helper source, and reject changed font/probe/collector inputs. Exact Range
+and Element observations stay separate; equal final screen positions do not
+justify collapsing their different transform stages.
+
 ## Window and native timer clocks
 
 `window-timer-clock-chrome.mjs` captures independent normal Chrome outcomes for
@@ -404,9 +438,11 @@ contexts. The native Inspector inventories generated sources without replacing
 proof of complete coverage or the server's rejection reason. This runner does
 not capture TLS/HTTP2 packets; the localhost ClientHello control is separate.
 
-The installed Chrome updated to 155.0.8059.40 on 2026-10-13. The genuine
-[155 source profile](./engine-155/README.md) builds V8 15.5.35.20-rusty. The
-HTTP profile targets 155 with measured seeded brands and header order; its upstream
+Current installed controls record Chrome155.0.8059.80 / V815.5.35.23. The genuine
+[155 source profile](./engine-155/README.md) builds actual V815.5.35.23-rusty
+from the Chrome155.0.8059.79 source pin; the older155.40 / V815.5.35.20 profile
+is retained explicitly for historical reproduction. The HTTP profile targets155
+with measured seeded brands and header order; its upstream
 TLS/H2 recipe is still 154. Record the actual browser, V8, target and base transport
 versions for each run. An unchanged official Chrome-for-Testing 154.0.8037.92
 has V8 15.4.80.19 (native is 15.4.80.20-rusty), and its standard launch currently

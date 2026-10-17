@@ -28,7 +28,7 @@ source hashes remain unchanged during its140.32s run. It includes the exact
 frame4, host input11, inline2, live geometry23 and shadow10. Earlier failures and
 the unchanged ownership/timing assertions remain preserved.
 
-The final pinned layout candidate is public2eac7f6, whose production bytes are
+The earlier pinned layout candidate is public2eac7f6, whose production bytes are
 identical to93fbdd3; its changes add coverage tests, including a cfg(test) suffix.
 A final review reproduced mixed-case font units producing NaNpx and scalar calc
 line-height losing inheritance. Canonical3ed91fb repairs both with real negative
@@ -46,9 +46,38 @@ bootstrap passes76 stock focused controls and strict workspace Clippy with the
 original3 collections and assertion. Genuine-native155 passes20 focused
 lifetime/crypto controls with all1447 selected source hashes unchanged. An additional initial-markup retirement control covers
 the earlier initial realm that the native155 navigation test did not measure.
-Independent review and focused crypto/error-realm controls pass; final
-default/native workspace/addon gates remain pending, followed by fresh API/Google
-measurements. The
+The source31bf6fe native workspace subsequently passes1,453 tests/134 suites with
+6 generated-doctest ignores; strict Clippy and formatting pass, with all1,447
+selected source hashes unchanged. Both Linux CI jobs pass the repaired8 lifetime
+controls, then fail the portable inline-width equality assertion.
+
+A deterministic same-font control isolates the difference: normal headed Chrome
+returns equal inline/Range widths, while native inline boxes retain raw advances
+and native Range already matches Chrome. With pinned IBM Plex Mono bytes, normal
+Chrome returns28.8046875px; native inline width is28.800003051757812px. Fira Code
+returns29.5390625px in normal Chrome/native Range versus29.53845977783203px for
+native inline width. Independent direct-CDP controls retain natural desktop scale
+and emulated scales separately. The earlier Playwright-headless capture uses a
+different grid and remains separate evidence.
+
+Public layout5a602097 now fixes native source-run admission before wrapping and
+placement, preserving exact partial glyph intervals. Source-audited transform
+stages also repair Range and block/replaced Element projection while preserving
+ordinary inline and PDF mapping. Producer22 focused and762 full tests pass, with
+strict checks and a test/fixture-only supplement. Its independent sibling compares
+42 admitted captures exactly and retains2 typed fixed-containing-block rejections;
+the corresponding Chrome observations remain saved. Surf now pins that public
+revision and passes all4 stock inline tests, including the full IBM/Fira geometry
+through actual DOM/CSS bindings, with1455 selected source hashes unchanged. No
+tolerance replaces the exact assertions. The actual V8155 component rerun also
+passes78/78 tests, zero ignored, with the same1455 source hashes unchanged.
+Producer CI passes runtime, strict and binding checks; coverage9656/9658 (99.98%)
+identifies only two untested lines, now receiving targeted controls without
+changing thresholds or exclusions.
+
+These complete native gates describe the source before that precision repair.
+Final post-repair default/native workspace/addon gates and fresh API/Google
+measurements remain pending. The
 separate BackCompat body-strut difference remains in issue28. See the
 [active checklist](./PARITY-GAPS.md#requested-pr26-implementation-batch--messaging-layoutrange-and-dom).
 

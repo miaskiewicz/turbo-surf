@@ -72,8 +72,13 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   decorated/empty/mixed-font inline boxes now have independent controls, including
   corrected macOS generic-serif font selection. The final75-test genuine-native155 cohort passes, including the exact20-scene
   iframe comparison, frame initialization/GC and production custom elements.
-  Default/zero iframe and canonical computed-font corrections are integrated;
-  complete workspace/addon gates remain pending. Unsupported
+  Default/zero iframe and canonical computed-font corrections are integrated.
+  Source31bf6fe passes1,453 genuine-native155 workspace tests plus strict checks;
+  subsequent Linux CI exposes an exact bundled-font inline advance difference.
+  Public layout5a602097 repairs native source advances and block/Range projection;
+  the real Surf bridge passes4 stock inline tests and78 actual-native155 component
+  tests with1455 source hashes unchanged. Renewed complete default/native workspace
+  and rebuilt addon gates remain pending. Unsupported
   inline alignment/writing/positioning, full stacking contexts and broader scrolling
   remain explicit bounds. See [the scope and controls](../harness/detection/LIVE-GEOMETRY.md).
 
@@ -1411,7 +1416,12 @@ Native isolation is now granted only by secure actual navigation with valid same
 Credentialless frames use an ephemeral top-document partition containing a real CookieJar and separate local/session storage backing. Initial navigation, response cookies, document.cookie, fetch, scripts, images and module graphs select that native partition. Credentialless siblings share it; normal frames retain their ordinary state. Native partition teardown reclaims its storage areas. PermissionsPolicy/FeaturePolicy has actual private brands/header parsing and measured defaults; Navigator.permissions query and clipboard reject disabled features.42 top headers,79 iframe admission/delegation cases,8 real shared-memory delivery cases,3 query-effect cases and a network/storage partition control match fresh normal Chrome155. Full popup/reporting/dynamic/deep policy, client-hint delegation and additional controlled APIs remain pending; merged/native155 and live-network validation remain independent.
 
 
-## Validated parity checkpoint (2026-10-16)
+## Historical validated parity checkpoint (2026-10-16)
+
+This section preserves its original source and test counts. The current
+messaging/layout/DOM follow-up and pending delivery gates are recorded in
+[PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md); these earlier results do not
+certify later changes.
 
 Production source at `26bd0f4` vendors committed canonical turbo-test `1e93cae`
 through the normal vendor script. Public DOM 0.5.7 candidate `fb60e6f` and layout 0.3.8
@@ -1445,7 +1455,7 @@ The human driver awaits its real Promise. XHR identity, descriptors/constants
 and private receiver checks match the independent bounded Chrome/HTTP controls.
 These implementations do not close broader lifecycle, policy or API behavior.
 
-The final complete workspace commands pass **1,376 default / 1,415 native 155
+At this checkpoint the complete workspace commands pass **1,376 default / 1,415 native 155
 tests**, zero failures, across 129 component suites each. Default has three
 unavailable native-callback ignores plus six generated doctest ignores; native 155
 has the six doctest ignores. Both strict all-target Clippy and formatting gates
@@ -1455,7 +1465,7 @@ counts, feature sets and hashes recorded in
 Native validation includes the MCP wreq/trust-anchors/Metal/CoreText set and the
 NAPI Metal/CoreText features. The shared GPU scene matches within its tested scope.
 
-The current independent 75-interface pair measures 64 original-scope / 142 expanded
+The checkpoint’s independent 75-interface pair measures 64 original-scope / 142 expanded
 missing own members and 374 leaf difference paths. All measured interfaces are
 present; this does not certify their full behavior or every browser interface.
 [API-INVENTORY.json](../harness/detection/API-INVENTORY.json) preserves exact lists

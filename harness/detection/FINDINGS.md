@@ -86,11 +86,26 @@ boundary/source ownership and moves collapsed prefixes with wrapped spans and ba
 text. Its full core/PDF suite passes765 tests/56 suites with204 source hashes
 unchanged; a stronger test-only supplement verifies actual bare-text construction
 and host boxes. Strict Clippy, formatting, complexity and independent reviews pass.
-Both Surf manifests and Cargo.lock pin this revision. Its stock and genuine-native155
-inline targets each pass5/5 tests with the same1457 source hashes unchanged. The
+That085 revision's stock and genuine-native155 inline targets each pass5/5 tests with the same1457 source hashes unchanged. The
 new test compares all fifteen scenes through actual DOM/CSS, including complete
 Range vectors. Complete workspace/addon validation and producer CI coverage remain
 pending.
+
+The subsequent ordinary-wrap coverage control exposed missing internal-space source
+records in bare text such as `abc def`. Public layoutdcbfd20 now retains each actual
+UTF-16 cell, preserves both wrapped separator Range endpoints and keeps caret
+old/new-line affinity distinct. Caret canonicalization follows only connected zero
+CSS-space cells ending at a real glyph on the winning physical edge, preserving
+visible leading spaces and pre/nowrap glyphs. Generic/PDF paths stay unchanged.
+Both Surf consumers and Cargo.lock pin this revision. Producer767 tests/56 suites
+and41 focused controls pass with205 source hashes unchanged; strict checks and
+independent reviews pass. The nineteen-scene reusable control includes four actual
+ordinary-text scenes and preserves the previous fifteen observations exactly.
+Current stock/native155 inline targets each pass5/5, zero ignored, with the same1457
+selected source hashes unchanged (manifest5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a).
+All nineteen scenes compare exactly through real DOM/CSS. Complete workspace/addon
+gates and producer CI coverage remain pending. The earlier085 five-test passes above
+precede this additional repair.
 
 These complete native gates describe the source before that precision repair.
 Final post-repair default/native workspace/addon gates and fresh API/Google

@@ -99,7 +99,7 @@ fn bundled_font_runs_partial_ranges_splits_and_rotation_match_normal_chrome() {
 }
 
 #[test]
-fn leading_spaces_preserve_inline_boundaries_source_ranges_and_wrapping_like_chrome() {
+fn leading_and_internal_spaces_preserve_boundaries_ranges_and_wrapping_like_chrome() {
     bundled_geometry_matches_chrome(
         include_str!("../../../../harness/detection/leading-space-geometry-probe.js"),
         include_str!(

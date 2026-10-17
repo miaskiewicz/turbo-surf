@@ -17,20 +17,25 @@ residual work beyond this PR, with audio separately deferred in
   whole/split runs, decorated boxes, partial Ranges and eleven transform contexts,
   retaining the explicit unsupported fixed-containing-block boundary. Bound
   WebSocket startup and cover timeout, early-close and error cleanup offline.
-  Add a fifteen-scene leading-space control with individual collapsed-space and
-  caret Ranges, plus an exact end-to-end DOM/CSS regression. Genuinely recapture
+  Add a nineteen-scene whitespace control with individual collapsed-space,
+  wrapped Range endpoint and caret-affinity observations, plus an exact end-to-end
+  DOM/CSS regression. Genuinely recapture
   all three modes after collector changes; preserve previous geometry exactly.
-- Pin public layout0850383, including native source-run advance admission before
+- Pin public layoutdcbfd20, including native source-run advance admission before
   wrapping and placement, preserving raw glyph intervals for partial Ranges.
   Apply Chrome's float transform stages to native text selections and actual
   block/replaced border quads; retain ordinary inline and PDF mapping. Keep
   same-source merges within compatible projection contexts and collect containing
   blocks in one pass. Preserve leading spaces inside their real inline boundary,
   place collapsed successor offsets after the rendered space, and carry collapsed
-  source prefixes with wrapped spans or bare text. Generic/PDF mapping is unchanged.
-  Producer765-test and corrected bare-text/host-box supplement pass. Both stock and
-  native155 inline targets pass5/5 with unchanged source hashes; final complete
-  consumer gates remain separate.
+  source prefixes with wrapped spans or bare text. Retain actual internal-space
+  UTF-16 cells in bare text, preserve wrapped Range endpoints and canonicalize
+  caret offsets only through connected zero-space cells at the winning edge.
+  Keep positive leading spaces and pre/nowrap glyph provenance; generic/PDF paths
+  stay unchanged. Document the new public Rust source-cluster provenance fields.
+  Producer767 full tests and41 focused controls pass. Current stock/native155
+  inline targets each pass5/5 with1457 unchanged source hashes and all nineteen
+  Chrome scenes; complete consumer gates remain separate.
 
 - Preserve per-element custom-element reaction order across reentrant adoption,
   including definition-realm callbacks and error routing. Parse Range fragments in

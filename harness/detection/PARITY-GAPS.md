@@ -33,14 +33,14 @@ entry with implementation, independent controls and integrated results as it lan
 | Area | Implemented and measured | Remaining delivery checks |
 |---|---|---|
 | Messaging / GC | Weak-context registry pruning, retained/nested frame retirement, native initialization rollback and queued transfer cleanup have regressions. Source31bf6fe removes both heap-proven first-frame WebCrypto roots while preserving child exception identity, the original3 collections and5000ms budget. It passes76 stock focused controls,20 genuine-native155 lifetime/crypto controls, then the complete native workspace:1453 tests, zero failures,6 generated-doctest ignores across134 suites, strict Clippy and formatting, with1447 selected source hashes unchanged. Both Linux CI jobs pass all8 frame-lifetime tests. | The later production geometry integration requires renewed final-source default/native and rebuilt addon gates. |
-| Layout / Range | Public layout0850383 is pinned in both consumers. The following focused consumer results describe predecessor5a602097; its later leading-space fix is detailed below. Native source-run admission and separate Range/block/replaced transform stages fix the measured font/rotation differences while preserving ordinary inline and PDF behavior. Producer22 focused and762 full core/PDF tests pass, with strict checks and a test/fixture-only supplement. Its sibling compares42 admitted captures exactly and retains2 typed fixed-containing-block rejections. The real Surf DOM/CSS bridge passes all4 stock inline tests, including complete IBM/Fira whole/split/partial/rotated geometry and the existing43-scene inline control, with1455 selected source hashes unchanged. | The genuine-native155 component cohort also passes78/78 tests, zero ignored, with the same1455 source hashes unchanged. Producer CI passes runtime/strict/binding checks; its99.98% coverage result identifies two untested lines, with targeted controls being added. Final full consumer/addon gates remain pending. Earlier75-test controls resolved the combined hang, iframe sizing, composed slots, scoped CSS and retirement; their original source/hash records remain in FINDINGS.md and LIVE-GEOMETRY.md. |
+| Layout / Range | Public layoutdcbfd20 is pinned in both consumers. Source-run admission, separate Range/block/replaced float stages, complete leading/internal whitespace UTF-16 ownership, wrapped endpoints and source-derived caret canonicalization have regressions. Producer767 full tests/56 suites and41 focused controls pass with205 source hashes unchanged, alongside strict checks and independent reviews. The nineteen-scene control preserves the earlier fifteen observations;42 transform captures match and two fixed-child cases retain typed rejections. | Current stock and genuine-native155 inline targets each pass5/5 tests, zero ignored, with all1457 selected source hashes unchanged. All nineteen scenes run through actual DOM/CSS; complete workspaces and rebuilt addons are pending. Earlier085 stock/native inline5/5 at1457 source hashes and5a component78/78/stock4/4 at1455 hashes are predecessor proof. Earlier75 controls resolved the combined hang, iframe sizing, composed slots, scoped CSS and retirement; exact source/hash records remain in FINDINGS.md and LIVE-GEOMETRY.md. |
 | DOM | Canonical3ed91fb is officially re-vendored; public DOM aaeb290 is pinned in all six consumers. Canonical74 focused tests pass on rusty_v8 149.3.0, including23 CSS controls and40 independent Chrome font cases. Production custom-element callbacks, parser/observer lifecycle, adopted stylesheet clearing and frame font ownership have genuine-native155 controls and are included in the source31bf6fe full workspace result above. | Final-source combined default/native/addon gates and fresh paired API/Google measurements remain pending. |
 
-Closing the two uncovered producer lines exposes an additional active PR26 bug:
+Closing the two uncovered producer lines exposed another bug in predecessor5a:
 a span's leading whitespace after an image or inline block is assigned outside
 its opening boundary. Independent same-font Chrome places the caption at x10
 with width38.40625 and the visible ABC Range at x19.59375 with width28.8125;
-the current native handoff has the wrong source origin. Fifteen frozen Chrome
+the5a native handoff had the wrong source origin. Fifteen frozen Chrome
 scenes cover direct text, nested/decorated spans, wrapped spans/bare text and paragraph starts/BRs;
 individual Ranges and carets distinguish the first rendered space from the second
 collapsed space. The reusable collector and exact end-to-end regression are saved;
@@ -48,11 +48,22 @@ all three collector modes were genuinely recaptured with previous geometry uncha
 Public layout0850383 now fixes native boundary/source ownership and wrapped
 span/bare-text prefix placement; its full765-test core/PDF gate and corrected
 bare-text/host-box supplement pass, along with strict checks and independent
-reviews. Both Surf consumers and Cargo.lock pin it. Stock and genuine-native155
+reviews. That085 revision's stock and genuine-native155
 inline targets each pass5/5 tests with all1457 selected source hashes unchanged,
 including the complete fifteen-scene DOM/CSS comparison. The public5a/Surf048d
 focused passes above precede this repair; complete workspace/addon gates remain
 pending.
+
+The subsequent ordinary-wrap control exposed missing internal-space source cells in
+bare text. Public layoutdcbfd20 now retains real UTF-16 cells, both wrapped Range
+endpoints and distinct caret affinities. Only actual connected zero-space suffixes
+at the winning glyph edge canonicalize caret offsets; visible leading spaces and
+pre/nowrap glyphs remain candidates. Producer767 full tests and41 focused controls
+pass, with strict checks and independent reviews. Four ordinary one/two-space scenes
+extend the reusable control to nineteen, preserving previous observations exactly.
+Both final-source stock/native155 inline targets pass5/5 tests at the same1457
+unchanged source hashes, covering all nineteen scenes. Complete workspaces/addons
+and producer CI coverage remain pending.
 
 The native glyph candidate is bounded by the measured fonts. Broader GPOS
 adjustment ordering and macOS AAT/trak backend selection still need independent

@@ -1,17 +1,23 @@
 # Native live geometry
 
-The renderer uses the public Git-pinned `turbo-html2pdf-core 0.3.8` candidate
-`0850383` from producer PR #23. The latest published registry release is 0.3.7.
-It includes source-run advance admission and staged native Range/block/replaced
-projection, plus leading-space boundary ownership and wrapped source-prefix fixes.
-Ordinary inline/PDF projection and generic/PDF whitespace behavior stay unchanged.
-Producer765 full core/PDF tests and the stronger actual-bare-text/host-box supplement
-pass, alongside strict Clippy, formatting, complexity and independent reviews.
-Surf's stock and genuine-native155 inline targets each pass5/5 tests, including all
-fifteen leading-space scenes through actual DOM/CSS bindings, with the same1457
-selected source hashes unchanged. Producer coverage and final complete consumer
-workspace/addon gates remain pending. The earlier5a602097 component cohort78/78
-and stock4/4 results at1455 source hashes are predecessor evidence. The current
+The renderer uses public Git-pinned `turbo-html2pdf-core 0.3.8` candidate
+`dcbfd20` from producer PR #23; the published registry release is0.3.7.
+Native source-run admission, float transform stages and real whitespace ownership
+now include complete bare-text UTF-16 cells, wrapped Range endpoints and caret
+canonicalization at the winning edge. Visible leading spaces, pre/nowrap glyphs,
+ordinary inline/PDF projection and generic/PDF whitespace behavior stay unchanged.
+The public Rust source-cluster structs gain documented whitespace provenance fields.
+Producer767 full core/PDF tests across56 suites and41 focused controls pass with205
+source hashes unchanged; strict Clippy, formatting, complexity and independent
+reviews pass. Current stock/native155 inline targets each pass5/5 tests, zero
+ignored, with all1457 selected source hashes unchanged, including the complete
+nineteen-scene DOM/CSS comparison. Complete workspaces/addons and producer CI
+coverage remain pending.
+Earlier085 stock/native155 inline targets each passed5/5 at1457 unchanged source
+hashes for the fifteen-scene control; this precedes the internal-space/caret fix.
+The current reusable control has nineteen scenes with full prefix/individual Range
+vectors and caret affinities. Earlier5a component78/78 and stock4/4 at1455 source
+hashes are also predecessor evidence. The current
 follow-up also integrates default/zero iframe corrections and officially
 re-vendored computed-font resolution;
 the implementation and exact tested source are tracked in [PARITY-GAPS.md](./PARITY-GAPS.md).

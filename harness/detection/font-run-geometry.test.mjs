@@ -137,7 +137,7 @@ test("leading-space oracle preserves real inline ownership and collapsed source 
     row.platformFonts.some((font) => font.isCustomFont && font.familyName === "IBM Plex Mono"),
   );
   const cases = row.geometry.cases;
-  assert.equal(cases.length, 15);
+  assert.equal(cases.length, 19);
   for (const atom of ["image", "inline-block"]) {
     const one = cases.find((entry) => entry.atom === atom && entry.prefix === " " && !entry.mode);
     const two = cases.find((entry) => entry.atom === atom && entry.prefix === "  " && !entry.mode);
@@ -165,4 +165,37 @@ test("leading-space oracle preserves real inline ownership and collapsed source 
   }
   assert.ok(cases.some((entry) => entry.mode === "nested-wrapper"));
   assert.ok(cases.some((entry) => entry.mode === "decorated"));
+});
+
+test("ordinary whitespace separates wrapped Range boundaries from caret affinity", () => {
+  const control = JSON.parse(
+    readFileSync(new URL("./fixtures/leading-space-geometry-chrome155.json", import.meta.url)),
+  );
+  const ordinary = control.result[0].geometry.cases.filter((entry) => entry.mode === "ordinary");
+  assert.equal(ordinary.length, 4);
+  for (const entry of ordinary) {
+    const wrapped = entry.width === 45;
+    assert.equal(entry.spacesRange.rects.length, wrapped ? 2 : 1);
+    assert.equal(entry.firstWordRange.rect.width, 28.8046875);
+    if (!wrapped) {
+      assert.equal(entry.spacesRange.rect.x, 28.796875);
+      assert.equal(entry.spacesRange.rect.width, 9.609375);
+      assert.equal(entry.secondWordRange.rect.x, 38.3984375);
+      continue;
+    }
+    assert.deepEqual(entry.spacesRange.rects, [
+      { x: 28.796875, y: 1.5, width: 0, height: 21 },
+      { x: 0, y: 25.5, width: 0, height: 21 },
+    ]);
+    assert.deepEqual(entry.spacesRange.rect, entry.spacesRange.rects[0]);
+    for (const prefix of entry.prefixRanges) {
+      assert.deepEqual(prefix.rects, entry.firstWordRange.rects);
+    }
+    const before = entry.individualRanges.find((range) => range.start === 3 && range.end === 3);
+    const end = entry.text.indexOf("def");
+    const after = entry.individualRanges.find((range) => range.start === end && range.end === end);
+    assert.deepEqual(before.rects, [entry.spacesRange.rects[0]]);
+    assert.deepEqual(after.rects, [entry.spacesRange.rects[1]]);
+    assert.equal(entry.fullRange.rects.length, 2);
+  }
 });

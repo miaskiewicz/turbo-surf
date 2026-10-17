@@ -53,7 +53,7 @@ const probes = {
     name: "leading-space-geometry",
     dprs: [null],
     families: fonts.slice(0, 1),
-    cases: 15,
+    cases: 19,
   },
 };
 const selectedProbe = probes[values.probe];

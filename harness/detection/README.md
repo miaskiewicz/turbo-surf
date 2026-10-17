@@ -46,7 +46,9 @@ node harness/detection/font-run-geometry-chrome-control.mjs \
 ```
 
 A third mode captures leading-space ownership after images and inline blocks,
-including direct text, nested/decorated spans, wrapping, paragraph starts and BRs:
+including direct text, nested/decorated spans, wrapping, paragraph starts and BRs.
+It also captures ordinary bare-text internal spaces, wrapped Range endpoints and
+caret affinity with one or two collapsed spaces:
 
 ```sh
 node harness/detection/font-run-geometry-chrome-control.mjs \

@@ -75,10 +75,12 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   Default/zero iframe and canonical computed-font corrections are integrated.
   Source31bf6fe passes1,453 genuine-native155 workspace tests plus strict checks;
   subsequent Linux CI exposes an exact bundled-font inline advance difference.
-  Public layout0850383 adds native leading-space ownership and wrapped source-prefix
-  fixes, with765 producer tests plus the corrected bare-text/host supplement.
-  Both stock/native155 inline targets pass5/5 at1457 unchanged source hashes;
-  complete workspace/addon gates are pending. Predecessor layout5a602097 repairs native
+  Public layoutdcbfd20 adds complete native leading/internal-space source ownership,
+  wrapped endpoints and caret affinity, with767 full producer tests and41 focused
+  controls. Current stock/native155 inline targets pass5/5 with1457 source hashes
+  unchanged, including all nineteen scenes; complete workspace/addon gates are
+  pending. Predecessor085
+  stock/native155 inline targets pass5/5 at1457 unchanged source hashes. Predecessor layout5a602097 repairs native
   source advances and block/Range projection;
   the real Surf bridge passes4 stock inline tests and78 actual-native155 component
   tests with1455 source hashes unchanged. Renewed complete default/native workspace

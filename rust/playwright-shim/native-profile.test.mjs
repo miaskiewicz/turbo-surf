@@ -21,6 +21,22 @@ const control = JSON.parse(
   readFileSync(new URL("fixtures/native-profile-chrome155.json", detection)),
 );
 
+test("the addon reports its linked renderer engine without exposing diagnostics to guests", async () => {
+  assert.equal(typeof native.engineVersion, "function");
+  const actual = native.engineVersion();
+  assert.match(actual, /^\d+\.\d+\.\d+\.\d+(?:-[\w.-]+)?$/);
+  const expected = process.env.TURBO_SURF_EXPECTED_V8_VERSION;
+  if (expected !== undefined) assert.equal(actual, expected);
+  const page = newPage();
+  try {
+    await page.setContent("<!doctype html><body>Engine diagnostic isolation</body>");
+    assert.equal(await page.evaluate("typeof globalThis.engineVersion"), "undefined");
+    assert.equal(native.engineVersion(), actual);
+  } finally {
+    await page.close();
+  }
+});
+
 async function fixture(run) {
   const counts = new Map();
   const server = createServer((request, response) => {

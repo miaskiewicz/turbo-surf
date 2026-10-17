@@ -81,6 +81,37 @@
 			"font-size:10px",
 		],
 		["calc-font-size", "font-size:20px", "font-size:calc(1em + 2px)"],
+		[
+			"scalar-calc-line-inheritance",
+			"font-size:20px;line-height:calc(1 + 1)",
+			"font-size:10px",
+		],
+		["mixedcase-em", "font-size:20px;line-height:1.5EM", "font-size:2eM"],
+		["mixedcase-rem-px", "font-size:20px", "font-size:2ReM;line-height:2pX"],
+		["mixedcase-pt-pc", "font-size:20px", "font-size:18Pt;line-height:1pC"],
+		[
+			"mixedcase-absolute-calc",
+			"",
+			"font-size:CALC(1IN + 2.54CM + 25.4MM + 101.6Q + 6PC + 72PT + 1PX);line-height:CALC(1eM + 1pX)",
+		],
+		["uppercase-shorthand", "font:ITALIC SMALL-CAPS BOLD 20PX/2 SERIF", ""],
+		[
+			"mixedcase-inherit",
+			"font:italic bold 20px/1.5 monospace",
+			"font:InHeRiT",
+		],
+		[
+			"uppercase-normal-smaller",
+			"font:italic bold 20px/2 serif",
+			"font-style:NORMAL;font-weight:NORMAL;font-variant-caps:NORMAL;line-height:NORMAL;font-size:SMALLER;font-family:MoNoSpAcE",
+		],
+		["uppercase-initial", "font:italic bold 24px/2 monospace", "font:INITIAL"],
+		["uppercase-revert-layer", "font:20px/1.5 monospace", "font:REVERT-LAYER"],
+		[
+			"mixedcase-family",
+			"",
+			'font-family:"MiXeD Family", mOnOsPaCe;font-size:18PX',
+		],
 	];
 	const rows = [];
 	for (const [name, parentStyle, childStyle] of cases) {

@@ -60,6 +60,12 @@ Chrome launch, DNS, localhost binding or Metal access must allow those operation
 for the corresponding run. Compiled GPU support alone does not prove real GPU
 readback: compare the recorded WebGL draw against Chrome.
 
+The rebuilt development addon exposes host-only `engineVersion()` for the actual
+linked renderer V8. Query that addon directly when recording engine provenance;
+`version()` is the package version and `process.versions.v8` belongs to Node.
+The native shim validation can set `TURBO_SURF_EXPECTED_V8_VERSION` to assert an
+exact engine version. This diagnostic is not installed in guest pages.
+
 Each run freezes a copy of the native executable so another Cargo build cannot
 replace it between passes. It checks the reported `impersonate`, `trustAnchors`,
 `gpuMetal` and `coretext` features. The default native identity is pinned in both

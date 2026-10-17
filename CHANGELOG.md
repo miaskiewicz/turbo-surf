@@ -20,7 +20,7 @@ residual work beyond this PR, with audio separately deferred in
   preserving same-document moves and disconnected roots. Stop automatic construction
   and queued reactions after a definition frame retires, retaining registry lookup
   and existing instance identity. Re-vendor
-  canonical turbo-test e8152d3 and pin the additive public turbo-dom aaeb290 API
+  canonical turbo-test 3ed91fb and pin the additive public turbo-dom aaeb290 API
   consistently across all six consumers.
 
 - Drop collected weak context registrations at host boundaries after actual V8 GC,
@@ -181,7 +181,7 @@ residual work beyond this PR, with audio separately deferred in
 ### Native DOM, scripts and ownership
 
 - Consume public Git-pinned turbo-dom0.5.7 candidateaaeb290 (latest registry
-  release0.5.6) and re-vendor committed turbo-teste8152d3. Native per-isolate node state preserves
+  release0.5.6) and re-vendor committed turbo-test3ed91fb. Native per-isolate node state preserves
   original UTF-16 payloads, names, parser positions and mutation-time ancestry.
   GC callbacks schedule bounded storage scans outside collection; genuine weak
   wrapper/guest edges and native job pins preserve retained identities without
@@ -273,9 +273,13 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Layout, CSS and resources
 
+- Expose the actual linked renderer V8 version through the host-only NAPI
+  `engineVersion()` diagnostic. Keep it distinct from package versions, the
+  advertised browser profile and Node's own V8; assert the expected engine during
+  native addon validation without adding a guest global.
 - Resolve measured initial/inherited computed font longhands and shorthand using
-  private owner-context preferences, relative arithmetic and typed line-height
-  state. Follow actual assigned-slot inheritance and flat-tree availability;
+  private owner-context preferences, case-insensitive grammar tokens, typed
+  arithmetic and scalar-versus-length line-height inheritance. Follow actual assigned-slot inheritance and flat-tree availability;
   refresh retained declarations after mutation, adoption, disconnect and frame
   retirement. Preserve conversion order and captured numeric intrinsics. Broader
   UA element defaults and unresolved font expressions remain tracked in issue28.

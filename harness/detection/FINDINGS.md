@@ -15,8 +15,8 @@ Google captures below describe their frozen source, rather than these new change
 Actual-GC controls verify pruning of collected weak context registrations while
 retained documents remain usable. Canonical custom-element reaction ordering and
 actual-context fragment parsing are officially re-vendored from turbo-test
-`e8152d3`, with the public turbo-dom parser API pinned at `aaeb290`. Its73 focused
-canonical tests pass on rusty_v8 149.3.0, including22 CSS controls and a29-case
+`3ed91fb`, with the public turbo-dom parser API pinned at `aaeb290`. Its74 focused
+canonical tests pass on rusty_v8 149.3.0, including23 CSS controls and a40-case
 Chrome font oracle; production native155 validation is separate.
 
 Expanded independent Chrome controls exposed adopted shadow stylesheets surviving
@@ -30,6 +30,9 @@ the unchanged ownership/timing assertions remain preserved.
 
 The final pinned layout candidate is public2eac7f6, whose production bytes are
 identical to93fbdd3; its changes add coverage tests, including a cfg(test) suffix.
+A final review reproduced mixed-case font units producing NaNpx and scalar calc
+line-height losing inheritance. Canonical3ed91fb repairs both with real negative
+controls; the75-test production cohort above precedes that final correction.
 Full workspace/addon gates and fresh API/Google measurements remain pending. The
 separate BackCompat body-strut difference remains in issue28. See the
 [active checklist](./PARITY-GAPS.md#requested-pr26-implementation-batch--messaging-layoutrange-and-dom).

@@ -60,6 +60,11 @@ pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+#[napi]
+pub fn engine_version() -> String {
+    turbo_surf_render::v8_version().to_string()
+}
+
 fn to_json_string<T: serde::Serialize>(v: &T) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| "null".to_string())
 }

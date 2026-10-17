@@ -614,3 +614,33 @@ fn font_variant_caps_subset_preserves_parser_validation_and_reset_order() {
         ])
     );
 }
+
+#[test]
+fn computed_font_case_normalization_uses_private_intrinsics_and_preserves_author_names() {
+    let value=run_with_font_defaults("<!doctype html><body><div style='font:ITALIC BOLD 20PX/2 SERIF'><span id=x style='font-size:2EM;line-height:NORMAL;font-family:&quot;MiXeD Family&quot;,mOnOsPaCe'></span></div></body>", r#"JSON.stringify((()=>{
+        const original=String.prototype.toLowerCase;let hooks=0;
+        String.prototype.toLowerCase=function(){const text=String(this);if(/(?:EM|PX|NORMAL|ITALIC|BOLD|SERIF|MiXeD|mOnOsPaCe)/.test(text)){hooks++;throw Error('guest font lowercase');}return Reflect.apply(original,this,[]);};
+        let result;try{const style=getComputedStyle(document.getElementById('x'));result=[style.font,style.lineHeight];}finally{String.prototype.toLowerCase=original;}
+        return [result,hooks];
+    })())"#,Some(("serif",16.0)));
+    assert_eq!(
+        value,
+        serde_json::json!([["italic 700 40px \"MiXeD Family\", monospace", "normal"], 0])
+    );
+    let unresolved=run_with_font_defaults("<!doctype html><body><div style='font-size:var(--FontSize);font-family:var(--FontFamily);line-height:var(--LineHeight)'><span id=x></span></div></body>",r#"JSON.stringify((()=>{const style=getComputedStyle(document.getElementById('x'));return [style.fontSize,style.fontFamily,style.lineHeight];})())"#,Some(("serif",16.0)));
+    assert_eq!(
+        unresolved,
+        serde_json::json!(["var(--FontSize)", "var(--FontFamily)", "var(--LineHeight)"])
+    );
+    for declaration in [
+        "font: INITIAL",
+        "font-size: ReVeRt-LaYeR",
+        "line-height: UnSeT",
+    ] {
+        assert!(
+            cssom_parser::parse(&format!("x {{{declaration}}}")).contains(declaration),
+            "{declaration}"
+        );
+    }
+    assert!(!cssom_parser::parse("x {font: INITIALgarbage}").contains("font:"));
+}

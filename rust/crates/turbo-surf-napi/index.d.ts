@@ -3,6 +3,8 @@
 // JS shim that wraps this addon.
 
 export function version(): string;
+/** Actual V8 version linked into the native renderer; host-only diagnostics. */
+export function engineVersion(): string;
 
 /** Fetch a URL → JSON `{ html, finalUrl, status, redirected }`. */
 export function fetchHtml(url: string): Promise<string>;

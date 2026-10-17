@@ -46,10 +46,11 @@ fn deferred_value(tokens: &TokenList<'_>) -> bool {
     tokens.0.iter().any(|token| match token {
         TokenOrValue::Var(_) | TokenOrValue::Env(_) => true,
         TokenOrValue::Function(function) => deferred_value(&function.arguments),
-        TokenOrValue::Token(Token::Ident(name)) => matches!(
-            name.as_ref(),
-            "inherit" | "initial" | "unset" | "revert" | "revert-layer"
-        ),
+        TokenOrValue::Token(Token::Ident(name)) => {
+            ["inherit", "initial", "unset", "revert", "revert-layer"]
+                .iter()
+                .any(|keyword| name.eq_ignore_ascii_case(keyword))
+        }
         _ => false,
     })
 }

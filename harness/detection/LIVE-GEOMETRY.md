@@ -38,8 +38,9 @@ The iframe test strictly compares20 independently captured Chrome scenes. Its
 initial zero-width and computed-font differences are repaired. All1350 source
 hashes are unchanged during the140.32s run on canonical e8152d3/public layout93fbdd3.
 The final pinned producer2eac7f6 adds coverage tests with identical production
-bytes. Canonical e8152d3 separately passes73 focused tests on rusty_v8 149.3.0,
-including the29-case Chrome font oracle. Complete workspace/addon gates are still
+bytes. The final canonical3ed91fb separately passes74 focused tests on rusty_v8 149.3.0,
+including the40-case Chrome font oracle and repaired mixed-case/scalar calc paths.
+The75-test production cohort above precedes that last font correction. Complete workspace/addon gates are still
 pending; the focused cohort does not replace them. Earlier22/49/52-control runs
 remain historical checkpoints.
 
@@ -78,9 +79,10 @@ callbacks; frame retirement empties retained Element/Range geometry.
 
 Remaining bounds:
 
-- Computed font resolution has29 independent Chrome cases plus owner/lifecycle
+- Computed font resolution has40 independent Chrome cases plus owner/lifecycle
   controls.
-  Metric-dependent ch/ex, viewport units and min/max/clamp/var expressions remain
+  Metric-dependent ch/ex, viewport units, unit-cancelling division and
+  min/max/clamp/var expressions remain
   uncertified; the existing partial computed-style surface can retain unresolved
   authored text for those classes. This does not certify their resolved values or
   complete font shorthand/variant grammar or serialization. Per-element UA heading/form-control font

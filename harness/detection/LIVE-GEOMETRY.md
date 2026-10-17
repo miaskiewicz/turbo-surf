@@ -11,8 +11,10 @@ Producer767 full core/PDF tests across56 suites and41 focused controls pass with
 source hashes unchanged; strict Clippy, formatting, complexity and independent
 reviews pass. Current stock/native155 inline targets each pass5/5 tests, zero
 ignored, with all1457 selected source hashes unchanged, including the complete
-nineteen-scene DOM/CSS comparison. Complete workspaces/addons and producer CI
-coverage remain pending.
+nineteen-scene DOM/CSS comparison. Implementation a005 passes the complete
+stock workspace1,411 and native155 workspace1,456, strict checks, formatting and
+rebuilt addon/Node/CDP gates. The test-only producer follow-up `4999290` passes768
+tests and coverage9,806/9,806; pinned dcb production bytes stay unchanged.
 Earlier085 stock/native155 inline targets each passed5/5 at1457 unchanged source
 hashes for the fifteen-scene control; this precedes the internal-space/caret fix.
 The current reusable control has nineteen scenes with full prefix/individual Range
@@ -47,13 +49,13 @@ The reusable `*-chrome-control.mjs` runners serve independent authored localhost
 fixtures. The older controls retain their original Chrome155.0.8059.79 metadata;
 new shadow/scoped controls record Chrome155.0.8059.80. Both use V815.5.35.23.
 Source/collector hashes pin the executed inputs; font-specific controls also
-record their measured font hashes. The final focused genuine-native155 cohort
+record their measured font hashes. The earlier focused genuine-native155 cohort
 passes all75 tests, zero failures/skips: abstract Range3, custom elements10, GC4,
 lifetime7, frame4, host input11, iframe1, inline2, live geometry23 and shadow10.
 The iframe test strictly compares20 independently captured Chrome scenes. Its
 initial zero-width and computed-font differences are repaired. All1350 source
 hashes are unchanged during the140.32s run on canonical e8152d3/public layout93fbdd3.
-The final pinned producer2eac7f6 adds coverage tests with identical production
+The earlier pinned producer2eac7f6 adds coverage tests with identical production
 bytes. The final canonical3ed91fb separately passes74 focused tests on rusty_v8 149.3.0,
 including the40-case Chrome font oracle and repaired mixed-case/scalar calc paths.
 The75-test production cohort above precedes that last font correction. The later
@@ -64,8 +66,7 @@ then passes the complete genuine-native155 workspace:1,453 tests, zero failures
 and6 generated-doctest ignores across134 suites, strict all-target Clippy and
 formatting, with all1,447 selected source hashes unchanged. Subsequent Linux CI
 passes all eight frame-lifetime tests but exposes a bundled-font inline advance
-mismatch. The new production geometry candidate requires renewed complete gates
-and rebuilt addons. Earlier22/49/52-control runs remain historical checkpoints.
+mismatch. The later a005 complete gates and rebuilt addons include this geometry repair. Earlier22/49/52-control runs remain historical checkpoints.
 
 The new authored probes are reusable through the paired localhost collector:
 
@@ -106,8 +107,8 @@ selected platform fonts. Whole and split source nodes, spaces, partial ranges an
 rotation remain separate observations. The native candidate fixes source-run
 admission before wrapping and placement. Its original rotated Range control now
 matches exactly, as do the admitted nested block-Element contexts. The22 focused
-producer tests pass with exact assertions; full gates and public dependency
-integration remain pending. The sibling retains eleven Chrome contexts, with
+producer tests pass with exact assertions; public dcb integration and the
+complete a005 gates above now include this repair. The sibling retains eleven Chrome contexts, with
 native fixed children under a
 transformed containing block still explicitly rejected and tracked in issue28. A headless capture has different font metrics and is preserved
 separately. See the collector command in [README.md](./README.md).

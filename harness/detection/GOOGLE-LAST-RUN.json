@@ -1,9 +1,15 @@
 {
   "schemaVersion": 4,
-  "collectedAt": "2026-10-17T09:30:23.583Z",
-  "baseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
+  "collectedAt": "2026-10-17T14:49:05.787Z",
+  "baseCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
   "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "binaryHash": "537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47",
+  "binaryHash": "3a3e99742fe28ec2671e782b7527312979f3c1f713969429bccbd75ee0370a45",
+  "repeats": 2,
+  "errorCountScope": "Counts trace.errors; process stdout/stderr and debugger diagnostics remain separate.",
+  "nativeBaseline": {
+    "captured": 2,
+    "successful": 0
+  },
   "build": {
     "version": "0.5.4",
     "debugAssertions": false,
@@ -35,12 +41,6 @@
     "chrome-network-metadata.mjs": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2",
     "checkout-provenance.mjs": "48ba6b48298454542d134055d4560c7d380962f27d7d98695ccdf8e11373a6a2"
   },
-  "repeats": 2,
-  "errorCountScope": "Counts trace.errors; process stdout/stderr and debugger diagnostics remain separate.",
-  "nativeBaseline": {
-    "captured": 2,
-    "successful": 0
-  },
   "runs": {
     "0/chrome-baseline": {
       "exitCode": 0,
@@ -48,58 +48,58 @@
       "traceMissing": false,
       "collectorComplete": null,
       "recordedErrorCount": 1,
+      "traceSha256": "8ff3312f5450d2a8f629f7177770a336a7a654728937a3c45297be4081a8be9f",
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 177,
-        "observed": 177,
+        "responses": 108,
+        "observed": 108,
         "unknown": 0,
         "protocols": {
-          "h2": 16,
-          "h3": 135,
+          "h2": 11,
+          "h3": 84,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 26,
+          "other": 13,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
-          "TLS 1.3": 16,
-          "QUIC": 135,
+          "TLS 1.3": 11,
+          "QUIC": 84,
           "other": 0,
-          "unknown": 26
+          "unknown": 13
         },
         "securityDetails": {
-          "present": 151,
-          "missing": 26
+          "present": 95,
+          "missing": 13
         },
         "timing": {
-          "present": 151,
-          "missing": 26
+          "present": 94,
+          "missing": 14
         },
         "connectionReused": {
-          "true": 132,
-          "false": 45,
+          "true": 76,
+          "false": 32,
           "unknown": 0
         },
         "fromDiskCache": {
-          "true": 2,
-          "false": 175,
+          "true": 3,
+          "false": 105,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 177,
+          "false": 108,
           "unknown": 0
         }
       },
       "networkCoverage": {
         "source": "cdp-network",
         "scope": "attached-target-sessions",
-        "enabledInBaseline": true,
-        "packetCapture": false
+        "packetCapture": false,
+        "enabledInBaseline": true
       },
-      "traceSha256": "fc56c5f68b23317f8559ec2a65e883bf98a1d05d8d99b3a0c1799de79fd9114f",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -147,6 +147,16 @@
             "__Secure-BUCKET",
             "__Secure-ENID"
           ]
+        },
+        {
+          "path": "/sorry/index",
+          "method": "GET",
+          "context": {
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -154,7 +164,10 @@
           "phase": "home",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -167,7 +180,10 @@
           "phase": "dismiss",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -180,7 +196,10 @@
           "phase": "step-0",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -193,7 +212,10 @@
           "phase": "step-1",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -206,7 +228,10 @@
           "phase": "step-2",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -219,7 +244,10 @@
           "phase": "step-3",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -232,7 +260,10 @@
           "phase": "step-4",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -243,22 +274,12 @@
         },
         {
           "phase": "step-5",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "results": 0,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "search",
           "path": "/search",
           "origin": "https://www.google.com",
-          "results": 7,
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -267,12 +288,28 @@
           "pendingNavigation": null,
           "cookieNames": [
             "AEC",
-            "DV",
             "SEARCH_SAMESITE",
+            "SG_SS",
             "SOCS",
             "__Secure-BUCKET",
             "__Secure-ENID"
           ]
+        },
+        {
+          "phase": "search",
+          "path": "/sorry/index",
+          "origin": "https://www.google.com",
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ]
     },
@@ -282,28 +319,28 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
+      "traceSha256": "8de435bb17377e880ae45a39e78ba8f626ee4fd4974b97d3be4fe84c79a8d7e3",
       "responseTransport": {
         "source": "native-application-response",
-        "responses": 52,
-        "observed": 52,
+        "packetCapture": false,
+        "responses": 30,
+        "observed": 30,
         "unknown": 0,
         "protocols": {
-          "h2": 52,
+          "h2": 30,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
           "other": 0,
           "unknown": 0
         },
-        "tlsDetails": "not-collected",
-        "packetCapture": false
+        "tlsDetails": "not-collected"
       },
       "networkCoverage": {
         "source": "native-application-response",
         "scope": "native-network-stack",
         "packetCapture": false
       },
-      "traceSha256": "0545a064621206ee0f271e70e5cb37fc5186422927830d90d16e7735980e4778",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -379,10 +416,10 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": false,
+          "hydrationBudgetExceeded": true,
           "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 500
+            "phase": "post-load-hydration",
+            "completedPumps": 0
           },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
@@ -395,10 +432,10 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": false,
+          "hydrationBudgetExceeded": true,
           "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 500
+            "phase": "post-load-hydration",
+            "completedPumps": 0
           },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
@@ -479,59 +516,59 @@
       "timedOut": false,
       "traceMissing": false,
       "collectorComplete": null,
-      "recordedErrorCount": 2,
+      "recordedErrorCount": 1,
+      "traceSha256": "aecc1a8a183df23c11155fb85a46379f9a21c6720051426530a0905d56f4bf89",
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 111,
-        "observed": 111,
+        "responses": 106,
+        "observed": 106,
         "unknown": 0,
         "protocols": {
           "h2": 12,
-          "h3": 84,
+          "h3": 82,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 15,
+          "other": 12,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
           "TLS 1.3": 12,
-          "QUIC": 84,
+          "QUIC": 82,
           "other": 0,
-          "unknown": 15
+          "unknown": 12
         },
         "securityDetails": {
-          "present": 96,
-          "missing": 15
+          "present": 94,
+          "missing": 12
         },
         "timing": {
-          "present": 95,
-          "missing": 16
+          "present": 93,
+          "missing": 13
         },
         "connectionReused": {
-          "true": 77,
-          "false": 34,
+          "true": 75,
+          "false": 31,
           "unknown": 0
         },
         "fromDiskCache": {
           "true": 3,
-          "false": 108,
+          "false": 103,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 111,
+          "false": 106,
           "unknown": 0
         }
       },
       "networkCoverage": {
         "source": "cdp-network",
         "scope": "attached-target-sessions",
-        "enabledInBaseline": true,
-        "packetCapture": false
+        "packetCapture": false,
+        "enabledInBaseline": true
       },
-      "traceSha256": "6a9f4b9374988a5c0ee08bf54b04e1ea76226bdb9926985dfbd8d4dd316d478e",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -596,7 +633,10 @@
           "phase": "home",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -609,7 +649,10 @@
           "phase": "dismiss",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -622,7 +665,10 @@
           "phase": "step-0",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -635,7 +681,10 @@
           "phase": "step-1",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -648,7 +697,10 @@
           "phase": "step-2",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -661,7 +713,10 @@
           "phase": "step-3",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -674,7 +729,10 @@
           "phase": "step-4",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -687,27 +745,26 @@
           "phase": "step-5",
           "path": "/search",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "search",
           "path": "/sorry/index",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -724,28 +781,28 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
+      "traceSha256": "e81ccdeb03fd36100584891306da445df378ce0eca78aa754439def80ac0b82b",
       "responseTransport": {
         "source": "native-application-response",
-        "responses": 42,
-        "observed": 42,
+        "packetCapture": false,
+        "responses": 29,
+        "observed": 29,
         "unknown": 0,
         "protocols": {
-          "h2": 42,
+          "h2": 29,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
           "other": 0,
           "unknown": 0
         },
-        "tlsDetails": "not-collected",
-        "packetCapture": false
+        "tlsDetails": "not-collected"
       },
       "networkCoverage": {
         "source": "native-application-response",
         "scope": "native-network-stack",
         "packetCapture": false
       },
-      "traceSha256": "a8ede3ac212ee60f05bdda59a6edfaa5022a90f122b169ecb63d547c70a76fd8",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -921,59 +978,59 @@
       "timedOut": false,
       "traceMissing": false,
       "collectorComplete": null,
-      "recordedErrorCount": 0,
+      "recordedErrorCount": 1,
+      "traceSha256": "e4c27aefa7f0e76ac6c9a967dfd068fbb74afffaf5a27be2217d39fef17a4d36",
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 192,
-        "observed": 192,
+        "responses": 108,
+        "observed": 108,
         "unknown": 0,
         "protocols": {
-          "h2": 12,
-          "h3": 149,
+          "h2": 11,
+          "h3": 83,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 31,
+          "other": 14,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
-          "TLS 1.3": 12,
-          "QUIC": 149,
+          "TLS 1.3": 11,
+          "QUIC": 83,
           "other": 0,
-          "unknown": 31
+          "unknown": 14
         },
         "securityDetails": {
-          "present": 161,
-          "missing": 31
+          "present": 94,
+          "missing": 14
         },
         "timing": {
-          "present": 161,
-          "missing": 31
+          "present": 93,
+          "missing": 15
         },
         "connectionReused": {
-          "true": 141,
-          "false": 51,
+          "true": 76,
+          "false": 32,
           "unknown": 0
         },
         "fromDiskCache": {
-          "true": 0,
-          "false": 192,
+          "true": 3,
+          "false": 105,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 192,
+          "false": 108,
           "unknown": 0
         }
       },
       "networkCoverage": {
         "source": "cdp-network",
         "scope": "attached-target-sessions",
-        "enabledInBaseline": true,
-        "packetCapture": false
+        "packetCapture": false,
+        "enabledInBaseline": true
       },
-      "traceSha256": "7ab1ecbcece81a96cbdb6be683db53d01f5aad02d5b39d17163e2685e386af27",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1021,6 +1078,16 @@
             "__Secure-BUCKET",
             "__Secure-ENID"
           ]
+        },
+        {
+          "path": "/sorry/index",
+          "method": "GET",
+          "context": {
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -1028,7 +1095,10 @@
           "phase": "home",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1041,7 +1111,10 @@
           "phase": "dismiss",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1054,7 +1127,10 @@
           "phase": "step-0",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1067,7 +1143,10 @@
           "phase": "step-1",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1080,7 +1159,10 @@
           "phase": "step-2",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1093,7 +1175,10 @@
           "phase": "step-3",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1106,7 +1191,10 @@
           "phase": "step-4",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1117,43 +1205,35 @@
         },
         {
           "phase": "step-5",
-          "path": "/search",
+          "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "search",
-          "path": "/search",
+          "path": "/sorry/index",
           "origin": "https://www.google.com",
-          "results": 8,
+          "status": null,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "DV",
-            "SEARCH_SAMESITE",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ]
     },
@@ -1163,28 +1243,28 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
+      "traceSha256": "aa34d1b2890fb48a3f58b12064a0ddc945d2d87e69057d178af78b56a58edade",
       "responseTransport": {
         "source": "native-application-response",
-        "responses": 39,
-        "observed": 39,
+        "packetCapture": false,
+        "responses": 31,
+        "observed": 31,
         "unknown": 0,
         "protocols": {
-          "h2": 39,
+          "h2": 31,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
           "other": 0,
           "unknown": 0
         },
-        "tlsDetails": "not-collected",
-        "packetCapture": false
+        "tlsDetails": "not-collected"
       },
       "networkCoverage": {
         "source": "native-application-response",
         "scope": "native-network-stack",
         "packetCapture": false
       },
-      "traceSha256": "093b0ab54e1f7d7be26c33a7ed949648301cc9454f1f39ff6d9b5e18eb5851bf",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1361,15 +1441,16 @@
       "traceMissing": false,
       "collectorComplete": null,
       "recordedErrorCount": 1,
+      "traceSha256": "1751d723228b60c977e77ad9e44d3b8937dab4a1c08c3419986456fff0b19908",
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 110,
-        "observed": 110,
+        "responses": 106,
+        "observed": 106,
         "unknown": 0,
         "protocols": {
           "h2": 11,
-          "h3": 86,
+          "h3": 82,
           "http/1.1": 0,
           "http/1.0": 0,
           "other": 13,
@@ -1378,41 +1459,40 @@
         "tlsProtocols": {
           "TLS 1.2": 0,
           "TLS 1.3": 11,
-          "QUIC": 86,
+          "QUIC": 82,
           "other": 0,
           "unknown": 13
         },
         "securityDetails": {
-          "present": 97,
+          "present": 93,
           "missing": 13
         },
         "timing": {
-          "present": 96,
+          "present": 92,
           "missing": 14
         },
         "connectionReused": {
-          "true": 79,
-          "false": 31,
+          "true": 74,
+          "false": 32,
           "unknown": 0
         },
         "fromDiskCache": {
           "true": 3,
-          "false": 107,
+          "false": 103,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 110,
+          "false": 106,
           "unknown": 0
         }
       },
       "networkCoverage": {
         "source": "cdp-network",
         "scope": "attached-target-sessions",
-        "enabledInBaseline": true,
-        "packetCapture": false
+        "packetCapture": false,
+        "enabledInBaseline": true
       },
-      "traceSha256": "9dcadcb7e4f20188eb40bd315593b8e233bafd17829f3c71fc3caf33fa69b415",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1477,7 +1557,10 @@
           "phase": "home",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1490,7 +1573,10 @@
           "phase": "dismiss",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1503,7 +1589,10 @@
           "phase": "step-0",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1516,7 +1605,10 @@
           "phase": "step-1",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1529,7 +1621,10 @@
           "phase": "step-2",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1542,7 +1637,10 @@
           "phase": "step-3",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1555,7 +1653,10 @@
           "phase": "step-4",
           "path": "/",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1568,7 +1669,10 @@
           "phase": "step-5",
           "path": "/search",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1588,7 +1692,10 @@
           "phase": "search",
           "path": "/sorry/index",
           "origin": "https://www.google.com",
+          "status": null,
           "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": null,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1605,28 +1712,28 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
+      "traceSha256": "6764a2a761d9eec8e920757626710c71834368698ae658b0751ae1c748042659",
       "responseTransport": {
         "source": "native-application-response",
-        "responses": 32,
-        "observed": 32,
+        "packetCapture": false,
+        "responses": 30,
+        "observed": 30,
         "unknown": 0,
         "protocols": {
-          "h2": 32,
+          "h2": 30,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
           "other": 0,
           "unknown": 0
         },
-        "tlsDetails": "not-collected",
-        "packetCapture": false
+        "tlsDetails": "not-collected"
       },
       "networkCoverage": {
         "source": "native-application-response",
         "scope": "native-network-stack",
         "packetCapture": false
       },
-      "traceSha256": "e641b0489af4929d827b2130cead7ff756c32af502ec5b48032c1dd194eda22d",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1797,5 +1904,29 @@
         }
       ]
     }
-  }
+  },
+  "publicationProvenance": {
+    "implementationSourceCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
+    "selectedSourceCount": 1457,
+    "selectedSourceManifestSha256": "5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a",
+    "scope": "Actual implementation and selected code/configuration/fixture hashes verified before and after execution. This later publication changes documentation and measurement data only; it does not assert a new engine build.",
+    "sourceBeforeReceiptSha256": "63844e77525bd121ffe21f37a8f353ff476c499c0b4ffa9d72043d5ae826b6ef",
+    "matrixReceiptSha256": "4c8d75f18f99285079018c91dcc82fd4764fb13bc2609cf267cb7d4f1d0665eb",
+    "captureManifestSha256": "7294623ce3a55f9109cfeacf680b061ac823bd0d30e465f3b68fda327635464a",
+    "sanitizedCaptureSha256": "d5f2ca0890ea24519f949c60d7feac432d251b0c6f5e50f4aa3c720f26de499f",
+    "processCompletionScope": "All 14 collectors exited zero without timeout; this is not SERP acceptance.",
+    "sanitizedInputVariant": "Read-only extraction with replay of eight historical fixed-code positive controls; sanitizedCaptureSha256 identifies that extractor output before publication metadata or formatting."
+  },
+  "previousCheckpoint": {
+    "immutableReport": "https://github.com/miaskiewicz/turbo-surf/blob/a005140fabeb02c6c3c23711125944cf445a1bb9/harness/detection/GOOGLE-LAST-RUN.json",
+    "reportSha256": "c07cf9e935462c7265ce681a9351ac757abbe3093073a4a3f1cbeed2b59a1943",
+    "captureBaseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
+    "scope": "Historical capture retained at the immutable report link; not the fresh a005 measurement.",
+    "nativeBaseline": {
+      "captured": 2,
+      "successful": 0
+    },
+    "chromeBaselineFinalResultMarkers": [7, 8]
+  },
+  "harnessHashScope": "harnessHashes contains the recorded harness subset only; publicationProvenance separately identifies the complete 1457-file selected source manifest."
 }

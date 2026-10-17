@@ -70,21 +70,22 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   client/offset/scroll metrics and point-hit regions have authored Chrome controls;
   shaped text/Range/caret and composed shadow/slot controls are integrated. Source-owned
   decorated/empty/mixed-font inline boxes now have independent controls, including
-  corrected macOS generic-serif font selection. The final75-test genuine-native155 cohort passes, including the exact20-scene
+  corrected macOS generic-serif font selection. The earlier75-test genuine-native155 cohort passes, including the exact20-scene
   iframe comparison, frame initialization/GC and production custom elements.
   Default/zero iframe and canonical computed-font corrections are integrated.
-  Source31bf6fe passes1,453 genuine-native155 workspace tests plus strict checks;
-  subsequent Linux CI exposes an exact bundled-font inline advance difference.
-  Public layoutdcbfd20 adds complete native leading/internal-space source ownership,
-  wrapped endpoints and caret affinity, with767 full producer tests and41 focused
-  controls. Current stock/native155 inline targets pass5/5 with1457 source hashes
-  unchanged, including all nineteen scenes; complete workspace/addon gates are
-  pending. Predecessor085
-  stock/native155 inline targets pass5/5 at1457 unchanged source hashes. Predecessor layout5a602097 repairs native
-  source advances and block/Range projection;
-  the real Surf bridge passes4 stock inline tests and78 actual-native155 component
-  tests with1455 source hashes unchanged. Renewed complete default/native workspace
-  and rebuilt addon gates remain pending. Unsupported
+  Public layoutdcbfd20 includes native source-run admission, separate block/Range
+  transform stages and complete leading/internal-space source ownership, wrapped
+  endpoints and caret affinity. Producer767 full tests and41 focused controls pass;
+  its test-only follow-up `4999290` passes768 tests with9,806/9,806 coverage and identical
+  production bytes. All nineteen whitespace scenes compare exactly through actual
+  DOM/CSS. Implementation a005140 passes the full stock-V8-150 workspace1,411
+  tests and native-V8-155 workspace1,456, strict Clippy and formatting, preserving
+  all1,457 selected implementation source hashes. Rebuilt native addon/Node/CDP
+  gates also pass; fresh75-interface API residuals remain unchanged. Fresh Google
+  baselines are0/2 accepted SERPs for both Chrome and native, and all four native
+  homepage passes still exhaust the20-second budget. These limits remain issue28,
+  with advanced audio separately in issue27. Earlier75/78/31bf source-specific
+  proofs remain historical in LIVE-GEOMETRY.md and FINDINGS.md. Unsupported
   inline alignment/writing/positioning, full stacking contexts and broader scrolling
   remain explicit bounds. See [the scope and controls](../harness/detection/LIVE-GEOMETRY.md).
 

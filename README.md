@@ -361,6 +361,16 @@ for acceptance results and remaining limits.
 A shell must be executed before classifying the final outcome; `/sorry` alone does not
 prove IP reputation is the cause.
 
+The current implementation (`a005140`) passes full stock/native155 workspace gates
+(1,411/1,456 tests), strict checks and rebuilt addon/Node/CDP controls. Fresh API
+measurement still records64 original-interface missing own members and374
+measured descriptor differences. In the latest two-repeat Google run, both Chrome
+and native baselines receive429 with no SERP markers; native homepage hydration
+also exhausts its20-second budget. These are explicit remaining limits, not a
+claim of full Chrome parity. See the [current evidence](./harness/detection/FINDINGS.md)
+and [remaining work](./harness/detection/PARITY-GAPS.md).
+
+
 ---
 
 **TLS/HTTP-2 fingerprint (`impersonate`).** rustls can't forge Chrome's

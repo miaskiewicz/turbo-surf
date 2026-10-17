@@ -10,8 +10,43 @@ its retry. Chrome oracle cookies were never reused in native tests.
 
 ## Current messaging, geometry and DOM batch
 
-The requested PR26 follow-up is in progress. The earlier complete gate counts and
-Google captures below describe their frozen source, rather than these new changes.
+Implementation source `a005140` passes the complete stock-V8-150 workspace
+(1,411 tests, nine ignores and six zero-test native-only targets) and genuine
+native-V8-155 workspace (1,456 tests across 134 suites, six generated-doctest
+ignores), with zero failures. Strict all-target Clippy and formatting pass;
+all 1,457 selected implementation source hashes remain unchanged
+(manifest `5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a`). Both Linux
+Node20/Node22 CI jobs pass. Rebuilt native-addon checks pass: shim96 with one
+intentional skip, E2E20/20, detection123 with two Node20 CDP skips, Python2/2;
+separate Node22 real-Chrome CDP controls pass3/3 with zero skips.
+
+Fresh paired API measurement covers75 interfaces with no unmeasured entries:
+64 missing own members across the original four interfaces,142 expanded missing
+members and374 descriptor difference paths. Complete member/difference arrays
+are unchanged from the preceding inventory; this is measured shape/ownership
+coverage, not full behavioral conformance. All remaining API and browser parity
+work stays in issue #28; advanced audio stays in issue #27.
+The current [API shape audit](./API-SHAPE-LAST-RUN.json) and
+[member inventory](./API-INVENTORY.json) record this remeasurement.
+[API-SHAPE.json](./API-SHAPE.json) remains the historical28-interface snapshot.
+
+The fresh `a005140` Google matrix completes all14 processes without process
+timeouts. Both Chrome baselines and both native baselines reach `/sorry/index`
+with HTTP429 and zero result markers: native0/2 and Chrome0/2 accepted SERPs.
+Both instrumented Chrome passes also receive429. All eight consent responses
+are204 before search. Native uses genuine form navigation, with no fallback,
+imported Chrome cookies or sidecar. All four native homepage passes exhaust the
+20-second hydration budget with zero completed pumps; dismiss retains that
+failure, and search subsequently reaches the real native429 response. The budget
+residual remains in issue #28. No jc/lc requests appear in any of the eight
+baseline/instrumented captures; their absence does not establish a rejection cause.
+These Node22 captures are separate from the historical Node24/source59f7835 run
+(Chrome7/8 result markers, native0/2). No native SERP success is claimed.
+
+The implementation commit is `a005140`; the later documentation/evidence commit
+does not change that tested implementation identity. The following integration
+progression preserves earlier failures and source-specific proofs.
+
 Actual-GC controls verify pruning of collected weak context registrations while
 retained documents remain usable. Canonical custom-element reaction ordering and
 actual-context fragment parsing are officially re-vendored from turbo-test
@@ -66,7 +101,7 @@ stages also repair Range and block/replaced Element projection while preserving
 ordinary inline and PDF mapping. Producer22 focused and762 full tests pass, with
 strict checks and a test/fixture-only supplement. Its independent sibling compares
 42 admitted captures exactly and retains2 typed fixed-containing-block rejections;
-the corresponding Chrome observations remain saved. Surf now pins that public
+the corresponding Chrome observations remain saved. At that checkpoint Surf pins that public
 revision and passes all4 stock inline tests, including the full IBM/Fira geometry
 through actual DOM/CSS bindings, with1455 selected source hashes unchanged. No
 tolerance replaces the exact assertions. The actual V8155 component rerun also
@@ -88,8 +123,7 @@ unchanged; a stronger test-only supplement verifies actual bare-text constructio
 and host boxes. Strict Clippy, formatting, complexity and independent reviews pass.
 That085 revision's stock and genuine-native155 inline targets each pass5/5 tests with the same1457 source hashes unchanged. The
 new test compares all fifteen scenes through actual DOM/CSS, including complete
-Range vectors. Complete workspace/addon validation and producer CI coverage remain
-pending.
+Range vectors. These component results precede the completed a005 gates recorded above.
 
 The subsequent ordinary-wrap coverage control exposed missing internal-space source
 records in bare text such as `abc def`. Public layoutdcbfd20 now retains each actual
@@ -103,17 +137,16 @@ independent reviews pass. The nineteen-scene reusable control includes four actu
 ordinary-text scenes and preserves the previous fifteen observations exactly.
 Current stock/native155 inline targets each pass5/5, zero ignored, with the same1457
 selected source hashes unchanged (manifest5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a).
-All nineteen scenes compare exactly through real DOM/CSS. Complete workspace/addon
-gates and producer CI coverage remain pending. The earlier085 five-test passes above
+All nineteen scenes compare exactly through real DOM/CSS. The completed current
+workspace/addon gates are recorded above. The producer test-only follow-up passes
+768 tests and coverage9,806/9,806 without changing pinned dcb production bytes. The earlier085 five-test passes above
 precede this additional repair.
 
-These complete native gates describe the source before that precision repair.
-Final post-repair default/native workspace/addon gates and fresh API/Google
-measurements remain pending. The
-separate BackCompat body-strut difference remains in issue28. See the
+Earlier complete native gates retain their original source identity; the current
+a005 gates above include the precision repair. The separate BackCompat body-strut difference remains in issue28. See the
 [active checklist](./PARITY-GAPS.md#requested-pr26-implementation-batch--messaging-layoutrange-and-dom).
 
-## Active observability and lifecycle follow-up — 2026-10-17
+## Earlier observability and lifecycle follow-up — 2026-10-17
 
 [PARITY-GAPS.md](./PARITY-GAPS.md#active-pr26-follow-up--2026-10-17)
 tracks this follow-up as implementation and validation proceed. Chrome collectors
@@ -154,7 +187,7 @@ the complete search matrix below or establish accepted native SERPs.
 [OBSERVABILITY-LAST-RUN.json](./OBSERVABILITY-LAST-RUN.json) preserves source/binary
 hashes, scoped transport metadata, run outcomes and historical candidate receipts.
 
-### Latest fresh retry — 2026-10-17, source59f7835
+### Historical fresh retry — 2026-10-17, source59f7835
 
 The requested fresh two-repeat matrix finishes all14 processes without a process
 timeout. Both clean Chrome baselines reach/search with7 and8 result markers.
@@ -169,7 +202,8 @@ Chrome cookies or a form fallback. This retry provides passing Chrome controls;
 it does not identify which difference causes native rejection. The preceding
 same-day matrix below is retained as history, including its both-Chrome-blocked
 outcome. Current [Google results](./GOOGLE-LAST-RUN.json) and
-[diagnostics](./GOOGLE-DIAGNOSTICS.json) describe this newer retry.
+[diagnostics](./GOOGLE-DIAGNOSTICS.json) instead describe the later a005 matrix
+recorded above; this59f retry remains historical evidence.
 
 Both instrumented final Chrome documents contain reCAPTCHA element/iframe/script/
 response-field markers, corroborating the user observation. Native homepage opens
@@ -298,11 +332,16 @@ records the fresh zero-code rerun and corrects the historical request boundary.
 
 Audio remains in#27; every other deferred behavior, homepage lifecycle bounds and
 reliable Google acceptance are explicitly recorded in#28. The finite delivery
-gates at the historical59f7835 checkpoint were complete; the current batch still
-needs its final gates. Full Chrome parity and native SERP acceptance remain open.
+gates at both the historical59f7835 checkpoint and current a005 checkpoint are
+complete. Full Chrome parity and native SERP acceptance remain open.
 No turbo-surf publication is performed.
 
 ## Earlier integration snapshot — 544180d / 26a08b5
+
+This section and its nested component checkpoints preserve historical API counts
+and pending/in-progress gate statements. They do not describe outstanding final
+delivery checks: the completed a005 validation and fresh API/Google audit at the
+top supersede their status, while their original failures remain evidence.
 
 This snapshot predates the dictionary/labels/privacy/clock integrations below.
 Use the canonical checklist and latest capture files for the current status.
@@ -413,7 +452,7 @@ pass155/155 and native all-target strict checks pass. These results precede the
 next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
 and fresh live validation remain pending.
 
-### Focused source integration results
+### Historical focused source integration results
 
 The current stock-engine renderer library passes326 tests. Core passes220 tests;
 its independent HTTPS dictionary gates pass10 controls on each transport,

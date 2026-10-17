@@ -9,6 +9,37 @@ checklist; [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) trac
 residual work beyond this PR, with audio separately deferred in
 [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
 
+### Final validation checkpoint — implementation a005140
+
+Implementation source `a005140` passes the complete stock-V8-150 workspace
+(1,411 tests, nine ignores and six zero-test native-only targets) and genuine
+native-V8-155 workspace (1,456 tests across 134 suites, six generated-doctest
+ignores), with zero failures. Strict all-target Clippy and formatting pass;
+all 1,457 selected implementation source hashes remain unchanged. Both Linux
+Node20/Node22 CI jobs pass. Rebuilt native-addon checks pass: shim96 with one
+intentional skip, E2E20/20, detection123 with two Node20 CDP skips, Python2/2;
+separate Node22 real-Chrome CDP controls pass3/3 with zero skips.
+
+Fresh paired API measurement covers75 interfaces with no unmeasured entries:
+64 missing own members across the original four interfaces,142 expanded missing
+members and374 descriptor difference paths. Complete member/difference arrays
+are unchanged from the preceding inventory; this is measured shape/ownership
+coverage, not full behavioral conformance. All remaining API and browser parity
+work stays in issue #28; advanced audio stays in issue #27.
+
+The fresh `a005140` Google matrix completes all14 processes without process
+timeouts. Both Chrome baselines and both native baselines reach `/sorry/index`
+with HTTP429 and zero result markers: native0/2 and Chrome0/2 accepted SERPs.
+Both instrumented Chrome passes also receive429. All eight consent responses
+are204 before search. Native uses genuine form navigation, with no fallback,
+imported Chrome cookies or sidecar. All four native homepage passes exhaust the
+20-second hydration budget with zero completed pumps; dismiss retains that
+failure, and search subsequently reaches the real native429 response. The budget
+residual remains in issue #28. No jc/lc requests appear in any of the eight
+baseline/instrumented captures; their absence does not establish a rejection cause.
+These Node22 captures are separate from the historical Node24/source59f7835 run
+(Chrome7/8 result markers, native0/2). No native SERP success is claimed.
+
 ### Reusable diagnostics and browser identity
 
 - Add reusable normal headed Chrome controls using the producer's exact bundled
@@ -35,7 +66,10 @@ residual work beyond this PR, with audio separately deferred in
   stay unchanged. Document the new public Rust source-cluster provenance fields.
   Producer767 full tests and41 focused controls pass. Current stock/native155
   inline targets each pass5/5 with1457 unchanged source hashes and all nineteen
-  Chrome scenes; complete consumer gates remain separate.
+  Chrome scenes. Final a005 full stock/native gates pass1,411/1,456 tests,
+  strict checks and formatting; rebuilt native addon/Node/CDP gates also pass.
+  The subsequent test-only producer follow-up `4999290` passes768 tests and coverage
+  9,806/9,806 without changing pinned dcb production bytes.
 
 - Preserve per-element custom-element reaction order across reentrant adoption,
   including definition-realm callbacks and error routing. Parse Range fragments in

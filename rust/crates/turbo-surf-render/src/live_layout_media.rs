@@ -174,11 +174,16 @@ pub(crate) struct ViewportMedia {
 
 impl ViewportMedia {
     pub(crate) fn matches(&self, source: &str) -> Result<bool, String> {
-        if ![self.width, self.height, self.initial_font_size]
+        if ![self.width, self.height]
             .iter()
-            .all(|v| v.is_finite() && *v > 0.0)
+            .all(|v| v.is_finite() && *v >= 0.0)
+            || !self.initial_font_size.is_finite()
+            || self.initial_font_size <= 0.0
         {
-            return Err("native media viewport/font size must be finite and positive".into());
+            return Err(
+                "native media viewport must be finite and non-negative; font size must be positive"
+                    .into(),
+            );
         }
         let mut input = ParserInput::new(source);
         let mut parser = Parser::new(&mut input);
@@ -248,8 +253,11 @@ impl ViewportMedia {
 
     fn feature(&self, feature: &MediaFeature) -> Result<bool, String> {
         match feature {
-            QueryFeature::Plain { name, value } => self.compare(name, value, Compare::Equal),
+            QueryFeature::Plain { name, value } => self.compare(name, value, Compare::Equal, false),
             QueryFeature::Boolean { name } => {
+                if let MediaFeatureName::Standard(Feature::AspectRatio) = name {
+                    return Ok(true);
+                }
                 if let MediaFeatureName::Standard(feature) = name {
                     if let Some((_, value)) = self.host.keyword(*feature)? {
                         return Ok(value);
@@ -261,20 +269,15 @@ impl ViewportMedia {
                 name,
                 operator,
                 value,
-            } => self.compare(name, value, *operator),
+            } => self.compare(name, value, *operator, false),
             QueryFeature::Interval {
                 name,
                 start,
                 start_operator,
                 end,
                 end_operator,
-            } => {
-                let Some(actual) = self.actual(name)? else {
-                    return Ok(false);
-                };
-                Ok(compare(self.value(start)?, actual, *start_operator)
-                    && compare(actual, self.value(end)?, *end_operator))
-            }
+            } => Ok(self.compare(name, start, *start_operator, true)?
+                && self.compare(name, end, *end_operator, false)?),
         }
     }
 
@@ -283,7 +286,24 @@ impl ViewportMedia {
         name: &MediaFeatureName<Feature>,
         value: &MediaFeatureValue,
         operator: Compare,
+        reverse: bool,
     ) -> Result<bool, String> {
+        if matches!(name, MediaFeatureName::Standard(Feature::AspectRatio)) {
+            let MediaFeatureValue::Ratio(value) = value else {
+                return Ok(false);
+            };
+            // Compare ratios as products: zero-sized CSS viewports are valid,
+            // and dividing either ratio would discard their defined ordering.
+            let actual = f64::from(self.width) * f64::from(value.1);
+            // Blink 155 media_query_exp.cc canonicalizes authored 0/0 to 1/0.
+            let numerator = if value.0 == 0.0 && value.1 == 0.0 {
+                1.0
+            } else {
+                value.0
+            };
+            let requested = f64::from(self.height) * f64::from(numerator);
+            return Ok(ordered_compare(actual, requested, operator, reverse));
+        }
         if let MediaFeatureName::Standard(feature) = name {
             if let Some((actual, _)) = self.host.keyword(*feature)? {
                 return Ok(
@@ -304,16 +324,18 @@ impl ViewportMedia {
                 _ => false,
             });
         }
-        Ok(compare(actual, self.value(value)?, operator))
+        Ok(ordered_compare(
+            actual,
+            self.value(value)?,
+            operator,
+            reverse,
+        ))
     }
 
     fn actual(&self, name: &MediaFeatureName<Feature>) -> Result<Option<f64>, String> {
         match name {
             MediaFeatureName::Standard(Feature::Width) => Ok(Some(f64::from(self.width))),
             MediaFeatureName::Standard(Feature::Height) => Ok(Some(f64::from(self.height))),
-            MediaFeatureName::Standard(Feature::AspectRatio) => {
-                Ok(Some(f64::from(self.width) / f64::from(self.height)))
-            }
             MediaFeatureName::Standard(Feature::Orientation) => Ok(Some(1.0)),
             MediaFeatureName::Standard(feature) => Err(format!(
                 "native live layout media requires host capability {feature:?}"
@@ -337,6 +359,15 @@ impl ViewportMedia {
             _ => Err("native media feature has no available numerical value".into()),
         }
     }
+}
+
+fn ordered_compare(left: f64, right: f64, operator: Compare, reverse: bool) -> bool {
+    let (left, right) = if reverse {
+        (right, left)
+    } else {
+        (left, right)
+    };
+    compare(left, right, operator)
 }
 
 fn compare(left: f64, right: f64, operator: Compare) -> bool {
@@ -410,11 +441,60 @@ mod tests {
             .matches("(width: 10ch)")
             .unwrap_err()
             .contains("unresolved"));
-        let invalid = ViewportMedia {
-            width: 0.0,
-            ..viewport()
-        };
-        assert!(invalid.matches("screen").is_err());
+        for invalid in [-1.0, f32::NAN, f32::INFINITY] {
+            assert!(ViewportMedia {
+                width: invalid,
+                ..viewport()
+            }
+            .matches("screen")
+            .is_err());
+            assert!(ViewportMedia {
+                height: invalid,
+                ..viewport()
+            }
+            .matches("screen")
+            .is_err());
+        }
+        for invalid in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(ViewportMedia {
+                initial_font_size: invalid,
+                ..viewport()
+            }
+            .matches("screen")
+            .is_err());
+        }
+    }
+    #[test]
+    fn zero_sized_viewport_media_matches_independent_chrome_ratio_controls() {
+        use sha2::{Digest, Sha256};
+        let source = include_str!("../../../../harness/detection/native-iframe-layout-probe.js");
+        let control: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../harness/detection/fixtures/native-iframe-layout-chrome155.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            control["probeSha256"],
+            format!("{:x}", Sha256::digest(source))
+        );
+        assert_eq!(control["errors"], serde_json::json!([]));
+        for case in control["result"].as_array().unwrap() {
+            let Some(media) = case["media"].as_object() else {
+                continue;
+            };
+            let view = ViewportMedia {
+                width: case["viewport"][0].as_f64().unwrap() as f32,
+                height: case["viewport"][1].as_f64().unwrap() as f32,
+                ..viewport()
+            };
+            for (query, expected) in media {
+                assert_eq!(
+                    view.matches(query).unwrap(),
+                    expected.as_bool().unwrap(),
+                    "{} {query}",
+                    case["name"]
+                );
+            }
+        }
     }
     #[test]
     fn logically_decisive_viewport_conditions_do_not_require_unrelated_host_features() {

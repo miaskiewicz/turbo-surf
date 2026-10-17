@@ -3627,6 +3627,11 @@ fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
 }
 
 struct FrameRetired;
+// Directly discarded frames lose their media-query factory; descendants remain
+// retained inactive contexts. Both still stop all native work and have no layout.
+struct FrameDirectRetirement;
+struct FailFrameInitializationForTesting;
+struct FailedFrameInitializationForTesting;
 
 struct WindowMessageLimits {
     max_messages: usize,
@@ -4548,359 +4553,379 @@ fn op_frame_set_document<'s>(
         context = window.get_creation_context(scope).unwrap();
         replaced = Some(previous);
     }
-    let mut sandbox = FrameSandbox::from_host(scope, parent, host);
-    if let Some(document) = &document {
-        let policy = crate::csp::Policy::new(
-            &document.url,
-            document
-                .headers
-                .iter()
-                .filter(|(name, _)| name.eq_ignore_ascii_case("content-security-policy"))
-                .map(|(_, value)| value.clone()),
-        );
-        sandbox.apply_csp(&policy);
-    }
-    let credentialless =
-        crate::browser_env::node_attribute(scope, host, "credentialless").is_some();
-    let embedding_blocked = document.as_ref().is_some_and(|document| {
-        let mut ancestors = Vec::new();
-        let mut context = parent;
-        loop {
-            if ancestors.len() > 12 || context.get_slot::<FrameRetired>().is_some() {
-                return true;
+    let result = (|| {
+        let mut sandbox = FrameSandbox::from_host(scope, parent, host);
+        if let Some(document) = &document {
+            let policy = crate::csp::Policy::new(
+                &document.url,
+                document
+                    .headers
+                    .iter()
+                    .filter(|(name, _)| name.eq_ignore_ascii_case("content-security-policy"))
+                    .map(|(_, value)| value.clone()),
+            );
+            sandbox.apply_csp(&policy);
+        }
+        let credentialless =
+            crate::browser_env::node_attribute(scope, host, "credentialless").is_some();
+        let embedding_blocked = document.as_ref().is_some_and(|document| {
+            let mut ancestors = Vec::new();
+            let mut context = parent;
+            loop {
+                if ancestors.len() > 12 || context.get_slot::<FrameRetired>().is_some() {
+                    return true;
+                }
+                ancestors.push(window_origin(scope, context));
+                let Some(link) = context.get_slot::<FrameParent>() else {
+                    break;
+                };
+                let Some(owner) = link.0.to_local(scope) else {
+                    return true;
+                };
+                context = owner;
             }
-            ancestors.push(window_origin(scope, context));
-            let Some(link) = context.get_slot::<FrameParent>() else {
-                break;
-            };
-            let Some(owner) = link.0.to_local(scope) else {
-                return true;
-            };
-            context = owner;
-        }
-        if !crate::resource_policy::ancestors_allowed(&document.url, &document.headers, &ancestors)
-        {
-            return true;
-        }
-        let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
-            return false;
-        };
-        let policy = parent_policy.policy.borrow().embedder_policy;
-        if policy == crate::resource_policy::EmbedderPolicy::UnsafeNone || credentialless {
-            return false;
-        }
-        let mut request = turbo_surf_core::request_context::RequestContext::resource(
-            &window_origin(scope, parent),
-            turbo_surf_core::request_context::Destination::Iframe,
-            turbo_surf_core::request_context::RequestMode::NoCors,
-        );
-        request.opaque_origin = window_is_opaque(scope, parent);
-        crate::resource_policy::EmbedderPolicy::from_headers(&document.headers)
-            == crate::resource_policy::EmbedderPolicy::UnsafeNone
-            || !crate::resource_policy::embedder_allowed(
-                policy,
-                &request,
+            if !crate::resource_policy::ancestors_allowed(
                 &document.url,
                 &document.headers,
-            )
-    });
-    if embedding_blocked {
-        sandbox.opaque = true;
-        sandbox.origin_restricted = true;
-        sandbox.scripts_blocked = true;
-    }
-    let data_document = document
-        .as_ref()
-        .is_some_and(|document| document.url.starts_with("data:"));
-    sandbox.opaque |= data_document || document.is_none() && window_is_opaque(scope, parent);
-    context.set_slot(Rc::new(sandbox));
-    context.set_slot(Rc::new(FrameConfigured));
-    context.set_slot(Rc::new(FrameHost(v8::Weak::new(scope, host))));
-    if let Some(document) = &document {
-        set_origin_token(scope, context, &document.url);
-        metadata["url"] = serde_json::Value::String(document.url.clone());
-        metadata["location"] = serde_json::Value::String(document.url.clone());
-        metadata["origin"] = serde_json::Value::String(window_origin(scope, context));
-    } else {
-        context.set_security_token(parent.get_security_token(scope));
-        metadata["origin"] = serde_json::Value::String(window_origin(scope, parent));
-        let owner_url = parent
-            .get_slot::<FrameDocumentUrl>()
-            .map(|url| url.0.clone())
-            .unwrap_or_else(|| {
-                JsRuntime::op_state_from(scope)
-                    .borrow()
-                    .borrow::<Base>()
-                    .0
-                    .clone()
-            });
-        metadata["url"] = serde_json::Value::String(owner_url);
-    }
-    if sandbox.origin_restricted || data_document {
-        context.use_default_security_token();
-    }
-    if sandbox.opaque {
-        metadata["origin"] = serde_json::Value::String("null".into());
-    }
-    #[cfg(turbo_surf_native_proxy)]
-    if replaced.is_some() {
-        window_proxy::synchronize_origins(scope, context);
-    }
-    #[cfg(not(turbo_surf_native_proxy))]
-    let _ = replaced;
-    metadata["depth"] =
-        serde_json::Value::from(context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0));
-    if metadata
-        .get("initial")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-    {
-        metadata["location"] = serde_json::Value::String("about:blank".into());
-    }
-    let url = metadata
-        .get("url")
-        .and_then(|v| v.as_str())
-        .unwrap_or("about:blank");
-    context.set_slot(Rc::new(FrameDocumentUrl(url.to_string())));
-    context.set_slot(Rc::new(FrameDocumentLocation(
-        metadata
-            .get("location")
-            .and_then(|value| value.as_str())
-            .unwrap_or(url)
-            .to_string(),
-    )));
-    let html_units = if embedding_blocked {
-        "<!doctype html><html><head></head><body></body></html>"
-            .encode_utf16()
-            .collect::<Vec<_>>()
-    } else {
-        document.as_ref().map_or(supplied_units, |document| {
-            document.html.encode_utf16().collect()
-        })
-    };
-    let html = String::from_utf16_lossy(&html_units);
-    let mut csp = if let Some(document) = document
-        .as_ref()
-        .filter(|document| !document.url.starts_with("data:"))
-    {
-        CspHandle::new(url, &document.headers, &html)
-    } else {
-        let handle = CspHandle::new(url, &[], &html);
-        if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
-            let inherited = parent_policy.policy.borrow().current().clone();
-            let mut policy = handle.policy.borrow_mut();
-            policy.header = inherited.clone();
-            policy.initial_base.inherit_headers(&inherited);
-            policy.active = inherited;
-            policy.report_only = parent_policy.policy.borrow().report_only.clone();
-            policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
-            policy.reporting_endpoints = parent_policy.policy.borrow().reporting_endpoints.clone();
-            policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
+                &ancestors,
+            ) {
+                return true;
+            }
+            let Some(parent_policy) = parent.get_slot::<CspHandle>() else {
+                return false;
+            };
+            let policy = parent_policy.policy.borrow().embedder_policy;
+            if policy == crate::resource_policy::EmbedderPolicy::UnsafeNone || credentialless {
+                return false;
+            }
+            let mut request = turbo_surf_core::request_context::RequestContext::resource(
+                &window_origin(scope, parent),
+                turbo_surf_core::request_context::Destination::Iframe,
+                turbo_surf_core::request_context::RequestMode::NoCors,
+            );
+            request.opaque_origin = window_is_opaque(scope, parent);
+            crate::resource_policy::EmbedderPolicy::from_headers(&document.headers)
+                == crate::resource_policy::EmbedderPolicy::UnsafeNone
+                || !crate::resource_policy::embedder_allowed(
+                    policy,
+                    &request,
+                    &document.url,
+                    &document.headers,
+                )
+        });
+        if embedding_blocked {
+            sandbox.opaque = true;
+            sandbox.origin_restricted = true;
+            sandbox.scripts_blocked = true;
         }
-        handle
-    };
-    let response_metadata = document.as_ref().map_or_else(
-        || {
-            let source = parent.get_slot::<FrameDocumentLocation>().map_or_else(
-                || {
+        let data_document = document
+            .as_ref()
+            .is_some_and(|document| document.url.starts_with("data:"));
+        sandbox.opaque |= data_document || document.is_none() && window_is_opaque(scope, parent);
+        context.set_slot(Rc::new(sandbox));
+        context.set_slot(Rc::new(FrameConfigured));
+        context.set_slot(Rc::new(FrameHost(v8::Weak::new(scope, host))));
+        if let Some(document) = &document {
+            set_origin_token(scope, context, &document.url);
+            metadata["url"] = serde_json::Value::String(document.url.clone());
+            metadata["location"] = serde_json::Value::String(document.url.clone());
+            metadata["origin"] = serde_json::Value::String(window_origin(scope, context));
+        } else {
+            context.set_security_token(parent.get_security_token(scope));
+            metadata["origin"] = serde_json::Value::String(window_origin(scope, parent));
+            let owner_url = parent
+                .get_slot::<FrameDocumentUrl>()
+                .map(|url| url.0.clone())
+                .unwrap_or_else(|| {
                     JsRuntime::op_state_from(scope)
                         .borrow()
                         .borrow::<Base>()
                         .0
                         .clone()
-                },
-                |location| location.0.clone(),
-            );
-            let referrer = if metadata.get("location").and_then(|value| value.as_str())
-                == Some("about:blank")
-            {
-                source
-            } else {
-                let policy = frame_referrer_policy_token(scope, host)
-                    .as_deref()
-                    .and_then(turbo_surf_core::referrer_policy::ReferrerPolicy::parse)
-                    .unwrap_or_else(|| {
-                        parent
-                            .get_slot::<CspHandle>()
-                            .map_or(Default::default(), |handle| {
-                                handle.policy.borrow().referrer_policy
-                            })
-                    });
-                crate::document_response::local_navigation_referrer(&source, policy)
-            };
-            crate::DocumentResponseMetadata {
-                status: 0,
-                referrer,
+                });
+            metadata["url"] = serde_json::Value::String(owner_url);
+        }
+        if sandbox.origin_restricted || data_document {
+            context.use_default_security_token();
+        }
+        if sandbox.opaque {
+            metadata["origin"] = serde_json::Value::String("null".into());
+        }
+        #[cfg(turbo_surf_native_proxy)]
+        if replaced.is_some() {
+            window_proxy::synchronize_origins(scope, context);
+        }
+        #[cfg(not(turbo_surf_native_proxy))]
+        let _ = replaced;
+        metadata["depth"] =
+            serde_json::Value::from(context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0));
+        if metadata
+            .get("initial")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            metadata["location"] = serde_json::Value::String("about:blank".into());
+        }
+        let url = metadata
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("about:blank");
+        context.set_slot(Rc::new(FrameDocumentUrl(url.to_string())));
+        context.set_slot(Rc::new(FrameDocumentLocation(
+            metadata
+                .get("location")
+                .and_then(|value| value.as_str())
+                .unwrap_or(url)
+                .to_string(),
+        )));
+        let html_units = if embedding_blocked {
+            "<!doctype html><html><head></head><body></body></html>"
+                .encode_utf16()
+                .collect::<Vec<_>>()
+        } else {
+            document.as_ref().map_or(supplied_units, |document| {
+                document.html.encode_utf16().collect()
+            })
+        };
+        let html = String::from_utf16_lossy(&html_units);
+        let mut csp = if let Some(document) = document
+            .as_ref()
+            .filter(|document| !document.url.starts_with("data:"))
+        {
+            CspHandle::new(url, &document.headers, &html)
+        } else {
+            let handle = CspHandle::new(url, &[], &html);
+            if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
+                let inherited = parent_policy.policy.borrow().current().clone();
+                let mut policy = handle.policy.borrow_mut();
+                policy.header = inherited.clone();
+                policy.initial_base.inherit_headers(&inherited);
+                policy.active = inherited;
+                policy.report_only = parent_policy.policy.borrow().report_only.clone();
+                policy.referrer_policy = parent_policy.policy.borrow().referrer_policy;
+                policy.reporting_endpoints =
+                    parent_policy.policy.borrow().reporting_endpoints.clone();
+                policy.embedder_policy = parent_policy.policy.borrow().embedder_policy;
             }
-        },
-        |document| document.response_metadata.clone(),
-    );
-    csp.response_metadata.replace(response_metadata.clone());
-    let state = JsRuntime::op_state_from(scope);
-    csp.partition = document
-        .as_ref()
-        .and_then(|document| document.partition.clone())
-        .or_else(|| frame_partition(scope, &mut state.borrow_mut(), parent, host));
-    if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
-        let parent_origin = window_origin(scope, parent);
-        let child_origin = window_origin(scope, context);
-        if let Some(document) = &document {
-            csp.policy.borrow_mut().permissions_policy =
-                crate::permissions_policy::PermissionsPolicy::from_headers(
-                    &child_origin,
-                    &document.headers,
+            handle
+        };
+        let response_metadata = document.as_ref().map_or_else(
+            || {
+                let source = parent.get_slot::<FrameDocumentLocation>().map_or_else(
+                    || {
+                        JsRuntime::op_state_from(scope)
+                            .borrow()
+                            .borrow::<Base>()
+                            .0
+                            .clone()
+                    },
+                    |location| location.0.clone(),
                 );
-        }
-        let allow = crate::browser_env::node_attribute(scope, host, "allow").unwrap_or_default();
-        csp.policy.borrow_mut().permissions_policy.inherit(
-            &parent_policy.policy.borrow().permissions_policy,
-            &parent_origin,
-            &child_origin,
-            &child_origin,
-            &allow,
+                let referrer = if metadata.get("location").and_then(|value| value.as_str())
+                    == Some("about:blank")
+                {
+                    source
+                } else {
+                    let policy = frame_referrer_policy_token(scope, host)
+                        .as_deref()
+                        .and_then(turbo_surf_core::referrer_policy::ReferrerPolicy::parse)
+                        .unwrap_or_else(|| {
+                            parent
+                                .get_slot::<CspHandle>()
+                                .map_or(Default::default(), |handle| {
+                                    handle.policy.borrow().referrer_policy
+                                })
+                        });
+                    crate::document_response::local_navigation_referrer(&source, policy)
+                };
+                crate::DocumentResponseMetadata {
+                    status: 0,
+                    referrer,
+                }
+            },
+            |document| document.response_metadata.clone(),
         );
-    }
-    let child_origin = window_origin(scope, context);
-    let allowed = !sandbox.opaque
-        && !embedding_blocked
-        && secure_context_for(scope, context)
-        && parent
+        csp.response_metadata.replace(response_metadata.clone());
+        let state = JsRuntime::op_state_from(scope);
+        csp.partition = document
+            .as_ref()
+            .and_then(|document| document.partition.clone())
+            .or_else(|| frame_partition(scope, &mut state.borrow_mut(), parent, host));
+        if let Some(parent_policy) = parent.get_slot::<CspHandle>() {
+            let parent_origin = window_origin(scope, parent);
+            let child_origin = window_origin(scope, context);
+            if let Some(document) = &document {
+                csp.policy.borrow_mut().permissions_policy =
+                    crate::permissions_policy::PermissionsPolicy::from_headers(
+                        &child_origin,
+                        &document.headers,
+                    );
+            }
+            let allow =
+                crate::browser_env::node_attribute(scope, host, "allow").unwrap_or_default();
+            csp.policy.borrow_mut().permissions_policy.inherit(
+                &parent_policy.policy.borrow().permissions_policy,
+                &parent_origin,
+                &child_origin,
+                &child_origin,
+                &allow,
+            );
+        }
+        let child_origin = window_origin(scope, context);
+        let allowed = !sandbox.opaque
+            && !embedding_blocked
+            && secure_context_for(scope, context)
+            && parent
+                .get_slot::<SharedMemoryCapability>()
+                .is_some_and(|capability| capability.allowed)
+            && csp.policy.borrow().permissions_policy.allows(
+                "cross-origin-isolated",
+                &child_origin,
+                &child_origin,
+            );
+        let group = parent
             .get_slot::<SharedMemoryCapability>()
-            .is_some_and(|capability| capability.allowed)
-        && csp.policy.borrow().permissions_policy.allows(
-            "cross-origin-isolated",
-            &child_origin,
-            &child_origin,
-        );
-    let group = parent
-        .get_slot::<SharedMemoryCapability>()
-        .map_or(csp.id, |capability| capability.group);
-    context.set_slot(Rc::new(SharedMemoryCapability {
-        allowed,
-        group,
-        origin: child_origin,
-    }));
-    let initial_base = csp.policy.borrow().initial_base.clone();
-    context.set_slot(Rc::new(csp.clone()));
-    JsRuntime::op_state_from(scope)
-        .borrow_mut()
-        .borrow_mut::<CspContexts>()
-        .0
-        .insert(csp.id, csp);
-    let mut policy = FrameScriptPolicy::from_html_units(&html_units, url, &initial_base);
-    let source = metadata
-        .get("location")
-        .and_then(|value| value.as_str())
-        .unwrap_or(url)
-        .to_string();
-    context.set_slot(Rc::new(FrameDocumentSourceUrl(source.clone())));
-    for script in &mut policy.scripts {
-        if script.src.is_none() {
-            script.source = source.clone();
+            .map_or(csp.id, |capability| capability.group);
+        context.set_slot(Rc::new(SharedMemoryCapability {
+            allowed,
+            group,
+            origin: child_origin,
+        }));
+        let initial_base = csp.policy.borrow().initial_base.clone();
+        context.set_slot(Rc::new(csp.clone()));
+        JsRuntime::op_state_from(scope)
+            .borrow_mut()
+            .borrow_mut::<CspContexts>()
+            .0
+            .insert(csp.id, csp);
+        let mut policy = FrameScriptPolicy::from_html_units(&html_units, url, &initial_base);
+        let source = metadata
+            .get("location")
+            .and_then(|value| value.as_str())
+            .unwrap_or(url)
+            .to_string();
+        context.set_slot(Rc::new(FrameDocumentSourceUrl(source.clone())));
+        for script in &mut policy.scripts {
+            if script.src.is_none() {
+                script.source = source.clone();
+            }
         }
-    }
-    if sandbox.scripts_blocked {
-        policy.scripts.clear();
-        policy.inline.clear();
-        policy.external.clear();
-    }
-    let document_base = policy.base.clone();
-    context.set_slot(Rc::new(policy));
-    let core = JsRuntime::op_state_from(scope)
-        .borrow()
-        .borrow::<FrameContexts>()
-        .core
-        .clone()
-        .ok_or_else(|| JsErrorBox::generic("iframe host core unavailable"))?;
-    let scope = &mut v8::ContextScope::new(scope, context);
-    #[cfg(turbo_surf_native_proxy)]
-    register_frame_modules(scope, &document_base)?;
-    let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
-        let policy = handle.policy.borrow();
-        policy.initial_base.has_policy() || policy.report_only.has_policy()
-    });
-    if source_positions {
-        crate::browser_env::install_independent_utf16_source_positions(scope, &html_units);
-    } else {
-        crate::browser_env::install_independent_html_units(scope, &html_units);
-    }
-    install_css_authorization(scope)?;
-    #[cfg(turbo_surf_native_proxy)]
-    window_proxy::install_document(scope);
-    let global = context.global(scope);
-    let core = v8::Local::new(scope, core);
+        if sandbox.scripts_blocked {
+            policy.scripts.clear();
+            policy.inline.clear();
+            policy.external.clear();
+        }
+        let document_base = policy.base.clone();
+        context.set_slot(Rc::new(policy));
+        let core = JsRuntime::op_state_from(scope)
+            .borrow()
+            .borrow::<FrameContexts>()
+            .core
+            .clone()
+            .ok_or_else(|| JsErrorBox::generic("iframe host core unavailable"))?;
+        let scope = &mut v8::ContextScope::new(scope, context);
+        #[cfg(turbo_surf_native_proxy)]
+        register_frame_modules(scope, &document_base)?;
+        let source_positions = context.get_slot::<CspHandle>().is_some_and(|handle| {
+            let policy = handle.policy.borrow();
+            policy.initial_base.has_policy() || policy.report_only.has_policy()
+        });
+        if source_positions {
+            crate::browser_env::install_independent_utf16_source_positions(scope, &html_units);
+        } else {
+            crate::browser_env::install_independent_html_units(scope, &html_units);
+        }
+        install_css_authorization(scope)?;
+        #[cfg(turbo_surf_native_proxy)]
+        window_proxy::install_document(scope);
+        let global = context.global(scope);
+        let core = v8::Local::new(scope, core);
 
-    let location_key = v8::String::new(scope, "location").unwrap();
-    if let Some(location) = global
-        .get(scope, location_key.into())
-        .and_then(|v| v.to_object(scope))
-    {
-        for (name, value) in [
-            ("href", url),
-            (
-                "origin",
-                metadata
-                    .get("origin")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("null"),
-            ),
-        ] {
-            let key = v8::String::new(scope, name).unwrap();
-            let value = v8::String::new(scope, value).unwrap();
-            location.set(scope, key.into(), value.into());
+        let location_key = v8::String::new(scope, "location").unwrap();
+        if let Some(location) = global
+            .get(scope, location_key.into())
+            .and_then(|v| v.to_object(scope))
+        {
+            for (name, value) in [
+                ("href", url),
+                (
+                    "origin",
+                    metadata
+                        .get("origin")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("null"),
+                ),
+            ] {
+                let key = v8::String::new(scope, name).unwrap();
+                let value = v8::String::new(scope, value).unwrap();
+                location.set(scope, key.into(), value.into());
+            }
         }
+        let depth_key = v8::String::new(scope, "__depth").unwrap();
+        let depth = v8::Integer::new_from_unsigned(
+            scope,
+            context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0),
+        );
+        global.set(scope, depth_key.into(), depth.into());
+        if let Some(namespace) = frame_namespace(scope) {
+            let name = v8::String::new(scope, "isFrame").unwrap();
+            let flag = v8::Boolean::new(scope, true);
+            namespace.set(scope, name.into(), flag.into());
+            context.set_slot(Rc::new(FrameEnvironment(
+                crate::context_ownership::object(scope, namespace).ok_or_else(|| {
+                    JsErrorBox::generic("Frame environment ownership interrupted")
+                })?,
+            )));
+        }
+        install_environment(scope, core).map_err(JsErrorBox::generic)?;
+        let secure = secure_context(scope);
+        let crypto_core = core
+            .to_object(scope)
+            .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
+        crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
+        crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+        crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
+        if parent
+            .remove_slot::<FailFrameInitializationForTesting>()
+            .is_some()
+        {
+            parent.set_slot(Rc::new(FailedFrameInitializationForTesting));
+            return Err(JsErrorBox::generic("injected frame initialization failure"));
+        }
+        #[cfg(turbo_surf_native_proxy)]
+        window_proxy::capture_exception(scope);
+        if let Some(namespace) = frame_namespace(scope) {
+            context.set_slot(Rc::new(FrameEnvironment(
+                crate::context_ownership::object(scope, namespace).ok_or_else(|| {
+                    JsErrorBox::generic("Frame environment ownership interrupted")
+                })?,
+            )));
+        }
+        metadata["base"] = serde_json::Value::String(document_base);
+        let metadata_location = metadata
+            .get("location")
+            .and_then(|value| value.as_str())
+            .unwrap_or("about:blank")
+            .to_string();
+        let json = v8::String::new(scope, &metadata.to_string()).unwrap();
+        let metadata = v8::json::parse(scope, json).unwrap();
+        call_frame_helper(
+            scope,
+            "configureFrame",
+            &[metadata, parent_window.into(), host.into()],
+        )
+        .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
+        #[cfg(turbo_surf_native_proxy)]
+        window_proxy::install_location(scope, &metadata_location);
+        #[cfg(not(turbo_surf_native_proxy))]
+        let _ = metadata_location;
+        run_frame_init_script(scope)?;
+        Ok(global)
+    })();
+    if result.is_err() {
+        retire_failed_frame_tree(scope, context);
     }
-    let depth_key = v8::String::new(scope, "__depth").unwrap();
-    let depth = v8::Integer::new_from_unsigned(
-        scope,
-        context.get_slot::<FrameDepth>().map_or(1, |depth| depth.0),
-    );
-    global.set(scope, depth_key.into(), depth.into());
-    if let Some(namespace) = frame_namespace(scope) {
-        let name = v8::String::new(scope, "isFrame").unwrap();
-        let flag = v8::Boolean::new(scope, true);
-        namespace.set(scope, name.into(), flag.into());
-        context.set_slot(Rc::new(FrameEnvironment(
-            crate::context_ownership::object(scope, namespace)
-                .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
-        )));
-    }
-    install_environment(scope, core).map_err(JsErrorBox::generic)?;
-    let secure = secure_context(scope);
-    let crypto_core = core
-        .to_object(scope)
-        .ok_or_else(|| JsErrorBox::generic("Native crypto core unavailable"))?;
-    crate::crypto_backend::install(scope, crypto_core, secure).map_err(JsErrorBox::generic)?;
-    crate::audio_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-    crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
-    #[cfg(turbo_surf_native_proxy)]
-    window_proxy::capture_exception(scope);
-    if let Some(namespace) = frame_namespace(scope) {
-        context.set_slot(Rc::new(FrameEnvironment(
-            crate::context_ownership::object(scope, namespace)
-                .ok_or_else(|| JsErrorBox::generic("Frame environment ownership interrupted"))?,
-        )));
-    }
-    metadata["base"] = serde_json::Value::String(document_base);
-    let metadata_location = metadata
-        .get("location")
-        .and_then(|value| value.as_str())
-        .unwrap_or("about:blank")
-        .to_string();
-    let json = v8::String::new(scope, &metadata.to_string()).unwrap();
-    let metadata = v8::json::parse(scope, json).unwrap();
-    call_frame_helper(
-        scope,
-        "configureFrame",
-        &[metadata, parent_window.into(), host.into()],
-    )
-    .ok_or_else(|| JsErrorBox::generic("frame configuration failed"))?;
-    #[cfg(turbo_surf_native_proxy)]
-    window_proxy::install_location(scope, &metadata_location);
-    #[cfg(not(turbo_surf_native_proxy))]
-    let _ = metadata_location;
-    run_frame_init_script(scope)?;
-    Ok(global)
+    result
 }
 
 #[op2(nofast, reentrant)]
@@ -5162,6 +5187,24 @@ fn op_create_frame<'s>(
 }
 
 fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'s, v8::Context>) {
+    retire_frame_tree_impl(scope, previous, true);
+}
+
+// Failed initialization has no published document or runnable guest task. Stop
+// native ownership without invoking partially installed JavaScript helpers.
+fn retire_failed_frame_tree<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    previous: v8::Local<'s, v8::Context>,
+) {
+    retire_frame_tree_impl(scope, previous, false);
+}
+
+fn retire_frame_tree_impl<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    previous: v8::Local<'s, v8::Context>,
+    call_helpers: bool,
+) {
+    previous.set_slot(Rc::new(FrameDirectRetirement));
     let contexts = JsRuntime::op_state_from(scope)
         .borrow()
         .borrow::<FrameContexts>()
@@ -5172,7 +5215,7 @@ fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'
         let mut ancestor = context;
         loop {
             if ancestor == previous {
-                {
+                if call_helpers {
                     let old_scope = &mut v8::ContextScope::new(scope, context);
                     let _ = call_frame_helper(old_scope, "cancelModuleGraphs", &[]);
                     let _ = call_frame_helper(old_scope, "cancelDocumentTasks", &[]);
@@ -5184,6 +5227,7 @@ fn retire_frame_tree<'s>(scope: &mut v8::PinScope<'s, '_>, previous: v8::Local<'
                 fetch_streams::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
                 storage_events::retire(context);
+                crate::browser_env::retire_native_document(scope, context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
                 #[cfg(turbo_surf_native_proxy)]
@@ -6598,6 +6642,34 @@ pub(crate) fn native_pointer_media_capability(context: v8::Local<v8::Context>) -
     context.get_slot::<HostInputDriver>().is_some()
 }
 
+pub(crate) fn native_frame_layout_host<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    if context.get_slot::<FrameRetired>().is_some() {
+        return None;
+    }
+    context.get_slot::<FrameHost>()?.0.to_local(scope)
+}
+
+pub(crate) fn native_frame_is_retired(context: v8::Local<v8::Context>) -> bool {
+    context.get_slot::<FrameRetired>().is_some()
+}
+
+#[op2(fast)]
+fn op_window_media_state(scope: &mut v8::PinScope, window: v8::Local<v8::Object>) -> u32 {
+    let Some(context) = window.get_creation_context(scope) else {
+        return 0;
+    };
+    if context.get_slot::<FrameDirectRetirement>().is_some() {
+        0
+    } else if context.get_slot::<FrameRetired>().is_some() {
+        1
+    } else {
+        2
+    }
+}
+
 // Transient activation belongs to this document's native context, never guest flags.
 struct HostUserActivation(std::time::Instant);
 
@@ -6692,6 +6764,7 @@ deno_core::extension!(
         op_frame_set_document,
         op_retire_frame,
         op_window_active,
+        op_window_media_state,
         op_window_message_pending,
         op_native_window_proxy,
         op_native_location_installed,
@@ -8208,14 +8281,11 @@ globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
 // IT here — ENV_BOOTSTRAP runs AFTER the binding, so an override would clobber the
 // real one and break the shim.
 //
-// matchMedia, though, ships as an always-`matches:false` stub. That makes every
-// responsive component render its MOBILE/collapsed variant (a `min-width:` desktop
-// query never matches) — e.g. Nike's header hydrates to a hamburger with its nav
-// links hidden, so the desktop nav "disappears" after hydration with NO error. We
-// override ONLY matchMedia (getComputedStyle untouched) with a real evaluator that
-// tests the query against the layout viewport (window.innerWidth/innerHeight), the
-// JS mirror of the CSS `@media` evaluation the layout tier already does.
+// Supported viewport and host-preference queries use the same private native
+// owner-window evaluator as CSS @media; guest dimension shadows cannot change
+// these results. Other legacy media features retain the bounded evaluator below.
 {
+  const __mediaWindow = globalThis, __mediaTypeError=TypeError, __mediaDOMException=DOMException;
   const __mqLen = (tok, basis) => {
     // A CSS length in a media feature → px. Supports px and em/rem (16px root).
     const m = String(tok).match(/([\d.]+)\s*(px|r?em)?/);
@@ -8252,14 +8322,18 @@ globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
     }
     return ok;
   };
-  const __evalMedia = (q) => {
-    if (/(?:forced-colors|prefers-contrast|prefers-color-scheme|prefers-reduced-motion|prefers-reduced-transparency|(?:any-)?pointer|(?:any-)?hover)/i.test(String(q || ""))) return ops.op_live_media_match(String(q || ""));
+  const __evalMedia = (q, owner) => {
+    if (/(?:forced-colors|prefers-contrast|prefers-color-scheme|prefers-reduced-motion|prefers-reduced-transparency|(?:any-)?pointer|(?:any-)?hover|\b(?:min-|max-)?(?:width|height)\b|aspect-ratio|orientation)/i.test(String(q || ""))) return ops.op_live_media_match(owner, String(q || ""));
     const query = String(q || "").toLowerCase().trim();
     if (!query || query === "all") return true;
     return query.split(",").some((c) => __mqClause(c.trim()));
   };
-  globalThis.matchMedia = function (q) {
+  globalThis.matchMedia = ({ matchMedia(q) {
+    const owner=this==null?__mediaWindow:this;
+    if(!ops.op_surf_is_window(owner))throw new __mediaTypeError("Illegal invocation");
+    if(!ops.op_windows_same_origin(owner))throw new __mediaDOMException("Cross-origin Window access","SecurityError");
     const media = String(q == null ? "" : q);
+    if(ops.op_window_media_state(owner)===0)return null;
     const mql = {
       media,
       onchange: null,
@@ -8270,9 +8344,9 @@ globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
       removeEventListener(_t, fn) { const i = this._l.indexOf(fn); if (i >= 0) this._l.splice(i, 1); },
       dispatchEvent() { return false; },
     };
-    Object.defineProperty(mql, "matches", { get: () => __evalMedia(media), enumerable: true });
+    Object.defineProperty(mql, "matches", { get: () => ops.op_window_media_state(owner)===2 && __evalMedia(media, owner), enumerable: true });
     return mql;
-  };
+  } }).matchMedia;
 }
 // FormData — auth/login SDKs (PropelAuth) build credential payloads with it; deno_core
 // ships none. A spec-shaped impl over an entry list (append keeps duplicates; set
@@ -10419,7 +10493,10 @@ __G.domSig = (() => {
     if (!ops.op_window_active(__document)) return null;
     const record = recordFor(el);
     if (!record || !ops.op_window_active(__document) || !frameConnected(el) || record.depth > FRAME_DEPTH_CAP || !frameWantsRealm(el)) return null;
-    if (record.realm) return record.realm;
+    if (record.realm && ops.op_window_active(record.realm)) return record.realm;
+    // An unsuccessful native commit retires its unpublished replacement. A
+    // later host navigation must allocate a fresh realm rather than reuse it.
+    record.realm = null;
     let window = ops.op_create_frame(globalThis);
     record.metadata = frameMetadata(el);
     window = ops.op_frame_set_document(window, record.owner, el,
@@ -14643,6 +14720,27 @@ impl PageSession {
     pub fn context_registry_diagnostics_for_testing(&mut self) -> serde_json::Value {
         let _activation = self.rt.activation_key().enter();
         crate::context_ownership::diagnostics(self.rt.v8_isolate())
+    }
+
+    /// Inject one native replacement-bootstrap failure before guest publication.
+    #[doc(hidden)]
+    pub fn fail_next_frame_initialization_for_testing(&mut self) {
+        let _activation = self.rt.activation_key().enter();
+        deno_core::scope!(scope, self.rt);
+        scope
+            .get_current_context()
+            .set_slot(Rc::new(FailFrameInitializationForTesting));
+    }
+
+    /// Consume the native test fault receipt without publishing guest state.
+    #[doc(hidden)]
+    pub fn take_frame_initialization_failure_for_testing(&mut self) -> bool {
+        let _activation = self.rt.activation_key().enter();
+        deno_core::scope!(scope, self.rt);
+        scope
+            .get_current_context()
+            .remove_slot::<FailedFrameInitializationForTesting>()
+            .is_some()
     }
 
     #[doc(hidden)]

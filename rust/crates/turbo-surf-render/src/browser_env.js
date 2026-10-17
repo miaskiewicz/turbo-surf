@@ -2,6 +2,8 @@
   var g = globalThis;
   var compatibilityElementPrototype,computedStyleNativeMatches,computedStyleNativeOwner;
   var normalizeComputedColor=g.__normalizeComputedColor;delete g.__normalizeComputedColor;
+  var computedFontContext=g.__computedFontContext;delete g.__computedFontContext;
+  var cssFontNumber=Number,cssFontString=String,cssFontFinite=Number.isFinite,cssFontPrecision=Number.prototype.toPrecision;
   var prepareInlineHandler=g.__prepareInlineHandler,noteInlineHandler=g.__noteInlineHandler;delete g.__prepareInlineHandler;delete g.__noteInlineHandler;
   var collectionGet=g.__getCollectionRecord,collectionSet=g.__setCollectionRecord;
   var appliedInlineRead=g.__readAppliedInlineStyle,appliedInlineWrite=g.__writeAppliedInlineStyle,inlineSheetAllowed=g.__isInlineSheetAllowed;
@@ -63,13 +65,17 @@
       if (p.length===1 && p[0]==='none'){ emit('flex-grow','0'); emit('flex-shrink','0'); emit('flex-basis','auto'); return; }
       if (p[0]!=null) emit('flex-grow', p[0]); if (p[1]!=null && /^[\d.]+$/.test(p[1])) emit('flex-shrink', p[1]); var basis = p.filter(function(t){ return isLen(t)||t==='auto'||t==='content'; }); if (basis.length) emit('flex-basis', basis[basis.length-1]); return;
     }
-    // font: [style] [variant] [weight] size[/line-height] family...
+    // Font shorthand resets omitted longhands; CSS-wide keywords apply to each.
     if (name === 'font'){
-      var fi=0; var weights={normal:1,bold:1,bolder:1,lighter:1,100:1,200:1,300:1,400:1,500:1,600:1,700:1,800:1,900:1};
-      while (fi<p.length){ var t=p[fi]; if (t==='italic'||t==='oblique') emit('font-style',t); else if (t==='small-caps') emit('font-variant',t); else if (weights[t]&&!isLen(t)) emit('font-weight',t); else break; fi++; }
-      if (fi<p.length){ var sz=p[fi]; var slash=sz.split('/'); emit('font-size', slash[0]); if (slash[1]) emit('line-height', slash[1]); fi++; }
-      if (fi<p.length) emit('font-family', p.slice(fi).join(' ')); return;
+      var fontProps=['font-style','font-variant','font-variant-caps','font-weight','font-stretch','font-size','line-height','font-family'];
+      if (/^(initial|inherit|unset|revert|revert-layer)$/.test(val)){fontProps.forEach(function(prop){emit(prop,val);});return;}
+      ['font-style','font-variant','font-variant-caps','font-weight','font-stretch','line-height'].forEach(function(prop){emit(prop,'normal');});
+      var tokens=splitTop(val.replace(/\s*\/\s*/g,'/')),fi=0;
+      while(fi<tokens.length){var token=tokens[fi];if(token==='italic'||token==='oblique')emit('font-style',token);else if(token==='small-caps'){emit('font-variant',token);emit('font-variant-caps',token);}else if(/^(normal|bold|bolder|lighter|[1-9]00)$/.test(token))emit('font-weight',token);else if(/^(ultra-|extra-|semi-)?(condensed|expanded)$/.test(token))emit('font-stretch',token);else break;fi++;}
+      if(fi<tokens.length){var sizeLine=tokens[fi++].split('/');emit('font-size',sizeLine[0]);if(sizeLine[1])emit('line-height',sizeLine[1]);}
+      if(fi<tokens.length)emit('font-family',tokens.slice(fi).join(' '));return;
     }
+    if(name==='font-variant'&&/^(normal|small-caps|initial|inherit|unset|revert|revert-layer)$/i.test(val)){emit('font-variant-caps',val.toLowerCase());return;}
     // text-decoration: line | style | color
     if (name === 'text-decoration'){
       var lines={none:1,underline:1,overline:1,'line-through':1,blink:1}; var styles={solid:1,double:1,dotted:1,dashed:1,wavy:1};
@@ -82,11 +88,58 @@
   // Returned declarations refresh on public reads; internal ancestor values use private
   // snapshots from the current calculation.
   function computedSnapshotValue(style,name){var record=declarationRecords.get(style),value=record&&cssMapGet(record.values,name);return value?value.text:'';}
+  // Keep inherited unitless line-height as a factor: its public computed px value
+  // alone cannot describe inheritance after a descendant changes font-size.
+  function computedFonts(decl,element,parentStyle,connected){
+    var context=computedFontContext(element),parent=context&&context[2],root=context&&context[3];
+    var initialFamily=context?context[0]:'',initialSize=context?context[1]:16;
+    var inherited=parent?declarationRecords.get(parentStyle(parent)).fontState:null;
+    var initial={__proto__:null,rootSize:initialSize,family:initialFamily,size:initialSize,style:'normal',weight:'400',stretch:'100%',caps:'normal',line:{__proto__:null,kind:'normal',value:0}};
+    inherited=inherited||initial;
+    function raw(name,inheritedValue,initialValue){var value=decl[name];return !value||/^(inherit|unset|revert|revert-layer)$/.test(value)?inheritedValue:value==='initial'?initialValue:value;}
+    function length(value,base,rem){
+      function term(text,scalar){var match=/^((?:\d*\.)?\d+)(px|em|rem|%|pt|pc|in|cm|mm|q)?$/i.exec(text);if(!match)return null;var number=cssFontNumber(match[1]),unit=match[2]||'',scale={__proto__:null,px:1,pt:96/72,pc:16,in:96,cm:96/2.54,mm:96/25.4,q:96/101.6};return unit==='em'?(base===null?null:number*base):unit==='rem'?(rem===null?null:number*rem):unit==='%'?(base===null?null:number*base/100):unit?number*scale[unit]:scalar||number===0?number:null;}
+      if(!/^calc\(/.test(value))return term(value,false);
+      var expression=value.replace(/calc\(/g,'(').replace(/\s+/g,''),tokens=expression.match(/(?:\d*\.)?\d+(?:[a-z]+|%)?|[()+*/-]/gi)||[],cursor=0;
+      if(tokens.join('')!==expression)return null;
+      function atom(){var token=tokens[cursor++];if(token==='+'||token==='-'){var signed=atom();return signed===null?null:token==='-'?-signed:signed;}if(token==='('){var grouped=sum();return tokens[cursor++]===')'?grouped:null;}return term(token||'',true);}
+      function product(){var value=atom();while(tokens[cursor]==='*'||tokens[cursor]==='/'){var operator=tokens[cursor++],right=atom();if(value===null||right===null||operator==='/'&&right===0)return null;value=operator==='*'?value*right:value/right;}return value;}
+      function sum(){var value=product();while(tokens[cursor]==='+'||tokens[cursor]==='-'){var operator=tokens[cursor++],right=product();if(value===null||right===null)return null;value=operator==='+'?value+right:value-right;}return value;}
+      var result=sum();return cursor===tokens.length&&cssFontFinite(result)?result:null;
+    }
+    function pixels(value){return cssFontString(cssFontNumber(cssApply(cssFontPrecision,value,[6])))+'px';}
+    var rootSize=inherited.rootSize===undefined?initialSize:inherited.rootSize;
+    var sizeValue=raw('font-size',inherited.size===null?inherited.sizeText:inherited.size,initialSize),size=typeof sizeValue==='number'?sizeValue:length(sizeValue,inherited.size,rootSize);
+    var sizeKeywords={__proto__:null,'xx-small':9,'x-small':10,small:13,medium:16,large:18,'x-large':24,'xx-large':32,'xxx-large':48};
+    if(size===null){if(sizeValue==='smaller')size=inherited.size===null?null:inherited.size/1.2;else if(sizeValue==='larger')size=inherited.size===null?null:inherited.size*1.2;else if(sizeKeywords[sizeValue])size=sizeKeywords[sizeValue]*initialSize/16;}
+    if(size!==null&&size<0)size=0;
+    var family=raw('font-family',inherited.family,initial.family),style=raw('font-style',inherited.style,initial.style),weight=cssFontString(raw('font-weight',inherited.weight,initial.weight));
+    if(weight==='normal')weight='400';else if(weight==='bold')weight='700';else if(weight==='bolder')weight=cssFontNumber(inherited.weight)<350?'400':cssFontNumber(inherited.weight)<550?'700':'900';else if(weight==='lighter')weight=cssFontNumber(inherited.weight)<550?'100':cssFontNumber(inherited.weight)<750?'400':'700';
+    var stretch=raw('font-stretch',inherited.stretch,initial.stretch),stretchValues={__proto__:null,'ultra-condensed':'50%','extra-condensed':'62.5%',condensed:'75%','semi-condensed':'87.5%',normal:'100%','semi-expanded':'112.5%',expanded:'125%','extra-expanded':'150%','ultra-expanded':'200%'};
+    stretch=stretchValues[stretch]||stretch;
+    var caps=raw('font-variant-caps',raw('font-variant',inherited.caps,initial.caps),initial.caps);
+    var lineValue=decl['line-height'],line;
+    if(!lineValue||/^(inherit|unset|revert|revert-layer)$/.test(lineValue))line=inherited.line;
+    else if(/^(normal|initial)$/.test(lineValue))line=initial.line;
+    else if(/^(?:\d*\.)?\d+$/.test(lineValue))line={__proto__:null,kind:'factor',value:cssFontNumber(lineValue)};
+    else line={__proto__:null,kind:'length',value:length(lineValue,size,rootSize),text:lineValue};
+    if(line.kind==='length'&&line.value!==null&&line.value<0)line={__proto__:null,kind:'length',value:0};
+    var available=!!(connected&&context&&context[4]&&(parent?inherited.active:root===element));
+    var state={__proto__:null,active:available,family:family,size:size,sizeText:cssFontString(sizeValue),style:style,weight:weight,stretch:stretch,caps:caps,line:line,rootSize:root===element?size:rootSize};
+    var lineText=line.kind==='normal'?'normal':line.value===null?line.text:line.kind==='factor'&&size===null?cssFontString(line.value):pixels(line.kind==='factor'?line.value*size:line.value);
+    var values={'font-family':family,'font-size':size===null?cssFontString(sizeValue):pixels(size),'font-style':style,'font-weight':weight,'font-stretch':stretch,'font-variant-caps':caps,'line-height':lineText};
+    var shorthand=[];
+    if(style!=='normal')shorthand.push(style);if(caps!=='normal')shorthand.push(caps);if(weight!=='400')shorthand.push(weight);
+    if(stretch!=='100%'){var stretchName=Object.keys(stretchValues).find(function(key){return stretchValues[key]===stretch;});shorthand.push(stretchName||stretch);}
+    shorthand.push(values['font-size']);if(lineText!=='normal')shorthand.push('/ '+lineText);shorthand.push(family);values.font=shorthand.join(' ');
+    Object.keys(values).forEach(function(name){var value=available?values[name]:'';decl[name]=value;decl[name.replace(/-([a-z])/g,function(_,letter){return letter.toUpperCase();})]=value;});
+    return state;
+  }
   if (typeof g.getComputedStyle === 'undefined') g.getComputedStyle = function computeStyle(el){
     var parentSnapshotNode=null,parentSnapshot=null;
     function parentStyle(node){if(parentSnapshotNode!==node){parentSnapshot=computeStyle(node);parentSnapshotNode=node;}return parentSnapshot;}
     var camel = function(p){ return p.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); }); };
-    var decl = { getPropertyValue: function(p){ var v = this[p]; if (v == null) v = this[camel(p)]; return v == null ? '' : String(v); }, getPropertyPriority: function(){ return ''; }, length: 0 };
+    var decl = { __proto__:null, getPropertyValue: function(p){ var v = this[p]; if (v == null) v = this[camel(p)]; return v == null ? '' : String(v); }, getPropertyPriority: function(){ return ''; }, length: 0 };
     // Minimal cascade: merge declarations from every injected stylesheet rule whose selector matches
     // `el` (emotion's `sx` -> `.css-xxx{...}`), then overlay the element's inline style (highest
     // priority). Common authored values remain observable before layout-dependent resolution.
@@ -104,7 +157,7 @@
     };
     // Length-valued properties resolve a bare zero to the computed "0px" spelling.
     var LEN_PROP = /(width|height|^top$|^right$|^bottom$|^left$|^inset|margin|padding|gap|^flex-basis$|radius|^font-size$|letter-spacing|word-spacing|text-indent|^outline-offset$|^column-(width|gap)$|size$)/;
-    var setProp = function(name, val){ name = String(name).trim(); if (!name) return; if (typeof val === 'string'){ var t = val.trim(); if (t.charAt(0) === '#') val = normColor(t); else if (t === '0' && LEN_PROP.test(name)) val = '0px'; else if (val.indexOf(',') >= 0) val = val.replace(/\s*,\s*/g, ', '); } decl[name] = val; decl[camel(name)] = val;
+    var setProp = function(name, val){ name = String(name).trim(); if (!name) return; if (typeof val === 'string'){ var t = val.trim(); if (t.charAt(0) === '#') val = normColor(t); else if (t === '0' && LEN_PROP.test(name)) val = '0px'; else if (val.indexOf(',') >= 0) val = cssPrelude(val,true); } decl[name] = val; decl[camel(name)] = val;
       if (typeof val === 'string') expandShorthand(name, val, setProp);
     };
     try {
@@ -185,7 +238,8 @@
         }
       });
     } catch(e){}
-    return __ns.makeComputedStyleDeclaration(decl,el);
+    var fontState=computedFonts(decl,el,parentStyle,connected);
+    return __ns.makeComputedStyleDeclaration(decl,el,fontState);
   };
   if (typeof g.requestAnimationFrame === 'undefined') g.requestAnimationFrame = function(cb){ return setTimeout(function(){ cb(Date.now()); }, 0); };
   if (typeof g.cancelAnimationFrame === 'undefined') g.cancelAnimationFrame = function(id){ clearTimeout(id); };
@@ -634,7 +688,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     return out.trim();
   }
   var declarationRecords=cssMap('declaration'),inlineDeclarations=cssMap('inlineDeclaration'),cssPropertyCache=new Map();
-  function declarationRecord(style){var record=declarationRecords.get(style);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=appliedInlineRead.call(record.owner);if(text!==record.source){record.source=text;parseDeclaration(record,text);}}if(record.refresh){var fresh=declarationRecords.get(record.refresh());if(fresh){record.values=fresh.values;record.names=fresh.names;}}return record;}
+  function declarationRecord(style){var record=declarationRecords.get(style);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=appliedInlineRead.call(record.owner);if(text!==record.source){record.source=text;parseDeclaration(record,text);}}if(record.refresh){var fresh=declarationRecords.get(record.refresh());if(fresh){record.values=fresh.values;record.names=fresh.names;record.fontState=fresh.fontState;}}return record;}
   function cssString(value){if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);}
   function cssPropertyName(name){if(name==='cssFloat')return 'float';return String(name).replace(/[A-Z]/g,function(c){return '-'+c.toLowerCase();}).replace(/^webkit-/,'-webkit-');}
   function knownProperty(name){if(!cssPropertyCache.has(name))cssPropertyCache.set(name,typeof cssNativeParse==='function'&&cssNativeParse(name,true));return cssPropertyCache.get(name);}
@@ -655,7 +709,7 @@ if(typeof __ns.makeNativeFunction==='function'){
   declarationMember('parentRule',function(){return declarationRecord(this).parentRule||null;});
   declarationMember('cssFloat',function(){var value=declarationRecord(this).values.get('float');return value?value.text:'';},function(value){setDeclaration(declarationRecord(this),'float',value,'');});
   declarationMember('cssText',function(){var record=declarationRecord(this);return record.computed?'':declarationText(record);},function(value){var record=declarationRecord(this);writableDeclaration(record);parseDeclaration(record,cssString(value));commitDeclaration(record);});
-  var declarationMethods={getPropertyValue:function(name){if(!arguments.length)throw new TypeError('getPropertyValue requires 1 argument');var record=declarationRecord(this),value=record.values.get(cssString(name));return value?value.text:'';},getPropertyPriority:function(name){if(!arguments.length)throw new TypeError('getPropertyPriority requires 1 argument');var value=declarationRecord(this).values.get(cssString(name));return value?value.priority:'';},setProperty:function(name,value,priority){if(arguments.length<2)throw new TypeError('setProperty requires 2 arguments');setDeclaration(declarationRecord(this),name,value,priority);},removeProperty:function(name){if(!arguments.length)throw new TypeError('removeProperty requires 1 argument');var record=declarationRecord(this);writableDeclaration(record);return removeDeclaration(record,cssString(name));},item:function(index){if(!arguments.length)throw new TypeError('item requires 1 argument');return declarationRecord(this).names[Number(index)>>>0]||'';}};
+  var declarationMethods={getPropertyValue:function(name){if(!arguments.length)throw new TypeError('getPropertyValue requires 1 argument');if(!declarationRecords.get(this))throw new TypeError('Illegal invocation');name=cssString(name);var record=declarationRecord(this),value=record.values.get(name);return value?value.text:'';},getPropertyPriority:function(name){if(!arguments.length)throw new TypeError('getPropertyPriority requires 1 argument');var value=declarationRecord(this).values.get(cssString(name));return value?value.priority:'';},setProperty:function(name,value,priority){if(arguments.length<2)throw new TypeError('setProperty requires 2 arguments');setDeclaration(declarationRecord(this),name,value,priority);},removeProperty:function(name){if(!arguments.length)throw new TypeError('removeProperty requires 1 argument');var record=declarationRecord(this);writableDeclaration(record);return removeDeclaration(record,cssString(name));},item:function(index){if(!arguments.length)throw new TypeError('item requires 1 argument');return declarationRecord(this).names[Number(index)>>>0]||'';}};
   Object.keys(declarationMethods).forEach(function(name){Object.defineProperty(declarationPrototype,name,{value:__ns.makeNativeFunction(declarationMethods[name],name,name==='setProperty'?2:1),writable:true,enumerable:true,configurable:true});});
   Object.defineProperty(declarationPrototype,Symbol.iterator,{value:Array.prototype.values,writable:true,configurable:true});
   function declarationProperty(name,record){if(typeof name!=='string'||name.startsWith('--'))return null;var cssName=cssPropertyName(name);return knownProperty(cssName)||record&&record.fontFace&&['src','font-display','unicode-range','size-adjust','ascent-override','descent-override','line-gap-override'].indexOf(cssName)>=0?cssName:null;}
@@ -663,7 +717,7 @@ if(typeof __ns.makeNativeFunction==='function'){
   var inlineDeclarationReceiver=__ns.domAccessor('nodeType',false,'Element');
   __ns.makeInlineStyleDeclaration=function(element){inlineDeclarationReceiver.call(element);var style=inlineDeclarations.get(element);if(!style){style=cssDeclaration(appliedInlineRead.call(element),element);inlineDeclarations.set(element,style);}return style;};
   var computedStyleReader=g.getComputedStyle;
-  __ns.makeComputedStyleDeclaration=function(values,element){var style=cssDeclaration(''),record=declarationRecords.get(style);Object.keys(values).forEach(function(name){var cssName=cssPropertyName(name),value=values[name];if(typeof value==='string'&&value&&knownProperty(cssName))storeDeclaration(record,cssName,value,'');});record.readOnly=true;record.computed=true;if(element)record.refresh=function(){return computedStyleReader(element);};return style;};
+  __ns.makeComputedStyleDeclaration=function(values,element,fontState){var style=cssDeclaration(''),record=declarationRecords.get(style);Object.keys(values).forEach(function(name){var cssName=cssPropertyName(name),value=values[name];if(typeof value==='string'&&value&&knownProperty(cssName))storeDeclaration(record,cssName,value,'');});record.readOnly=true;record.computed=true;record.fontState=fontState;if(element)record.refresh=function(){return computedStyleReader(element);};return style;};
   var cssRuleStates=cssMap('rule');
   var cssRuleRecord=function(rule,type){var record=cssRuleStates.get(rule);if(!record||type&&record.type!==type)throw new TypeError('Illegal invocation');return record;};
   function cssRuleInterface(name,parent){var ctor=__ns.makeNativeFunction(function(){throw new TypeError('Illegal constructor');},name,0,true);ctor.prototype=Object.create(parent||Object.prototype);Object.defineProperty(ctor.prototype,'constructor',{value:ctor,writable:true,configurable:true});Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});Object.defineProperty(ctor,'prototype',{writable:false});if(parent)Object.setPrototypeOf(ctor,parent.constructor);Object.defineProperty(g,name,{value:ctor,writable:true,configurable:true,enumerable:false});}

@@ -470,16 +470,6 @@ fn async_access(
     }
 }
 
-pub(super) fn contextual_fragment<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    _rv: v8::ReturnValue,
-) {
-    if let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(0)) {
-        template_contents::mark_parsed(scope, object, false);
-    }
-}
-
 pub(super) fn install(scope: &mut v8::PinScope) {
     let global = scope.get_current_context().global(scope);
     let ctor_name = v8::String::new(scope, "HTMLScriptElement").unwrap();

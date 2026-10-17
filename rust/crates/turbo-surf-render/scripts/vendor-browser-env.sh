@@ -74,7 +74,7 @@ done
 for file in css_descriptor_cases.json css_descriptor_probe.js css_descriptor_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
-for file in computed_intrinsics_cases.json computed_intrinsics_probe.js computed_intrinsics_chrome155.json; do
+for file in computed_intrinsics_cases.json computed_intrinsics_probe.js computed_intrinsics_chrome155.json computed_intrinsics_font_probe.js computed_intrinsics_font_chrome155.json computed_intrinsics_font_realms_probe.js computed_intrinsics_font_realms_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
 git -C "$repo" show "${source_rev}:src/event_handlers.rs" > "$dest/event_handlers.rs"
@@ -84,7 +84,7 @@ git -C "$repo" show "${source_rev}:src/event_listeners.js" > "$dest/event_listen
 for file in range_contents.rs range_contents.js range_probe.js range_chrome155.json range_live.rs range_live_probe.js range_live_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
-for file in shadow_slots.rs shadow_slots.js shadow_slots_tests.rs shadow_slots_probe.js shadow_slots_chrome155.json frame_tokens_tests.rs frame_tokens_probe.js frame_tokens_chrome155.json iframe_credentialless_tests.rs iframe_credentialless_probe.js iframe_credentialless_chrome155.json html_meta_tests.rs html_meta_probe.js html_meta_chrome155.json css_live_tests.rs css_live_probe.js css_live_chrome155.json computed_color_probe.js computed_color_chrome155.json css_adoption_tests.rs css_adoption_probe.js css_adoption_ownership_probe.js css_adoption_chrome155.json css_adoption_ownership_chrome155.json; do
+for file in css_adoption_lifecycle_probe.js css_adoption_lifecycle_chrome155.json shadow_slots.rs shadow_slots.js shadow_slots_tests.rs shadow_slots_probe.js shadow_slots_chrome155.json frame_tokens_tests.rs frame_tokens_probe.js frame_tokens_chrome155.json iframe_credentialless_tests.rs iframe_credentialless_probe.js iframe_credentialless_chrome155.json html_meta_tests.rs html_meta_probe.js html_meta_chrome155.json css_live_tests.rs css_live_probe.js css_live_chrome155.json computed_color_probe.js computed_color_chrome155.json css_adoption_tests.rs css_adoption_probe.js css_adoption_ownership_probe.js css_adoption_chrome155.json css_adoption_ownership_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
 git -C "$repo" show "${source_rev}:src/html_documents.rs" > "$dest/html_documents.rs"
@@ -117,7 +117,7 @@ done
 for file in template_contents.rs template_contents.js template_ownership_probe.js template_ownership_chrome155.json template_lifecycle_probe.js template_lifecycle_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
-for file in custom_elements.rs custom_elements.js custom_elements_probe.js custom_elements_chrome155.json custom_elements_extended_probe.js custom_elements_extended_chrome155.json custom_elements_reactions_probe.js custom_elements_reactions_chrome155.json custom_elements_idl_probe.js custom_elements_idl_chrome155.json custom_elements_realms_probe.js custom_elements_realms_chrome155.json custom_elements_moves_probe.js custom_elements_moves_chrome155.json; do
+for file in custom_elements_retired_probe.js custom_elements_retired_chrome155.json custom_elements_callbacks_probe.js custom_elements_callbacks_chrome155.json dom_parser_observer_lifecycle_probe.js dom_parser_observer_lifecycle_chrome155.json custom_elements.rs custom_elements.js custom_elements_probe.js custom_elements_chrome155.json custom_elements_extended_probe.js custom_elements_extended_chrome155.json custom_elements_reactions_probe.js custom_elements_reactions_chrome155.json custom_elements_idl_probe.js custom_elements_idl_chrome155.json custom_elements_realms_probe.js custom_elements_realms_chrome155.json custom_elements_moves_probe.js custom_elements_moves_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
 for file in script_state.rs script_preparation_probe.js script_preparation_chrome155.json; do

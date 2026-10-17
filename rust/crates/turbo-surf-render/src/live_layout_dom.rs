@@ -6,6 +6,19 @@ use crate::live_layout_composed::Composition;
 use crate::live_stylesheets::SheetSnapshot;
 use std::collections::HashSet;
 
+pub(crate) fn retire_context(_scope: &mut v8::PinScope, context: v8::Local<v8::Context>) {
+    crate::browser_env::retire_custom_element_context(context);
+    let Some(id) = context.get_slot::<DomContextId>() else {
+        return;
+    };
+    let _dom = DomScope::enter(id.0);
+    DOM.with(|state| {
+        if let Some(state) = state.borrow_mut().as_mut() {
+            state.browsing_context = false;
+        }
+    });
+}
+
 pub(crate) struct NativeLayoutInput<'s> {
     pub(crate) owner_context: Option<v8::Local<'s, v8::Context>>,
     pub(crate) tree: LiveTreeInput,

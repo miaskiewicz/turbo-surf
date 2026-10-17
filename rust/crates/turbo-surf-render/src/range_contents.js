@@ -1,4 +1,4 @@
-(function (record, make, markContextualFragment, convertTrustedType, staticRecord) {
+(function (record, make, convertTrustedType, staticRecord, parseContextualFragment) {
   "use strict";
   let Exception = DOMException;
   const LocalRange = Range,
@@ -352,18 +352,11 @@
     return !container || (compare(container, index(node), this.endContainer, this.endOffset) < 0 &&
       compare(container, index(node) + 1, this.startContainer, this.startOffset) > 0);
   });
-  const createElement = descriptor(Document.prototype, "createElement").value;
-  const innerHTML = descriptor(Element.prototype, "innerHTML").set;
   method("createContextualFragment", 1, function (html) {
     required(arguments, 1);
-    const container = apply(createElement, this.document, ["div"]);
-    html = convertTrustedType(container, html, "TrustedHTML", "Range createContextualFragment", "Failed to execute 'createContextualFragment' on 'Range': ", false);
-    apply(innerHTML, container, [html]);
-    const result = apply(fragment, this.document, []);
-    let child;
-    while ((child = first(container))) apply(append, result, [child]);
-    markContextualFragment(result);
-    return result;
+    const start = this.startContainer;
+    html = convertTrustedType(start, html, "TrustedHTML", "Range createContextualFragment", "Failed to execute 'createContextualFragment' on 'Range': ", false);
+    return parseContextualFragment(this.startContainer, html);
   });
   method("cloneContents", 0, function () { return contents(this, "clone"); });
   method("extractContents", 0, function () { return contents(this, "extract"); });

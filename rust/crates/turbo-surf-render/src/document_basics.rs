@@ -426,6 +426,9 @@ pub fn adopt<'s>(
                 .insert(handle, object);
         });
         dom_ownership::observe(scope, handle, local);
+        if with_tree(|tree| tree.is_shadow_root(handle)).unwrap_or(false) {
+            css_policy::clear_adopted_sheets(scope, local);
+        }
     }
     STYLE.with(|state| state.borrow_mut().extend(styles));
     LISTENERS.with(|state| state.borrow_mut().extend(listeners));

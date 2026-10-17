@@ -20,6 +20,7 @@ pub fn is_supported_property(name: &str) -> bool {
         || matches!(
             name,
             "content"
+                | "font-variant"
                 | "float"
                 | "clear"
                 | "direction"
@@ -186,6 +187,13 @@ impl<'i> DeclarationParser<'i> for CssParser {
                 .ok_or_else(|| input.new_custom_error(()));
         }
         let valid = input.parse_until_before(Delimiter::Bang, |input| {
+            // Lightning CSS does not model the CSS2 font-variant shorthand.
+            // Admit its measured caps subset without accepting arbitrary custom tokens.
+            if name.eq_ignore_ascii_case("font-variant") {
+                let value = input.expect_ident_cloned()?.to_ascii_lowercase();
+                input.expect_exhausted()?;
+                return Ok(matches!(value.as_str(), "normal" | "small-caps" | "initial" | "inherit" | "unset" | "revert" | "revert-layer"));
+            }
             let property=Property::parse(
                 PropertyId::from(lightningcss::values::string::CowArcStr::from(name.to_string())),
                 input,

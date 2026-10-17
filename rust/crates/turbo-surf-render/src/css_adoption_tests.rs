@@ -9,6 +9,17 @@ fn check(probe: &str, expected: &str) {
         scope,
         "<!doctype html><html><head></head><body></body></html>",
     );
+    if probe.contains("child.eval(") {
+        let child = v8::Context::new(scope, Default::default());
+        child.set_security_token(context.get_security_token(scope));
+        {
+            let scope = &mut v8::ContextScope::new(scope, child);
+            install_independent_html(scope, "<!doctype html><body></body>");
+        }
+        let global = context.global(scope);
+        let child = child.global(scope);
+        set_prop(scope, global, "child", child.into());
+    }
     let foreign = parse_html_document(scope, "<!doctype html><html><body></body></html>", false);
     let key = v8::String::new(scope, "__adoptionForeignDoc").unwrap();
     context.global(scope).set(scope, key.into(), foreign.into());
@@ -43,5 +54,13 @@ fn shadow_and_independent_documents_match_chrome_adoption_ownership_and_integrit
     check(
         include_str!("css_adoption_ownership_probe.js"),
         include_str!("css_adoption_ownership_chrome155.json"),
+    );
+}
+
+#[test]
+fn shadow_adoption_clears_constructed_sheets_without_public_hooks_matching_chrome() {
+    check(
+        include_str!("css_adoption_lifecycle_probe.js"),
+        include_str!("css_adoption_lifecycle_chrome155.json"),
     );
 }

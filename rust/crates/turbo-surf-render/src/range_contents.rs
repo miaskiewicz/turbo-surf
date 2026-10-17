@@ -3,6 +3,60 @@
 struct RangeAccessor(v8::Weak<v8::Function>);
 struct RangeExceptionUpdater(v8::Weak<v8::Function>);
 
+fn contextual_fragment<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut result: v8::ReturnValue,
+) {
+    let Ok(start) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
+        return;
+    };
+    let _owner = super::DomScope::for_object(scope, start);
+    let Some(start_handle) = super::handle_of(scope, start) else {
+        return;
+    };
+    let Some(source) = args.get(1).to_string(scope) else {
+        return;
+    };
+    let units = super::string_code_units(scope, source);
+    let scripting_enabled = super::node_has_window_owner(scope, start);
+    let Some((context, fragment)) = super::with_tree_mut(|tree| {
+        let context = if tree.node_type_id(start_handle) == 1 {
+            Some(start_handle)
+        } else {
+            tree.parent(start_handle)
+                .filter(|node| tree.node_type_id(*node) == 1)
+        };
+        let context = context
+            .filter(|node| tree.namespace_id(*node) != 0 || tree.local_name(*node) != Some("html"));
+        // The HTML-root and non-element cases use a body parser context. This
+        // private native node never runs a page custom-element constructor.
+        let context = context.unwrap_or_else(|| tree.create_element("body"));
+        let fragment = tree.create_contextual_fragment_utf16(context, &units, scripting_enabled);
+        (context, fragment)
+    }) else {
+        return;
+    };
+    let context = super::wrap(scope, context);
+    let fragment = super::wrap(scope, fragment);
+    if let Some(content) = super::template_contents::ensure(scope, context) {
+        let target = {
+            let _owner = super::DomScope::for_object(scope, content);
+            let Some(root) = super::with_tree(super::Tree::root) else {
+                return;
+            };
+            super::wrap(scope, root)
+        };
+        if super::document_basics::adopt(scope, target, fragment).is_err() {
+            return;
+        }
+    }
+    super::template_contents::realize(scope, fragment);
+    super::template_contents::mark_parsed(scope, fragment, false);
+    super::custom_elements::parsed_fragment(scope, fragment, context);
+    result.set(fragment.into());
+}
+
 // Static boundaries own their nodes through the wrapper's private V8 edge. They
 // deliberately never enter the live-boundary mutation registry.
 fn static_record(
@@ -79,9 +133,9 @@ pub(super) fn install(scope: &mut v8::PinScope) {
         .and_then(|script| script.run(scope))
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
     {
-        let marker = v8::Function::new(scope, super::script_state::contextual_fragment).unwrap();
         let convert = v8::Function::new(scope, super::trusted_types::convert_call).unwrap();
         let static_accessor = v8::Function::new(scope, static_record).unwrap();
+        let parser = v8::Function::new(scope, contextual_fragment).unwrap();
         let receiver = v8::undefined(scope);
         if let Some(updater) = initializer
             .call(
@@ -90,9 +144,9 @@ pub(super) fn install(scope: &mut v8::PinScope) {
                 &[
                     accessor.into(),
                     factory,
-                    marker.into(),
                     convert.into(),
                     static_accessor.into(),
+                    parser.into(),
                 ],
             )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())

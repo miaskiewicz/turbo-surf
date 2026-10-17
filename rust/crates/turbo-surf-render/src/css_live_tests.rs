@@ -1,11 +1,18 @@
 use super::*;
 
 fn run(html: &str, code: &str) -> serde_json::Value {
+    run_with_font_defaults(html, code, None)
+}
+
+fn run_with_font_defaults(html: &str, code: &str, fonts: Option<(&str, f64)>) -> serde_json::Value {
     super::tests::init_v8();
     let isolate = &mut v8::Isolate::new(Default::default());
     v8::scope!(let scope,isolate);
     let context = v8::Context::new(scope, Default::default());
     let scope = &mut v8::ContextScope::new(scope, context);
+    if let Some((family, size)) = fonts {
+        assert!(set_computed_font_defaults(context, family, size));
+    }
     install_with_html(scope, html);
     let global = scope.get_current_context().global(scope);
     let key = v8::String::new(scope, "document").unwrap();
@@ -22,6 +29,11 @@ fn run(html: &str, code: &str) -> serde_json::Value {
     let host = record.get(scope, key.into()).unwrap();
     let key = v8::String::new(scope, "__cssTestHost").unwrap();
     global.set(scope, key.into(), host);
+    if code.contains("__fontInertDoc") {
+        let document = parse_html_document(scope, "<!doctype html><body><b>inert</b>", false);
+        let key = v8::String::new(scope, "__fontInertDoc").unwrap();
+        global.set(scope, key.into(), document.into());
+    }
     let code = v8::String::new(scope, code).unwrap();
     v8::tc_scope!(let scope,scope);
     let value = v8::Script::compile(scope, code, None)
@@ -381,6 +393,224 @@ fn computed_import_rules_keep_source_order_and_live_declarations_after_flattenin
             ["rgb(0, 128, 0)", "11px", "23px"],
             ["rgb(0, 0, 255)", "7px", "23px"],
             ["rgb(255, 165, 0)", "7px", "23px"]
+        ])
+    );
+}
+
+#[test]
+fn computed_font_values_match_source_bound_chrome155_inheritance_and_lifecycle() {
+    use sha2::{Digest, Sha256};
+    let source = include_str!("computed_intrinsics_font_probe.js");
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("computed_intrinsics_font_chrome155.json")).unwrap();
+    assert_eq!(
+        fixture["probeSha256"],
+        format!("{:x}", Sha256::digest(source.as_bytes()))
+    );
+    assert_eq!(fixture["errors"], serde_json::json!([]));
+    // Standalone V8 has no host DOMParser installer; provide the same native inert
+    // document factory used by production, leaving the Chrome control unchanged.
+    let adapted = source.replace("new DOMParser().parseFromString(\n\t\t\"<!doctype html><body><b>inert</b>\",\n\t\t\"text/html\",\n\t)", "__fontInertDoc");
+    assert_ne!(adapted, source);
+    let result = run_with_font_defaults(
+        "<!doctype html><html><head></head><body></body></html>",
+        &format!("JSON.stringify({})", adapted.trim().trim_end_matches(';')),
+        Some(("Times", 16.0)),
+    );
+    for (index, row) in fixture["result"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(result["rows"][index], *row, "font row {}", row["name"]);
+    }
+    assert_eq!(result, fixture["result"]);
+}
+
+#[test]
+fn computed_font_host_preferences_are_private_and_used_by_css_initial_values() {
+    let result = run_with_font_defaults("<!doctype html><body><div id=parent style='font:italic 30px/2 serif'><span id=child style='font:initial'></span></div>", r#"JSON.stringify((()=>{
+        const style=getComputedStyle(document.getElementById('child'));
+        return [style.font,style.fontSize,style.lineHeight,typeof globalThis.__computedFontContext];
+    })())"#, Some(("monospace", 18.0)));
+    assert_eq!(
+        result,
+        serde_json::json!(["18px monospace", "18px", "normal", "undefined"])
+    );
+}
+
+#[test]
+fn computed_font_context_follows_actual_owner_preferences_adoption_and_retirement() {
+    fn evaluate(scope: &mut v8::PinScope, source: &str) -> serde_json::Value {
+        v8::tc_scope!(let scope, scope);
+        let source = v8::String::new(scope, source).unwrap();
+        let value = v8::Script::compile(scope, source, None)
+            .and_then(|script| script.run(scope))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{:?}",
+                    scope
+                        .exception()
+                        .map(|value| value.to_rust_string_lossy(scope))
+                )
+            });
+        serde_json::from_str(&value.to_rust_string_lossy(scope)).unwrap()
+    }
+    tests::init_v8();
+    let isolate = &mut v8::Isolate::new(Default::default());
+    v8::scope!(let scope, isolate);
+    let parent = v8::Context::new(scope, Default::default());
+    let scope = &mut v8::ContextScope::new(scope, parent);
+    assert!(set_computed_font_defaults(parent, "serif", 24.0));
+    assert!(!set_computed_font_defaults(parent, "", 16.0));
+    assert!(!set_computed_font_defaults(parent, "monospace", f64::NAN));
+    assert!(!set_computed_font_defaults(parent, "monospace", 0.0));
+    install_with_html(scope, "<!doctype html><body></body>");
+    let child = v8::Context::new(scope, Default::default());
+    child.set_security_token(parent.get_security_token(scope));
+    {
+        let scope = &mut v8::ContextScope::new(scope, child);
+        assert!(set_computed_font_defaults(child, "monospace", 18.0));
+        install_independent_html(
+            scope,
+            "<!doctype html><body><span id=leaf style='font-size:10px'>child</span></body>",
+        );
+    }
+    let child_global = child.global(scope);
+    let parent_global = parent.global(scope);
+    set_prop(scope, parent_global, "fontChild", child_global.into());
+    let initial = evaluate(
+        scope,
+        r#"JSON.stringify((()=>{
+        const doc=fontChild.document,leaf=doc.getElementById('leaf');
+        const preference=getComputedStyle(doc.body).font;
+        document.documentElement.style.lineHeight='2';doc.documentElement.style.lineHeight='1.5';
+        const read=style=>[style.font,style.fontSize,style.lineHeight];
+        const retained=getComputedStyle(leaf);globalThis.fontRetiredStyle=fontChild.getComputedStyle(doc.body);
+        const before={borrowed:read(retained),own:read(fontChild.getComputedStyle(leaf))};
+        document.body.append(document.adoptNode(leaf));
+        return {preference,before,adopted:{retained:read(retained),own:read(getComputedStyle(leaf))}};
+    })())"#,
+    );
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "computed_intrinsics_font_realms_chrome155.json"
+    ))
+    .unwrap();
+    use sha2::{Digest, Sha256};
+    assert_eq!(fixture["errors"], serde_json::json!([]));
+    assert_eq!(
+        fixture["probeSha256"],
+        format!(
+            "{:x}",
+            Sha256::digest(include_bytes!("computed_intrinsics_font_realms_probe.js"))
+        )
+    );
+    assert_eq!(initial["preference"], "18px monospace");
+    assert_eq!(initial["before"], fixture["result"]["before"]);
+    assert_eq!(initial["adopted"], fixture["result"]["adopted"]);
+    let document_key = v8::String::new(scope, "document").unwrap();
+    let document = child_global
+        .get(scope, document_key.into())
+        .unwrap()
+        .to_object(scope)
+        .unwrap();
+    {
+        let _owner = DomScope::for_object(scope, document);
+        // The production frame retirement boundary changes this same private flag.
+        DOM.with(|dom| dom.borrow_mut().as_mut().unwrap().browsing_context = false);
+    }
+    let retired = evaluate(scope, "JSON.stringify([fontRetiredStyle.font,fontRetiredStyle.lineHeight,getComputedStyle(fontChild.document.body).font])");
+    assert_eq!(retired, serde_json::json!(["", "", ""]));
+    reset();
+}
+
+#[test]
+fn computed_fonts_preserve_unresolved_metrics_without_fabricating_inherited_values() {
+    let value = run_with_font_defaults("<!doctype html><body><div id=p style='font-size:2ch;line-height:calc(1em + 1ch)'><span id=c><b id=g></b></span></div></body>", r#"JSON.stringify((()=>{
+        const values=[];
+        for(const id of ['p','c','g']){const style=getComputedStyle(document.getElementById(id));values.push([style.fontSize,style.lineHeight,style.font]);}
+        return values;
+    })())"#, Some(("serif",16.0)));
+    assert_eq!(
+        value,
+        serde_json::json!([
+            ["2ch", "calc(1em + 1ch)", "2ch / calc(1em + 1ch) serif"],
+            ["2ch", "calc(1em + 1ch)", "2ch / calc(1em + 1ch) serif"],
+            ["2ch", "calc(1em + 1ch)", "2ch / calc(1em + 1ch) serif"]
+        ])
+    );
+}
+
+#[test]
+fn computed_fonts_ignore_public_slot_and_inherited_private_state_getters() {
+    let value = run_with_font_defaults(
+        "<!doctype html><body></body>",
+        r#"JSON.stringify((()=>{
+        const host=document.createElement('div'),leaf=document.createElement('span');
+        const shadow=host.attachShadow({mode:'closed',slotAssignment:'manual'}),slot=document.createElement('slot');
+        slot.style.cssText='font-size:30px;line-height:2';shadow.append(slot);host.append(leaf);document.body.append(host);slot.assign(leaf);
+        let reads=0;Object.defineProperty(leaf,'assignedSlot',{get(){reads++;throw Error('guest slot');}});
+        Object.defineProperty(Object.prototype,'rootSize',{configurable:true,get(){reads++;throw Error('guest state');}});
+        let result;try{const style=getComputedStyle(leaf);result=[style.font,style.lineHeight];}finally{delete Object.prototype.rootSize;}
+        return [result,reads];
+    })())"#,
+        Some(("serif", 16.0)),
+    );
+    assert_eq!(value, serde_json::json!([["30px / 60px serif", "60px"], 0]));
+}
+
+#[test]
+fn computed_font_numeric_operations_ignore_guest_precision_and_unknown_unit_hooks() {
+    let value = run_with_font_defaults("<!doctype html><body><span id=known style='font-size:calc(10px + 2px);line-height:1.5'></span><span id=unknown style='font-size:2ch'></span></body>", r#"JSON.stringify((()=>{
+        const savedPrecision=Number.prototype.toPrecision,savedFinite=Number.isFinite;let reads=0;
+        Number.prototype.toPrecision=Number.isFinite=function(){reads++;throw Error('guest numeric hook');};
+        Object.defineProperty(Object.prototype,'2ch',{configurable:true,get(){reads++;throw Error('guest unit');}});
+        let values;try{values=[getComputedStyle(document.getElementById('known')).font,getComputedStyle(document.getElementById('unknown')).font];}
+        finally{Number.prototype.toPrecision=savedPrecision;Number.isFinite=savedFinite;delete Object.prototype['2ch'];}
+        return [values,reads];
+    })())"#,Some(("serif",16.0)));
+    assert_eq!(
+        value,
+        serde_json::json!([["12px / 18px serif", "2ch serif"], 0])
+    );
+}
+
+#[test]
+fn font_variant_caps_subset_preserves_parser_validation_and_reset_order() {
+    assert!(cssom_parser::is_supported_property("font-variant"));
+    for value in [
+        "normal",
+        "small-caps",
+        "SMALL-CAPS",
+        "initial",
+        "inherit",
+        "unset",
+        "revert",
+        "revert-layer",
+    ] {
+        assert!(
+            cssom_parser::parse(&format!("x {{font-variant:{value}}}")).contains("font-variant:"),
+            "{value}"
+        );
+    }
+    for value in ["garbage", "small-caps garbage", "123", "small-caps,normal"] {
+        assert!(
+            !cssom_parser::parse(&format!("x {{font-variant:{value}}}")).contains("font-variant:"),
+            "{value}"
+        );
+    }
+    let actual=run_with_font_defaults("<!doctype html><body><span id=x style='font:20px serif;font-variant:small-caps'></span></body>", r#"JSON.stringify((()=>{
+        const x=document.getElementById('x'),style=getComputedStyle(x),values=[style.font];
+        x.style.cssText='font-variant:small-caps;font:20px serif';values.push(style.font);
+        x.style.cssText='font:20px serif;font-variant:SMALL-CAPS';values.push(style.font);return values;
+    })())"#,Some(("serif",16.0)));
+    assert_eq!(
+        actual,
+        serde_json::json!([
+            "small-caps 20px serif",
+            "20px serif",
+            "small-caps 20px serif"
         ])
     );
 }

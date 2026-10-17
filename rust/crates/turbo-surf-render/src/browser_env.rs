@@ -1,5 +1,5 @@
 //! Generated browser binding adapter; source: scripts/browser-env-adapter.rs.in.
-//! Canonical DOM + CSS grammar + JS: turbo-test @ 8d8ebd2.
+//! Canonical DOM + CSS grammar + JS: turbo-test @ e8152d3.
 //! Rebuild only through scripts/vendor-browser-env.sh from committed upstream HEAD.
 #![allow(unused)]
 #![allow(clippy::all)]
@@ -25,6 +25,7 @@ pub fn document_html() -> String {
 #[path = "live_layout_dom.rs"]
 mod live_layout_dom;
 pub(crate) use live_layout_dom::capture as capture_native_layout;
+pub(crate) use live_layout_dom::retire_context as retire_native_document;
 pub(crate) use live_layout_dom::{
     capture_document as capture_native_document_layout,
     valid_receiver as valid_native_geometry_receiver, wrap_elements as wrap_native_layout_elements,

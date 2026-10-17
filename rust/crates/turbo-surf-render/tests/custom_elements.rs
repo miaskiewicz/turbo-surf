@@ -21,7 +21,7 @@ async fn check(probe: &str, fixture: &str) {
             r#"(async()=>{{
                 const stringify=JSON.stringify.bind(JSON),keys=Object.keys;
                 const control=JSON.parse({fixture_json});
-                if(control.browser!=="Chrome/155.0.8059.79"||control.v8!=="15.5.35.23"||control.errors.length||control.probeSha256!=="{probe_sha}")throw Error("Stale custom-element control");
+                if(!control.browser.startsWith("Chrome/155.")||control.v8!=="15.5.35.23"||control.errors.length||control.probeSha256!=="{probe_sha}")throw Error("Stale custom-element control");
                 const actual=await ({probe});
                 return stringify(keys(control.result).filter(key=>stringify(actual[key])!==stringify(control.result[key])).map(key=>({{key,actual:actual[key],expected:control.result[key]}})));
             }})()"#,
@@ -77,3 +77,27 @@ async fn cross_realm_adoption_and_borrowed_registry_methods() {
     )
     .await;
 }
+
+contract!(
+    callback_realms_errors_and_reentrant_adoption,
+    "../src/custom_elements_callbacks_probe.js",
+    "../src/custom_elements_callbacks_chrome155.json"
+);
+
+contract!(
+    contextual_parser_and_observer_lifecycle,
+    "../src/dom_parser_observer_lifecycle_probe.js",
+    "../src/dom_parser_observer_lifecycle_chrome155.json"
+);
+
+contract!(
+    cross_document_shadow_stylesheet_adoption_lifecycle,
+    "../src/css_adoption_lifecycle_probe.js",
+    "../src/css_adoption_lifecycle_chrome155.json"
+);
+
+contract!(
+    retired_frame_preserves_registry_but_suppresses_automatic_custom_element_lifecycle,
+    "../src/custom_elements_retired_probe.js",
+    "../src/custom_elements_retired_chrome155.json"
+);

@@ -19,10 +19,10 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
 
 ## Active PR26 follow-up — 2026-10-17
 
-This follow-up covers transport/GPU observability and the homepage execution-budget
-failure. It does not close the broader issue #28 backlog or certify Google acceptance.
-States below include the completed local gates and fresh current-source consent/search
-measurement. Final-head CI is recorded in the PR checks.
+The previous transport/GPU observability batch and fresh source59f7835 Google
+measurement are preserved below. The current messaging/layout/DOM batch has its
+own implementation and validation state; earlier full gates do not certify it.
+Neither batch closes issue #28 or establishes Google acceptance.
 
 ### Requested PR26 implementation batch — messaging, layout/Range and DOM
 
@@ -32,9 +32,14 @@ entry with implementation, independent controls and integrated results as it lan
 
 | Area | Work in progress | Closure evidence required |
 |---|---|---|
-| Messaging / GC | Dead weak-context registry entries are pruned after actual GC at host boundaries. Native17 lifecycle controls pass; disabling the sweep reproduces retention. Default and final integrated checks remain pending. | Production retained/released ownership and reentrant failure controls; forced-GC and repeated-navigation checks on the genuine155 engine. |
-| Layout / Range | Current focused native155 baseline passes35 tests (3 abstract Range,23 geometry,9 shadow), without reproducing the old hang. Decorated inline source fragments and expanded scoped/composed/lifecycle controls are in progress. | Bounded combined geometry/Range runs, independent Chrome geometry controls and production/default/native regressions without larger watchdogs. |
-| DOM | Fresh Chrome controls reproduce reentrant adoption callback-order differences on both production engines. Canonical callback fix passes its new control; the broader matrix also reveals wrong Range fragment context and premature template custom-element upgrades, with native parser fixes in progress. | Independent callback realm/receiver/order controls, canonical fixes officially re-vendored, production parser/observer regressions and combined gates. |
+| Messaging / GC | Dead weak-context registry entries are pruned after actual GC at host boundaries, with a disabled-sweep negative control. The final75-test native cohort includes GC4, lifetime7, frame4 and host input11. Native initialization rollback, lazy parent layout and initial/later failure cleanup pass with exact ownership assertions and original watchdogs. | Focused integrated controls pass; complete default/native workspace and addon gates remain pending. |
+| Layout / Range | The final75-test genuine-native155 cohort passes, including exact20-scene iframe comparison, geometry23, abstract Range3, inline2 and shadow10. The old combined hang does not reproduce. Zero inline widths, initial/inherited fonts, actual child sizing, retirement, scoped CSS and composed slot controls pass. Measured source is canonical e8152d3/public layout93fbdd3; final pin2eac7f6 adds tests with identical production bytes. | Focused integration passes with1350 source hashes unchanged; complete gates and fresh measurements remain pending. |
+| DOM | Canonical e8152d3 is officially re-vendored; DOM aaeb290 is pinned in all six consumers. Its73 focused tests pass on rusty_v8 149.3.0, including22 CSS controls and29 Chrome font cases. The separate genuine-native155 cohort passes all10 production custom-element controls, parser/observer lifecycle, adopted stylesheet clearing and font ownership in the20-scene iframe comparison. | Independent controls and final75 production tests pass; complete workspace/addon gates remain pending. |
+
+The independent zero-viewport control also exposes a remaining BackCompat body
+strut difference: native34px versus Chrome30px, with matching child rectangles and
+Times text Range18.5px. Full quirks geometry needs document-mode input and remains
+in issue28. A separate standards-srcdoc control must not erase that evidence.
 
 ### Latest fresh retry — 2026-10-17, source59f7835
 
@@ -76,7 +81,8 @@ outcomes and preserved earlier failures. Full-gate status is updated separately.
 | Initial script classification | A narrow native HTML-script guard prevents an HTMLScriptElement receiver error from discarding the initial script batch when an SVG/uppercase pseudo-script is present. | Independent old-addon reproduction and new default queue-preservation/resource controls pass. Broader SVG script loading/execution remains open in #28; skipping an unsupported SVG script does not implement that feature. |
 | Default geometry fixture startup | The first full default gate passes1011 tests, then both neutral-at-rule controls hit5-second expression budgets before their behavior assertions. An isolated host sample places one thread in cold system-font discovery/parsing and the peer in the same OnceLock wait; an unsampled single control passes. | A separate60-second warmup checks real7×9 geometry, closes its session, then retains the original5-second conformance sessions and every assertion. Affected default/native2 controls and the complete default gate pass. Production cold-font startup latency remains in#28. Failed logs/binary are retained; failed gates are not counted as passes. |
 
-The complete default `npm run check` passes: **1384 Rust tests**, zero failures,
+At historical production source88528ae (documentation/evidence59f7835),
+the complete default `npm run check` passes: **1384 Rust tests**, zero failures,
 9 documented ignores across131 suites, strict all-target Clippy and formatting.
 The native155 full workspace passes **1423 tests**, zero failures and6 generated
 doctest ignores across131 suites. That native full run precedes only the test-only
@@ -101,7 +107,7 @@ results are not counted as passing gates. The bounded fixture warmup and inactiv
 compiler-cache cleanup precede the successful complete retries. Production
 budgets and cold-font performance are unchanged.
 
-The fresh current-source consent/search matrix at production commit `88528ae`
+The earlier same-day consent/search matrix at production commit `88528ae`
 completes all14 processes without a process timeout: **native baseline0/2 accepted
 SERPs, Chrome baseline0/2**. All four native passes save real consent204 before
 native-form search200 and retry to/sorry429, using native cookies and no fallback
@@ -196,7 +202,7 @@ the issue retains the specific unclosed requirements.
 | Area | Remaining closure requirements | Tracking |
 |---|---|---|
 | Messaging / GC | Broader realm/frame retirement, detached storage reclamation, endpoint and reentrant failure coverage | #28 |
-| Layout | Decorated/empty/mixed-font inline boxes, stacking, scrolling/events/RTL, fixed positioning, iframe migration and cold system-font discovery/parsing latency | #28 |
+| Layout | Inline behavior beyond measured decorated/empty/mixed-font controls, stacking, scrolling/events/RTL, fixed positioning, iframe migration and cold system-font discovery/parsing latency | #28 |
 | Range / caret | Remaining composed-tree/lifecycle/geometry cases beyond the integrated interface/receiver/GC controls | #28 |
 | DOM | Parsing/observer edges, custom-element reactions/registries, broader form association/CustomStateSet lifecycle, UTF-16 edge cases | #28 |
 | Forms | Broader radio/adoption and form-collection behavior beyond saved controls, FileList/multipart, other targets and encoding/submitter/policy cases | #28 |

@@ -32,6 +32,7 @@ deno_core::extension!(
     ops = [
         op_geometry_object,
         crate::live_layout_backend::op_live_media_match,
+        crate::live_layout_backend::op_live_frame_dimension,
         crate::live_layout_supports::op_native_css_supports,
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,
@@ -77,8 +78,15 @@ pub(crate) fn install<'s>(
         .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
     if let Some(initializer) = initializer {
         let undefined = v8::undefined(scope);
+        let context = scope.get_current_context();
+        let frame_window = crate::runtime::native_frame_layout_host(scope, context).is_some();
+        let frame_window = v8::Boolean::new(scope, frame_window);
         if let Some(factory) = initializer
-            .call(scope, undefined.into(), &[core.into(), factory.into()])
+            .call(
+                scope,
+                undefined.into(),
+                &[core.into(), factory.into(), frame_window.into()],
+            )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         {
             let key = factory_key(scope).ok_or("Geometry private key allocation interrupted")?;

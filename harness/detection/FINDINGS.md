@@ -8,6 +8,32 @@ Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
+## Current messaging, geometry and DOM batch
+
+The requested PR26 follow-up is in progress. The earlier complete gate counts and
+Google captures below describe their frozen source, rather than these new changes.
+Actual-GC controls verify pruning of collected weak context registrations while
+retained documents remain usable. Canonical custom-element reaction ordering and
+actual-context fragment parsing are officially re-vendored from turbo-test
+`e8152d3`, with the public turbo-dom parser API pinned at `aaeb290`. Its73 focused
+canonical tests pass on rusty_v8 149.3.0, including22 CSS controls and a29-case
+Chrome font oracle; production native155 validation is separate.
+
+Expanded independent Chrome controls exposed adopted shadow stylesheets surviving
+cross-document adoption, incorrect child-frame viewports and geometry surviving
+frame retirement. The final combined genuine-native155 cohort now passes all75
+tests, zero failures/skips, on canonical e8152d3 and public layout93fbdd3. All1350
+source hashes remain unchanged during its140.32s run. It includes the exact
+20-scene iframe comparison, abstract Range3, custom elements10, GC4, lifetime7,
+frame4, host input11, inline2, live geometry23 and shadow10. Earlier failures and
+the unchanged ownership/timing assertions remain preserved.
+
+The final pinned layout candidate is public2eac7f6, whose production bytes are
+identical to93fbdd3; its changes add coverage tests, including a cfg(test) suffix.
+Full workspace/addon gates and fresh API/Google measurements remain pending. The
+separate BackCompat body-strut difference remains in issue28. See the
+[active checklist](./PARITY-GAPS.md#requested-pr26-implementation-batch--messaging-layoutrange-and-dom).
+
 ## Active observability and lifecycle follow-up — 2026-10-17
 
 [PARITY-GAPS.md](./PARITY-GAPS.md#active-pr26-follow-up--2026-10-17)
@@ -32,14 +58,14 @@ are officially re-vendored, with independent Chrome controls and review. A nativ
 adapter fix now validates a selector once before matching every node against its
 current state. It adds no persistent target or stylesheet cache.
 
-The latest native155 build completes **3/3 clean homepage runs and1/1 profiled run**
+The historical source88528ae native155 homepage-only build completes **3/3 clean runs and1/1 profiled run**
 within the unchanged20s budget, with zero budget exhaustion. Whole-process walls
 are13.30s/11.44s/13.61s clean and12.33s profiled; those are not isolated open times.
 The two latest profiles both capture98 geometry reads: selector preparation falls
 5.05s→1.97s and total capture6.29s→3.18s. Earlier failed/mixed candidates remain
 preserved; partial live runs are not a fixed-work benchmark. All four successful runs
 reach the500-pump cap; the three clean runs report pendingWork=1, while that
-post-verdict probe is unavailable for the profiled run. This is not global idle. Complete local gates pass: default1384/native1423 Rust tests, strict Clippy/fmt,
+post-verdict probe is unavailable for the profiled run. This is not global idle. That historical source passes complete local gates: default1384/native1423 Rust tests, strict Clippy/fmt,
 both rebuilt addons95 shim/20 E2E/116 detection plus2 Python. Node22 additionally
 executes all3 real-Chrome controls without skips. The native full run precedes only
 a test-fixture font warmup; affected native2 and refreshed strict/fmt validate that
@@ -192,8 +218,9 @@ retains those constant codes/counts and artifact hashes; the current receipt
 records the fresh zero-code rerun and corrects the historical request boundary.
 
 Audio remains in#27; every other deferred behavior, homepage lifecycle bounds and
-reliable Google acceptance are explicitly recorded in#28. The finite PR26 delivery
-gates are complete; full Chrome parity and native SERP acceptance remain open.
+reliable Google acceptance are explicitly recorded in#28. The finite delivery
+gates at the historical59f7835 checkpoint were complete; the current batch still
+needs its final gates. Full Chrome parity and native SERP acceptance remain open.
 No turbo-surf publication is performed.
 
 ## Earlier integration snapshot — 544180d / 26a08b5

@@ -181,7 +181,7 @@ impl Copier<'_> {
 
 // This is a UA-origin supplement, not author CSS or a DOM rewrite. Universal
 // author rules must be able to override it regardless of selector specificity.
-pub(crate) const LIVE_UA: &str = "body{margin:8px;font-family:serif}head,style,script,title,meta,link,base,noscript{display:none}";
+pub(crate) const LIVE_UA: &str = "body{margin:8px;font-family:serif}iframe{display:inline;border:2px inset}head,style,script,title,meta,link,base,noscript{display:none}";
 
 pub(crate) fn live_cascade(css: &str, width: f32, height: f32) -> Cascade {
     turbo_html2pdf_core::set_media_viewport_height(height);

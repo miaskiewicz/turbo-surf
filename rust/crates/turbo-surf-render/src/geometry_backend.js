@@ -1,5 +1,5 @@
 // Private, native-branded rectangle data; no guest-visible host registry.
-(function (core, make) {
+(function (core, make, frameWindow) {
   "use strict";
   const ops = core.ops;
   const getRecord = ops.op_interface_record_get;
@@ -8,11 +8,66 @@
   const setPrototype = Object.setPrototypeOf;
   const create = Object.create;
   const LocalTypeError = TypeError;
+  const LocalDOMException = DOMException;
+  const apply = Reflect.apply;
+  const isPrototypeOf = Object.prototype.isPrototypeOf;
+  const localTypeErrorPrototype = LocalTypeError.prototype;
+  const nativeTypeErrorPrototype = Object.getPrototypeOf(core.buildCustomError("TypeError", ""));
   const minimum = Math.min;
   const maximum = Math.max;
   const finite = Number.isFinite;
   const single = Math.fround;
   const prototypes = create(null);
+
+  function frameDimension(receiver, height, read) {
+    let value;
+    try {
+      value = ops.op_live_frame_dimension(receiver, height, read);
+    } catch (error) {
+      if (
+        apply(isPrototypeOf, nativeTypeErrorPrototype, [error]) &&
+        !apply(isPrototypeOf, localTypeErrorPrototype, [error])
+      )
+        throw new LocalTypeError("Illegal invocation");
+      throw error;
+    }
+    if (value === null) throw new LocalDOMException("Cross-origin Window access", "SecurityError");
+    return value;
+  }
+
+  if (frameWindow) {
+    for (const [name, height] of [
+      ["innerWidth", false],
+      ["innerHeight", true],
+    ]) {
+      define(globalThis, name, {
+        __proto__: null,
+        get: make(
+          function () {
+            return frameDimension(this, height, true);
+          },
+          `get ${name}`,
+          0,
+        ),
+        set: make(
+          function (value) {
+            frameDimension(this, height, false);
+            define(this, name, {
+              __proto__: null,
+              value,
+              writable: true,
+              enumerable: true,
+              configurable: true,
+            });
+          },
+          `set ${name}`,
+          1,
+        ),
+        configurable: true,
+        enumerable: true,
+      });
+    }
+  }
 
   function brand(receiver, kind) {
     if (!ops.op_live_geometry_brand(receiver, kind)) throw new LocalTypeError("Illegal invocation");
@@ -226,7 +281,6 @@
   }
   const rectListPrototype = create(Object.prototype);
   const arrayValues = Array.prototype.values;
-  const apply = Reflect.apply;
   const DOMRectList = make(
     function () {
       throw new LocalTypeError("Illegal constructor");

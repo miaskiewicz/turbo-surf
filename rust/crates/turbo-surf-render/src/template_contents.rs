@@ -294,17 +294,12 @@ pub(super) fn set_html<'s>(
     };
     let source = {
         let _owner = DomScope::for_object(scope, host);
-        // Parse with the actual template context, without replacing its light children.
-        let placeholder = with_tree_mut(|tree| {
-            let temporary = tree.create_element("template");
-            tree.set_inner_html_utf16(temporary, html);
-            tree.take_template_contents(temporary).unwrap_or_else(|| {
-                let fragment = tree.create_document_fragment();
-                for child in tree.children(temporary) {
-                    tree.remove_child(temporary, child);
-                    tree.append_child(fragment, child)
-                }
-                fragment
+        // Parse without observable active-document mutations. Its elements must
+        // reach the template's inert owner before custom-element upgrade checks.
+        let scripting_enabled = node_has_window_owner(scope, host);
+        let placeholder = handle_of(scope, host).and_then(|context| {
+            with_tree_mut(|tree| {
+                tree.create_contextual_fragment_utf16(context, html, scripting_enabled)
             })
         });
         let Some(fragment) = placeholder else {

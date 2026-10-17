@@ -1,0 +1,86 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "34b1ac7d15dad06262f0d5730f4020dddaa2359a5f6e069c069340d11dc18bd8",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "name": "nested",
+      "host": [0, 0, 128, 26],
+      "light": [4, 4, 31, 7],
+      "nested": [4, 11, 60, 11],
+      "leaf": [4, 11, 23, 11],
+      "range": [4, 4, 31, 18.5]
+    },
+    {
+      "name": "sheet-mutation",
+      "host": [0, 0, 128, 26],
+      "light": [4, 4, 31, 7],
+      "nested": [4, 11, 60, 11],
+      "leaf": [4, 11, 29, 11],
+      "range": [4, 4, 31, 18.5]
+    },
+    {
+      "name": "unassigned",
+      "host": [0, 0, 128, 19],
+      "light": [0, 0, 0, 0],
+      "nested": [4, 4, 60, 11],
+      "leaf": [4, 4, 29, 11],
+      "range": [0, 0, 0, 0]
+    },
+    {
+      "name": "reassigned",
+      "host": [0, 0, 128, 26],
+      "light": [4, 4, 31, 7],
+      "nested": [4, 11, 60, 11],
+      "leaf": [4, 11, 29, 11],
+      "range": [4, 4, 31, 18.5]
+    },
+    {
+      "name": "disconnected",
+      "host": [0, 0, 0, 0],
+      "light": [0, 0, 0, 0],
+      "nested": [0, 0, 0, 0],
+      "leaf": [0, 0, 0, 0],
+      "range": [0, 0, 0, 0]
+    },
+    {
+      "name": "reconnected",
+      "host": [0, 0, 128, 26],
+      "light": [4, 4, 31, 7],
+      "nested": [4, 11, 60, 11],
+      "leaf": [4, 11, 29, 11],
+      "range": [0, 0, 0, 0]
+    },
+    {
+      "name": "adopted-frame",
+      "host": [0, 0, 200, 32],
+      "light": [4, 4, 192, 13],
+      "nested": [4, 17, 60, 11],
+      "leaf": [4, 17, 17, 11],
+      "range": [0, 0, 0, 0],
+      "migratedRange": [4, 4, 192, 18.5],
+      "owner": true,
+      "shadowOwner": true
+    },
+    {
+      "name": "retired-frame",
+      "host": [0, 0, 0, 0],
+      "light": [0, 0, 0, 0],
+      "nested": [0, 0, 0, 0],
+      "leaf": [0, 0, 0, 0],
+      "range": [0, 0, 0, 0],
+      "migratedRange": [0, 0, 0, 0]
+    }
+  ]
+}

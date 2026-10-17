@@ -53,6 +53,32 @@ pub(crate) fn element_geometry(
     let used = first
         .used_box
         .ok_or("native live layout used box metrics are missing")?;
+    if used.inline_fragment {
+        let rects = boxes
+            .iter()
+            .map(|fragment| fragment.transformed_bounds)
+            .collect::<Vec<_>>();
+        let local = all_fragment_bounds(
+            &boxes
+                .iter()
+                .map(|fragment| fragment.rect)
+                .collect::<Vec<_>>(),
+        );
+        return Ok(ElementGeometry {
+            bounds: bounding_box(&rects),
+            rects,
+            client: ClientMetrics {
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+            },
+            offset: OffsetSize {
+                width: integer(local.width)?,
+                height: integer(local.height)?,
+            },
+        });
+    }
     let padding = used.padding_rect(first.rect);
     let rects: Vec<_> = boxes
         .iter()
@@ -75,6 +101,30 @@ pub(crate) fn element_geometry(
     })
 }
 
+fn all_fragment_bounds(rects: &[Rect]) -> Rect {
+    let left = rects
+        .iter()
+        .map(|rect| rect.x)
+        .fold(f32::INFINITY, f32::min);
+    let top = rects
+        .iter()
+        .map(|rect| rect.y)
+        .fold(f32::INFINITY, f32::min);
+    let right = rects
+        .iter()
+        .map(|rect| rect.x + rect.width)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let bottom = rects
+        .iter()
+        .map(|rect| rect.y + rect.height)
+        .fold(f32::NEG_INFINITY, f32::max);
+    Rect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    }
+}
 fn integer(value: f32) -> Result<i32, String> {
     if !value.is_finite() || value < 0.0 || f64::from(value) > f64::from(i32::MAX) {
         return Err("native CSSOM metric is outside its integer range".into());
@@ -145,6 +195,15 @@ fn offset_integer(value: f32) -> Result<i32, String> {
     }
     Ok((f64::from(value) + 0.5).floor() as i32)
 }
+fn is_inline_fragment(snapshot: &LayoutSnapshot, id: SourceId) -> bool {
+    snapshot.source(id).is_some_and(|source| {
+        source.fragment_indices.iter().any(|index| {
+            snapshot.fragments()[*index]
+                .used_box
+                .is_some_and(|used| used.inline_fragment)
+        })
+    })
+}
 pub(crate) fn offset_position(
     snapshot: &LayoutSnapshot,
     styles: &crate::live_layout_scroll::SourceStyles,
@@ -197,7 +256,8 @@ pub(crate) fn offset_position(
         let transformed = parent_style
             .style
             .get("transform")
-            .is_some_and(|value| value != "none");
+            .is_some_and(|value| value != "none")
+            && !is_inline_fragment(snapshot, parent);
         let table = used.position == turbo_html2pdf_core::layout::value::Position::Static
             && matches!(parent_style.tag.as_str(), "table" | "td" | "th");
         if positioned || transformed || table || parent_style.tag == "body" {
@@ -217,8 +277,18 @@ pub(crate) fn offset_position(
                     .used_box
                     .ok_or("native offset parent used box missing")?;
                 (
-                    box_.rect.x + metrics.border.left,
-                    box_.rect.y + metrics.border.top,
+                    box_.rect.x
+                        + if metrics.inline_fragment {
+                            0.0
+                        } else {
+                            metrics.border.left
+                        },
+                    box_.rect.y
+                        + if metrics.inline_fragment {
+                            0.0
+                        } else {
+                            metrics.border.top
+                        },
                 )
             };
             return Ok(OffsetPosition {

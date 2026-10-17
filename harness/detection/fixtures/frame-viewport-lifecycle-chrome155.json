@@ -1,0 +1,163 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "413b7c54cd3100bd20a4c0a0000b7e06fe3afb4fb739c9a1038d444367b33d31",
+  "result": [
+    {
+      "name": "initial",
+      "media": [true, false],
+      "viewport": [200, 100],
+      "box": [0, 0, 200, 50],
+      "range": [0, 0, 200, 50],
+      "nestedViewport": [100, 40],
+      "leaf": [0, 0, 100, 10]
+    },
+    {
+      "name": "descriptor",
+      "get": "function",
+      "set": "function",
+      "enumerable": true,
+      "configurable": true,
+      "forgedGet": {
+        "ok": false,
+        "name": "TypeError",
+        "definitionTypeError": true,
+        "definitionDOMException": false
+      },
+      "forgedSet": {
+        "ok": false,
+        "name": "TypeError",
+        "definitionTypeError": true,
+        "definitionDOMException": false
+      }
+    },
+    {
+      "name": "media-receivers",
+      "ownPrototype": false,
+      "construct": {
+        "ok": false,
+        "name": "TypeError",
+        "definitionTypeError": false,
+        "definitionDOMException": false
+      },
+      "parent": {
+        "ok": true,
+        "value": true
+      },
+      "forged": {
+        "ok": false,
+        "name": "TypeError",
+        "definitionTypeError": true,
+        "definitionDOMException": false
+      },
+      "nullReceiver": {
+        "ok": true,
+        "value": false
+      }
+    },
+    {
+      "name": "resized",
+      "media": [false, false],
+      "viewport": [240, 120],
+      "box": [0, 0, 240, 60],
+      "range": [0, 0, 240, 60],
+      "nestedViewport": [120, 40],
+      "leaf": [0, 0, 120, 10]
+    },
+    {
+      "name": "fractional",
+      "media": [false, false],
+      "viewport": [240, 120],
+      "box": [0, 0, 240.5, 60.25],
+      "range": [0, 0, 240.5, 60.25],
+      "nestedViewport": [120, 40],
+      "leaf": [0, 0, 120.5, 10]
+    },
+    {
+      "name": "assignment",
+      "result": {
+        "ok": true,
+        "value": 777
+      },
+      "nativeBox": [0, 0, 240.5, 60.25]
+    },
+    {
+      "name": "guest-shadowed",
+      "box": [0, 0, 240.5, 60.25],
+      "leaf": [0, 0, 120.5, 10],
+      "media": [false, false]
+    },
+    {
+      "name": "cross-origin-get",
+      "result": {
+        "ok": false,
+        "name": "SecurityError",
+        "definitionTypeError": false,
+        "definitionDOMException": true
+      },
+      "setterResult": {
+        "ok": false,
+        "name": "SecurityError",
+        "definitionTypeError": false,
+        "definitionDOMException": true
+      }
+    },
+    {
+      "name": "retired",
+      "box": [0, 0, 0, 0],
+      "range": [0, 0, 0, 0],
+      "leaf": [0, 0, 0, 0],
+      "retainedDocument": true,
+      "retainedDefaultView": false,
+      "retainedNestedDefaultView": false,
+      "retainedNestedFrameElement": false,
+      "retiredAssociations": {
+        "outerDocument": true,
+        "nestedDocument": true,
+        "outerWindowDocumentType": "object",
+        "nestedWindowDocumentType": "object",
+        "nestedConnected": true,
+        "nestedDocConnected": true,
+        "leafConnected": true
+      },
+      "retiredMetrics": {
+        "client": [0, 0, 0, 0],
+        "offset": [0, 0, 0, 0],
+        "scroll": [0, 0, 0, 0],
+        "offsetParentIsNull": true,
+        "hit": [true, 0],
+        "caret": [true, true],
+        "media": {
+          "retainedMax": false,
+          "retainedAll": false,
+          "newMax": null,
+          "newAll": null,
+          "newZero": null,
+          "nestedAll": {
+            "matches": false
+          }
+        }
+      },
+      "retainedViewport": [0, 0, 0, 0]
+    },
+    {
+      "name": "retired-mutation",
+      "text": "usable",
+      "connected": true,
+      "box": [0, 0, 0, 0]
+    },
+    {
+      "name": "reinserted-host",
+      "distinctWindow": true,
+      "distinctDocument": true,
+      "oldViewport": [0, 0],
+      "oldQueries": [false, false],
+      "oldNewQuery": null,
+      "newViewport": [240, 120],
+      "newQuery": {
+        "matches": true
+      },
+      "oldBox": [0, 0, 0, 0]
+    }
+  ]
+}

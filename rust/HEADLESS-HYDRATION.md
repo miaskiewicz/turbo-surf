@@ -68,8 +68,14 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 - Observer delivery remains partial. Element box geometry now uses the public native
   live-tree layout seam, private actual CSSOM rules and transform provenance. Supported
   client/offset/scroll metrics and point-hit regions have authored Chrome controls;
-  shaped text/Range/caret and composed shadow/slot controls are integrated; decorated
-  inline boxes, full stacking contexts and broader scrolling remain incomplete. See [the scope and controls](../harness/detection/LIVE-GEOMETRY.md).
+  shaped text/Range/caret and composed shadow/slot controls are integrated. Source-owned
+  decorated/empty/mixed-font inline boxes now have independent controls, including
+  corrected macOS generic-serif font selection. The final75-test genuine-native155 cohort passes, including the exact20-scene
+  iframe comparison, frame initialization/GC and production custom elements.
+  Default/zero iframe and canonical computed-font corrections are integrated;
+  complete workspace/addon gates remain pending. Unsupported
+  inline alignment/writing/positioning, full stacking contexts and broader scrolling
+  remain explicit bounds. See [the scope and controls](../harness/detection/LIVE-GEOMETRY.md).
 
 **Current interface corrections (2026-10-10):**
 
@@ -130,9 +136,15 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   browsing context, and source attribute changes navigate asynchronously. Load events
   are branded, trusted native Events. Retired timers, descendant timers, classic-script
   queues and queued message delivery stop. Native Document ownership guards prevent
-  old documents from initiating replacement-realm script/frame work. Contexts and DOM
-  trees remain owned until page reset/teardown rather than being collected individually;
-  cancellation of every in-flight async operation remains incomplete.
+  old documents from initiating replacement-realm script/frame work. Retained guest
+  documents, constructors and pending native jobs preserve their actual ownership;
+  unreachable contexts can collect before page teardown. Real V8 GC schedules bounded
+  native-storage collection and pruning of dead weak-context registrations at host
+  boundaries, without traversing Trees inside the GC callback. Registry vector capacity
+  retains its high-water mark. Retired definitions retain registry/instance identity
+  while automatic upgrades and queued reactions stop; retired documents expose empty
+  geometry. Broader reclamation and cancellation of every in-flight async operation
+  remain incomplete.
 - Connected child indices follow browsing-context connection order. Moving an iframe
   discards its old context and appends the replacement after surviving contexts, matching
   the measured Chrome behavior even when DOM order differs. Shadow-tree frames own real

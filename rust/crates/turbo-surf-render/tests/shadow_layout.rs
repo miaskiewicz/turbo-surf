@@ -258,3 +258,35 @@ fn genuine_selector_matching_and_specificity_match_light_and_closed_shadow_chrom
         include_str!("../../../../harness/detection/fixtures/selector-layout-chrome155.json"),
     );
 }
+
+#[cfg(turbo_surf_native_proxy)]
+#[tokio::test(flavor = "current_thread")]
+async fn nested_shadow_scope_mutations_slot_reassignment_and_range_frame_migrations_match_chrome() {
+    let source = include_str!("../../../../harness/detection/composed-layout-lifecycle-probe.js");
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/composed-layout-lifecycle-chrome155.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        expected["probeSha256"],
+        format!("{:x}", Sha256::digest(source))
+    );
+    let mut page = turbo_surf_render::PageSession::open(
+        "<!doctype html><html><head></head><body></body></html>",
+        "https://layout-lifecycle.test/",
+        "",
+        "",
+        10000,
+    )
+    .await
+    .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(
+        &page
+            .eval_json_expression(source.trim().trim_end_matches(';'))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual, expected["result"]);
+    page.close();
+}

@@ -11,11 +11,29 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Reusable diagnostics and browser identity
 
+- Preserve per-element custom-element reaction order across reentrant adoption,
+  including definition-realm callbacks and error routing. Parse Range fragments in
+  their actual post-conversion context with native namespace, form-ancestor,
+  quirks-mode and UTF-16 handling; preserve scoped registries and inert-template
+  ownership without premature upgrades or spurious observer events. Clear retained
+  shadow-root adopted stylesheet lists before cross-document adoption callbacks,
+  preserving same-document moves and disconnected roots. Stop automatic construction
+  and queued reactions after a definition frame retires, retaining registry lookup
+  and existing instance identity. Re-vendor
+  canonical turbo-test e8152d3 and pin the additive public turbo-dom aaeb290 API
+  consistently across all six consumers.
+
 - Drop collected weak context registrations at host boundaries after actual V8 GC,
   preserving live retained documents and avoiding native Tree traversal inside GC
   callbacks. Add independent nested-frame/retained-constructor ownership controls,
   exact registry reclamation and reentrant Window transfer retirement regressions.
   Vector backing capacity retains its high-water mark; this is not full OS-memory reclamation.
+
+- Roll back native ownership when iframe initialization fails before publication,
+  without calling guest helpers in partially installed or terminating realms.
+  Resolve child viewport layout when metrics are read so unsupported parent CSS
+  does not prevent frame scripts from starting. Add host-only one-shot fault
+  controls for exact cleanup and same-host recovery; preserve the existing watchdog.
 
 - Preserve the requested fresh source59f7835 retry separately from the earlier
   same-day capture: Chrome baselines reach7/8 SERP markers, native baselines remain
@@ -24,7 +42,7 @@ residual work beyond this PR, with audio separately deferred in
   Preserve3/4 native homepage watchdog failures, including one clean baseline;
   later navigation completion does not erase initial-open diagnostics.
 
-- Record the source-pinned October17 consent/search rerun: all14 processes finish;
+- Preserve the earlier source88528ae October17 consent/search rerun: all14 processes finish;
   native and Chrome baselines both accept0/2 SERPs. Native consent204 and genuine
   form navigation work without imported cookies or fallback. Clean native flows
   stay within20s, while one instrumented homepage open exhausts it; its repeated
@@ -162,8 +180,8 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Native DOM, scripts and ownership
 
-- Consume public Git-pinned turbo-dom0.5.7 candidatefb60e6f (latest registry
-  release0.5.6) and re-vendor committed turbo-test1e93cae. Native per-isolate node state preserves
+- Consume public Git-pinned turbo-dom0.5.7 candidateaaeb290 (latest registry
+  release0.5.6) and re-vendor committed turbo-teste8152d3. Native per-isolate node state preserves
   original UTF-16 payloads, names, parser positions and mutation-time ancestry.
   GC callbacks schedule bounded storage scans outside collection; genuine weak
   wrapper/guest edges and native job pins preserve retained identities without
@@ -255,6 +273,29 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Layout, CSS and resources
 
+- Resolve measured initial/inherited computed font longhands and shorthand using
+  private owner-context preferences, relative arithmetic and typed line-height
+  state. Follow actual assigned-slot inheritance and flat-tree availability;
+  refresh retained declarations after mutation, adoption, disconnect and frame
+  retirement. Preserve conversion order and captured numeric intrinsics. Broader
+  UA element defaults and unresolved font expressions remain tracked in issue28.
+- Preserve native inline source boundaries through shaping and wrapping: genuine
+  decorated/empty/mixed-font border fragments, own-font struts, nested baseline
+  shifts, relative offsets and source-owned whitespace/BR Range geometry.
+  Distinguish ordinary inline client metrics from replaced controls; preserve
+  empty fragments in offset bounds without duplicating ancestor paint.
+- Derive child/nested frame viewports from actual content boxes and refresh them
+  on resize without consulting guest dimension getters. Preserve measured
+  Replaceable accessor writes, borrowed media-query receivers, definition-realm
+  errors and cross-origin guards. Retired frames return empty retained geometry
+  and zero viewport dimensions while their retained DOM remains usable.
+- Use genuine iframe default object dimensions, UA borders and content boxes;
+  preserve finite zero-sized child viewports, definite-zero percentage bases and
+  normal-flow relative positioning. Resolve zero-axis aspect-ratio media queries
+  using the native parser and rational comparison. Suppress native iframe fallback
+  layout while retaining DOM/UTF-16 ownership and empty fallback Range rectangles.
+  Preserve the separate generic/PDF behavior. BackCompat body-strut geometry
+  remains explicitly tracked in issue28.
 - Preserve the complete exact macOS UTF-16/font geometry oracle and run exact
   font-independent code-unit, selection, private access and caret lifetime
   contracts on every platform. Linux fallback fonts differ from the captured
@@ -267,7 +308,7 @@ residual work beyond this PR, with audio separately deferred in
   Range behavior, scoped native matching and real CSP-applied declarations.
   Host-only realm cache epochs prevent independent sessions with equal document
   IDs from sharing snapshots. Share actual platform font loading across threads.
-- Consume public Git-pinned turbo-html2pdf-core0.3.8 candidate9d7f02fb from PR23;
+- Consume public Git-pinned turbo-html2pdf-core0.3.8 candidate2eac7f6 from PR23;
   latest published registry release is0.3.7. The producer adds display:contents,
   matched cascade, fractional anonymous flex/grid text and platform-only fonts.
   Publication remains separate from development integration.
@@ -277,7 +318,8 @@ residual work beyond this PR, with audio separately deferred in
   quoted commas/braces and genuine :is/:where specificity and relative :has.
 - Admit parsed font-face/keyframe definitions only when actual matched styles
   prove them unused. Referenced/unresolved definitions still reject. Complete
-  decorated/mixed-font inline boxes, used fonts/animations, stacking/scrolling,
+  unsupported inline alignment/writing/positioning and block splitting, used
+  fonts/animations, stacking/scrolling,
   inner SVG and broader CSS/resource behavior remain tracked in issue28.
 
 ### Security, messaging and native APIs

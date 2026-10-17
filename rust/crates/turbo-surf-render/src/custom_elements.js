@@ -9,7 +9,8 @@
     nativePrivate = g.__customElementPrivate,
     nativeReport = g.__customElementReport,
     nativeDefining = g.__customElementDefining,
-    nativeReact = g.__customElementReact;
+    nativeReact = g.__customElementReact,
+    nativeActive = g.__customElementActive;
   delete g.__customElementConstructor;
   delete g.__customElementChildren;
   delete g.__customElementUpgrade;
@@ -17,6 +18,7 @@
   delete g.__customElementReport;
   delete g.__customElementDefining;
   delete g.__customElementReact;
+  delete g.__customElementActive;
   const apply = Reflect.apply,
     construct = Reflect.construct,
     ProxyValue = Proxy,
@@ -160,8 +162,9 @@
   const report = (error) => nativeReport(error);
   let updateInternals, initializeInternals;
   const callback = (node, record, name, args) => {
-    const fn = record.definition.callbacks[name];
-    if (fn && nativeReact(node, fn, args)) return;
+    const definition = record.definition, fn = definition.callbacks[name];
+    if (!fn || !nativeActive(definition.registry) || !nativeActive(definition.constructor) || !nativeActive(fn)) return;
+    if (nativeReact(node, fn, args, definition.registry, definition.constructor)) return;
     if (fn)
       try {
         apply(fn, node, args);
@@ -210,12 +213,12 @@
     return associated === false ? (wget(associations, documentOf(node)) ?? null) : associated;
   }
   function definitionFor(node, selected) {
-    if (kind(node) !== 1 || read(namespace, node) !== htmlNamespace || !selected) return;
+    if (kind(node) !== 1 || read(namespace, node) !== htmlNamespace || !selected || !nativeActive(selected)) return;
     const record = state(selected),
       tag = read(local, node),
       is = nativePrivate(node) ?? apply(getAttribute, node, ["is"]);
     const definition = mget(record.definitions, valid(tag) ? tag : is);
-    return definition && definition.local === tag ? definition : undefined;
+    return definition && definition.local === tag && nativeActive(definition.constructor) ? definition : undefined;
   }
   function upgraded(node, definition) {
     let record = wget(elementStates, node);
@@ -790,7 +793,16 @@
     mutation(event);
     if (updateInternals) updateInternals(event);
   };
-  g.__captureCustomElementParsed = (node, adopting) => {
+  g.__captureCustomElementParsed = (node, adopting, context) => {
+    if (context) {
+      // Detached parser results inherit the context's scoped registry. Template
+      // fragments use their associated inert document, whose registry is null.
+      const selected = documentOf(node) === documentOf(context) ? registryFor(context) : null;
+      walk(node, (element) => {
+        if (element === node || kind(element) === 1) associate(element, selected);
+      });
+      return;
+    }
     if (adopting) {
       // Adoption rebinds the old document's registry, including an inert null.
       walk(node, (element) => {

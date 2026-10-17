@@ -372,3 +372,44 @@ impl PolicyState {
         self.cascade = None;
     }
 }
+
+fn own_object<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let key = v8::String::new(scope, name)?;
+    let descriptor = object.get_own_property_descriptor(scope, key.into())?;
+    let descriptor = v8::Local::<v8::Object>::try_from(descriptor).ok()?;
+    let value = v8::String::new(scope, "value")?;
+    if descriptor.has_own_property(scope, value.into()) != Some(true) {
+        return None;
+    }
+    v8::Local::<v8::Object>::try_from(descriptor.get(scope, value.into())?).ok()
+}
+
+pub(super) fn clear_adopted_sheets<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    shadow: v8::Local<'s, v8::Object>,
+) {
+    if scope.is_execution_terminating() {
+        return;
+    }
+    let Some(record) = get_interface_record(scope, shadow)
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+    else {
+        return;
+    };
+    let Some(target) = own_object(scope, record, "css")
+        .and_then(|css| own_object(scope, css, "adoption"))
+        .and_then(|adoption| own_object(scope, adoption, "target"))
+        .and_then(|target| v8::Local::<v8::Array>::try_from(target).ok())
+    else {
+        return;
+    };
+    // Mutate the private backing array, preserving every retained ObservableArray
+    // identity without consulting page-overridden getters or array methods.
+    let length = v8::String::new(scope, "length").unwrap();
+    let zero = v8::Integer::new(scope, 0);
+    target.set(scope, length.into(), zero.into());
+}

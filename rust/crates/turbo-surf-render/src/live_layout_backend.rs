@@ -58,6 +58,80 @@ impl crate::live_stylesheets::Conditions for Viewport {
         crate::live_layout_supports::matches(condition)
     }
 }
+
+fn viewport<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+) -> Result<std::rc::Rc<Viewport>, String> {
+    viewport_at_depth(scope, context, 0)
+}
+
+fn viewport_at_depth<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    depth: usize,
+) -> Result<std::rc::Rc<Viewport>, String> {
+    if depth > 12 {
+        return Err("native frame viewport hierarchy exceeds its depth limit".into());
+    }
+    let current = context
+        .get_slot::<Viewport>()
+        .ok_or("native layout viewport was not captured")?;
+    let [width, height] = if crate::runtime::native_frame_is_retired(context) {
+        [0.0; 2]
+    } else if let Some(host) = crate::runtime::native_frame_layout_host(scope, context) {
+        frame_content_size(scope, host, depth + 1)?
+    } else {
+        return Ok(current);
+    };
+    if current.width == width && current.height == height {
+        return Ok(current);
+    }
+    let mut updated = *current;
+    updated.width = width;
+    updated.height = height;
+    let updated = std::rc::Rc::new(updated);
+    context.set_slot(updated.clone());
+    Ok(updated)
+}
+
+fn frame_content_size<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    host: v8::Local<'s, v8::Object>,
+    depth: usize,
+) -> Result<[f32; 2], String> {
+    let input = crate::browser_env::capture_native_layout(scope, host)?;
+    if !input.connected || !input.browsing_context {
+        return Ok([0.0; 2]);
+    }
+    let context = input
+        .owner_context
+        .ok_or("frame layout owner unavailable")?;
+    let viewport = viewport_at_depth(scope, context, depth)?;
+    let view = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
+    let id = crate::live_layout::source_id(input.tree.document_id, input.handle);
+    let source = view
+        .snapshot
+        .source(id)
+        .ok_or("frame layout source unavailable")?;
+    if source.excluded_from_layout || view.omitted.contains(&id) {
+        return Ok([0.0; 2]);
+    }
+    let used = source
+        .fragment_indices
+        .iter()
+        .find_map(|&index| {
+            let fragment = &view.snapshot.fragments()[index];
+            (fragment.kind == turbo_html2pdf_core::layout_snapshot::GeometryKind::BorderBox)
+                .then_some(fragment.used_box)
+                .flatten()
+        })
+        .ok_or("frame content box unavailable")?;
+    // Child browsing-context viewports are snapped to the parent's layout pixel
+    // grid; transforms and border/padding remain outside that content surface.
+    let snap = |value: f32| (value * viewport.layout_scale + 0.5).floor() / viewport.layout_scale;
+    Ok([snap(used.content_width), snap(used.content_height)])
+}
 #[derive(Serialize)]
 pub(crate) struct Geometry {
     bounds: [f32; 4],
@@ -90,9 +164,7 @@ fn measure<'s>(
         let context = input
             .owner_context
             .ok_or("native layout owner realm unavailable")?;
-        let viewport = context
-            .get_slot::<Viewport>()
-            .ok_or("native layout viewport was not captured")?;
+        let viewport = viewport(scope, context)?;
         let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
         let mut geometry = element_geometry(
             &snapshot,
@@ -307,9 +379,7 @@ fn scroll<'s>(
     let context = input
         .owner_context
         .ok_or("native layout owner realm unavailable")?;
-    let viewport = context
-        .get_slot::<Viewport>()
-        .ok_or("native layout viewport was not captured")?;
+    let viewport = viewport(scope, context)?;
     let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let id = crate::live_layout::source_id(input.tree.document_id, input.handle);
     if snapshot.omitted.contains(&id) {
@@ -378,6 +448,9 @@ pub(crate) fn capture_viewport(scope: &mut v8::PinScope) -> Result<(), String> {
             .number_value(scope)
             .ok_or("native layout viewport interrupted")? as f32;
     }
+    // Frames can bootstrap while their owner's geometry capability is still
+    // being installed. Actual content sizes are resolved by viewport() at every
+    // observable read; initialization must not perform the parent's layout.
     if !values.iter().all(|v| v.is_finite() && *v > 0.0) {
         return Err("native layout viewport must be finite and positive".into());
     }
@@ -415,6 +488,45 @@ pub(crate) fn capture_viewport(scope: &mut v8::PinScope) -> Result<(), String> {
 }
 
 #[op2(reentrant)]
+pub(crate) fn op_live_frame_dimension<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    height: bool,
+    read: bool,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    Ok(match frame_dimension(scope, receiver, height, read)? {
+        Some(value) => v8::Number::new(scope, value).into(),
+        None => v8::null(scope).into(),
+    })
+}
+
+fn frame_dimension<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    height: bool,
+    read: bool,
+) -> Result<Option<f64>, JsErrorBox> {
+    let context = receiver
+        .get_creation_context(scope)
+        .filter(|context| receiver.strict_equals(context.global(scope).into()))
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    let caller = scope.get_entered_or_microtask_context();
+    if !caller
+        .get_security_token(scope)
+        .strict_equals(context.get_security_token(scope))
+    {
+        return Ok(None);
+    }
+    if !read {
+        return Ok(Some(0.0));
+    }
+    let value = viewport(scope, context).map_err(JsErrorBox::generic)?;
+    Ok(Some(
+        f64::from(if height { value.height } else { value.width }).floor(),
+    ))
+}
+
+#[op2(reentrant)]
 pub(crate) fn op_live_elements_at_point<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
@@ -441,9 +553,7 @@ fn hit<'s>(
     let context = input
         .owner_context
         .ok_or("native layout owner realm unavailable")?;
-    let viewport = context
-        .get_slot::<Viewport>()
-        .ok_or("native layout viewport was not captured")?;
+    let viewport = viewport(scope, context)?;
     let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let state = scroll_state(context);
     let ids = crate::live_layout_hit::elements_at_point(
@@ -497,9 +607,7 @@ fn offset<'s>(
         let context = input
             .owner_context
             .ok_or("native layout owner realm unavailable")?;
-        let viewport = context
-            .get_slot::<Viewport>()
-            .ok_or("native layout viewport was not captured")?;
+        let viewport = viewport(scope, context)?;
         let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
         let id = crate::live_layout::source_id(input.tree.document_id, input.handle);
         if snapshot.omitted.contains(&id) {
@@ -569,9 +677,7 @@ fn range_geometry<'s>(
         let context = input
             .owner_context
             .ok_or("native Range owner realm unavailable")?;
-        let viewport = context
-            .get_slot::<Viewport>()
-            .ok_or("native Range viewport unavailable")?;
+        let viewport = viewport(scope, context)?;
         let view = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
         let state = scroll_state(context);
         let offsets = state.values.borrow();
@@ -655,9 +761,7 @@ fn caret_at_point<'s>(
     let context = input
         .owner_context
         .ok_or("native caret owner realm unavailable")?;
-    let viewport = context
-        .get_slot::<Viewport>()
-        .ok_or("native caret viewport unavailable")?;
+    let viewport = viewport(scope, context)?;
     let view = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let state = scroll_state(context);
     let endpoint = crate::live_layout_text::caret(
@@ -714,9 +818,7 @@ fn caret_geometry<'s>(
     let context = input
         .owner_context
         .ok_or("native caret owner realm unavailable")?;
-    let viewport = context
-        .get_slot::<Viewport>()
-        .ok_or("native caret viewport unavailable")?;
+    let viewport = viewport(scope, context)?;
     let view = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let source = crate::live_layout::source_id(input.tree.document_id, input.handle);
     let _current = view
@@ -762,15 +864,17 @@ fn caret_geometry<'s>(
     ])
 }
 
-#[op2(nofast)]
-pub(crate) fn op_live_media_match(
-    scope: &mut v8::PinScope,
+#[op2(nofast, reentrant)]
+pub(crate) fn op_live_media_match<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
     #[string] source: &str,
 ) -> Result<bool, JsErrorBox> {
-    let context = scope.get_current_context();
-    let viewport = context
-        .get_slot::<Viewport>()
-        .ok_or_else(|| JsErrorBox::generic("Native media environment was not captured"))?;
+    let context = window
+        .get_creation_context(scope)
+        .filter(|context| window.strict_equals(context.global(scope).into()))
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    let viewport = viewport(scope, context).map_err(JsErrorBox::generic)?;
     crate::live_stylesheets::Conditions::media(viewport.as_ref(), source)
         .map_err(JsErrorBox::generic)
 }

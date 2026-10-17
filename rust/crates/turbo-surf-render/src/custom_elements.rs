@@ -3,6 +3,27 @@ use super::*;
 use std::rc::Rc;
 
 struct DefinitionsActive;
+struct RetiredContext;
+
+pub(super) fn retire_context(context: v8::Local<v8::Context>) {
+    context.set_slot(Rc::new(RetiredContext));
+}
+
+fn object_active(scope: &mut v8::PinScope, object: v8::Local<v8::Object>) -> bool {
+    object
+        .get_creation_context(scope)
+        .is_some_and(|context| context.get_slot::<RetiredContext>().is_none())
+}
+
+fn active(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    mut result: v8::ReturnValue,
+) {
+    let value = v8::Local::<v8::Object>::try_from(args.get(0))
+        .is_ok_and(|value| object_active(scope, value));
+    result.set_bool(value);
+}
 
 struct ConstructionFrame {
     constructor: v8::Weak<v8::Function>,
@@ -98,7 +119,12 @@ fn construct(
     args: v8::FunctionCallbackArguments,
     mut result: v8::ReturnValue,
 ) {
-    if !args.is_construct_call() {
+    if !args.is_construct_call()
+        || scope
+            .get_current_context()
+            .get_slot::<RetiredContext>()
+            .is_some()
+    {
         type_error(scope, "Illegal constructor");
         return;
     }
@@ -394,12 +420,29 @@ fn react(
         .get(scope, node)
         .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok());
     let queue = existing.unwrap_or_else(|| {
-        let queue = v8::Array::new(scope, 0);
+        // Reactions belong to the element, not the current CEReactions frame.
+        // A callback can enter another frame while its element still has older
+        // reactions queued; that frame must drain the older reactions first.
+        let frames = scope
+            .get_slot::<Rc<ReactionFrames>>()
+            .map(|frames| frames.0.borrow().clone())
+            .unwrap_or_default();
+        let pending = frames.iter().rev().skip(1).find_map(|frame| {
+            let callbacks = frame.callbacks.borrow().as_ref()?.to_local(scope)?;
+            callbacks
+                .get(scope, node)
+                .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+        });
+        let queue = pending.unwrap_or_else(|| {
+            let cursor = v8::Integer::new_from_unsigned(scope, 1);
+            v8::Array::new_with_elements(scope, &[cursor.into()])
+        });
         callbacks.set(scope, node, queue.into());
         append(scope, order, node);
         queue
     });
-    let record = v8::Array::new_with_elements(scope, &[args.get(1), args.get(2)]);
+    let record =
+        v8::Array::new_with_elements(scope, &[args.get(1), args.get(2), args.get(3), args.get(4)]);
     append(scope, queue, record.into());
     result.set_bool(true);
 }
@@ -438,10 +481,21 @@ impl ReactionScope<'_> {
             else {
                 continue;
             };
-            for index in 0..queue.length() {
+            loop {
                 if scope.is_execution_terminating() {
                     return;
                 }
+                let Some(index) = queue
+                    .get_index(scope, 0)
+                    .and_then(|value| value.uint32_value(scope))
+                    .filter(|index| *index < queue.length())
+                else {
+                    break;
+                };
+                // Advance before guest code: reentrant delivery shares the cursor.
+                let next = v8::Integer::new_from_unsigned(scope, index + 1);
+                let key = v8::String::new(scope, "0").unwrap();
+                queue.create_data_property(scope, key.into(), next.into());
                 let Some(record) = queue
                     .get_index(scope, index)
                     .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
@@ -454,6 +508,15 @@ impl ReactionScope<'_> {
                 else {
                     continue;
                 };
+                let inactive_definition = [2, 3].into_iter().any(|index| {
+                    record
+                        .get_index(scope, index)
+                        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+                        .is_some_and(|value| !object_active(scope, value))
+                });
+                if inactive_definition || !object_active(scope, function.into()) {
+                    continue;
+                }
                 let Some(arguments) = record
                     .get_index(scope, 1)
                     .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
@@ -521,13 +584,44 @@ fn deliver_mutation(scope: &mut v8::PinScope, event: v8::Local<v8::Object>) {
     let receiver = v8::undefined(scope);
     function.call(scope, receiver.into(), &[event.into()]);
 }
+pub(super) fn parsed_fragment(
+    scope: &mut v8::PinScope,
+    fragment: v8::Local<v8::Object>,
+    context: v8::Local<v8::Object>,
+) {
+    association_hook(scope, fragment, false, Some(context));
+    let _owner = DomScope::for_object(scope, fragment);
+    let Some(handle) = handle_of(scope, fragment) else {
+        return;
+    };
+    let handles = with_tree(|tree| tree.children(handle)).unwrap_or_default();
+    if handles.is_empty() {
+        return;
+    }
+    let event = v8::Object::new(scope);
+    let kind = v8::String::new(scope, "childList").unwrap();
+    set_prop(scope, event, "type", kind.into());
+    set_prop(scope, event, "target", fragment.into());
+    let added = node_array(scope, handles);
+    set_prop(scope, event, "addedNodes", added.into());
+    let removed = v8::Array::new(scope, 0);
+    set_prop(scope, event, "removedNodes", removed.into());
+    let reactions = reactions(scope);
+    mutation(scope, event);
+    reactions.flush(scope);
+}
 pub(super) fn parsed(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) {
-    association_hook(scope, node, false);
+    association_hook(scope, node, false, None);
 }
 pub(super) fn adopting(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) {
-    association_hook(scope, node, true);
+    association_hook(scope, node, true, None);
 }
-fn association_hook(scope: &mut v8::PinScope, node: v8::Local<v8::Object>, adopting: bool) {
+fn association_hook(
+    scope: &mut v8::PinScope,
+    node: v8::Local<v8::Object>,
+    adopting: bool,
+    parser_context: Option<v8::Local<v8::Object>>,
+) {
     let Some(function) = node
         .get_creation_context(scope)
         .and_then(|context| context.get_slot::<ParsedHook>())
@@ -542,7 +636,12 @@ fn association_hook(scope: &mut v8::PinScope, node: v8::Local<v8::Object>, adopt
     let _owner = DomScope::for_object(scope, node);
     let undefined = v8::undefined(scope);
     let adopting = v8::Boolean::new(scope, adopting);
-    function.call(scope, undefined.into(), &[node.into(), adopting.into()]);
+    let context = parser_context.map_or_else(|| v8::undefined(scope).into(), Into::into);
+    function.call(
+        scope,
+        undefined.into(),
+        &[node.into(), adopting.into(), context],
+    );
 }
 pub(super) fn moved(scope: &mut v8::PinScope, node: v8::Local<v8::Object>) {
     let event = v8::Object::new(scope);
@@ -612,6 +711,7 @@ pub(super) fn install(scope: &mut v8::PinScope) {
     bind_native(scope, global, "__customElementReport", report);
     bind_native(scope, global, "__customElementDefining", defining);
     bind_native(scope, global, "__customElementReact", react);
+    bind_native(scope, global, "__customElementActive", active);
     run_js(scope, include_str!("custom_elements.js"));
     for (name, family) in [
         ("__captureCustomElementMutation", 0),
@@ -670,7 +770,7 @@ mod tests {
         let scope = &mut v8::ContextScope::new(scope, context);
         install_with_html(scope, "<!doctype html><body></body>");
         let mut contexts = vec![context];
-        if probe.contains("child.eval(") {
+        if probe.contains("child.eval(") || probe.contains("child.document") {
             let child = v8::Context::new(scope, Default::default());
             child.set_security_token(context.get_security_token(scope));
             {
@@ -681,6 +781,11 @@ mod tests {
             let global = context.global(scope);
             let child = child.global(scope);
             set_prop(scope, global, "child", child.into());
+        }
+        if probe.contains("quirksDocument") {
+            let quirks = parse_html_document(scope, "<body><div id=quirks></div>", false);
+            let global = context.global(scope);
+            set_prop(scope, global, "quirksDocument", quirks.into());
         }
         if consumers {
             for context in contexts {
@@ -765,6 +870,117 @@ mod tests {
             include_str!("custom_elements_realms_chrome155.json"),
             true,
         );
+    }
+
+    #[test]
+    fn contextual_parser_and_observer_lifecycle_match_independent_chrome() {
+        check_chrome_probe_with_consumers(
+            include_str!("dom_parser_observer_lifecycle_probe.js"),
+            include_str!("dom_parser_observer_lifecycle_chrome155.json"),
+            true,
+        );
+    }
+
+    #[test]
+    fn callback_realms_errors_and_reentrant_adoption_match_independent_chrome() {
+        check_chrome_probe_with_consumers(
+            include_str!("custom_elements_callbacks_probe.js"),
+            include_str!("custom_elements_callbacks_chrome155.json"),
+            true,
+        );
+    }
+
+    fn retire_current_for_test(
+        scope: &mut v8::PinScope,
+        _args: v8::FunctionCallbackArguments,
+        _result: v8::ReturnValue,
+    ) {
+        retire_context(scope.get_current_context());
+    }
+
+    #[test]
+    fn already_queued_callbacks_stop_when_the_definition_realm_retires() {
+        super::super::tests::init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        install_with_html(scope, "<!doctype html><body></body>");
+        let global = context.global(scope);
+        bind_method(
+            scope,
+            global,
+            "stopDefinitionRealm",
+            retire_current_for_test,
+        );
+        let actual = eval(
+            scope,
+            r#"globalThis.queuedRows=[];
+          class Queued extends HTMLElement {
+            static observedAttributes=['a','b'];
+            constructor(){super();queuedRows.push('constructor');}
+            attributeChangedCallback(name){queuedRows.push(name);if(name==='a')stopDefinitionRealm();}
+            connectedCallback(){queuedRows.push('connected');}
+          }
+          customElements.define('x-retired-queued',Queued);
+          document.body.innerHTML='<x-retired-queued a="one" b="two"></x-retired-queued>';
+          JSON.stringify(queuedRows)"#,
+        );
+        assert_eq!(actual.to_rust_string_lossy(scope), r#"["constructor","a"]"#);
+        reset();
+    }
+
+    #[test]
+    fn retired_definition_context_retains_registry_but_suppresses_automatic_lifecycle() {
+        super::super::tests::init_v8();
+        let isolate = &mut v8::Isolate::new(Default::default());
+        v8::scope!(let scope, isolate);
+        let main = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, main);
+        install_with_html(scope, "<!doctype html><body></body>");
+        let callback = eval(
+            scope,
+            "globalThis.borrowedRows=[];(function(){borrowedRows.push('callback')})",
+        );
+        let child = v8::Context::new(scope, Default::default());
+        child.set_security_token(main.get_security_token(scope));
+        {
+            let scope = &mut v8::ContextScope::new(scope, child);
+            install_independent_html(scope, "<!doctype html><body></body>");
+            let global = child.global(scope);
+            set_prop(scope, global, "parentCallback", callback);
+            eval(
+                scope,
+                r#"globalThis.rows=[];
+              globalThis.Retired=class extends HTMLElement {
+                static observedAttributes=['data-v'];
+                constructor(){super();rows.push('constructor');}
+                connectedCallback(){rows.push('connected');}
+                disconnectedCallback(){rows.push('disconnected');}
+              };
+              Retired.prototype.attributeChangedCallback=parentCallback;
+              customElements.define('x-retired-unit',Retired);
+              globalThis.kept=document.createElement('x-retired-unit');document.body.append(kept);
+              globalThis.keptRegistry=customElements;rows.length=0;"#,
+            );
+        }
+        retire_context(child);
+        let global = main.global(scope);
+        let child_global = child.global(scope);
+        set_prop(scope, global, "child", child_global.into());
+        assert!(eval(scope, r#"(()=>{
+          const doc=child.document,created=doc.createElement('x-retired-unit');
+          doc.body.append(created);created.setAttribute('data-v','new');
+          const parsed=doc.createElement('div');parsed.innerHTML='<x-retired-unit></x-retired-unit>';doc.body.append(parsed);
+          const range=doc.createRange();range.selectNodeContents(doc.body);const fragment=range.createContextualFragment('<x-retired-unit></x-retired-unit>');
+          child.kept.setAttribute('data-v','retired');child.kept.remove();doc.body.append(child.kept);
+          document.body.append(child.kept);child.kept.setAttribute('data-v','adopted');
+          child.customElements.upgrade(created);
+          return child.customElements===child.keptRegistry&&child.customElements.get('x-retired-unit')===child.Retired&&
+            !(created instanceof child.Retired)&&!(parsed.firstChild instanceof child.Retired)&&!(fragment.firstChild instanceof child.Retired)&&
+            child.kept instanceof child.Retired&&child.kept.ownerDocument===document&&child.rows.length===0&&borrowedRows.length===0;
+        })()"#).is_true());
+        reset();
     }
 
     #[test]

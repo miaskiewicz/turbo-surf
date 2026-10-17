@@ -846,6 +846,12 @@ pub fn node_parser_position(
     })
     .flatten()
 }
+/// Retire automatic custom-element construction and reactions without clearing
+/// retained registries, definitions, instances or author-callable JS functions.
+pub fn retire_custom_element_context(context: v8::Local<v8::Context>) {
+    custom_elements::retire_context(context);
+}
+
 /// Determine actual Window ownership without reading guest document properties.
 pub fn node_has_window_owner<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -6725,9 +6731,104 @@ fn normalize_computed_color(
     }
 }
 
+struct ComputedFontDefaults {
+    family: String,
+    size: f64,
+}
+
+/// Host font preferences, retained as native scalars rather than guest properties.
+/// macOS defaults match the independent Chrome control; other platforms retain
+/// the conventional Times New Roman preference pending a matching local oracle.
+pub fn set_computed_font_defaults(
+    context: v8::Local<v8::Context>,
+    family: &str,
+    size: f64,
+) -> bool {
+    if family.trim().is_empty() || !size.is_finite() || size <= 0.0 {
+        return false;
+    }
+    context.set_slot(std::rc::Rc::new(ComputedFontDefaults {
+        family: family.into(),
+        size,
+    }));
+    true
+}
+
+fn computed_font_context<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut result: v8::ReturnValue,
+) {
+    let Ok(element) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
+        return;
+    };
+    let _owner = DomScope::for_object(scope, element);
+    if handle_of(scope, element).is_none() {
+        return;
+    }
+    let Some((document, root)) = with_tree(|tree| {
+        let root = tree
+            .children(tree.root())
+            .into_iter()
+            .find(|node| tree.node_type_id(*node) == 1);
+        (tree.root(), root)
+    }) else {
+        return;
+    };
+    let document = wrap(scope, document);
+    let context = document
+        .get_creation_context(scope)
+        .unwrap_or_else(|| scope.get_current_context());
+    let defaults = context.get_slot::<ComputedFontDefaults>();
+    let default_family = if cfg!(target_os = "macos") {
+        "Times"
+    } else {
+        "Times New Roman"
+    };
+    let family = defaults
+        .as_ref()
+        .map_or(default_family, |defaults| defaults.family.as_str());
+    let size = defaults.as_ref().map_or(16.0, |defaults| defaults.size);
+    let family = v8::String::new(scope, family).unwrap();
+    let size = v8::Number::new(scope, size);
+    let composed_parent = shadow_slots::composed_parent(scope, element).filter(|parent| {
+        handle_of(scope, *parent)
+            .is_some_and(|handle| with_tree(|tree| tree.node_type_id(handle) == 1).unwrap_or(false))
+    });
+    let parent = if let Some(parent) = composed_parent {
+        parent.into()
+    } else {
+        v8::null(scope).into()
+    };
+    let root = if let Some(root) = root {
+        wrap(scope, root).into()
+    } else {
+        v8::null(scope).into()
+    };
+    let active = DOM.with(|dom| {
+        dom.borrow()
+            .as_ref()
+            .is_some_and(|state| state.browsing_context)
+    });
+    let active = v8::Boolean::new(scope, active);
+    result.set(
+        v8::Array::new_with_elements(
+            scope,
+            &[family.into(), size.into(), parent, root, active.into()],
+        )
+        .into(),
+    );
+}
+
 pub fn register_css_parser(scope: &mut v8::PinScope) {
     let global = scope.get_current_context().global(scope);
     bind_method(scope, global, "__parseCssNative", parse_css_native);
+    bind_method(
+        scope,
+        global,
+        "__computedFontContext",
+        computed_font_context,
+    );
     bind_method(
         scope,
         global,

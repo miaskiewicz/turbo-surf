@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 // Fresh Chrome oracle; no cookies leave this process or feed the native attempt.
 import { enrichProtocolHeaders } from "./protocol-headers.mjs";
+import { enrichResponseTransport, responseNetworkEvents } from "./chrome-network-metadata.mjs";
 const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
 if (config.chromeBackend !== "patchright") {
   await import("./chrome-cdp-trace.mjs");
@@ -60,21 +61,30 @@ try {
   await windowSession.detach();
   // Optional intrusive source inventory includes inline/eval/dynamic scripts. Keep the
   // debugger off in baseline runs; it can alter the detector's verdict on its own.
-  if (instrumented || config.debugger) {
+  {
     const cdp = await context.newCDPSession(page);
-    if (instrumented) {
-      for (const event of [
-        "requestWillBeSent",
-        "requestWillBeSentExtraInfo",
-        "responseReceivedExtraInfo",
-        "loadingFailed",
-      ]) {
-        cdp.on(`Network.${event}`, (params) =>
-          protocolNetwork.push({ event, timeMs: Date.now(), params }),
-        );
-      }
-      await cdp.send("Network.enable");
+    const { frameTree } = await cdp.send("Page.getFrameTree");
+    const mainFrameId = frameTree.frame.id;
+    // Network metadata is collected in both passes. This does not enable the
+    // Debugger or inject page JavaScript; it still observes through CDP.
+    for (const event of responseNetworkEvents) {
+      cdp.on(`Network.${event}`, (params) =>
+        protocolNetwork.push({
+          event,
+          timeMs: Date.now(),
+          ...(event === "requestWillBeSent"
+            ? {
+                targetScope:
+                  params.frameId === mainFrameId && params.type === "Document"
+                    ? "main-frame-navigation"
+                    : "unverified-target",
+              }
+            : {}),
+          params,
+        }),
+      );
     }
+    await cdp.send("Network.enable");
     if (config.debugger) {
       cdp.on("Debugger.scriptParsed", (s) => {
         pending.push(
@@ -117,7 +127,17 @@ try {
       url: r.url(),
       type: r.resourceType(),
       body: r.postData(),
+      cdpTargetScope: "unverified-target",
     };
+    try {
+      row.cdpTargetScope =
+        !r.serviceWorker?.() && r.frame() === page.mainFrame() && r.isNavigationRequest()
+          ? "main-frame-navigation"
+          : "unverified-target";
+    } catch {
+      // Dedicated-worker fetch can report its owning main Frame. Only actual
+      // navigation requests have independently verified main-frame ownership.
+    }
     requests.push(row);
     requestRows.set(r, row);
     pending.push(
@@ -287,11 +307,13 @@ try {
     await Promise.allSettled(batch);
   }
   enrichProtocolHeaders(requests, protocolNetwork);
+  enrichResponseTransport(requests, responses, protocolNetwork);
   writeFileSync(
     join(out, "trace.json"),
     JSON.stringify(
       {
         runtime: "chrome",
+        backend: "patchright",
         instrumented,
         startedAt,
         browserVersion: context?.browser()?.version(),
@@ -301,6 +323,17 @@ try {
         responses: responses.sort((a, b) => a.id - b.id),
         scripts,
         protocolNetwork,
+        networkCoverage: {
+          source: "cdp-network",
+          scope: "main-page-session",
+          targets: "main page CDP session; child targets are not independently attached",
+          responseAssociation:
+            "verified main-frame navigation scopes with one-to-one unique URL/method; subresources and other responses stay unavailable",
+          enabledInBaseline: true,
+          packetCapture: false,
+          responseMetadata:
+            "protocol, securityDetails, timing, connection and cache state; unavailable when no unambiguous CDP response matches",
+        },
         sockets,
         frames,
         probes,

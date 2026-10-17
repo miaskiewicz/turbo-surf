@@ -120,6 +120,10 @@ place, and the render returns the hydrated HTML (the Lane B contract).
   `ReadableStream`, `AbortController`, `BroadcastChannel`, `WebSocket`,
   `document.cookie` bridged to the shared `CookieJar`, observers, history) + the
   hydration pump (executes injected `<script>` chunks, drains to quiescence).
+  Host-owned hydration diagnostics retain the last lifecycle phase and completed
+  post-load pump count, including on watchdog interruption. Bounded pump completion
+  is not a global-idle guarantee. The detection harness can opt into private native
+  Inspector CPU profiles without changing the execution budget.
 - **`fetch` is real** (async, event-loop-driven; relative URLs resolve against the
   page base) — promise/`await`/timer-driven hydration settles before serialization.
 - `run_with_dom` (the sync evaluation path) retains its isolate and native DOM for

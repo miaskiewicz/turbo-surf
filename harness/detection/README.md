@@ -299,12 +299,43 @@ these are distinct from the structured `trace.errors` array.
   traced passes. Session-qualified correlation keeps worker/frame request IDs
   separate. Attached out-of-process frames and dedicated/shared/service workers
   are recorded separately; source/body retrieval failures remain visible.
+  Response records now retain `transport.protocol`, `securityDetails`, `timing`,
+  connection and cache state. Omitted CDP fields are explicitly null; these fields
+  are browser observations, not packet captures. `networkCoverage` identifies the
+  direct collector's attached-target sessions or the alternative collector's
+  main-page session. Direct collection uses session-qualified request IDs and
+  validated redirect hops. The alternative collector only enriches unique,
+  independently verified main-frame navigations; raw subresource events remain
+  available without assigning uncertain metadata to automation callbacks.
+  Unknown correlations remain unavailable.
 - `--debugger`: the instrumented passes enable the real V8 Inspector in both
   engines. Chrome records compiled inline, eval, Function and module sources by
   SHA256 per attached session. Native saves per-isolate `native-js/isolate-N/`
-  inventories and source files, including genuine child contexts on engine 154.
+  inventories and source files, including genuine child contexts on source-built
+  native-proxy profiles154/155; stock builds observe the main context only.
   Inventories report source limits, dropped records, pending retrievals and
   errors. Debugger attachment changes execution; use baseline as the control.
+- `--native-cpu-profile`: implies debugger capture in the instrumented pass and
+  saves native Inspector `cpu-profile.json` files alongside each isolate's source
+  inventory. Baseline and probe-only passes keep profiling off. Profiles cover
+  initial hydration with a requested 1ms sampling interval, stop on completion or watchdog
+  interruption, and remain private because their call frames contain source URLs.
+  Inventory records setup acknowledgements and errors; the requested interval
+  alone does not prove successful profiler setup.
+  The companion `layout-profile.json` retains host-stage call counts/durations and
+  layout-cache hits/misses for initial hydration only. Capture/composition/tree/
+  stylesheet/rule-key/layout spans overlap inclusively; do not add them as disjoint
+  costs. The rule/key stage includes lazy system-font initialization when cold;
+  attribute that separately before treating it as repeated key construction cost.
+  Profiling is disabled in clean controls and can change execution timing.
+  Direct native configs use `nativeCpuProfile: true` together with `debugger: true`.
+- Native hydration snapshots retain a host-owned `progress.phase` and
+  `progress.completed_pumps`. These describe the initial open operation; repeated
+  snapshots do not establish separate timeouts. The watchdog remains active.
+- Interface snapshots include bounded `coverage` records for returned canvas
+  contexts and WebGL extensions, with installation scope and explicit unavailable,
+  immutable or unobserved members. Symbols, previously captured methods, later
+  replacements and ordinary own data reads remain outside this wrapper coverage.
 - `comparison.json`: endpoint counts, query/payload field names/hashes, header
   scope, observed interface counts, differing argument/result samples and stacks,
   separate main/child/worker observations, pages/errors/features and shared-probe
@@ -319,6 +350,11 @@ node harness/detection/summarize-run.mjs /tmp/search-trace /tmp/search-summary.j
 
 The summarizer verifies the executable hash, retains missing captures and process
 failures, and excludes cookie values, query strings, bodies and error text. It
+uses schema4 for fixed protocol/TLS histograms, availability counts, known
+collector scopes and hydration phases. Certificate names/SANs, addresses,
+connection IDs and absolute response timing remain in private raw captures.
+Native protocol counts do not imply native TLS details were collected. Old
+captures remain explicitly unknown where the metadata was not recorded. It
 records actual consent ordering and fallback configuration. `nativeBaseline` is a
 Google acceptance metric: both the configured starting URL and final page must
 have the exact origin `https://www.google.com`. Custom URLs remain captured but
@@ -780,3 +816,39 @@ The second command leases the SDK target and temporarily restores exact preimage
 run it without another compiler using that SDK. It leaves the SDK patched. Genuine
 rejections remain errors; interrupted operations are not silently discarded. See
 [the repair and its bounds](./engine-155/ASYNC-ADMISSION.md).
+
+### Regenerate the parser resource-order Chrome control
+
+```sh
+node harness/detection/resource-scan-order-chrome.mjs harness/detection/fixtures/resource-scan-order-chrome155.json
+npx --no-install biome format --write harness/detection/fixtures/resource-scan-order-chrome155.json
+```
+
+This uses installed Chrome and the exact HTML fixture in the Rust resource-order
+test. Temporary capture/profile directories are private and removed on completion;
+the saved control pins its fixture, collector and generator source hashes. It
+covers stylesheet admission/order and script exclusion. Full SVG script execution
+remains outside this control.
+
+### Repeat the native layout capture control
+
+Serve the checked-in fixture from a local HTTP server:
+
+```sh
+python3 -m http.server 8765 --bind 127.0.0.1 --directory harness/detection/fixtures
+```
+
+In another terminal, run the existing differential against the current native binary:
+
+```sh
+node harness/detection/run.mjs --live --binary /absolute/path/to/detection_trace --url http://127.0.0.1:8765/layout-profile.html --no-interaction --native-cpu-profile --page-budget 20000 --out harness/detection/artifacts/layout-profile
+```
+
+The fixture records 100 rectangle reads and a 11000 total-width checksum in
+`browserFixture`. Inspect the native initial-hydration CPU and layout profiles,
+including cache hits/misses, and keep clean and instrumented outcomes separate.
+The instrumented runner also wraps interfaces; direct native configurations can
+set `interfaces: false` with `debugger: true` and `nativeCpuProfile: true` to
+measure without those wrappers. Cold font initialization and overlapping host
+stages must remain explicit when comparing results. This local control does not
+establish live Google acceptance.

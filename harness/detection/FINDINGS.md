@@ -1,4 +1,4 @@
-# Google detection audit — 2026-10-09; follow-up 2026-10-16
+# Google detection audit — 2026-10-09; follow-up 2026-10-17
 
 The canonical pending-work checklist is [PARITY-GAPS.md](./PARITY-GAPS.md).
 Residual work beyond PR26 is tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28),
@@ -8,11 +8,52 @@ Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
-## Latest validation checkpoint — 2026-10-16
+## Active observability and lifecycle follow-up — 2026-10-17
+
+[PARITY-GAPS.md](./PARITY-GAPS.md#active-pr26-follow-up--2026-10-17)
+tracks this follow-up as implementation and validation proceed. Chrome collectors
+now retain response protocol/TLS/timing metadata with explicit correlation scopes;
+native GPU tracing covers configurable methods on returned contexts/extensions.
+Neither observation supplies a packet fingerprint or complete access coverage.
+
+A source-pinned clean Chrome155.80 homepage capture negotiates HTTP/3/QUIC for the
+main document, while native homepage captures use HTTP/2. This measured difference
+is not evidence that it causes rejection. The last complete search matrix below
+remains0/2 accepted native SERPs; these new controls load only the homepage.
+
+Host-owned phase/pump diagnostics and optional CPU/host-stage profiles locate the
+20s failure inside a one-pass controller visibility scan. Repeated selector
+validation during stylesheet preparation dominated native layout input capture;
+actual layout and cache misses were much smaller costs.
+
+Canonical turbo-test commits `fe2b7a4`, `e5231a7` and `8d8ebd2` reduce stylesheet-list
+refresh, inherited live-getter recursion and duplicate private rule lookup. They
+are officially re-vendored, with independent Chrome controls and review. A native
+adapter fix now validates a selector once before matching every node against its
+current state. It adds no persistent target or stylesheet cache.
+
+The latest native155 build completes **3/3 clean homepage runs and1/1 profiled run**
+within the unchanged20s budget, with zero budget exhaustion. Whole-process walls
+are13.30s/11.44s/13.61s clean and12.33s profiled; those are not isolated open times.
+The two latest profiles both capture98 geometry reads: selector preparation falls
+5.05s→1.97s and total capture6.29s→3.18s. Earlier failed/mixed candidates remain
+preserved; partial live runs are not a fixed-work benchmark. All four successful runs
+reach the500-pump cap; the three clean runs report pendingWork=1, while that
+post-verdict probe is unavailable for the profiled run. This is not global idle. Complete local gates pass: default1384/native1423 Rust tests, strict Clippy/fmt,
+both rebuilt addons95 shim/20 E2E/116 detection plus2 Python. Node22 additionally
+executes all3 real-Chrome controls without skips. The native full run precedes only
+a test-fixture font warmup; affected native2 and refreshed strict/fmt validate that
+amendment with production sources unchanged. Earlier font-budget and disk failures
+remain preserved. The fixture warmup does not reduce production cold-font latency. These homepage controls do not replace
+the complete search matrix below or establish accepted native SERPs.
+[OBSERVABILITY-LAST-RUN.json](./OBSERVABILITY-LAST-RUN.json) preserves source/binary
+hashes, scoped transport metadata, run outcomes and historical candidate receipts.
+
+## Historical validation checkpoint — 2026-10-16
 
 Pushed26bd0f4 includes canonical turbo-test1e93cae labels, actual native/Window
 clock ordering, awaited human input, private abort/controller boundaries and
-bounded XHR identity/receiver fixes. The final current-source default workspace
+bounded XHR identity/receiver fixes. At that checkpoint, the default workspace
 passes **1,376 tests**, zero failures, with three explicit stock-native callback
 skips and six generated doctest ignores. Both engines pass the final five XHR
 controls and all-target strict/format checks. The final actual155 six-feature full-workspace command passes **1,415 tests**,

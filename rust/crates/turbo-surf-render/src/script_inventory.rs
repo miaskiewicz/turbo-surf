@@ -25,6 +25,9 @@ struct Records {
     dropped: usize,
     bytes: usize,
     sequence: i32,
+    profile_request: Option<i32>,
+    profile_saved: bool,
+    profile_setup: BTreeMap<i32, (String, bool)>,
 }
 
 fn save(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -56,6 +59,36 @@ fn record(message: InspectorMsg, records: &RefCell<Records>, directory: &Path) {
             }
         }
     } else if let Some(id) = value["id"].as_i64() {
+        if let Some((method, acknowledged)) = records.profile_setup.get_mut(&(id as i32)) {
+            *acknowledged = value.get("result").is_some();
+            if !*acknowledged {
+                let method = method.clone();
+                records
+                    .failures
+                    .push(format!("{method} failed: {}", value["error"]));
+            }
+            return;
+        }
+        if records.profile_request == Some(id as i32) {
+            records.profile_request = None;
+            if value["result"]["profile"].is_object() {
+                let bytes = serde_json::to_vec(&value["result"]["profile"]).unwrap();
+                if bytes.len() > SOURCE_LIMIT {
+                    records
+                        .failures
+                        .push("CPU profile byte budget exceeded".into());
+                } else if let Err(error) = save(&directory.join("cpu-profile.json"), &bytes) {
+                    records.failures.push(error.to_string());
+                } else {
+                    records.profile_saved = true;
+                }
+            } else {
+                records
+                    .failures
+                    .push(format!("CPU profile failed: {}", value["error"]));
+            }
+            return;
+        }
         let Some(script_id) = records.requests.remove(&(id as i32)) else {
             return;
         };
@@ -119,6 +152,8 @@ pub(crate) struct ScriptInventory {
     session: LocalInspectorSession,
     records: Rc<RefCell<Records>>,
     directory: PathBuf,
+    profiling: bool,
+    layout_profile: Option<crate::layout_profile::LayoutProfile>,
 }
 
 impl ScriptInventory {
@@ -148,12 +183,61 @@ impl ScriptInventory {
         );
         session.post_message(1, "Debugger.enable", None::<Value>);
         session.post_message(2, "Debugger.setSkipAllPauses", Some(json!({"skip":true})));
-        records.borrow_mut().sequence = 2;
+        let profiling = std::env::var_os("TURBO_SURF_JS_PROFILE").is_some_and(|value| value == "1");
+        if profiling {
+            records.borrow_mut().profile_setup = [
+                (3, ("Profiler.enable".into(), false)),
+                (4, ("Profiler.setSamplingInterval".into(), false)),
+                (5, ("Profiler.start".into(), false)),
+            ]
+            .into_iter()
+            .collect();
+            session.post_message(3, "Profiler.enable", None::<Value>);
+            session.post_message(
+                4,
+                "Profiler.setSamplingInterval",
+                Some(json!({"interval":1000})),
+            );
+            session.post_message(5, "Profiler.start", None::<Value>);
+        }
+        let layout_profile =
+            profiling.then(|| crate::layout_profile::LayoutProfile::install(runtime.v8_isolate()));
+        records.borrow_mut().sequence = 5;
         Ok(Self {
             session,
             records,
             directory,
+            profiling,
+            layout_profile,
         })
+    }
+
+    pub(crate) fn stop_profile(&mut self) {
+        if !self.profiling {
+            return;
+        }
+        self.profiling = false;
+        let layout_profile = self.layout_profile.take().map(|profile| profile.stop());
+        let id = {
+            let mut records = self.records.borrow_mut();
+            records.sequence += 1;
+            let id = records.sequence;
+            records.profile_request = Some(id);
+            id
+        };
+        self.session
+            .post_message(id, "Profiler.stop", None::<Value>);
+        self.session
+            .post_message(id + 1, "Profiler.disable", None::<Value>);
+        self.records.borrow_mut().sequence += 1;
+        if let Some(value) = layout_profile {
+            if let Err(error) = save(
+                &self.directory.join("layout-profile.json"),
+                &serde_json::to_vec_pretty(&value).unwrap(),
+            ) {
+                self.records.borrow_mut().failures.push(error.to_string());
+            }
+        }
     }
 
     pub(crate) fn flush(&mut self) {
@@ -187,7 +271,7 @@ impl ScriptInventory {
             }
         }
         let records = self.records.borrow();
-        let value = json!({"backend":"native V8 Inspector", "intrusive":true, "scripts":records.scripts.values().collect::<Vec<_>>(), "dropped":records.dropped,"sourceBytes":records.bytes,"pendingSources":records.requests.len(),"errors":records.failures,"coverage":if cfg!(turbo_surf_native_proxy){"main and native iframe V8 contexts; native workers are unsupported"}else{"main V8 context; child inspector registration requires a source-built native proxy profile; native workers are unsupported"}});
+        let value = json!({"backend":"native V8 Inspector", "intrusive":true, "scripts":records.scripts.values().collect::<Vec<_>>(), "dropped":records.dropped,"sourceBytes":records.bytes,"pendingSources":records.requests.len(),"cpuProfileSaved":records.profile_saved,"cpuProfilePending":records.profile_request.is_some(),"cpuProfileSetup":{"requestedIntervalMicroseconds":(!records.profile_setup.is_empty()).then_some(1000),"commands":records.profile_setup.values().map(|(method,acknowledged)| json!({"method":method,"acknowledged":acknowledged})).collect::<Vec<_>>()},"errors":records.failures,"coverage":if cfg!(turbo_surf_native_proxy){"main and native iframe V8 contexts; native workers are unsupported"}else{"main V8 context; child inspector registration requires a source-built native proxy profile; native workers are unsupported"}});
         if let Err(error) = save(
             &self.directory.join("inventory.json"),
             serde_json::to_string_pretty(&value).unwrap().as_bytes(),
@@ -199,6 +283,32 @@ impl ScriptInventory {
 
 impl Drop for ScriptInventory {
     fn drop(&mut self) {
+        self.stop_profile();
         self.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_profiler_setup_failure_is_retained_in_inventory_evidence() {
+        let records = RefCell::new(Records::default());
+        records
+            .borrow_mut()
+            .profile_setup
+            .insert(4, ("Profiler.setSamplingInterval".into(), false));
+        record(
+            InspectorMsg::notification(json!({
+                "id":4,"error":{"message":"Sampling interval unavailable"}
+            })),
+            &records,
+            Path::new("."),
+        );
+        let records = records.borrow();
+        assert!(!records.profile_setup[&4].1);
+        assert_eq!(records.failures.len(), 1);
+        assert!(records.failures[0].contains("Profiler.setSamplingInterval"));
     }
 }

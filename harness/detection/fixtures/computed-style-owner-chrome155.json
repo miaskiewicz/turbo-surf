@@ -1,0 +1,30 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "9da27adef120355a20ead158a3c7b8b1c52571ff94744d7877f085bd2be248d4",
+  "probeSha256": "81dc05c5fdafb03cc5fca806dc2b33cac86eb2386db2c2196b1338e21b019b78",
+  "collectorSha256": "700a755df1701cfa30a95ca9f20800e81724f50ca7aafd6b46f77e87b2b91351",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "private-computed-foreign-owner",
+      "result": {
+        "values": [
+          ["61px", "rgb(0, 0, 255)"],
+          ["67px", "rgb(0, 0, 255)"],
+          ["47px", "rgb(255, 0, 0)"]
+        ],
+        "sheetReads": 0
+      }
+    }
+  ]
+}

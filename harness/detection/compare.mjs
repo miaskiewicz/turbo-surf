@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  summarizeNativeResponseTransport,
+  summarizeResponseTransport,
+} from "./chrome-network-metadata.mjs";
 
 export const endpoint = (row) => {
   try {
@@ -221,7 +225,12 @@ export const compareDirectory = (out) => {
       nativeNetworkRecords: rows.length,
       nativeScriptInventory: nativeScriptInventory(ndir),
       chromeCompiledScripts: chrome.scripts?.length || 0,
+      chromeNetwork: chrome.networkCoverage || null,
       incompleteNativeNetworkRecords: rows.filter((r) => r.event === "incomplete-record").length,
+    };
+    result[pass].responseTransport = {
+      chrome: summarizeResponseTransport(chrome.responses || []),
+      native: summarizeNativeResponseTransport(rows.filter((row) => row.event === "response")),
     };
   }
   result.isolatedProbes = Object.fromEntries(

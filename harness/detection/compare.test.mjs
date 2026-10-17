@@ -80,33 +80,185 @@ test("partial runs preserve usable network observations and missing-trace failur
   }
 });
 
-test("protocol headers pair repeated URLs by time and preserve ambiguous redirects", async () => {
+test("transport comparison keeps browser CDP and native application observations separate", () => {
+  const out = mkdtempSync(join(tmpdir(), "transport-diff-test-"));
+  try {
+    mkdirSync(join(out, "chrome-baseline"));
+    mkdirSync(join(out, "native-baseline"));
+    writeFileSync(
+      join(out, "chrome-baseline/trace.json"),
+      JSON.stringify({
+        networkCoverage: { source: "cdp-network", scope: "fixture" },
+        responses: [
+          { transport: { source: "cdp-response", protocol: "h2" } },
+          { transport: { source: "unavailable" } },
+        ],
+      }),
+    );
+    writeFileSync(
+      join(out, "native-baseline/network.jsonl"),
+      [
+        { event: "response", protocol: "HTTP/2.0", url: "https://example.test/" },
+        { event: "response", url: "https://example.test/other" },
+      ]
+        .map(JSON.stringify)
+        .join("\n"),
+    );
+    const result = compareDirectory(out).baseline;
+    assert.equal(result.responseTransport.chrome.protocols.h2, 1);
+    assert.equal(result.responseTransport.chrome.unknown, 1);
+    assert.equal(result.responseTransport.native.protocols.h2, 1);
+    assert.equal(result.responseTransport.native.unknown, 1);
+    assert.equal(result.responseTransport.native.securityDetails, undefined);
+    assert.equal(result.traceCoverage.chromeNetwork.source, "cdp-network");
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+const headerMain = (requestId, url, extra = {}) => ({
+  event: "requestWillBeSent",
+  ...extra,
+  params: { requestId, wallTime: 1, request: { url, method: "GET" } },
+});
+const headerExtra = (requestId, value, extra = {}) => ({
+  event: "requestWillBeSentExtraInfo",
+  ...extra,
+  params: { requestId, headers: { "X-Target": value, "Sec-Fetch-Dest": "document" } },
+});
+
+test("raw CDP headers use exact session IDs and redirect order rather than callback time", async () => {
   const { enrichProtocolHeaders } = await import("./protocol-headers.mjs");
-  const requests = [1000, 2000].map((timeMs) => ({
-    timeMs,
-    url: "https://example.test/",
-    method: "GET",
-    headers: { accept: "old" },
-  }));
-  const main = (requestId, wallTime) => ({
-    event: "requestWillBeSent",
-    params: { requestId, wallTime, request: { url: "https://example.test/", method: "GET" } },
-  });
-  const extra = (requestId) => ({
-    event: "requestWillBeSentExtraInfo",
-    params: { requestId, headers: { "Sec-Fetch-Dest": "document", Cookie: "server=1" } },
-  });
-  enrichProtocolHeaders(requests, [main("b", 2), extra("b"), main("a", 1), extra("a")]);
+  const url = "https://example.test/";
+  const requests = [
+    {
+      protocolRequestId: "same",
+      sessionId: "page",
+      timeMs: 1005,
+      url,
+      method: "GET",
+      headers: { accept: "page-old" },
+    },
+    {
+      protocolRequestId: "same",
+      sessionId: "worker",
+      timeMs: 1000,
+      url,
+      method: "GET",
+      headers: { accept: "worker-old" },
+    },
+    {
+      protocolRequestId: "redirect",
+      sessionId: "page",
+      timeMs: 9000,
+      url: url + "start",
+      method: "GET",
+    },
+    {
+      protocolRequestId: "redirect",
+      sessionId: "page",
+      timeMs: 500,
+      url: url + "final",
+      method: "GET",
+    },
+  ];
+  enrichProtocolHeaders(requests, [
+    headerMain("same", url, { sessionId: "page" }),
+    headerMain("same", url, { sessionId: "worker" }),
+    headerExtra("same", "worker", { sessionId: "worker" }),
+    headerExtra("same", "page", { sessionId: "page" }),
+    headerMain("redirect", url + "start", { sessionId: "page" }),
+    headerExtra("redirect", "start", { sessionId: "page" }),
+    headerMain("redirect", url + "final", { sessionId: "page" }),
+    headerExtra("redirect", "final", { sessionId: "page" }),
+  ]);
   assert.deepEqual(
-    requests.map((r) => r.cdpRequestId),
-    ["a", "b"],
+    requests.map((row) => row.headers["x-target"]),
+    ["page", "worker", "start", "final"],
   );
+  assert.ok(requests.every((row) => row.headerScope === "cdp-extra-info"));
+  assert.equal(requests[0].automationHeaders.accept, "page-old");
   assert.equal(requestSummary(requests[0]).headerScope, "cdp-extra-info");
-  assert.equal(requests[0].headers["sec-fetch-dest"], "document");
-  assert.equal(requests[0].automationHeaders.accept, "old");
-  const ambiguous = [{ timeMs: 1000, url: "https://example.test/", method: "GET" }];
-  enrichProtocolHeaders(ambiguous, [main("r", 1), main("r", 1.1), extra("r")]);
-  assert.equal(ambiguous[0].cdpRequestId, undefined);
+});
+
+test("Patchright headers enrich only unique main-frame navigation and never closer worker callbacks", async () => {
+  const { enrichProtocolHeaders } = await import("./protocol-headers.mjs");
+  const url = "https://example.test/";
+  const requests = [
+    {
+      timeMs: 1005,
+      timing: { startTime: 1005 },
+      cdpTargetScope: "main-frame-navigation",
+      url,
+      method: "GET",
+      headers: { accept: "main-old" },
+    },
+    {
+      timeMs: 1000,
+      cdpTargetScope: "unverified-target",
+      url,
+      method: "GET",
+      headers: { accept: "worker-old" },
+    },
+  ];
+  enrichProtocolHeaders(requests, [
+    headerMain("page", url, { targetScope: "main-frame-navigation" }),
+    headerExtra("page", "main"),
+  ]);
+  assert.equal(requests[0].headers["x-target"], "main");
+  assert.equal(requests[0].headerScope, "cdp-extra-info");
+  assert.equal(requests[1].headers.accept, "worker-old");
+  assert.equal(requests[1].headerScope, "automation-api");
+  assert.equal(requests[1].cdpRequestId, undefined);
+  const unknown = [
+    { ...requests[0], headers: { accept: "old" }, cdpRequestId: undefined, headerScope: undefined },
+  ];
+  enrichProtocolHeaders(unknown, [
+    headerMain("child", url, { targetScope: "unverified-target" }),
+    headerExtra("child", "child"),
+  ]);
+  assert.equal(unknown[0].headerScope, "automation-api");
+  assert.equal(unknown[0].headers.accept, "old");
+});
+
+test("incomplete redirects, reordered raw hops and repeated Patchright navigation remain unjoined", async () => {
+  const { enrichProtocolHeaders } = await import("./protocol-headers.mjs");
+  const url = "https://example.test/";
+  const raw = [url + "start", url + "final"].map((url) => ({
+    protocolRequestId: "r",
+    url,
+    method: "GET",
+    headers: { accept: "original" },
+  }));
+  const mains = [headerMain("r", url + "start"), headerMain("r", url + "final")];
+  enrichProtocolHeaders(raw, [...mains, headerExtra("r", "incomplete")]);
+  assert.ok(
+    raw.every(
+      (row) => row.headerScope === "cdp-request-event" && row.headers.accept === "original",
+    ),
+  );
+  enrichProtocolHeaders(raw.toReversed(), [
+    ...mains,
+    headerExtra("r", "first"),
+    headerExtra("r", "second"),
+  ]);
+  assert.ok(raw.every((row) => row.cdpRequestId === undefined));
+  const repeated = [1, 2].map((time) => ({
+    cdpTargetScope: "main-frame-navigation",
+    timing: { startTime: time * 1000 },
+    timeMs: time * 1000,
+    url,
+    method: "GET",
+  }));
+  enrichProtocolHeaders(repeated, [
+    headerMain("a", url, { targetScope: "main-frame-navigation" }),
+    headerExtra("a", "first"),
+    headerMain("b", url, { targetScope: "main-frame-navigation" }),
+    headerExtra("b", "second"),
+  ]);
+  assert.ok(
+    repeated.every((row) => row.headerScope === "automation-api" && row.cdpRequestId === undefined),
+  );
 });
 
 test("interface comparison separates native host-pump reads from page queries", () => {

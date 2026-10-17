@@ -1,143 +1,413 @@
 {
-  "schemaVersion": 1,
-  "productionSourceCommit": "26bd0f459c0edeab35dea345550f7f311818ed32",
-  "scope": "Complete local default and actual native155 commands; bounded browser conformance tests, not complete Chrome parity or Google acceptance.",
-  "default": {
-    "engine": {
-      "version": "0.5.4",
-      "debugAssertions": true,
-      "features": {
-        "impersonate": true,
-        "trustAnchors": false,
-        "gpuMetal": false,
-        "coretext": false
+  "schemaVersion": 2,
+  "capturedDate": "2026-10-17",
+  "scope": "Complete local production-default gate and native155 workspace/addon gates; bounded controls, not complete Chrome conformance or native Google SERP acceptance.",
+  "source": {
+    "baseCommit": "a057a3a5c8608a430b08e75d94fde99d62a1733e",
+    "sourceFiles": [
+      {
+        "path": "harness/detection/chrome-cdp-trace.mjs",
+        "sha256": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15"
       },
-      "engine": {
-        "v8Version": "15.0.245.2-rusty",
-        "stableWindowProxy": false,
-        "transportChromeMajor": 155,
-        "transportBaseChromeMajor": 154,
-        "reportedChromeMajor": 155,
-        "reportedFullVersion": "155.0.8059.80"
+      {
+        "path": "harness/detection/chrome-cdp-trace.test.mjs",
+        "sha256": "033b0c61abd796d390f7ea7e1603315580b89131d34092a77f32f15c4000894e"
+      },
+      {
+        "path": "harness/detection/chrome-network-metadata.mjs",
+        "sha256": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2"
+      },
+      {
+        "path": "harness/detection/chrome-network-metadata.test.mjs",
+        "sha256": "7b9977d5d999e4aebba2fa1dba20633d2a2ec3cb0f403758122454e71f7adada"
+      },
+      {
+        "path": "harness/detection/chrome-trace.mjs",
+        "sha256": "4acb9fef7dd1ba1d98cd98c9ab735e824d399b5d78efc7e761c705abac28aeca"
+      },
+      {
+        "path": "harness/detection/compare.mjs",
+        "sha256": "4a1f3a0984045e76c3cdc3b4ea94684256011126b56280a2d31d11b539ed82c7"
+      },
+      {
+        "path": "harness/detection/compare.test.mjs",
+        "sha256": "93559fa820d164ee51343399eb793fc938e56c1514945aa2c69f51c0c69d62ba"
+      },
+      {
+        "path": "harness/detection/computed-style-owner-probe.js",
+        "sha256": "81dc05c5fdafb03cc5fca806dc2b33cac86eb2386db2c2196b1338e21b019b78"
+      },
+      {
+        "path": "harness/detection/computed-style-owner.test.mjs",
+        "sha256": "29bf98ee198828b824e19902079d771ec6ec2336a2607dc554ac79aba793e46b"
+      },
+      {
+        "path": "harness/detection/fixtures/computed-style-owner-cases.json",
+        "sha256": "9da27adef120355a20ead158a3c7b8b1c52571ff94744d7877f085bd2be248d4"
+      },
+      {
+        "path": "harness/detection/fixtures/computed-style-owner-chrome155.json",
+        "sha256": "897f7d014f2faa05b3dd30c3a412486853946817abc34c843e93e08bf135eee0"
+      },
+      {
+        "path": "harness/detection/fixtures/layout-profile.html",
+        "sha256": "d9bc9149645e801f0d9c0d01bf529342d923753b2d2d1461d9ed62d6597d873c"
+      },
+      {
+        "path": "harness/detection/fixtures/resource-scan-order-chrome155.json",
+        "sha256": "0f0710f14c1c72828abc26d8589c4065003623e234c416c3550f2c191a6a285a"
+      },
+      {
+        "path": "harness/detection/gpu-interface-trace.test.mjs",
+        "sha256": "3887f1d9862fb781c8cc062c21907d0df9e6b56e9989de7b277113bf57de9890"
+      },
+      {
+        "path": "harness/detection/interface-trace.js",
+        "sha256": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc"
+      },
+      {
+        "path": "harness/detection/interface-trace.test.mjs",
+        "sha256": "6295cdef1d3ca2ac2284550cc81af052c8f644b2b2dc83750b556d9fefd18221"
+      },
+      {
+        "path": "harness/detection/protocol-headers.mjs",
+        "sha256": "763b85da53476f6352dfd6e2dbaed07eb2571b2bca4fe7f934b165ae9da5b5e1"
+      },
+      {
+        "path": "harness/detection/resource-scan-order-chrome.mjs",
+        "sha256": "668ff5a78843136f779a25467fae0ae600cf3c82a295b654c28fa842cb2aa9f3"
+      },
+      {
+        "path": "harness/detection/resource-scan-order-chrome.test.mjs",
+        "sha256": "85aa8c97dd0a6c7f51f178b34c89d60603d02d05c2c8f7aab4754baff2eaf8a9"
+      },
+      {
+        "path": "harness/detection/run.mjs",
+        "sha256": "ca8fef9ff00b2692addb14dbb608e700ebc1b61ff074b4a052c3fc7a48d708df"
+      },
+      {
+        "path": "harness/detection/summarize-run.mjs",
+        "sha256": "ffc9ae0280c009f900d37a59c722f70e3fb6bf5774f15b60ed1fddbecb282266"
+      },
+      {
+        "path": "harness/detection/summarize-run.test.mjs",
+        "sha256": "653b2d6b917e99254ea4dfece957836d2f52a3b0a58490f85026fe30458b8a8e"
+      },
+      {
+        "path": "rust/crates/turbo-surf-mcp/examples/detection_trace.rs",
+        "sha256": "8bf9e6161932f500a6d23b71e99e485ed7fad32dc600dad6ad191b336ad88ac5"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/browser_env.js",
+        "sha256": "346a84ecb8ac4e57e9cdbe351c00326cc2e2424db54661bf631a439f6939cef2"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/browser_env.rs",
+        "sha256": "e0f95509c2b9652e0d2dab388ee04cfab2b79cb0f8c39b7182e606aa91f8f31c"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/computed_intrinsics_chrome155.json",
+        "sha256": "e979f92413a5089bb7f3192155223edb8047ce1fce1b59c0d72c494c858f30fa"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/computed_intrinsics_probe.js",
+        "sha256": "c31a81a093cd8c2c07f431d76303865757740d2b30a167c8fc51e48c7e19f1c9"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/css_live_tests.rs",
+        "sha256": "cba96fc863c1152655c61deb26f0976533e26b04a55abf97100c805c3496a866"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/layout_profile.rs",
+        "sha256": "321428257973eeba6158f36843b825f2d03ff4c133e59ffd678442f36d348106"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/lib.rs",
+        "sha256": "bc4ab34195479591d0e3b3fa9867d907a71e4eaa0defc231483743845e3e5d23"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/live_layout_backend.rs",
+        "sha256": "dd8000803fae54fea20b91e0894a21a394b7089bab2bcd60f97669277f748a85"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/live_layout_dom.rs",
+        "sha256": "813108ad7ab9fc376bedbea748b3678179b6f86298c03d9d07a7acfbeb636958"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/live_layout_scoped.rs",
+        "sha256": "10547dc86afb9f28a81855958fe5865098ee743ee0ae4d85324c13f229f37d6a"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/runtime.rs",
+        "sha256": "2e4c6b9bc8046d731b395f2a5dddcf2e633cef3596a278d53d0c1ed3a14f4bd8"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/src/script_inventory.rs",
+        "sha256": "847affb8d2505c3e1e007e5a49e60fb96fd5376ea159e99155c01080bb77acf2"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/tests/hydration_progress.rs",
+        "sha256": "1ed755b20a2a03419c195b287b986c8bf3f552ba817e9a20fc98af98c722ea0a"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/tests/neutral_at_rules.rs",
+        "sha256": "72174dedd7c77ddf7a728f68bc72871a998e511518d4e0065a87de20487744c5"
+      },
+      {
+        "path": "rust/crates/turbo-surf-render/tests/resource_scan_order.rs",
+        "sha256": "3c3d8d8bcfa5cb7687ce91c8506c3fa4e5438f7f9ee4a7f48b29bb0031640bb0"
       }
-    },
+    ],
+    "canonicalTurboTestCommit": "8d8ebd226f4505daabf4fe876e54607ea8cef5e4",
+    "scope": "Implementation/fixtures unchanged from the first gates; test-only neutral_at_rules cold-font warmup added for the full default retry. Native full workspace is supplemented by affected native2 and refreshed strict checks."
+  },
+  "default": {
+    "command": "CARGO_BUILD_JOBS=2 npm run check",
+    "node": "v20.20.2",
+    "exitCode": 0,
     "workspace": {
-      "exitCode": 0,
-      "passed": 1376,
+      "passed": 1384,
       "failed": 0,
       "ignored": 9,
-      "suiteSummaries": 129,
-      "sourceScope": "finalXHR+finalshadow9 includedfromstart; normaltestparallelism",
-      "skipReasons": ["3nativeSDKcodegenerationcallbacktests", "6extensionmacro-generateddoctests"]
+      "componentSuites": 131,
+      "ignoreReasons": [
+        "Three stock-SDK native callback tests unavailable",
+        "Six generated extension doctests"
+      ]
     },
     "strict": {
-      "exitCode": 0,
-      "sha256": "634ec06d5ccdccc1dd49d9033e2e64e4140acf33f85e180ca10151826d48a982"
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
     },
     "format": {
-      "exitCode": 0,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "command": "cargo fmt --check",
+      "exitCode": 0
     },
-    "addonSha256": "f2dc71c3194227be3331db18793475cf4c400c13bf309cc7c5bd047364d3027f",
-    "shim": {
-      "exitCode": 0,
-      "passed": 95,
-      "failed": 0,
-      "skipped": 1,
-      "skipReason": "explicit skipped test does not run fixture"
+    "gates": {
+      "shim": {
+        "tests": 96,
+        "suites": 2,
+        "passed": 95,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 1,
+        "todo": 0
+      },
+      "e2e": {
+        "tests": 20,
+        "suites": 0,
+        "passed": 20,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "detection": {
+        "tests": 118,
+        "suites": 0,
+        "passed": 116,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 2,
+        "todo": 0
+      }
     },
-    "e2e": {
-      "exitCode": 0,
-      "passed": 20,
-      "failed": 0,
-      "skipped": 0
+    "pythonHelpers": {
+      "passed": 2,
+      "failed": 0
     },
-    "detection": {
-      "exitCode": 0,
-      "nodePassed": 89,
-      "nodeFailed": 0,
-      "nodeSkipped": 0,
-      "pythonPassed": 2,
-      "pythonFailed": 0,
-      "addonExplicit": true,
-      "logSha256": "b8ef58258a2cedfdee86f201050d49ba076765a0fd6ce517e6dffb65669376e6"
-    },
-    "fullLogSha256": "63c3cb228913c751fb1c1c95dfcde455e273ef3fe6ea608eddb88ce17a119dc7",
-    "sourceManifestSha256": "bbf0c961f10170e28f27fc4df53ee36460bcdf57316b66c3f0c578fdd8b10e27",
-    "localReceiptSha256": "9e50f3510eb7a40ca526474dfa70f90371b80c15f339b6b1a218cd6e644851e4"
+    "addonSha256": "c6133372f3967ebbe0772fbc7709c36e0ca87129c6df3643d8ab26f8ad334aee",
+    "addonBuildDylibSha256": "9527c4e4bca6446ea15b25d1b039551a4c4c539cb1795a877541c47c5871371f",
+    "buildConfiguration": "Production stock V8 SDK; default NAPI features. Native155/Metal configuration is validated separately.",
+    "fullLogSha256": "ccfd2eef721c5e26bd438ad7562e85336572b49ef5798d9dd5381f52d1ba57c9"
   },
   "native155": {
-    "features": [
-      "turbo-surf-mcp/impersonate",
-      "turbo-surf-mcp/trust-anchors",
-      "turbo-surf-mcp/gpu-metal",
-      "turbo-surf-mcp/coretext",
-      "turbo-surf-napi/gpu-metal",
-      "turbo-surf-napi/coretext"
-    ],
     "workspace": {
       "exitCode": 0,
-      "passed": 1415,
+      "passed": 1423,
       "failed": 0,
       "ignored": 6,
       "measured": 0,
       "filtered": 0,
-      "componentSuites": 129,
-      "ignoreReasons": ["Six extension-macro generated doctest examples"]
+      "suites": 131,
+      "logSha256": "62811dd4a502dee9ca827c7abf69a183fdb2738949be50b0e01570940bf29879"
     },
+    "workspaceSourceScope": "Full1423 run precedes only the test-only neutral-rule font warmup; all implementation hashes remain unchanged. Affected native2 and refreshed all-target strict/fmt validate that fixture amendment.",
     "strict": {
+      "command": "CARGO_INCREMENTAL=0 python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 2 --surf clippy --workspace --all-targets --features turbo-surf-mcp/impersonate,turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext,turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext -- -D warnings",
       "exitCode": 0,
-      "sha256": "bd2934b167bf3a72038dd91c17db3640e5ae2a61eca2754ab1755cf680bd5ec3"
+      "log": "native-strict-after-warmup-retry.log",
+      "logSha256": "149630dd594d43db63effcc28f10401e882916692a81ebbb2d6c5b8bd38acfd9"
     },
     "format": {
+      "command": "cd rust && cargo fmt --all --check",
       "exitCode": 0,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "log": "format-after-warmup.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "cliSha256": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50",
-    "addonSha256": "141b9dd2d052e1b7ae7f01e62a34d59b3b58390fde26218b56494097b3536c4e",
-    "shim": {
+    "testOnlyFixtureSupplement": {
+      "command": "python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 4 --surf test --workspace --test neutral_at_rules --features turbo-surf-mcp/impersonate,turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext,turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext",
       "exitCode": 0,
-      "passed": 95,
+      "passed": 2,
       "failed": 0,
-      "skipped": 1,
-      "skipReason": "Explicit test-framework skipped-test control",
-      "logSha256": "9b08c5804508884ca6b8b9f25d9349c28a1a13a5efb67ab151b25fd51ade2197"
+      "durationSeconds": 4.24
     },
-    "e2e": {
+    "node": "v20.20.2",
+    "addonSha256": "67a3680cc1de005d0f836ce80f0591a7761ea6881ce7f95f76d29db4a5c7aefa",
+    "addonBuild": {
+      "command": "python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 4 --surf build --release -p turbo-surf-napi --features turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext,turbo-surf-core/trust-anchors",
       "exitCode": 0,
-      "passed": 20,
-      "failed": 0,
-      "skipped": 0,
-      "logSha256": "24d1b113033f11683438d761708fcbcc724ba7535b0cd7a843c49faf8a12318a"
+      "buildLog": "oct17-candidate4-native-addon-build.log",
+      "buildLogSha256": "91f792a8126cc55dffd1695e7d21e3a215bde2e04f62f9597831dded9bf98d60",
+      "addonSha256": "67a3680cc1de005d0f836ce80f0591a7761ea6881ce7f95f76d29db4a5c7aefa",
+      "addonPath": ".native-builds/recovery/root/oct17-native155-final/turbo-surf-native155-release.node",
+      "v8": "15.5.35.23-rusty",
+      "canonicalTurboTestHead": "8d8ebd226f4505daabf4fe876e54607ea8cef5e4",
+      "testOnlySourceAdjustmentReceipt": "oct17-candidate4-test-only-adjustment.json"
     },
-    "detection": {
-      "exitCode": 0,
-      "nodePassed": 89,
-      "nodeFailed": 0,
-      "nodeSkipped": 0,
-      "pythonPassed": 2,
-      "pythonFailed": 0,
-      "logSha256": "07ce0c5f5711938792f8c783e8a9f353f9e1a2ba236a5f1ffd0a5f4e47bd198d"
-    },
-    "fullLogSha256": "78cdd5ff6c07ac2a6910c39cf690a73681155851e5c2be1f41f33dbf25a16114",
-    "localReceiptSha256": "1e1d2847fd1694a2dd60f9f1019ee2a81f51bc4458388eab91e521e1098b2d4b"
-  },
-  "reproduction": "See harness/detection/README.md and engine-155/README.md. Native feature qualification includes both the MCP four-feature set and NAPI gpu-metal/coretext; stock SDK and managed native155 are distinct configurations.",
-  "rawEvidence": "Ignored local receipts and logs retain command details. This report contains selected result counts and hashes; it does not embed raw logs.",
-  "harnessFollowup": {
-    "baseCommit": "589d2d30df30f9d36bfd9952082285c6847b6f5d",
-    "sourceFiles": [
-      {
-        "path": "harness/detection/interface-trace.js",
-        "sha256": "0a43b414acde5bd3cd8e0b3eabc1c21ac544c22928f9cdbff63ca2e640f39caf"
+    "gates": {
+      "shim": {
+        "exitCode": 0,
+        "log": "oct17-candidate4-native-shim.log",
+        "logSha256": "8893578f6dd80a539617c6269ad4c018edd6c09ecd6e8f81ecb98fbbba9f8f77",
+        "tests": 96,
+        "pass": 95,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 1,
+        "todo": 0
       },
-      {
-        "path": "harness/detection/interface-trace.test.mjs",
-        "sha256": "37c83d9b2e1335b1d9c40d659afe02fbf80d26a3c014e2a1fc9b7ffe9347d91f"
+      "e2e": {
+        "exitCode": 0,
+        "log": "oct17-candidate4-native-e2e.log",
+        "logSha256": "331ec5118fcada6372dd17c28a4e8b837f576cc0efebd4a77b4f21c92008bc49",
+        "tests": 20,
+        "pass": 20,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "detection": {
+        "exitCode": 0,
+        "log": "oct17-candidate4-native-detection.log",
+        "logSha256": "47e8bfdeb821728553fa6db69f5ed5d0d3a16d12a1c8b4a19a1333b65d2aef67",
+        "tests": 118,
+        "pass": 116,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 2,
+        "todo": 0,
+        "pythonAdmission": {
+          "tests": 2,
+          "failed": 0
+        }
       }
+    }
+  },
+  "supplementalChromeControls": {
+    "node": "v22.22.3",
+    "exitCode": 0,
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 7976.476666,
+    "log": "oct17-candidate4-chrome-cdp-node22.log",
+    "logSha256": "4de4f2f6823e522acd5778637229bdafbecb52b7a15f6a371af6853685cf3fa6",
+    "sourceSha256": {
+      "harness/detection/chrome-cdp-trace.test.mjs": "033b0c61abd796d390f7ea7e1603315580b89131d34092a77f32f15c4000894e",
+      "harness/detection/chrome-cdp-trace.mjs": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15",
+      "harness/detection/chrome-network-metadata.mjs": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2",
+      "harness/detection/chrome-trace.mjs": "4acb9fef7dd1ba1d98cd98c9ab735e824d399b5d78efc7e761c705abac28aeca",
+      "harness/detection/interface-trace.js": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc"
+    },
+    "controls": [
+      "worker and out-of-process iframe requests, source inventory, interface reads and consent/input lifecycle",
+      "baseline HTTP/2 TLS metadata and timing through redirect without JS tracing",
+      "Patchright baseline main-session metadata without interface or debugger tracing"
     ],
-    "scope": "Complete offline detection only; sequential existing artifacts, no Rust rebuild; interface tracing origin correction. Earlier88 logs preserved.",
-    "command": "TURBO_SURF_NAPI_PATH=<addon> TURBO_SURF_DETECTION_BINARY=<cli> npm run test:detection",
-    "localReceiptSha256": "cd690399dd44fbdfa663f69cc90bc1e6fd1a9fc773b27e8013b25a347925569f"
-  }
+    "tempCleanup": "Each test closes local servers and removes its own temporary capture/profile directory in finally.",
+    "command": "node --test harness/detection/chrome-cdp-trace.test.mjs"
+  },
+  "testOnlyFontInitialization": {
+    "scope": "Test-only system-font initialization warmup; original conformance sessions and assertions retain 5000ms budgets. Production source and budgets unchanged.",
+    "beforeBinarySha256": "6442588f6affc422083b295973ba1c1fc5c34cab1fd797e252fcb7dbf3b2eb93",
+    "beforeSourceSha256": "c46e9c622f383a6150ea4edead9385661a7638fdcd8b53406ef38ef7c0576643",
+    "afterSourceSha256": "72174dedd7c77ddf7a728f68bc72871a998e511518d4e0065a87de20487744c5",
+    "diagnosis": "Sampled parallel reproduction spent 1559 samples inside font initialization on one test and 1559 waiting on the same process-wide OnceLock on the other. Unsampled single and parallel controls passed; this is cold-font watchdog sensitivity, not a deterministic CSS admission mismatch.",
+    "warmup": {
+      "budgetMs": 60000,
+      "geometry": [7, 9],
+      "closesSession": true
+    },
+    "default": {
+      "command": "cd rust && cargo test -p turbo-surf-render --test neutral_at_rules",
+      "exitCode": 0,
+      "passed": 2,
+      "failed": 0,
+      "durationSeconds": 4.57
+    },
+    "native155": {
+      "command": "python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 4 --surf test --workspace --test neutral_at_rules --features turbo-surf-mcp/impersonate,turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext,turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext",
+      "exitCode": 0,
+      "passed": 2,
+      "failed": 0,
+      "durationSeconds": 4.24
+    },
+    "evidenceSha256": {
+      "isolated-parallel.log": "9dc482b5b0d73d559c20c9b386e94a0d53cf34f95623d2b8d8f72577b7f24514",
+      "isolated-one-unsampled.log": "255594066431a06d22c7f1cf820905e2103201b74bc2a6e7b128581636846d56",
+      "isolated-parallel-unsampled.log": "e6b80f1768a4b96a6181477cfd0beaeeb6bbe69a2c2fbcbd1ec9b6988330fce2",
+      "host-sample.txt": "7ded786dae48f6ed63d27108bb2bd049bfc352fc88cf4d8048f4267677aa27c0",
+      "default-warmup-fix.log": "01c67877b10872e4c5ed47eeefef196eba54c215f3b76ae683e0921fe1a82b59",
+      "native-warmup-fix.log": "727f50cd201f715093778ebb0c3d97001f13933a1a196e9b981200f90ac04e07"
+    },
+    "format": {
+      "command": "cd rust && cargo fmt --all --check",
+      "exitCode": 0,
+      "log": "format-after-warmup.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "nativeStrictFirstAttempt": {
+      "exitCode": 101,
+      "cause": "ENOSPC while writing dependency files; no Clippy diagnostics. Not a passing strict gate.",
+      "log": "native-strict-after-warmup.log",
+      "logSha256": "c685ad677c469845447fb84186afa6e83ad32149a1d2c1d427f412268c13294d"
+    },
+    "nativeStrict": {
+      "command": "CARGO_INCREMENTAL=0 python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 2 --surf clippy --workspace --all-targets --features turbo-surf-mcp/impersonate,turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext,turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext -- -D warnings",
+      "exitCode": 0,
+      "log": "native-strict-after-warmup-retry.log",
+      "logSha256": "149630dd594d43db63effcc28f10401e882916692a81ebbb2d6c5b8bd38acfd9"
+    }
+  },
+  "preservedFailures": {
+    "firstDefaultGate": {
+      "exitCode": 101,
+      "passedBeforeStop": 1011,
+      "failed": 2,
+      "ignoredBeforeStop": 3,
+      "componentSummaries": 81,
+      "logSha256": "cb6c9b6a1f67cdbb8604ee6021743d82a1d187986f6e66b121c0ed2f2782ea1b",
+      "failure": "neutral_at_rules: two 5-second session expression budget errors before behavior assertions; isolated diagnosis pending",
+      "fullGatePassed": false
+    },
+    "diskInterruptedDefaultRetry": {
+      "exitCode": 101,
+      "classification": "Infrastructure disk exhaustion during test execution; incomplete default gate",
+      "logSha256": "17f7480f00ecc7bf1e6e64c8e1baeafe34b829f2e84ba9aef417048a6244c66b",
+      "fullGatePassed": false,
+      "productionSourceChanged": false
+    }
+  },
+  "previousCheckpoint": {
+    "capturedDate": "2026-10-16",
+    "productionSourceCommit": "26bd0f459c0edeab35dea345550f7f311818ed32",
+    "reportSha256": "1d4471ca014075a3bd3acf8bcc8319736aba4dec59aea7f7c64015f443cd8f8c",
+    "defaultPassed": 1376,
+    "native155Passed": 1415,
+    "scope": "Historical checkpoint retained in Git; superseded for current local gate counts."
+  },
+  "liveMeasurement": "OBSERVABILITY-LAST-RUN.json records homepage-only controls. GOOGLE-LAST-RUN.json remains the prior complete search matrix with0/2 accepted native SERPs.",
+  "rawEvidence": "Private ignored logs, profiles and receipts preserve raw evidence; this report publishes selected relative source paths, counts and hashes only."
 }

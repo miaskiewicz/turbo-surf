@@ -93,7 +93,7 @@ fn measure<'s>(
         let viewport = context
             .get_slot::<Viewport>()
             .ok_or("native layout viewport was not captured")?;
-        let snapshot = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
+        let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
         let mut geometry = element_geometry(
             &snapshot,
             crate::live_layout::source_id(input.tree.document_id, input.handle),
@@ -142,10 +142,14 @@ fn element_geometry(
     }
 }
 fn resolve(
+    scope: &v8::PinScope<'_, '_>,
     tree: &crate::live_layout::LiveTreeInput,
     sheets: &[crate::live_stylesheets::SheetSnapshot],
     viewport: &Viewport,
 ) -> Result<std::rc::Rc<LayoutView>, String> {
+    let key_timer =
+        crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::RulesKey);
+    let profile = crate::layout_profile::LayoutProfile::current(scope);
     let rules = crate::live_stylesheets::active_rule_snapshots(sheets, viewport)?;
     let fonts = SYSTEM_FONTS.get_or_init(|| {
         let mut registry = FontRegistry::new();
@@ -186,9 +190,15 @@ fn resolve(
             .find(|entry| entry.key == key)
             .map(|entry| entry.snapshot.clone())
     });
+    drop(key_timer);
+    if let Some(profile) = profile {
+        profile.cache(cached.is_some());
+    }
     let snapshot = if let Some(snapshot) = cached {
         snapshot
     } else {
+        let layout_timer =
+            crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::Layout);
         let (snapshot, styles) = crate::live_layout::layout_active_rules_resolved(
             tree,
             &key.rules,
@@ -201,6 +211,7 @@ fn resolve(
             },
             &mut Diagnostics::default(),
         )?;
+        drop(layout_timer);
         // Native Range boundaries follow the original DOM. Unassigned light
         // children and inactive fallback nodes are connected but lack flat boxes.
         let omitted =
@@ -299,7 +310,7 @@ fn scroll<'s>(
     let viewport = context
         .get_slot::<Viewport>()
         .ok_or("native layout viewport was not captured")?;
-    let snapshot = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
+    let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let id = crate::live_layout::source_id(input.tree.document_id, input.handle);
     if snapshot.omitted.contains(&id) {
         return Ok(ScrollResult {
@@ -433,7 +444,7 @@ fn hit<'s>(
     let viewport = context
         .get_slot::<Viewport>()
         .ok_or("native layout viewport was not captured")?;
-    let snapshot = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
+    let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let state = scroll_state(context);
     let ids = crate::live_layout_hit::elements_at_point(
         &snapshot.snapshot,
@@ -489,7 +500,7 @@ fn offset<'s>(
         let viewport = context
             .get_slot::<Viewport>()
             .ok_or("native layout viewport was not captured")?;
-        let snapshot = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
+        let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
         let id = crate::live_layout::source_id(input.tree.document_id, input.handle);
         if snapshot.omitted.contains(&id) {
             crate::live_layout_metrics::OffsetPosition {
@@ -561,7 +572,7 @@ fn range_geometry<'s>(
         let viewport = context
             .get_slot::<Viewport>()
             .ok_or("native Range viewport unavailable")?;
-        let view = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
+        let view = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
         let state = scroll_state(context);
         let offsets = state.values.borrow();
         for selection in selections {
@@ -647,7 +658,7 @@ fn caret_at_point<'s>(
     let viewport = context
         .get_slot::<Viewport>()
         .ok_or("native caret viewport unavailable")?;
-    let view = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
+    let view = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let state = scroll_state(context);
     let endpoint = crate::live_layout_text::caret(
         &view.snapshot,
@@ -706,7 +717,7 @@ fn caret_geometry<'s>(
     let viewport = context
         .get_slot::<Viewport>()
         .ok_or("native caret viewport unavailable")?;
-    let view = resolve(&input.tree, &input.sheets, viewport.as_ref())?;
+    let view = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let source = crate::live_layout::source_id(input.tree.document_id, input.handle);
     let _current = view
         .snapshot

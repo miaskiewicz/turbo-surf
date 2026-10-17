@@ -163,6 +163,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         std::env::remove_var("TURBO_SURF_JS_TRACE");
     }
+    if config["nativeCpuProfile"].as_bool().unwrap_or(false) {
+        if !config["debugger"].as_bool().unwrap_or(false) {
+            return Err("Native CPU profiling requires debugger inventory".into());
+        }
+        std::env::set_var("TURBO_SURF_JS_PROFILE", "1");
+    } else {
+        std::env::remove_var("TURBO_SURF_JS_PROFILE");
+    }
     let mut trace = json!({"runtime":"turbo-surf","version":turbo_surf_core::VERSION,
         "instrumented":config["interfaces"].as_bool().unwrap_or(false), "config":config,
         "nativeDebugger":{"enabled":config["debugger"].as_bool().unwrap_or(false),"directory":"native-js","childContexts":turbo_surf_render::stable_window_proxy()},

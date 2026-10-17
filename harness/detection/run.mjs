@@ -179,6 +179,7 @@ const manifest = {
       "api-shape.js",
       "compare.mjs",
       "protocol-headers.mjs",
+      "chrome-network-metadata.mjs",
       "checkout-provenance.mjs",
     ].map((f) => [f, sha(readFileSync(join(here, f)))]),
   ),
@@ -215,7 +216,8 @@ for (let repeat = 0; repeat < repeats; repeat++) {
   mkdirSync(runOut, { recursive: true, mode: 0o700 });
   for (const instrumented of [false, true]) {
     config.interfaces = instrumented;
-    config.debugger = instrumented && argv.includes("--debugger");
+    config.nativeCpuProfile = instrumented && argv.includes("--native-cpu-profile");
+    config.debugger = instrumented && (argv.includes("--debugger") || config.nativeCpuProfile);
     const path = join(runOut, instrumented ? "instrumented-config.json" : "baseline-config.json");
     writeFileSync(path, JSON.stringify(config, null, 2), { mode: 0o600 });
     const order = argv.includes("--native-first") ? ["native", "chrome"] : ["chrome", "native"];
@@ -232,6 +234,7 @@ for (let repeat = 0; repeat < repeats; repeat++) {
               TURBO_SURF_BROWSER_CMD: "",
               TURBO_SURF_BROWSER_FETCH_CMD: "",
               TURBO_SURF_ENID_CACHE: join(dest, "unused-cookie-cache.json"),
+              TURBO_SURF_JS_PROFILE: config.nativeCpuProfile ? "1" : "",
             });
       if (runtime === "native" && existsSync(join(dest, "trace.json"))) {
         const trace = JSON.parse(readFileSync(join(dest, "trace.json"), "utf8"));
@@ -273,6 +276,7 @@ for (let repeat = 0; repeat < repeats; repeat++) {
           steps: [],
           interfaces: false,
           debugger: false,
+          nativeCpuProfile: false,
           probeOnly: true,
         },
         null,

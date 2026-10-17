@@ -1,3 +1,13 @@
+# Source-hashed authored probes and controls must retain LF on every platform.
+harness/detection/*.js text eol=lf
+harness/detection/*.mjs text eol=lf
+harness/detection/*.json text eol=lf
+harness/detection/fixtures/*.json text eol=lf
+harness/detection/fixtures/*.html text eol=lf
+rust/crates/turbo-surf-render/src/*.js text eol=lf
+rust/crates/turbo-surf-render/src/*.json text eol=lf
+rust/crates/turbo-surf-render/tests/*.rs text eol=lf
+
 # Preserve the exact published MIT XPath provider and license bytes.
 rust/crates/turbo-surf-render/src/xpath_provider/xpath.js -text -whitespace
 rust/crates/turbo-surf-render/src/xpath_provider/LICENSE -text -whitespace

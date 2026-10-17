@@ -9438,12 +9438,18 @@ const __resourceCSSHosts = new WeakMap();
 const __resourceCompatMode=Object.getOwnPropertyDescriptor(Document.prototype,"compatMode").get;
 const __resourceAttribute=Element.prototype.getAttribute;
 const __resourceTagName=Object.getOwnPropertyDescriptor(Element.prototype,"tagName").get;
+const __resourceLocalName=Object.getOwnPropertyDescriptor(Element.prototype,"localName").get;
+const __resourceIndexOf=Function.prototype.call.bind(Array.prototype.indexOf);
+const __resourceListLength=Object.getOwnPropertyDescriptor(NodeList.prototype,"length").get;
+const __resourceListItem=NodeList.prototype.item;
+const __resourceListApply=Reflect.apply;
 const __resourceScriptAsync=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,"async").get;
 const __resourceText=Object.getOwnPropertyDescriptor(Node.prototype,"textContent").get;
 const __resourceNativeOwner=Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype,"ownerDocument").get);
 const __resourceNativeBase=Function.prototype.call.bind(Object.getOwnPropertyDescriptor(Node.prototype,"baseURI").get);
 const __resourceDocumentQuery=Document.prototype.querySelectorAll;
 const __resourceCompare=Node.prototype.compareDocumentPosition;
+let __resourceMutationEpoch = 0;
 const __resourceBaseURL=Object.getOwnPropertyDescriptor(Node.prototype,"baseURI").get;
 "##,
     include_str!("compression_dictionary.js"),
@@ -9538,9 +9544,22 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
   if(doc!==__document || __documentType.call(doc)!==9)throw new TypeError("Resource loading requires the owning native Document");
   __discoverDictionaries();
   const styles=[];
-  for (const el of Array.from(__resourceDocumentQuery.call(doc,"link,img,style"))) {
-    if(before&&(__resourceCompare.call(el,before)&4)===0)continue;
+  // The query is already in document order. Avoid a whole-tree position walk
+  // for each parser resource, unless a resource hook changed that order.
+  const epoch=__resourceMutationEpoch;
+  const selected=__resourceListApply(__resourceDocumentQuery,doc,[before?"link,img,style,script":"link,img,style"]);
+  const length=__resourceListApply(__resourceListLength,selected,[]);
+  const elements={__proto__:null,length};
+  for(let index=0;index<length;index++)elements[index]=__resourceListApply(__resourceListItem,selected,[index]);
+  const cutoff=before?__resourceIndexOf(elements,before):-1;
+  for (let index=0;index<elements.length;index++) {
+    const el=elements[index];
+    if(before){
+      if(cutoff>=0&&epoch===__resourceMutationEpoch){if(index>=cutoff)break;}
+      else if((__resourceCompare.call(el,before)&4)===0)continue;
+    }
     const tag=__resourceTagName.call(el);
+    if(tag==="SCRIPT"||__resourceLocalName.call(el)==="script")continue;
     if (tag==="IMG") {__patchImage(el,win);__loadImage(el,win);continue;}
     if(tag==="STYLE"){
       const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
@@ -9838,6 +9857,7 @@ function __resourceMutation(event) {
   if (relevant) __loadMutatedResources();
 }
 ops.op_install_resource_consumer(__document, event => {
+  __resourceMutationEpoch++;
   __prepareCspStyleMutation(event);
   __documentBaseMutation(event,element=>{
     const prepared=__prepareResourceScript(element);
@@ -9865,7 +9885,7 @@ __G.hydrate = async function (maxRounds = 300, timerBudget = 200000, fireTimers 
     // deferred. New scripts injected mid-round re-partition on the next pass.
     const all = __initialResourceScripts.splice(0);
     if(!__G.isFrame)__frameScriptElements.length=0;
-    const isDeferred = element => !__resourceScriptAsync.call(element) &&
+    const isDeferred = element => __htmlPolicyElement(element,"script") && !__resourceScriptAsync.call(element) &&
       ((__resourceAttribute.call(element,"type") || "").trim().toLowerCase() === "module" ||
         __resourceAttribute.call(element,"src") !== null && __resourceAttribute.call(element,"defer") !== null);
     const ordered = all.filter(element => !isDeferred(element)).concat(all.filter(isDeferred));
@@ -13771,16 +13791,20 @@ async fn hydrate_installed_document(
     base: &str,
     init_script: &str,
 ) -> Result<String, String> {
+    rt.op_state().borrow_mut().put(HydrationProgress::default());
+    hydration_phase(rt, HydrationPhase::DocumentLoading);
     run_lifecycle(rt, "documentLoading").map_err(|error| error.to_string())?;
     rt.execute_script(
         "<current-script>",
         "globalThis[Symbol.for('ts')].setCurrentScript(null);",
     )
     .map_err(|e| e.to_string())?;
+    hydration_phase(rt, HydrationPhase::InitScript);
     if !init_script.is_empty() {
         rt.execute_script("<init-script>", init_script.to_string())
             .map_err(|e| e.to_string())?;
     }
+    hydration_phase(rt, HydrationPhase::ParserAndDeferredScripts);
     rt.execute_script(
         "<initial-hydrate>",
         "globalThis[Symbol.for('ts')].initialHydrated=false;globalThis[Symbol.for('ts')].tcHydrate=globalThis[Symbol.for('ts')].hydrate(300,200000,false).finally(()=>{globalThis[Symbol.for('ts')].initialHydrated=true});",
@@ -13791,15 +13815,19 @@ async fn hydrate_installed_document(
         Some("globalThis[Symbol.for('ts')].initialHydrated ? '1' : '0'"),
     )
     .await?;
+    hydration_phase(rt, HydrationPhase::ModuleScripts);
     drain_module_scripts(rt, base).await?;
+    hydration_phase(rt, HydrationPhase::DocumentInteractive);
     run_lifecycle(rt, "dispatchDocumentInteractive").map_err(|error| error.to_string())?;
     // HTML load waits for script graph completion, images/styles and frames,
     // independently of unrelated fetches or a module's pending top-level await.
+    hydration_phase(rt, HydrationPhase::LoadResources);
     drain_event_loop_until(
         rt,
         Some("globalThis[Symbol.for('ts')].documentLoadReady() ? '1' : '0'"),
     )
     .await?;
+    hydration_phase(rt, HydrationPhase::DocumentComplete);
     run_lifecycle(rt, "dispatchDocumentComplete")?;
     // Unified event-loop pump. A single "run scripts+timers, then drain" pass isn't
     // enough for a real SPA: React kicks a fetch, yields, the fetch resolves, React
@@ -13808,7 +13836,8 @@ async fn hydrate_installed_document(
     // injected-script loads), check whether JS still has queued work — until it
     // quiesces. The watchdog bounds wall time; MAX_PUMPS bounds a pathological spin.
     const MAX_PUMPS: usize = 500;
-    for _ in 0..MAX_PUMPS {
+    hydration_phase(rt, HydrationPhase::PostLoadHydration);
+    for round in 0..MAX_PUMPS {
         rt.execute_script(
             "<hydrate>",
             "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
@@ -13817,6 +13846,10 @@ async fn hydrate_installed_document(
         drain_event_loop(rt).await?;
         drain_module_scripts(rt, base).await?;
         drain_event_loop(rt).await?;
+        rt.op_state()
+            .borrow_mut()
+            .borrow_mut::<HydrationProgress>()
+            .completed_pumps = round + 1;
         let pending = rt
             .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
             .map_err(|e| e.to_string())?;
@@ -13825,7 +13858,9 @@ async fn hydrate_installed_document(
         }
     }
     run_lifecycle(rt, "dispatchDocumentComplete").map_err(|error| error.to_string())?;
+    hydration_phase(rt, HydrationPhase::PostLoadQuiescence);
     drain_to_quiescence(rt).await?;
+    hydration_phase(rt, HydrationPhase::Complete);
     Ok(crate::browser_env::document_html())
 }
 
@@ -14032,6 +14067,46 @@ async fn drain_to_quiescence_with_scripts(
     Ok(())
 }
 
+/// Stable host lifecycle labels; page scripts cannot replace these diagnostics.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HydrationPhase {
+    #[default]
+    DocumentLoading,
+    InitScript,
+    ParserAndDeferredScripts,
+    ModuleScripts,
+    DocumentInteractive,
+    LoadResources,
+    DocumentComplete,
+    PostLoadHydration,
+    PostLoadQuiescence,
+    Complete,
+}
+
+/// Last host lifecycle gate entered, retained even when guest execution is interrupted.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct HydrationProgress {
+    pub phase: HydrationPhase,
+    pub completed_pumps: usize,
+}
+
+fn hydration_phase(rt: &mut JsRuntime, phase: HydrationPhase) {
+    let state = rt.op_state();
+    let mut state = state.borrow_mut();
+    if let Some(progress) = state.try_borrow_mut::<HydrationProgress>() {
+        progress.phase = phase;
+    }
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct HydrationDiagnostics {
+    pub budget_exceeded: bool,
+    pub progress: HydrationProgress,
+    pub open_error: Option<String>,
+    pub unsupported_csp: Vec<String>,
+}
+
 /// A LIVE page: a persistent [`JsRuntime`] whose hydrated DOM + running JS (React, the
 /// app's closures, its delegated event listeners) stay ALIVE across operations. Unlike
 /// the one-shot `render_*`/`render_hydrate` paths — which serialize the DOM to a string
@@ -14042,13 +14117,6 @@ async fn drain_to_quiescence_with_scripts(
 /// The V8 isolate + the binding's thread-local DOM are NOT `Send`: a session must be
 /// created and driven from a single owning thread (the napi layer pins one thread per
 /// session). `close()` (or drop) resets the binding while the isolate is still alive.
-#[derive(Clone, Debug, Default, serde::Serialize)]
-pub struct HydrationDiagnostics {
-    pub budget_exceeded: bool,
-    pub open_error: Option<String>,
-    pub unsupported_csp: Vec<String>,
-}
-
 pub struct PageSession {
     script_inventory: Option<crate::script_inventory::ScriptInventory>,
     navigation_count: u64,
@@ -14278,9 +14346,11 @@ impl PageSession {
         drop(watchdog);
         if let Some(inventory) = &mut script_inventory {
             let _activation = key.enter();
+            inventory.stop_profile();
             inventory.flush();
         }
         let budget_exceeded = exceeded.load(std::sync::atomic::Ordering::Relaxed);
+        let progress = rt.op_state().borrow().borrow::<HydrationProgress>().clone();
         let unsupported_csp = {
             let _activation = rt.activation_key().enter();
             let context = rt.main_context();
@@ -14298,6 +14368,7 @@ impl PageSession {
                 rt,
                 hydration_diagnostics: HydrationDiagnostics {
                     budget_exceeded,
+                    progress,
                     open_error: budget_exceeded
                         .then(|| format!("Hydration exceeded its {budget_ms}ms execution budget")),
                     unsupported_csp,
@@ -14318,6 +14389,7 @@ impl PageSession {
                     rt,
                     hydration_diagnostics: HydrationDiagnostics {
                         budget_exceeded,
+                        progress,
                         open_error: Some(if budget_exceeded {
                             format!("render budget exceeded ({budget_ms}ms): {e}")
                         } else {

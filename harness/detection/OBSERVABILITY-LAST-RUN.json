@@ -1,0 +1,867 @@
+{
+  "schemaVersion": 1,
+  "capturedDate": "2026-10-17",
+  "scope": "Fresh Google homepage observability and initial-hydration budget controls only; no consent or search submission.",
+  "chrome": {
+    "sourceReceipt": {
+      "baseCommit": "a057a3a5c8608a430b08e75d94fde99d62a1733e",
+      "collectorHashes": {
+        "chrome-cdp-trace.mjs": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15",
+        "chrome-network-metadata.mjs": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2",
+        "chrome-launch-policy.mjs": "6961d1c3ff7011216b77a6850c361e31a20fe9686fb63aa02346cb8803970cb0",
+        "cdp-connection.mjs": "7b9f522db23484f79575ee46cf320277a4a516de53becba1eef5730d5a5549a0",
+        "protocol-headers.mjs": "763b85da53476f6352dfd6e2dbaed07eb2571b2bca4fe7f934b165ae9da5b5e1"
+      },
+      "configSha256": "ac59d70e4b8b28468b471a56a459b7f43481e03842a1c4beba5f36f162e9cff6",
+      "scope": "Fresh homepage only; no consent or search input; uninstrumented; no cookies shared with native."
+    },
+    "traceSha256": "d82855a67556f1121648bffdedf9d73d82d97048abdcdf4cbb6aa791ea48e365",
+    "browserVersion": "Chrome/155.0.8059.80",
+    "v8Version": "15.5.35.23",
+    "interfaceWrapping": false,
+    "debugger": false,
+    "recordedErrorCount": 0,
+    "networkScope": "attached-target-sessions",
+    "packetCapture": false,
+    "responseTransport": {
+      "source": "cdp-response",
+      "packetCapture": false,
+      "responses": 49,
+      "observed": 49,
+      "unknown": 0,
+      "protocols": {
+        "h2": 4,
+        "h3": 37,
+        "http/1.1": 0,
+        "http/1.0": 0,
+        "other": 8,
+        "unknown": 0
+      },
+      "tlsProtocols": {
+        "TLS 1.2": 0,
+        "TLS 1.3": 4,
+        "QUIC": 37,
+        "other": 0,
+        "unknown": 8
+      },
+      "securityDetails": {
+        "present": 41,
+        "missing": 8
+      },
+      "timing": {
+        "present": 41,
+        "missing": 8
+      },
+      "connectionReused": {
+        "true": 33,
+        "false": 16,
+        "unknown": 0
+      },
+      "fromDiskCache": {
+        "true": 0,
+        "false": 49,
+        "unknown": 0
+      },
+      "fromServiceWorker": {
+        "true": 0,
+        "false": 49,
+        "unknown": 0
+      }
+    },
+    "mainDocument": {
+      "protocol": "h3",
+      "tlsProtocol": "QUIC"
+    },
+    "headerCorrelation": {
+      "cdp-extra-info": 41,
+      "cdp-request-event": 7
+    }
+  },
+  "nativeCurrent": {
+    "schema": 1,
+    "status": "Candidate4 completes three fresh clean homepage attempts and one profiled attempt within the unchanged20-second hydration budget.",
+    "scope": "Fresh-cookie Google homepage only; no consent/search or SERP acceptance attempt.",
+    "pageBudgetMs": 20000,
+    "nativeFeatures": {
+      "impersonate": true,
+      "trustAnchors": true,
+      "gpuMetal": true,
+      "coretext": true
+    },
+    "engine": {
+      "v8Version": "15.5.35.23-rusty",
+      "stableWindowProxy": true,
+      "transportChromeMajor": 155,
+      "transportBaseChromeMajor": 154,
+      "reportedChromeMajor": 155,
+      "reportedFullVersion": "155.0.8059.80"
+    },
+    "candidate4BinarySha256": "537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47",
+    "candidate4CanonicalTurboTestHead": "8d8ebd226f4505daabf4fe876e54607ea8cef5e4",
+    "candidate4SourceHashes": {
+      "rust/crates/turbo-surf-render/src/runtime.rs": "2e4c6b9bc8046d731b395f2a5dddcf2e633cef3596a278d53d0c1ed3a14f4bd8",
+      "rust/crates/turbo-surf-render/src/script_inventory.rs": "847affb8d2505c3e1e007e5a49e60fb96fd5376ea159e99155c01080bb77acf2",
+      "rust/crates/turbo-surf-render/src/lib.rs": "bc4ab34195479591d0e3b3fa9867d907a71e4eaa0defc231483743845e3e5d23",
+      "rust/crates/turbo-surf-mcp/examples/detection_trace.rs": "8bf9e6161932f500a6d23b71e99e485ed7fad32dc600dad6ad191b336ad88ac5",
+      "rust/crates/turbo-surf-render/src/browser_env.js": "346a84ecb8ac4e57e9cdbe351c00326cc2e2424db54661bf631a439f6939cef2",
+      "rust/crates/turbo-surf-render/src/browser_env.rs": "e0f95509c2b9652e0d2dab388ee04cfab2b79cb0f8c39b7182e606aa91f8f31c",
+      "rust/crates/turbo-surf-render/src/browser_env_upstream.rs": "964e68205ac06865a94e18cd629eaac13f16f821f451c47eae2dd4c187dd3e32",
+      "rust/crates/turbo-surf-render/src/live_layout_dom.rs": "813108ad7ab9fc376bedbea748b3678179b6f86298c03d9d07a7acfbeb636958",
+      "rust/crates/turbo-surf-render/src/live_layout_backend.rs": "dd8000803fae54fea20b91e0894a21a394b7089bab2bcd60f97669277f748a85",
+      "rust/crates/turbo-surf-render/src/layout_profile.rs": "321428257973eeba6158f36843b825f2d03ff4c133e59ffd678442f36d348106",
+      "rust/crates/turbo-surf-render/src/live_layout_scoped.rs": "a973b05259f2a48709dfeaeb51c0afb7059a77785e4aa4a92cfe23f0bb66bb64",
+      "harness/detection/resource-scan-order-chrome.mjs": "668ff5a78843136f779a25467fae0ae600cf3c82a295b654c28fa842cb2aa9f3",
+      "harness/detection/fixtures/resource-scan-order-chrome155.json": "0f0710f14c1c72828abc26d8589c4065003623e234c416c3550f2c191a6a285a"
+    },
+    "sourceHashScope": "Selected source files frozen with executable, not a complete build-input manifest.",
+    "concurrentRustBuild": false,
+    "cleanCandidate4": [
+      {
+        "captureComplete": true,
+        "errorCount": 0,
+        "readyState": "complete",
+        "status": 200,
+        "traceSha256": "9922bc086ee3c8dece36ed615330dba99120ab7f9a82789cd6c722e1ab986ae6",
+        "configSha256": "028fb85e62a44ce624ef17f6c14af8a23bfd8a061cfb2a2cd2e7c44145b73f35",
+        "processWallMs": 13295.92975,
+        "budgetExceeded": false,
+        "phase": "complete",
+        "completedPumps": 500,
+        "postVerdictPendingWork": "1"
+      },
+      {
+        "captureComplete": true,
+        "errorCount": 0,
+        "readyState": "complete",
+        "status": 200,
+        "traceSha256": "bb632df9145d4ff82fcbd9bb62600c6e6e4ec6e58e3e9b28f936c35961b65292",
+        "configSha256": "028fb85e62a44ce624ef17f6c14af8a23bfd8a061cfb2a2cd2e7c44145b73f35",
+        "processWallMs": 11442.116666,
+        "budgetExceeded": false,
+        "phase": "complete",
+        "completedPumps": 500,
+        "postVerdictPendingWork": "1"
+      },
+      {
+        "captureComplete": true,
+        "errorCount": 0,
+        "readyState": "complete",
+        "status": 200,
+        "traceSha256": "8c393f506734acdbca0cb28d0392e424fa61944a2111e7ba71a1110248875d63",
+        "configSha256": "028fb85e62a44ce624ef17f6c14af8a23bfd8a061cfb2a2cd2e7c44145b73f35",
+        "processWallMs": 13605.768583,
+        "budgetExceeded": false,
+        "phase": "complete",
+        "completedPumps": 500,
+        "postVerdictPendingWork": "1"
+      }
+    ],
+    "profileCandidate4": {
+      "captureComplete": true,
+      "errorCount": 0,
+      "readyState": "complete",
+      "status": 200,
+      "traceSha256": "c3f8e0d594c5a490b9464d1d98b3cb5f941330ee7dd772f264ef1ce74b61f5c9",
+      "configSha256": "7136b2bb94b1be88cf57291f44bb98d6417fa04ebf6a567c33246a2f09f0821f",
+      "processWallMs": 12328.406917,
+      "budgetExceeded": false,
+      "phase": "complete",
+      "completedPumps": 500,
+      "postVerdictPendingWork": null,
+      "rawProfileSha256": "aebc381efe2ba0c1da5dee46d03c1bf12789666a15c50d7337088b9253289389",
+      "inventorySha256": "0a1a40cb1f933ffdbb44c39a6b7dcd6a10f508bc6acf220a723be963edc6c1cf",
+      "durationMs": 11746.277,
+      "sampleCount": 7485,
+      "samplingSetup": {
+        "requestedIntervalMicroseconds": 1000,
+        "commands": [
+          {
+            "method": "Profiler.enable",
+            "acknowledged": true
+          },
+          {
+            "method": "Profiler.setSamplingInterval",
+            "acknowledged": true
+          },
+          {
+            "method": "Profiler.start",
+            "acknowledged": true
+          }
+        ]
+      },
+      "saved": true,
+      "pending": false
+    },
+    "selectedInclusiveSamples": {
+      "currentSheetGetter": 456,
+      "compareDocumentPosition": 1,
+      "op_live_element_geometry": 2357,
+      "computeStyle": 3534,
+      "__G.hydrate": 542,
+      "__runLocalTimers": 51,
+      "szm": 2234,
+      "_.Wac": 2305
+    },
+    "sampleCountMethod": "Count each sample once for each named function present anywhere in its ancestor stack.",
+    "moduleInitializationEvidence": {
+      "sourceSha256": "6506ece4d05b0d0ebf36d41be41ad25ad858b6c6dd7727f6dbd1b361de5e25a2",
+      "sourceLineOneBased": 2914,
+      "operation": "One-pass querySelectorAll controller iteration followed by computed style and rectangle visibility checks.",
+      "inclusiveSampleCount": 2234,
+      "timerRunawayEstablished": false
+    },
+    "openWallMs": null,
+    "processWallScope": "Process includes fetch/bootstrap/open/snapshot/post-verdict probe/cleanup; not separately timed open.",
+    "postVerdictProbeAuthoritative": false,
+    "limits": [
+      "All four candidate4 captures reached the existing 500-pump cap; this is bounded completion, not global idle.",
+      "Historical candidate2 clean repeats exhausted the watchdog; candidate3 outcomes were mixed. Three clean candidate4 repeats passed; broad future reliability is not established.",
+      "One-pass controller visibility initialization is finite; removed repeated per-node selector validation without caching dynamic matches. A timer runaway was not established.",
+      "Focused regressions and three fresh clean attempts support this bounded homepage outcome; complete Google lifecycle and SERP acceptance parity remain unverified.",
+      "Live captures have different partial work and response content; sample comparisons are not fixed-work benchmarks.",
+      "No cookies, addresses, URLs, request identifiers or absolute profile timestamps are included.",
+      "Host timing stages overlap inclusively; rulesKey includes cold system-font initialization. Live source content and partial progress vary."
+    ],
+    "hostLayoutProfile": {
+      "sha256": "61807ef74a2a3b9ab7ac91564f50b8897970e8e2b778f522a700a7fbf326ae85",
+      "scope": "Initial hydration only; host stages overlap inclusively.",
+      "timingUnit": "microseconds",
+      "stages": {
+        "capture": {
+          "calls": 98,
+          "elapsedMicroseconds": 3180144
+        },
+        "composition": {
+          "calls": 98,
+          "elapsedMicroseconds": 15067
+        },
+        "treeSnapshot": {
+          "calls": 98,
+          "elapsedMicroseconds": 69440
+        },
+        "stylesheets": {
+          "calls": 98,
+          "elapsedMicroseconds": 3062928
+        },
+        "sheetExport": {
+          "calls": 5958,
+          "elapsedMicroseconds": 974013
+        },
+        "selectorPreparation": {
+          "calls": 5958,
+          "elapsedMicroseconds": 1970497
+        },
+        "rulesKey": {
+          "calls": 98,
+          "elapsedMicroseconds": 450015
+        },
+        "layout": {
+          "calls": 15,
+          "elapsedMicroseconds": 397373
+        }
+      },
+      "cacheHits": 83,
+      "cacheMisses": 15
+    },
+    "fixedControl": {
+      "fixtureSha256": "d9bc9149645e801f0d9c0d01bf529342d923753b2d2d1461d9ed62d6597d873c",
+      "scope": "Identical100-element fixture;100 rectangle reads; expected width checksum11000. Two runs per build; cold font initialization dominates process wall variance.",
+      "baseline": {
+        "sources": {
+          "binarySha256": "f2276d5e8aec5bddbde2e2526541ba4a58dfdcec2625c9a7b33723b6f804acf3",
+          "sourceHashes": {
+            "rust/crates/turbo-surf-render/src/live_layout_dom.rs": "312bfa77726d7ec4f643f7a8bcc6db8836170b500a2a001a060b0856889d0664",
+            "rust/crates/turbo-surf-render/src/live_layout_backend.rs": "dd8000803fae54fea20b91e0894a21a394b7089bab2bcd60f97669277f748a85",
+            "rust/crates/turbo-surf-render/src/layout_profile.rs": "d3719c10b9d97c5c89857e14919d6d693fcc25064477db75462eed8a7d78f25a",
+            "rust/crates/turbo-surf-render/src/script_inventory.rs": "847affb8d2505c3e1e007e5a49e60fb96fd5376ea159e99155c01080bb77acf2",
+            "rust/crates/turbo-surf-render/src/browser_env.js": "60d3b90d2493474ed9f889e9dd300598ffcb4929af726bc8c174407d9d6daf68",
+            "harness/detection/fixtures/layout-profile.html": "d9bc9149645e801f0d9c0d01bf529342d923753b2d2d1461d9ed62d6597d873c"
+          }
+        },
+        "runs": [
+          {
+            "processWallMs": 3258.042959,
+            "fixture": {
+              "measured": 100,
+              "totalWidth": 11000
+            },
+            "budgetExceeded": false,
+            "layoutProfile": {
+              "scope": "Initial hydration only; host stages overlap inclusively.",
+              "timingUnit": "microseconds",
+              "stages": {
+                "capture": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 39265
+                },
+                "composition": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 6917
+                },
+                "treeSnapshot": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 2944
+                },
+                "stylesheets": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 17106
+                },
+                "rulesKey": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 1874789
+                },
+                "layout": {
+                  "calls": 1,
+                  "elapsedMicroseconds": 1819
+                }
+              },
+              "cacheHits": 99,
+              "cacheMisses": 1
+            },
+            "layoutProfileSha256": "e3c0caf80af15db3ffe18af041443ac22ad9b3588fdf19af16322fc28dd39835"
+          },
+          {
+            "processWallMs": 1318.611459,
+            "fixture": {
+              "measured": 100,
+              "totalWidth": 11000
+            },
+            "budgetExceeded": false,
+            "layoutProfile": {
+              "scope": "Initial hydration only; host stages overlap inclusively.",
+              "timingUnit": "microseconds",
+              "stages": {
+                "capture": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 39489
+                },
+                "composition": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 6893
+                },
+                "treeSnapshot": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 2967
+                },
+                "stylesheets": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 17639
+                },
+                "rulesKey": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 1008507
+                },
+                "layout": {
+                  "calls": 1,
+                  "elapsedMicroseconds": 1584
+                }
+              },
+              "cacheHits": 99,
+              "cacheMisses": 1
+            },
+            "layoutProfileSha256": "7162e6619da20b2e4faedb202203f43167a8dda86ceb67a0e35837cfbe383cb4"
+          }
+        ]
+      },
+      "candidate4": {
+        "sources": {
+          "binarySha256": "537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47",
+          "sourceHashes": {
+            "rust/crates/turbo-surf-render/src/live_layout_dom.rs": "813108ad7ab9fc376bedbea748b3678179b6f86298c03d9d07a7acfbeb636958",
+            "rust/crates/turbo-surf-render/src/live_layout_backend.rs": "dd8000803fae54fea20b91e0894a21a394b7089bab2bcd60f97669277f748a85",
+            "rust/crates/turbo-surf-render/src/layout_profile.rs": "321428257973eeba6158f36843b825f2d03ff4c133e59ffd678442f36d348106",
+            "rust/crates/turbo-surf-render/src/script_inventory.rs": "847affb8d2505c3e1e007e5a49e60fb96fd5376ea159e99155c01080bb77acf2",
+            "rust/crates/turbo-surf-render/src/browser_env.js": "346a84ecb8ac4e57e9cdbe351c00326cc2e2424db54661bf631a439f6939cef2",
+            "harness/detection/fixtures/layout-profile.html": "d9bc9149645e801f0d9c0d01bf529342d923753b2d2d1461d9ed62d6597d873c",
+            "rust/crates/turbo-surf-render/src/live_layout_scoped.rs": "a973b05259f2a48709dfeaeb51c0afb7059a77785e4aa4a92cfe23f0bb66bb64"
+          }
+        },
+        "runs": [
+          {
+            "processWallMs": 3820.6195,
+            "fixture": {
+              "measured": 100,
+              "totalWidth": 11000
+            },
+            "budgetExceeded": false,
+            "layoutProfile": {
+              "scope": "Initial hydration only; host stages overlap inclusively.",
+              "timingUnit": "microseconds",
+              "stages": {
+                "capture": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 73754
+                },
+                "composition": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 4198
+                },
+                "treeSnapshot": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 6343
+                },
+                "stylesheets": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 31195
+                },
+                "sheetExport": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 6360
+                },
+                "selectorPreparation": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 17352
+                },
+                "rulesKey": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 1856250
+                },
+                "layout": {
+                  "calls": 1,
+                  "elapsedMicroseconds": 4797
+                }
+              },
+              "cacheHits": 99,
+              "cacheMisses": 1
+            },
+            "layoutProfileSha256": "5f48bb1b3cbd084680961a803984e29a6ad93f570e62eaa718cd01c38f58c302"
+          },
+          {
+            "processWallMs": 944.57,
+            "fixture": {
+              "measured": 100,
+              "totalWidth": 11000
+            },
+            "budgetExceeded": false,
+            "layoutProfile": {
+              "scope": "Initial hydration only; host stages overlap inclusively.",
+              "timingUnit": "microseconds",
+              "stages": {
+                "capture": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 44945
+                },
+                "composition": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 2790
+                },
+                "treeSnapshot": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 4623
+                },
+                "stylesheets": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 18981
+                },
+                "sheetExport": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 3781
+                },
+                "selectorPreparation": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 12414
+                },
+                "rulesKey": {
+                  "calls": 100,
+                  "elapsedMicroseconds": 593557
+                },
+                "layout": {
+                  "calls": 1,
+                  "elapsedMicroseconds": 2376
+                }
+              },
+              "cacheHits": 99,
+              "cacheMisses": 1
+            },
+            "layoutProfileSha256": "a3976128db680f222de9f0ceb6f6d077c9114ef7189ad30ec7182e67b6e804c7"
+          }
+        ]
+      }
+    },
+    "previousCandidate3HostLayoutProfile": {
+      "sha256": "5e4ee3f3dbaf36c6211c98d42712adf5af04ea70c7716e598654e053a1bada16",
+      "scope": "Initial hydration only; host stages overlap inclusively.",
+      "timingUnit": "microseconds",
+      "stages": {
+        "capture": {
+          "calls": 98,
+          "elapsedMicroseconds": 6290578
+        },
+        "composition": {
+          "calls": 98,
+          "elapsedMicroseconds": 16369
+        },
+        "treeSnapshot": {
+          "calls": 98,
+          "elapsedMicroseconds": 71336
+        },
+        "stylesheets": {
+          "calls": 98,
+          "elapsedMicroseconds": 6168100
+        },
+        "sheetExport": {
+          "calls": 5958,
+          "elapsedMicroseconds": 990042
+        },
+        "selectorPreparation": {
+          "calls": 5958,
+          "elapsedMicroseconds": 5052524
+        },
+        "rulesKey": {
+          "calls": 98,
+          "elapsedMicroseconds": 463463
+        },
+        "layout": {
+          "calls": 15,
+          "elapsedMicroseconds": 461385
+        }
+      },
+      "cacheHits": 83,
+      "cacheMisses": 15
+    },
+    "previousCandidate3ReceiptSha256": "9d3732ff4f98d9cdbe343bbab650829e6450e0638b92bdaa1e80d91558082320"
+  },
+  "nativeResponseTransport": {
+    "scope": "First fresh clean homepage capture",
+    "traceSha256": "9922bc086ee3c8dece36ed615330dba99120ab7f9a82789cd6c722e1ab986ae6",
+    "networkSha256": "e8463106e6d4405dc23f67649f2f3f7b89e47da85a2e1764dc6aa247e95f3d47",
+    "aggregate": {
+      "source": "native-application-response",
+      "responses": 42,
+      "observed": 42,
+      "unknown": 0,
+      "protocols": {
+        "h2": 42,
+        "h3": 0,
+        "http/1.1": 0,
+        "http/1.0": 0,
+        "other": 0,
+        "unknown": 0
+      },
+      "tlsDetails": "not-collected",
+      "packetCapture": false
+    },
+    "mainDocument": {
+      "protocol": "h2",
+      "tlsDetails": "not-collected"
+    }
+  },
+  "capturedVsGateTestOnlyAdjustment": {
+    "file": "rust/crates/turbo-surf-render/src/live_layout_scoped.rs",
+    "capturedSourceSha256": "a973b05259f2a48709dfeaeb51c0afb7059a77785e4aa4a92cfe23f0bb66bb64",
+    "gateSourceSha256": "10547dc86afb9f28a81855958fe5865098ee743ee0ae4d85324c13f229f37d6a",
+    "scope": "Test-only assert!(empty Vec) -> assert_eq!(Vec,new Vec) for Rust1.99 clippy; no production code changed after frozen candidate4 executable."
+  },
+  "historicalCandidates": {
+    "initial": {
+      "receiptSha256": "f90dbb7dfb55a11ecdceb40c6c3ac47ee3201fd6cdc7b0ca886111e393b8f6de",
+      "status": "intermediate; additional computed inheritance performance fix in flight",
+      "before": {
+        "budgetExceeded": true,
+        "phase": "post-load-hydration",
+        "completedPumps": 0,
+        "traceSha256": "2eca0b8e76eeb6ce980f030885faffac549c1e4905dcb2b4fcb0114f53c0e6bd"
+      },
+      "clean": [
+        {
+          "budgetExceeded": false,
+          "phase": "complete",
+          "completedPumps": 500,
+          "traceSha256": "727375bb046ff6443b6f1bd70e732351f1c331019d1127d10c0e6d634bbf0dbb"
+        },
+        {
+          "budgetExceeded": false,
+          "phase": "complete",
+          "completedPumps": 500,
+          "traceSha256": "144cd871f31bc20348880ed9a3d532a7615910335f2eec730f3cbcac91fae48e"
+        }
+      ],
+      "profiled": {
+        "budgetExceeded": true,
+        "phase": "post-load-hydration",
+        "completedPumps": 0,
+        "traceSha256": null
+      }
+    },
+    "inheritance": {
+      "receiptSha256": "9d21f88d512d9e419c4acc2a8157bf95fb51aa5ae0de2205007ba43283f30d2b",
+      "status": "Homepage lifecycle budget remains unresolved after measured CSS/resource optimizations.",
+      "clean": [
+        {
+          "budgetExceeded": true,
+          "phase": "post-load-hydration",
+          "completedPumps": 0,
+          "traceSha256": "c936de899b57ed579fdf63b5e5e6bb8fb7c864098a928742cc5a03e532a5ea0d"
+        },
+        {
+          "budgetExceeded": true,
+          "phase": "post-load-hydration",
+          "completedPumps": 0,
+          "traceSha256": "cad5fc399cd56e2db436eea654028ddcfc31da8c7c79ee765fc695c43fb24bc7"
+        }
+      ],
+      "profiled": {
+        "budgetExceeded": true,
+        "phase": "post-load-hydration",
+        "completedPumps": 0,
+        "traceSha256": "b36d7a2e7fd5fd6ccff6e75b353df1c4a333c7fd6cb6ae330267bcbfd353c576"
+      }
+    },
+    "traversal": {
+      "receiptSha256": "9d3732ff4f98d9cdbe343bbab650829e6450e0638b92bdaa1e80d91558082320",
+      "status": "Candidate3 improves capture overhead but homepage lifecycle budget remains unreliable.",
+      "clean": [
+        {
+          "budgetExceeded": false,
+          "phase": "complete",
+          "completedPumps": 500,
+          "traceSha256": "5762810be832f809417bc55775631420a88895b27dafeaa2a8fd90e63ab64a70"
+        },
+        {
+          "budgetExceeded": true,
+          "phase": "post-load-hydration",
+          "completedPumps": 0,
+          "traceSha256": "e1e6b2ac935a3e6bf2e3c374d4c28bd2ae406db1efeffa032cb75e66cf55ea09"
+        }
+      ],
+      "profiled": {
+        "budgetExceeded": false,
+        "phase": "complete",
+        "completedPumps": 500,
+        "traceSha256": "7d1e4d180f8bff213693d3f88323ef0d9582775a9285d678fa3c4b0166398e50"
+      }
+    }
+  },
+  "validation": {
+    "defaultDiskFailure": {
+      "exitCode": 101,
+      "classification": "Infrastructure disk exhaustion during test execution; incomplete default gate",
+      "logSha256": "17f7480f00ecc7bf1e6e64c8e1baeafe34b829f2e84ba9aef417048a6244c66b",
+      "fullGatePassed": false,
+      "productionSourceChanged": false
+    },
+    "testOnlyFontWarmup": {
+      "scope": "Test-only system-font initialization warmup; original conformance sessions and assertions retain 5000ms budgets. Production source and budgets unchanged.",
+      "beforeBinarySha256": "6442588f6affc422083b295973ba1c1fc5c34cab1fd797e252fcb7dbf3b2eb93",
+      "beforeSourceSha256": "c46e9c622f383a6150ea4edead9385661a7638fdcd8b53406ef38ef7c0576643",
+      "afterSourceSha256": "72174dedd7c77ddf7a728f68bc72871a998e511518d4e0065a87de20487744c5",
+      "diagnosis": "Sampled parallel reproduction spent 1559 samples inside font initialization on one test and 1559 waiting on the same process-wide OnceLock on the other. Unsampled single and parallel controls passed; this is cold-font watchdog sensitivity, not a deterministic CSS admission mismatch.",
+      "warmup": {
+        "budgetMs": 60000,
+        "geometry": [7, 9],
+        "closesSession": true
+      },
+      "default": {
+        "command": "cd rust && cargo test -p turbo-surf-render --test neutral_at_rules",
+        "exitCode": 0,
+        "passed": 2,
+        "failed": 0,
+        "durationSeconds": 4.57
+      },
+      "native155": {
+        "command": "python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 4 --surf test --workspace --test neutral_at_rules --features turbo-surf-mcp/impersonate,turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext,turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext",
+        "exitCode": 0,
+        "passed": 2,
+        "failed": 0,
+        "durationSeconds": 4.24
+      },
+      "evidenceSha256": {
+        "isolated-parallel.log": "9dc482b5b0d73d559c20c9b386e94a0d53cf34f95623d2b8d8f72577b7f24514",
+        "isolated-one-unsampled.log": "255594066431a06d22c7f1cf820905e2103201b74bc2a6e7b128581636846d56",
+        "isolated-parallel-unsampled.log": "e6b80f1768a4b96a6181477cfd0beaeeb6bbe69a2c2fbcbd1ec9b6988330fce2",
+        "host-sample.txt": "7ded786dae48f6ed63d27108bb2bd049bfc352fc88cf4d8048f4267677aa27c0",
+        "default-warmup-fix.log": "01c67877b10872e4c5ed47eeefef196eba54c215f3b76ae683e0921fe1a82b59",
+        "native-warmup-fix.log": "727f50cd201f715093778ebb0c3d97001f13933a1a196e9b981200f90ac04e07"
+      },
+      "format": {
+        "command": "cd rust && cargo fmt --all --check",
+        "exitCode": 0,
+        "log": "format-after-warmup.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "nativeStrictFirstAttempt": {
+        "exitCode": 101,
+        "cause": "ENOSPC while writing dependency files; no Clippy diagnostics. Not a passing strict gate.",
+        "log": "native-strict-after-warmup.log",
+        "logSha256": "c685ad677c469845447fb84186afa6e83ad32149a1d2c1d427f412268c13294d"
+      },
+      "nativeStrict": {
+        "command": "CARGO_INCREMENTAL=0 python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 2 --surf clippy --workspace --all-targets --features turbo-surf-mcp/impersonate,turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext,turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext -- -D warnings",
+        "exitCode": 0,
+        "log": "native-strict-after-warmup-retry.log",
+        "logSha256": "149630dd594d43db63effcc28f10401e882916692a81ebbb2d6c5b8bd38acfd9"
+      }
+    },
+    "defaultFirstFailure": {
+      "exitCode": 101,
+      "passedBeforeStop": 1011,
+      "failed": 2,
+      "ignoredBeforeStop": 3,
+      "componentSummaries": 81,
+      "logSha256": "cb6c9b6a1f67cdbb8604ee6021743d82a1d187986f6e66b121c0ed2f2782ea1b",
+      "failure": "neutral_at_rules: two 5-second session expression budget errors before behavior assertions; isolated diagnosis pending",
+      "fullGatePassed": false
+    },
+    "state": "Complete local default/npm and native155 gates pass; current-source consent/search matrix pending",
+    "nativeWorkspace": {
+      "exitCode": 0,
+      "passed": 1423,
+      "failed": 0,
+      "ignored": 6,
+      "measured": 0,
+      "filtered": 0,
+      "suites": 131,
+      "logSha256": "62811dd4a502dee9ca827c7abf69a183fdb2738949be50b0e01570940bf29879"
+    },
+    "nativeWorkspaceSourceScope": "Full1423 run precedes only test-fixture font warmup; affected native2 and refreshed strict/fmt validate the amendment with all implementation hashes unchanged.",
+    "nativeRustGates": {
+      "strict": {
+        "command": "CARGO_INCREMENTAL=0 python3 harness/detection/engine-155/build.py .native-builds/sdk155-8059.79 --jobs 2 --surf clippy --workspace --all-targets --features turbo-surf-mcp/impersonate,turbo-surf-mcp/trust-anchors,turbo-surf-mcp/gpu-metal,turbo-surf-mcp/coretext,turbo-surf-napi/gpu-metal,turbo-surf-napi/coretext -- -D warnings",
+        "exitCode": 0,
+        "log": "native-strict-after-warmup-retry.log",
+        "logSha256": "149630dd594d43db63effcc28f10401e882916692a81ebbb2d6c5b8bd38acfd9"
+      },
+      "format": {
+        "command": "cd rust && cargo fmt --all --check",
+        "exitCode": 0,
+        "log": "format-after-warmup.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "defaultGate": {
+      "command": "CARGO_BUILD_JOBS=2 npm run check",
+      "node": "v20.20.2",
+      "exitCode": 0,
+      "workspace": {
+        "passed": 1384,
+        "failed": 0,
+        "ignored": 9,
+        "componentSuites": 131,
+        "ignoreReasons": [
+          "Three stock-SDK native callback tests unavailable",
+          "Six generated extension doctests"
+        ]
+      },
+      "strict": {
+        "command": "cargo clippy --workspace --all-targets -- -D warnings",
+        "exitCode": 0
+      },
+      "format": {
+        "command": "cargo fmt --check",
+        "exitCode": 0
+      },
+      "gates": {
+        "shim": {
+          "tests": 96,
+          "suites": 2,
+          "passed": 95,
+          "failed": 0,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        "e2e": {
+          "tests": 20,
+          "suites": 0,
+          "passed": 20,
+          "failed": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "detection": {
+          "tests": 118,
+          "suites": 0,
+          "passed": 116,
+          "failed": 0,
+          "cancelled": 0,
+          "skipped": 2,
+          "todo": 0
+        }
+      },
+      "pythonHelpers": {
+        "passed": 2,
+        "failed": 0
+      },
+      "addonSha256": "c6133372f3967ebbe0772fbc7709c36e0ca87129c6df3643d8ab26f8ad334aee",
+      "addonBuildDylibSha256": "9527c4e4bca6446ea15b25d1b039551a4c4c539cb1795a877541c47c5871371f",
+      "buildConfiguration": "Production stock V8 SDK; default NAPI features. Native155/Metal configuration is validated separately.",
+      "fullLogSha256": "ccfd2eef721c5e26bd438ad7562e85336572b49ef5798d9dd5381f52d1ba57c9"
+    },
+    "chromeControls": {
+      "node": "v22.22.3",
+      "exitCode": 0,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 7976.476666,
+      "log": "oct17-candidate4-chrome-cdp-node22.log",
+      "logSha256": "4de4f2f6823e522acd5778637229bdafbecb52b7a15f6a371af6853685cf3fa6",
+      "sourceSha256": {
+        "harness/detection/chrome-cdp-trace.test.mjs": "033b0c61abd796d390f7ea7e1603315580b89131d34092a77f32f15c4000894e",
+        "harness/detection/chrome-cdp-trace.mjs": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15",
+        "harness/detection/chrome-network-metadata.mjs": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2",
+        "harness/detection/chrome-trace.mjs": "4acb9fef7dd1ba1d98cd98c9ab735e824d399b5d78efc7e761c705abac28aeca",
+        "harness/detection/interface-trace.js": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc"
+      },
+      "controls": [
+        "worker and out-of-process iframe requests, source inventory, interface reads and consent/input lifecycle",
+        "baseline HTTP/2 TLS metadata and timing through redirect without JS tracing",
+        "Patchright baseline main-session metadata without interface or debugger tracing"
+      ],
+      "tempCleanup": "Each test closes local servers and removes its own temporary capture/profile directory in finally.",
+      "command": "node --test harness/detection/chrome-cdp-trace.test.mjs"
+    },
+    "nativeAddonGates": {
+      "node": "v20.20.2",
+      "addonSha256": "67a3680cc1de005d0f836ce80f0591a7761ea6881ce7f95f76d29db4a5c7aefa",
+      "gates": {
+        "shim": {
+          "exitCode": 0,
+          "log": "oct17-candidate4-native-shim.log",
+          "logSha256": "8893578f6dd80a539617c6269ad4c018edd6c09ecd6e8f81ecb98fbbba9f8f77",
+          "tests": 96,
+          "pass": 95,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        "e2e": {
+          "exitCode": 0,
+          "log": "oct17-candidate4-native-e2e.log",
+          "logSha256": "331ec5118fcada6372dd17c28a4e8b837f576cc0efebd4a77b4f21c92008bc49",
+          "tests": 20,
+          "pass": 20,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        "detection": {
+          "exitCode": 0,
+          "log": "oct17-candidate4-native-detection.log",
+          "logSha256": "47e8bfdeb821728553fa6db69f5ed5d0d3a16d12a1c8b4a19a1333b65d2aef67",
+          "tests": 118,
+          "pass": 116,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 2,
+          "todo": 0,
+          "pythonAdmission": {
+            "tests": 2,
+            "failed": 0
+          }
+        }
+      }
+    }
+  },
+  "limits": [
+    "CDP and application observations are not packet captures or complete TLS fingerprints.",
+    "Native HTTP/2 versus Chrome HTTP/3 is a measured scope difference, not a demonstrated rejection cause.",
+    "Clean and profiled execution differ; partial live profiles are not fixed-work benchmarks.",
+    "All four latest native runs reach the500-pump cap; only the three clean runs have a post-verdict pendingWork1 observation. This is not global idle.",
+    "The last complete SERP matrix remains in GOOGLE-LAST-RUN.json: native0/2 accepted; homepage controls do not replace it.",
+    "Raw captures, source URLs, bodies, cookies, request IDs, certificates and absolute timestamps remain private."
+  ]
+}

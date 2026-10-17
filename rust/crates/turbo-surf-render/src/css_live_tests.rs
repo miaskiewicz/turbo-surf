@@ -314,3 +314,73 @@ fn computed_style_uses_private_native_matcher_and_owner_document() {
         expected["result"][0]["result"]
     );
 }
+
+#[test]
+fn inherited_computed_values_use_linear_stylesheet_scans_and_keep_live_results() {
+    let value = run(
+        "<!doctype html><head><style>.unused {color:red}</style></head><body>",
+        r#"(()=>{
+          const read=getComputedStyle,query=document.querySelectorAll,rows=[];
+          let scans=0;
+          document.querySelectorAll=function(selector){if(selector==='style,link')scans++;return Reflect.apply(query,this,arguments);};
+          try {
+            for(const percentage of [false,true])for(const depth of [3,5,7]){
+              const root=document.createElement('section');root.style.cssText='color:red;width:256px;height:512px';document.body.appendChild(root);
+              let leaf=root;
+              for(let index=0;index<depth;index++){const child=document.createElement('div');child.style.cssText='color:inherit'+(percentage?';width:50%;height:50%':'');leaf.appendChild(child);leaf=child;}
+              scans=0;const retained=read(leaf),color=retained.getPropertyValue('color');
+              const width=percentage?retained.getPropertyValue('width'):null,height=percentage?retained.getPropertyValue('height'):null;
+              rows.push({depth,percentage,scans,color,width,height});
+              root.remove();
+            }
+          } finally {document.querySelectorAll=query;}
+          return JSON.stringify(rows);
+        })()"#,
+    );
+    for row in value.as_array().unwrap() {
+        let depth = row["depth"].as_u64().unwrap();
+        assert!(
+            row["scans"].as_u64().unwrap() <= 8 * (depth + 2),
+            "ancestor computation rescanned exponentially: {row}"
+        );
+        assert_eq!(row["color"], "rgb(255, 0, 0)", "{row}");
+        if row["percentage"].as_bool().unwrap() {
+            assert_eq!(row["width"], format!("{}px", 256_u64 >> depth), "{row}");
+            assert_eq!(row["height"], format!("{}px", 512_u64 >> depth), "{row}");
+        }
+    }
+}
+
+#[test]
+fn computed_import_rules_keep_source_order_and_live_declarations_after_flattening() {
+    let value = run(
+        "<!doctype html><head><style id=s>@import url('child.css'); .target {height:17px}</style></head><body><div id=t class=target></div></body>",
+        r#"(()=>{
+          const sheet=document.getElementById('s').sheet,child=new CSSStyleSheet(),nested=new CSSStyleSheet();
+          __cssTestHost.attachImport(sheet.cssRules[0],child,'http://localhost/child.css',"@import url('nested.css'); .target {color:red;width:11px}",true);
+          __cssTestHost.attachImport(child.cssRules[0],nested,'http://localhost/nested.css','.target {color:blue;width:7px;height:13px}',true);
+          const retained=getComputedStyle(document.getElementById('t')),states=[];
+          const capture=()=>states.push([retained.color,retained.width,retained.height]);
+          capture();
+          child.cssRules[1].style.color='green';nested.cssRules[0].style.height='23px';capture();
+          sheet.deleteRule(1);capture();
+          child.insertRule('.target {width:29px}',child.cssRules.length);capture();
+          child.deleteRule(child.cssRules.length-1);capture();
+          const old=child.cssRules[1];child.deleteRule(1);old.style.color='purple';capture();
+          nested.cssRules[0].style.color='orange';capture();
+          return JSON.stringify(states);
+        })()"#,
+    );
+    assert_eq!(
+        value,
+        serde_json::json!([
+            ["rgb(255, 0, 0)", "11px", "17px"],
+            ["rgb(0, 128, 0)", "11px", "17px"],
+            ["rgb(0, 128, 0)", "11px", "23px"],
+            ["rgb(0, 128, 0)", "29px", "23px"],
+            ["rgb(0, 128, 0)", "11px", "23px"],
+            ["rgb(0, 0, 255)", "7px", "23px"],
+            ["rgb(255, 165, 0)", "7px", "23px"]
+        ])
+    );
+}

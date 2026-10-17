@@ -1,0 +1,16 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "scope": "Parser stylesheet order and script exclusion; SVG script execution is outside this control.",
+  "fixtureSource": "rust/crates/turbo-surf-render/tests/resource_scan_order.rs",
+  "fixtureSha256": "e063e83334fa5755f79cd510a3cf21bd0c8024d792189fc3c302c4116b73ffce",
+  "collectorSha256": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15",
+  "generatorSha256": "668ff5a78843136f779a25467fae0ae600cf3c82a295b654c28fa842cb2aa9f3",
+  "errors": [],
+  "result": {
+    "cutoff": [1, true, 1],
+    "finished": true
+  },
+  "unexpectedStylesheetRequests": [],
+  "scriptFetchesOutsideControl": []
+}

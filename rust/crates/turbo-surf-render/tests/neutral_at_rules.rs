@@ -1,6 +1,32 @@
 use sha2::{Digest, Sha256};
+
+async fn warm_layout_fonts() {
+    // System-font discovery is process-wide and can exceed the conformance
+    // watchdog in unoptimized builds; measure CSS admission after it completes.
+    let mut page = turbo_surf_render::PageSession::open(
+        "<!doctype html><style>#warm{width:7px;height:9px}</style><div id='warm'></div>",
+        "https://example.test/",
+        "",
+        "",
+        60_000,
+    )
+    .await
+    .unwrap();
+    let actual: serde_json::Value = serde_json::from_str(
+        &page
+            .eval_json_expression("(()=>{const r=document.getElementById('warm').getBoundingClientRect();return [r.width,r.height]})()")
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual, serde_json::json!([7, 9]));
+    assert!(!page.hydration_diagnostics().budget_exceeded);
+    page.close();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn live_layout_neutral_admission_matches_real_chrome_and_rejects_used_dependencies() {
+    warm_layout_fonts().await;
     let probe = include_str!("../../../../harness/detection/neutral-at-rules-probe.js");
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../harness/detection/fixtures/neutral-at-rules-chrome155.json"
@@ -61,6 +87,7 @@ async fn live_layout_neutral_admission_matches_real_chrome_and_rejects_used_depe
 
 #[tokio::test(flavor = "current_thread")]
 async fn geometry_admission_rechecks_inline_and_stylesheet_dependencies_after_cache_hits() {
+    warm_layout_fonts().await;
     let mut page = turbo_surf_render::PageSession::open(
         "<!doctype html><style id='rules'>#target{width:10px;height:10px}@container probe-container (max-width:200px){#target{width:70px}}</style><div id='parent'><div id='target'></div></div>",
         "https://example.test/", "", "", 5000,

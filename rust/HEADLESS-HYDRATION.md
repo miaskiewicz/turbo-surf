@@ -784,10 +784,16 @@ navigation/form/worker/media directive behavior remain incomplete; diagnostics
 retain unsupported/partial policy paths.
 The HTML tree is parsed before hydration, so incremental parser races are not covered.
 
-`PageSession::hydration_diagnostics()` reports real host-budget termination and partial
-open errors and encountered unsupported CSP features independently of guest globals.
-Callers can inspect it before using a
-partially hydrated DOM. BrowserStorage can be retained by the owning browsing session
+`PageSession::hydration_diagnostics()` reports real host-budget termination,
+partial open errors and encountered unsupported CSP features independently of guest
+globals. Its `progress.phase` identifies the last entered host lifecycle gate;
+`progress.completed_pumps` counts completed post-load pump iterations. These describe
+the initial open operation, including after a watchdog interruption. Repeated
+snapshots preserve that initial diagnostic. Reaching the500-pump cap does not
+establish global idle. Callers can inspect diagnostics before using a partially
+hydrated DOM. Optional private Inspector CPU profiles and their acknowledged
+sampling setup are described in the
+[detection harness](../harness/detection/README.md). BrowserStorage can be retained by the owning browsing session
 through the browsing-state APIs rather than shared globally across runtimes.
 
 Classic scripts with genuine module-syntax parse failures retain a separate
@@ -1393,7 +1399,7 @@ Native isolation is now granted only by secure actual navigation with valid same
 Credentialless frames use an ephemeral top-document partition containing a real CookieJar and separate local/session storage backing. Initial navigation, response cookies, document.cookie, fetch, scripts, images and module graphs select that native partition. Credentialless siblings share it; normal frames retain their ordinary state. Native partition teardown reclaims its storage areas. PermissionsPolicy/FeaturePolicy has actual private brands/header parsing and measured defaults; Navigator.permissions query and clipboard reject disabled features.42 top headers,79 iframe admission/delegation cases,8 real shared-memory delivery cases,3 query-effect cases and a network/storage partition control match fresh normal Chrome155. Full popup/reporting/dynamic/deep policy, client-hint delegation and additional controlled APIs remain pending; merged/native155 and live-network validation remain independent.
 
 
-## Current parity integration (2026-10-16)
+## Validated parity checkpoint (2026-10-16)
 
 Production source at `26bd0f4` vendors committed canonical turbo-test `1e93cae`
 through the normal vendor script. Public DOM 0.5.7 candidate `fb60e6f` and layout 0.3.8

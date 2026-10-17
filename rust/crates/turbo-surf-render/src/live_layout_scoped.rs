@@ -91,17 +91,17 @@ fn prepare_rule(
                 }
             }
         } else {
+            let shadow = shadow_selector(selector);
+            let mut validated = false;
             for &node in graph.scopes.keys() {
                 if tree.node_type_id(node) != 1 {
                     continue;
                 }
-                let matches = if shadow_selector(selector) {
+                let matches = if shadow {
                     matcher.matches(selector, node, false)?
                 } else {
                     graph.scopes.get(&node) == Some(&root)
-                        && tree
-                            .matches_checked(node, source)
-                            .map_err(|error| format!("native selector match failed: {error:?}"))?
+                        && matches_validated(tree, node, source, &mut validated)?
                 };
                 if matches {
                     let value = specificity_by_node.entry(node).or_default();
@@ -126,6 +126,26 @@ fn prepare_rule(
             .ok_or("native CSS scope depth missing")?,
         targets,
     })
+}
+
+fn matches_validated(
+    tree: &Tree,
+    node: Handle,
+    source: &str,
+    validated: &mut bool,
+) -> Result<bool, String> {
+    // The checked API validates only the selector, then calls matches. Keep the
+    // first eligible checked call and evaluate every later node's current state.
+    if *validated {
+        return Ok(tree.matches(node, source));
+    }
+    #[cfg(test)]
+    ORDINARY_VALIDATIONS.with(|count| count.set(count.get() + 1));
+    let result = tree
+        .matches_checked(node, source)
+        .map_err(|error| format!("native selector match failed: {error:?}"))?;
+    *validated = true;
+    Ok(result)
 }
 
 fn selector_sources(source: &str) -> Result<Vec<String>, String> {
@@ -569,6 +589,9 @@ pub(crate) fn style_composed_tree(
 }
 
 #[cfg(test)]
+thread_local! {static ORDINARY_VALIDATIONS:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
+
+#[cfg(test)]
 thread_local! {static BATCH_QUERIES:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
 
 #[cfg(test)]
@@ -710,6 +733,72 @@ mod tests {
                 1
             );
         }
+    }
+
+    #[test]
+    fn selector_validation_is_bounded_without_caching_dynamic_matches_or_scopes() {
+        use turbo_dom_parser::rtdom::tree::FormProp;
+        let mut tree = Tree::parse(
+            "<body><div id=host></div><input id=c type=checkbox><x-state id=s></x-state></body>",
+        );
+        let host = tree.get_element_by_id("host").unwrap();
+        let checked = tree.get_element_by_id("c").unwrap();
+        let state = tree.get_element_by_id("s").unwrap();
+        for _ in 0..100 {
+            let element = tree.create_element("div");
+            tree.append_child(host, element);
+        }
+        let shadow = tree.attach_shadow(host);
+        let inner = tree.create_element("input");
+        tree.set_attribute(inner, "type", "checkbox");
+        tree.set_form_property(inner, FormProp::Checked, true);
+        tree.append_child(shadow, inner);
+        let css = "input:checked,x-state:state(active),div:nth-child(2n){width:10px}";
+        for present in [false, true, false] {
+            tree.set_form_property(checked, FormProp::Checked, present);
+            tree.set_custom_state_utf16(
+                state,
+                &"active".encode_utf16().collect::<Vec<_>>(),
+                present,
+            );
+            let graph = Composition::scopes(&tree).unwrap();
+            for root in [tree.root(), shadow] {
+                let expected = legacy_targets(&tree, root, &graph, css);
+                ORDINARY_VALIDATIONS.with(|count| count.set(0));
+                let actual = prepared(&tree, root, &graph, css).targets;
+                assert_eq!(actual, expected);
+                assert_eq!(ORDINARY_VALIDATIONS.with(|count| count.get()), 3);
+                assert_eq!(
+                    actual
+                        .iter()
+                        .any(|target| target.source == source_id(1, inner)),
+                    root == shadow
+                );
+                if root == tree.root() {
+                    for node in [checked, state] {
+                        assert_eq!(
+                            actual
+                                .iter()
+                                .any(|target| target.source == source_id(1, node)),
+                            present
+                        );
+                    }
+                }
+            }
+        }
+        let mut empty = Composition::scopes(&tree).unwrap();
+        empty.scopes.clear();
+        ORDINARY_VALIDATIONS.with(|count| count.set(0));
+        assert_eq!(
+            prepared(&tree, tree.root(), &empty, css).targets,
+            Vec::<Target>::new()
+        );
+        assert_eq!(ORDINARY_VALIDATIONS.with(|count| count.get()), 0);
+        let mut validated = false;
+        assert!(matches_validated(&tree, checked, "input[", &mut validated)
+            .unwrap_err()
+            .contains("native selector match failed"));
+        assert!(!validated);
     }
 
     #[test]

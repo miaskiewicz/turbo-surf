@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  summarizeNativeResponseTransport,
+  summarizeResponseTransport,
+} from "./chrome-network-metadata.mjs";
 
 const read = (path) => readFileSync(path, "utf8");
 const json = (path) => JSON.parse(read(path));
@@ -23,6 +27,28 @@ const cookieNames = (cookie) =>
     .map((part) => part.trim().split("=", 1)[0])
     .filter(Boolean)
     .sort();
+const hydrationPhases = new Set([
+  "document-loading",
+  "init-script",
+  "parser-and-deferred-scripts",
+  "module-scripts",
+  "document-interactive",
+  "load-resources",
+  "document-complete",
+  "post-load-hydration",
+  "post-load-quiescence",
+  "complete",
+]);
+const hydrationProgress = (page) => {
+  const progress = page.hydration?.progress;
+  return {
+    phase: hydrationPhases.has(progress?.phase) ? progress.phase : "unknown",
+    completedPumps:
+      Number.isSafeInteger(progress?.completed_pumps) && progress.completed_pumps >= 0
+        ? progress.completed_pumps
+        : null,
+  };
+};
 
 export function summarizeRun(directory) {
   const manifest = json(join(directory, "manifest.json"));
@@ -73,6 +99,29 @@ export function summarizeRun(directory) {
     Object.assign(entry, {
       collectorComplete: trace.captureComplete ?? null,
       recordedErrorCount: trace.errors?.length || 0,
+      responseTransport: (run.runtime === "chrome"
+        ? summarizeResponseTransport
+        : summarizeNativeResponseTransport)(rows.filter((row) => row.event === "response")),
+      networkCoverage:
+        run.runtime === "chrome"
+          ? {
+              source: "cdp-network",
+              scope: ["attached-target-sessions", "main-page-session"].includes(
+                trace.networkCoverage?.scope,
+              )
+                ? trace.networkCoverage.scope
+                : "unknown",
+              enabledInBaseline:
+                typeof trace.networkCoverage?.enabledInBaseline === "boolean"
+                  ? trace.networkCoverage.enabledInBaseline
+                  : null,
+              packetCapture: false,
+            }
+          : {
+              source: "native-application-response",
+              scope: "native-network-stack",
+              packetCapture: false,
+            },
       traceSha256: sha(tracePath),
       startOrigin: publicOrigin(config),
       formFallbackDisabled: config.disableFormFallback === true,
@@ -120,6 +169,7 @@ export function summarizeRun(directory) {
           typeof page.hydration?.budget_exceeded === "boolean"
             ? page.hydration.budget_exceeded
             : null,
+        hydrationProgress: hydrationProgress(page),
         pendingNavigation: typeof page.nav === "string" ? page.nav !== page.url : null,
         cookieNames: (page.cookies || []).map((cookie) => cookie.name).sort(),
       })),
@@ -127,7 +177,7 @@ export function summarizeRun(directory) {
   }
   const baselines = Object.entries(runs).filter(([key]) => key.endsWith("/native-baseline"));
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     collectedAt: manifest.createdAt,
     baseCommit: manifest.commit,
     dirtyDiffHash: manifest.dirtyDiffHash,

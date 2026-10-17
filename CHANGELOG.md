@@ -11,6 +11,42 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Reusable diagnostics and browser identity
 
+- Pin authored probe/control line endings to LF so source-hash controls remain
+  reproducible on Windows. Preserve the licensed XPath provider's original bytes.
+- Retain Chrome response protocol, TLS/security, timing, connection and cache
+  metadata, including redirects and raw response events. Public summaries use
+  fixed protocol buckets and availability counts; native application-layer
+  observations remain separate from Chrome CDP and packet-level evidence.
+- Trace configurable methods on returned native WebGL/2D contexts and WebGL
+  extensions, including own methods. Report skipped/unsupported surfaces and
+  bounded inspection coverage; clean controls retain their original behavior.
+  Intrusive wrappers remain observable and do not capture every JavaScript access.
+- Traverse ordinary native light-tree children directly during layout capture,
+  retaining private shadow-host/slot distribution and termination checks. Preserve
+  stylesheet scope order with indexed membership rather than repeated linear scans.
+- Reduce repeated resource-order walks during parser hydration while preserving
+  synchronous mutation fallback and native collection order. A narrow HTML-script
+  guard prevents unsupported SVG/uppercase script nodes from discarding queued
+  ordinary HTML scripts; full SVG script execution remains tracked in issue28.
+- Reuse private CSS rule records during computed-style import flattening, keeping
+  nested import/media order and retained declarations live.
+- Warm process-wide font discovery in a separately bounded geometry-test session
+  before the existing five-second neutral-rule conformance controls. Preserve all
+  original assertions and production budgets; retain the failed cold-start evidence.
+- Validate native layout selectors once per invocation before matching current
+  node state, instead of repeating the same validation for every candidate node.
+  Preserve dynamic matching, scope boundaries and first-error behavior.
+- Avoid exponential parent computed-style refresh through inherited color and
+  percentage-size chains. Fresh parent values are shared only within the current
+  calculation; external retained declarations continue refreshing on each read.
+- Refresh the private stylesheet list once per computed-style calculation, keeping
+  retained declarations live. Independent Chrome controls cover stylesheet edits,
+  replacement, disabled state and owner-document behavior.
+- Add native hydration phase/pump diagnostics and opt-in Inspector CPU profiles
+  that survive watchdog termination. The execution budget remains enforced;
+  collected profiles and script sources stay in private local artifacts. Optional
+  host-stage aggregates separate layout input capture, rule/key work, cache hits/
+  misses and actual layout, with explicit inclusive timing scope.
 - Separate source-less native script-pump reads from page queries in interface
   traces. A real-stack regression preserves page callees, return identity and
   timing; source/ancestor attribution remains a diagnostic heuristic. Refresh

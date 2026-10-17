@@ -28,7 +28,7 @@
   });
   if (typeof g.frameElement === 'undefined') { try { Object.defineProperty(g, 'frameElement', { value: null, writable: true, configurable: true, enumerable: false }); } catch(e){ try { g.frameElement = null; } catch(e2){} } }
   // ---- CSS shorthand expansion ----------------------------------------------------------------
-  // getComputedStyle in jsdom derives longhands from shorthands; tests read e.g. marginTop,
+  // Computed-style reads derive common longhands from shorthands, including marginTop,
   // borderWidth, backgroundColor, rowGap, flexBasis. Expand the common shorthands into longhands so
   // those reads resolve. `emit(prop, value)` writes a single longhand.
   var LINE_STYLES = { none:1,hidden:1,dotted:1,dashed:1,solid:1,double:1,groove:1,ridge:1,inset:1,outset:1 };
@@ -78,40 +78,46 @@
     // background: extract the color token -> background-color (position/size/repeat are layout-y)
     if (name === 'background'){ for (var bi=0; bi<p.length; bi++){ if (/^#[0-9a-fA-F]{3,8}$/.test(p[bi]) || /^(rgb|rgba|hsl|hsla)\(/i.test(p[bi]) || p[bi]==='transparent'){ emit('background-color', p[bi]); break; } } return; }
   };
-  // getComputedStyle reflects the element's inline style object (React writes el.style.X), so
-  // jest-dom toHaveStyle (computedStyle[prop] / getPropertyValue(prop)) and toBeVisible (display/
-  // visibility/opacity) read real values. No cascade — inline styles only, which covers these tests.
+  // Bounded stylesheet and inline computed-value resolution supports style/visibility reads.
+  // Returned declarations refresh on public reads; internal ancestor values use private
+  // snapshots from the current calculation.
+  function computedSnapshotValue(style,name){var record=declarationRecords.get(style),value=record&&cssMapGet(record.values,name);return value?value.text:'';}
   if (typeof g.getComputedStyle === 'undefined') g.getComputedStyle = function computeStyle(el){
+    var parentSnapshotNode=null,parentSnapshot=null;
+    function parentStyle(node){if(parentSnapshotNode!==node){parentSnapshot=computeStyle(node);parentSnapshotNode=node;}return parentSnapshot;}
     var camel = function(p){ return p.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); }); };
     var decl = { getPropertyValue: function(p){ var v = this[p]; if (v == null) v = this[camel(p)]; return v == null ? '' : String(v); }, getPropertyPriority: function(){ return ''; }, length: 0 };
     // Minimal cascade: merge declarations from every injected stylesheet rule whose selector matches
     // `el` (emotion's `sx` -> `.css-xxx{...}`), then overlay the element's inline style (highest
-    // priority). jsdom-style getComputedStyle so MUI sx values (gradients, etc.) are observable
-    // without a full layout engine. Properties are exposed both kebab and camelCase.
+    // priority). Common authored values remain observable before layout-dependent resolution.
+    // Properties are exposed both kebab and camelCase.
     // Normalize comma-spacing ("a,b" -> "a, b"): minified emotion rules drop the space, but jest-dom
     // toHaveStyle's expected value is normalized by the browser's CSS parser (which inserts ", "),
     // so font-family / shorthand lists must match that form.
-    // Normalize hex colors to rgb()/rgba() (jsdom's CSS parser does this), matching the form stored
-    // by the style proxy, so jest-dom toHaveStyle color assertions compare equal.
+    // Normalize authored hex colors to the computed rgb()/rgba() spelling used by the
+    // declaration records and style assertions.
     var normColor = function(v){
       var m = /^#([0-9a-fA-F]{3})$/.exec(v); if (m){ var x=m[1]; return 'rgb('+parseInt(x[0]+x[0],16)+', '+parseInt(x[1]+x[1],16)+', '+parseInt(x[2]+x[2],16)+')'; }
       m = /^#([0-9a-fA-F]{6})$/.exec(v); if (m){ var h=m[1]; return 'rgb('+parseInt(h.slice(0,2),16)+', '+parseInt(h.slice(2,4),16)+', '+parseInt(h.slice(4,6),16)+')'; }
       m = /^#([0-9a-fA-F]{8})$/.exec(v); if (m){ var h2=m[1]; return 'rgba('+parseInt(h2.slice(0,2),16)+', '+parseInt(h2.slice(2,4),16)+', '+parseInt(h2.slice(4,6),16)+', '+(Math.round(parseInt(h2.slice(6,8),16)/255*100)/100)+')'; }
       return v;
     };
-    // length-valued properties where the computed value is in px (jsdom returns "0px" for a bare 0).
+    // Length-valued properties resolve a bare zero to the computed "0px" spelling.
     var LEN_PROP = /(width|height|^top$|^right$|^bottom$|^left$|^inset|margin|padding|gap|^flex-basis$|radius|^font-size$|letter-spacing|word-spacing|text-indent|^outline-offset$|^column-(width|gap)$|size$)/;
     var setProp = function(name, val){ name = String(name).trim(); if (!name) return; if (typeof val === 'string'){ var t = val.trim(); if (t.charAt(0) === '#') val = normColor(t); else if (t === '0' && LEN_PROP.test(name)) val = '0px'; else if (val.indexOf(',') >= 0) val = val.replace(/\s*,\s*/g, ', '); } decl[name] = val; decl[camel(name)] = val;
       if (typeof val === 'string') expandShorthand(name, val, setProp);
     };
     try {
       var owner=el?cssApply(computedStyleNativeOwner,el,[]):null;
-      var sheets = owner ? (owner.styleSheets || []) : [];
+      // A live list refreshes on every indexed/length read. Refresh its private
+      // backing array once per computation; retained declarations still recompute.
+      var ownerRecord=owner&&collectionGet(owner),host=ownerRecord&&ownerRecord.cssHost;
+      var sheets = host ? host.readSheets() : [];
       for (var si=0; si<sheets.length; si++) {
         if(sheetRecord(sheets[si]).disabled)continue;
-        var rules = appliedSheetRules(sheets[si]);
+        var rules = appliedSheetRuleRecords(sheets[si]);
         for (var ri=0; ri<rules.length; ri++) {
-          var txt = String(cssRuleText(cssRuleRecord(rules[ri])) || ''); var br = txt.indexOf('{'); if (br < 0) continue;
+          var txt = String(cssRuleText(rules[ri]) || ''); var br = txt.indexOf('{'); if (br < 0) continue;
           var sel = txt.slice(0, br).trim(); var body = txt.slice(br+1, txt.lastIndexOf('}'));
           var matched = false;
           var parts = sel.split(',');
@@ -134,7 +140,9 @@
     else if (!color || colorKeyword === 'inherit' || colorKeyword === 'unset' || colorKeyword === 'currentcolor') {
       var colorParent = null;
       try { colorParent = __ns.domAccessor('parentElement',false,'Node').call(el); } catch(e) {}
-      color = colorParent ? computeStyle(colorParent).color : 'rgb(0, 0, 0)';
+      // A fresh internal result is already resolved. Reading its public live getter
+      // would compute the same ancestors again and double recursion at every level.
+      color = colorParent ? computedSnapshotValue(parentStyle(colorParent),'color') : 'rgb(0, 0, 0)';
     }
     var connected = false;
     try { connected = __ns.domAccessor('isConnected',false,'Node').call(el); } catch(e) {}
@@ -158,8 +166,8 @@
     // getComputedStyle(child).width matches a browser without a full layout engine.
     var usedPx = function(node, axis, depth){
       if (!node || depth > 32) return null;
-      var cs; try { cs = (node === el) ? decl : g.getComputedStyle(node); } catch(e){ return null; }
-      var raw = cs && (axis === 'width' ? cs.width : cs.height); raw = raw == null ? '' : String(raw);
+      var raw;try{raw=node===el?decl[axis]:computedSnapshotValue(parentStyle(node),axis);}catch(e){return null;}
+      raw = raw == null ? '' : String(raw);
       var mpx = /^(-?\d+(?:\.\d+)?)px$/.exec(raw); if (mpx) return parseFloat(mpx[1]);
       var parent = node.parentElement || (node.parentNode && node.parentNode.nodeType === 1 ? node.parentNode : null);
       var mpc = /^(-?\d+(?:\.\d+)?)%$/.exec(raw);
@@ -722,7 +730,7 @@ if(typeof __ns.makeNativeFunction==='function'){
   cssMember(styleSheetConstructor.prototype,'media',function(){return sheetRecord(this).media;},function(value){mediaRecord(sheetRecord(this).media).items=mediaQueries(value);});
   cssMember(styleSheetConstructor.prototype,'disabled',function(){return sheetRecord(this).disabled;},function(value){sheetRecord(this).disabled=!!value;});
   cssMember(sheetConstructor.prototype,'ownerRule',function(){return sheetRecord(this).ownerRule;});
-  function appliedSheetRules(sheet,seen){seen=seen||new Set();if(seen.has(sheet))return [];seen.add(sheet);var out=[];for(var rule of cssItems(sheetRecord(sheet).rules)){var record=cssRuleRecord(rule);if(record.type===3){if(record.styleSheet&&(!record.media.mediaText||g.matchMedia(record.media.mediaText).matches))out.push.apply(out,appliedSheetRules(record.styleSheet,seen));}else out.push(rule);}return out;}
+  function appliedSheetRuleRecords(sheet,seen){seen=seen||new Set();if(seen.has(sheet))return [];seen.add(sheet);var out=[];for(var rule of cssItems(sheetRecord(sheet).rules)){var record=cssRuleRecord(rule);if(record.type===3){if(record.styleSheet&&(!record.media.mediaText||g.matchMedia(record.media.mediaText).matches))out.push.apply(out,appliedSheetRuleRecords(record.styleSheet,seen));}else out.push(record);}return out;}
   function readableSheet(sheet){var record=sheetRecord(sheet);if(!record.originClean)throw new g.DOMException('Cannot access rules of a cross-origin stylesheet','SecurityError');return record;}
   var cssStyleSheetRulesGetter=__ns.makeNativeFunction(function(){return readableSheet(this).rules;},'get cssRules',0);
   Object.defineProperty(sheetConstructor.prototype,'cssRules',{get:cssStyleSheetRulesGetter,enumerable:true,configurable:true});
@@ -1460,6 +1468,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     // (userEvent's isValidDateOrTimeValue clones a date input, assigns, and checks the value stuck).
     void applyControlProto;
     var documentSheets=cssList('StyleSheetList',function(){var list=[],els=d.querySelectorAll('style,link');for(var i=0;i<els.length;i++){var sheet=els[i].sheet;if(sheet)list.push(sheet);}return list;});
+    documentCSSRecord.cssHost.readSheets=function(){return cssRecord(documentSheets).items;};
     try { Object.defineProperty(d, 'styleSheets', { configurable: true, get: function(){return documentSheets;} }); } catch(e){}
 
     // Alias the shim interface-constructor `.prototype`s onto the REAL element/document prototypes,

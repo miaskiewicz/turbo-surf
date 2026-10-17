@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { chromeExtensionArgs } from "./chrome-launch-policy.mjs";
 import { cdpConnection } from "./cdp-connection.mjs";
 import { enrichProtocolHeaders } from "./protocol-headers.mjs";
+import { responseNetworkEvents, responseTransport } from "./chrome-network-metadata.mjs";
 
 const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const out = resolve(process.argv[3]);
@@ -206,14 +207,7 @@ try {
     socket.onerror = fail;
   });
   connection = cdpConnection(socket, (data) => {
-    if (
-      [
-        "Network.requestWillBeSent",
-        "Network.requestWillBeSentExtraInfo",
-        "Network.responseReceivedExtraInfo",
-        "Network.loadingFailed",
-      ].includes(data.method)
-    )
+    if (responseNetworkEvents.some((event) => data.method === `Network.${event}`))
       protocolNetwork.push({
         event: data.method.slice(8),
         timeMs: Date.now(),
@@ -273,6 +267,7 @@ try {
         headers: event.redirectResponse.headers,
         type: previous?.type || event.type.toLowerCase(),
         redirect: true,
+        transport: responseTransport(event.redirectResponse),
       });
     }
     const row = {
@@ -312,6 +307,7 @@ try {
         status: response.status,
         headers: response.headers,
         type: event.type.toLowerCase(),
+        transport: responseTransport(response),
       };
     responses.push(row);
   });
@@ -586,6 +582,15 @@ try {
         targets,
         consoles,
         targetCoverage: "page, out-of-process iframe, dedicated/shared/service worker CDP sessions",
+        networkCoverage: {
+          source: "cdp-network",
+          scope: "attached-target-sessions",
+          targets: "attached page, iframe and worker sessions",
+          enabledInBaseline: true,
+          packetCapture: false,
+          responseMetadata:
+            "protocol, securityDetails, timing, connection and cache state; null when CDP omits a field",
+        },
         probes,
         errors,
       },

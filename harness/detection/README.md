@@ -281,9 +281,12 @@ It covers the tested contracts, rather than complete Chrome conformance.
 stylesheet telemetry codes and stdout/stderr counts with an explicit capture date;
 these are distinct from the structured `trace.errors` array. Historical telemetry
 is retained separately when the next live page takes a different execution path.
-The October17 consent/search matrix rejects both native and Chrome baselines.
-Clean native flows stay within20s; one instrumented open exhausts that budget,
-and the dismiss snapshot retains the same diagnostic. See [the parity checklist](./PARITY-GAPS.md)
+The latest October17 retry rejects native baselines while clean Chrome reaches7/8
+result markers; both instrumented Chrome passes are challenged. Earlier same-day
+Chrome baseline rejections remain historical evidence.
+The latest retry exhausts20s in3/4 native homepage opens, including one clean
+baseline; dismiss retains the original diagnostic, and later navigation completion
+does not erase it. See [the parity checklist](./PARITY-GAPS.md)
 for the full-trace budget and acceptance residuals.
 
 - `manifest.json`: checkout commit/branch, dirty diff hash, executable hash/mtime,

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "captureBaseCommit": "88528aef4ee80274aa38caf43bfc509e126e0e32",
+  "captureBaseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
   "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "binarySha256": "537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47",
   "interfaceTracerSha256": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc",
@@ -15,7 +15,7 @@
     "allBeforeSaveResponse": true,
     "scope": "Historical request-boundary evidence only; not a claim that telemetry followed consent response completion."
   },
-  "extractorSha256": "a90ecf3f509397f33af2089ac62460a2fc7fa5e532c582a15835b0eb37ef22d1",
+  "extractorSha256": "22ddabf5d3c8ea6be2e02b68f4afd4f80f77d7d9652c8c3e7850a4882710b3b8",
   "priorControl": {
     "inputSummarySha256": "5070d0bb20b2cc1ec50c30575fa7d77f356b6912efbe7451cf6a79f75fd38065",
     "eightRunControl": [
@@ -64,7 +64,7 @@
   "runs": [
     {
       "run": "repeat-0/chrome-baseline",
-      "traceSha256": "428c136d2982e90d9f5f948ee6abb6259774e1e75bc0f5f3167073f4a24e748c",
+      "traceSha256": "fc56c5f68b23317f8559ec2a65e883bf98a1d05d8d99b3a0c1799de79fd9114f",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -76,45 +76,7 @@
     },
     {
       "run": "repeat-0/chrome-interfaces",
-      "traceSha256": "b5f3d086e24393fc1adea9e157f3afcc4138832ddc6fb9fef2872e5fdb5ed48a",
-      "recordedErrorCount": 1,
-      "stdoutFailedToFetchCount": 0,
-      "stderrBytes": 0,
-      "stylesheetTelemetry": [],
-      "fixedCodeCounts": {
-        "jc": 0,
-        "lc": 0
-      }
-    },
-    {
-      "run": "repeat-0/native-baseline",
-      "traceSha256": "649c8fad8f197dfcffdc1f230a8545758828f8ea318d15d522e61f435748d816",
-      "recordedErrorCount": 0,
-      "stdoutFailedToFetchCount": 1,
-      "stderrBytes": 0,
-      "stylesheetTelemetry": [],
-      "fixedCodeCounts": {
-        "jc": 0,
-        "lc": 0
-      },
-      "networkSha256": "0ea23aa2f55109a8a5de7328dc3f87146f0f0507ac9a7cf3e78252ea59fb1b3b"
-    },
-    {
-      "run": "repeat-0/native-interfaces",
-      "traceSha256": "90f51d40eeeff2bfccf2e089db62870336be2d52bd34f8c048931128d547ae87",
-      "recordedErrorCount": 0,
-      "stdoutFailedToFetchCount": 1,
-      "stderrBytes": 0,
-      "stylesheetTelemetry": [],
-      "fixedCodeCounts": {
-        "jc": 0,
-        "lc": 0
-      },
-      "networkSha256": "c8d23817b361d03f890ac40f0bb8370757ae77d361bb8e9f83acdd06a06748a1"
-    },
-    {
-      "run": "repeat-1/chrome-baseline",
-      "traceSha256": "5084cd27b189c203febb5ab2ec652b59390b8c9c58c5d695a19fd7a24420ef8d",
+      "traceSha256": "6a9f4b9374988a5c0ee08bf54b04e1ea76226bdb9926985dfbd8d4dd316d478e",
       "recordedErrorCount": 2,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -125,8 +87,46 @@
       }
     },
     {
+      "run": "repeat-0/native-baseline",
+      "traceSha256": "0545a064621206ee0f271e70e5cb37fc5186422927830d90d16e7735980e4778",
+      "recordedErrorCount": 0,
+      "stdoutFailedToFetchCount": 1,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "3c07ef66be33ddfbf2f7d8cb0954b4d0f963bb1e0ffb7dea91080ee01682b286"
+    },
+    {
+      "run": "repeat-0/native-interfaces",
+      "traceSha256": "a8ede3ac212ee60f05bdda59a6edfaa5022a90f122b169ecb63d547c70a76fd8",
+      "recordedErrorCount": 0,
+      "stdoutFailedToFetchCount": 1,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "aec45db1af36b2d2d15eb980a79c113e314d0144e0dedf94ffdb72ab9454302b"
+    },
+    {
+      "run": "repeat-1/chrome-baseline",
+      "traceSha256": "7ab1ecbcece81a96cbdb6be683db53d01f5aad02d5b39d17163e2685e386af27",
+      "recordedErrorCount": 0,
+      "stdoutFailedToFetchCount": 0,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
+    },
+    {
       "run": "repeat-1/chrome-interfaces",
-      "traceSha256": "bcf013b48285af5fedf3a6c316bcfeb501f1a87a2da415043441fc3213881b57",
+      "traceSha256": "9dcadcb7e4f20188eb40bd315593b8e233bafd17829f3c71fc3caf33fa69b415",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -138,7 +138,7 @@
     },
     {
       "run": "repeat-1/native-baseline",
-      "traceSha256": "0ef2328fefe4ac7bdd5810a73f522bf733b32735b2703e80a2b9d542cc56de70",
+      "traceSha256": "093b0ab54e1f7d7be26c33a7ed949648301cc9454f1f39ff6d9b5e18eb5851bf",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -147,11 +147,11 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "b22f3b43e3c72131662c63be556331fbc012cdc12ad31fd50c52bb47f37a1ffb"
+      "networkSha256": "9bf848df4ee7edff398ed9c3927c07af9207f6216fab04fcf4f2b44dfa0a16a7"
     },
     {
       "run": "repeat-1/native-interfaces",
-      "traceSha256": "89439275c1b564bcc8c8186ee6a5d20e40528e6c96de672c143aa12e22c7d8e0",
+      "traceSha256": "e641b0489af4929d827b2130cead7ff756c32af502ec5b48032c1dd194eda22d",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -160,7 +160,7 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "d045106b07c4629e3ebd55cc82c99ce722493c3d244b083033681dbdfcac373e"
+      "networkSha256": "98fadb8dcf840beee6f8a6e91bc514ee52cb6b5062e96ee0b09931ca42ff1bd9"
     }
   ],
   "capturedDate": "2026-10-17"

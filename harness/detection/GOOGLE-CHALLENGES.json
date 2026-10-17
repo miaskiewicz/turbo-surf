@@ -1,0 +1,167 @@
+{
+  "scope": "Fixed structural indicators read from already-saved final HTML only. No raw URLs/query values, tokens, text, cookies or DOM bodies are emitted. Presence does not prove a visible checkbox or successful CAPTCHA interaction.",
+  "captureBaseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
+  "binarySha256": "537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47",
+  "extractorSha256": "fe6bf2aa69a402c1717b2a2a6314960046479992c6bddd4abebbc12c3425f060",
+  "userObservations": {
+    "secondAutomatedChromeCaptchaReported": true,
+    "laterSerpReported": true,
+    "mappedToExactPhysicalWindowOrCapture": false,
+    "source": "User observation relayed by parent; captured runtime/pass outcomes are recorded independently below."
+  },
+  "runs": [
+    {
+      "repeat": 0,
+      "runtime": "chrome",
+      "pass": "baseline",
+      "final": {
+        "path": "/search",
+        "status": 200,
+        "results": 7,
+        "hydrationBudgetExceeded": null
+      },
+      "sorryPath": false,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": false,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": false,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": false,
+      "htmlSha256": "8750a5939ed86e54211f2ced183e9d48c0dbc4024918f09360f76a34c0541664"
+    },
+    {
+      "repeat": 0,
+      "runtime": "chrome",
+      "pass": "interfaces",
+      "final": {
+        "path": "/sorry/index",
+        "status": 429,
+        "results": 0,
+        "hydrationBudgetExceeded": null
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": true,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": true,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "1afedff0207cf2a44286560d2ebe859b739e7fa7a3f3bf40e720640505f60743"
+    },
+    {
+      "repeat": 0,
+      "runtime": "native",
+      "pass": "baseline",
+      "final": {
+        "path": "/sorry/index",
+        "status": 429,
+        "results": 0,
+        "hydrationBudgetExceeded": false
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "4ec5d5a2b287dc8c95e503a7a10f96067d1d27fa9f8f38688fe7aff735749849"
+    },
+    {
+      "repeat": 0,
+      "runtime": "native",
+      "pass": "interfaces",
+      "final": {
+        "path": "/sorry/index",
+        "status": 429,
+        "results": 0,
+        "hydrationBudgetExceeded": false
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "2bc63bbc00690e35ec6f0a14a0b1c253bcdb4383dd0b3982be0c0f3156bdf54b"
+    },
+    {
+      "repeat": 1,
+      "runtime": "chrome",
+      "pass": "baseline",
+      "final": {
+        "path": "/search",
+        "status": 200,
+        "results": 8,
+        "hydrationBudgetExceeded": null
+      },
+      "sorryPath": false,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": false,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": false,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": false,
+      "htmlSha256": "e4f1c0460b5dfedab6c6dadc4f59f57eda19680dffcbdf566347e938052de8cd"
+    },
+    {
+      "repeat": 1,
+      "runtime": "chrome",
+      "pass": "interfaces",
+      "final": {
+        "path": "/sorry/index",
+        "status": 429,
+        "results": 0,
+        "hydrationBudgetExceeded": null
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": true,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": true,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "b7e275fdcac71a793dbc8d19804f94376067dd25950c5350b05954b265f987b2"
+    },
+    {
+      "repeat": 1,
+      "runtime": "native",
+      "pass": "baseline",
+      "final": {
+        "path": "/sorry/index",
+        "status": 429,
+        "results": 0,
+        "hydrationBudgetExceeded": false
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "cc6c839e30348e6effd1ff6a347c25b6a200b2a85a20467597702c7f323348f5"
+    },
+    {
+      "repeat": 1,
+      "runtime": "native",
+      "pass": "interfaces",
+      "final": {
+        "path": "/sorry/index",
+        "status": 429,
+        "results": 0,
+        "hydrationBudgetExceeded": false
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "14d501c9210fa12baa166dbe071a93648859559c408008aa749cdcbfe76c100b"
+    }
+  ],
+  "capturedDate": "2026-10-17"
+}

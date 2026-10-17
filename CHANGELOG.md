@@ -11,6 +11,13 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Reusable diagnostics and browser identity
 
+- Preserve the requested fresh source59f7835 retry separately from the earlier
+  same-day capture: Chrome baselines reach7/8 SERP markers, native baselines remain
+  0/2 accepted, and both instrumented Chrome passes are challenged. All14 processes
+  finish without process timeout; no native cookie import or form fallback is used.
+  Preserve3/4 native homepage watchdog failures, including one clean baseline;
+  later navigation completion does not erase initial-open diagnostics.
+
 - Record the source-pinned October17 consent/search rerun: all14 processes finish;
   native and Chrome baselines both accept0/2 SERPs. Native consent204 and genuine
   form navigation work without imported cookies or fallback. Clean native flows

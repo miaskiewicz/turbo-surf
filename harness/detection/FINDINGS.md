@@ -49,7 +49,32 @@ the complete search matrix below or establish accepted native SERPs.
 [OBSERVABILITY-LAST-RUN.json](./OBSERVABILITY-LAST-RUN.json) preserves source/binary
 hashes, scoped transport metadata, run outcomes and historical candidate receipts.
 
-### Fresh consent/search rerun — 2026-10-17
+### Latest fresh retry — 2026-10-17, source59f7835
+
+The requested fresh two-repeat matrix finishes all14 processes without a process
+timeout. Both clean Chrome baselines reach/search with7 and8 result markers.
+Both native baselines end/sorry429 with zero markers: **0/2 accepted native SERPs**.
+Both instrumented Chrome passes are challenged. The user's observed Chrome SERPs
+correspond to the two clean Chrome baselines, not native acceptance.
+
+All56 measured source/helper hashes remain unchanged, and the source-identical
+native release retains SHA256537c910b… with wreq, trust anchors, Metal and CoreText.
+Fresh native cookies, real consent and genuine forms are used without imported
+Chrome cookies or a form fallback. This retry provides passing Chrome controls;
+it does not identify which difference causes native rejection. The preceding
+same-day matrix below is retained as history, including its both-Chrome-blocked
+outcome. Current [Google results](./GOOGLE-LAST-RUN.json) and
+[diagnostics](./GOOGLE-DIAGNOSTICS.json) describe this newer retry.
+
+Both instrumented final Chrome documents contain reCAPTCHA element/iframe/script/
+response-field markers, corroborating the user observation. Native homepage opens
+exhaust20s in3/4 captures: clean repeat1 and both instrumented passes, all in
+post-load-hydration with zero completed pumps. Clean repeat0 reaches500pumps without
+exhaustion. Dismiss retains the original open diagnostic; later navigation
+budget=false does not erase those failures. Homepage boundedness remains unreliable.
+See [challenge indicators](./GOOGLE-CHALLENGES.json).
+
+### Earlier consent/search rerun — 2026-10-17
 
 A clean source checkout at `88528ae` and the rebuilt native155 release executable
 (SHA256 `537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47`)

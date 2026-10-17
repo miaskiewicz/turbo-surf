@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
-  "collectedAt": "2026-10-17T03:27:16.477Z",
-  "baseCommit": "88528aef4ee80274aa38caf43bfc509e126e0e32",
+  "collectedAt": "2026-10-17T09:30:23.583Z",
+  "baseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
   "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "binaryHash": "537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47",
   "build": {
@@ -51,45 +51,45 @@
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 107,
-        "observed": 107,
+        "responses": 177,
+        "observed": 177,
         "unknown": 0,
         "protocols": {
-          "h2": 11,
-          "h3": 81,
+          "h2": 16,
+          "h3": 135,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 15,
+          "other": 26,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
-          "TLS 1.3": 11,
-          "QUIC": 81,
+          "TLS 1.3": 16,
+          "QUIC": 135,
           "other": 0,
-          "unknown": 15
+          "unknown": 26
         },
         "securityDetails": {
-          "present": 92,
-          "missing": 15
+          "present": 151,
+          "missing": 26
         },
         "timing": {
-          "present": 91,
-          "missing": 16
+          "present": 151,
+          "missing": 26
         },
         "connectionReused": {
-          "true": 74,
-          "false": 33,
+          "true": 132,
+          "false": 45,
           "unknown": 0
         },
         "fromDiskCache": {
-          "true": 3,
-          "false": 104,
+          "true": 2,
+          "false": 175,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 107,
+          "false": 177,
           "unknown": 0
         }
       },
@@ -99,7 +99,7 @@
         "enabledInBaseline": true,
         "packetCapture": false
       },
-      "traceSha256": "428c136d2982e90d9f5f948ee6abb6259774e1e75bc0f5f3167073f4a24e748c",
+      "traceSha256": "fc56c5f68b23317f8559ec2a65e883bf98a1d05d8d99b3a0c1799de79fd9114f",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -147,16 +147,6 @@
             "__Secure-BUCKET",
             "__Secure-ENID"
           ]
-        },
-        {
-          "path": "/sorry/index",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -253,7 +243,7 @@
         },
         {
           "phase": "step-5",
-          "path": "/search",
+          "path": "/",
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
@@ -266,16 +256,23 @@
         },
         {
           "phase": "search",
-          "path": "/sorry/index",
+          "path": "/search",
           "origin": "https://www.google.com",
-          "results": 0,
+          "results": 7,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": [
+            "AEC",
+            "DV",
+            "SEARCH_SAMESITE",
+            "SOCS",
+            "__Secure-BUCKET",
+            "__Secure-ENID"
+          ]
         }
       ]
     },
@@ -287,11 +284,11 @@
       "recordedErrorCount": 0,
       "responseTransport": {
         "source": "native-application-response",
-        "responses": 58,
-        "observed": 58,
+        "responses": 52,
+        "observed": 52,
         "unknown": 0,
         "protocols": {
-          "h2": 58,
+          "h2": 52,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
@@ -306,7 +303,7 @@
         "scope": "native-network-stack",
         "packetCapture": false
       },
-      "traceSha256": "649c8fad8f197dfcffdc1f230a8545758828f8ea318d15d522e61f435748d816",
+      "traceSha256": "0545a064621206ee0f271e70e5cb37fc5186422927830d90d16e7735980e4778",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -482,49 +479,49 @@
       "timedOut": false,
       "traceMissing": false,
       "collectorComplete": null,
-      "recordedErrorCount": 1,
+      "recordedErrorCount": 2,
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 103,
-        "observed": 103,
+        "responses": 111,
+        "observed": 111,
         "unknown": 0,
         "protocols": {
-          "h2": 11,
-          "h3": 80,
+          "h2": 12,
+          "h3": 84,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 12,
+          "other": 15,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
-          "TLS 1.3": 11,
-          "QUIC": 80,
+          "TLS 1.3": 12,
+          "QUIC": 84,
           "other": 0,
-          "unknown": 12
+          "unknown": 15
         },
         "securityDetails": {
-          "present": 91,
-          "missing": 12
+          "present": 96,
+          "missing": 15
         },
         "timing": {
-          "present": 90,
-          "missing": 13
+          "present": 95,
+          "missing": 16
         },
         "connectionReused": {
-          "true": 72,
-          "false": 31,
+          "true": 77,
+          "false": 34,
           "unknown": 0
         },
         "fromDiskCache": {
           "true": 3,
-          "false": 100,
+          "false": 108,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 103,
+          "false": 111,
           "unknown": 0
         }
       },
@@ -534,7 +531,7 @@
         "enabledInBaseline": true,
         "packetCapture": false
       },
-      "traceSha256": "b5f3d086e24393fc1adea9e157f3afcc4138832ddc6fb9fef2872e5fdb5ed48a",
+      "traceSha256": "6a9f4b9374988a5c0ee08bf54b04e1ea76226bdb9926985dfbd8d4dd316d478e",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -697,7 +694,14 @@
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": [
+            "AEC",
+            "SEARCH_SAMESITE",
+            "SG_SS",
+            "SOCS",
+            "__Secure-BUCKET",
+            "__Secure-ENID"
+          ]
         },
         {
           "phase": "search",
@@ -722,11 +726,11 @@
       "recordedErrorCount": 0,
       "responseTransport": {
         "source": "native-application-response",
-        "responses": 53,
-        "observed": 53,
+        "responses": 42,
+        "observed": 42,
         "unknown": 0,
         "protocols": {
-          "h2": 53,
+          "h2": 42,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
@@ -741,7 +745,7 @@
         "scope": "native-network-stack",
         "packetCapture": false
       },
-      "traceSha256": "90f51d40eeeff2bfccf2e089db62870336be2d52bd34f8c048931128d547ae87",
+      "traceSha256": "a8ede3ac212ee60f05bdda59a6edfaa5022a90f122b169ecb63d547c70a76fd8",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -817,10 +821,10 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": false,
+          "hydrationBudgetExceeded": true,
           "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 500
+            "phase": "post-load-hydration",
+            "completedPumps": 0
           },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
@@ -833,10 +837,10 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": false,
+          "hydrationBudgetExceeded": true,
           "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 500
+            "phase": "post-load-hydration",
+            "completedPumps": 0
           },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
@@ -917,49 +921,49 @@
       "timedOut": false,
       "traceMissing": false,
       "collectorComplete": null,
-      "recordedErrorCount": 2,
+      "recordedErrorCount": 0,
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 104,
-        "observed": 104,
+        "responses": 192,
+        "observed": 192,
         "unknown": 0,
         "protocols": {
-          "h2": 11,
-          "h3": 79,
+          "h2": 12,
+          "h3": 149,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 14,
+          "other": 31,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
-          "TLS 1.3": 11,
-          "QUIC": 79,
+          "TLS 1.3": 12,
+          "QUIC": 149,
           "other": 0,
-          "unknown": 14
+          "unknown": 31
         },
         "securityDetails": {
-          "present": 90,
-          "missing": 14
+          "present": 161,
+          "missing": 31
         },
         "timing": {
-          "present": 89,
-          "missing": 15
+          "present": 161,
+          "missing": 31
         },
         "connectionReused": {
-          "true": 71,
-          "false": 33,
+          "true": 141,
+          "false": 51,
           "unknown": 0
         },
         "fromDiskCache": {
-          "true": 3,
-          "false": 101,
+          "true": 0,
+          "false": 192,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 104,
+          "false": 192,
           "unknown": 0
         }
       },
@@ -969,7 +973,7 @@
         "enabledInBaseline": true,
         "packetCapture": false
       },
-      "traceSha256": "5084cd27b189c203febb5ab2ec652b59390b8c9c58c5d695a19fd7a24420ef8d",
+      "traceSha256": "7ab1ecbcece81a96cbdb6be683db53d01f5aad02d5b39d17163e2685e386af27",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1017,16 +1021,6 @@
             "__Secure-BUCKET",
             "__Secure-ENID"
           ]
-        },
-        {
-          "path": "/sorry/index",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -1132,20 +1126,34 @@
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": [
+            "AEC",
+            "SEARCH_SAMESITE",
+            "SG_SS",
+            "SOCS",
+            "__Secure-BUCKET",
+            "__Secure-ENID"
+          ]
         },
         {
           "phase": "search",
-          "path": "/sorry/index",
+          "path": "/search",
           "origin": "https://www.google.com",
-          "results": 0,
+          "results": 8,
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": [
+            "AEC",
+            "DV",
+            "SEARCH_SAMESITE",
+            "SOCS",
+            "__Secure-BUCKET",
+            "__Secure-ENID"
+          ]
         }
       ]
     },
@@ -1157,11 +1165,11 @@
       "recordedErrorCount": 0,
       "responseTransport": {
         "source": "native-application-response",
-        "responses": 57,
-        "observed": 57,
+        "responses": 39,
+        "observed": 39,
         "unknown": 0,
         "protocols": {
-          "h2": 57,
+          "h2": 39,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
@@ -1176,7 +1184,7 @@
         "scope": "native-network-stack",
         "packetCapture": false
       },
-      "traceSha256": "0ef2328fefe4ac7bdd5810a73f522bf733b32735b2703e80a2b9d542cc56de70",
+      "traceSha256": "093b0ab54e1f7d7be26c33a7ed949648301cc9454f1f39ff6d9b5e18eb5851bf",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1252,10 +1260,10 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": false,
+          "hydrationBudgetExceeded": true,
           "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 500
+            "phase": "post-load-hydration",
+            "completedPumps": 0
           },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
@@ -1268,10 +1276,10 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": false,
+          "hydrationBudgetExceeded": true,
           "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 500
+            "phase": "post-load-hydration",
+            "completedPumps": 0
           },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
@@ -1356,45 +1364,45 @@
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 107,
-        "observed": 107,
+        "responses": 110,
+        "observed": 110,
         "unknown": 0,
         "protocols": {
           "h2": 11,
-          "h3": 82,
+          "h3": 86,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 14,
+          "other": 13,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
           "TLS 1.3": 11,
-          "QUIC": 82,
+          "QUIC": 86,
           "other": 0,
-          "unknown": 14
+          "unknown": 13
         },
         "securityDetails": {
-          "present": 93,
-          "missing": 14
+          "present": 97,
+          "missing": 13
         },
         "timing": {
-          "present": 92,
-          "missing": 15
+          "present": 96,
+          "missing": 14
         },
         "connectionReused": {
-          "true": 74,
-          "false": 33,
+          "true": 79,
+          "false": 31,
           "unknown": 0
         },
         "fromDiskCache": {
           "true": 3,
-          "false": 104,
+          "false": 107,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 107,
+          "false": 110,
           "unknown": 0
         }
       },
@@ -1404,7 +1412,7 @@
         "enabledInBaseline": true,
         "packetCapture": false
       },
-      "traceSha256": "bcf013b48285af5fedf3a6c316bcfeb501f1a87a2da415043441fc3213881b57",
+      "traceSha256": "9dcadcb7e4f20188eb40bd315593b8e233bafd17829f3c71fc3caf33fa69b415",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1567,7 +1575,14 @@
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": [
+            "AEC",
+            "SEARCH_SAMESITE",
+            "SG_SS",
+            "SOCS",
+            "__Secure-BUCKET",
+            "__Secure-ENID"
+          ]
         },
         {
           "phase": "search",
@@ -1592,11 +1607,11 @@
       "recordedErrorCount": 0,
       "responseTransport": {
         "source": "native-application-response",
-        "responses": 50,
-        "observed": 50,
+        "responses": 32,
+        "observed": 32,
         "unknown": 0,
         "protocols": {
-          "h2": 50,
+          "h2": 32,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
@@ -1611,7 +1626,7 @@
         "scope": "native-network-stack",
         "packetCapture": false
       },
-      "traceSha256": "89439275c1b564bcc8c8186ee6a5d20e40528e6c96de672c143aa12e22c7d8e0",
+      "traceSha256": "e641b0489af4929d827b2130cead7ff756c32af502ec5b48032c1dd194eda22d",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,

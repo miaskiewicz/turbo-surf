@@ -1453,10 +1453,12 @@ implemented browser behavior.
 
 The October17 source-pinned Google matrix uses fresh native cookies, actual consent and
 genuine forms with no Chrome cookie import or fallback. Native fetches `/search` with HTTP200
-then follows retry to `/sorry` with HTTP429. Both native and Chrome baselines accept0/2
-SERPs, so the current run cannot isolate a native-specific rejection cause.
-Clean native flows remain within20s; one instrumented homepage open still exhausts
-that budget, with its original diagnostic retained by the dismiss snapshot. See the
+then follows retry to `/sorry` with HTTP429. The latest fresh retry accepts0/2 native SERPs while clean Chrome reaches7/8
+result markers. Instrumented Chrome is challenged; the native rejection signal
+remains unidentified.
+The latest retry exhausts20s during3/4 native homepage opens, including one clean
+baseline and both instrumented passes. Dismiss retains the original open diagnostic;
+later navigation budget=false does not erase that failure. See the
 [latest sanitized run](../harness/detection/GOOGLE-LAST-RUN.json) and
 [findings](../harness/detection/FINDINGS.md) for the current repetitions, budgets,
 script diagnostics and baseline/instrumentation distinction. The passing shared

@@ -633,23 +633,24 @@
     }
   },
   "currentSearchMatrix": {
+    "productionSourceCommit": "88528aef4ee80274aa38caf43bfc509e126e0e32",
+    "captureBaseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
     "matrixProcessCount": 14,
     "allMatrixProcessesExitZeroWithoutTimeout": true,
     "sourceUnchangedDuringMatrix": true,
     "sourceHashCount": 56,
-    "receiptSha256": "36bac9a1bb240be064c92b819c3c801a638a048d87af205293c9aec0e7e4c0be",
-    "diagnosticsSha256": "ee92cc0befa4f93f9b4210fa91665ec2f4ebbcf68c62f74ef00ef7bd6bc6fc7b",
-    "productionSourceCommit": "88528aef4ee80274aa38caf43bfc509e126e0e32",
-    "summarySha256": "f6f36cef1f453a72a2de6a188f78cffe133afa71775293cd312dfa38b80a776f",
+    "receiptSha256": "18ac9893d366ad08c5af311c76760d26af4963524715db55a1072181871827de",
+    "summarySha256": "c07cf9e935462c7265ce681a9351ac757abbe3093073a4a3f1cbeed2b59a1943",
+    "diagnosticsSha256": "58cea4a040f409faf1b97460f6afa0e23611fdc32ac45a2866d504f73e205051",
+    "challengeIndicatorsSha256": "681b908c64fc12d138e4865be00175ced91f6ba2bf9db8b8cc58ce17496f892f",
     "nativeBaseline": {
       "captured": 2,
       "successful": 0
     },
-    "chromeBaseline": {
-      "captured": 2,
-      "successful": 0
-    },
-    "scope": "Separate fresh consent/search matrix; see GOOGLE-LAST-RUN.json. No packet fingerprint or rejection cause established."
+    "chromeBaselineResultMarkers": [7, 8],
+    "nativeHomepageBudgetExhaustedCaptures": 3,
+    "nativeHomepageCaptures": 4,
+    "scope": "Latest separate fresh retry: clean Chrome reaches results, instrumented Chrome has CAPTCHA markers, native SERPs remain rejected. Three initial native opens exhaust20s; later navigation does not erase earlier failures. No rejection cause established."
   },
   "validation": {
     "defaultDiskFailure": {
@@ -721,7 +722,7 @@
       "failure": "neutral_at_rules: two 5-second session expression budget errors before behavior assertions; isolated diagnosis pending",
       "fullGatePassed": false
     },
-    "state": "Complete local default/npm and native155 gates pass; current-source consent/search matrix complete, both native and Chrome baselines rejected",
+    "state": "Complete local default/npm and native155 gates pass; source59f7835 Node20/22 CI passes. Latest retry has successful clean Chrome controls but rejected native SERPs and3/4 native homepage budget failures.",
     "nativeWorkspace": {
       "exitCode": 0,
       "passed": 1423,
@@ -880,7 +881,7 @@
     "Native HTTP/2 versus Chrome HTTP/3 is a measured scope difference, not a demonstrated rejection cause.",
     "Clean and profiled execution differ; partial live profiles are not fixed-work benchmarks.",
     "All four scoped homepage-only performance controls reach the500-pump cap; only the three clean runs have a post-verdict pendingWork1 observation. This is not global idle.",
-    "The October17 current-source consent/search matrix in GOOGLE-LAST-RUN.json records native0/2 and Chrome0/2 accepted baselines. Both clean native flows stay within20s; one instrumented homepage open exhausts20s before completing a pump, and dismiss retains that same open diagnostic. This confounded rejection comparison does not isolate a native-specific cause.",
-    "Raw captures, source URLs, bodies, cookies, request IDs, certificates and absolute timestamps remain private."
+    "Raw captures, source URLs, bodies, cookies, request IDs, certificates and absolute timestamps remain private.",
+    "Latest consent/search retry at59f7835 supersedes the earlier88528ae both-Chrome-blocked comparison; two clean Chrome baselines now succeed. Initial native opens still exhaust20s in3/4 captures."
   ]
 }

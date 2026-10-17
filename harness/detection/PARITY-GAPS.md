@@ -24,6 +24,18 @@ failure. It does not close the broader issue #28 backlog or certify Google accep
 States below include the completed local gates and fresh current-source consent/search
 measurement. Final-head CI is recorded in the PR checks.
 
+### Requested PR26 implementation batch — messaging, layout/Range and DOM
+
+The next batch addresses these three named areas in parallel. A source audit or
+an isolated pass does not close the combined production regression. Update each
+entry with implementation, independent controls and integrated results as it lands.
+
+| Area | Work in progress | Closure evidence required |
+|---|---|---|
+| Messaging / GC | Dead weak-context registry entries are pruned after actual GC at host boundaries. Native17 lifecycle controls pass; disabling the sweep reproduces retention. Default and final integrated checks remain pending. | Production retained/released ownership and reentrant failure controls; forced-GC and repeated-navigation checks on the genuine155 engine. |
+| Layout / Range | Current focused native155 baseline passes35 tests (3 abstract Range,23 geometry,9 shadow), without reproducing the old hang. Decorated inline source fragments and expanded scoped/composed/lifecycle controls are in progress. | Bounded combined geometry/Range runs, independent Chrome geometry controls and production/default/native regressions without larger watchdogs. |
+| DOM | Fresh Chrome controls reproduce reentrant adoption callback-order differences on both production engines. Canonical callback fix passes its new control; the broader matrix also reveals wrong Range fragment context and premature template custom-element upgrades, with native parser fixes in progress. | Independent callback realm/receiver/order controls, canonical fixes officially re-vendored, production parser/observer regressions and combined gates. |
+
 ### Latest fresh retry — 2026-10-17, source59f7835
 
 All14 processes finish without a process timeout, with56 source/helper hashes

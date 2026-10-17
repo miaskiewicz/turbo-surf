@@ -14638,6 +14638,13 @@ impl PageSession {
         crate::storage_gc::diagnostics(self.rt.v8_isolate())
     }
 
+    /// Host-only context registry accounting; never installed on guest globals.
+    #[doc(hidden)]
+    pub fn context_registry_diagnostics_for_testing(&mut self) -> serde_json::Value {
+        let _activation = self.rt.activation_key().enter();
+        crate::context_ownership::diagnostics(self.rt.v8_isolate())
+    }
+
     #[doc(hidden)]
     pub fn frame_lifecycle_diagnostics_for_testing(&mut self) -> serde_json::Value {
         let _activation = self.rt.activation_key().enter();

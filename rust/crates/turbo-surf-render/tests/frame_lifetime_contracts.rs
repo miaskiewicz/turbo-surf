@@ -177,3 +177,59 @@ async fn repeated_navigation_keeps_only_active_host_contexts_and_retires_nested_
     }
     assert_eq!(page.message_port_diagnostics_for_testing()["endpoints"], 0);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn navigation_during_clone_discards_only_the_old_window_transfer_snapshot() {
+    let mut page = turbo_surf_render::PageSession::open(
+        "<iframe id=f></iframe>",
+        "https://lifetime.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    let actual = page.eval_json_expression(r#"(()=>{
+      const frame=document.getElementById('f'),child=frame.contentWindow;
+      const channel=new MessageChannel(),buffer=new ArrayBuffer(4096);
+      globalThis.navigationPeer=channel.port1;globalThis.oldArray=new WeakRef(child.Array);
+      let calls=0;
+      child.postMessage({get navigation(){calls++;frame.srcdoc='<body>replacement';return true;},buffer,port:channel.port2},'*',[buffer,channel.port2]);
+      return {calls,bytes:buffer.byteLength};
+    })()"#).await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&actual).unwrap(),
+        json!({"calls":1,"bytes":0})
+    );
+    let state = page.frame_lifecycle_diagnostics_for_testing();
+    assert_eq!(state["retiredHostContexts"], 0, "{state}");
+    assert_eq!(state["queuedWindowMessages"], 0, "{state}");
+    assert_eq!(state["queuedWindowBytes"], 0, "{state}");
+    page.eval("globalThis.__RESULT='pump';").await.unwrap();
+    assert_eq!(
+        page.eval_expression("document.getElementById('f').contentDocument.body.textContent")
+            .await
+            .unwrap(),
+        "replacement"
+    );
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    assert_eq!(
+        page.eval_expression("String(oldArray.deref()===undefined)")
+            .await
+            .unwrap(),
+        "true"
+    );
+    let ports = page.message_port_diagnostics_for_testing();
+    assert_eq!(ports["endpoints"], 1, "{ports}");
+    assert_eq!(ports["queuedMessages"], 0, "{ports}");
+    assert_eq!(ports["queuedBytes"], 0, "{ports}");
+    page.eval_expression("navigationPeer=null;document.getElementById('f').remove();'released'")
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        page.collect_message_port_garbage_for_testing();
+    }
+    assert_eq!(page.message_port_diagnostics_for_testing()["endpoints"], 0);
+}

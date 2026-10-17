@@ -136,3 +136,23 @@ pub(crate) fn take_contexts(scope: &mut v8::PinScope) -> Vec<v8::Weak<v8::Contex
         .map(|contexts| contexts.0)
         .unwrap_or_default()
 }
+
+/// Dead weak handles still own native allocations until their Rust handles drop.
+/// Prune only at a host boundary after GC, without localizing any live contexts.
+pub(crate) fn sweep_collected(scope: &mut v8::PinScope) {
+    if let Some(contexts) = scope.get_slot_mut::<Contexts>() {
+        contexts.0.retain(|context| !context.is_empty());
+    }
+}
+
+pub(crate) fn diagnostics(isolate: &v8::Isolate) -> serde_json::Value {
+    let Some(contexts) = isolate.get_slot::<Contexts>() else {
+        return serde_json::json!({"registered":0,"live":0,"cleared":0});
+    };
+    let cleared = contexts
+        .0
+        .iter()
+        .filter(|context| context.is_empty())
+        .count();
+    serde_json::json!({"registered":contexts.0.len(),"live":contexts.0.len()-cleared,"cleared":cleared})
+}

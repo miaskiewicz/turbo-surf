@@ -11,6 +11,12 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Reusable diagnostics and browser identity
 
+- Drop collected weak context registrations at host boundaries after actual V8 GC,
+  preserving live retained documents and avoiding native Tree traversal inside GC
+  callbacks. Add independent nested-frame/retained-constructor ownership controls,
+  exact registry reclamation and reentrant Window transfer retirement regressions.
+  Vector backing capacity retains its high-water mark; this is not full OS-memory reclamation.
+
 - Preserve the requested fresh source59f7835 retry separately from the earlier
   same-day capture: Chrome baselines reach7/8 SERP markers, native baselines remain
   0/2 accepted, and both instrumented Chrome passes are challenged. All14 processes

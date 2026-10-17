@@ -18,8 +18,8 @@ Neither observation supplies a packet fingerprint or complete access coverage.
 
 A source-pinned clean Chrome155.80 homepage capture negotiates HTTP/3/QUIC for the
 main document, while native homepage captures use HTTP/2. This measured difference
-is not evidence that it causes rejection. The last complete search matrix below
-remains0/2 accepted native SERPs; these new controls load only the homepage.
+is not evidence that it causes rejection. These scoped transport controls load only the homepage; the fresh full
+consent/search matrix is recorded separately below.
 
 Host-owned phase/pump diagnostics and optional CPU/host-stage profiles locate the
 20s failure inside a one-pass controller visibility scan. Repeated selector
@@ -48,6 +48,39 @@ remain preserved. The fixture warmup does not reduce production cold-font latenc
 the complete search matrix below or establish accepted native SERPs.
 [OBSERVABILITY-LAST-RUN.json](./OBSERVABILITY-LAST-RUN.json) preserves source/binary
 hashes, scoped transport metadata, run outcomes and historical candidate receipts.
+
+### Fresh consent/search rerun — 2026-10-17
+
+A clean source checkout at `88528ae` and the rebuilt native155 release executable
+(SHA256 `537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47`)
+complete all14 sequential capture/comparison processes with no process timeout.
+Source/helper hashes remain unchanged across collection. Each native pass uses
+wreq, trust anchors, Metal and CoreText, fresh native cookies, actual consent
+POST/save204 and genuine native-form navigation, with no Chrome cookie import or
+form fallback. Both native baselines reach/search200 then/sorry429: **0/2 accepted
+SERPs**. Both Chrome baselines are also rejected, unlike the October16 controls.
+This run cannot isolate a native-specific rejection cause; network reputation,
+request rate and timing are possible confounds, not established explanations.
+
+Both clean native consent/search flows remain within the unchanged20s budget.
+Instrumented repeat1 exhausts that budget during homepage open, in
+post-load-hydration with zero completed pumps; dismiss retains that same original
+open diagnostic. It is one observed exhaustion, not two independent timeouts.
+Intrusive full-trace boundedness remains open in#28. The four earlier successful
+homepage-only performance controls remain separately scoped above.
+[GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json) records the fresh sanitized flow;
+[GOOGLE-DIAGNOSTICS.json](./GOOGLE-DIAGNOSTICS.json) dates telemetry separately.
+No selected `jc`/`lc` report requests appear in any of the eight fresh captures.
+The fixed-code extractor reproduces the historical positive controls; absence
+here does not prove stylesheet conformance or explain rejection. Historical
+`afterConsentBeforeSearch` means after the `/save` request, not its response;
+the four selected repeat0 native-baseline reports precede that response.
+All four fresh native trace.errors arrays are empty, while each process stdout
+separately records one fetch failure. Chrome trace.errors counts are1/1/2/1.
+
+Both fresh independent probe-only pairs match on capabilities and the shared
+WebGL scene, including pixel hash3630084024 and identity. Window own-property
+counts remain Chrome1235/native1240. These are bounded controls; The API inventory is still the frozen October16 measurement, not a new audit.
 
 ## Historical validation checkpoint — 2026-10-16
 
@@ -83,7 +116,7 @@ The final optimized CLI SHA256 is
 [VALIDATION-LAST-RUN.json](./VALIDATION-LAST-RUN.json) records both engine
 configurations, full command results and evidence hashes.
 
-### Fresh Google matrix — final source, 2026-10-16
+### Historical Google matrix — final source, 2026-10-16
 
 The frozen executable above uses production source26bd0f4. The corrected tracer
 was captured against base589d2d3 with its exact dirty-diff and harness hashes
@@ -100,8 +133,8 @@ All four native trace.errors arrays are empty; each process stdout log separatel
 records one reCAPTCHA script fetch failure. The old Missing-promise failure does
 not recur in these captures. Native home and immediate dismiss snapshots still
 report20s hydration budget exhaustion; successful collection does not establish
-complete homepage execution. See [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json)
-for consent ordering, final pages, error-count scope and trace hashes.
+complete homepage execution. The current [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json) supersedes that
+October16 summary with the separately dated October17 rerun.
 
 In both fresh probe-only pairs, capabilities and the shared WebGL probe match
 exactly: CSSOM rules/sentinel, iframe constructors, control values, languages,
@@ -124,13 +157,14 @@ and differing wrapper coverage still limit attribution; zero dropped rows does
 not mean every interface is observable.
 
 Actual Google stylesheet telemetry remains open despite the passing isolated
-CSSOM probe. All four native passes emit both `jc` and `lc` after consent and
+CSSOM probe. All four October16 native passes emit both `jc` and `lc` after the consent request and
 before the first search: each code appears at `/gen_204` and
 `/httpservice/retry/jserror`, with HTTP204 responses. Chrome emits neither code.
 The earlier589 matrix emitted those codes only in repeat0, yet repeat1 also
 rejected native searches. Their presence is not a proven rejection cause or
-necessary condition. [GOOGLE-DIAGNOSTICS.json](./GOOGLE-DIAGNOSTICS.json) records
-only constant codes/counts, stream diagnostics and raw artifact hashes.
+necessary condition. The [October16 diagnostic receipt](https://github.com/miaskiewicz/turbo-surf/blob/a057a3a/harness/detection/GOOGLE-DIAGNOSTICS.json)
+retains those constant codes/counts and artifact hashes; the current receipt
+records the fresh zero-code rerun and corrects the historical request boundary.
 
 Audio remains in#27; every other deferred behavior, homepage lifecycle bounds and
 reliable Google acceptance are explicitly recorded in#28. The finite PR26 delivery

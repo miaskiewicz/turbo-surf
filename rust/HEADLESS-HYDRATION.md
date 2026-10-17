@@ -1451,9 +1451,12 @@ and descriptors; every residual is tracked in #28. Conditional presence-only
 Navigator, database, cache, network and Navigation API fallbacks do not establish
 implemented browser behavior.
 
-The final-source Google matrix uses fresh native cookies, actual consent and
+The October17 source-pinned Google matrix uses fresh native cookies, actual consent and
 genuine forms with no Chrome cookie import or fallback. Native fetches `/search` with HTTP200
-then follows retry to `/sorry` with HTTP429; accepted native SERP remains unresolved. See the
+then follows retry to `/sorry` with HTTP429. Both native and Chrome baselines accept0/2
+SERPs, so the current run cannot isolate a native-specific rejection cause.
+Clean native flows remain within20s; one instrumented homepage open still exhausts
+that budget, with its original diagnostic retained by the dismiss snapshot. See the
 [latest sanitized run](../harness/detection/GOOGLE-LAST-RUN.json) and
 [findings](../harness/detection/FINDINGS.md) for the current repetitions, budgets,
 script diagnostics and baseline/instrumentation distinction. The passing shared

@@ -21,7 +21,8 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
 
 This follow-up covers transport/GPU observability and the homepage execution-budget
 failure. It does not close the broader issue #28 backlog or certify Google acceptance.
-Update the states below as the integrated checks and native measurements finish.
+States below include the completed local gates and fresh current-source consent/search
+measurement. Final-head CI is recorded in the PR checks.
 
 [OBSERVABILITY-LAST-RUN.json](./OBSERVABILITY-LAST-RUN.json) records the sanitized
 Chrome protocol observations, native source/binary hashes, measured homepage
@@ -33,7 +34,7 @@ outcomes and preserved earlier failures. Full-gate status is updated separately.
 | Request/header correlation | Direct CDP uses exact session/request IDs and validated redirect hops. The alternative collector enriches only unambiguous main-frame navigations; other associations remain unavailable. | Adversarial controls cover concurrent same-URL worker/frame traffic and request-ID collisions. Callback arrival time is no longer an identity anchor. Both rebuilt addons pass116 detection controls; Node22 executes all3 real-Chrome controls with zero skips. |
 | Native GPU interface tracing | Returned WebGL/2D contexts and extension objects have configurable own/prototype methods observed, with explicit skipped/unavailable coverage and bounded inspection. | Twelve VM controls pass on Node 20/22; default and genuine155/Metal addons pass paired clean/traced identity and pixel controls. Wrappers remain observable. Symbols, prior captured functions, later replacements and ordinary data reads remain outside coverage. |
 | Fresh homepage transport observation | Independent clean Chrome 155.80 homepage captures report HTTP/3/QUIC for the main Google document; native homepage captures report HTTP/2. | This is a scoped measured difference, not proof of a rejection cause. Source-pinned metadata and safe protocol aggregates are recorded in OBSERVABILITY-LAST-RUN.json; the latest complete search matrix remains 0/2 accepted native SERPs. |
-| Native hydration diagnosis | Host-owned phase/pump diagnostics and optional Inspector CPU profiles locate the original 20s failure in the first post-load hydration pump, with zero completed pumps. The latest selector-validation build completes all three fresh clean homepage runs and one CPU-profiled run within the unchanged 20s budget. Earlier failed/mixed candidates remain preserved separately. | All four controls reach phase complete and the500-pump cap. Only the three clean runs report pendingWork1; the profiled probe is unavailable. This is bounded completion, not global idle or SERP acceptance. All local gates below pass. Repeated dismiss snapshots retain the original open diagnostic rather than proving a second timeout. |
+| Native hydration diagnosis | Host-owned phase/pump diagnostics and optional Inspector CPU profiles locate the original 20s failure in the first post-load hydration pump, with zero completed pumps. The selector-validation build completes three clean homepage-only runs and one CPU-profiled run within the unchanged 20s budget. Earlier failed/mixed candidates remain preserved separately. | All four homepage-only controls reach phase complete and the500-pump cap; clean runs report pendingWork1. Both subsequent clean consent/search flows stay within budget, but instrumented repeat1 hits20s during the first post-load pump. Its dismiss snapshot retains that same open diagnostic, not a second timeout. Full-trace boundedness remains in#28; no budget increase is made. |
 | Computed-style refresh cost | Canonical turbo-test commit `fe2b7a4` snapshots the private stylesheet list once per computation, preserving fresh reads on subsequent computed-property access. Officially re-vendored into this branch. | Canonical29 CSS controls and the iframe-owner regression on both rebuilt addons pass, including child CSSOM mutation and poisoned public styleSheets access. The private entry point bypasses document.styleSheets but its provider still uses public querySelectorAll/sheet hooks; those remain in#28. No persistent style cache is added. |
 | Parser resource scan cost | Avoid repeated whole-tree document-order comparisons when the native tree is unchanged; use a native mutation fallback, trusted collection-order snapshot and script-element exclusion. | Default reentrant resource ordering, SVG/uppercase exclusion and poisoned Array.from/iterator controls pass within 29 focused tests across 8 binaries. Native profiling reduces inclusive compareDocumentPosition samples from 2662 to 0; two clean homepage controls complete. The profiled run timed out at that intermediate checkpoint; the later selector-validation build supplies the latest passing measurements. |
 | Inherited computed-style recursion | An isolated control reveals exponential stylesheet scans at nested explicit inherit declarations: depths 3/5/7 produce 248/1016/4088 scans on the older addon. Fresh parent declarations are immediately refreshed again through their live property getters. | Canonical turbo-test commit `e5231a7` reads freshly computed parent backing values once per calculation and is officially re-vendored. All 23 canonical CSS controls pass, including linear scan bounds for inheritance/percentage-width/height chains and six independent Chrome mutation states. Independent adversarial review is clean. The intermediate post-inheritance native build succeeded, but both clean repeats and its profiled run timed out before completing a post-load pump. The bounded recursion regression was fixed, while timeout resolution still needed the later selector-validation repair. |
@@ -68,9 +69,17 @@ results are not counted as passing gates. The bounded fixture warmup and inactiv
 compiler-cache cleanup precede the successful complete retries. Production
 budgets and cold-font performance are unchanged.
 
-A fresh current-source native-cookie consent/search matrix is next. The last
-complete search checkpoint remains0/2 accepted native SERPs; homepage controls
-do not replace that measurement. Exact final-head CI status belongs to the linked PR checks; local records do not
+The fresh current-source consent/search matrix at production commit `88528ae`
+completes all14 processes without a process timeout: **native baseline0/2 accepted
+SERPs, Chrome baseline0/2**. All four native passes save real consent204 before
+native-form search200 and retry to/sorry429, using native cookies and no fallback
+or imported Chrome jar. Both clean native flows stay within the20s hydration
+budget; instrumented repeat1 exhausts it during homepage open with zero completed
+post-load pumps. The sticky dismiss snapshot is the same original diagnostic.
+This leaves intrusive full-trace boundedness open in#28. Chrome is also blocked,
+so this run cannot isolate a native-specific rejection cause. The October16
+Chrome-success checkpoint remains historical below. See [GOOGLE-LAST-RUN.json](./GOOGLE-LAST-RUN.json).
+Exact final-head CI status belongs to the linked PR checks; local records do not
 certify a future CI run. Every broader residual stays in#28; audio stays in#27.
 
 Audited cleanup removed consumed-success test executables in exact reviewed
@@ -80,7 +89,7 @@ default executables (18.06GiB). Only inactive incremental compiler cache was als
 cleared. Hashes/file identity, ignore/tracking state and open handles were checked;
 source, libraries/dependencies, SDKs, frozen evidence binaries and raw logs/profiles
 remain preserved. The final109-file cleanup raised actual free space from11.92GB
-to31.30GB before the default release-addon build.
+to31.30GB before the fresh native release-CLI rebuild.
 
 ## Latest repair status
 
@@ -100,7 +109,7 @@ reading source alone.
 | Native XHR identity and receivers | Independent Chrome control1 + existing HTTP-frame4 pass on both engines; strict and both detector captures pass | Bounded fix validated; broader XHR remains#28 |
 | Interface attribution | Five focused controls and89 detection tests per addon; all20 saved host-frame rows classify runtime in fresh capture | Immediate script-pump misclassification fixed; attribution remains a first-stack heuristic |
 | API inventory | Fresh75-interface Chrome155.80/native155 pair:64 original/142 expanded missing,374 paths, all interfaces measured | Measured; all residual paths tracked in#28 |
-| Google acceptance | Fresh final-source GPU/wreq matrix: native baseline0/2; Chrome9 result markers each | Native consent/forms work; native SERP rejection remains#28 |
+| Google acceptance | October17 source88528ae GPU/wreq matrix: native baseline0/2 and Chrome baseline0/2; all14 processes complete | Native consent/forms work; both baselines rejected, so native-specific cause is unisolated. Acceptance and full-trace budget residual remain#28 |
 
 ### Historical full workspace checkpoint — 2026-10-16
 
@@ -115,11 +124,10 @@ Clippy with `-D warnings`, and formatting. Both rebuilt addons pass95 shim tests
 zero skips, plus2 Python SDK-helper tests. The native addon actually renders the
 shared GPU triangle: pixelHash3630084024 and centerRGBA[128,128,153,255].
 
-The fresh75-interface pair and Google matrix are complete. Full test configurations
-and evidence hashes are saved in [VALIDATION-LAST-RUN.json](./VALIDATION-LAST-RUN.json).
-The fresh [Google summary](./GOOGLE-LAST-RUN.json) records zero native baseline
-SERP successes in two repetitions; completion of the measurement does not mean
-Google accepts the native browser.
+The October16 75-interface pair and search matrix were complete at that checkpoint.
+The current validation report retains those prior counts separately. The current
+[Google summary](./GOOGLE-LAST-RUN.json) is the October17 rerun; both Chrome
+and native baselines are rejected. Neither completed measurement proves acceptance.
 
 ## Earlier PR26 completion checkpoint — 2026-10-16
 
@@ -169,7 +177,7 @@ the issue retains the specific unclosed requirements.
 | Distribution | Stock/native V8 alignment, native patch distribution, layout publication and registry-ready transport/crypto dependencies | #28 |
 | Browser lifecycle | Watchdog/async-op admission recovery, timeout-signal delivery/GC, listener-count release and retained detached-window active-time suspension | #28 |
 | Validation | Broader lifecycle regressions and additional conformance controls beyond the completed default/native/addon gates | #28 |
-| Transport / GPU / Google | Unmeasured wire/rendering differences and reliable native-cookie SERP acceptance; fresh consent/search matrix still rejects native | #28 |
+| Transport / GPU / Google | Unmeasured wire/rendering differences and reliable native-cookie SERP acceptance; October17 consent/search rejects both native and Chrome baselines; intrusive full-trace budget exhaustion remains | #28 |
 | Audio | Realtime/feedback/parameter connections/multichannel/custom waves/oversampling/suspend-resume | [#27](https://github.com/miaskiewicz/turbo-surf/issues/27) |
 
 When an item is finished, record the relevant test/capture and commit before
@@ -454,7 +462,7 @@ No native interface is absent in this75-interface capture. This does not enumera
 | Rendered text | Complete layout-dependent wrapping/line-box behavior beyond native cascade text flow | Canonical visibility/whitespace/break/table/details/setter contracts implemented; fresh native 155 pair has zero differences for the saved probe |
 | Shadow/custom elements | ElementInternals/form association, broader upgrades/reactions and scoped-registry lifecycle | Native slots/manual assignment, closed roots, scoped registries and construction/adoption controls are integrated; ElementInternals and CustomStateSet now pass native behavior/GC controls |
 | CSS parsing/layout | Complete grammar/cascade, Typed OM, animation timelines and transitions | Measured stylesheet policy controls pass; complete CSS behavior is open |
-| Live stylesheet installation | Explain Google's jc/lc reports during actual execution; compare live ownership and rule state | Isolated CSSOM controls pass, but all four final native passes emit both codes before search; Chrome emits neither. Exact constant-code evidence is in GOOGLE-DIAGNOSTICS.json; no rejection cause established |
+| Live stylesheet installation | Explain Google's jc/lc reports during actual execution; compare live ownership and rule state | Isolated CSSOM controls pass. October16 native passes all emit jc/lc before search; the October17 rerun has no selected jc/lc reports in any of8 captures, using a historically positive-controlled extractor. GOOGLE-DIAGNOSTICS.json corrects the earlier consent request/response boundary. Changing telemetry does not establish a semantic fix or rejection cause |
 | Observers | Real Mutation/Resize/Intersection/Performance observer queues and lifecycle | Native MutationObserver semantic records, microtask delivery, options/old values/transients and a private postconnection consumer are integrated. Full mutation lifecycle and Resize/Intersection/Performance queues remain open |
 | Browser lifecycle/resources | Complete parsing/resource scheduling, frame navigation, media and native worker lifecycles | Tested subset only; native workers unsupported |
 | Frames/security | Complete WindowProxy/DOM policies in production SDK, opaque/sandbox navigation behavior | Stronger native proxy profile is experimental; default SDK coverage partial |
@@ -475,7 +483,7 @@ No native interface is absent in this75-interface capture. This does not enumera
 | Input execution | Stop at private input completion, bound synchronous runaway, cancel queued edits | Eight readiness/input regressions have passed profile cohorts. Private bootstrap arguments replace temporary public host globals; the full combined run exposed a termination race during frame setup, fixed with a checked lookup; default and genuine155 final combined gates pass |
 | Classic script errors | Preserve original exceptions, trusted Window reporting and fetched-script load success; mute no-CORS cross-origin reports | Current default main/iframe and CORS controls pass; fresh Chrome155 authored fixture saved. Genuine155 paired audit pending; Window onerror registry and wider error handling in progress |
 | Element event propagation | Include actual Window in native node propagation path with capture/phase/stop/composedPath semantics | Canonical bf2a0ef passes 133 Rust and 63 JS tests, including private generic/Window/Node/Signal collection regressions. Generic EventTarget and AbortSignal listener/handler records are private; direct-target registration order follows fresh Chrome155 controls. Surf integration removes duplicate manual callbacks/DCL and public abort stubs; the earlier integrated native155 gate passed; six current event contracts and final default/native workspace gates pass. Timeout/any, full composed-shadow retargeting and listener exception reporting remain open |
-| Live search | Reliable fresh consent+query+retry acceptance without imported Chrome cookies | Final84d22 executable/origin-fix harness against589d2d3: native baseline0/2, Chrome9 markers each. All four native passes complete/save204 before genuine form/search200→/sorry429 with native cookies and no fallback. All native trace.errors arrays are empty; each stdout log records a reCAPTCHA fetch failure. At that October16 checkpoint, home/dismiss hydration reaches20s. The separate October17 homepage-only repeats above complete within budget. Both instrumented Chrome search passes are rejected, so tracing remains intrusive |
+| Live search | Reliable fresh consent+query+retry acceptance without imported Chrome cookies | October17 source88528ae/native executable537c910b: native baseline0/2 and Chrome baseline0/2. All four native passes complete/save204 before native-form/search200→/sorry429 with native cookies and no fallback. Clean native flows stay within20s; instrumented repeat1 open reaches20s/0 pumps, with the same sticky dismiss diagnostic. Cause remains unisolated because Chrome baselines also fail. October16 Chrome9-marker successes are historical controls |
 | Publishing | Clean registry consumers need compatible published DOM and transport APIs; verify per-platform artifacts | Latest published DOM0.5.6 and layout0.3.7 are distinct from pinned public DOM0.5.7/layout0.3.8 candidates; registry-ready transport APIs, distributable hardened crypto provider and per-platform Surf artifacts remain unresolved |
 
 ## Closure record

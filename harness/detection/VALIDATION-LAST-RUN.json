@@ -1,6 +1,7 @@
 {
   "schemaVersion": 2,
   "capturedDate": "2026-10-17",
+  "productionSourceCommit": "88528aef4ee80274aa38caf43bfc509e126e0e32",
   "scope": "Complete local production-default gate and native155 workspace/addon gates; bounded controls, not complete Chrome conformance or native Google SERP acceptance.",
   "source": {
     "baseCommit": "a057a3a5c8608a430b08e75d94fde99d62a1733e",
@@ -408,6 +409,6 @@
     "native155Passed": 1415,
     "scope": "Historical checkpoint retained in Git; superseded for current local gate counts."
   },
-  "liveMeasurement": "OBSERVABILITY-LAST-RUN.json records homepage-only controls. GOOGLE-LAST-RUN.json remains the prior complete search matrix with0/2 accepted native SERPs.",
+  "liveMeasurement": "GOOGLE-LAST-RUN.json records the fresh current-production consent/search matrix; OBSERVABILITY-LAST-RUN.json separately records scoped homepage performance controls.",
   "rawEvidence": "Private ignored logs, profiles and receipts preserve raw evidence; this report publishes selected relative source paths, counts and hashes only."
 }

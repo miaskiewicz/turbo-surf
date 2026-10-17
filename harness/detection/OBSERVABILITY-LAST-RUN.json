@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "capturedDate": "2026-10-17",
-  "scope": "Fresh Google homepage observability and initial-hydration budget controls only; no consent or search submission.",
+  "scope": "Homepage observability and initial-hydration controls, with separately scoped fresh consent/search outcome references.",
   "chrome": {
     "sourceReceipt": {
       "baseCommit": "a057a3a5c8608a430b08e75d94fde99d62a1733e",
@@ -632,6 +632,25 @@
       }
     }
   },
+  "currentSearchMatrix": {
+    "matrixProcessCount": 14,
+    "allMatrixProcessesExitZeroWithoutTimeout": true,
+    "sourceUnchangedDuringMatrix": true,
+    "sourceHashCount": 56,
+    "receiptSha256": "36bac9a1bb240be064c92b819c3c801a638a048d87af205293c9aec0e7e4c0be",
+    "diagnosticsSha256": "ee92cc0befa4f93f9b4210fa91665ec2f4ebbcf68c62f74ef00ef7bd6bc6fc7b",
+    "productionSourceCommit": "88528aef4ee80274aa38caf43bfc509e126e0e32",
+    "summarySha256": "f6f36cef1f453a72a2de6a188f78cffe133afa71775293cd312dfa38b80a776f",
+    "nativeBaseline": {
+      "captured": 2,
+      "successful": 0
+    },
+    "chromeBaseline": {
+      "captured": 2,
+      "successful": 0
+    },
+    "scope": "Separate fresh consent/search matrix; see GOOGLE-LAST-RUN.json. No packet fingerprint or rejection cause established."
+  },
   "validation": {
     "defaultDiskFailure": {
       "exitCode": 101,
@@ -702,7 +721,7 @@
       "failure": "neutral_at_rules: two 5-second session expression budget errors before behavior assertions; isolated diagnosis pending",
       "fullGatePassed": false
     },
-    "state": "Complete local default/npm and native155 gates pass; current-source consent/search matrix pending",
+    "state": "Complete local default/npm and native155 gates pass; current-source consent/search matrix complete, both native and Chrome baselines rejected",
     "nativeWorkspace": {
       "exitCode": 0,
       "passed": 1423,
@@ -860,8 +879,8 @@
     "CDP and application observations are not packet captures or complete TLS fingerprints.",
     "Native HTTP/2 versus Chrome HTTP/3 is a measured scope difference, not a demonstrated rejection cause.",
     "Clean and profiled execution differ; partial live profiles are not fixed-work benchmarks.",
-    "All four latest native runs reach the500-pump cap; only the three clean runs have a post-verdict pendingWork1 observation. This is not global idle.",
-    "The last complete SERP matrix remains in GOOGLE-LAST-RUN.json: native0/2 accepted; homepage controls do not replace it.",
+    "All four scoped homepage-only performance controls reach the500-pump cap; only the three clean runs have a post-verdict pendingWork1 observation. This is not global idle.",
+    "The October17 current-source consent/search matrix in GOOGLE-LAST-RUN.json records native0/2 and Chrome0/2 accepted baselines. Both clean native flows stay within20s; one instrumented homepage open exhausts20s before completing a pump, and dismiss retains that same open diagnostic. This confounded rejection comparison does not isolate a native-specific cause.",
     "Raw captures, source URLs, bodies, cookies, request IDs, certificates and absolute timestamps remain private."
   ]
 }

@@ -11,6 +11,13 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Reusable diagnostics and browser identity
 
+- Record the source-pinned October17 consent/search rerun: all14 processes finish;
+  native and Chrome baselines both accept0/2 SERPs. Native consent204 and genuine
+  form navigation work without imported cookies or fallback. Clean native flows
+  stay within20s, while one instrumented homepage open exhausts it; its repeated
+  dismiss diagnostic is the same event. Keep full-trace boundedness and reliable
+  acceptance open in issue28, without inferring a rejection cause.
+
 - Pin authored probe/control line endings to LF so source-hash controls remain
   reproducible on Windows. Preserve the licensed XPath provider's original bytes.
 - Retain Chrome response protocol, TLS/security, timing, connection and cache

@@ -278,8 +278,13 @@ can contain session secrets; keep raw artifacts local.
 default/native workspace and addon results, configurations and evidence hashes.
 It covers the tested contracts, rather than complete Chrome conformance.
 [GOOGLE-DIAGNOSTICS.json](./GOOGLE-DIAGNOSTICS.json) separately records constant
-stylesheet telemetry codes and stdout/stderr counts from the latest capture;
-these are distinct from the structured `trace.errors` array.
+stylesheet telemetry codes and stdout/stderr counts with an explicit capture date;
+these are distinct from the structured `trace.errors` array. Historical telemetry
+is retained separately when the next live page takes a different execution path.
+The October17 consent/search matrix rejects both native and Chrome baselines.
+Clean native flows stay within20s; one instrumented open exhausts that budget,
+and the dismiss snapshot retains the same diagnostic. See [the parity checklist](./PARITY-GAPS.md)
+for the full-trace budget and acceptance residuals.
 
 - `manifest.json`: checkout commit/branch, dirty diff hash, executable hash/mtime,
   harness hashes, complete streamed dirty-diff hash and untracked source hashes, actual native build diagnostics, per-process exit/timeout status. This records provenance; rebuild

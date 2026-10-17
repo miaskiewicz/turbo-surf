@@ -1,178 +1,167 @@
 {
   "schemaVersion": 1,
-  "captureBaseCommit": "589d2d30df30f9d36bfd9952082285c6847b6f5d",
-  "dirtyDiffHash": "3c44b253d3ec52c521d9fcb52dfbf148669d3027f6eb4d44d9dba6340702c451",
-  "binarySha256": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50",
-  "interfaceTracerSha256": "0a43b414acde5bd3cd8e0b3eabc1c21ac544c22928f9cdbff63ca2e640f39caf",
-  "scope": "Selected constant diagnostic codes/counts only. Empty trace.errors does not exclude stdout diagnostics or Google error-report requests. No rejection cause established.",
+  "captureBaseCommit": "88528aef4ee80274aa38caf43bfc509e126e0e32",
+  "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "binarySha256": "537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47",
+  "interfaceTracerSha256": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc",
+  "scope": "Selected fixed jc/lc diagnostic code counts only. No payloads, query values, cookies or raw URLs are published. No rejection cause established. Trace arrays and process diagnostics are separate scopes.",
+  "extractionRule": "Only www.google.com and exact /gen_204 or /httpservice/retry/jserror routes; decoded error query field must contain standalone fixed jc/lc token. Responses joined by native id or Chrome requestId.",
+  "orderingDefinition": "Historical afterConsentBeforeSearch means after the /save REQUEST and before first /search REQUEST; it does not mean after consent response completion. The standard summary separately proves /save204 response before search.",
+  "historicalOrderingCaveat": "The four selected historical repeat-0 native baseline jc/lc report requests precede the /save response; the old field cannot be read as after consent response completion.",
+  "historicalOrderingControl": {
+    "run": "repeat-0/native-baseline",
+    "selectedFixedCodeRequestCount": 4,
+    "allAfterSaveRequest": true,
+    "allBeforeSaveResponse": true,
+    "scope": "Historical request-boundary evidence only; not a claim that telemetry followed consent response completion."
+  },
+  "extractorSha256": "a90ecf3f509397f33af2089ac62460a2fc7fa5e532c582a15835b0eb37ef22d1",
+  "priorControl": {
+    "inputSummarySha256": "5070d0bb20b2cc1ec50c30575fa7d77f356b6912efbe7451cf6a79f75fd38065",
+    "eightRunControl": [
+      {
+        "run": "repeat-0/chrome-baseline",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "d2b258eb13b4df52f6ccb517a65903b6ef351f67d108c1e64d2e39652616ad22"
+      },
+      {
+        "run": "repeat-0/chrome-interfaces",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "2c5ec8fb3e08c479be3bcc261ee87c908869661a90d58465339d51d37fae16c5"
+      },
+      {
+        "run": "repeat-0/native-baseline",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "fe0e59e7253904a4a61b58cd7c11008c0c0fc49e809d8a4bbcad30be021ec85e"
+      },
+      {
+        "run": "repeat-0/native-interfaces",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "4f3b950fbd836a17e7c7fa424dae7eb88bf613f1b5f4371c479c9102b11f0171"
+      },
+      {
+        "run": "repeat-1/chrome-baseline",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "7198eb584d48c2fc06cbef7610537501ddec35b1ef03ba22526e377bd8a8dbda"
+      },
+      {
+        "run": "repeat-1/chrome-interfaces",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "3e1b79a149b639cf1367646757d9ed833cc5ef3c7025d729e305f2fc239f2ccb"
+      },
+      {
+        "run": "repeat-1/native-baseline",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "0ee6598aefcbbaeda121c76fb2cc1c8bc1bb9b94b129ea7e8b6cba517c4bf99d"
+      },
+      {
+        "run": "repeat-1/native-interfaces",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "95c443cf0d508f8182384bcf530bc45422695df7923814fd3fae2a22fb300a68"
+      }
+    ]
+  },
   "runs": [
     {
       "run": "repeat-0/chrome-baseline",
-      "traceSha256": "d2b258eb13b4df52f6ccb517a65903b6ef351f67d108c1e64d2e39652616ad22",
-      "recordedErrorCount": 0,
+      "traceSha256": "428c136d2982e90d9f5f948ee6abb6259774e1e75bc0f5f3167073f4a24e748c",
+      "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
-      "stylesheetTelemetry": []
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
     },
     {
       "run": "repeat-0/chrome-interfaces",
-      "traceSha256": "2c5ec8fb3e08c479be3bcc261ee87c908869661a90d58465339d51d37fae16c5",
+      "traceSha256": "b5f3d086e24393fc1adea9e157f3afcc4138832ddc6fb9fef2872e5fdb5ed48a",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
-      "stylesheetTelemetry": []
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
     },
     {
       "run": "repeat-0/native-baseline",
-      "traceSha256": "fe0e59e7253904a4a61b58cd7c11008c0c0fc49e809d8a4bbcad30be021ec85e",
+      "traceSha256": "649c8fad8f197dfcffdc1f230a8545758828f8ea318d15d522e61f435748d816",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
-      "stylesheetTelemetry": [
-        {
-          "code": "jc",
-          "route": "/gen_204",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "jc",
-          "route": "/httpservice/retry/jserror",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "lc",
-          "route": "/gen_204",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "lc",
-          "route": "/httpservice/retry/jserror",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        }
-      ],
-      "networkSha256": "5f1f2b585444162cc23ced68d229f20fd81edc3fe2a113f1ed1041ec8443a857"
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "0ea23aa2f55109a8a5de7328dc3f87146f0f0507ac9a7cf3e78252ea59fb1b3b"
     },
     {
       "run": "repeat-0/native-interfaces",
-      "traceSha256": "4f3b950fbd836a17e7c7fa424dae7eb88bf613f1b5f4371c479c9102b11f0171",
+      "traceSha256": "90f51d40eeeff2bfccf2e089db62870336be2d52bd34f8c048931128d547ae87",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
-      "stylesheetTelemetry": [
-        {
-          "code": "jc",
-          "route": "/gen_204",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "jc",
-          "route": "/httpservice/retry/jserror",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "lc",
-          "route": "/gen_204",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "lc",
-          "route": "/httpservice/retry/jserror",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        }
-      ],
-      "networkSha256": "ef325317b5605f0c0e01bbb0fa27d59ea777f701fe60bc19a98e172b095dbea9"
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "c8d23817b361d03f890ac40f0bb8370757ae77d361bb8e9f83acdd06a06748a1"
     },
     {
       "run": "repeat-1/chrome-baseline",
-      "traceSha256": "7198eb584d48c2fc06cbef7610537501ddec35b1ef03ba22526e377bd8a8dbda",
-      "recordedErrorCount": 0,
+      "traceSha256": "5084cd27b189c203febb5ab2ec652b59390b8c9c58c5d695a19fd7a24420ef8d",
+      "recordedErrorCount": 2,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
-      "stylesheetTelemetry": []
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
     },
     {
       "run": "repeat-1/chrome-interfaces",
-      "traceSha256": "3e1b79a149b639cf1367646757d9ed833cc5ef3c7025d729e305f2fc239f2ccb",
+      "traceSha256": "bcf013b48285af5fedf3a6c316bcfeb501f1a87a2da415043441fc3213881b57",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
-      "stylesheetTelemetry": []
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
     },
     {
       "run": "repeat-1/native-baseline",
-      "traceSha256": "0ee6598aefcbbaeda121c76fb2cc1c8bc1bb9b94b129ea7e8b6cba517c4bf99d",
+      "traceSha256": "0ef2328fefe4ac7bdd5810a73f522bf733b32735b2703e80a2b9d542cc56de70",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
-      "stylesheetTelemetry": [
-        {
-          "code": "jc",
-          "route": "/gen_204",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "jc",
-          "route": "/httpservice/retry/jserror",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "lc",
-          "route": "/gen_204",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "lc",
-          "route": "/httpservice/retry/jserror",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        }
-      ],
-      "networkSha256": "7470ae37c7509009158045d26e3d1e20af75c125ffbfffc32f7d9c7d2bde9868"
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "b22f3b43e3c72131662c63be556331fbc012cdc12ad31fd50c52bb47f37a1ffb"
     },
     {
       "run": "repeat-1/native-interfaces",
-      "traceSha256": "95c443cf0d508f8182384bcf530bc45422695df7923814fd3fae2a22fb300a68",
+      "traceSha256": "89439275c1b564bcc8c8186ee6a5d20e40528e6c96de672c143aa12e22c7d8e0",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
-      "stylesheetTelemetry": [
-        {
-          "code": "jc",
-          "route": "/gen_204",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "jc",
-          "route": "/httpservice/retry/jserror",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "lc",
-          "route": "/gen_204",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        },
-        {
-          "code": "lc",
-          "route": "/httpservice/retry/jserror",
-          "status": 204,
-          "afterConsentBeforeSearch": true
-        }
-      ],
-      "networkSha256": "8cb81de71178730a674f3c223642682bb138a5db9f03584965b2eb484fca87d7"
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "d045106b07c4629e3ebd55cc82c99ce722493c3d244b083033681dbdfcac373e"
     }
-  ]
+  ],
+  "capturedDate": "2026-10-17"
 }

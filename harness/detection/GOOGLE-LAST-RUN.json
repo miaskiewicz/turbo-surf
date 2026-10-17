@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 3,
-  "collectedAt": "2026-10-16T18:32:46.343Z",
-  "baseCommit": "589d2d30df30f9d36bfd9952082285c6847b6f5d",
-  "dirtyDiffHash": "3c44b253d3ec52c521d9fcb52dfbf148669d3027f6eb4d44d9dba6340702c451",
-  "binaryHash": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50",
+  "schemaVersion": 4,
+  "collectedAt": "2026-10-17T03:27:16.477Z",
+  "baseCommit": "88528aef4ee80274aa38caf43bfc509e126e0e32",
+  "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "binaryHash": "537c910bc850896b62925d896e4ca7108b1bd35c5df44ab34bb54e940e16ea47",
   "build": {
     "version": "0.5.4",
     "debugAssertions": false,
@@ -23,15 +23,16 @@
     }
   },
   "harnessHashes": {
-    "run.mjs": "5222da3de26cb5faef712bcbefa477ac539012a5dc2adb7815cf9d49a350c36c",
-    "chrome-trace.mjs": "0b274768d9505cfcbaee162c0307f4cf85740efd0806154f3c1d7e11ad5d712a",
-    "chrome-cdp-trace.mjs": "ae27ad725fe0fa3d03e9311813895bc38eae384c66bb0b49c0a121f702177c34",
+    "run.mjs": "ca8fef9ff00b2692addb14dbb608e700ebc1b61ff074b4a052c3fc7a48d708df",
+    "chrome-trace.mjs": "4acb9fef7dd1ba1d98cd98c9ab735e824d399b5d78efc7e761c705abac28aeca",
+    "chrome-cdp-trace.mjs": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15",
     "cdp-connection.mjs": "7b9f522db23484f79575ee46cf320277a4a516de53becba1eef5730d5a5549a0",
-    "interface-trace.js": "0a43b414acde5bd3cd8e0b3eabc1c21ac544c22928f9cdbff63ca2e640f39caf",
+    "interface-trace.js": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc",
     "capabilities.js": "787246288936c57d61b5ad4920ed69184891d38e79908cdcf4ca45b831092b84",
     "api-shape.js": "21d5aafbdf94c61e6f8a7216b51d448b750ff099688e1a26ff9c3d31e1975bae",
-    "compare.mjs": "b07cda7cf11beb6f9ce6a337d6ddfbf4f38797237c2b471df35f12b72200d2d7",
-    "protocol-headers.mjs": "353fcfb1ee19cbb16f4dc62d7e2e86a42156b57d063ec49c66b3148853c9b1c5",
+    "compare.mjs": "4a1f3a0984045e76c3cdc3b4ea94684256011126b56280a2d31d11b539ed82c7",
+    "protocol-headers.mjs": "763b85da53476f6352dfd6e2dbaed07eb2571b2bca4fe7f934b165ae9da5b5e1",
+    "chrome-network-metadata.mjs": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2",
     "checkout-provenance.mjs": "48ba6b48298454542d134055d4560c7d380962f27d7d98695ccdf8e11373a6a2"
   },
   "repeats": 2,
@@ -46,8 +47,59 @@
       "timedOut": false,
       "traceMissing": false,
       "collectorComplete": null,
-      "recordedErrorCount": 0,
-      "traceSha256": "d2b258eb13b4df52f6ccb517a65903b6ef351f67d108c1e64d2e39652616ad22",
+      "recordedErrorCount": 1,
+      "responseTransport": {
+        "source": "cdp-response",
+        "packetCapture": false,
+        "responses": 107,
+        "observed": 107,
+        "unknown": 0,
+        "protocols": {
+          "h2": 11,
+          "h3": 81,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 15,
+          "unknown": 0
+        },
+        "tlsProtocols": {
+          "TLS 1.2": 0,
+          "TLS 1.3": 11,
+          "QUIC": 81,
+          "other": 0,
+          "unknown": 15
+        },
+        "securityDetails": {
+          "present": 92,
+          "missing": 15
+        },
+        "timing": {
+          "present": 91,
+          "missing": 16
+        },
+        "connectionReused": {
+          "true": 74,
+          "false": 33,
+          "unknown": 0
+        },
+        "fromDiskCache": {
+          "true": 3,
+          "false": 104,
+          "unknown": 0
+        },
+        "fromServiceWorker": {
+          "true": 0,
+          "false": 107,
+          "unknown": 0
+        }
+      },
+      "networkCoverage": {
+        "source": "cdp-network",
+        "scope": "attached-target-sessions",
+        "enabledInBaseline": true,
+        "packetCapture": false
+      },
+      "traceSha256": "428c136d2982e90d9f5f948ee6abb6259774e1e75bc0f5f3167073f4a24e748c",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -95,6 +147,16 @@
             "__Secure-BUCKET",
             "__Secure-ENID"
           ]
+        },
+        {
+          "path": "/sorry/index",
+          "method": "GET",
+          "context": {
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -104,6 +166,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         },
@@ -113,6 +179,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -122,6 +192,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -131,6 +205,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -140,6 +218,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -149,6 +231,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -158,33 +244,38 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "step-5",
-          "path": "/",
+          "path": "/search",
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "search",
-          "path": "/search",
+          "path": "/sorry/index",
           "origin": "https://www.google.com",
-          "results": 9,
+          "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "DV",
-            "SEARCH_SAMESITE",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ]
     },
@@ -194,7 +285,28 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "fe0e59e7253904a4a61b58cd7c11008c0c0fc49e809d8a4bbcad30be021ec85e",
+      "responseTransport": {
+        "source": "native-application-response",
+        "responses": 58,
+        "observed": 58,
+        "unknown": 0,
+        "protocols": {
+          "h2": 58,
+          "h3": 0,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 0,
+          "unknown": 0
+        },
+        "tlsDetails": "not-collected",
+        "packetCapture": false
+      },
+      "networkCoverage": {
+        "source": "native-application-response",
+        "scope": "native-network-stack",
+        "packetCapture": false
+      },
+      "traceSha256": "649c8fad8f197dfcffdc1f230a8545758828f8ea318d15d522e61f435748d816",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -270,7 +382,11 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": true,
+          "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 500
+          },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         },
@@ -282,7 +398,11 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": true,
+          "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 500
+          },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -295,6 +415,10 @@
           "nativeNavigationCount": 1,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": true,
           "cookieNames": [
             "AEC",
@@ -314,6 +438,10 @@
           "nativeNavigationCount": 1,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": true,
           "cookieNames": [
             "AEC",
@@ -333,6 +461,10 @@
           "nativeNavigationCount": 0,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": false,
           "cookieNames": [
             "AEC",
@@ -351,7 +483,58 @@
       "traceMissing": false,
       "collectorComplete": null,
       "recordedErrorCount": 1,
-      "traceSha256": "2c5ec8fb3e08c479be3bcc261ee87c908869661a90d58465339d51d37fae16c5",
+      "responseTransport": {
+        "source": "cdp-response",
+        "packetCapture": false,
+        "responses": 103,
+        "observed": 103,
+        "unknown": 0,
+        "protocols": {
+          "h2": 11,
+          "h3": 80,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 12,
+          "unknown": 0
+        },
+        "tlsProtocols": {
+          "TLS 1.2": 0,
+          "TLS 1.3": 11,
+          "QUIC": 80,
+          "other": 0,
+          "unknown": 12
+        },
+        "securityDetails": {
+          "present": 91,
+          "missing": 12
+        },
+        "timing": {
+          "present": 90,
+          "missing": 13
+        },
+        "connectionReused": {
+          "true": 72,
+          "false": 31,
+          "unknown": 0
+        },
+        "fromDiskCache": {
+          "true": 3,
+          "false": 100,
+          "unknown": 0
+        },
+        "fromServiceWorker": {
+          "true": 0,
+          "false": 103,
+          "unknown": 0
+        }
+      },
+      "networkCoverage": {
+        "source": "cdp-network",
+        "scope": "attached-target-sessions",
+        "enabledInBaseline": true,
+        "packetCapture": false
+      },
+      "traceSha256": "b5f3d086e24393fc1adea9e157f3afcc4138832ddc6fb9fef2872e5fdb5ed48a",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -418,6 +601,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         },
@@ -427,6 +614,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -436,6 +627,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -445,6 +640,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -454,6 +653,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -463,6 +666,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -472,6 +679,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -481,6 +692,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -490,6 +705,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
@@ -501,7 +720,28 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "4f3b950fbd836a17e7c7fa424dae7eb88bf613f1b5f4371c479c9102b11f0171",
+      "responseTransport": {
+        "source": "native-application-response",
+        "responses": 53,
+        "observed": 53,
+        "unknown": 0,
+        "protocols": {
+          "h2": 53,
+          "h3": 0,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 0,
+          "unknown": 0
+        },
+        "tlsDetails": "not-collected",
+        "packetCapture": false
+      },
+      "networkCoverage": {
+        "source": "native-application-response",
+        "scope": "native-network-stack",
+        "packetCapture": false
+      },
+      "traceSha256": "90f51d40eeeff2bfccf2e089db62870336be2d52bd34f8c048931128d547ae87",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -577,7 +817,11 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": true,
+          "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 500
+          },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         },
@@ -589,7 +833,11 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": true,
+          "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 500
+          },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -602,6 +850,10 @@
           "nativeNavigationCount": 1,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": true,
           "cookieNames": [
             "AEC",
@@ -621,6 +873,10 @@
           "nativeNavigationCount": 1,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": true,
           "cookieNames": [
             "AEC",
@@ -640,6 +896,10 @@
           "nativeNavigationCount": 0,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": false,
           "cookieNames": [
             "AEC",
@@ -657,8 +917,59 @@
       "timedOut": false,
       "traceMissing": false,
       "collectorComplete": null,
-      "recordedErrorCount": 0,
-      "traceSha256": "7198eb584d48c2fc06cbef7610537501ddec35b1ef03ba22526e377bd8a8dbda",
+      "recordedErrorCount": 2,
+      "responseTransport": {
+        "source": "cdp-response",
+        "packetCapture": false,
+        "responses": 104,
+        "observed": 104,
+        "unknown": 0,
+        "protocols": {
+          "h2": 11,
+          "h3": 79,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 14,
+          "unknown": 0
+        },
+        "tlsProtocols": {
+          "TLS 1.2": 0,
+          "TLS 1.3": 11,
+          "QUIC": 79,
+          "other": 0,
+          "unknown": 14
+        },
+        "securityDetails": {
+          "present": 90,
+          "missing": 14
+        },
+        "timing": {
+          "present": 89,
+          "missing": 15
+        },
+        "connectionReused": {
+          "true": 71,
+          "false": 33,
+          "unknown": 0
+        },
+        "fromDiskCache": {
+          "true": 3,
+          "false": 101,
+          "unknown": 0
+        },
+        "fromServiceWorker": {
+          "true": 0,
+          "false": 104,
+          "unknown": 0
+        }
+      },
+      "networkCoverage": {
+        "source": "cdp-network",
+        "scope": "attached-target-sessions",
+        "enabledInBaseline": true,
+        "packetCapture": false
+      },
+      "traceSha256": "5084cd27b189c203febb5ab2ec652b59390b8c9c58c5d695a19fd7a24420ef8d",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -706,6 +1017,16 @@
             "__Secure-BUCKET",
             "__Secure-ENID"
           ]
+        },
+        {
+          "path": "/sorry/index",
+          "method": "GET",
+          "context": {
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -715,6 +1036,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         },
@@ -724,6 +1049,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -733,6 +1062,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -742,6 +1075,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -751,6 +1088,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -760,6 +1101,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -769,33 +1114,38 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "step-5",
-          "path": "/",
+          "path": "/search",
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "search",
-          "path": "/search",
+          "path": "/sorry/index",
           "origin": "https://www.google.com",
-          "results": 9,
+          "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "DV",
-            "SEARCH_SAMESITE",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
       ]
     },
@@ -805,7 +1155,28 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "0ee6598aefcbbaeda121c76fb2cc1c8bc1bb9b94b129ea7e8b6cba517c4bf99d",
+      "responseTransport": {
+        "source": "native-application-response",
+        "responses": 57,
+        "observed": 57,
+        "unknown": 0,
+        "protocols": {
+          "h2": 57,
+          "h3": 0,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 0,
+          "unknown": 0
+        },
+        "tlsDetails": "not-collected",
+        "packetCapture": false
+      },
+      "networkCoverage": {
+        "source": "native-application-response",
+        "scope": "native-network-stack",
+        "packetCapture": false
+      },
+      "traceSha256": "0ef2328fefe4ac7bdd5810a73f522bf733b32735b2703e80a2b9d542cc56de70",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -881,7 +1252,11 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": true,
+          "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 500
+          },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         },
@@ -893,7 +1268,11 @@
           "results": 0,
           "nativeNavigationCount": 0,
           "readyState": "complete",
-          "hydrationBudgetExceeded": true,
+          "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 500
+          },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -906,6 +1285,10 @@
           "nativeNavigationCount": 1,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": true,
           "cookieNames": [
             "AEC",
@@ -925,6 +1308,10 @@
           "nativeNavigationCount": 1,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": true,
           "cookieNames": [
             "AEC",
@@ -944,6 +1331,10 @@
           "nativeNavigationCount": 0,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": false,
           "cookieNames": [
             "AEC",
@@ -962,7 +1353,58 @@
       "traceMissing": false,
       "collectorComplete": null,
       "recordedErrorCount": 1,
-      "traceSha256": "3e1b79a149b639cf1367646757d9ed833cc5ef3c7025d729e305f2fc239f2ccb",
+      "responseTransport": {
+        "source": "cdp-response",
+        "packetCapture": false,
+        "responses": 107,
+        "observed": 107,
+        "unknown": 0,
+        "protocols": {
+          "h2": 11,
+          "h3": 82,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 14,
+          "unknown": 0
+        },
+        "tlsProtocols": {
+          "TLS 1.2": 0,
+          "TLS 1.3": 11,
+          "QUIC": 82,
+          "other": 0,
+          "unknown": 14
+        },
+        "securityDetails": {
+          "present": 93,
+          "missing": 14
+        },
+        "timing": {
+          "present": 92,
+          "missing": 15
+        },
+        "connectionReused": {
+          "true": 74,
+          "false": 33,
+          "unknown": 0
+        },
+        "fromDiskCache": {
+          "true": 3,
+          "false": 104,
+          "unknown": 0
+        },
+        "fromServiceWorker": {
+          "true": 0,
+          "false": 107,
+          "unknown": 0
+        }
+      },
+      "networkCoverage": {
+        "source": "cdp-network",
+        "scope": "attached-target-sessions",
+        "enabledInBaseline": true,
+        "packetCapture": false
+      },
+      "traceSha256": "bcf013b48285af5fedf3a6c316bcfeb501f1a87a2da415043441fc3213881b57",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1029,6 +1471,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         },
@@ -1038,6 +1484,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -1047,6 +1497,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -1056,6 +1510,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -1065,6 +1523,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -1074,6 +1536,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -1083,6 +1549,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -1092,15 +1562,12 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
         {
           "phase": "search",
@@ -1108,6 +1575,10 @@
           "origin": "https://www.google.com",
           "results": 0,
           "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
           "pendingNavigation": null,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         }
@@ -1119,7 +1590,28 @@
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "95c443cf0d508f8182384bcf530bc45422695df7923814fd3fae2a22fb300a68",
+      "responseTransport": {
+        "source": "native-application-response",
+        "responses": 50,
+        "observed": 50,
+        "unknown": 0,
+        "protocols": {
+          "h2": 50,
+          "h3": 0,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 0,
+          "unknown": 0
+        },
+        "tlsDetails": "not-collected",
+        "packetCapture": false
+      },
+      "networkCoverage": {
+        "source": "native-application-response",
+        "scope": "native-network-stack",
+        "packetCapture": false
+      },
+      "traceSha256": "89439275c1b564bcc8c8186ee6a5d20e40528e6c96de672c143aa12e22c7d8e0",
       "startOrigin": "https://www.google.com",
       "formFallbackDisabled": true,
       "formFallbackUsed": false,
@@ -1196,6 +1688,10 @@
           "nativeNavigationCount": 0,
           "readyState": "complete",
           "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         },
@@ -1208,6 +1704,10 @@
           "nativeNavigationCount": 0,
           "readyState": "complete",
           "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
           "pendingNavigation": false,
           "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
         },
@@ -1220,6 +1720,10 @@
           "nativeNavigationCount": 1,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": true,
           "cookieNames": [
             "AEC",
@@ -1239,6 +1743,10 @@
           "nativeNavigationCount": 1,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": true,
           "cookieNames": [
             "AEC",
@@ -1258,6 +1766,10 @@
           "nativeNavigationCount": 0,
           "readyState": "complete",
           "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
           "pendingNavigation": false,
           "cookieNames": [
             "AEC",

@@ -1,0 +1,207 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "54bb558e8f35807b4124aaa94182f4f0ada8dd19cfea7e63e7cafebcb4dc2e98",
+  "collectorSha256": "109f610c1acc4696bf090b5fa44a3c8414123fec7f352411ced33eedd9531d48",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "full": [
+      {
+        "status": 200,
+        "body": "abcdefghij",
+        "count": "1",
+        "range": null
+      },
+      {
+        "error": "TypeError"
+      },
+      {
+        "error": "TypeError"
+      },
+      {
+        "error": "TypeError"
+      },
+      {
+        "error": "TypeError"
+      },
+      {
+        "status": 200,
+        "body": "abcdefghij",
+        "count": "1",
+        "range": null
+      }
+    ],
+    "fullRange": [
+      {
+        "status": 200,
+        "body": "abcdefghij",
+        "count": "1",
+        "range": null
+      },
+      {
+        "status": 206,
+        "body": "cdef",
+        "count": "1",
+        "range": "bytes 2-5/10"
+      },
+      {
+        "status": 206,
+        "body": "cdef",
+        "count": "1",
+        "range": "bytes 2-5/10"
+      },
+      {
+        "error": "TypeError"
+      }
+    ],
+    "partial": [
+      {
+        "status": 206,
+        "body": "abcd",
+        "count": "1",
+        "range": "bytes 0-3/10"
+      },
+      {
+        "status": 206,
+        "body": "abcd",
+        "count": "1",
+        "range": "bytes 0-3/10"
+      },
+      {
+        "error": "TypeError"
+      },
+      {
+        "status": 206,
+        "body": "efghij",
+        "count": "2",
+        "range": "bytes 4-9/10"
+      },
+      {
+        "error": "TypeError"
+      }
+    ],
+    "partialFull": [
+      {
+        "status": 206,
+        "body": "abcd",
+        "count": "1",
+        "range": "bytes 0-3/10"
+      },
+      {
+        "status": 206,
+        "body": "efghij",
+        "count": "2",
+        "range": "bytes 4-9/10"
+      },
+      {
+        "status": 200,
+        "body": "abcdefghij",
+        "count": "2",
+        "range": null
+      },
+      {
+        "error": "TypeError"
+      }
+    ],
+    "overlap": [
+      {
+        "status": 206,
+        "body": "abcd",
+        "count": "1",
+        "range": "bytes 0-3/10"
+      },
+      {
+        "status": 206,
+        "body": "cdefg",
+        "count": "1",
+        "range": "bytes 2-6/10"
+      },
+      {
+        "error": "TypeError"
+      }
+    ],
+    "purge-omit": {
+      "status": 200,
+      "body": "{\"count\":1,\"conditional\":null,\"cacheControl\":null,\"pragma\":null,\"vary\":null,\"referer\":true}",
+      "count": "1",
+      "range": null
+    },
+    "purge-same-origin": {
+      "error": "TypeError"
+    },
+    "purge-include": {
+      "error": "TypeError"
+    },
+    "types-cache": {
+      "status": 200,
+      "body": "{\"count\":1,\"conditional\":null,\"cacheControl\":null,\"pragma\":null,\"vary\":null,\"referer\":true}",
+      "count": "1",
+      "range": null
+    },
+    "types-\"unknown\"": {
+      "status": 200,
+      "body": "{\"count\":1,\"conditional\":null,\"cacheControl\":null,\"pragma\":null,\"vary\":null,\"referer\":true}",
+      "count": "1",
+      "range": null
+    },
+    "types-\"*\"": {
+      "error": "TypeError"
+    },
+    "ancestor": ["1", "1"],
+    "classic": [1, 1],
+    "style": "1px",
+    "image": 1,
+    "modules": [1, 1]
+  },
+  "requests": [
+    {
+      "url": "/range/full",
+      "range": null,
+      "ifRange": null
+    },
+    {
+      "url": "/range/full-range",
+      "range": null,
+      "ifRange": null
+    },
+    {
+      "url": "/range/partial",
+      "range": "bytes=0-3",
+      "ifRange": null
+    },
+    {
+      "url": "/range/partial",
+      "range": "bytes=4-9",
+      "ifRange": "\"range\""
+    },
+    {
+      "url": "/range/partial-full",
+      "range": "bytes=0-3",
+      "ifRange": null
+    },
+    {
+      "url": "/range/partial-full",
+      "range": "bytes=4-9",
+      "ifRange": "\"range\""
+    },
+    {
+      "url": "/range/overlap",
+      "range": "bytes=0-3",
+      "ifRange": null
+    },
+    {
+      "url": "/range/overlap",
+      "range": "bytes=4-6",
+      "ifRange": "\"range\""
+    }
+  ]
+}

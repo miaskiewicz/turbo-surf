@@ -1,0 +1,964 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "cae1f61e9f8817e53b56ff6ef2d957229e5b672fe3f8e777bad56595da3a8234",
+  "probeSha256": "a98fde510338480d2a5c3972e8b46ff37f6e3ce7b4997b69e1347ed5d182563b",
+  "collectorSha256": "d258e82d4b79e3752baa6d87b5eb6b76773d0ed881ab387d74d541c4d969ab64",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "1",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": true,
+          "invalid": false,
+          "list": ["*"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": false,
+          "own": false,
+          "foreign": true,
+          "invalid": false,
+          "list": ["https://foreign.test"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": true,
+          "invalid": false,
+          "list": ["<origin>", "https://foreign.test"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": ["http://127.0.0.1:123"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": true,
+          "invalid": false,
+          "list": ["*"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": true,
+          "invalid": false,
+          "list": ["*"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "14",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "15",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "16",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": true,
+          "invalid": false,
+          "list": ["*"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "17",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "18",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "19",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    },
+    {
+      "id": "20",
+      "result": [
+        {
+          "name": "geolocation",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "camera",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "cross-origin-isolated",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "autoplay",
+          "allowed": true,
+          "own": true,
+          "foreign": false,
+          "invalid": false,
+          "list": ["<origin>"]
+        },
+        {
+          "name": "unknown-feature",
+          "allowed": false,
+          "own": false,
+          "foreign": false,
+          "invalid": false,
+          "list": []
+        }
+      ]
+    }
+  ]
+}

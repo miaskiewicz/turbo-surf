@@ -1,0 +1,32 @@
+{
+  "collectedAt": "2026-10-14T01:36:06.593Z",
+  "browserVersion": "Chrome/155.0.8059.79",
+  "browserV8Version": "15.5.35.23",
+  "effectiveExtensionFlags": ["--disable-extensions"],
+  "collectorSha256": "97573605710c30393aeeb4b1dcda03ee75652ca89040bac8139f984a35bf8c60",
+  "result": {
+    "defaults": ["SOURCE/page?authored=value", null],
+    "policies": {
+      "no-referrer": [null, null],
+      "no-referrer-when-downgrade": ["SOURCE/page?authored=value", "SOURCE/page?authored=value"],
+      "same-origin": ["SOURCE/page?authored=value", null],
+      "origin": ["SOURCE/", "SOURCE/"],
+      "strict-origin": ["SOURCE/", "SOURCE/"],
+      "origin-when-cross-origin": ["SOURCE/page?authored=value", "SOURCE/"],
+      "strict-origin-when-cross-origin": ["SOURCE/page?authored=value", "SOURCE/"],
+      "unsafe-url": ["SOURCE/page?authored=value", "SOURCE/page?authored=value"]
+    },
+    "redirects": {
+      "no-referrer": null,
+      "origin": "SOURCE/",
+      "unsafe-url": "SOURCE/page?authored=value",
+      "invalid": "SOURCE/page?authored=value"
+    },
+    "referrer": {
+      "": null,
+      "about:client": "SOURCE/page?authored=value",
+      "SOURCE/authored?token=value#fragment": "SOURCE/authored?token=value",
+      "CROSS/foreign": "SOURCE/page?authored=value"
+    }
+  }
+}

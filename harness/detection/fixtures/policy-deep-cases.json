@@ -1,0 +1,122 @@
+[
+  {
+    "id": "0",
+    "headers": [],
+    "childHeaders": [],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": false,
+    "innerCross": false
+  },
+  {
+    "id": "1",
+    "headers": [],
+    "childHeaders": [],
+    "outerAllow": "geolocation 'none'",
+    "innerAllow": "geolocation *",
+    "outerCross": false,
+    "innerCross": false
+  },
+  {
+    "id": "2",
+    "headers": [],
+    "childHeaders": [],
+    "outerAllow": null,
+    "innerAllow": "camera 'none'; autoplay 'none'",
+    "outerCross": false,
+    "innerCross": false
+  },
+  {
+    "id": "3",
+    "headers": [["Permissions-Policy", "geolocation=()"]],
+    "childHeaders": [],
+    "outerAllow": "geolocation *",
+    "innerAllow": "geolocation *",
+    "outerCross": false,
+    "innerCross": false
+  },
+  {
+    "id": "4",
+    "headers": [],
+    "childHeaders": [["Permissions-Policy", "camera=()"]],
+    "outerAllow": "camera *",
+    "innerAllow": "camera *",
+    "outerCross": false,
+    "innerCross": false
+  },
+  {
+    "id": "5",
+    "headers": [],
+    "childHeaders": [],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": true,
+    "innerCross": false
+  },
+  {
+    "id": "6",
+    "headers": [],
+    "childHeaders": [],
+    "outerAllow": "geolocation *; camera *; autoplay *",
+    "innerAllow": "geolocation *; camera *; autoplay *",
+    "outerCross": true,
+    "innerCross": false
+  },
+  {
+    "id": "7",
+    "headers": [],
+    "childHeaders": [],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": false,
+    "innerCross": true
+  },
+  {
+    "id": "8",
+    "headers": [],
+    "childHeaders": [],
+    "outerAllow": "geolocation *; camera *; autoplay *",
+    "innerAllow": "geolocation *; camera *; autoplay *",
+    "outerCross": false,
+    "innerCross": true
+  },
+  {
+    "id": "9",
+    "headers": [],
+    "childHeaders": [],
+    "outerAllow": "geolocation *; camera *; autoplay *",
+    "innerAllow": "geolocation *; camera *; autoplay *",
+    "outerCross": true,
+    "innerCross": true
+  },
+  {
+    "id": "10",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "outerAllow": null,
+    "innerAllow": null,
+    "outerCross": false,
+    "innerCross": false
+  },
+  {
+    "id": "11",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "outerAllow": "cross-origin-isolated 'none'",
+    "innerAllow": "cross-origin-isolated *",
+    "outerCross": false,
+    "innerCross": false
+  }
+]

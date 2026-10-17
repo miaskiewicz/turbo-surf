@@ -56,16 +56,24 @@ const PROBE_INSTALL: &str = r#"(() => {
   // re-wraps them (canvas/context/navigator sub-objects do).
   const wrap = (name, obj) => {
     if (!obj || (typeof obj !== "object" && typeof obj !== "function")) return obj;
-    return new Proxy(obj, {
+    const proxy = new Proxy(obj, {
       get(o, p) {
-        let v; try { v = Reflect.get(o, p); } catch (e) { v = undefined; }
+        let v; try { v = Reflect.get(o, p, o); } catch (e) { v = undefined; }
         rec(name, p, "get", v !== undefined);
         if (typeof v === "function") {
-          return function (...a) { rec(name, p, "call", true); return v.apply(this === undefined ? o : this, a); };
+          return function (...a) {
+            rec(name, p, "call", true);
+            return Reflect.apply(v, this === proxy ? o : this, a);
+          };
         }
         return v;
       },
+      set(o, p, value) {
+        rec(name, p, "set", true);
+        return Reflect.set(o, p, value, o);
+      },
     });
+    return proxy;
   };
   // Preserve constructor-ness for function-valued globals (XMLHttpRequest, Worker,
   // RTCPeerConnection, the observers…): a plain closure would break `new`.
@@ -123,6 +131,7 @@ const PROBE_INSTALL: &str = r#"(() => {
       }
       return v;
     },
+    set(o,p,value) {rec("document",p,"set",true);return Reflect.set(o,p,value,o);},
   });
 
   // Dedicated wraps for the compound fingerprint objects (substituted into the

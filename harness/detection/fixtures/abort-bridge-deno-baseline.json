@@ -1,0 +1,28 @@
+{
+  "description": "Pre-adapter official Deno reaction order; differs from Chrome, retained as a documented gap",
+  "binarySha256": "b8c111d32c2aadf01d54fc05598a540a5a3dc1ea99ce1677d25185bf9df05ba3",
+  "probeSha256": "e9bcb8f082333d2d33fc82bf20814289c1485275b9e8af3ad6e62f51c5d49979",
+  "rawDOMsubscriptionPresent": true,
+  "arrayAdapterAbsent": true,
+  "phases": {
+    "listenerBeforePipe": [
+      "signal",
+      "dependent",
+      "after-abort",
+      "signal-microtask",
+      "sink-abort",
+      "cancel",
+      "pipe-reject"
+    ],
+    "listenerAfterPipe": [
+      "signal",
+      "dependent",
+      "after-abort",
+      "signal-microtask",
+      "sink-abort",
+      "cancel",
+      "pipe-reject"
+    ],
+    "timeout": ["timeout", "after-timeout"]
+  }
+}

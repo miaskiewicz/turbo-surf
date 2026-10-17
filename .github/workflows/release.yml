@@ -31,7 +31,7 @@ jobs:
           - { host: windows-latest, target: x86_64-pc-windows-msvc, node: win32-x64, ext: .exe }
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
         with: { targets: "${{ matrix.target }}" }
       # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
       - name: Install BoringSSL toolchain (nasm/cmake)
@@ -43,17 +43,17 @@ jobs:
             Windows) choco install nasm --no-progress -y && echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH" ;;
           esac
       - name: Build the MCP binary
-        # `--features trust-anchors` (Chrome 152+ 0xCA34 ext → JA4 t13d1517h2). It's NOT a crate
-        # default because it needs the vendored wreq's `trust_anchors` field (absent from the
-        # crates.io wreq, which would fail `cargo publish`); enabled here where the vendored wreq
-        # is present, so the shipped binary gets it without breaking crate publishing.
-        run: cargo build --release -p turbo-surf-mcp --features trust-anchors --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
+        # Pinned upstream Chrome 154 transport already includes real trust anchors.
+        run: cargo build --locked --release -p turbo-surf-mcp --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
+      - name: Verify third-party notices
+        run: python3 scripts/sync-third-party-notices.py --check
       - name: Stage platform binary
         shell: bash
         run: |
           mkdir -p out
           cp "rust/target/${{ matrix.target }}/release/turbo-surf-mcp${{ matrix.ext }}" \
              "out/turbo-surf-mcp-${{ matrix.node }}${{ matrix.ext }}"
+          cp LICENSE THIRD_PARTY_NOTICES.md out/
       - uses: actions/upload-artifact@v4
         with:
           name: bin-${{ matrix.node }}

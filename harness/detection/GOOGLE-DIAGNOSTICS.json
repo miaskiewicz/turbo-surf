@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 2,
+  "capturedDate": "2026-10-17",
+  "captureBaseCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
+  "binarySha256": "3a3e99742fe28ec2671e782b7527312979f3c1f713969429bccbd75ee0370a45",
+  "extractorSha256": "cb54e1b1a333e8ac67c1d378dbe06289530f0965a7b5b91273c9bea6583eecaf",
+  "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "interfaceTracerSha256": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc",
+  "scope": "Selected standalone fixed jc/lc tokens only. No raw URLs, query values, cookies, payloads or addresses. Counts are not a rejection cause or complete JS observation.",
+  "extractionRule": "Exact Google HTTPS host and /gen_204 or /httpservice/retry/jserror; decoded error field standalone jc/lc; native id or Chrome requestId with available session/redirect-hop guards.",
+  "orderingDefinition": "afterConsentBeforeSearch is after save REQUEST and before search REQUEST. afterConsentResponseBeforeSearch separately uses save RESPONSE.",
+  "priorControl": {
+    "eightRunControl": [
+      {
+        "run": "repeat-0/chrome-baseline",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "d2b258eb13b4df52f6ccb517a65903b6ef351f67d108c1e64d2e39652616ad22"
+      },
+      {
+        "run": "repeat-0/chrome-interfaces",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "2c5ec8fb3e08c479be3bcc261ee87c908869661a90d58465339d51d37fae16c5"
+      },
+      {
+        "run": "repeat-0/native-baseline",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "fe0e59e7253904a4a61b58cd7c11008c0c0fc49e809d8a4bbcad30be021ec85e"
+      },
+      {
+        "run": "repeat-0/native-interfaces",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "4f3b950fbd836a17e7c7fa424dae7eb88bf613f1b5f4371c479c9102b11f0171"
+      },
+      {
+        "run": "repeat-1/chrome-baseline",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "7198eb584d48c2fc06cbef7610537501ddec35b1ef03ba22526e377bd8a8dbda"
+      },
+      {
+        "run": "repeat-1/chrome-interfaces",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "3e1b79a149b639cf1367646757d9ed833cc5ef3c7025d729e305f2fc239f2ccb"
+      },
+      {
+        "run": "repeat-1/native-baseline",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "0ee6598aefcbbaeda121c76fb2cc1c8bc1bb9b94b129ea7e8b6cba517c4bf99d"
+      },
+      {
+        "run": "repeat-1/native-interfaces",
+        "matchesPriorCodeRouteStatusAndRequestOrdering": true,
+        "traceSha256": "95c443cf0d508f8182384bcf530bc45422695df7923814fd3fae2a22fb300a68"
+      }
+    ],
+    "inputSummarySha256": "5070d0bb20b2cc1ec50c30575fa7d77f356b6912efbe7451cf6a79f75fd38065"
+  },
+  "runs": [
+    {
+      "run": "repeat-0/chrome-baseline",
+      "traceSha256": "8ff3312f5450d2a8f629f7177770a336a7a654728937a3c45297be4081a8be9f",
+      "recordedErrorCount": 1,
+      "stdoutFailedToFetchCount": 0,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
+    },
+    {
+      "run": "repeat-0/native-baseline",
+      "traceSha256": "8de435bb17377e880ae45a39e78ba8f626ee4fd4974b97d3be4fe84c79a8d7e3",
+      "recordedErrorCount": 0,
+      "stdoutFailedToFetchCount": 1,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "5b70a8b4cc71646b6c1cbd932b830fdddaa82430a2de51f75dfe158c21c90405"
+    },
+    {
+      "run": "repeat-0/chrome-interfaces",
+      "traceSha256": "aecc1a8a183df23c11155fb85a46379f9a21c6720051426530a0905d56f4bf89",
+      "recordedErrorCount": 1,
+      "stdoutFailedToFetchCount": 0,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
+    },
+    {
+      "run": "repeat-0/native-interfaces",
+      "traceSha256": "e81ccdeb03fd36100584891306da445df378ce0eca78aa754439def80ac0b82b",
+      "recordedErrorCount": 0,
+      "stdoutFailedToFetchCount": 1,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "f5c4cc383cfee912d83fc651f75b43b90960a38d5645726a01360402eb3ca7be"
+    },
+    {
+      "run": "repeat-1/chrome-baseline",
+      "traceSha256": "e4c27aefa7f0e76ac6c9a967dfd068fbb74afffaf5a27be2217d39fef17a4d36",
+      "recordedErrorCount": 1,
+      "stdoutFailedToFetchCount": 0,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
+    },
+    {
+      "run": "repeat-1/native-baseline",
+      "traceSha256": "aa34d1b2890fb48a3f58b12064a0ddc945d2d87e69057d178af78b56a58edade",
+      "recordedErrorCount": 0,
+      "stdoutFailedToFetchCount": 1,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "fc9f67e9a20fc2f78bfd297897145a81a73d901c0cb8651933b08d365ae4e4da"
+    },
+    {
+      "run": "repeat-1/chrome-interfaces",
+      "traceSha256": "1751d723228b60c977e77ad9e44d3b8937dab4a1c08c3419986456fff0b19908",
+      "recordedErrorCount": 1,
+      "stdoutFailedToFetchCount": 0,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      }
+    },
+    {
+      "run": "repeat-1/native-interfaces",
+      "traceSha256": "6764a2a761d9eec8e920757626710c71834368698ae658b0751ae1c748042659",
+      "recordedErrorCount": 0,
+      "stdoutFailedToFetchCount": 1,
+      "stderrBytes": 0,
+      "stylesheetTelemetry": [],
+      "fixedCodeCounts": {
+        "jc": 0,
+        "lc": 0
+      },
+      "networkSha256": "3915003faa6c21eec412998087b3312c88780cdc6e19c69b37a341cfc948ad3f"
+    }
+  ],
+  "publicationProvenance": {
+    "implementationSourceCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
+    "selectedSourceCount": 1457,
+    "selectedSourceManifestSha256": "5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a",
+    "scope": "Actual implementation and selected code/configuration/fixture hashes verified before and after execution. This later publication changes documentation and measurement data only; it does not assert a new engine build.",
+    "sourceBeforeReceiptSha256": "63844e77525bd121ffe21f37a8f353ff476c499c0b4ffa9d72043d5ae826b6ef",
+    "matrixReceiptSha256": "4c8d75f18f99285079018c91dcc82fd4764fb13bc2609cf267cb7d4f1d0665eb",
+    "captureManifestSha256": "7294623ce3a55f9109cfeacf680b061ac823bd0d30e465f3b68fda327635464a",
+    "sanitizedCaptureSha256": "6a76c7d51df6dbb63c82ad8f471c78b8d627ea0048c9d7eb0438f5363f5fea08",
+    "processCompletionScope": "All 14 collectors exited zero without timeout; this is not SERP acceptance.",
+    "sanitizedInputVariant": "Read-only extraction with replay of eight historical fixed-code positive controls; sanitizedCaptureSha256 identifies that extractor output before publication metadata or formatting."
+  },
+  "previousCheckpoint": {
+    "immutableReport": "https://github.com/miaskiewicz/turbo-surf/blob/a005140fabeb02c6c3c23711125944cf445a1bb9/harness/detection/GOOGLE-DIAGNOSTICS.json",
+    "reportSha256": "58cea4a040f409faf1b97460f6afa0e23611fdc32ac45a2866d504f73e205051",
+    "captureBaseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
+    "scope": "Historical capture retained at the immutable report link; not the fresh a005 measurement."
+  },
+  "historicalOrderingCaveat": "The four selected historical repeat-0 native-baseline jc/lc requests followed the save REQUEST but preceded its RESPONSE. Offline replay of those eight historical captures verifies extraction only, not current Google acceptance or a rejection cause."
+}

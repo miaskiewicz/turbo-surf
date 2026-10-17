@@ -1,0 +1,164 @@
+[
+  {
+    "id": "direct-success",
+    "status": 200
+  },
+  {
+    "id": "direct-not-found",
+    "status": 404
+  },
+  {
+    "id": "same-origin-not-found",
+    "status": 404,
+    "source": "same"
+  },
+  {
+    "id": "no-referrer-not-found",
+    "status": 404,
+    "source": "same",
+    "policy": "no-referrer"
+  },
+  {
+    "id": "cross-origin-default",
+    "status": 403,
+    "source": "cross"
+  },
+  {
+    "id": "cross-origin-unsafe",
+    "status": 418,
+    "source": "cross",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "redirect-not-found",
+    "status": 404,
+    "source": "same",
+    "redirect": true
+  },
+  {
+    "id": "frame-same-not-found",
+    "status": 404,
+    "frame": "http"
+  },
+  {
+    "id": "frame-cross-default",
+    "status": 403,
+    "frame": "http",
+    "child": "cross"
+  },
+  {
+    "id": "frame-cross-unsafe",
+    "status": 418,
+    "frame": "http",
+    "child": "cross",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "frame-blank",
+    "status": 0,
+    "frame": "blank"
+  },
+  {
+    "id": "frame-srcdoc",
+    "status": 0,
+    "frame": "srcdoc"
+  },
+  {
+    "id": "frame-data",
+    "status": 0,
+    "frame": "data"
+  },
+  {
+    "id": "frame-blank-no-referrer",
+    "status": 0,
+    "frame": "blank",
+    "policy": "no-referrer"
+  },
+  {
+    "id": "frame-srcdoc-no-referrer",
+    "status": 0,
+    "frame": "srcdoc",
+    "policy": "no-referrer"
+  },
+  {
+    "id": "frame-srcdoc-unsafe",
+    "status": 0,
+    "frame": "srcdoc",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "frame-data-no-referrer",
+    "status": 200,
+    "frame": "data",
+    "policy": "no-referrer"
+  },
+  {
+    "id": "frame-data-unsafe",
+    "status": 200,
+    "frame": "data",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "direct-fragment",
+    "status": 200,
+    "fragment": true
+  },
+  {
+    "id": "frame-same-fragment",
+    "status": 404,
+    "frame": "http",
+    "fragment": true
+  },
+  {
+    "id": "frame-cross-fragment",
+    "status": 403,
+    "frame": "http",
+    "child": "cross",
+    "fragment": true
+  },
+  {
+    "id": "frame-policy-no-referrer",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url",
+    "framePolicy": "no-referrer"
+  },
+  {
+    "id": "frame-policy-unsafe",
+    "status": 403,
+    "frame": "http",
+    "child": "cross",
+    "policy": "no-referrer",
+    "framePolicy": "unsafe-url"
+  },
+  {
+    "id": "frame-policy-uppercase",
+    "status": 404,
+    "frame": "http",
+    "framePolicy": "NO-REFERRER"
+  },
+  {
+    "id": "frame-policy-invalid-whitespace",
+    "status": 404,
+    "frame": "http",
+    "framePolicy": " no-referrer "
+  },
+  {
+    "id": "frame-blank-policy",
+    "status": 0,
+    "frame": "blank",
+    "framePolicy": "no-referrer"
+  },
+  {
+    "id": "frame-srcdoc-policy",
+    "status": 0,
+    "frame": "srcdoc",
+    "framePolicy": "no-referrer"
+  },
+  {
+    "id": "frame-data-policy",
+    "status": 200,
+    "frame": "data",
+    "framePolicy": "no-referrer"
+  }
+]

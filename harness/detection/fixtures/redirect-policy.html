@@ -1,0 +1,17 @@
+<!doctype html><html><head></head><body><script>
+(async()=>{
+  const header={Authorization:'Bearer fixture'};
+  const same=await(await fetch('/same',{headers:header})).json();
+  const cross=await(await fetch('/cross',{headers:header})).json();
+  const back=await(await fetch('/back',{headers:header})).json();
+  const manual=await fetch('/manual',{redirect:'manual'});
+  let errorRejected=false;
+  try {await fetch('/error',{redirect:'error'});}catch(error){errorRejected=error instanceof TypeError;}
+  const unsafe=await(await fetch('/unsafe-allowed',{method:'PUT',headers:{'X-Hop':'yes'},body:'payload'})).json();
+  let unsafeDenied=false;
+  try {await fetch('/unsafe-denied',{method:'PUT',headers:{'X-Hop':'yes'},body:'payload'});}catch(error){unsafeDenied=error instanceof TypeError;}
+  const unsafeAllowed=unsafe.method==='PUT'&&unsafe.hop&&unsafe.origin==='null';
+  globalThis.__browserFixture={same:!!same.authorization,cross:!!cross.authorization,back:!!back.authorization,manual:{type:manual.type,status:manual.status,ok:manual.ok,url:new URL(manual.url,location.href).pathname,headers:Array.from(manual.headers),text:await manual.text()},errorRejected,unsafeAllowed,unsafeDenied};
+  document.body.setAttribute('data-browser-fixture','complete');
+})();
+</script></body></html>

@@ -1,0 +1,77 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "fixtureSha256": "2d24a51cf1063826d522439deac916593e86b73a3c82995d54bd43819f7be614",
+  "tlsTrust": "Only the checked fixture certificate SPKI is trusted for this localhost control",
+  "probeSha256": "8cad68766fdb32d2e879839aed10d4062857a783f24aaafe5d0bb7af72afeef5",
+  "collectorSha256": "4c43f2f36e90a8de3869531684aa7d1783ba754285ed00eebcafa2278ae347b4",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--ignore-certificate-errors-spki-list=tgZhMuDR4ffcvwcdvk0UExoYIcSg3V4sRX6nubjtqQc=",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "wire": [
+    {
+      "method": "GET",
+      "path": "/",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/favicon.ico",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/stream-frame",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/stream-frame",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    },
+    {
+      "method": "GET",
+      "path": "/stream-frame",
+      "id": "",
+      "protocol": "2.0",
+      "bytes": 0,
+      "bodyHex": ""
+    }
+  ],
+  "result": {
+    "readableAfterRetirement": {
+      "settled": false
+    },
+    "writableAfterRetirement": {
+      "settled": true
+    },
+    "writableAccepted": [43],
+    "receiverAfterRetirement": {
+      "settled": true,
+      "error": {
+        "name": "TypeError",
+        "message": "Failed to execute 'read' on 'ReadableStreamDefaultReader': Context is detached"
+      }
+    }
+  }
+}

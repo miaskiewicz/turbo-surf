@@ -1,0 +1,33 @@
+[
+  {
+    "id": "0",
+    "headers": [["Content-Security-Policy", "script-src 'none' 'report-sample'"]]
+  },
+  {
+    "id": "1",
+    "headers": [["Content-Security-Policy-Report-Only", "script-src 'none' 'report-sample'"]]
+  },
+  {
+    "id": "2",
+    "headers": [["Content-Security-Policy", "script-src 'unsafe-eval' 'report-sample'"]]
+  },
+  {
+    "id": "3",
+    "headers": [["Content-Security-Policy", "script-src 'unsafe-eval'; script-src-elem 'none'"]]
+  },
+  {
+    "id": "4",
+    "headers": [["Content-Security-Policy", "default-src 'none' 'report-sample'"]]
+  },
+  {
+    "id": "5",
+    "headers": [
+      ["Content-Security-Policy", "script-src 'unsafe-eval'"],
+      ["Content-Security-Policy", "script-src 'none' 'report-sample'"]
+    ]
+  },
+  {
+    "id": "6",
+    "headers": [["Content-Security-Policy", "script-src 'unsafe-eval'"]]
+  }
+]

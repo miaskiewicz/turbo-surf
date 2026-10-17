@@ -1,0 +1,64 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "first": [
+    {
+      "name": "unreferenced-open-pair",
+      "alive": [false, false]
+    },
+    {
+      "name": "unreferenced-listening-pair",
+      "alive": [false, false]
+    },
+    {
+      "name": "unreferenced-closed-pair",
+      "alive": [false, false]
+    },
+    {
+      "name": "reachable-peer",
+      "alive": [true, true]
+    },
+    {
+      "name": "reachable-peer-without-listener",
+      "alive": [true, false]
+    },
+    {
+      "name": "unreachable-queued-transfer-cycle",
+      "alive": [false, false]
+    },
+    {
+      "name": "reachable-queued-transfer-peer",
+      "alive": [true, true]
+    }
+  ],
+  "afterRelease": [
+    {
+      "name": "unreferenced-open-pair",
+      "alive": [false, false]
+    },
+    {
+      "name": "unreferenced-listening-pair",
+      "alive": [false, false]
+    },
+    {
+      "name": "unreferenced-closed-pair",
+      "alive": [false, false]
+    },
+    {
+      "name": "reachable-peer",
+      "alive": [false, false]
+    },
+    {
+      "name": "reachable-peer-without-listener",
+      "alive": [false, false]
+    },
+    {
+      "name": "unreachable-queued-transfer-cycle",
+      "alive": [false, false]
+    },
+    {
+      "name": "reachable-queued-transfer-peer",
+      "alive": [false, false]
+    }
+  ]
+}

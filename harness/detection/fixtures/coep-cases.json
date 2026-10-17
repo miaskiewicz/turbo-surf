@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "0",
+      "headers": []
+    },
+    {
+      "id": "1",
+      "headers": [["Cross-Origin-Resource-Policy", "same-origin"]]
+    },
+    {
+      "id": "2",
+      "headers": [["Cross-Origin-Resource-Policy", "same-site"]]
+    },
+    {
+      "id": "3",
+      "headers": [["Cross-Origin-Resource-Policy", "cross-origin"]]
+    },
+    {
+      "id": "4",
+      "headers": [["Cross-Origin-Resource-Policy", "Same-Origin"]]
+    },
+    {
+      "id": "5",
+      "headers": [
+        ["Cross-Origin-Resource-Policy", "same-origin"],
+        ["Cross-Origin-Resource-Policy", "cross-origin"]
+      ]
+    },
+    {
+      "id": "6",
+      "headers": [["Cross-Origin-Resource-Policy", "nonsense"]]
+    },
+    {
+      "id": "7",
+      "headers": [["Cross-Origin-Resource-Policy", "same-origin, cross-origin"]]
+    },
+    {
+      "id": "8",
+      "headers": [["Cross-Origin-Resource-Policy", "cross-origin; report-to=\"local\""]]
+    }
+  ]
+}

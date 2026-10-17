@@ -1,0 +1,42 @@
+<!doctype html><html><head><meta charset="utf-8"><script>
+globalThis.moduleLog = [];
+globalThis.moduleEvents = {};
+globalThis.moduleErrors = [];
+globalThis.moduleTlaStarted = false;
+globalThis.moduleTlaDone = false;
+globalThis.moduleRepeatCount = 0;
+function captureModule(event) {
+  if (event.target.tagName !== 'SCRIPT') return;
+  const id = event.target.id;
+  (moduleEvents[id] ||= []).push({type:event.type,trusted:event.isTrusted,target:event.currentTarget===document,currentScript:document.currentScript===null});
+  moduleLog.push(id + ':' + event.type);
+}
+document.addEventListener('load',captureModule,true);
+document.addEventListener('error',captureModule,true);
+addEventListener('error',event=>{
+  if (event.target!==window) return;
+  moduleErrors.push({name:event.error?.name,filename:new URL(event.filename,location.href).pathname,message:event.message,trusted:event.isTrusted,target:event.currentTarget===window,currentScript:document.currentScript===null,brand:Object.prototype.toString.call(event),line:event.lineno>0});
+  event.preventDefault();
+});
+function finishModuleProbe() {
+  if (!globalThis.moduleWindowLoad || !moduleTlaDone) return;
+  globalThis.__browserFixture={events:moduleLog,scriptEvents:moduleEvents,errors:moduleErrors,dcl:moduleDcl,load:moduleWindowLoad,tla:moduleTlaResult,repeat:moduleRepeatCount};
+  document.body.setAttribute('data-browser-fixture','complete');
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  globalThis.moduleDcl={started:moduleTlaStarted,done:moduleTlaDone,currentScript:document.currentScript===null};
+  moduleLog.push('dcl');
+  fetch('/evaluation-gate');
+});
+addEventListener('load',()=>{
+  globalThis.moduleWindowLoad={started:moduleTlaStarted,done:moduleTlaDone,currentScript:document.currentScript===null};
+  moduleLog.push('window:load');
+  finishModuleProbe();
+});
+</script>
+<script id="tla" type="module" src="/tla.mjs"></script>
+<script id="runtime" type="module" src="/runtime-error.mjs"></script>
+<script id="parse" type="module" src="/parse-error.mjs"></script>
+<script id="repeat1" type="module" src="/repeat.mjs"></script>
+<script id="repeat2" type="module" src="/repeat.mjs"></script>
+</head><body>Module evaluation probe</body></html>

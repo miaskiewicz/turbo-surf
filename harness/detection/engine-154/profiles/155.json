@@ -1,0 +1,27 @@
+{
+  "chromeMajor": 155,
+  "chromeVersion": "155.0.8059.40",
+  "engineRevision": "56832c166a78bd1eb61068ac69876d6880eaabdf",
+  "engineVersion": "15.5.35.20",
+  "buildRevision": "8ca8a372cab9ff143072204053d30fbc2c17bd7a",
+  "icuRevision": "6ebb40c594776cc2c21ea14df85a2a89a328b364",
+  "rustDependenciesRevision": "4dec6f65bcb34c4c289736b0e6fd571b35c6c665",
+  "libclangPackages": {
+    "darwin-arm64": {
+      "url": "https://storage.googleapis.com/chromium-browser-clang/Mac_arm64/rust-libclang-0913b18e489ac1011b580e31fa5559654be12bfc-2-llvmorg-24-init-3796-g20e97c4b.tar.xz",
+      "sha256": "0a95d15ec7e992b60f47b9cf98f951b32f718488aa5d15d1c8cbae81f1db6b39"
+    },
+    "darwin-x86_64": {
+      "url": "https://storage.googleapis.com/chromium-browser-clang/Mac/rust-libclang-0913b18e489ac1011b580e31fa5559654be12bfc-2-llvmorg-24-init-3796-g20e97c4b.tar.xz",
+      "sha256": "0ff3d2a46a0ed3851311cce6aa60f70f3d3e88e4177c2b10806c990a72461f67"
+    },
+    "linux-x86_64": {
+      "url": "https://storage.googleapis.com/chromium-browser-clang/Linux_x64/rust-libclang-0913b18e489ac1011b580e31fa5559654be12bfc-2-llvmorg-24-init-3796-g20e97c4b.tar.xz",
+      "sha256": "a36afcfb09b2b096cd7d17b6008beb1993c3962d780a7ccc0aa4c5f544447429"
+    },
+    "windows-x86_64": {
+      "url": "https://storage.googleapis.com/chromium-browser-clang/Win/rust-libclang-0913b18e489ac1011b580e31fa5559654be12bfc-2-llvmorg-24-init-3796-g20e97c4b.tar.xz",
+      "sha256": "75033b0243acf7c25227f6015c60797724b98d1de5514e9e1a374735ef76aa4e"
+    }
+  }
+}

@@ -41,7 +41,12 @@ if (!existsSync(join(BOTTO, "harness/tools/browser-probe.inject.js"))) {
 // ── load the turbo-surf native addon (the live V8 render isolate) ──
 let addon;
 try {
-  addon = require("../../rust/crates/turbo-surf-napi/index.js");
+  const addonArg = process.argv.indexOf("--addon");
+  addon = require(
+    addonArg >= 0
+      ? resolve(process.argv[addonArg + 1])
+      : "../../rust/crates/turbo-surf-napi/index.js",
+  );
 } catch (e) {
   skip(`turbo-surf addon not built (${e.message}) — run: cargo build -p turbo-surf-napi`);
 }
@@ -134,7 +139,7 @@ async function main() {
   const verdict = runChecks(facts);
 
   if (JSON_OUT) {
-    console.log(JSON.stringify({ envFacts, verdict }, null, 2));
+    console.log(JSON.stringify({ addonVersion: addon.version?.(), envFacts, verdict }, null, 2));
     return;
   }
 

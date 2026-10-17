@@ -1,0 +1,143 @@
+[
+  {
+    "id": "header-unsafe-baseline",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "parser-head",
+    "html": "<!doctype html><head><meta name=referrer content=no-referrer></head>",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "parser-body",
+    "html": "<!doctype html><body><meta name=referrer content=no-referrer></body>",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "parser-uppercase",
+    "html": "<!doctype html><head><meta name=REFERRER content=NO-REFERRER></head>",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "parser-padded",
+    "html": "<!doctype html><head><meta name=referrer content=\" no-referrer \"></head>",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "parser-legacy-never",
+    "html": "<!doctype html><head><meta name=referrer content=never></head>",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "parser-legacy-always",
+    "policy": "no-referrer",
+    "html": "<!doctype html><head><meta name=referrer content=always></head>",
+    "status": 404,
+    "frame": "http"
+  },
+  {
+    "id": "dynamic-head",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';document.head.append(meta)})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "dynamic-body",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';document.body.append(meta)})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "dynamic-content",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';document.head.append(meta);meta.content='unsafe-url'})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "dynamic-name",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';meta.name='other';document.head.append(meta);meta.name='referrer'})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "dynamic-invalid",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';document.head.append(meta);meta.content='not-a-policy'})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "dynamic-removed",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';document.head.append(meta);meta.remove()})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "template-inert",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';const template=document.createElement('template');template.content.append(meta);document.body.append(template)})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "shadow-inert",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';const host=document.createElement('div');document.body.append(host);host.attachShadow({mode:'open'}).append(meta)})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "foreign-inert",
+    "steps": "(()=>{const meta=document.createElementNS('urn:fixture','meta');meta.setAttribute('name','referrer');meta.setAttribute('content','no-referrer');document.head.append(meta)})()",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url"
+  },
+  {
+    "id": "parser-legacy-default-cross",
+    "status": 404,
+    "frame": "http",
+    "child": "cross",
+    "policy": "unsafe-url",
+    "html": "<!doctype html><head><meta name=referrer content=default></head>"
+  },
+  {
+    "id": "parser-legacy-origin-cross",
+    "status": 404,
+    "frame": "http",
+    "child": "cross",
+    "policy": "no-referrer",
+    "html": "<!doctype html><head><meta name=referrer content=origin-when-crossorigin></head>"
+  },
+  {
+    "id": "dynamic-native-attributes",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url",
+    "steps": "(()=>{const meta=document.createElement('meta');meta.setAttribute('name','referrer');meta.setAttribute('content','no-referrer');for(const key of ['name','content'])Object.defineProperty(meta,key,{get(){throw new Error('guest meta getter')}});document.head.append(meta)})()"
+  },
+  {
+    "id": "parser-template-inert",
+    "status": 404,
+    "frame": "http",
+    "policy": "unsafe-url",
+    "html": "<!doctype html><head><template><meta name=referrer content=no-referrer></template></head>"
+  }
+]

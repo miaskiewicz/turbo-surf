@@ -1,0 +1,52 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "recordedAt": "2026-10-14T03:35:09.519Z",
+  "fixture": "inert-geometry-probe.js",
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages"
+  ],
+  "result": [
+    {
+      "type": "text/html",
+      "rect": [0, 0, 0, 0],
+      "rects": 0,
+      "client": [0, 0],
+      "scroll": [0, 0, 0, 0],
+      "hit": null,
+      "hits": 0
+    },
+    {
+      "type": "application/xml",
+      "rect": [0, 0, 0, 0],
+      "rects": 0,
+      "client": [0, 0],
+      "scroll": [0, 0, 0, 0],
+      "hit": null,
+      "hits": 0
+    },
+    {
+      "type": "application/xml",
+      "rect": [0, 0, 0, 0],
+      "rects": 0,
+      "client": [0, 0],
+      "scroll": [0, 0, 0, 0],
+      "hit": null,
+      "hits": 0
+    },
+    {
+      "type": "application/xhtml+xml",
+      "rect": [0, 0, 0, 0],
+      "rects": 0,
+      "client": [0, 0],
+      "scroll": [0, 0, 0, 0],
+      "hit": null,
+      "hits": 0
+    },
+    {
+      "detached": [0, 0, 0, 0],
+      "rects": 0
+    }
+  ]
+}

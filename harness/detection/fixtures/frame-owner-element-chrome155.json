@@ -1,0 +1,38 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "0fbbb9bee186f9997e1a35070df937333ecd8c6363b6d2d8f1ba0211ee806208",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "descriptor": {
+      "get": "function",
+      "set": "undefined",
+      "configurable": true,
+      "enumerable": true
+    },
+    "before": {
+      "owner": true,
+      "parent": true,
+      "closed": false
+    },
+    "forged": "TypeError",
+    "borrowedParent": true,
+    "after": {
+      "ownerNull": true,
+      "parentNull": true,
+      "parentMain": false,
+      "closed": true,
+      "defaultViewNull": true
+    }
+  }
+}

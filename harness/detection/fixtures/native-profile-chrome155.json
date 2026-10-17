@@ -1,0 +1,51 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "3d2d096394ce75c1c3fd7abdb43091b5da4668798323fa472fdd224ab6be365f",
+  "collectorSha256": "7dab41d3e04c4c6cc9b8abd911eae64e711af557b66ef90bb15bdc1993ada8ff",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "first": {
+      "local": "first",
+      "session": "alpha"
+    },
+    "otherBefore": {
+      "local": "first",
+      "session": null
+    },
+    "otherWrite": {
+      "local": "second",
+      "session": "beta"
+    },
+    "firstAfter": {
+      "local": "second",
+      "session": "alpha"
+    },
+    "navigation": {
+      "local": "second",
+      "session": "alpha"
+    },
+    "freshTab": {
+      "local": "second",
+      "session": null
+    },
+    "clearedPeer": {
+      "local": null,
+      "session": null
+    },
+    "clearedSource": {
+      "local": null,
+      "session": null
+    },
+    "cachedRequests": 1
+  }
+}

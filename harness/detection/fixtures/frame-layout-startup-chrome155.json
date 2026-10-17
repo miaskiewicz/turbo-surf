@@ -1,0 +1,12 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "6431d2ae9b3b633903abd4e83cd912c3e0459197630d28baf3726e94bb5a6d43",
+  "result": {
+    "started": true,
+    "initial": {
+      "width": 200
+    },
+    "widthAfterClear": 200
+  }
+}

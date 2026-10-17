@@ -1,0 +1,325 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "034110e3aaa3a847e89514a1a5fdb57e45456d8fbcb753fbe6a795b8ebac28c0",
+  "probeSha256": "29dc48a9c0813a8387882e1903748f0358676042e0cad0dd4e9e9f6525013b42",
+  "collectorSha256": "326041136b77cc4448273b4b9c02bc167fb54a786382096c1bdbc6b5176da563",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "rows": [
+          {
+            "target": "document",
+            "blocked": "<origin>/externalClassic.js",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 28,
+            "column": 19,
+            "sampleUnits": [],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "blocked": "<origin>/externalModule.js",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 28,
+            "column": 19,
+            "sampleUnits": [],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "emoji",
+            "blocked": "inline",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 51,
+            "column": 19,
+            "sampleUnits": [
+              47, 42, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357,
+              56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357,
+              56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357,
+              56832, 55357, 56832
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "emojiStyle",
+            "blocked": "inline",
+            "directive": "style-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 55,
+            "column": 19,
+            "sampleUnits": [
+              47, 42, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357,
+              56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357,
+              56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357, 56832, 55357,
+              56832, 55357, 56832
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "splitSurrogate",
+            "blocked": "inline",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 51,
+            "column": 19,
+            "sampleUnits": [
+              97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97,
+              97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 55357
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "splitSurrogateStyle",
+            "blocked": "inline",
+            "directive": "style-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 55,
+            "column": 19,
+            "sampleUnits": [
+              97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97,
+              97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 55357
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "loneUnits",
+            "blocked": "inline",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 51,
+            "column": 19,
+            "sampleUnits": [47, 42, 55296, 120, 56320, 42, 47],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "loneUnitsStyle",
+            "blocked": "inline",
+            "directive": "style-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 55,
+            "column": 19,
+            "sampleUnits": [47, 42, 55296, 120, 56320, 42, 47],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "whitespace",
+            "blocked": "inline",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 51,
+            "column": 19,
+            "sampleUnits": [
+              98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98,
+              98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "whitespaceStyle",
+            "blocked": "inline",
+            "directive": "style-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 55,
+            "column": 19,
+            "sampleUnits": [
+              98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98,
+              98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "nonAsciiWhitespace",
+            "blocked": "inline",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 51,
+            "column": 19,
+            "sampleUnits": [
+              160, 65279, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+              99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "nonAsciiWhitespaceStyle",
+            "blocked": "inline",
+            "directive": "style-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 55,
+            "column": 19,
+            "sampleUnits": [
+              160, 65279, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+              99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "verticalTab",
+            "blocked": "inline",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 51,
+            "column": 19,
+            "sampleUnits": [
+              100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+              100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+              100, 100, 100, 100, 100, 100
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "verticalTabStyle",
+            "blocked": "inline",
+            "directive": "style-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 55,
+            "column": 19,
+            "sampleUnits": [
+              100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+              100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+              100, 100, 100, 100, 100, 100
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "prefixWhitespace",
+            "blocked": "inline",
+            "directive": "script-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 51,
+            "column": 19,
+            "sampleUnits": [
+              101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101,
+              101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101,
+              101, 101, 101, 101, 101, 32
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "prefixWhitespaceStyle",
+            "blocked": "inline",
+            "directive": "style-src-elem",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 55,
+            "column": 19,
+            "sampleUnits": [
+              101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101,
+              101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101, 101,
+              101, 101, 101, 101, 101, 32
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "blocked": "eval",
+            "directive": "script-src",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 58,
+            "column": 5,
+            "sampleUnits": [
+              103, 108, 111, 98, 97, 108, 84, 104, 105, 115, 46, 101, 118, 97, 108, 82, 97, 110, 61,
+              116, 114, 117, 101
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "blocked": "eval",
+            "directive": "script-src",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/resource-probe.js",
+            "line": 63,
+            "column": 5,
+            "sampleUnits": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110, 111, 110, 121, 109, 111, 117,
+              115, 40, 10, 41, 32, 123, 10, 103, 108, 111, 98, 97, 108, 84, 104, 105, 115, 46, 102,
+              117, 110, 99
+            ],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "blocked": "<origin>/blocked.png",
+            "directive": "img-src",
+            "disposition": "enforce",
+            "source": "",
+            "line": 0,
+            "column": 0,
+            "sampleUnits": [],
+            "status": 200,
+            "referrer": "",
+            "trusted": true
+          }
+        ],
+        "errors": ["EvalError", "EvalError"]
+      }
+    }
+  ]
+}

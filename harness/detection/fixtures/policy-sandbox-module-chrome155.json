@@ -1,0 +1,51 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "f53b20160df31731a20ee77e8eab1fb9eab62c861d92c3de5ae3f091ae7cc582",
+  "probeSha256": "c0b453e953c8ea8bb1a2b41edddbe91d1d29da2d7ae7d63af5bb5ad1aa8df30c",
+  "collectorSha256": "f33476c48548652764cdc413126bed34686fe782b2ffd329994dac1f467aa49c",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "ok": true,
+        "origin": "<127.0.0.1>",
+        "cookie": "sandboxTransport=1"
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "ok": true,
+        "origin": "null",
+        "cookie": ""
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "ok": true,
+        "origin": "<127.0.0.1>",
+        "cookie": "sandboxTransport=1"
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "ok": true,
+        "origin": "<127.0.0.1>",
+        "cookie": "sandboxTransport=1"
+      }
+    }
+  ]
+}

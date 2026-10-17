@@ -1,0 +1,180 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "a0195599c1c1ec0aecd9fd33abbac303586e3adf85e1b4d5d95bea8ef7018046",
+  "probeSha256": "0a2fdea6bfa64c6c32f8fc74bd5d81c9c7e86a5557990914b84e34f620b9779a",
+  "collectorSha256": "9708cba5c041aa8885da51c27676b14339b5f2728d100753e683d5a19a64a701",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "dynamic-policy-snapshot",
+      "result": [
+        {
+          "slot": "before",
+          "referrer": "<origin>/?case=0",
+          "method": "GET"
+        },
+        {
+          "slot": "after",
+          "referrer": "",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "parser-policy-phases",
+      "result": [
+        {
+          "slot": "before",
+          "referrer": "<origin>/?case=1",
+          "method": "GET"
+        },
+        {
+          "slot": "after",
+          "referrer": "",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "explicit-fetch-policy",
+      "result": [
+        {
+          "slot": "explicit",
+          "referrer": "<origin>/?case=2",
+          "method": "GET"
+        },
+        {
+          "slot": "default",
+          "referrer": "",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "request-inherits-at-fetch",
+      "result": [
+        {
+          "slot": "request",
+          "referrer": "",
+          "method": "GET"
+        },
+        {
+          "slot": "explicit",
+          "referrer": "<origin>/?case=3",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "request-retains-explicit-policy",
+      "result": [
+        {
+          "slot": "request",
+          "referrer": "<origin>/?case=4",
+          "method": "GET"
+        },
+        {
+          "slot": "default",
+          "referrer": "",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "mutation-retains-initiating-policy",
+      "result": [
+        {
+          "slot": "before",
+          "referrer": "",
+          "method": "GET"
+        },
+        {
+          "slot": "after",
+          "referrer": "<origin>/?case=5",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "blob-retains-initiating-policy",
+      "result": [
+        {
+          "slot": "before",
+          "referrer": "<origin>/?case=6",
+          "method": "POST"
+        },
+        {
+          "slot": "after",
+          "referrer": "",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "blob-retains-initiating-csp",
+      "result": [
+        {
+          "slot": "before",
+          "referrer": "<origin>/?case=7",
+          "method": "POST"
+        },
+        {
+          "slot": "after",
+          "name": "TypeError"
+        }
+      ]
+    },
+    {
+      "id": "template-script-does-not-shift-policy-phase",
+      "result": [
+        {
+          "slot": "active",
+          "referrer": "",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "template-csp-meta-is-inactive",
+      "result": [
+        {
+          "slot": "active",
+          "referrer": "<origin>/?case=9",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "id": "request-url-prototype-getter-cannot-change-transport",
+      "result": [
+        {
+          "slot": "authentic",
+          "referrer": "<origin>/?case=10",
+          "method": "GET",
+          "getterReads": 0
+        }
+      ]
+    },
+    {
+      "id": "throwing-request-url-prototype-getter-is-ignored",
+      "result": [
+        {
+          "slot": "authentic",
+          "referrer": "<origin>/?case=11",
+          "method": "GET",
+          "getterReads": 0
+        }
+      ]
+    }
+  ]
+}

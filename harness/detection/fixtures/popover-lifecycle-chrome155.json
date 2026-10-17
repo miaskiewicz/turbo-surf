@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "browserVersion": "Chrome/155.0.8059.40",
+  "browserV8Version": "15.5.35.20",
+  "collector": "harness/detection/popover-lifecycle-probe.js",
+  "collectorSha256": "65128e33ea817368f3607ca81088c8a80b6a3eec2cb0af83e5264bbf6921ee4f",
+  "note": "Authored localhost fixtures evaluated in normal headed Chrome. No request headers, cookies or local paths retained. Covered contracts only; autofocus, light-dismiss and top-layer painting remain separate.",
+  "result": {
+    "basic": [
+      {
+        "undefined": true
+      },
+      true,
+      {
+        "undefined": true
+      },
+      true,
+      {
+        "undefined": true
+      },
+      false,
+      {
+        "undefined": true
+      },
+      true,
+      false
+    ],
+    "coalescedEvents": [
+      ["beforetoggle", "closed", "open", true, true, true, null, false],
+      ["beforetoggle", "open", "closed", false, true, true, null, true],
+      ["beforetoggle", "closed", "open", true, true, true, null, false],
+      ["beforetoggle", "open", "closed", false, true, true, null, true],
+      ["toggle", "closed", "closed", false, true, true, null, false]
+    ],
+    "cancelOpen": [
+      {
+        "undefined": true
+      },
+      false,
+      false,
+      false
+    ],
+    "autoClose": [false, true],
+    "autoEvents": [
+      [0, "beforetoggle", "closed", "open", true, true],
+      [1, "beforetoggle", "closed", "open", true, true],
+      [0, "beforetoggle", "open", "closed", false, true],
+      [0, "toggle", "closed", "closed", false, true],
+      [1, "toggle", "closed", "open", false, true]
+    ],
+    "nested": [true, true, false],
+    "hints": [true, true, false, true],
+    "newAuto": [false, false, false, true],
+    "removed": [
+      false,
+      {
+        "undefined": true
+      },
+      {
+        "error": "InvalidStateError"
+      }
+    ],
+    "removalEvents": [],
+    "attributeRemoved": [
+      false,
+      {
+        "error": "NotSupportedError"
+      }
+    ],
+    "attributeEvents": [
+      ["beforetoggle", "open", "closed", false, true, true, null, true],
+      ["toggle", "open", "closed", false, true, true, null, false]
+    ],
+    "attributeDuringBefore": [
+      {
+        "error": "NotSupportedError"
+      },
+      false
+    ],
+    "disconnectDuringBefore": [
+      {
+        "error": "InvalidStateError"
+      },
+      false
+    ],
+    "disabled": [
+      {
+        "undefined": true
+      },
+      true
+    ],
+    "source": [
+      {
+        "undefined": true
+      },
+      {
+        "undefined": true
+      }
+    ],
+    "sourceEvents": [
+      ["beforetoggle", "closed", "open", true, true, true, "source", false],
+      ["beforetoggle", "open", "closed", false, true, true, null, true],
+      ["toggle", "closed", "closed", false, true, true, null, false]
+    ],
+    "options": [
+      true,
+      true,
+      false,
+      false,
+      {
+        "error": "TypeError"
+      }
+    ],
+    "selectors": [
+      true,
+      true,
+      0,
+      true,
+      false,
+      {
+        "error": "SyntaxError"
+      }
+    ],
+    "moves": {
+      "insertSelf": [{}, false, []],
+      "replaceSelf": [{}, false, []],
+      "replaceWithSelf": [
+        {
+          "undefined": true
+        },
+        false,
+        []
+      ],
+      "appendExisting": [{}, false, []],
+      "moveBefore": [
+        {
+          "undefined": true
+        },
+        true,
+        []
+      ]
+    },
+    "conversion": {
+      "number": [
+        {
+          "error": "TypeError"
+        },
+        false
+      ],
+      "string": [
+        {
+          "error": "TypeError"
+        },
+        false
+      ],
+      "boolean": [
+        {
+          "error": "TypeError"
+        },
+        false
+      ],
+      "nullValue": [
+        {
+          "undefined": true
+        },
+        true
+      ]
+    },
+    "sourceReads": 1,
+    "modeChangedBefore": [
+      {
+        "undefined": true
+      },
+      true
+    ],
+    "pendingRemoval": [
+      ["beforetoggle", "closed", "open", true, true, true, null, false],
+      ["toggle", "closed", "open", false, true, true, null, false]
+    ],
+    "namespaced": [
+      null,
+      "auto",
+      {
+        "error": "NotSupportedError"
+      },
+      false
+    ],
+    "modeMatrix": {
+      "auto/auto": [true, true],
+      "auto/hint": [true, true],
+      "auto/manual": [true, true],
+      "hint/auto": [true, true],
+      "hint/hint": [true, true],
+      "hint/manual": [true, true],
+      "manual/auto": [true, true],
+      "manual/hint": [true, true],
+      "manual/manual": [true, true]
+    }
+  }
+}

@@ -575,3 +575,26 @@ fn noscript_styles_are_inert() {
         "noscript <style> must not cascade and hide the div"
     );
 }
+
+#[test]
+fn screenshot_renders_fractionally_positioned_one_pixel_border() {
+    let png = screenshot_png(
+        r#"<html><body style="margin:0;background:white"><div style="position:absolute;left:0.5px;top:0;width:0;height:4px;border-left:1px solid black"></div></body></html>"#,
+        Viewport { width: 4, height: 4 },
+    ).expect("fractional border PNG");
+    let image = image::load_from_memory(&png)
+        .expect("decode PNG")
+        .to_rgba8();
+    assert_eq!(image.dimensions(), (4, 4));
+    for y in 0..4 {
+        for x in [0, 1] {
+            let pixel = image.get_pixel(x, y).0;
+            assert!(
+                (120..=135).contains(&pixel[0]),
+                "partial black border at {x},{y}: {pixel:?}"
+            );
+            assert_eq!(pixel[3], 255);
+        }
+        assert_eq!(image.get_pixel(2, y).0, [255, 255, 255, 255]);
+    }
+}

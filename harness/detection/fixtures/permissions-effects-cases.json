@@ -1,0 +1,24 @@
+[
+  {
+    "id": "0",
+    "headers": [
+      [
+        "Permissions-Policy",
+        "geolocation=(),camera=(),microphone=(),midi=(),clipboard-read=(),clipboard-write=()"
+      ]
+    ]
+  },
+  {
+    "id": "1",
+    "headers": [["Permissions-Policy", "geolocation=(),camera=(self),microphone=()"]]
+  },
+  {
+    "id": "2",
+    "headers": [
+      [
+        "Permissions-Policy",
+        "geolocation=(\"https://foreign.test\"),clipboard-read=(),clipboard-write=()"
+      ]
+    ]
+  }
+]

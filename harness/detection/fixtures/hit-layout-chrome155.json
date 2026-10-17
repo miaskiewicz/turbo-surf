@@ -1,0 +1,112 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "recordedAt": "2026-10-14T02:55:36.801Z",
+  "fixture": "hit-layout-probe.js",
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages"
+  ],
+  "result": [
+    {
+      "fixture": "overlap",
+      "points": [
+        {
+          "point": [20, 20],
+          "one": "lower",
+          "all": ["lower", "body", "html"]
+        },
+        {
+          "point": [40, 40],
+          "one": "upper",
+          "all": ["upper", "lower", "body", "html"]
+        },
+        {
+          "point": [105, 105],
+          "one": "upper",
+          "all": ["upper", "body", "html"]
+        },
+        {
+          "point": [120, 120],
+          "one": "body",
+          "all": ["body", "html"]
+        }
+      ]
+    },
+    {
+      "fixture": "pointer",
+      "points": [
+        {
+          "point": [20, 20],
+          "one": "lower",
+          "all": ["lower", "body", "html"]
+        },
+        {
+          "point": [100, 100],
+          "one": "body",
+          "all": ["body", "html"]
+        }
+      ]
+    },
+    {
+      "fixture": "clip",
+      "points": [
+        {
+          "point": [20, 20],
+          "one": "child",
+          "all": ["child", "clip", "body", "html"]
+        },
+        {
+          "point": [60, 20],
+          "one": "body",
+          "all": ["body", "html"]
+        },
+        {
+          "point": [20, 60],
+          "one": "body",
+          "all": ["body", "html"]
+        }
+      ]
+    },
+    {
+      "fixture": "rotate",
+      "points": [
+        {
+          "point": [90, 110],
+          "one": "rotated",
+          "all": ["rotated", "body", "html"]
+        },
+        {
+          "point": [105, 110],
+          "one": "body",
+          "all": ["body", "html"]
+        },
+        {
+          "point": [81, 139],
+          "one": "rotated",
+          "all": ["rotated", "body", "html"]
+        },
+        {
+          "point": [80, 140],
+          "one": "body",
+          "all": ["body", "html"]
+        }
+      ]
+    },
+    {
+      "fixture": "visibility",
+      "points": [
+        {
+          "point": [15, 15],
+          "one": "visible",
+          "all": ["visible", "body", "html"]
+        },
+        {
+          "point": [50, 50],
+          "one": "body",
+          "all": ["body", "html"]
+        }
+      ]
+    }
+  ]
+}

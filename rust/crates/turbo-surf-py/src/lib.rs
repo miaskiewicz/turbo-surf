@@ -39,7 +39,7 @@ fn to_json_string<T: serde::Serialize>(v: &T) -> String {
 /// The package version (matches the crate / wheel version).
 #[pyfunction]
 fn version() -> &'static str {
-    "0.5.0"
+    env!("CARGO_PKG_VERSION")
 }
 
 // --- view passes (parse + read; one parse per call) -------------------------

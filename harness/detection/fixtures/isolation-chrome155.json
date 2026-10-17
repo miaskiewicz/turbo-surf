@@ -1,0 +1,565 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "2c5c74af05e37135a88f414afc1775586aeaea607c8cdef11ee2012d11bea3d7",
+  "probeSha256": "44a96a25303d20898930198d6f2f2e674b36114bd2d0c1fe4f7e56f488537367",
+  "collectorSha256": "d258e82d4b79e3752baa6d87b5eb6b76773d0ed881ab387d74d541c4d969ab64",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "unsafe-none:unsafe-none:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "unsafe-none:unsafe-none:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "unsafe-none:unsafe-none:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "unsafe-none:require-corp:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "unsafe-none:require-corp:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "unsafe-none:require-corp:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "unsafe-none:credentialless:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "unsafe-none:credentialless:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "unsafe-none:credentialless:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:unsafe-none:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:unsafe-none:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:unsafe-none:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:require-corp:default",
+      "result": {
+        "secure": true,
+        "isolated": true,
+        "sharedType": "function",
+        "sharedBytes": 16,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:require-corp:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:require-corp:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": true,
+        "sharedType": "function",
+        "sharedBytes": 16,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:credentialless:default",
+      "result": {
+        "secure": true,
+        "isolated": true,
+        "sharedType": "function",
+        "sharedBytes": 16,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:credentialless:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin:credentialless:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": true,
+        "sharedType": "function",
+        "sharedBytes": 16,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:unsafe-none:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:unsafe-none:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:unsafe-none:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:require-corp:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:require-corp:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:require-corp:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:credentialless:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:credentialless:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "same-origin-allow-popups:credentialless:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:unsafe-none:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:unsafe-none:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:unsafe-none:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:require-corp:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:require-corp:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:require-corp:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:credentialless:default",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:credentialless:cross-origin-isolated=()",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": false,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "restrict-properties:credentialless:cross-origin-isolated=(self)",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "syntax:\"same-origin\"",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "syntax:Same-Origin",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "syntax:same-origin;report-to=\"endpoint\"",
+      "result": {
+        "secure": true,
+        "isolated": true,
+        "sharedType": "function",
+        "sharedBytes": 16,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "syntax:same-origin, same-origin",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "syntax:same-origin;p=@123",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    },
+    {
+      "id": "syntax:same-origin;p=%\"test\"",
+      "result": {
+        "secure": true,
+        "isolated": false,
+        "sharedType": "undefined",
+        "sharedBytes": null,
+        "allowedIsolation": true,
+        "policyBrand": "[object PermissionsPolicy]",
+        "permissionPolicy": "undefined",
+        "featurePolicy": "object"
+      }
+    }
+  ]
+}

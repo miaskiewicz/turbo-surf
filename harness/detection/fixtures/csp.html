@@ -1,0 +1,15 @@
+<!doctype html><html><head>
+<script>globalThis.blockedInline=true;</script>
+<script>globalThis.hashAllowed=true;</script>
+<script nonce="good">
+globalThis.policyEvents=[];globalThis.nonceAllowed=true;
+for(const type of ['load','error'])document.addEventListener(type,event=>{if(event.target.tagName==='SCRIPT')policyEvents.push([event.target.id,event.type,event.isTrusted]);},true);
+try{eval('globalThis.evalExecuted=true;');globalThis.evalBlocked=false;}catch(error){globalThis.evalBlocked=error.name==='EvalError';}
+fetch('/blocked-connect').then(()=>{globalThis.connectBlocked=false;},error=>{globalThis.connectBlocked=error.name==='TypeError';});
+window.addEventListener('load',()=>{globalThis.__browserFixture={inlineBlocked:globalThis.blockedInline===undefined,hashAllowed,nonceAllowed,evalBlocked,connectBlocked,classic:globalThis.allowedClassic===true,module:globalThis.allowedModule===true,externalBlocked:globalThis.blockedExternal===undefined,cookie:document.cookie,events:policyEvents};document.body.setAttribute('data-browser-fixture','complete');});
+</script>
+<script id="classic" nonce="good" src="/allowed.js"></script>
+<script id="module" nonce="good" type="module" src="/allowed.mjs"></script>
+<script id="blocked" src="/blocked.js"></script>
+<link rel="stylesheet" href="/blocked.css">
+</head><body><img src="/blocked.png"><iframe src="/blocked-frame"></iframe></body></html>

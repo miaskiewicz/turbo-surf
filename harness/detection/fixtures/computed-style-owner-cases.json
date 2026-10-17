@@ -1,0 +1,7 @@
+[
+  {
+    "id": "private-computed-foreign-owner",
+    "headers": [],
+    "html": "<!doctype html><head><style>.target {width:47px;color:red}</style></head><body><div class=target id=target></div>"
+  }
+]

@@ -1,0 +1,568 @@
+{
+  "casesSha256": "b5233c252121f6df9f5e919a1859b1c2e3f7c5dce18dc2cc7a69e065cd6aa2ce",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "a65fd9e01c18d13a57cf126c10892f552ad908f312861b9cbb2ec67f0c60826a",
+  "collectorSha256": "053675d56f04ba45068f1e64863762c1fcdcbed02d7f1ae8f89c502e222bafcd",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "policy": "unsafe-none",
+      "rows": [
+        {
+          "id": "0:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "0:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "1:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "1:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "2:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "2:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "3:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "3:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "4:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "4:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "5:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "5:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "6:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "6:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "7:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "7:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "8:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "8:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        }
+      ],
+      "requests": [
+        {
+          "id": "0:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "0:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "1:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "1:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "2:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "2:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "3:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "3:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "4:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "4:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "5:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "5:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "6:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "6:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "7:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "7:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "8:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "8:cors",
+          "cookie": "seed=local"
+        }
+      ]
+    },
+    {
+      "policy": "require-corp",
+      "rows": [
+        {
+          "id": "0:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "0:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "1:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "1:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "2:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "2:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "3:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "3:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "4:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "4:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "5:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "5:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "6:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "6:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "7:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "7:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "8:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "8:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        }
+      ],
+      "requests": [
+        {
+          "id": "0:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "0:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "1:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "1:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "2:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "2:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "3:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "3:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "4:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "4:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "5:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "5:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "6:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "6:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "7:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "7:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "8:no-cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "8:cors",
+          "cookie": "seed=local"
+        }
+      ]
+    },
+    {
+      "policy": "credentialless",
+      "rows": [
+        {
+          "id": "0:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "0:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "1:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "1:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "2:no-cors",
+          "allowed": false,
+          "name": "TypeError"
+        },
+        {
+          "id": "2:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "3:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "3:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "4:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "4:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "5:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "5:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "6:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "6:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "7:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "7:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        },
+        {
+          "id": "8:no-cors",
+          "allowed": true,
+          "type": "opaque",
+          "status": 0
+        },
+        {
+          "id": "8:cors",
+          "allowed": true,
+          "type": "cors",
+          "status": 200
+        }
+      ],
+      "requests": [
+        {
+          "id": "0:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "0:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "1:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "1:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "2:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "2:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "3:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "3:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "4:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "4:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "5:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "5:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "6:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "6:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "7:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "7:cors",
+          "cookie": "seed=local"
+        },
+        {
+          "id": "8:no-cors",
+          "cookie": ""
+        },
+        {
+          "id": "8:cors",
+          "cookie": "seed=local"
+        }
+      ]
+    }
+  ]
+}

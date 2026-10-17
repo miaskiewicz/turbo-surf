@@ -1,0 +1,110 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "07ee561cb11c91bd4eb9330848de85216d077f9a58f6a52f16dba1d18b17071e",
+  "probeSha256": "5083378c46467961170c8718c90a14750dc21a9e8b25f69515a258ca27432e19",
+  "collectorSha256": "4e61b029135dacd18fdb68e4194fea875766edc7f203f7560bd3b826ad6aa0cb",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "unrestricted",
+      "result": {
+        "error": null,
+        "changed": true
+      }
+    },
+    {
+      "id": "sandbox-blocked",
+      "result": {
+        "error": "SecurityError",
+        "changed": false
+      }
+    },
+    {
+      "id": "sandbox-top-allowed",
+      "result": {
+        "error": null,
+        "changed": true
+      }
+    },
+    {
+      "id": "sandbox-activation-required",
+      "result": {
+        "error": "SecurityError",
+        "changed": false
+      }
+    },
+    {
+      "id": "sandbox-uppercase-top",
+      "result": {
+        "error": null,
+        "changed": true
+      }
+    },
+    {
+      "id": "csp-intersects-attribute",
+      "result": {
+        "error": "SecurityError",
+        "changed": false
+      }
+    },
+    {
+      "id": "csp-top-allowed",
+      "result": {
+        "error": null,
+        "changed": true
+      }
+    },
+    {
+      "id": "opaque-blocked",
+      "result": {
+        "error": "SecurityError",
+        "changed": false
+      }
+    },
+    {
+      "id": "opaque-top-allowed",
+      "result": {
+        "error": null,
+        "changed": true
+      }
+    },
+    {
+      "id": "nested-inherited-block",
+      "result": {
+        "error": "SecurityError",
+        "changed": false
+      }
+    },
+    {
+      "id": "nested-inner-block",
+      "result": {
+        "error": "SecurityError",
+        "changed": false
+      }
+    },
+    {
+      "id": "nested-both-allowed",
+      "result": {
+        "error": null,
+        "changed": true
+      }
+    },
+    {
+      "id": "guest-forged-activation-does-not-authorize",
+      "result": {
+        "error": "SecurityError",
+        "changed": false
+      }
+    }
+  ]
+}

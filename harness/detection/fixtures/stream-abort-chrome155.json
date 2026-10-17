@@ -1,0 +1,97 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "3e74c0ee947a59cc81ec3b273c48ff8f6c246b693646a3b2f5e0932581516af1",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "abort": {
+      "aborted": true,
+      "reason": true,
+      "abortSame": true,
+      "events": [[true, true, true, true], "handler"],
+      "hits": 1,
+      "forged": true,
+      "own": [],
+      "controllerOwn": []
+    },
+    "stream": {
+      "own": [],
+      "controller": true,
+      "readerOwn": [],
+      "first": {
+        "done": false,
+        "value": "first"
+      },
+      "second": {
+        "done": false,
+        "value": "second"
+      },
+      "end": {
+        "done": true
+      },
+      "locked": false,
+      "chunks": [["a", true, true], ["b", true, true]],
+      "byob": [0, 255, 128],
+      "viewDetached": true,
+      "transformedValue": {
+        "done": false,
+        "value": "HI"
+      },
+      "transformedEnd": {
+        "done": true
+      },
+      "iteratorShape": {
+        "own": [],
+        "proto": ["next", "return", "Symbol(Symbol.toStringTag)"],
+        "tag": "[object ReadableStream AsyncIterator]",
+        "result": {
+          "done": false,
+          "value": "iterator"
+        }
+      },
+      "strategyShape": {
+        "own": [],
+        "sizeOwn": ["length", "name"],
+        "name": "size",
+        "length": 1,
+        "native": true,
+        "size": 3,
+        "same": true
+      },
+      "countShape": {
+        "length": 0,
+        "size": 1,
+        "native": true,
+        "same": true
+      },
+      "timeoutShape": {
+        "aborted": true,
+        "name": "TimeoutError",
+        "brand": true,
+        "target": true,
+        "trusted": true
+      },
+      "foreignShape": {
+        "promise": false,
+        "sameError": true,
+        "borrowedPromise": true,
+        "localError": true
+      },
+      "constructorErrors": [true, true, true, true, true, true],
+      "dictionaryErrors": [false, false, false],
+      "subclasses": true,
+      "sourceError": true,
+      "strategyError": true
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "serverSha256": "ddcd8500d3aacf4f3ff27ff7566618316e21230513843dfc7d2095967d99cfd8",
+  "protocol": {
+    "bodyDelayMs": 20,
+    "bodyWindowMs": 100,
+    "abortWindowMs": 30,
+    "nativeTimeoutMs": 20,
+    "nativeTimeoutWindowMs": 30,
+    "gcRounds": 3
+  },
+  "serverReceipts": {
+    "delayedBody": {
+      "requests": 1,
+      "headersFlushed": true,
+      "bodyWritten": true
+    },
+    "stalledBody": {
+      "requests": 1,
+      "headersFlushed": true,
+      "bodyWritten": false,
+      "socketClosed": true
+    }
+  },
+  "probeSha256": "c7015e83eb1f30ab322d924fe12e10e3601e4768530cd2b980d5bfcb6c300f29",
+  "collectorSha256": "8ad85317d2090b3f2c3655294feab5df31bb5ab6e2e4a50af364cc92ee9914e6",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "bodyBeforeLaterTimer": true,
+    "windowDeadlineAbort": "AbortError",
+    "retainedNativeTimeout": true,
+    "heldNativeTimeout": true
+  }
+}

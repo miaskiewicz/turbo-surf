@@ -65,15 +65,15 @@ for (const frame of page.frames()) {
         break;
       }
     }
-  } catch (e) {}
+  } catch {}
 }
 await page.waitForTimeout(1200);
 
-const raw = await page.evaluate(COLLECT);
+const raw = await page.evaluate(COLLECT, undefined, false);
 // Collectors return a JSON string; pretty-print it (fall back to raw on non-JSON).
 try {
   process.stdout.write(JSON.stringify(JSON.parse(raw), null, 2) + "\n");
-} catch (e) {
+} catch {
   process.stdout.write(String(raw) + "\n");
 }
 await context.close();

@@ -1,0 +1,8 @@
+<!doctype html><html><head><title>child</title><script>
+globalThis.frameLog=[];
+document.addEventListener('DOMContentLoaded',()=>frameLog.push('dcl'));
+window.addEventListener('load',()=>frameLog.push('load'));
+</script><script id='entry' type='module' src='./frame-entry.mjs'></script>
+<script id='repeat' type='module' src='./frame-entry.mjs'></script>
+<script type='module'>import {owned} from './frame-dep.mjs';globalThis.inlineModule={owned,current:document.currentScript===null,url:import.meta.url};</script>
+</head><body>child</body></html>

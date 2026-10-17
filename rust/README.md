@@ -5,9 +5,25 @@ so the browserless crawler is Rust too. The only piece that *must* stay JS is th
 `@playwright/test` drop-in façade (agents `import` it inside their own Node
 process); it's a thin shim over the napi addon — all the muscle is Rust.
 
-turbo-dom is consumed from **crates.io** as the `turbo-dom-parser` crate
-(`{ package = "turbo-dom", version = "0.3.1" }`) — its pure-Rust `rtdom::Tree`
-(handle-based `u32` DOM, no napi/wasm boundary).
+turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
+`rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
+workspace now resolves the public Git-pinned `turbo-dom` 0.5.7 candidate
+`aaeb290` (PR14, including PR13 custom states and detached contextual fragments); latest registry release is0.5.6.
+The candidate adds native custom states and live checked-state reads to the original
+0.5.6 capabilities, including original UTF-16
+payload/name/parser APIs, native mutation batches and bounded storage collection.
+The published0.5.6 annotated release tag identifies PR #12 merge commit
+`ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`; npm platform/WASM metadata,
+the successful release workflow and official registry checksums were verified.
+The canonical binding consumes collection through the public API with genuine
+weak wrapper roots and native job pins. Real V8 GC notifications schedule a
+bounded scan after completed host operations; no Tree traversal runs inside the
+GC callback. Limits are 250,000 nodes, 2,000,000 edges and 64 MiB retained payload
+per Tree, with at most 256 Documents. Rejection leaves that Tree unchanged and
+is retained in host diagnostics; earlier Trees in a multi-document scan may have
+committed. Native DOM state is isolate-owned;
+PageSessions enter their V8 isolate and native world for each future poll, then
+restore the caller before yielding.
 
 ## Crates
 
@@ -17,12 +33,22 @@ turbo-dom is consumed from **crates.io** as the `turbo-dom-parser` crate
 | `turbo-surf-page` | Tier 2 — `TurboNavigator` (fetch+parse over `rtdom::Tree`) |
 | `turbo-surf-view` | extraction & views — extract / visible / aria / ax / locator / markdown / text / schema / query / xpath / hydration / dom-ops / actions |
 | `turbo-surf-render` | Tier 3 — `deno_core` isolate + the rtdom↔V8 DOM binding (JS execution / hydration) |
+| `turbo-surf-raster` | native layout/paint, canvas rasterization and system text measurement; optional Metal WebGL and CoreText |
+| `turbo-surf-py` | PyO3 binding and PyPI wheels |
 | `turbo-surf-transform` | swc TS/JSX → classic JS for the render tier |
 | `turbo-surf-napi` | the `.node` addon — in-process bridge from the core to Node (+ stateful `Session`) |
-| `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 60-tool surface (parity with the JS server) over a stateful session |
+| `turbo-surf-mcp` | stdio JSON-RPC MCP server — native binary, full 80-tool surface over a stateful session |
 
-`cargo test` runs the full offline suite across the workspace (200+ tests);
-`cargo clippy --workspace --all-targets` and `cargo fmt` are clean.
+`cargo test --workspace` runs the offline engine suite. Required gates also include
+`cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
+the root npm test command checks versions, the addon/shim and detection harness too.
+
+The render tier consumes a public, immutable Git-pinned `turbo-html2pdf-core 0.3.8`
+release candidate from producer PR #23 (published registry release: 0.3.7) for native live-tree
+box geometry, transforms, element scroll metrics and point-hit regions. It reads
+private actual CSSOM state without guest getters or HTML rewriting. Supported
+contracts and remaining inline/caret/scroll/layout limits are recorded in
+[LIVE-GEOMETRY.md](../harness/detection/LIVE-GEOMETRY.md).
 
 ## Tier 1 — `turbo-surf-core`
 
@@ -36,11 +62,20 @@ Direct ports of the JS modules, same behavior and edge cases:
   `RobotsFetcher` → offline-testable.
 - `cookies` — RFC 6265 subset `CookieJar` (domain/path scope, Secure, HttpOnly,
   Expires/Max-Age, SameSite; `storageState` round-trip). Times are `f64` ms (session
-  cookie = `f64::INFINITY`). Self-contained HTTP-date parser (no chrono).
-- `net` — `fetch_html` over reqwest (gzip/br, rustls, HTTP/2). Charset sniff, byte
+  cookie = `f64::INFINITY`). Script-visible cookie access excludes HttpOnly cookies
+  and rejects script overwrites of them. Self-contained HTTP-date parser (no chrono).
+- `net` — `fetch_html` over wreq/BoringSSL by default (`impersonate`), or reqwest/rustls
+  with that feature disabled. Charset sniff, byte
   cap, content-type gate, CookieJar round-trip, manual per-hop redirect follow, and a
   **shared pooled `build_client()`** passed via `FetchOptions::client` so connections
-  + TLS sessions are reused across pages.
+  + TLS sessions are reused across pages. `request_context` derives destination/mode,
+  referrer/Origin and credentials policy, with PSL site classification and session-scoped
+  Accept-CH opt-ins. `FetchOptions::client_hints` shares this state with page execution.
+- `http_cache` / `compression_dictionary` — session-owned HTTP representations and
+  partitioned, origin-scoped compression dictionaries; genuine selected hash/ID
+  negotiation and bounded incremental Brotli/Zstandard decoding. The renderer owns
+  policy-aware background Link
+  discovery; see [controls and bounds](../harness/detection/COMPRESSION-DICTIONARIES.md).
 - `crawl` — frontier-driven scheduling: global + per-host concurrency, per-host
   politeness, retry/backoff, depth/page caps, robots gate. Fetch+parse seam is the
   `Navigator` trait (tier-2 `Page` implements it).
@@ -74,9 +109,10 @@ place, and the render returns the hydrated HTML (the Lane B contract).
   Testing Library). A JS DOM node is a V8 object holding a turbo-dom handle in an
   internal field; methods/accessors are native callbacks straight onto `Tree`. No
   JS-DOM-in-JS-VM indirection. See [`src/browser_env.rs`](crates/turbo-surf-render/src/browser_env.rs)
-  for the vendor/sync story (verbatim copy + a one-command re-vendor script; the
-  turbo-surf-specific deltas — `install_html`/`document_html` and the env bootstrap
-  — live separately and are never patched into the upstream file).
+  for the vendor/sync story: the one-command script copies committed canonical
+  Rust/JS/CSS grammar and generates the surf adapter from
+  `scripts/browser-env-adapter.rs.in`. Seeded installation delegates to the
+  canonical API; surf additions remain outside the upstream binding.
 - The runtime in [`src/runtime.rs`](crates/turbo-surf-render/src/runtime.rs) grafts
   that binding onto deno_core's context, then layers the non-DOM `window` env a real
   page needs (`navigator`, `location`, virtual timers + real microtasks, `fetch`/XHR
@@ -84,11 +120,18 @@ place, and the render returns the hydrated HTML (the Lane B contract).
   `ReadableStream`, `AbortController`, `BroadcastChannel`, `WebSocket`,
   `document.cookie` bridged to the shared `CookieJar`, observers, history) + the
   hydration pump (executes injected `<script>` chunks, drains to quiescence).
+  Host-owned hydration diagnostics retain the last lifecycle phase and completed
+  post-load pump count, including on watchdog interruption. Bounded pump completion
+  is not a global-idle guarantee. The detection harness can opt into private native
+  Inspector CPU profiles without changing the execution budget.
 - **`fetch` is real** (async, event-loop-driven; relative URLs resolve against the
   page base) — promise/`await`/timer-driven hydration settles before serialization.
-- `run_with_dom` (the sync `page.evaluate` path) reuses a **thread-persistent
-  isolate across pages** — the ~20 ms boot is paid once, then ~5 ms/call. Page-JS
-  isolation across pages is intentionally relaxed (a crawl doesn't need it).
+- `run_with_dom` (the sync evaluation path) retains its isolate and native DOM for
+  repeated calls with identical HTML. Changing the HTML creates a fresh isolate,
+  clearing lexical declarations, globals and modified intrinsics. Fresh page hydration
+  also uses independent runtimes. `render_page_pooled` keeps its public compatibility
+  name but currently opens a fresh runtime on every call; the former cross-page boot
+  optimization was removed to preserve isolation.
 - `transform` (`turbo-surf-transform`, swc) turns a TS/JSX bundle into classic JS
   so it runs under the tier.
 
@@ -113,3 +156,13 @@ cargo clippy --workspace --all-targets
 cargo fmt
 cargo build --release -p turbo-surf-napi   # build the .node addon (then node addon tests / harness)
 ```
+
+## Detection diagnostics
+
+See [`../harness/detection/README.md`](../harness/detection/README.md) for a fresh-jar
+Chrome/native comparison with all native fingerprint/raster features enabled.
+`PageSession::open_with_init_script` installs opt-in diagnostics before page scripts;
+`TURBO_SURF_HTTP_TRACE` records native application HTTP requests, responses and decoded
+bodies. These are raw local diagnostics, not a TLS packet capture. Current Google
+observations and unresolved gaps are in
+[`../harness/detection/FINDINGS.md`](../harness/detection/FINDINGS.md).

@@ -1,0 +1,610 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "f8152496d876ac800ae79499cb4dfa118a9ca1e85623ca4c79574bc36b538551",
+  "probeSha256": "3ce4ed1e182b7eb8e27ed5bc34baff7e7886679b08d3db565f5de21a930c8b90",
+  "collectorSha256": "326041136b77cc4448273b4b9c02bc167fb54a786382096c1bdbc6b5176da563",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "rows": [
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 38,
+            "column": 25,
+            "sample": [115, 104, 97, 100, 111, 119, 32, 43, 32, 49],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 39,
+            "column": 36,
+            "sample": [116, 121, 112, 101, 111, 102, 32, 115, 104, 97, 100, 111, 119],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 40,
+            "column": 27,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110, 111, 110, 121, 109, 111, 117,
+              115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114, 110, 32, 116, 121, 112, 101,
+              111, 102, 32, 115
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 41,
+            "column": 68,
+            "sample": [
+              47, 42, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 42,
+            "column": 66,
+            "sample": [],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 43,
+            "column": 70,
+            "sample": [
+              40, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110,
+              111, 110, 121, 109, 111, 117, 115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114,
+              110, 32, 57
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 44,
+            "column": 75,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 42, 32, 97, 110, 111, 110, 121, 109, 111,
+              117, 115, 40, 10, 41, 32, 123, 10, 121, 105, 101, 108, 100, 32, 49, 48, 10, 125, 41
+            ],
+            "trusted": true
+          }
+        ],
+        "results": {
+          "direct": "EvalError",
+          "indirect": "EvalError",
+          "function": "EvalError",
+          "leadingSample": "EvalError",
+          "prefixOnlyWhitespace": "EvalError",
+          "asyncFunction": "EvalError",
+          "generatorFunction": "EvalError",
+          "objectIdentity": true,
+          "boxedIdentity": true,
+          "failedConversion": "RangeError"
+        }
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "rows": [
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "report",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 38,
+            "column": 25,
+            "sample": [115, 104, 97, 100, 111, 119, 32, 43, 32, 49],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "report",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 39,
+            "column": 36,
+            "sample": [116, 121, 112, 101, 111, 102, 32, 115, 104, 97, 100, 111, 119],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "report",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 40,
+            "column": 27,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110, 111, 110, 121, 109, 111, 117,
+              115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114, 110, 32, 116, 121, 112, 101,
+              111, 102, 32, 115
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "report",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 41,
+            "column": 68,
+            "sample": [
+              47, 42, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "report",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 42,
+            "column": 66,
+            "sample": [],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "report",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 43,
+            "column": 70,
+            "sample": [
+              40, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110,
+              111, 110, 121, 109, 111, 117, 115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114,
+              110, 32, 57
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "report",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 44,
+            "column": 75,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 42, 32, 97, 110, 111, 110, 121, 109, 111,
+              117, 115, 40, 10, 41, 32, 123, 10, 121, 105, 101, 108, 100, 32, 49, 48, 10, 125, 41
+            ],
+            "trusted": true
+          }
+        ],
+        "results": {
+          "direct": 8,
+          "indirect": "undefined",
+          "function": "undefined",
+          "leadingSample": "undefined",
+          "prefixOnlyWhitespace": "undefined",
+          "asyncFunction": 9,
+          "generatorFunction": 10,
+          "objectIdentity": true,
+          "boxedIdentity": true,
+          "failedConversion": "RangeError"
+        }
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "rows": [],
+        "results": {
+          "direct": 8,
+          "indirect": "undefined",
+          "function": "undefined",
+          "leadingSample": "undefined",
+          "prefixOnlyWhitespace": "undefined",
+          "asyncFunction": 9,
+          "generatorFunction": 10,
+          "objectIdentity": true,
+          "boxedIdentity": true,
+          "failedConversion": "RangeError"
+        }
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "rows": [],
+        "results": {
+          "direct": 8,
+          "indirect": "undefined",
+          "function": "undefined",
+          "leadingSample": "undefined",
+          "prefixOnlyWhitespace": "undefined",
+          "asyncFunction": 9,
+          "generatorFunction": 10,
+          "objectIdentity": true,
+          "boxedIdentity": true,
+          "failedConversion": "RangeError"
+        }
+      }
+    },
+    {
+      "id": "4",
+      "result": {
+        "rows": [
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 38,
+            "column": 25,
+            "sample": [115, 104, 97, 100, 111, 119, 32, 43, 32, 49],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 39,
+            "column": 36,
+            "sample": [116, 121, 112, 101, 111, 102, 32, 115, 104, 97, 100, 111, 119],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 40,
+            "column": 27,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110, 111, 110, 121, 109, 111, 117,
+              115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114, 110, 32, 116, 121, 112, 101,
+              111, 102, 32, 115
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 41,
+            "column": 68,
+            "sample": [
+              47, 42, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 42,
+            "column": 66,
+            "sample": [],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 43,
+            "column": 70,
+            "sample": [
+              40, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110,
+              111, 110, 121, 109, 111, 117, 115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114,
+              110, 32, 57
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 44,
+            "column": 75,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 42, 32, 97, 110, 111, 110, 121, 109, 111,
+              117, 115, 40, 10, 41, 32, 123, 10, 121, 105, 101, 108, 100, 32, 49, 48, 10, 125, 41
+            ],
+            "trusted": true
+          }
+        ],
+        "results": {
+          "direct": "EvalError",
+          "indirect": "EvalError",
+          "function": "EvalError",
+          "leadingSample": "EvalError",
+          "prefixOnlyWhitespace": "EvalError",
+          "asyncFunction": "EvalError",
+          "generatorFunction": "EvalError",
+          "objectIdentity": true,
+          "boxedIdentity": true,
+          "failedConversion": "RangeError"
+        }
+      }
+    },
+    {
+      "id": "5",
+      "result": {
+        "rows": [
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 38,
+            "column": 25,
+            "sample": [115, 104, 97, 100, 111, 119, 32, 43, 32, 49],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 39,
+            "column": 36,
+            "sample": [116, 121, 112, 101, 111, 102, 32, 115, 104, 97, 100, 111, 119],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 40,
+            "column": 27,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110, 111, 110, 121, 109, 111, 117,
+              115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114, 110, 32, 116, 121, 112, 101,
+              111, 102, 32, 115
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 41,
+            "column": 68,
+            "sample": [
+              47, 42, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 42,
+            "column": 66,
+            "sample": [],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 43,
+            "column": 70,
+            "sample": [
+              40, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110,
+              111, 110, 121, 109, 111, 117, 115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114,
+              110, 32, 57
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 44,
+            "column": 75,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 42, 32, 97, 110, 111, 110, 121, 109, 111,
+              117, 115, 40, 10, 41, 32, 123, 10, 121, 105, 101, 108, 100, 32, 49, 48, 10, 125, 41
+            ],
+            "trusted": true
+          }
+        ],
+        "results": {
+          "direct": "EvalError",
+          "indirect": "EvalError",
+          "function": "EvalError",
+          "leadingSample": "EvalError",
+          "prefixOnlyWhitespace": "EvalError",
+          "asyncFunction": "EvalError",
+          "generatorFunction": "EvalError",
+          "objectIdentity": true,
+          "boxedIdentity": true,
+          "failedConversion": "RangeError"
+        }
+      }
+    },
+    {
+      "id": "6",
+      "result": {
+        "rows": [
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 38,
+            "column": 25,
+            "sample": [115, 104, 97, 100, 111, 119, 32, 43, 32, 49],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 39,
+            "column": 36,
+            "sample": [116, 121, 112, 101, 111, 102, 32, 115, 104, 97, 100, 111, 119],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 40,
+            "column": 27,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110, 111, 110, 121, 109, 111, 117,
+              115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114, 110, 32, 116, 121, 112, 101,
+              111, 102, 32, 115
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 41,
+            "column": 68,
+            "sample": [
+              47, 42, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113, 113,
+              113, 113, 113, 113
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 42,
+            "column": 66,
+            "sample": [],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 43,
+            "column": 70,
+            "sample": [
+              40, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 97, 110,
+              111, 110, 121, 109, 111, 117, 115, 40, 10, 41, 32, 123, 10, 114, 101, 116, 117, 114,
+              110, 32, 57
+            ],
+            "trusted": true
+          },
+          {
+            "target": "document",
+            "directive": "script-src",
+            "blocked": "eval",
+            "disposition": "enforce",
+            "source": "https://csp-probe.test/code-generation-probe.js",
+            "line": 44,
+            "column": 75,
+            "sample": [
+              40, 102, 117, 110, 99, 116, 105, 111, 110, 42, 32, 97, 110, 111, 110, 121, 109, 111,
+              117, 115, 40, 10, 41, 32, 123, 10, 121, 105, 101, 108, 100, 32, 49, 48, 10, 125, 41
+            ],
+            "trusted": true
+          }
+        ],
+        "results": {
+          "direct": "EvalError",
+          "indirect": "EvalError",
+          "function": "EvalError",
+          "leadingSample": "EvalError",
+          "prefixOnlyWhitespace": "EvalError",
+          "asyncFunction": "EvalError",
+          "generatorFunction": "EvalError",
+          "objectIdentity": true,
+          "boxedIdentity": true,
+          "failedConversion": "RangeError"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "b5dbf76c60d29d6d79664ff5ca3964fc127878beddc509712f778b7f04948016",
+  "collectorSha256": "ce37e68bf42007bb363bdb03642c7f0101803fc0c0e91e070870a771493a65ff",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "request": {
+      "different": true,
+      "allAbort": true,
+      "reason": true,
+      "nullFresh": true,
+      "invalid": true,
+      "syncThrow": false,
+      "rejection": true
+    },
+    "held": {
+      "status": 200,
+      "own": [],
+      "used": false,
+      "locked": false,
+      "canceledUsed": true
+    },
+    "abort": {
+      "readReason": true,
+      "consumedReason": false,
+      "beforeSame": true
+    },
+    "binary": {
+      "first": [0, 255, 128, 65, 226, 130, 172],
+      "second": [0, 255, 128, 65, 226, 130, 172],
+      "type": "basic",
+      "statusText": "Authored",
+      "used": true,
+      "cloneUsed": true
+    },
+    "upload": [0, 255, 128, 65],
+    "nullBody": {
+      "null": false,
+      "status": 204,
+      "type": "[object ReadableStream]",
+      "cloneType": "[object ReadableStream]",
+      "cloneText": ""
+    }
+  }
+}

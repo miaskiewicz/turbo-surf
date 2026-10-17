@@ -15,6 +15,7 @@ use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
 use turbo_surf_core::cookies::CookieJar;
 use turbo_surf_core::net::{fetch_html, FetchOptions};
+use turbo_surf_core::request_context::{ClientHints, RequestContext};
 use turbo_surf_view as view;
 
 struct Job {
@@ -28,6 +29,7 @@ struct State {
     tree: Option<Tree>,
     url: String,
     jar: CookieJar,
+    client_hints: ClientHints,
 }
 
 /// A retained-DOM browsing session. Methods block on the worker thread.
@@ -96,6 +98,11 @@ async fn goto(st: &mut State, url: &str) -> std::result::Result<String, String> 
     let opts = FetchOptions {
         allow_non_html: true,
         jar: Some(&mut st.jar),
+        client_hints: Some(&st.client_hints),
+        context: Some(RequestContext::navigation(
+            (!st.url.is_empty()).then(|| st.url.clone()),
+            true,
+        )),
         ..Default::default()
     };
     let res = fetch_html(url, opts).await.map_err(|e| e.to_string())?;
@@ -135,6 +142,8 @@ async fn action(st: &mut State, tool: &str, args: &Value) -> std::result::Result
                     body: s.body,
                     allow_non_html: true,
                     jar: Some(&mut st.jar),
+                    client_hints: Some(&st.client_hints),
+                    context: Some(RequestContext::navigation(Some(st.url.clone()), true)),
                     ..Default::default()
                 };
                 let res = fetch_html(&s.url, opts).await.map_err(|e| e.to_string())?;
@@ -202,14 +211,16 @@ fn read_query(t: &Tree, root: Handle, args: &Value) -> std::result::Result<Strin
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::Sender as MpscSender;
 use std::sync::{Mutex, OnceLock};
+use tokio::sync::mpsc::UnboundedSender as MpscSender;
 use turbo_surf_render::{PageSession, DEFAULT_RENDER_BUDGET_MS};
 
 enum LiveJob {
     Eval(String, SyncSender<std::result::Result<String, String>>),
+    Expression(String, SyncSender<std::result::Result<String, String>>),
     Serialize(SyncSender<String>),
     Cookies(SyncSender<String>),
+    NetworkLog(SyncSender<String>),
     Close(SyncSender<()>),
 }
 
@@ -233,10 +244,14 @@ fn live_send(id: u32, job: LiveJob) -> std::result::Result<(), String> {
 /// Async (hydration fetches chunks from a possibly same-process server, so Node's loop
 /// must stay free).
 pub struct LiveOpenTask {
+    response: crate::document_response::DocumentResponse,
+    init_script: String,
     html: String,
     base_url: String,
     cookies: String,
     user_agent: String,
+    client_hints: ClientHints,
+    storage: turbo_surf_render::BrowserStorage,
 }
 
 #[napi]
@@ -245,12 +260,16 @@ impl Task for LiveOpenTask {
     type JsValue = u32;
 
     fn compute(&mut self) -> Result<u32> {
-        let (tx, rx) = std::sync::mpsc::channel::<LiveJob>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LiveJob>();
         let (open_tx, open_rx) = sync_channel::<std::result::Result<(), String>>(1);
         let html = std::mem::take(&mut self.html);
         let base = std::mem::take(&mut self.base_url);
         let cookies = std::mem::take(&mut self.cookies);
         let ua = std::mem::take(&mut self.user_agent);
+        let client_hints = self.client_hints.clone();
+        let storage = self.storage.clone();
+        let response = self.response.clone();
+        let init_script = std::mem::take(&mut self.init_script);
         thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -262,12 +281,17 @@ impl Task for LiveOpenTask {
                     return;
                 }
             };
-            let mut session = match rt.block_on(PageSession::open(
+            let mut session = match rt.block_on(PageSession::open_with_document_response(
                 &html,
                 &base,
                 &cookies,
                 &ua,
                 DEFAULT_RENDER_BUDGET_MS,
+                &init_script,
+                client_hints,
+                &response.headers,
+                storage,
+                response.metadata,
             )) {
                 Ok(s) => {
                     let _ = open_tx.send(Ok(()));
@@ -278,13 +302,52 @@ impl Task for LiveOpenTask {
                     return;
                 }
             };
-            for job in rx {
+            let mut storage_work = false;
+            loop {
+                enum Ready {
+                    Job(Option<LiveJob>),
+                    Storage,
+                }
+                let ready = if storage_work {
+                    rt.block_on(async {
+                        tokio::select! {
+                            biased;
+                            job = rx.recv() => Ready::Job(job),
+                            _ = session.eval("") => Ready::Storage,
+                        }
+                    })
+                } else {
+                    let signal = session.storage_event_signal();
+                    rt.block_on(async {
+                        tokio::select! {
+                            biased;
+                            job = rx.recv() => Ready::Job(job),
+                            () = signal => Ready::Storage,
+                        }
+                    })
+                };
+                let job = match ready {
+                    Ready::Job(Some(job)) => job,
+                    Ready::Job(None) => break,
+                    Ready::Storage => {
+                        // Drive continuations while IO is pending, but let host
+                        // commands interrupt the drain (Close cancels transport).
+                        storage_work = !storage_work;
+                        continue;
+                    }
+                };
                 match job {
                     LiveJob::Eval(script, reply) => {
                         let _ = reply.send(rt.block_on(session.eval(&script)));
                     }
+                    LiveJob::Expression(script, reply) => {
+                        let _ = reply.send(rt.block_on(session.eval_expression(&script)));
+                    }
                     LiveJob::Serialize(reply) => {
                         let _ = reply.send(session.serialize());
+                    }
+                    LiveJob::NetworkLog(reply) => {
+                        let _ = reply.send(session.drain_network_log());
                     }
                     LiveJob::Cookies(reply) => {
                         let _ = reply.send(session.cookies());
@@ -321,16 +384,24 @@ pub fn live_open(
     base_url: String,
     cookies: Option<String>,
     user_agent: Option<String>,
-) -> AsyncTask<LiveOpenTask> {
+    request_state_id: Option<u32>,
+    document_response: Option<String>,
+    init_script: Option<String>,
+) -> Result<AsyncTask<LiveOpenTask>> {
     // Parent the V8 platform on the main thread before the live session's worker thread
     // creates the isolate — see `turbo_surf_render::ensure_platform`.
     crate::ensure_render_init();
-    AsyncTask::new(LiveOpenTask {
+    let state = crate::request_state(request_state_id)?;
+    Ok(AsyncTask::new(LiveOpenTask {
+        response: crate::document_response::parse(document_response)?,
+        init_script: init_script.unwrap_or_default(),
         html,
         base_url,
         cookies: cookies.unwrap_or_default(),
         user_agent: user_agent.unwrap_or_default(),
-    })
+        client_hints: state.client_hints,
+        storage: state.storage,
+    }))
 }
 
 /// Run `script` in the live isolate, drain to quiescence, return `String(__RESULT||'')`.
@@ -338,6 +409,7 @@ pub fn live_open(
 pub struct LiveEvalTask {
     id: u32,
     script: String,
+    expression: bool,
 }
 
 #[napi]
@@ -349,7 +421,11 @@ impl Task for LiveEvalTask {
         let (reply, rx) = sync_channel(1);
         live_send(
             self.id,
-            LiveJob::Eval(std::mem::take(&mut self.script), reply),
+            if self.expression {
+                LiveJob::Expression(std::mem::take(&mut self.script), reply)
+            } else {
+                LiveJob::Eval(std::mem::take(&mut self.script), reply)
+            },
         )
         .map_err(Error::from_reason)?;
         rx.recv()
@@ -365,7 +441,46 @@ impl Task for LiveEvalTask {
 /// Eval JS in a live session (async).
 #[napi]
 pub fn live_eval(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
-    AsyncTask::new(LiveEvalTask { id, script })
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: false,
+    })
+}
+
+/// Evaluate an expression and await its actual native Promise completion.
+#[napi]
+pub fn live_eval_expression(id: u32, script: String) -> AsyncTask<LiveEvalTask> {
+    AsyncTask::new(LiveEvalTask {
+        id,
+        script,
+        expression: true,
+    })
+}
+
+pub struct LiveNetworkLogTask {
+    id: u32,
+}
+
+#[napi]
+impl Task for LiveNetworkLogTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<String> {
+        let (reply, rx) = sync_channel(1);
+        live_send(self.id, LiveJob::NetworkLog(reply)).map_err(Error::from_reason)?;
+        rx.recv()
+            .map_err(|_| Error::from_reason("live session dropped network log reply"))
+    }
+    fn resolve(&mut self, _env: Env, out: String) -> Result<String> {
+        Ok(out)
+    }
+}
+
+/// Drain native response records without exposing raw resource bodies to guest JS.
+#[napi]
+pub fn live_network_log(id: u32) -> AsyncTask<LiveNetworkLogTask> {
+    AsyncTask::new(LiveNetworkLogTask { id })
 }
 
 /// Serialize the live DOM to HTML (sync — no network).

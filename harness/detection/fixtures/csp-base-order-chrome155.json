@@ -1,0 +1,48 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "eaabcb5ab7f6e4fffe8a031cf817519a90ba45527aa62d6419d4cdfb25ff86a2",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "kind": "parsed-before",
+      "before": "<origin>/allowed/",
+      "after": "<origin>/"
+    },
+    {
+      "kind": "parsed-after",
+      "before": "<origin>/",
+      "after": "<origin>/"
+    },
+    {
+      "kind": "fragment-before",
+      "before": "<origin>/allowed/",
+      "after": "<origin>/"
+    },
+    {
+      "kind": "fragment-after",
+      "before": "<origin>/allowed/",
+      "after": "<origin>/"
+    },
+    {
+      "kind": "svg-base",
+      "before": "<origin>/allowed/",
+      "after": "<origin>/changed/"
+    },
+    {
+      "kind": "body-policy",
+      "before": "<origin>/allowed/",
+      "after": "<origin>/changed/"
+    }
+  ]
+}

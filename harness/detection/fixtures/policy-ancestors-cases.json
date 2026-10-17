@@ -1,0 +1,253 @@
+[
+  {
+    "id": "0",
+    "headers": [],
+    "childHeaders": [],
+    "cross": false
+  },
+  {
+    "id": "1",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors 'none'"]],
+    "cross": false
+  },
+  {
+    "id": "2",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors 'self'"]],
+    "cross": false
+  },
+  {
+    "id": "3",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors 'self'"]],
+    "cross": true
+  },
+  {
+    "id": "4",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors *"]],
+    "cross": true
+  },
+  {
+    "id": "5",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'"]],
+    "cross": true
+  },
+  {
+    "id": "6",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors http://127.0.0.1:*"]],
+    "cross": true
+  },
+  {
+    "id": "7",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors http://localhost:*"]],
+    "cross": true
+  },
+  {
+    "id": "8",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors http:"]],
+    "cross": true
+  },
+  {
+    "id": "9",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors 'none' *"]],
+    "cross": true
+  },
+  {
+    "id": "10",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "DENY"]],
+    "cross": true
+  },
+  {
+    "id": "11",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "deny"]],
+    "cross": true
+  },
+  {
+    "id": "12",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "SAMEORIGIN"]],
+    "cross": true
+  },
+  {
+    "id": "13",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "sameorigin"]],
+    "cross": true
+  },
+  {
+    "id": "14",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "ALLOW-FROM https://example.test"]],
+    "cross": true
+  },
+  {
+    "id": "15",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "DENY, SAMEORIGIN"]],
+    "cross": true
+  },
+  {
+    "id": "16",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "DENY, DENY"]],
+    "cross": true
+  },
+  {
+    "id": "17",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "unknown"]],
+    "cross": true
+  },
+  {
+    "id": "18",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "SAMEORIGIN"]],
+    "cross": false
+  },
+  {
+    "id": "19",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "DENY"], ["Content-Security-Policy", "frame-ancestors *"]],
+    "cross": true
+  },
+  {
+    "id": "20",
+    "headers": [],
+    "childHeaders": [
+      ["X-Frame-Options", "DENY"],
+      ["Content-Security-Policy", "default-src *; script-src 'unsafe-inline'"]
+    ],
+    "cross": true
+  },
+  {
+    "id": "21",
+    "headers": [],
+    "childHeaders": [
+      ["Content-Security-Policy", "frame-ancestors *"],
+      ["Content-Security-Policy", "frame-ancestors 'none'"]
+    ],
+    "cross": true
+  },
+  {
+    "id": "22",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "SAMEORIGIN, UNKNOWN"]],
+    "cross": false
+  },
+  {
+    "id": "23",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "UNKNOWN, SAMEORIGIN"]],
+    "cross": false
+  },
+  {
+    "id": "24",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "UNKNOWN, DENY"]],
+    "cross": false
+  },
+  {
+    "id": "25",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "SAMEORIGIN, DENY"]],
+    "cross": false
+  },
+  {
+    "id": "26",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "SAMEORIGIN"], ["X-Frame-Options", "SAMEORIGIN"]],
+    "cross": false
+  },
+  {
+    "id": "27",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "\"DENY\""]],
+    "cross": false
+  },
+  {
+    "id": "28",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors"]],
+    "cross": false
+  },
+  {
+    "id": "29",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors *; frame-ancestors 'none'"]],
+    "cross": true
+  },
+  {
+    "id": "30",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors 'none'; frame-ancestors *"]],
+    "cross": false
+  },
+  {
+    "id": "31",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors http://127.0.0.1:*/ignored"]],
+    "cross": true
+  },
+  {
+    "id": "32",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy-Report-Only", "frame-ancestors 'none'"]],
+    "cross": true
+  },
+  {
+    "id": "33",
+    "headers": [],
+    "childHeaders": [
+      ["Content-Security-Policy-Report-Only", "frame-ancestors *"],
+      ["X-Frame-Options", "DENY"]
+    ],
+    "cross": false
+  },
+  {
+    "id": "34",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "UNKNOWN, UNKNOWN"]],
+    "cross": false
+  },
+  {
+    "id": "35",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "UNKNOWN, other"]],
+    "cross": false
+  },
+  {
+    "id": "36",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "SAMEORIGIN, SAMEORIGIN"]],
+    "cross": false
+  },
+  {
+    "id": "37",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", ", SAMEORIGIN"]],
+    "cross": false
+  },
+  {
+    "id": "38",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "frame-ancestors 'none'"]],
+    "cross": true,
+    "credentialless": true
+  },
+  {
+    "id": "39",
+    "headers": [],
+    "childHeaders": [["X-Frame-Options", "DENY"]],
+    "cross": true,
+    "credentialless": true
+  }
+]

@@ -78,6 +78,44 @@ async function fresh() {
   return page;
 }
 
+test("response events drain host records while opaque bodies stay hidden in page JS", async () => {
+  const target = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("host-only-response");
+  });
+  await new Promise((done) => target.listen(0, "127.0.0.1", done));
+  const endpoint = `http://127.0.0.1:${target.address().port}/private`;
+  const source = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(
+      `<body><script>fetch(${JSON.stringify(endpoint)},{mode:'no-cors'}).then(r=>r.text()).then(text=>document.body.setAttribute('data-body',text));</script></body>`,
+    );
+  });
+  await new Promise((done) => source.listen(0, "127.0.0.1", done));
+  const page = newPage();
+  const observed = [];
+  page.on("response", (response) => {
+    if (response.url() === endpoint) observed.push(response);
+  });
+  try {
+    await page.goto(`http://127.0.0.1:${source.address().port}/`, { waitUntil: "networkidle" });
+    assert.equal(await page.locator("body").getAttribute("data-body"), "");
+    assert.equal(
+      await page.evaluate(() => String(globalThis[Symbol.for("ts")].netLog !== undefined)),
+      "false",
+    );
+    assert.equal(observed.length, 1);
+    assert.equal(await observed[0].text(), "host-only-response");
+    await page._drainNetworkEvents();
+    assert.equal(observed.length, 1, "host records drain once");
+  } finally {
+    await page.close();
+    source.closeAllConnections();
+    target.closeAllConnections();
+    await Promise.all([source, target].map((server) => new Promise((done) => server.close(done))));
+  }
+});
+
 // --- Locator: composition (pure JS) ---------------------------------------
 test("Locator composition: count/first/last/nth/all", async () => {
   const p = await fresh();
@@ -731,4 +769,114 @@ test("goto('about:blank') yields a blank document with no network fetch", async 
   // reload of the blank page must also be a no-fetch no-op (the failing real-world path)
   await p.reload();
   assert.equal(p.url(), "about:blank");
+});
+
+test("request metadata and client hints survive hydration and stay context scoped", async () => {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({ path: req.url, headers: req.headers });
+    if (req.url === "/start") {
+      res.writeHead(200, {
+        "content-type": "text/html",
+        "accept-ch": "Sec-CH-UA-Arch",
+        "set-cookie": "sid=context; Path=/",
+      });
+      return res.end(
+        '<html><head><link rel="stylesheet" href="/site.css"></head><body><img src="/image.png"><script src="/bundle.js"></script></body></html>',
+      );
+    }
+    if (req.url === "/bundle.js") {
+      res.writeHead(200, { "content-type": "application/javascript" });
+      return res.end(
+        'fetch("/api").then(r=>r.text()).then(t=>document.body.setAttribute("data-api",t));',
+      );
+    }
+    res.writeHead(200, { "content-type": req.url === "/site.css" ? "text/css" : "text/html" });
+    res.end(
+      req.url === "/api"
+        ? "hydrated"
+        : req.url === "/site.css"
+          ? "body{color:red}"
+          : "<body>next</body>",
+    );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const context = new BrowserContext();
+  const isolated = new BrowserContext();
+  try {
+    assert.ok(context._requestState != null, "build the current addon with request-state support");
+    const page = await context.newPage();
+    await page.goto(`${base}/start`, { waitUntil: "networkidle" });
+    assert.equal(await page.locator("body").getAttribute("data-api"), "hydrated");
+    await page._fetchLinkedCss();
+    await page._fetchImages();
+    await page.goto(`${base}/next`, { waitUntil: "commit" });
+    const other = await isolated.newPage();
+    await other.goto(`${base}/isolated`, { waitUntil: "commit" });
+    for (const [path, dest, mode] of [
+      ["/bundle.js", "script", "no-cors"],
+      ["/api", "empty", "cors"],
+      ["/site.css", "style", "no-cors"],
+      ["/image.png", "image", "no-cors"],
+      ["/next", "document", "navigate"],
+    ]) {
+      const headers = seen.find((entry) => entry.path === path)?.headers;
+      assert.ok(headers, `missing ${path}`);
+      assert.equal(headers["sec-fetch-dest"], dest, path);
+      assert.equal(headers["sec-fetch-mode"], mode, path);
+      assert.equal(headers["sec-fetch-site"], "same-origin", path);
+      assert.equal(headers["sec-ch-ua-arch"], '"arm"', path);
+      assert.equal(headers.cookie, "sid=context", path);
+      if (mode !== "navigate") assert.equal(headers["sec-fetch-user"], undefined, path);
+    }
+    assert.equal(seen.find((entry) => entry.path === "/start").headers["sec-fetch-site"], "none");
+    assert.equal(
+      seen.find((entry) => entry.path === "/isolated").headers["sec-ch-ua-arch"],
+      undefined,
+    );
+  } finally {
+    await context.close();
+    await isolated.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("live hydration retains native response policy, status and selected referrer", async () => {
+  const server = createServer((req, res) => {
+    if (req.url === "/source") {
+      res.writeHead(200, { "content-type": "text/html", "referrer-policy": "no-referrer" });
+      res.end("<title>source</title>");
+      return;
+    }
+    res.writeHead(404, {
+      "content-type": "text/html",
+      "content-security-policy": "script-src 'nonce-good'; style-src 'none'",
+    });
+    res.end(`<head></head><body><script>document.body.setAttribute('data-denied','ran')</script><script nonce=good>
+      document.body.setAttribute('data-referrer',document.referrer);
+      document.body.setAttribute('data-init',String(globalThis.trustedInit));
+      document.addEventListener('securitypolicyviolation',event=>document.body.setAttribute('data-report',event.statusCode+' '+event.referrer));
+      const style=document.createElement('style');style.textContent='.denied{}';document.head.append(style);
+    </script></body>`);
+  });
+  const base = await listen(server);
+  const page = newPage();
+  try {
+    await page.addInitScript(() => {
+      globalThis.trustedInit = true;
+    });
+    await page.goto(`${base}/source`, { waitUntil: "commit" });
+    const response = await page.goto(`${base}/target`, { waitUntil: "networkidle" });
+    assert.equal(response.status(), 404);
+    assert.equal(await page.locator("body").getAttribute("data-denied"), null);
+    assert.equal(await page.locator("body").getAttribute("data-referrer"), "");
+    assert.equal(await page.locator("body").getAttribute("data-report"), "404 ");
+    assert.equal(await page.locator("body").getAttribute("data-init"), "true");
+  } finally {
+    await page.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

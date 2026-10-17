@@ -1,0 +1,17 @@
+[
+  {
+    "id": "0",
+    "headers": [
+      ["Content-Security-Policy", "script-src 'none'; style-src 'none'; connect-src 'none'"]
+    ]
+  },
+  {
+    "id": "1",
+    "headers": [
+      [
+        "Content-Security-Policy-Report-Only",
+        "script-src 'none'; style-src 'none'; connect-src 'none'"
+      ]
+    ]
+  }
+]

@@ -1,0 +1,99 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "8f8c18e07ce14acb0fbc4e1a435efafbda7507602e36ea5563937deffb4101d0",
+  "result": [
+    {
+      "mode": "open",
+      "manual": false,
+      "before": {
+        "host": [10, 10, 252, 72],
+        "inner": [16, 16, 64, 24],
+        "first": [16, 40, 120, 18],
+        "second": [16, 58, 120, 18],
+        "slots": [[0, 0, 0, 0], [0, 0, 0, 0]],
+        "documentHit": true,
+        "shadowHit": true
+      },
+      "after": {
+        "host": [10, 10, 252, 96],
+        "inner": [16, 16, 64, 24],
+        "first": [16, 64, 120, 18],
+        "second": [16, 82, 120, 18],
+        "slots": [[0, 0, 0, 0], [0, 0, 0, 0]],
+        "documentHit": true,
+        "shadowHit": true
+      },
+      "range": [0, 0, 0, 0]
+    },
+    {
+      "mode": "open",
+      "manual": true,
+      "before": {
+        "host": [10, 10, 252, 72],
+        "inner": [16, 16, 64, 24],
+        "first": [16, 40, 120, 18],
+        "second": [16, 58, 120, 18],
+        "slots": [[0, 0, 0, 0], [0, 0, 0, 0]],
+        "documentHit": true,
+        "shadowHit": true
+      },
+      "after": {
+        "host": [10, 10, 252, 72],
+        "inner": [16, 16, 64, 24],
+        "first": [16, 58, 120, 18],
+        "second": [16, 40, 120, 18],
+        "slots": [[0, 0, 0, 0], [0, 0, 0, 0]],
+        "documentHit": true,
+        "shadowHit": true
+      },
+      "range": [0, 0, 0, 0]
+    },
+    {
+      "mode": "closed",
+      "manual": false,
+      "before": {
+        "host": [10, 10, 252, 72],
+        "inner": [16, 16, 64, 24],
+        "first": [16, 40, 120, 18],
+        "second": [16, 58, 120, 18],
+        "slots": [[0, 0, 0, 0], [0, 0, 0, 0]],
+        "documentHit": true,
+        "shadowHit": true
+      },
+      "after": {
+        "host": [10, 10, 252, 96],
+        "inner": [16, 16, 64, 24],
+        "first": [16, 64, 120, 18],
+        "second": [16, 82, 120, 18],
+        "slots": [[0, 0, 0, 0], [0, 0, 0, 0]],
+        "documentHit": true,
+        "shadowHit": true
+      },
+      "range": [0, 0, 0, 0]
+    },
+    {
+      "mode": "closed",
+      "manual": true,
+      "before": {
+        "host": [10, 10, 252, 72],
+        "inner": [16, 16, 64, 24],
+        "first": [16, 40, 120, 18],
+        "second": [16, 58, 120, 18],
+        "slots": [[0, 0, 0, 0], [0, 0, 0, 0]],
+        "documentHit": true,
+        "shadowHit": true
+      },
+      "after": {
+        "host": [10, 10, 252, 72],
+        "inner": [16, 16, 64, 24],
+        "first": [16, 58, 120, 18],
+        "second": [16, 40, 120, 18],
+        "slots": [[0, 0, 0, 0], [0, 0, 0, 0]],
+        "documentHit": true,
+        "shadowHit": true
+      },
+      "range": [0, 0, 0, 0]
+    }
+  ]
+}

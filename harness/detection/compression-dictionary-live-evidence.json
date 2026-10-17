@@ -1,0 +1,122 @@
+{
+  "capture": "google-final26-originfix-20261016",
+  "scope": "All8completedlivebaseline/interfacepasses; probeOnly blank-page controls excluded",
+  "table": [
+    {
+      "repeat": 0,
+      "runtime": "chrome",
+      "pass": "baseline",
+      "recordedRequestEntries": 185,
+      "availableDictionaryRequests": 81,
+      "dcbDczAdvertisedRequests": 81,
+      "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
+      "useAsDictionaryResponses": 2,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "CDP response headers",
+      "headerArtifactSha256": "d2b258eb13b4df52f6ccb517a65903b6ef351f67d108c1e64d2e39652616ad22"
+    },
+    {
+      "repeat": 0,
+      "runtime": "chrome",
+      "pass": "interfaces",
+      "recordedRequestEntries": 103,
+      "availableDictionaryRequests": 30,
+      "dcbDczAdvertisedRequests": 30,
+      "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "CDP response headers",
+      "headerArtifactSha256": "2c5ec8fb3e08c479be3bcc261ee87c908869661a90d58465339d51d37fae16c5"
+    },
+    {
+      "repeat": 0,
+      "runtime": "native",
+      "pass": "baseline",
+      "recordedRequestEntries": 37,
+      "availableDictionaryRequests": 16,
+      "dcbDczAdvertisedRequests": 16,
+      "requestHeaderField": "network.jsonl request.explicit_headers",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "native ordinary client automatic decoding may strip original encoding; no dcb/dcz observed is not uncompressed-wire proof",
+      "headerArtifactSha256": "5f1f2b585444162cc23ced68d229f20fd81edc3fe2a113f1ed1041ec8443a857"
+    },
+    {
+      "repeat": 0,
+      "runtime": "native",
+      "pass": "interfaces",
+      "recordedRequestEntries": 37,
+      "availableDictionaryRequests": 16,
+      "dcbDczAdvertisedRequests": 16,
+      "requestHeaderField": "network.jsonl request.explicit_headers",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "native ordinary client automatic decoding may strip original encoding; no dcb/dcz observed is not uncompressed-wire proof",
+      "headerArtifactSha256": "ef325317b5605f0c0e01bbb0fa27d59ea777f701fe60bc19a98e172b095dbea9"
+    },
+    {
+      "repeat": 1,
+      "runtime": "chrome",
+      "pass": "baseline",
+      "recordedRequestEntries": 175,
+      "availableDictionaryRequests": 74,
+      "dcbDczAdvertisedRequests": 74,
+      "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
+      "useAsDictionaryResponses": 2,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "CDP response headers",
+      "headerArtifactSha256": "7198eb584d48c2fc06cbef7610537501ddec35b1ef03ba22526e377bd8a8dbda"
+    },
+    {
+      "repeat": 1,
+      "runtime": "chrome",
+      "pass": "interfaces",
+      "recordedRequestEntries": 102,
+      "availableDictionaryRequests": 32,
+      "dcbDczAdvertisedRequests": 32,
+      "requestHeaderField": "trace.json requests[].headers merged CDP requestWillBeSentExtraInfo",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "CDP response headers",
+      "headerArtifactSha256": "3e1b79a149b639cf1367646757d9ed833cc5ef3c7025d729e305f2fc239f2ccb"
+    },
+    {
+      "repeat": 1,
+      "runtime": "native",
+      "pass": "baseline",
+      "recordedRequestEntries": 38,
+      "availableDictionaryRequests": 21,
+      "dcbDczAdvertisedRequests": 21,
+      "requestHeaderField": "network.jsonl request.explicit_headers",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "native ordinary client automatic decoding may strip original encoding; no dcb/dcz observed is not uncompressed-wire proof",
+      "headerArtifactSha256": "7470ae37c7509009158045d26e3d1e20af75c125ffbfffc32f7d9c7d2bde9868"
+    },
+    {
+      "repeat": 1,
+      "runtime": "native",
+      "pass": "interfaces",
+      "recordedRequestEntries": 38,
+      "availableDictionaryRequests": 16,
+      "dcbDczAdvertisedRequests": 16,
+      "requestHeaderField": "network.jsonl request.explicit_headers",
+      "useAsDictionaryResponses": 1,
+      "responseDcbDczHeaders": 0,
+      "responseHeaderBoundary": "native ordinary client automatic decoding may strip original encoding; no dcb/dcz observed is not uncompressed-wire proof",
+      "headerArtifactSha256": "8cb81de71178730a674f3c223642682bb138a5db9f03584965b2eb484fca87d7"
+    }
+  ],
+  "boundaries": [
+    "Native counts use actual application headers logged in core net::send after dictionary selection/negotiate and before req.send; headerScope explicitly excludes transport-added headers.",
+    "Therefore missing native accept-encoding in other request entries is not evidence that it was absent on wire. SelectedDictionary.negotiate explicitly adds Available-Dictionary and dcb/dcz Accept-Encoding, and those additions ARE captured.",
+    "Chrome Available-Dictionary counted entries all have headerScope=cdp-extra-info; requests[].headers are enriched with actual CDP requestWillBeSentExtraInfo.",
+    "Use-As-Dictionary and Content-Encoding counts read response.headers. Native ordinary transport decoders may strip encoding metadata; native none does not imply uncompressed server bytes.",
+    "No captured response header lists dcb/dcz in thismatrix. This live run proves dictionary acquisition/negotiation, not live dictionary-codec decoding or transport-wide parity."
+  ],
+  "noSecrets": "No URLs, query values, body bytes, cookie values, dictionary hashes or IDs included.",
+  "productionSourceCommit": "26bd0f459c0edeab35dea345550f7f311818ed32",
+  "captureCheckoutCommit": "589d2d30df30f9d36bfd9952082285c6847b6f5d",
+  "binarySha256": "84d22febc3fde7cf13730e98f688814b8da259a781bf1d183c8631abe0e42f50",
+  "dirtyDiffHash": "3c44b253d3ec52c521d9fcb52dfbf148669d3027f6eb4d44d9dba6340702c451"
+}

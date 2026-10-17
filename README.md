@@ -12,7 +12,7 @@ demand — see below):
   elements, a link/form graph, an accessibility tree, markdown and plain-text views,
   rendered-HTML capture, CSS/XPath node queries, and schema-driven structured
   extraction.
-- **An agent tool** — a 76-tool **MCP** server agents drive directly over stdio
+- **An agent tool** — a 80-tool **MCP** server agents drive directly over stdio
   (`crawl`, `batch`, navigate, click/fill/submit, query, extract, accessibility
   tree, markdown, `render`/`eval_js`/`inject_js`, `screenshot`, cookies/headers,
   `snapshot`).
@@ -29,7 +29,7 @@ library, and they get their DOM from a real browser (Playwright/Puppeteer/
 Selenium) or an in-process fake DOM with no security isolation (jsdom,
 happy-dom). turbo-surf is unusual on four axes at once:
 
-1. **AI-agent-ready out of the box.** It ships a full **MCP server** (76 tools:
+1. **AI-agent-ready out of the box.** It ships a full **MCP server** (80 tools:
    navigate, click/fill/submit, query, extract, accessibility tree, markdown,
    `crawl` a whole site, `batch` a URL list, `render`/`set_mode` to run page JS,
    `eval_js`/`inject_js` against the live render heap with a DOM-history trail,
@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.5.3 — working** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.5.4 — development** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -66,7 +66,7 @@ canonical dedupe, depth/page caps), structured extraction, CSS+XPath query, a
 no-Chromium JS render tier (a true V8 isolate over the native DOM) with re-enterable
 live-heap `eval_js`/`inject_js` + a DOM-history trail, **synthetic screenshots**
 (PNG/SVG from a native layout+paint of any HTML snapshot — still no browser), and a
-76-tool MCP server (native binary). Benchmarked against real browsers + other
+80-tool MCP server (native binary). Benchmarked against real browsers + other
 crawlers (below).
 
 ## Install
@@ -76,7 +76,7 @@ The npm package is a thin launcher that spawns the native binary:
 ```sh
 npm install -g turbo-surf   # provides the `turbo-surf-mcp` command
 # …or run without installing:
-npx -y turbo-surf-mcp
+npx -y turbo-surf
 ```
 
 Node ≥ 20 to launch; the engine is a prebuilt per-platform native binary (no Node
@@ -101,7 +101,7 @@ shim (`rust/playwright-shim/`) is a dev/in-repo tool, not an npm artifact.
 ## MCP server (agents)
 
 ```sh
-npx turbo-surf-mcp          # stdio MCP server (76 tools), e.g.:
+npx turbo-surf-mcp          # stdio MCP server (80 tools), e.g.:
 # navigation:  goto, go_back, go_forward, reload, set_user_agent
 # content:     interactive_elements, accessibility_tree, aria_snapshot, markdown,
 #              text, html, links, requests, snapshot, query, get_by,
@@ -155,10 +155,10 @@ time you run it.
 the command Claude will spawn):
 
 ```sh
-claude mcp add turbo-surf -- npx -y turbo-surf-mcp
+claude mcp add turbo-surf -- npx -y turbo-surf
 ```
 
-That writes the server into your Claude Code config. `npx -y turbo-surf-mcp`
+That writes the server into your Claude Code config. `npx -y turbo-surf`
 resolves + spawns the native binary over stdio — one process, no Node hosting it,
 no browser.
 
@@ -170,7 +170,7 @@ claude mcp list
 ```
 
 Now start (or restart) Claude Code and ask it to, e.g., *"use turbo-surf to fetch
-the markdown of example.com"* — the 76 tools above are available. Remove it later
+the markdown of example.com"* — the 80 tools above are available. Remove it later
 with `claude mcp remove turbo-surf`.
 
 **Scope (where the server is registered).** By default it's registered for your
@@ -181,7 +181,7 @@ user. To share it with a repo instead, add `--scope project` — that writes a
 // .mcp.json — committed; teammates get the server automatically
 {
   "mcpServers": {
-    "turbo-surf": { "command": "npx", "args": ["-y", "turbo-surf-mcp"] }
+    "turbo-surf": { "command": "npx", "args": ["-y", "turbo-surf"] }
   }
 }
 ```
@@ -195,28 +195,30 @@ claude mcp add turbo-surf -- "$PWD/rust/target/release/turbo-surf-mcp"
 
 **Troubleshooting.** `command not found: claude` → install the Claude Code CLI.
 `npx` hangs the first run → it's downloading the binary; let it finish (or pre-warm
-with `npx -y turbo-surf-mcp` in a terminal, then Ctrl-C). Shows `✗ failed` in
+with `npx -y turbo-surf` in a terminal, then Ctrl-C). Shows `✗ failed` in
 `claude mcp list` → run the command directly to see the error; on an unsupported
 platform there's no prebuilt binary (build from a checkout as above).
 
 **Other MCP clients** (Claude Desktop, Cursor, …) — point their MCP config's
-`command` at `npx` with args `["-y", "turbo-surf-mcp"]`, or at the binary path.
+`command` at `npx` with args `["-y", "turbo-surf"]`, or at the binary path.
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
-By default every request carries a real **Chrome 154** identity — full UA + client
-hints (`sec-ch-ua`, `sec-fetch-*`, …) **in Chrome's exact per-version header order**
-on the wire, and a matching Chrome `navigator` (`platform`, `vendor`,
+The default profile reports **Chrome 155** through its UA and client hints
+(`sec-ch-ua`, `sec-fetch-*`, …), with a configured per-version header order
+and a corresponding `navigator` (`platform`, `vendor`,
 `webdriver: false`, plugins, `window.chrome`, native-`toString`, coherent
-`userAgentData` brands + `fullVersionList`) inside the JS render tier. **Nothing to
-configure for the common case** — it just looks like Chrome.
+`userAgentData` brands + `fullVersionList`) inside the JS render tier. This is an
+emulated browser surface; successful identity probes do not establish complete
+Chrome parity or acceptance by a site's anti-bot system.
 
 Version-specific fingerprint data (reported major, full build for high-entropy
 UA-CH, and the navigation **header order** — which Chrome reorders across releases)
 lives in a declarative per-version registry (`turbo-surf-core`'s `browser` module):
-one coherent config per Chrome version, defaulting to the current stable. Both the
-wire headers and the render-tier navigator read from it, so the two layers stay in
-lockstep, and supporting a new Chrome (e.g. 155) is a one-line config drop-in.
+one coherent config per supported Chrome version, defaulting to Chrome
+155.0.8059.80. Wire headers and the render-tier navigator read from it. Each new
+profile needs a measured header/client-hint configuration and separate engine
+and transport validation; a reported version change does not upgrade V8.
 
 ### Quick start (anti-bot)
 
@@ -235,7 +237,7 @@ cp .env.example .env
 npx turbo-surf-mcp
 ```
 
-That's it. With no `.env` you get the Chrome fingerprint (clears most sites);
+That's it. With no `.env` you get the default Chrome identity and transport profile;
 set one `TURBO_SURF_SOLVER` to also clear challenge walls.
 
 ### Configuration reference
@@ -244,11 +246,11 @@ All optional. Set in `.env` (auto-loaded) or the process env.
 
 | Variable | Values | What it does |
 |---|---|---|
-| `TURBO_SURF_SOLVER` | `cloudflare` · `awswaf` · `akamai` · `hyper` · `scrapfly` · `browser` | Pick the challenge solver. Unset = no solving (fingerprint only). `cloudflare`/`awswaf`/`akamai` are in-house (no key). |
+| `TURBO_SURF_SOLVER` | `cloudflare` · `awswaf` · `akamai` · `recaptcha` · `hyper` · `scrapfly` · `browser` | Pick the challenge solver. Unset = no solving (fingerprint only). `cloudflare`/`awswaf`/`akamai` are in-house (no key). |
 | `HYPER_API_KEY` | key | Hyper Solutions token API (Akamai/DataDome/Kasada). Used when solver=`hyper`. |
 | `SCRAPFLY_API_KEY` | key | Scrapfly ASP API (Cloudflare + fallback). Used when solver=`scrapfly`. |
 | `TURBO_SURF_BROWSER_CMD` | shell command | The hardened-headless sidecar to run for solver=`browser` (e.g. `node harness/browser-solver/solve.mjs`). When solver=`akamai`, also enables the browser fallback (see below). |
-| `TURBO_SURF_PROXY` | `http://user:pass@host:port` | Egress proxy. **Required for real solves** — tokens bind to the IP/JA3 that minted them; replay must use the same egress. |
+| `TURBO_SURF_PROXY` | `http://user:pass@host:port` | Egress proxy. Optional egress proxy. Where a token is IP-bound, minting and replay must use the same egress. |
 | `TURBO_SURF_SENSOR_DIR` | path (default `akamai-sensors`) | Where `analyze_akamai`'s `retry` saves a working sensor (keyed by script hash + version). |
 
 **Solver maturity** — `cloudflare` (managed/Iuam) and `awswaf` (common + targeted
@@ -260,12 +262,13 @@ failed self-solve still clears the wall. `hyper`/`scrapfly`/`browser` are the ro
 paths. CAPTCHA tiers (AWS `captcha`, CF Turnstile-interactive) aren't self-solvable
 and route straight to the sidecar.
 
-Build feature (not env): **`--features impersonate`** swaps rustls → BoringSSL
+Build feature (not env): **`impersonate`** is enabled by default for the MCP binary and swaps rustls → BoringSSL
 (`wreq`) for a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint. Needs `cmake`+`nasm`.
-Add **`--features trust-anchors`** (implies `impersonate`) to also emit Chrome 152+'s
-`trust_anchors` TLS extension (JA4 `t13d1516h2` → `t13d1517h2`); it's built on a
-vendored `wreq` fork (`rust/vendor/wreq`), so it works in this binary but not for
-crates.io library consumers — see [`PUBLISHING.md`](./PUBLISHING.md).
+The Chrome 154 transport sends real `trust_anchors` IDs by default, backed by the
+same Chromium root store used for certificate verification. `trust-anchors` is a
+compatibility feature alias. This development build requires pinned upstream Git
+sources and Rust 1.98; crates.io library publishing remains blocked until those
+APIs ship — see [`PUBLISHING.md`](./PUBLISHING.md).
 
 Build feature (not env): **`--features gpu-metal`** (macOS/Metal, off by default) runs the
 render tier's **WebGL on the real Apple GPU** — a live WebGL→wgpu→Metal bridge records the
@@ -275,7 +278,7 @@ pixels. Measured: a standard WebGL fingerprint draw is now **byte-identical to r
 ANGLE→Metal on the same GPU). Canvas 2D `toDataURL` also rasterizes on the GPU (falls back to
 tiny-skia on any GPU error, so enabling it never regresses). Zero cost to the default build +
 the PyPI wheels (no `wgpu` unless enabled). Beats device-invariance/SwiftShader detection —
-for WebGL, exact-hash comparison too.
+the shared WebGL scene matched an exact hash. This does not establish arbitrary scene parity.
 
 A second build feature **`--features coretext`** (macOS only, off by default) rasterizes canvas
 **text** through CoreText/CoreGraphics — the same system glyph stack Chrome's Skia uses on macOS —
@@ -291,21 +294,22 @@ MCP tools for stealth: **`set_fingerprint`** (override navigator fields),
 **`stealth_status`** (inspect active profile/solver/overrides), **`probe`** (see
 what a page's anti-bot JS reads), **`probe_mint`** (browserless recon: run a page's
 integrity JS in-isolate → the env surface it demands + any cookies earned),
-**`human_interact`** (play realistic **trusted** input — curved browser-sampled mouse
+**`human_interact`** (play scripted input — curved mouse
 motion, real mousedown→dwell→mouseup→click, human typing, hover + focus/blur — as a
 generic `move`/`click`/`focus`/`type` step sequence or a saved `routine`), and
 **`analyze_akamai`** (experimental: rebuild + test Akamai sensors). Detailed below.
 
-**Human interaction (`human_interact`).** Some walls (e.g. google's BotGuard) are
-*interaction-gated* — their integrity VM only runs, and only scores you, once a real
-person engages the page. `human_interact` strings together trusted input gestures on
-the current page so the page's own listeners (and the collector) see genuine,
-entropy-bearing mouse/keyboard activity: `goto` a page, then drive a `steps` array or a
-named `routine`. The bundled **`google-serp`** routine composes the real-user search
-flow (move → click the box → focus → type `{query}` → click Search). Honest scope: this
-supplies the interaction-gate + input-entropy signal in-isolate; a *trusted* google
-`__Secure-ENID` also needs real-GPU pixels + server-side scoring (see `probe_mint` and
-the CHANGELOG), so it is not by itself a SERP unlock.
+**Human interaction (`human_interact`).** This MCP tool plays a `steps` array or
+saved `routine` through page JavaScript. The `google-serp` routine moves to the
+search box, clicks, focuses, types `{query}` and presses Enter. Those script-dispatched
+events are untrusted. The differential harness uses a separate private native
+host-input capability to create trusted events, bound by a cancellable execution
+budget; guest scripts cannot access that capability. Neither path establishes
+server acceptance. Fresh native-cookie Google controls complete genuine consent
+and form navigation, but reliable native SERP acceptance remains unresolved. See
+the [latest sanitized capture](./harness/detection/GOOGLE-LAST-RUN.json),
+[reusable differential harness](./harness/detection/README.md) and
+[dated observations](./harness/detection/FINDINGS.md).
 
 **Render-tier realism.** The isolate is shaped to match real Chrome structurally, verified by
 diffing a shared collector against real headed Chrome (the reusable probes under
@@ -315,60 +319,124 @@ and in-isolate via the `fp_snapshot` example). Highlights:
 - **`navigator` is a real `Navigator` instance** — zero own properties, all ~84 members on
   `Navigator.prototype` (native-marked getters/methods), `instanceof Navigator`, `webdriver`
   a prototype getter (not an own prop).
-- **Window surface breadth** matches Chrome (~1235 own props): the full set of interface
-  constructors, `on*` handler slots (null), and bar/API objects — so `X in window` /
-  `typeof window.X` presence checks pass.
-- **No `__*` internal globals leak.** turbo-surf's own render helpers (timers, hydration, the
-  module/frame loader, …) live on a `globalThis[Symbol.for('ts')]` namespace — a Symbol key, so
-  `Object.getOwnPropertyNames(window)` shows none of them (real Chrome has no such `__*` globals),
-  while they stay reachable across the isolate, child realms, and the Rust host.
+- **Window surface breadth** includes many Chrome interface constructors, `on*`
+  slots and API objects. Exact property counts differ by document/version, and
+  presence does not establish implementation parity.
+- **Namespaced helpers.** Most render helpers live on `globalThis[Symbol.for('ts')]`,
+  reducing named globals. Symbol properties remain discoverable and some helpers
+  are transiently exposed during evaluation/interaction; this is not invisible storage.
 - **Native-fn shape**: masked shims report `[native code]` **and** have no own `prototype` (like
   real native functions); the `toString` anti-hook trap is itself shapeless.
 - **Canvas 2D**: `getImageData` returns the real rendered pixels (byte-identical to Chrome for
-  solids/shapes), `measureText` width matches Chrome exactly (real system-font measurer), context
+  selected solids/shapes), `measureText` uses the system-font measurer, context
   class-tags as `CanvasRenderingContext2D` + `getContextAttributes`.
 - **WebGL**: full enum-constant set on the context prototype; under `--features gpu-metal`,
-  `readPixels` is byte-identical to Chrome (see above).
+  `readPixels` matched Chrome for the shared gradient scene when Metal was accessible.
+  Unsupported draws/device failures can fall back to synthetic readback.
 - Real **page-load lifecycle** (`readyState` loading→interactive→complete with `DOMContentLoaded`
   → window `load` → `pageshow`, in order), a Chrome-shaped **coherent high-resolution clock**
   (fractional `performance.now`/`timeOrigin`, batched rAF) with spread `performance.timing`. Observable
   time is **real**: `performance.now()`/`Date.now()` derive from real monotonic hrtime + virtual timer
   advance, so `setTimeout(fn, 100)` observes ~100ms elapsed (was 0ms — a chronometric-trap tell) and
-  `timeOrigin + performance.now() == Date.now()` holds (passes BotGuard's perf-vs-Date cross-check);
+  `timeOrigin + performance.now() == Date.now()` holds (verified by the shared clock probe, not a Google clearance result);
   timer *delays* stay virtual so the crawler never blocks. Plus **distinct**
   `Intersection`/`Resize`/`MutationObserver` constructors, real `MessagePort`/`MessageChannel`/
   `MessageEvent` instances, spec-shaped `navigator.permissions`, and general **nested-iframe realms**
-  (any iframe/`srcdoc` runs its own scripts with a distinct `contentWindow` + wired frame tree + depth cap).
+  (loaded iframe/`srcdoc` scripts have their own V8 contexts and ECMAScript intrinsics,
+  share the isolate and session cookies, and have a depth cap. DOM API wrappers and
+  cross-origin enforcement still have limits).
 
 Search strategies also take optional **`headers`** + **`internal_hosts`** maps (e.g. `Referer` +
 `sec-fetch-site` for a real in-site-navigation shape). Opt into a coherent timezone with
 **`TURBO_SURF_TZ`**. The synthetic google/youtube consent (`SOCS`) cookie is param-driven —
 **`set_consent_socs`** overrides the value, and `""` seeds none so the *real*
 `consent.google.com/save` Accept-all handshake runs instead of the shortcut (measured: both paths
-still yield the JS-gated shell, so the consent guard is not the trust gate). Honest scope: these
-close the client-side/structural tells; google's trusted `__Secure-ENID` remains **server-scored**
-(see the CHANGELOG's BotGuard notes).
+still yielded the JS-gated shell in those historical runs). The probes cover selected
+interfaces; they do not establish complete Chrome parity. Current fixes parse stylesheet
+rules, expose parsed hidden-control values, allocate independent frame intrinsics and
+execute classic scripts on the host pump with document source locations. Session-scoped
+Accept-CH and resource metadata now distinguish navigation, scripts and fetches. GPU
+renderer identity comes from the real adapter. See the [dated comparison](./harness/detection/FINDINGS.md)
+for acceptance results and remaining limits.
+A shell must be executed before classifying the final outcome; `/sorry` alone does not
+prove IP reputation is the cause.
+
+The current implementation (`a005140`) passes full stock/native155 workspace gates
+(1,411/1,456 tests), strict checks and rebuilt addon/Node/CDP controls. Fresh API
+measurement still records64 original-interface missing own members and374
+measured descriptor differences. In the latest two-repeat Google run, both Chrome
+and native baselines receive429 with no SERP markers; native homepage hydration
+also exhausts its20-second budget. These are explicit remaining limits, not a
+claim of full Chrome parity. See the [current evidence](./harness/detection/FINDINGS.md)
+and [remaining work](./harness/detection/PARITY-GAPS.md).
+
 
 ---
 
 **TLS/HTTP-2 fingerprint (`impersonate`).** rustls can't forge Chrome's
-JA3/JA4 + Akamai HTTP-2 fingerprint. Build with the opt-in feature to swap in a
-BoringSSL client (`wreq`) that does — it presents a real Chrome 149 TLS + HTTP-2
-fingerprint:
+JA3/JA4 + Akamai HTTP-2 fingerprint. The default MCP build uses BoringSSL
+(`wreq`) with the [upstream Chrome 154 profile](https://github.com/0x676e67/wreq-util/blob/5715529002738f46eea86a7271f918f9374d3582/src/emulate/profile/chrome/tls.rs)
+and the measured Chrome 155 navigation identity. The workspace pins wreq
+`4ed3cf0c` in the controlled `greg-flux/wreq` fork (upstream base `c6fd8b1`), wreq-util `5715529`, and btls `f5a8a48`; btls-sys pins BoringSSL
+`f1f2556`. These APIs require Rust 1.98.0, pinned in `rust/rust-toolchain.toml`.
 
 ```bash
-# needs a C toolchain (cmake + nasm) for BoringSSL
+cd rust
 cargo build --release -p turbo-surf-mcp --features impersonate
+cargo test -p turbo-surf-core --test client_hello
 ```
 
-Off by default (keeps the pure-rustls build dependency-free). Verified against a
-live TLS/HTTP-2 echo in the test suite.
+The offline ClientHello regression checks the cipher sequence, signature-algorithm
+GREASE, ML-DSA44/65/87, and exact public trust-anchor IDs against a local Chrome
+154.0.8037.98 capture. The former empty trust-anchor patch is superseded by upstream
+support. Workspace patches do not propagate to library consumers, so publishing
+remains blocked until these APIs are published or a distributable fork is reviewed.
+
+The development candidate also negotiates genuine compression dictionaries from
+partitioned native session state and decodes selected Brotli/Zstandard responses.
+Policy-aware document/link discovery, independent encoder fixtures and Chrome
+controls are described in the [dictionary parity notes](harness/detection/COMPRESSION-DICTIONARIES.md).
+Dictionary-coded bodies now have bounded incremental decoding and cancellation
+controls. Fresh live traces also show native dictionary acquisition/negotiation;
+that does not demonstrate live dictionary decoding, complete browser parity or
+Google acceptance. See the [live header boundaries](harness/detection/COMPRESSION-DICTIONARIES.md#final-live-google-observation--2026-10-16).
+
+Native WebCrypto uses a reproducibly hardened Deno provider and genuine Rust
+X-Wing keys for Chrome 155's `MLKEM768-X25519`. Key permissions and private native
+cloning have adversarial regression coverage; the covered localhost algorithm
+queries and KEM roundtrips match Chrome 155. The provider patch also needs a
+distributable dependency before a crates.io release. See the
+[provider provenance](rust/vendor/DENO_CRYPTO.md) and the
+[itemized browser parity backlog](harness/detection/PARITY-GAPS.md) for remaining
+behavior and validation limits.
+
+The default render tier uses `deno_core` 0.412.0 and `deno_v8` 0.4.0 with
+[the `v8` 150.4.0 binding](https://docs.rs/crate/deno_v8/0.4.0/source/Cargo.toml)
+(native engine 15.0.245.2, corresponding to Chrome 150). The harness records the
+actual engine/template versions separately from the Chrome 155 identity. The TLS
+upgrade does not upgrade the JavaScript engine. The reproducible
+[Chrome 155 source profile](harness/detection/engine-155/README.md) builds and
+validates actual V8 **15.5.35.23-rusty** and the corresponding SDK/context seams.
+The historical [Chrome 154 profile](harness/detection/engine-154/README.md) remains
+reproducible. [TRANSPORT-155.json](harness/detection/TRANSPORT-155.json) records zero
+normalized differences for the measured local ClientHello, HTTP/2 settings/window
+and navigation header-order controls against Chrome 155. The upstream transport
+recipe is still 154; these controls do not cover all HTTP/2 frames or HTTP/3.
+The differential harness records which engine was built; this experimental profile
+does not change the published default or establish complete browser parity.
+
+Enabled by default in `turbo-surf-core` and the MCP binary. Use
+`--no-default-features` for the rustls backend. The differential harness enables the
+`trust-anchors` compatibility alias, `gpu-metal` and `coretext`.
 
 **Fingerprint seed pool.** `turbo-surf-core::fingerprint` holds ~4000 internally
 coherent real-Chrome identities (UA ↔ client hints ↔ `navigator` all agree),
 selected deterministically by a client key — the same host always gets the same
 profile, while the fleet spreads across the pool. The MCP session and the crawl
-navigator rotate per host automatically; in code:
+navigator select profiles per host, but `FetchOptions.profile` only controls default
+headers on the rustls backend. The wreq backend currently pins `default_profile()`;
+rotating the render profile there can produce a mismatch. The differential harness
+pins the native default in both layers. For rustls, use:
 
 ```rust
 use turbo_surf_core::{fingerprint, net::{fetch_html, FetchOptions}};
@@ -426,7 +494,7 @@ Set `TURBO_SURF_PROXY` so the token's IP/JA3 matches your egress (and build with
 `--features impersonate` so the replay JA3 matches the Chrome that minted it).
 
 **Controllable render fingerprint.** Every render-tier `navigator` field has a
-Chrome 154 default and is overridable at runtime via the MCP `set_fingerprint`
+Chrome 155 default and is overridable at runtime via the MCP `set_fingerprint`
 tool (or `turbo_surf_render::set_fingerprint(json)`):
 
 ```jsonc
@@ -438,7 +506,7 @@ tool (or `turbo_surf_render::set_fingerprint(json)`):
     "devicePixelRatio": 2,
     "connection": { "effectiveType": "4g", "rtt": 50, "downlink": 10 },
     "userAgentData": { "platform": "Windows", "brands": [ /* … */ ] }
-} }   // {} resets to Chrome 154 macOS defaults
+} }   // {} resets to Chrome 155 macOS defaults
 ```
 
 `stealth_status` reports the active profile, the wired solver, the pool size, and
@@ -555,7 +623,7 @@ extracts — in **132 ms** (**~7× faster than Chromium**, 933), inside a true V
 isolate over a native rtdom DOM, **no Chromium process**. It stays network-bound
 via a **pooled HTTP client** (connection/TLS reuse across pages), a **persistent V8
 isolate** whose **DOM install is reused across same-page `page.evaluate`s** (parse
-once per page, ~0.5 ms/call after), an **external-script cache** (jQuery fetched
+once per page, ~0.5 ms/call after; a different page gets a fresh realm), an **external-script cache** (jQuery fetched
 once, not per page), a **per-page parse cache**, and a back-forward snapshot cache
 so `goBack` restores instead of re-fetching. Profilers: `cargo bench -p
 turbo-surf-view` (Rust microbench) + `harness/hotpath/rust-hotpath.mjs`.

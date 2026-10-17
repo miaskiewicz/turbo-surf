@@ -1,0 +1,85 @@
+[
+  {
+    "id": "code-open",
+    "headers": [],
+    "html": "<!doctype html><html data-case=\"code-open\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-enforce",
+    "headers": [["Content-Security-Policy", "require-trusted-types-for 'script'"]],
+    "html": "<!doctype html><html data-case=\"code-enforce\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-report",
+    "headers": [["Content-Security-Policy-Report-Only", "require-trusted-types-for 'script'"]],
+    "html": "<!doctype html><html data-case=\"code-report\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-default",
+    "headers": [
+      ["Content-Security-Policy", "require-trusted-types-for 'script';trusted-types alpha default"]
+    ],
+    "html": "<!doctype html><html data-case=\"code-default\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-default-null",
+    "headers": [
+      ["Content-Security-Policy", "require-trusted-types-for 'script';trusted-types alpha default"]
+    ],
+    "html": "<!doctype html><html data-case=\"code-default-null\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-eval-block",
+    "headers": [
+      [
+        "Content-Security-Policy",
+        "require-trusted-types-for 'script'; trusted-types alpha default; script-src 'unsafe-inline'"
+      ]
+    ],
+    "html": "<!doctype html><html data-case=\"code-eval-block\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-eval-typed",
+    "headers": [
+      [
+        "Content-Security-Policy",
+        "require-trusted-types-for 'script'; trusted-types alpha default; script-src 'unsafe-inline' 'trusted-types-eval'"
+      ]
+    ],
+    "html": "<!doctype html><html data-case=\"code-eval-typed\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-eval-typed-default",
+    "headers": [
+      [
+        "Content-Security-Policy",
+        "require-trusted-types-for 'script'; trusted-types alpha default; script-src 'unsafe-inline' 'trusted-types-eval'"
+      ]
+    ],
+    "html": "<!doctype html><html data-case=\"code-eval-typed-default\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-eval-unsafe-default",
+    "headers": [
+      [
+        "Content-Security-Policy",
+        "require-trusted-types-for 'script'; trusted-types alpha default; script-src 'unsafe-inline' 'unsafe-eval'"
+      ]
+    ],
+    "html": "<!doctype html><html data-case=\"code-eval-unsafe-default\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-default-change",
+    "headers": [
+      ["Content-Security-Policy", "require-trusted-types-for 'script';trusted-types alpha default"]
+    ],
+    "html": "<!doctype html><html data-case=\"code-default-change\"><head></head><body></body></html>"
+  },
+  {
+    "id": "code-default-throw",
+    "headers": [
+      ["Content-Security-Policy", "require-trusted-types-for 'script';trusted-types alpha default"]
+    ],
+    "html": "<!doctype html><html data-case=\"code-default-throw\"><head></head><body></body></html>"
+  }
+]

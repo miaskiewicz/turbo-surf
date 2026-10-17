@@ -1,0 +1,34 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "7a00de91660e08e8f79d80a1067974107b60ff58f3dd4431ac13315f61f09bcb",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "global": "undefined",
+    "isolated": false,
+    "wasm": {
+      "brand": "[object SharedArrayBuffer]",
+      "bytes": 65536
+    },
+    "clone": "DataCloneError",
+    "atomic": "DataCloneError",
+    "retained": 0,
+    "port": "DataCloneError",
+    "window": "DataCloneError",
+    "forged": {
+      "flag": true,
+      "constructor": "function",
+      "clone": "DataCloneError"
+    }
+  }
+}

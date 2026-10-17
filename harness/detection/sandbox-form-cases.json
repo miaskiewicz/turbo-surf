@@ -1,0 +1,50 @@
+[
+  {
+    "id": "unrestricted",
+    "headers": [],
+    "html": "<!doctype html><body><iframe srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "sandbox-form-blocked",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin\" srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "sandbox-form-allowed",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-forms\" srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "csp-form-intersection",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-forms\" srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "csp-form-allowed",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin allow-forms"]],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-forms\" srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "uppercase-allow-forms",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"ALLOW-SCRIPTS ALLOW-SAME-ORIGIN ALLOW-FORMS\" srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "opaque-allow-forms",
+    "headers": [],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-forms\" srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "attribute-blocks-csp-allow",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin allow-forms"]],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin\" srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  },
+  {
+    "id": "multiple-csp-intersection",
+    "headers": [
+      ["Content-Security-Policy", "sandbox allow-scripts allow-same-origin allow-forms"],
+      ["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]
+    ],
+    "html": "<!doctype html><body><iframe sandbox=\"allow-scripts allow-same-origin allow-forms\" srcdoc=\"&lt;form>&lt;button>submit&lt;/button>&lt;/form>&lt;script>addEventListener(&quot;message&quot;,function(event){if(event.data!==&quot;sandbox-form-run&quot;)return;let clicks=0,submits=0,trusted=null;const form=document.querySelector(&quot;form&quot;),button=document.querySelector(&quot;button&quot;);button.addEventListener(&quot;click&quot;,()=>clicks++);form.addEventListener(&quot;submit&quot;,event=>{submits++;trusted=event.isTrusted;event.preventDefault();});button.click();parent.postMessage({kind:&quot;sandbox-form-result&quot;,clicks,submits,trusted},&quot;*&quot;);});&lt;/script>\"></iframe></body>"
+  }
+]

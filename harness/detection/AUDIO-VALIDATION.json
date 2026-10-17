@@ -1,0 +1,31 @@
+{
+  "chromeVersion": "155.0.8059.40",
+  "chromeV8Version": "15.5.35.20",
+  "nativeV8Version": "15.5.35.20-rusty",
+  "controlPlatform": "macOS ARM64",
+  "graphs": 32,
+  "exactFloat32PCM": true,
+  "filterResponses": 8,
+  "frequencyResponseAliasing": "exact interleaved output writes; input snapshot",
+  "nativeAudioContracts": 13,
+  "nativeRenderLibraryTests": 108,
+  "nativeRenderMcpAllFeatureTests": 474,
+  "features": ["gpu-metal", "coretext", "impersonate", "trust-anchors"],
+  "strictClippyAllTargets": "passed -D warnings; upstream SDK dependency warnings retained",
+  "rustfmt": "passed",
+  "javascriptLintFormat": "passed",
+  "sourceVerification": {
+    "immutableChromeFiles": 23,
+    "rustfft": "6.4.1 exact adapted FFI source"
+  },
+  "unsupported": [
+    "realtime device playback",
+    "AudioParam signal connections",
+    "feedback cycles",
+    "custom PeriodicWave",
+    "WaveShaper oversampling",
+    "rendered channels above two",
+    "suspend/resume"
+  ],
+  "notes": "Independent Chrome controls prove authored graphs and specified lifecycle/API contracts. No stored PCM is used by rendering."
+}

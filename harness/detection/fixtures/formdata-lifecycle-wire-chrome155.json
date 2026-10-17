@@ -1,0 +1,181 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "e3489bcd3bcdc5b1f83a369fb3b6cff96abfa80aba1c459dc625e3ac50a07543",
+  "result": [
+    {
+      "mode": "all-metadata",
+      "events": [
+        "submit",
+        {
+          "type": "formdata",
+          "trusted": true,
+          "bubbles": true,
+          "cancelable": false,
+          "entries": [["initial", "one"]]
+        }
+      ],
+      "frameIndex": 0,
+      "wire": {
+        "url": "/wire?initial=changed&event=two",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#before"
+    },
+    {
+      "mode": "action",
+      "events": [
+        "submit",
+        {
+          "type": "formdata",
+          "trusted": true,
+          "bubbles": true,
+          "cancelable": false,
+          "entries": [["initial", "one"]]
+        }
+      ],
+      "frameIndex": 0,
+      "wire": {
+        "url": "/wire?initial=changed&event=two",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#before"
+    },
+    {
+      "mode": "method",
+      "events": [
+        "submit",
+        {
+          "type": "formdata",
+          "trusted": true,
+          "bubbles": true,
+          "cancelable": false,
+          "entries": [["initial", "one"]]
+        }
+      ],
+      "frameIndex": 0,
+      "wire": {
+        "url": "/wire?initial=changed&event=two",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#before"
+    },
+    {
+      "mode": "enctype",
+      "events": [
+        "submit",
+        {
+          "type": "formdata",
+          "trusted": true,
+          "bubbles": true,
+          "cancelable": false,
+          "entries": [["initial", "one"]]
+        }
+      ],
+      "frameIndex": 0,
+      "wire": {
+        "url": "/wire?initial=changed&event=two",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#before"
+    },
+    {
+      "mode": "target",
+      "events": [
+        "submit",
+        {
+          "type": "formdata",
+          "trusted": true,
+          "bubbles": true,
+          "cancelable": false,
+          "entries": [["initial", "one"]]
+        }
+      ],
+      "frameIndex": 0,
+      "wire": {
+        "url": "/wire?initial=changed&event=two",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#before"
+    },
+    {
+      "mode": "prevent-default",
+      "events": [
+        "submit",
+        {
+          "type": "formdata",
+          "trusted": true,
+          "bubbles": true,
+          "cancelable": false,
+          "entries": [["initial", "one"]]
+        }
+      ],
+      "frameIndex": 0,
+      "wire": {
+        "url": "/wire?initial=changed&event=two",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#before"
+    },
+    {
+      "mode": "submit-bypass",
+      "events": [
+        {
+          "type": "formdata",
+          "trusted": true,
+          "bubbles": true,
+          "cancelable": false,
+          "entries": [["initial", "one"]]
+        }
+      ],
+      "frameIndex": 0,
+      "wire": {
+        "url": "/wire?initial=changed&event=two",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#before"
+    },
+    {
+      "mode": "invalid",
+      "events": ["invalid"],
+      "wire": null
+    },
+    {
+      "mode": "cancel-submit",
+      "events": ["submit"],
+      "wire": null
+    },
+    {
+      "mode": "csp-blocked",
+      "events": [
+        "submit",
+        {
+          "type": "formdata",
+          "trusted": true,
+          "bubbles": true,
+          "cancelable": false,
+          "entries": [["initial", "one"]]
+        },
+        {
+          "policy": "form-action",
+          "disposition": "enforce"
+        }
+      ],
+      "wire": null
+    }
+  ]
+}

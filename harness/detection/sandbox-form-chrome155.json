@@ -1,0 +1,91 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "c25fc1860e731d4c5ef072c3a5fab5c03afc8d8cb66efd8b965c3f271681462c",
+  "probeSha256": "a3d68936a6bf4ac34ad12d210e83e6f9bc352c389529760a4172ae4b73768140",
+  "collectorSha256": "4e61b029135dacd18fdb68e4194fea875766edc7f203f7560bd3b826ad6aa0cb",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "unrestricted",
+      "result": {
+        "clicks": 1,
+        "submits": 1,
+        "trusted": true
+      }
+    },
+    {
+      "id": "sandbox-form-blocked",
+      "result": {
+        "clicks": 1,
+        "submits": 0,
+        "trusted": null
+      }
+    },
+    {
+      "id": "sandbox-form-allowed",
+      "result": {
+        "clicks": 1,
+        "submits": 1,
+        "trusted": true
+      }
+    },
+    {
+      "id": "csp-form-intersection",
+      "result": {
+        "clicks": 1,
+        "submits": 0,
+        "trusted": null
+      }
+    },
+    {
+      "id": "csp-form-allowed",
+      "result": {
+        "clicks": 1,
+        "submits": 1,
+        "trusted": true
+      }
+    },
+    {
+      "id": "uppercase-allow-forms",
+      "result": {
+        "clicks": 1,
+        "submits": 1,
+        "trusted": true
+      }
+    },
+    {
+      "id": "opaque-allow-forms",
+      "result": {
+        "clicks": 1,
+        "submits": 1,
+        "trusted": true
+      }
+    },
+    {
+      "id": "attribute-blocks-csp-allow",
+      "result": {
+        "clicks": 1,
+        "submits": 0,
+        "trusted": null
+      }
+    },
+    {
+      "id": "multiple-csp-intersection",
+      "result": {
+        "clicks": 1,
+        "submits": 0,
+        "trusted": null
+      }
+    }
+  ]
+}

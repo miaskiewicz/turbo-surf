@@ -1,0 +1,269 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "c2fcfb30dbbafcc2aea902d5f47f6ec14df58ff2317928fb1ef09f0d164e2877",
+  "runnerSha256": "ae27ad725fe0fa3d03e9311813895bc38eae384c66bb0b49c0a121f702177c34",
+  "result": {
+    "ranges": [
+      {
+        "start": 0,
+        "end": 0,
+        "rects": [[0, 4.5, 0, 71]],
+        "bounds": [0, 4.5, 0, 71]
+      },
+      {
+        "start": 0,
+        "end": 1,
+        "rects": [[0, 4.5, 28.40625, 71]],
+        "bounds": [0, 4.5, 28.40625, 71]
+      },
+      {
+        "start": 0,
+        "end": 2,
+        "rects": [[0, 4.5, 60.40625, 71]],
+        "bounds": [0, 4.5, 60.40625, 71]
+      },
+      {
+        "start": 1,
+        "end": 1,
+        "rects": [[28.40625, 4.5, 0, 71]],
+        "bounds": [28.40625, 4.5, 0, 71]
+      },
+      {
+        "start": 1,
+        "end": 2,
+        "rects": [[28.40625, 4.5, 32, 71]],
+        "bounds": [28.40625, 4.5, 32, 71]
+      },
+      {
+        "start": 2,
+        "end": 2,
+        "rects": [[60.40625, 4.5, 0, 71]],
+        "bounds": [60.40625, 4.5, 0, 71]
+      }
+    ],
+    "carets": [
+      {
+        "sameText": true,
+        "offset": 0,
+        "rect": [0, 4.5, 0, 71],
+        "rangeText": true,
+        "rangeOffset": 0,
+        "collapsed": true
+      },
+      {
+        "sameText": true,
+        "offset": 1,
+        "rect": [28.40625, 4.5, 0, 71],
+        "rangeText": true,
+        "rangeOffset": 1,
+        "collapsed": true
+      },
+      {
+        "sameText": true,
+        "offset": 1,
+        "rect": [28.40625, 4.5, 0, 71],
+        "rangeText": true,
+        "rangeOffset": 1,
+        "collapsed": true
+      },
+      {
+        "sameText": true,
+        "offset": 2,
+        "rect": [60.40625, 4.5, 0, 71],
+        "rangeText": true,
+        "rangeOffset": 2,
+        "collapsed": true
+      }
+    ],
+    "hit": true,
+    "privateRange": [0, 4.5, 60.40625, 71],
+    "hooks": 0,
+    "errors": {
+      "rangeBrand": "TypeError",
+      "positionBrand": "TypeError",
+      "positionConstructor": "TypeError",
+      "caretArguments": "TypeError",
+      "caretNonfinite": null,
+      "positionInfinity": "TypeError",
+      "positionNaN": "TypeError",
+      "positionFloatOverflow": "TypeError",
+      "positionNegativeFloatOverflow": "TypeError",
+      "positionBigInt": "TypeError",
+      "positionSymbol": "TypeError"
+    },
+    "legacyConversions": [
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 1
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 1
+      },
+      {
+        "isNull": true,
+        "sameText": false,
+        "offset": null
+      }
+    ],
+    "positionConversions": [
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 0
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 1
+      },
+      {
+        "isNull": false,
+        "sameText": true,
+        "offset": 1
+      },
+      {
+        "isNull": true,
+        "sameText": false,
+        "offset": null
+      },
+      {
+        "isNull": true,
+        "sameText": false,
+        "offset": null
+      },
+      {
+        "isNull": true,
+        "sameText": false,
+        "offset": null
+      },
+      {
+        "isNull": true,
+        "sameText": false,
+        "offset": null
+      }
+    ],
+    "lifecycle": [
+      {
+        "step": "font",
+        "offset": 2,
+        "rect": [30.203125, 6, 0, 35.5]
+      },
+      {
+        "step": "detached",
+        "offset": 2,
+        "rect": [0, 0, 0, 0]
+      },
+      {
+        "step": "shortened",
+        "offset": 2,
+        "rect": [0, 0, 0, 0]
+      },
+      {
+        "step": "restored",
+        "offset": 2,
+        "rect": [30.203125, 6, 0, 35.5]
+      }
+    ],
+    "outOfView": true,
+    "interfaces": {
+      "rangeRects": {
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "name": "getClientRects",
+        "length": 0
+      },
+      "rangeBounds": {
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "name": "getBoundingClientRect",
+        "length": 0
+      },
+      "caretRange": {
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "name": "caretRangeFromPoint",
+        "length": 0
+      },
+      "caretPosition": {
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "name": "caretPositionFromPoint",
+        "length": 2
+      },
+      "caretNode": {
+        "enumerable": true,
+        "configurable": true,
+        "writable": null,
+        "name": "get offsetNode",
+        "length": 0
+      },
+      "caretOffset": {
+        "enumerable": true,
+        "configurable": true,
+        "writable": null,
+        "name": "get offset",
+        "length": 0
+      },
+      "caretRect": {
+        "enumerable": true,
+        "configurable": true,
+        "writable": true,
+        "name": "getClientRect",
+        "length": 0
+      }
+    }
+  }
+}

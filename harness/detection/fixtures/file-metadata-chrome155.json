@@ -1,0 +1,55 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "302d00a4c9567b33b4e1532c89f3ec4bf72577396514db65b00872a22e8a3517",
+  "result": {
+    "nameDescriptor": {
+      "enumerable": true,
+      "configurable": true,
+      "set": "undefined"
+    },
+    "cases": [
+      {
+        "name": "null",
+        "lastModified": 0,
+        "relativePath": "",
+        "own": [],
+        "tag": "[object File]",
+        "size": 3
+      },
+      {
+        "name": "a�b/é",
+        "lastModified": 5,
+        "relativePath": "",
+        "own": [],
+        "tag": "[object File]",
+        "size": 3
+      },
+      {
+        "name": "f",
+        "lastModified": -1,
+        "relativePath": "",
+        "own": [],
+        "tag": "[object File]",
+        "size": 3
+      },
+      {
+        "name": "f",
+        "lastModified": 0,
+        "relativePath": "",
+        "own": [],
+        "tag": "[object File]",
+        "size": 3
+      },
+      {
+        "name": "f",
+        "lastModified": 0,
+        "relativePath": "",
+        "own": [],
+        "tag": "[object File]",
+        "size": 3
+      }
+    ],
+    "illegalBrand": "TypeError"
+  }
+}

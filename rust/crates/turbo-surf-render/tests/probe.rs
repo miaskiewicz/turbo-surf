@@ -152,7 +152,8 @@ fn host_protocol_shims_are_present_not_gaps() {
 async fn async_probe_reports_gaps_and_captures_cookies() {
     let script = r#"
         const _ = [navigator.userAgent, navigator.bogusProbeProp];
-        try { document.cookie = "probe_test=1"; } catch (e) {}
+        document.cookie = "probe_test=1";
+        document.body.setAttribute("data-probe",document.querySelector("body").tagName);
         ''
     "#;
     let (report, storage) = probe_page_async(

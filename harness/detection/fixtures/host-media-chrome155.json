@@ -1,0 +1,41 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "08191a98b38513944f0e34c4664d4a49ff7731e4cb00f40d70386a443597657d",
+  "result": {
+    "matches": [
+      ["(forced-colors)", false],
+      ["(forced-colors: active)", false],
+      ["(forced-colors: none)", true],
+      ["not (forced-colors: active)", true],
+      ["(forced-colors: invalid)", false],
+      ["(prefers-contrast)", false],
+      ["(prefers-contrast: no-preference)", true],
+      ["(prefers-contrast: more)", false],
+      ["(prefers-contrast: less)", false],
+      ["(prefers-contrast: custom)", false],
+      ["(prefers-color-scheme)", true],
+      ["(prefers-color-scheme: dark)", false],
+      ["(prefers-color-scheme: light)", true],
+      ["(prefers-reduced-motion)", false],
+      ["(prefers-reduced-motion: reduce)", false],
+      ["(prefers-reduced-motion: no-preference)", true],
+      ["(prefers-reduced-transparency)", false],
+      ["(prefers-reduced-transparency: reduce)", false],
+      ["(prefers-reduced-transparency: no-preference)", true],
+      ["(hover)", true],
+      ["(hover: hover)", true],
+      ["(hover: none)", false],
+      ["(pointer)", true],
+      ["(pointer: fine)", true],
+      ["(pointer: coarse)", false],
+      ["(pointer: none)", false],
+      ["(any-hover: hover)", true],
+      ["(any-pointer: fine)", true],
+      ["(forced-colors: active), (prefers-contrast: more)", false],
+      ["(forced-colors: none) and (min-width: 1px)", true],
+      ["not ((forced-colors: active) and (prefers-color-scheme: dark))", true]
+    ],
+    "box": [20, 50]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "43bf66feca498bc4adf7c65b31352ff51737d2f587021e24f2b3f6505d756398",
+  "result": {
+    "light": [40, 20],
+    "shadow": [40, 20],
+    "raw": ["width:123px;height:77px", "width:123px;height:77px"]
+  }
+}

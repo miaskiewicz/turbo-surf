@@ -1,0 +1,64 @@
+{
+  "casesSha256": "b5233c252121f6df9f5e919a1859b1c2e3f7c5dce18dc2cc7a69e065cd6aa2ce",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "1a7c0390c2c9fa6669225e144011896086e1ed2f41da78d51b0e6b79dc606da6",
+  "collectorSha256": "78adefcaa16fe2d88b303a9416ed5ef6d3c3fac5de2f3eef1d30a7ddde279598",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "policy": "unsafe-none",
+      "rows": {
+        "ownRealm": true,
+        "allowed": true,
+        "type": "opaque",
+        "status": 0
+      },
+      "requests": [
+        {
+          "id": "0:no-cors",
+          "cookie": "seed=local"
+        }
+      ]
+    },
+    {
+      "policy": "require-corp",
+      "rows": {
+        "ownRealm": true,
+        "allowed": false,
+        "name": "TypeError",
+        "errorRealm": true
+      },
+      "requests": [
+        {
+          "id": "0:no-cors",
+          "cookie": "seed=local"
+        }
+      ]
+    },
+    {
+      "policy": "credentialless",
+      "rows": {
+        "ownRealm": true,
+        "allowed": true,
+        "type": "opaque",
+        "status": 0
+      },
+      "requests": [
+        {
+          "id": "0:no-cors",
+          "cookie": ""
+        }
+      ]
+    }
+  ]
+}

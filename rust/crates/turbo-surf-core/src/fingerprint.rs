@@ -6,22 +6,76 @@
 //! sees one consistent browser, and at scale sees many distinct ones.
 //!
 //! It does **not** defeat active canvas/WebGL/audio draw-and-hash or PoW
-//! challenges (those need a real raster backend / a token solver — out of scope;
-//! see the tier-3 notes). The seed pool is the highest-value piece you can build
-//! in-house with no Chromium.
+//! challenges by itself. The optional raster/GPU bridges and render-tier solvers
+//! handle separate parts of those workloads; acceptance must still be measured.
 //!
 //! Coherence is the whole point: every [`Profile`] field agrees with the others
 //! (UA OS ↔ `sec-ch-ua-platform` ↔ `navigator.platform`; Chrome major ↔
 //! `sec-ch-ua`; `deviceMemory` within Chrome's privacy cap). A single `Profile`
-//! drives BOTH the HTTP headers ([`crate::net`]) and the render-tier navigator —
-//! **rotate both layers with the same profile**, or a page that fetches over HTTP
-//! and then reads `navigator` sees a mismatch (itself a bot signal).
+//! should drive both HTTP and JS identity. Per-call rotation currently applies
+//! only to rustls headers: wreq emulation pins default_profile(). Pin that same
+//! identity in the render tier on the wreq path to avoid a cross-layer mismatch.
 
-/// `Accept` header value — stable across Chrome versions and OSes, so it is not
-/// part of the per-profile axes.
-pub const ACCEPT: &str =
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,\
-image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
+/// Navigation Accept for the current configured Chrome release.
+pub const ACCEPT: &str = crate::browser::RELEASES[0].navigation_accept;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct BrandVersion {
+    pub brand: String,
+    pub version: String,
+}
+
+/// Chrome's major-seeded GREASE brand/version permutation, shared by HTTP and JS.
+/// Source: Chromium 155 components/embedder_support/user_agent_utils.cc.
+pub fn brand_versions(major: u16, version: &str, full: bool) -> Vec<BrandVersion> {
+    const CHARACTERS: [&str; 11] = [" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_"];
+    const VERSIONS: [&str; 3] = ["8", "99", "24"];
+    const ORDERS: [[usize; 3]; 6] = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+    let seed = usize::from(major);
+    let grease = VERSIONS[seed % VERSIONS.len()];
+    let brands = [
+        BrandVersion {
+            brand: format!(
+                "Not{}A{}Brand",
+                CHARACTERS[seed % 11],
+                CHARACTERS[(seed + 1) % 11]
+            ),
+            version: if full {
+                format!("{grease}.0.0.0")
+            } else {
+                grease.into()
+            },
+        },
+        BrandVersion {
+            brand: "Chromium".into(),
+            version: version.into(),
+        },
+        BrandVersion {
+            brand: "Google Chrome".into(),
+            version: version.into(),
+        },
+    ];
+    let mut output = vec![brands[0].clone(); 3];
+    for (brand, destination) in brands.into_iter().zip(ORDERS[seed % 6]) {
+        output[destination] = brand;
+    }
+    output
+}
+
+pub fn brand_header(major: u16, version: &str, full: bool) -> String {
+    brand_versions(major, version, full)
+        .into_iter()
+        .map(|item| format!("\"{}\";v=\"{}\"", item.brand, item.version))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// One coherent real-Chrome client identity. Construct via [`select`] (by client
 /// key) or [`profile_at`] (by index); [`default_profile`] is the fixed identity
@@ -31,7 +85,7 @@ pub struct Profile {
     pub chrome_major: u16,
     /// Full build version for high-entropy UA-CH (`fullVersionList` /
     /// `uaFullVersion`), from the per-version [`crate::browser`] registry, e.g.
-    /// `"154.0.7258.66"`. The UA string stays reduced to `<major>.0.0.0`.
+    /// `"155.0.8059.79"`. The UA string stays reduced to `<major>.0.0.0`.
     pub full_version: &'static str,
     /// Top-level navigation header ORDER for this Chrome version (a fingerprint),
     /// from the [`crate::browser`] registry — Chrome reorders it across releases.
@@ -46,8 +100,8 @@ pub struct Profile {
     pub accept_language: &'static str,
     pub languages: &'static [&'static str],
     pub hardware_concurrency: u8,
-    /// `navigator.deviceMemory` — Chrome caps this at 8 for privacy, so the pool
-    /// never emits a higher value (it would be a tell).
+    /// `navigator.deviceMemory` in GiB. Chrome 155 desktop rounds within 2..32;
+    /// the local default and the selected pool machine can have different memory.
     pub device_memory: u8,
     pub max_touch_points: u8,
     pub screen_width: u16,
@@ -55,6 +109,29 @@ pub struct Profile {
 }
 
 impl Profile {
+    /// UA-CH architecture for the selected desktop platform.
+    pub fn architecture(&self) -> &'static str {
+        if self.nav_platform == "MacIntel" {
+            if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
+                "x86"
+            } else {
+                "arm"
+            }
+        } else {
+            "x86"
+        }
+    }
+
+    /// A native macOS session uses its actual product version. Foreign-platform
+    /// profiles retain their configured defaults; the frozen UA OS token is separate.
+    pub fn platform_version(&self) -> String {
+        match self.nav_platform {
+            "MacIntel" => macos_product_version().to_string(),
+            "Win32" => "10.0.0".to_string(),
+            _ => String::new(),
+        }
+    }
+
     /// Chrome's top-level navigation headers for this identity, minus the ones the
     /// HTTP client owns (`accept-encoding`, `host`, `cookie`). The returned order
     /// is Chrome's; callers that store into a `BTreeMap` lose it (a known
@@ -62,7 +139,12 @@ impl Profile {
     pub fn nav_headers(&self) -> Vec<(&'static str, String)> {
         vec![
             ("user-agent", self.user_agent.clone()),
-            ("accept", ACCEPT.to_string()),
+            (
+                "accept",
+                crate::browser::release(self.chrome_major)
+                    .navigation_accept
+                    .to_string(),
+            ),
             ("accept-language", self.accept_language.to_string()),
             ("sec-ch-ua", self.sec_ch_ua.clone()),
             ("sec-ch-ua-mobile", "?0".to_string()),
@@ -74,6 +156,43 @@ impl Profile {
             ("upgrade-insecure-requests", "1".to_string()),
         ]
     }
+}
+
+fn macos_product_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        if let Ok(plist) =
+            std::fs::read_to_string("/System/Library/CoreServices/SystemVersion.plist")
+        {
+            if let Some(rest) = plist.split("<key>ProductVersion</key>").nth(1) {
+                if let Some(value) = rest
+                    .split("<string>")
+                    .nth(1)
+                    .and_then(|s| s.split("</string>").next())
+                {
+                    if let Some(version) = normalize_product_version(value) {
+                        return version;
+                    }
+                }
+            }
+        }
+        "15.0.0".to_string()
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn normalize_product_version(value: &str) -> Option<String> {
+    let mut parts: Vec<&str> = value.trim().split('.').collect();
+    if parts.len() > 3
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    parts.resize(3, "0");
+    Some(parts.join("."))
 }
 
 struct Os {
@@ -104,16 +223,15 @@ const OSES: &[Os] = &[
     },
 ];
 
-// Recent Chrome majors, newest first. The reported version is independent of the
-// (wreq-util BoringSSL) TLS profile, so this can lead the current stable. Each
-// major resolves its version-specific data (full build, header order) through the
-// `crate::browser` registry, so every profile stays coherent.
-const MAJORS: &[u16] = &[154, 153, 152, 151, 150, 149];
+// Configured release majors only: older unlisted versions cannot borrow a newer
+// full version while still advertising their original major. Transport emulation
+// remains pinned to the current default identity.
+const MAJORS: &[u16] = &[155, 154, 153];
 
 // Plausible logical-core counts for desktops.
 const CORES: &[u8] = &[4, 8, 12, 16];
 
-// `navigator.deviceMemory` — Chrome only ever reports {4, 8} on desktop (capped).
+// Selected pool machines have 4/8 GiB; this is a subset of Chrome's allowed values.
 const DEVICE_MEMORY: &[u8] = &[4, 8];
 
 // Common real desktop resolutions (CSS px).
@@ -184,13 +302,7 @@ pub fn profile_at(index: usize) -> Profile {
             "Mozilla/5.0 ({}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{}.0.0.0 Safari/537.36",
             os.ua_token, major
         ),
-        // GREASE brand + order validated against a live real-Chrome capture:
-        // `"Chromium";v="M", "Google Chrome";v="M", "Not A(Brand";v="99"`. Must stay identical
-        // to the render tier's navigator.userAgentData.brands (a wire/JS mismatch is a hard tell).
-        sec_ch_ua: format!(
-            "\"Chromium\";v=\"{m}\", \"Google Chrome\";v=\"{m}\", \"Not A(Brand\";v=\"99\"",
-            m = major
-        ),
+        sec_ch_ua: brand_header(major, &major.to_string(), false),
         sec_ch_ua_platform: os.sec_ch_platform,
         nav_platform: os.nav_platform,
         vendor: "Google Inc.",
@@ -220,16 +332,14 @@ pub fn default_profile() -> Profile {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
              (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
         ),
-        sec_ch_ua: format!(
-            "\"Chromium\";v=\"{major}\", \"Google Chrome\";v=\"{major}\", \"Not A(Brand\";v=\"99\""
-        ),
+        sec_ch_ua: brand_header(major, &major.to_string(), false),
         sec_ch_ua_platform: "\"macOS\"",
         nav_platform: "MacIntel",
         vendor: "Google Inc.",
         accept_language: "en-US,en;q=0.9",
         languages: &["en-US", "en"],
         hardware_concurrency: 8,
-        device_memory: 8,
+        device_memory: rel.default_device_memory,
         max_touch_points: 0,
         screen_width: 1920,
         screen_height: 1080,
@@ -239,6 +349,28 @@ pub fn default_profile() -> Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chrome155_brand_headers_match_the_captured_low_and_full_versions() {
+        assert_eq!(
+            brand_header(155, "155", false),
+            "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\""
+        );
+        assert_eq!(brand_header(155, "155.0.8059.79", true), "\"Google Chrome\";v=\"155.0.8059.79\", \"Chromium\";v=\"155.0.8059.79\", \"Not(A:Brand\";v=\"24.0.0.0\"");
+        assert_eq!(
+            brand_header(154, "154", false),
+            "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\""
+        );
+    }
+
+    #[test]
+    fn product_versions_are_normalized_without_accepting_markup() {
+        assert_eq!(normalize_product_version("27.2"), Some("27.2.0".into()));
+        assert_eq!(normalize_product_version(" 15.0.1 "), Some("15.0.1".into()));
+        for value in ["", "27..2", "27.2.extra", "27.2.0.1", "<string>"] {
+            assert_eq!(normalize_product_version(value), None);
+        }
+    }
 
     #[test]
     fn pool_is_large() {
@@ -277,7 +409,7 @@ mod tests {
             assert!(p.user_agent.contains(ua_os));
             assert_eq!(p.sec_ch_ua_platform, sec);
             assert_eq!(p.nav_platform, nav);
-            // deviceMemory must stay within Chrome's privacy cap.
+            // These selected pool machines have 4/8 GiB of memory.
             assert!(p.device_memory <= 8);
             assert_eq!(p.vendor, "Google Inc.");
         }
@@ -293,6 +425,10 @@ mod tests {
         );
         assert!(p.sec_ch_ua.contains(&format!("\"{major}\"")));
         assert_eq!(p.sec_ch_ua_platform, "\"macOS\"");
+        assert_eq!(
+            p.device_memory, 16,
+            "Measured local Chrome 155 desktop memory"
+        );
         // Version-specific data comes from the browser registry.
         assert_eq!(
             p.full_version,

@@ -285,6 +285,7 @@ impl PageSession {
                 storage,
                 metadata,
                 Some(activation),
+                self.options,
             )
             .await?;
             let mut logs: Vec<serde_json::Value> =

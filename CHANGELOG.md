@@ -9,7 +9,158 @@ checklist; [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) trac
 residual work beyond this PR, with audio separately deferred in
 [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
 
-### Final validation checkpoint — implementation a005140
+### Runner timing follow-up — 2026-10-20
+
+- Complete the full default `npm run check`:1,450 Rust tests, strict Clippy,
+  formatting, rebuilt addon/shim96, E2E20, detection184 and Python2 pass.
+  Explicit skips remain nine Rust, one framework and seven Node20 browser
+  controls requiring Node22. Actual addon loading/code identity is verified;
+  full native-feature and fresh optimized API/Google checks remain pending.
+
+- Re-vendor public canonical `a49544f`: computed styles preserve parsed
+  declaration importance through shorthand expansion, respect private document
+  adopted sheets in source order, and bypass poisoned public priority/root
+  getters and numeric Array prototype setters. Canonical checks pass 299 library,
+  52 compatibility and63 Node tests; all four exact-head platform CI jobs pass.
+  The unrelated computed custom-property omission
+  remains explicitly tracked in issue #28.
+
+- Expand physical border shorthands before native cascade winner selection, so
+  author declarations retain their origin, importance and source-order priority
+  over UA side widths. All nine measured border controls pass in the rebuilt
+  native engine, alongside genuine same-embedded-font Range controls. The Times
+  glyph-width mismatch remains tracked in issue #28.
+- Reuse supervised children in the API inventory runner, retaining its60-second
+  deadline, full private logs and owned-process cleanup on timeout/abort. Six
+  focused tests pass on both Node20 and22; historical API inventory stays intact.
+
+- Reject malformed collector-error metadata when deciding modern capture,
+  observation and SERP completion. Empty arrays pass; absent legacy evidence stays
+  unmeasured. Focused comparison/summary regressions pass31 each on Node20/22.
+- Preserve a genuine frozen-Chrome timeout/interval conversion control, including
+  huge finite values, Infinity and signed32 boundaries. Matching native coercion
+  and defensive scheduler overflow guards pass the fresh native integration run.
+
+- Integrate the native inline/block layout repair from producer PR24: split real
+  block descendants out of inline flow, preserve continuation and Range ownership,
+  propagate collapsed margins and quantize native intrinsic widths. Preserve
+  zero-size client rectangles without inflating integer offsets. The producer's
+  final local gate at public `2ea52368` passes858 workspace tests and15 xref
+  controls, strict Clippy, formatting and complexity checks. Exact-head CI passes
+  all three jobs, including100% coverage. The rebuilt native integration passes
+  66 tests, affected-crate strict Clippy and formatting with unchanged source and
+  compiled fixtures. The unchanged four paired suites pass13 tests with zero
+  skips, including9 observation variants / 17 captures. Full native-feature
+  validation and optimized live comparison remain pending.
+- Use measured Chrome button defaults at native UA priority, retaining author
+  overrides. Officially re-vendor canonical turbo-test `030c776`: matching computed
+  button styles, repaired Node/EventTarget constructor identity, and real Text and
+  DocumentFragment constructors with native creation, conversion and subclass
+  behavior. Canonical library295 and nine compatibility fixtures52 pass, as do
+  all four platform CI jobs at that exact head. Its
+  supplemental strict attempt still reports28 unchanged-base diagnostics; that
+  result does not replace turbo-surf's required strict gate.
+- Save the genuine Chrome constructor/ShadowRoot probe and control as reusable
+  harness assets. Combined turbo-surf and native155 checks remain pending after
+  these integrations; component passes alone do not establish Google acceptance.
+
+- Add a central [Chrome155 parity runbook](harness/detection/CHROME-PARITY-RUNBOOK.md) with exact native SDK/build commands, feature and tracing flags, timing options, artifact checks, test order and evidence limits; link it from the agent documentation index, SDK, engine and main harness docs. Document inherited environment/`.env` effects, addon shadowing, browser version drift and incomplete control-path selection.
+- Supervise test and matrix children with abort signals, bounded cleanup and full
+  private output logs. Retire owned groups even when their leader exits first;
+  test teardown waits for retirement before starting the next case. Nine offline
+  controls pass under actual Node20 and Node22, including intentional outer-test
+  timeout and resistant-descendant cases. Preserve timeout failures and original
+  success deadlines.
+- Let both Chrome backends and all four collector suites select the explicit
+  Chrome executable. On interruption, checkpoint incomplete captures and retire
+  only the owned browser. Verify actual typed insertion, retained control identity
+  and focus before Enter, accounting for existing text and UTF-16 selections;
+  equivalent native host guards and startup changes pass47 focused native tests
+  and four example tests, strict affected-crate Clippy and formatting.
+- Initialize diagnostic render hooks without loading solver configuration or
+  `.env`; production session initialization retains its existing behavior.
+- Add a reusable complete-app Chrome freezer with signature verification, source
+  before/after and copy content checks, internal-link validation and failure
+  receipts. Nine Node22 offline controls pass. Preserve installed Chrome and user
+  profiles; omit Finder metadata only from the owned copy. Fixed-version actual
+  Chrome controls and a genuine oracle refresh pass8/8. Actual Chrome is
+  155.0.8059.85 / V815.5.35.25; native remains .80 / .23, an open profile/engine gap.
+- Verify both Chrome interruption paths against real owned processes: preserve
+  incomplete traces, retire observed helpers and remove owned profiles. Both
+  controls pass without fallback kills. Public summaries require all measured
+  process-completion fields;14 controls pass on Node20 and Node22. Legacy captures
+  missing these fields remain unmeasured.
+- Preserve a newly exposed native block-in-inline layout failure in the combined
+  run (12 passing tests, one failure). Fifteen paired captures complete; the
+  existing-results fixture fails geometry before consent or search. Keep this
+  layout defect separate from Google acceptance and from the earlier input and
+  timeout failures.
+
+- Run detection test files serially to bound competing browser/V8 workloads,
+  preserving all deadlines, assertions and skips. The prior concurrent failure
+  remains recorded; its cause is unproved. Unchanged isolated controls pass3/3
+  and the full serial diagnostic passes 134 with four existing skips.
+- Measure a real comparison gap with reusable localhost scenarios: a600ms retry
+  produces a Chrome200 shell versus native429 at the current observation point,
+  and native guest typing clocks advance about twice the real typing duration.
+  The slow-response and20ms retry controls agree; the failed timing control is
+  preserved rather than relabeled as a passing comparison.
+- Add opt-in real-time Window scheduling before hydration and through frame/form
+  navigation, preserving default virtual crawler scheduling and original budgets.
+  A one-shot hydration cap leaves later operation budgets unchanged. Ten focused
+  default-engine controls pass; genuine-native155 passes40 integration controls
+  and two example tests, strict affected-crate Clippy and formatting.
+- Observe both engines against one deadline starting before final Enter. Preserve
+  overruns, unfinished/failed main navigation, hop limits and timeouts. Guard
+  snapshots against loader changes and distinguish main-document requests from
+  iframe/XHR traffic. Public summaries require complete observation and real-time
+  native mode; absent legacy evidence remains unmeasured. Thirty focused
+  comparison/navigation tests and twelve public-summary tests pass; actual paired
+  timing controls, final integrated gates and fresh Google verification remain pending.
+
+### Chrome control and diagnostic follow-up — 2026-10-19
+
+A signed-out native Chrome Incognito UI control reaches real results for the
+same `rust lang` query, with Google's sign-in link visible before and after
+submission. This is one successful UI control, not a reliability measurement or
+an empty-profile control: existing Incognito cookie state was not measured and
+extensions were present. It does not establish native search acceptance or the
+cause of the traced collector's challenges. The earlier logged-in control is a
+separate observation. Historical captured Google matrices remain unchanged.
+
+- Separate guest script errors from collector completion. Preserve both kinds of
+  errors and label legacy completion inference explicitly.
+- Exclude hidden query fields from input diagnostics and record the selected
+  control type/counts. This reports type-based selection, not computed visibility.
+- Record the Chrome document's actual HTTP status, ready state and response
+  identity. Accept a Chrome SERP only with a completed capture, a same-origin
+  `/search` document, HTTP200, complete DOM and organic result headings.
+  Receiving an HTTP200 shell alone does not qualify.
+- Align harness readiness, real pre/post dwell, per-step snapshots and minimum
+  host-wall typing cadence. Recompute trusted native click coordinates from the
+  private current-layout operation, and replace live input/textarea selections
+  while respecting canceled editing events. Initialize the existing shared system-font
+  registry during geometry setup so a first click does not incur cold font parsing
+  inside its input budget; this shifts that real cost to engine startup. Add paired localhost action evidence
+  and an explicitly selected Incognito comparison mode. Rebuilt native155
+  diagnostics/input pass19/19, native duration2/2, paired/native-process controls6/6
+  with zero skips, and separate real-Chrome collector controls6/6.
+- Pin the public turbo-dom attribute-selector repair `d01d6a5` in all six
+  consumers and the lockfile. Preserve the shared hidden-field exclusion selector
+  and its failing fixture; the repair belongs in the matcher. Its full producer
+  Rust/JS/native/WASM gate and exact-head CI pass; Surf native155 integration
+  passes the genuine paired action control.
+- Reject malformed custom-step operands in the common driver before artifacts or
+  backend launch. Keep Chrome string/timer coercion from producing a different
+  plan than native; accept empty typing and zero waits explicitly.
+- Verify actual offline action alignment in baseline and interface modes: all six
+  actions, real consent coordinates/response/cookie ordering, focused textarea
+  query, trusted events, genuine native form submission and final HTTP200/results.
+  Missing readiness fails before input on both engines. Full default checks and
+  fresh optimized Google validation remain pending; this does not certify live
+  Google acceptance or identical event timing.
+
+### Previous full validation checkpoint — implementation a005140
 
 Implementation source `a005140` passes the complete stock-V8-150 workspace
 (1,411 tests, nine ignores and six zero-test native-only targets) and genuine

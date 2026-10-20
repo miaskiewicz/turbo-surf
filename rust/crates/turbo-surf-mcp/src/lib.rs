@@ -278,9 +278,17 @@ fn ensure_render_hooks() {
     });
 }
 
+/// Initialize the compiled text, canvas and GPU render hooks without creating a session.
+///
+/// Diagnostic embedders can use these hooks without loading solver configuration or `.env`.
+/// Repeated calls are safe; [`Session::new`] installs the same hooks automatically.
+pub fn initialize_render_hooks() {
+    ensure_render_hooks();
+}
+
 impl Session {
     pub fn new() -> Self {
-        ensure_render_hooks();
+        initialize_render_hooks();
         Self {
             // Pick up a solver from env/`.env` if one is configured (else inert).
             // Supply the V8 engines: the PoW engine runs a Cloudflare/AWS challenge's

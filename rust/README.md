@@ -8,7 +8,11 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
 workspace now resolves the public Git-pinned `turbo-dom` 0.5.7 candidate
-`aaeb290` (PR14, including PR13 custom states and detached contextual fragments); latest registry release is0.5.6.
+`d01d6a5` ([PR15](https://github.com/miaskiewicz/turbo-dom/pull/15), preserving
+PR13/PR14 custom states, checkedness and detached contextual fragments). Latest
+registry release is0.5.6. The candidate also repairs scalar/original-UTF16
+attribute case modifiers and measured HTML name/type defaults; the shared native
+search selector now excludes hidden query fields correctly.
 The candidate adds native custom states and live checked-state reads to the original
 0.5.6 capabilities, including original UTF-16
 payload/name/parser APIs, native mutation batches and bounded storage collection.
@@ -161,6 +165,8 @@ cargo build --release -p turbo-surf-napi   # build the .node addon (then node ad
 
 See [`../harness/detection/README.md`](../harness/detection/README.md) for a fresh-jar
 Chrome/native comparison with all native fingerprint/raster features enabled.
+The [Chrome parity runbook](../harness/detection/CHROME-PARITY-RUNBOOK.md) lists
+the SDK setup, every required opt-in, executable/addon selection and validation order.
 `PageSession::open_with_init_script` installs opt-in diagnostics before page scripts;
 `TURBO_SURF_HTTP_TRACE` records native application HTTP requests, responses and decoded
 bodies. These are raw local diagnostics, not a TLS packet capture. Current Google

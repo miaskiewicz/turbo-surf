@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setTimeout as pause } from "node:timers/promises";
 import { runInNewContext } from "node:vm";
-import { differences, localFixtureUrl, memberInventory } from "./api-shape.mjs";
+import { differences, localFixtureUrl, memberInventory, runApiCollector } from "./api-shape.mjs";
 
 test("custom paired fixtures remain local and reject credential-bearing or remote URLs", () => {
   for (const url of [
@@ -149,3 +152,89 @@ test("member inventory distinguishes missing interfaces, members and descriptor 
     { path: "changed.enumerable", chrome: true, native: false },
   ]);
 });
+
+for (const reason of ["timeout", "abort"]) {
+  test(
+    `API collector ${reason} preserves full logs and retires its detached child`,
+    {
+      skip: process.platform === "win32",
+    },
+    async (t) => {
+      const directory = mkdtempSync(join(tmpdir(), "api-collector-cleanup-"));
+      const ready = join(directory, "ready.json");
+      const evidence = join(directory, "trace.json");
+      const controller = new AbortController();
+      let descendant, observation;
+      let passed = false;
+      const source = String.raw`
+      import {spawn} from 'node:child_process';
+      import {writeFileSync} from 'node:fs';
+      import {once} from 'node:events';
+      import {collectorLifecycle} from ${JSON.stringify(new URL("collector-lifecycle.mjs", import.meta.url).href)};
+      const lifecycle=collectorLifecycle({graceMs:20,onAbort(){
+        writeFileSync(process.argv[2],JSON.stringify({captureComplete:false,interrupted:true}));
+      }});
+      const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});
+      const retired=once(child,'close');lifecycle.own(child);
+      await new Promise(done=>process.stdout.write('x'.repeat(2**20+17),done));
+      process.stderr.write('private diagnostic\n');
+      writeFileSync(process.argv[1],JSON.stringify({pid:child.pid}));
+      try{await lifecycle.race(new Promise(()=>{}));}catch{}
+      finally{await lifecycle.stopBrowser();await retired;lifecycle.dispose();}
+    `;
+      try {
+        const pending = runApiCollector(
+          process.execPath,
+          ["--input-type=module", "-e", source, ready, evidence],
+          directory,
+          {
+            signal: controller.signal,
+            timeoutMs: reason === "timeout" ? 1000 : 5000,
+            killGraceMs: 200,
+          },
+        );
+        // Observe rejection immediately while waiting for the fixture's readiness.
+        observation = pending.then(
+          (value) => ({ value }),
+          (error) => ({ error }),
+        );
+        const deadline = Date.now() + 3000;
+        while (!existsSync(ready) && Date.now() < deadline) await pause(10);
+        assert.equal(existsSync(ready), true, "the owned child reached its waiting state");
+        descendant = JSON.parse(readFileSync(ready, "utf8")).pid;
+        if (reason === "abort") controller.abort();
+        const { error } = await observation;
+        assert.ok(error instanceof Error);
+        assert.equal(
+          error.processResult.code,
+          0,
+          "cooperative cleanup may exit zero without becoming success",
+        );
+        assert.equal(error.processResult.timedOut, reason === "timeout");
+        assert.equal(error.processResult.aborted, reason === "abort");
+        assert.deepEqual(
+          JSON.parse(readFileSync(join(directory, "process.json"), "utf8")),
+          error.processResult,
+        );
+        assert.equal(readFileSync(join(directory, "stdout.log")).length, 2 ** 20 + 17);
+        assert.equal(readFileSync(join(directory, "stderr.log"), "utf8"), "private diagnostic\n");
+        assert.deepEqual(JSON.parse(readFileSync(evidence, "utf8")), {
+          captureComplete: false,
+          interrupted: true,
+        });
+        assert.throws(() => process.kill(descendant, 0), { code: "ESRCH" });
+        passed = true;
+      } finally {
+        controller.abort();
+        await observation;
+        if (descendant) {
+          try {
+            process.kill(descendant, "SIGKILL");
+          } catch {}
+        }
+        if (passed) rmSync(directory, { recursive: true, force: true });
+        else t.diagnostic(`Failed API supervision fixture retained at ${directory}`);
+      }
+    },
+  );
+}

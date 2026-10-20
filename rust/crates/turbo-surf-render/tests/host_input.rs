@@ -387,3 +387,319 @@ async fn script_navigation_captures_source_activation_at_admission() {
         page.close();
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn clicks_resolve_current_target_center_without_a_prior_move() {
+    let mut page = PageSession::open(
+        "<body style='margin:0'><button id=q style='position:absolute;left:20px;top:30px;width:80px;height:40px'>Click</button></body>",
+        "https://example.test/", "", "", 5000,
+    ).await.unwrap();
+    page.eval(r#"
+      globalThis.positions=[];globalThis.expected=[];
+      const q=document.querySelector('#q'),rect=Element.prototype.getBoundingClientRect;
+      globalThis.recordCenter=()=>{const r=rect.call(q);expected.push([r.left+r.width/2,r.top+r.height/2]);};
+      recordCenter();q.onclick=e=>positions.push([e.clientX,e.clientY,e.isTrusted]);
+      q.getBoundingClientRect=()=>{throw Error('guest rectangle override');};
+    "#).await.unwrap();
+    page.input(&json!([{"click":"#q"}])).await.unwrap();
+    page.input(&json!([{"move":{"selector":"#q"}}]))
+        .await
+        .unwrap();
+    page.eval("document.querySelector('#q').style.left='170px';document.querySelector('#q').style.top='90px';recordCenter();").await.unwrap();
+    page.input(&json!([{"click":"#q"}])).await.unwrap();
+    assert_eq!(
+        page.eval_json_expression("positions").await.unwrap(),
+        page.eval_json_expression("expected.map(p=>[...p,true])")
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        page.eval_json_expression(
+            "positions.length===2&&positions[0][0]>0&&positions[1][0]>positions[0][0]"
+        )
+        .await
+        .unwrap(),
+        "true"
+    );
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn typing_replaces_live_control_selections_and_preserves_cancellation() {
+    let mut page = PageSession::open(
+        "<body><input id=q><textarea id=t></textarea></body>",
+        "https://example.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval(r#"
+      globalThis.edits=[];globalThis.readControl=[];
+      for(const [id,C] of [['q',HTMLInputElement],['t',HTMLTextAreaElement]]){
+        const q=document.getElementById(id),p=C.prototype;
+        const value=Object.getOwnPropertyDescriptor(p,'value');
+        const start=Object.getOwnPropertyDescriptor(p,'selectionStart').get;
+        const end=Object.getOwnPropertyDescriptor(p,'selectionEnd').get;
+        const select=p.setSelectionRange;
+        value.set.call(q,'abcd');select.call(q,1,3,'backward');
+        readControl.push(()=>[value.get.call(q),start.call(q),end.call(q)]);
+        q.onbeforeinput=e=>{
+          edits.push([id,e.type,e.data,e.isTrusted]);
+          if(e.data==='!')e.preventDefault();
+          if(e.data==='Z')select.call(q,0,1);
+        };
+        q.oninput=e=>edits.push([id,e.type,e.data,e.isTrusted]);
+        for(const key of ['value','selectionStart','selectionEnd'])Object.defineProperty(q,key,{get(){throw Error('guest control accessor');},set(){throw Error('guest control setter');},configurable:true});
+        q.setSelectionRange=()=>{throw Error('guest selection method');};
+      }
+    "#).await.unwrap();
+    for selector in ["#q", "#t"] {
+        page.input(&json!([{"focus":selector},{"type":"X!YZ"}]))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        page.eval_json_expression("readControl.map(read=>read())")
+            .await
+            .unwrap(),
+        "[[\"ZXYd\",1,1],[\"ZXYd\",1,1]]"
+    );
+    assert_eq!(page.eval_json_expression("edits.filter(e=>e[1]==='input').map(e=>[e[0],e[2],e[3]])").await.unwrap(), "[[\"q\",\"X\",true],[\"q\",\"Y\",true],[\"q\",\"Z\",true],[\"t\",\"X\",true],[\"t\",\"Y\",true],[\"t\",\"Z\",true]]");
+    page.close();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn input_guard_preserves_selection_utf16_and_multiple_typing_chunks() {
+    let mut page = PageSession::open(
+        "<body><textarea id=q>A😀BC</textarea></body>",
+        "https://guard.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.input(&json!([{"focus":"#q"}])).await.unwrap();
+    page.eval("document.querySelector('#q').setSelectionRange(1,3)")
+        .await
+        .unwrap();
+    let globals = page
+        .eval_json_expression("Object.getOwnPropertyNames(globalThis)")
+        .await
+        .unwrap();
+    page.input(&json!([
+        {"inputGuard":{"begin":"Ω😀","selector":"#q"}},
+        {"type":"Ω😀"}, {"inputGuard":"verify"},
+        {"inputGuard":{"begin":"!","selector":"#q"}},
+        {"type":"!"}, {"inputGuard":"verify"}, {"inputGuard":"clear"}
+    ]))
+    .await
+    .unwrap();
+    assert_eq!(
+        page.eval_json_expression("document.querySelector('#q').value")
+            .await
+            .unwrap(),
+        "\"AΩ😀!BC\""
+    );
+    assert_eq!(
+        page.eval_json_expression("Object.getOwnPropertyNames(globalThis)")
+            .await
+            .unwrap(),
+        globals
+    );
+    let error = page
+        .input(&json!([{"inputGuard":"verify"}]))
+        .await
+        .unwrap_err();
+    assert!(error.contains("No retained input control"), "{error}");
+}
+
+async fn guarded_input_page(attributes: &str, listener: &str) -> PageSession {
+    let mut page = PageSession::open(
+        &format!("<body><form><input id=q name=q {attributes}></form><input id=other></body>"),
+        "https://guard.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval(&format!("globalThis.submits=0;document.querySelector('form').onsubmit=e=>{{e.preventDefault();submits++}};{listener}"))
+        .await
+        .unwrap();
+    page.input(&json!([{"focus":"#q"}])).await.unwrap();
+    page
+}
+
+async fn rejected_guarded_query(page: &mut PageSession, text: &str) -> String {
+    let error = page
+        .input(&json!([
+            {"inputGuard":{"begin":text,"selector":"#q"}}, {"type":text},
+            {"inputGuard":"verify"}, {"inputGuard":"clear"}, {"press":"Enter"}
+        ]))
+        .await
+        .unwrap_err();
+    assert!(error.contains("expected focused query"), "{error}");
+    assert_eq!(page.eval_json_expression("submits").await.unwrap(), "0");
+    let retired = page
+        .input(&json!([{"inputGuard":"verify"}]))
+        .await
+        .unwrap_err();
+    assert!(retired.contains("No retained input control"), "{retired}");
+    error
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn input_guard_rejects_truncated_typing_without_repair_or_submission() {
+    let mut page = guarded_input_page("", "document.querySelector('#q').oninput=event=>{event.target.value=event.target.value.slice(0,2)};").await;
+    rejected_guarded_query(&mut page, "query").await;
+    assert_eq!(
+        page.eval_json_expression("document.querySelector('#q').value")
+            .await
+            .unwrap(),
+        "\"qu\""
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn input_guard_rejects_focus_loss_without_refocusing_or_submission() {
+    let mut page = guarded_input_page(
+        "",
+        "document.querySelector('#q').oninput=()=>document.querySelector('#other').focus();",
+    )
+    .await;
+    let error = rejected_guarded_query(&mut page, "x").await;
+    assert!(error.contains(r#""focused":false"#), "{error}");
+    assert_eq!(
+        page.eval_json_expression("document.activeElement.id")
+            .await
+            .unwrap(),
+        "\"other\""
+    );
+    assert_eq!(
+        page.eval_json_expression("document.querySelector('#q').value")
+            .await
+            .unwrap(),
+        "\"x\""
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn input_guard_rejects_a_focused_same_selector_replacement_with_matching_value() {
+    let mut page = guarded_input_page("", "document.querySelector('#q').oninput=event=>{const old=event.target;const replacement=old.cloneNode();replacement.value=old.value;old.replaceWith(replacement);replacement.focus()};").await;
+    let error = rejected_guarded_query(&mut page, "x").await;
+    assert!(error.contains(r#""connected":false"#), "{error}");
+    assert_eq!(
+        page.eval_json_expression("[document.activeElement.id,document.querySelector('#q').value]")
+            .await
+            .unwrap(),
+        "[\"q\",\"x\"]"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn input_guard_requires_the_intended_control_before_typing() {
+    let mut page = guarded_input_page("", "").await;
+    page.input(&json!([{"focus":"#other"}])).await.unwrap();
+    let error = page
+        .input(&json!([
+            {"inputGuard":{"begin":"x","selector":"#q"}}, {"type":"x"}
+        ]))
+        .await
+        .unwrap_err();
+    assert!(
+        error.contains("intended connected editable control"),
+        "{error}"
+    );
+    assert_eq!(
+        page.eval_json_expression(
+            "[document.querySelector('#q').value,document.querySelector('#other').value]"
+        )
+        .await
+        .unwrap(),
+        "[\"\",\"\"]"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn input_guard_rechecks_before_enter_and_releases_before_successful_submission() {
+    let mut page = guarded_input_page("", "").await;
+    page.input(&json!([
+        {"inputGuard":{"begin":"query","selector":"#q"}}, {"type":"query"},
+        {"inputGuard":"verify"}
+    ]))
+    .await
+    .unwrap();
+    page.eval("document.querySelector('#q').value='truncated'")
+        .await
+        .unwrap();
+    let error = page
+        .input(&json!([
+            {"inputGuard":"verify"}, {"inputGuard":"clear"}, {"press":"Enter"}
+        ]))
+        .await
+        .unwrap_err();
+    assert!(error.contains("expected focused query"), "{error}");
+    assert_eq!(page.eval_json_expression("submits").await.unwrap(), "0");
+    page.input(&json!([
+        {"inputGuard":{"begin":"!","selector":"#q"}}, {"type":"!"},
+        {"inputGuard":"verify"}, {"inputGuard":"clear"}, {"press":"Enter"}
+    ]))
+    .await
+    .unwrap();
+    assert_eq!(page.eval_json_expression("submits").await.unwrap(), "1");
+    let released = page
+        .input(&json!([{"inputGuard":"verify"}]))
+        .await
+        .unwrap_err();
+    assert!(released.contains("No retained input control"), "{released}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn input_budget_cancellation_releases_guard_and_prevents_delayed_type_or_enter() {
+    let mut page = PageSession::open_with_document_response_and_options(
+        "<form><input id=q name=q></form><script>window.submits=0;document.querySelector('form').onsubmit=e=>{e.preventDefault();submits++}</script>",
+        "https://guard.test/", "", "", 100, "",
+        turbo_surf_core::request_context::ClientHints::default(), &[],
+        turbo_surf_render::BrowserStorage::default(),
+        turbo_surf_render::DocumentResponseMetadata::default(), None,
+        turbo_surf_render::PageSessionOptions {
+            window_timer_mode: turbo_surf_render::WindowTimerMode::RealTime,
+            ..Default::default()
+        },
+    ).await.unwrap();
+    page.input(&json!([{"focus":"#q"}])).await.unwrap();
+    let error = page
+        .input(&json!([
+            {"inputGuard":{"begin":"late","selector":"#q"}}, {"wait":250},
+            {"type":"late"}, {"press":"Enter"}
+        ]))
+        .await
+        .unwrap_err();
+    assert!(error.contains("budget"), "{error}");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    page.eval("void 0").await.unwrap();
+    assert_eq!(
+        page.eval_json_expression("[submits,document.querySelector('#q').value]")
+            .await
+            .unwrap(),
+        "[0,\"\"]"
+    );
+    let released = page
+        .input(&json!([{"inputGuard":"verify"}]))
+        .await
+        .unwrap_err();
+    assert!(released.contains("No retained input control"), "{released}");
+    page.eval("window.recoveredKeys=[];document.querySelector('#q').onkeydown=e=>recoveredKeys.push([e.key,e.isTrusted])")
+        .await
+        .unwrap();
+    page.input(&json!([{"press":"Escape"}])).await.unwrap();
+    assert_eq!(
+        page.eval_json_expression("[submits,document.querySelector('#q').value,recoveredKeys]")
+            .await
+            .unwrap(),
+        "[0,\"\",[[\"Escape\",true]]]"
+    );
+}

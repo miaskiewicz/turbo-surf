@@ -1,4 +1,4 @@
-# Google detection audit — 2026-10-09; follow-up 2026-10-17
+# Google detection audit — 2026-10-09; follow-up 2026-10-20
 
 The canonical pending-work checklist is [PARITY-GAPS.md](./PARITY-GAPS.md).
 Residual work beyond PR26 is tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28),
@@ -8,7 +8,228 @@ Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
-## Current messaging, geometry and DOM batch
+## Current integration checkpoint — 2026-10-20
+
+The current native build passes 66 focused tests, strict affected-crate Clippy
+and formatting. The unchanged four paired localhost suites pass 13 tests with
+zero failures/skips. Their final observation fixture covers 9 variants and17
+actual captures, including the former block-in-inline geometry failure. The
+source, compiled PNG/font fixtures, native binary and full frozen Chrome bundle
+remain unchanged. Successful unit fixtures remove their raw directories by
+design; retained receipts/logs and test assertions support these results, not a
+claim that every successful raw trace is archived.
+
+The complete default `npm run check` passes1,450 Rust tests, workspace strict
+Clippy and formatting, rebuilt addon/shim96, E2E20, detection184 and Python2.
+Nine Rust, one framework and seven Node20 browser controls are explicitly
+ignored/skipped. The latter need Node22; the separate paired run above exercises
+its selected real-Chrome controls. Full native-feature, fresh API and optimized
+Google validation remain pending. The 100ms boundary control records Chrome429 and a native200 shell
+with explicit elapsed-time overruns; passing harness assertions do not establish
+identical scheduling or universal page behavior. Times glyph width and the
+Chrome/native engine patch gap remain tracked in issue #28. Earlier failures
+below retain their original outcomes and precede the current fixes.
+
+Private addon-proof preflights initially reject Cargo's inode-only refresh and
+the signing allocation retained after signature removal. Those attempts are
+preserved. A separate completion proof verifies the actual consumed addon,
+current Cargo artifact/profile and all code/data bytes, allowing only validated
+`__LINKEDIT.vmsize` signing padding. Actual code-byte and unrelated-header
+mutations fail the comparison; source, test budgets and consumed addon stay
+unchanged. These helper corrections do not erase the original gate evidence.
+
+## Measured runner timing mismatch — 2026-10-20
+
+Six fresh localhost processes complete all six actions, trusted submission and
+13 trusted input events with the intended query. Consent response204 precedes
+search, and all three Chrome runs verify a newly created nondefault Incognito
+context. The current native155 executable and348 selected source/binary/runner
+hashes remain unchanged during collection.
+
+| Controlled transition | Chrome after100ms dwell | Native after100ms dwell |
+|---|---|---|
+| HTTP response delayed600ms | HTTP200, one result | HTTP200, one result |
+| Initial200 shell, JS retry after600ms | HTTP200 shell, no results | HTTP429 retry document |
+| JS retry after20ms | HTTP429 retry document | HTTP429 retry document |
+
+Native typing takes1490–1495ms of host time but2805–2807ms on guest clocks.
+Chrome host and guest spans are approximately1463–1598ms. Native keydown-to-keyup
+is about111ms, followed by another110–118ms guest gap before the next keydown:
+the native virtual timer and the harness's remaining real wait both contribute.
+The600ms native retry reaches the fixture server after283ms of real time.
+These are measured timing differences, not evidence of a Google rejection cause.
+Opt-in real-time native scheduling and one fixed observation window starting
+before Enter are implemented locally. Genuine native155 passes40 focused
+integration tests and two example tests, strict affected-crate Clippy and formatting.
+New passing combined controls and fresh Google results are still required.
+The earlier real429 observations remain preserved.
+
+The latest combined browser attempt fails an original45s Patchright timeout and
+a new short-window Chrome control. In the latter, the query is truncated and
+focus is on BODY before Enter; the fixture receives no search request. Completed
+host calls do not establish effective input, and this failure does not justify
+relaxing terminal-page assertions. The timed-out owned Chrome child also survives
+the test until explicitly terminated; test-child teardown requires repair.
+Chrome updates from155.0.8059.80 to155.0.8059.85 during these attempts, so their
+results do not certify a fixed-version suite. Preserve the failed captures and
+freeze a coherent browser bundle before the next oracle/control collection.
+
+The follow-up freezes a complete owned155.0.8059.85 app bundle. Source before/after
+and copied content, modes and internal links match; the copy passes deep strict
+macOS signature verification. A genuine oracle refresh and six actual Chrome
+controls pass8/8 with zero skips and no unexpected source or browser changes.
+The original Patchright loader regression passes with its unchanged deadline.
+These captures report actual V815.5.35.25, while the native SDK remains
+15.5.35.23-rusty with a155.0.8059.80 identity. This is a real engine/profile patch
+gap tracked in issue #28; the earlier .80/.23 controls remain historical.
+
+Reusable child supervision now waits through owned-process retirement even after
+the leader exits, with actual Node20/22 test-timeout ordering controls. Both Chrome
+backends honor the selected executable and fail before Enter on incomplete text,
+lost focus or a replaced input, preserving prefilled/selection typing behavior.
+Native equivalents and no-dotenv diagnostic startup pass47 integration and four
+example tests, strict affected-crate Clippy and formatting. Both actual Chrome
+interruption controls pass: incomplete captures are retained and observed owned
+browser processes retire without fallback kills. Public-summary controls pass14/14
+under Node20 and Node22, including missing legacy process evidence.
+
+The subsequent combined run passes12 tests and fails one. Fifteen paired captures
+complete with the intended query and consent204 before search. Host and guest
+typing clocks now agree within their measured spans. The existing-results
+scenario exposes a separate native layout defect: an inline link containing a
+block heading makes the whole geometry snapshot reject with
+`native block-in-inline splitting is unsupported`, including the unrelated
+consent button. That native process stops before any search request. The valid
+fixture and failed captures are retained; this is a layout failure, not a measured
+Google rejection. Its repair and the full workspace/consumer gates remain pending.
+
+The producer repair now matches all six genuine Chrome inline/block scenes,
+including nested/decorated links, continuation rectangles and the following
+button's complete geometry. Public producer PR24 at `2ea52368` passes858 local
+workspace tests,15 xref controls and strict/fmt/complexity checks. Its preceding
+Linux coverage result is99.88% (9,961/9,973); the follow-up adds missing controls
+and removes obsolete unreachable branches without changing the threshold.
+Exact-head CI now passes all three jobs, including100% coverage; rebuilt
+turbo-surf checks remain pending.
+
+The first rebuilt consumer run passes26 diagnostic/input tests, then records
+2/4 passing geometry tests. Element boxes, offsets, button defaults and center hit
+match the saved Chrome control. Range glyph width is80.2734375 versus80.2578125;
+author4px border overrides compute correctly but geometry retains the UA2px.
+The border cascade repair expands physical shorthands before ranked winners.
+The Times width mismatch remains in issue #28's existing system-font/shaping
+scope: explicit smaller sizes do not close all rows, and source-level analysis
+finds no unconditional per-word snapping defect. A genuine embedded-font control
+will isolate layout/Range semantics; Times parity is not established. Expected
+values and the failed attempt remain unchanged. That attempt stops before timer
+integration and the new CLI build, so it supplies no final paired or live proof.
+
+Source comparisons narrow the font investigation without establishing its cause.
+[Chromium155 HarfBuzz setup](https://raw.githubusercontent.com/chromium/chromium/155.0.8059.80/third_party/blink/renderer/platform/fonts/shaping/harfbuzz_face.cc)
+scales before shaping and obtains advances through Skia;
+[ShapeResult](https://raw.githubusercontent.com/chromium/chromium/155.0.8059.80/third_party/blink/renderer/platform/fonts/shaping/shape_result.cc)
+retains fractional advances before aggregate snapping. The native cursor already
+accumulates same-source words and spaces, so an unconditional per-word rounding
+repair is unsupported. The
+[Skia Mac metrics implementation on main](https://raw.githubusercontent.com/google/skia/main/src/ports/SkScalerContext_mac_ct.cpp)
+uses CoreText advances at the requested size; that link is not a pinned Chrome155
+revision. Native design-unit shaping and actual platform glyph metrics still need
+independent controls under issue #28.
+
+Canonical turbo-test `030c776` is officially re-vendored. It adds measured button
+computed defaults, repairs Node's constructor-parent identity after EventTarget
+installation, and makes Text/DocumentFragment constructible through captured
+native factories. Canonical library295 and compatibility52 tests pass, with all
+four exact-head platform CI jobs green, including
+new conversion, poisoning, subclass and cross-realm ownership controls. A
+supplemental strict run reports28 diagnostics in unchanged baseline files;
+canonical CI does not run that command. Turbo-surf's own required strict checks
+still need to pass on this integration. Unusual foreign `newTarget` fallback
+behavior remains outside the measured constructor subset.
+
+Before those timing edits, pinned Rust1.98 passes1,414 tests, strict Clippy,
+formatting and addon build. The enclosing full command fails a five-second shim
+control; unchanged reruns pass shim96 with one skip, E2E20 and Python2. The
+concurrent detection attempt records131 passes, two failures, one cancellation
+and four skips. Its three failed controls pass unchanged in isolation; a full
+serial diagnostic passes 134 with the same four skips. The prior timeout cause
+is unproved. The detection command now bounds browser/V8 file concurrency to
+one; its amended run and the new timing implementation remain to be validated.
+
+The subsequent current-source native run at canonical `a49544f` passes 66 tests,
+affected-crate strict Clippy and formatting. This includes all nine border
+controls, both same-embedded-font Range scenes, timer conversion and the private
+adopted-sheet Array-setter regression. Source and compiled PNG/font fixtures
+remain unchanged throughout. This closes the focused integration failures within
+their measured scope; the Times glyph-width discrepancy remains in issue #28.
+The full workspace, consumer and paired runs still need to complete before fresh
+Google evidence can be interpreted.
+
+## Signed-out UI control and runner audit — 2026-10-19
+
+A native Chrome Incognito window successfully submits `rust lang` through the
+homepage search field and displays real `/search` results, including the official
+Rust site, install/book links and Wikipedia. Google's `Entrar` sign-in link is
+visible on both pages; AX and a native screenshot verify the result. No CAPTCHA
+or consent dialog appears in this control. The earlier successful normal-profile
+UI control was logged in and is a separate observation.
+
+This single signed-out success does not establish reliability or equivalence to a
+new empty Chrome profile. Existing Incognito cookies were not inspected, and
+Ghostery/1Password toolbar buttons were present. There is no collector HTTP or
+interface trace for this UI control, no Chrome cookie transfer to native, and no
+new native SERP success. The prior captured429 results remain real observations.
+Profile state, environment and tracing still differ; no rejection cause is proved.
+
+The runner audit found two misleading diagnostics: guest script exceptions could
+make completed Chrome captures look incomplete, and a hidden challenge query
+field could be mistaken for the search field. In the October18 captures all16
+actual search requests carried the intended query. New diagnostics separate
+collector errors, filter hidden query controls and retain actual document status,
+ready state and loader identity. A200 shell with no organic headings and a429
+challenge must both fail SERP classification.
+
+The new real-coordinate input control exposed a cold-start cost that the old
+zero-coordinate path avoided. An isolated native sample places all645 captured
+page-thread samples in system-font registry initialization, before the click
+handler's background timer. Production geometry setup now initializes the same
+immutable process-wide registry before guest/input budgets; subsequent frames
+reuse it. Font policy and bytes are unchanged. This pays real font-loading cost
+at engine startup; it does not make that work free or relax the existing500ms
+budget/300ms input assertion. The unchanged assertion passes in a fresh process;
+the rebuilt native155 diagnostic/input targets pass19/19.
+
+The first genuine paired Incognito/native localhost test passes Chrome's flow but
+fails native targeting: `[type="hidden" i]` matches no native nodes, causing
+`:not(...)` to select the hidden `q` field. A separate actual Chrome/native matrix
+confirms the public turbo-dom parser keeps the trailing modifier as part of the
+literal value. The scalar/UTF-16 repair is committed as public turbo-dom
+`d01d6a5` in [PR15](https://github.com/miaskiewicz/turbo-dom/pull/15) and pinned
+in all six native consumers. Its complete producer gate passes on Rust1.99 and
+Node22: 342 backend contracts, seven parser tests, three strict Clippy variants,
+native/Node/Web WASM builds, JS548, Vitest29 and Jest2. The existing five html5lib
+misses remain. [Exact-head producer CI](https://github.com/miaskiewicz/turbo-dom/actions/runs/39251631117)
+is green. The rebuilt Surf native155 now passes the genuine paired action control;
+the valid selector and failure fixture remain unchanged. Chrome-specific `s/S` syntax
+admission and wider HTML default policies are separately tracked in issue #28.
+
+The paired localhost action control now passes in baseline and interface modes:
+both engines perform all six actions, click consent inside its real box, receive
+response204 and send its cookie before search, type the intended textarea query
+with trusted focused events, submit the form and reach HTTP200/results. Both
+missing-readiness negative cases fail before input. All six paired/native-process
+Node controls pass without skips, alongside two native example duration tests.
+This bounds actual consent, target, input/focus, submission, navigation and
+readiness behavior. The subsequent October20 delayed control above exposes a
+real timing mismatch; fresh optimized live validation remains pending. Chrome
+snapshots once after the dwell, while native may follow up to five pending
+navigation hops. This can expose a transient page; it does not invalidate the
+previous real429 observations.
+Chrome's baseline still uses CDP, environment overrides and page
+snapshots; disabling interface wrappers does not make it an untouched browser.
+Do not attribute a baseline challenge to native behavior or tracing alone.
+
+## Previous validated messaging, geometry and DOM batch — a005140
 
 Implementation source `a005140` passes the complete stock-V8-150 workspace
 (1,411 tests, nine ignores and six zero-test native-only targets) and genuine

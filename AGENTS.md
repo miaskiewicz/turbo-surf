@@ -48,7 +48,7 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   and `src/trusted_types{.rs,.js}`, its native mapping, tests/probes/Chrome controls
   and `src/form_entrylist_{cases.json,probe.js,chrome155.json}`, `src/formdata_constructor_{cases.json,probe.js,chrome155.json}`, `src/form_controls.js` with its form-methods cases/probe/Chrome control,
   `src/element_internals{.rs,.js}` and its core/associated/state/definition/setlike controls,
-  `src/computed_intrinsics_*`, `src/css_descriptor_*`, `src/checkedness_*`, `src/control_prototypes_*`, `src/form_reflection_*`
+  `src/computed_intrinsics_*`, `src/computed_button_ua_*`, `src/computed_border_priority_*`, `src/css_descriptor_*`, `src/checkedness_*`, `src/control_prototypes_*`, `src/form_reflection_*`
   and `src/formdata_{event,guards}_*` controls
   and `src/form_collections.js`, `src/form_checked_state.rs`,
   `src/{element_registry,submitter_reflection,form_collections,radio_dirty}_*`
@@ -138,5 +138,6 @@ to ship/publish/release.
   [`PUBLISHING.md`](./PUBLISHING.md).
 - **Harness:** [`harness/competitive/README.md`](./harness/competitive/README.md),
   [`harness/crawlers/README.md`](./harness/crawlers/README.md).
+- **Chrome parity setup:** [`harness/detection/CHROME-PARITY-RUNBOOK.md`](./harness/detection/CHROME-PARITY-RUNBOOK.md) (SDK, all-feature builds, opt-in flags, controls and evidence).
 - **Playwright drop-in:** [`rust/playwright-shim/LIMITATIONS.md`](./rust/playwright-shim/LIMITATIONS.md)
   (per-method coverage map).

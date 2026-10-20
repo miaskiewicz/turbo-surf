@@ -1,15 +1,61 @@
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   compareDirectory,
   interfaceDiff,
   requestSummary,
   nativeScriptInventory,
   captureSummary,
+  chromeSearchOutcome,
+  interactionSummary,
+  observationSummary,
 } from "./compare.mjs";
+
+test("interaction evidence requires actual completed actions and type snapshots", () => {
+  const trace = {
+    config: { steps: [{ focus: "#q" }, { type: "fixture query" }, { press: "Enter" }] },
+    actions: [
+      { index: 0, action: "focus", completed: true },
+      { index: 1, action: "type", completed: true },
+      { index: 2, action: "press", completed: true },
+    ],
+    pages: [
+      {
+        phase: "step-1",
+        inputState: { value: "fixture query", activeTag: "TEXTAREA", controlTag: "TEXTAREA" },
+      },
+    ],
+  };
+  const complete = interactionSummary(trace);
+  assert.equal(complete.configuredActionsExecuted, true);
+  assert.equal(complete.completedSteps, 3);
+  assert.deepEqual(complete.typed, [
+    { index: 1, valueMatchesTypedText: true, activeTagMatchesControl: true },
+  ]);
+  assert.equal(
+    interactionSummary({ ...trace, actions: trace.actions.slice(0, 2) }).configuredActionsExecuted,
+    false,
+  );
+  assert.equal(
+    interactionSummary({ ...trace, actions: [...trace.actions].reverse() })
+      .configuredActionsExecuted,
+    false,
+  );
+  assert.equal(interactionSummary({ ...trace, pages: [] }).typed[0].valueMatchesTypedText, null);
+  assert.equal(interactionSummary({ config: trace.config }).evidence, "unmeasured");
+  const failed = structuredClone(trace);
+  failed.actions.at(-1).completed = false;
+  assert.equal(interactionSummary(failed).configuredActionsExecuted, false);
+  assert.equal(interactionSummary(failed).completedSteps, 2);
+  assert.equal(interactionSummary({ config: trace.config }).completedSteps, null);
+  trace.pages[0].inputState.value = "unrelated-hidden-field";
+  assert.equal(interactionSummary(trace).typed[0].valueMatchesTypedText, false);
+});
 
 test("partial captures expose input errors and page execution limits", () => {
   const summary = captureSummary({
@@ -24,6 +70,151 @@ test("partial captures expose input errors and page execution limits", () => {
   assert.equal(summary.inputError, "budget");
   assert.deepEqual(summary.inputState, { value: "" });
   assert.equal(captureSummary({}).complete, false);
+});
+
+test("collector completion stays independent of guest exceptions", () => {
+  const errors = ["ReferenceError: page fixture is not defined"];
+  const completed = {
+    captureComplete: true,
+    collectorErrors: [],
+    pages: [{ phase: "search" }],
+    errors,
+  };
+  const summary = captureSummary(completed);
+  assert.equal(summary.complete, true);
+  assert.equal(summary.completionSource, "collector");
+  assert.equal(summary.collectorErrorCount, 0);
+  assert.deepEqual(completed.errors, errors);
+  assert.equal(captureSummary({ ...completed, captureComplete: false }).complete, false);
+  assert.equal(
+    captureSummary({ ...completed, collectorErrors: [{ phase: "target setup" }] }).complete,
+    false,
+  );
+  const historical = captureSummary({ pages: completed.pages, errors });
+  assert.equal(historical.complete, false);
+  assert.equal(historical.completionSource, "legacy-error-heuristic");
+  assert.equal(historical.collectorErrorCount, null);
+});
+
+test("modern collector completion requires an actual empty error array", () => {
+  const trace = {
+    captureComplete: true,
+    collectorErrors: [],
+    config: { url: "https://www.google.com/" },
+    pages: [
+      {
+        phase: "search",
+        url: "https://www.google.com/search",
+        status: 200,
+        readyState: "complete",
+        results: 1,
+      },
+    ],
+    observation: {
+      policy: "fixed-deadline-before-enter",
+      requestedMs: 0,
+      elapsedMs: 1,
+      overrunMs: 1,
+      completed: true,
+    },
+  };
+  for (const collectorErrors of [{}, false, null, undefined, "", { length: 0 }]) {
+    const malformed = { ...trace, collectorErrors };
+    assert.equal(captureSummary(malformed).complete, false);
+    assert.equal(captureSummary(malformed).collectorErrorCount, null);
+    assert.equal(observationSummary(malformed).complete, false);
+    assert.equal(chromeSearchOutcome(malformed).accepted, false);
+  }
+  assert.equal(captureSummary(trace).complete, true);
+  assert.equal(observationSummary(trace).complete, true);
+  assert.equal(chromeSearchOutcome(trace).accepted, true);
+  const legacy = { pages: trace.pages, errors: [] };
+  assert.equal(captureSummary(legacy).complete, true);
+  assert.equal(captureSummary(legacy).completionSource, "legacy-error-heuristic");
+  assert.equal(captureSummary(legacy).collectorErrorCount, null);
+  assert.equal(observationSummary(legacy).evidence, "unmeasured");
+  assert.equal(chromeSearchOutcome(legacy).accepted, false);
+});
+
+test("Chrome SERP verdict rejects HTTP 200 shells, challenges and incomplete documents", () => {
+  const trace = {
+    config: { url: "https://www.google.com/" },
+    captureComplete: true,
+    collectorErrors: [],
+    errors: ["ReferenceError: independent guest fixture"],
+    pages: [
+      {
+        phase: "search",
+        url: "https://www.google.com/search?q=fixture",
+        status: 200,
+        readyState: "complete",
+        results: 2,
+      },
+    ],
+  };
+  assert.equal(chromeSearchOutcome(trace).accepted, true);
+  for (const change of [
+    { results: 0 },
+    { status: 429, url: "https://www.google.com/sorry/index" },
+    { status: null },
+    { readyState: "loading" },
+    { phase: "step-5" },
+    { url: "https://other.example/search" },
+  ]) {
+    const result = chromeSearchOutcome({ ...trace, pages: [{ ...trace.pages[0], ...change }] });
+    assert.equal(result.accepted, false, JSON.stringify(change));
+  }
+  assert.equal(chromeSearchOutcome({ ...trace, captureComplete: false }).accepted, false);
+  assert.equal(chromeSearchOutcome({ ...trace, collectorErrors: ["CDP timeout"] }).accepted, false);
+  assert.equal(
+    chromeSearchOutcome({ ...trace, config: { ...trace.config, successSelector: "body" } })
+      .accepted,
+    false,
+  );
+  assert.equal(chromeSearchOutcome({}).accepted, false);
+  assert.equal(chromeSearchOutcome({}).classification, "unmeasured");
+  assert.equal(chromeSearchOutcome({ pages: trace.pages }).evidence, "unmeasured");
+});
+
+test("runner comparison reports a measured challenge instead of a marker-only Chrome verdict", () => {
+  const directory = mkdtempSync(join(tmpdir(), "detection-verdict-test-"));
+  try {
+    mkdirSync(join(directory, "chrome-baseline"));
+    mkdirSync(join(directory, "native-baseline"));
+    writeFileSync(
+      join(directory, "chrome-baseline/trace.json"),
+      JSON.stringify({
+        config: { url: "https://www.google.com/" },
+        captureComplete: true,
+        collectorErrors: [],
+        errors: ["ReferenceError: independent page fixture"],
+        pages: [
+          {
+            phase: "search",
+            url: "https://www.google.com/sorry/index",
+            status: 429,
+            readyState: "complete",
+            results: 0,
+          },
+        ],
+      }),
+    );
+    writeFileSync(join(directory, "native-baseline/trace.json"), JSON.stringify({ pages: [] }));
+    const output = execFileSync(
+      process.execPath,
+      [fileURLToPath(new URL("./compare.mjs", import.meta.url)), directory],
+      { encoding: "utf8" },
+    );
+    assert.match(output, /chrome SERP: challenge; accepted false; evidence measured/);
+    assert.match(output, /chrome: 0 result markers; \/sorry\/index; capture complete/);
+    const result = JSON.parse(readFileSync(join(directory, "comparison.json"), "utf8"));
+    assert.equal(result.baseline.chromeSearchOutcome.accepted, false);
+    assert.equal(result.baseline.capture.chrome.complete, true);
+    assert.deepEqual(result.baseline.errors.chrome, ["ReferenceError: independent page fixture"]);
+    assert.equal(result.interfaces.chromeSearchOutcome.classification, "unmeasured");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("interface comparison retains value differences without double-counting snapshots", () => {
@@ -317,4 +508,54 @@ test("native debugger inventory retains per-isolate coverage and incomplete capt
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("fixed observation diagnostics never accept incomplete or pending navigation", () => {
+  const trace = {
+    config: { url: "https://www.google.com/", observationMs: 1000 },
+    captureComplete: true,
+    collectorErrors: [],
+    observation: {
+      policy: "fixed-deadline-before-enter",
+      triggerStepIndex: 5,
+      requestedMs: 1000,
+      elapsedMs: 1010,
+      overrunMs: 10,
+      completed: true,
+    },
+    pages: [
+      {
+        phase: "search",
+        url: "https://www.google.com/search?q=fixture",
+        status: 200,
+        readyState: "complete",
+        results: 1,
+      },
+    ],
+  };
+  assert.equal(observationSummary(trace).complete, true);
+  assert.equal(observationSummary(trace).overrunMs, 10);
+  assert.equal(chromeSearchOutcome(trace).accepted, true);
+  for (const change of [
+    { completed: false },
+    { elapsedMs: 500 },
+    { navigationWaitTimedOut: true },
+    { navigationFailed: true },
+    { navigationHopLimit: true },
+    { pendingNavigation: "https://www.google.com/sorry" },
+    { pendingNavigation: 0 },
+    { navigationFailed: "false" },
+    { navigationWaitTimedOut: 0 },
+    { navigationHopLimit: null },
+    { requestedMs: 60001 },
+    { elapsedMs: Infinity },
+    { overrunMs: -1 },
+  ]) {
+    const altered = { ...trace, observation: { ...trace.observation, ...change } };
+    assert.equal(observationSummary(altered).complete, false, JSON.stringify(change));
+    assert.equal(chromeSearchOutcome(altered).accepted, false, JSON.stringify(change));
+  }
+  assert.equal(observationSummary({ ...trace, collectorErrors: ["CDP timeout"] }).complete, false);
+  assert.equal(observationSummary({}).evidence, "unmeasured");
+  assert.equal(chromeSearchOutcome({ ...trace, observation: undefined }).accepted, false);
 });

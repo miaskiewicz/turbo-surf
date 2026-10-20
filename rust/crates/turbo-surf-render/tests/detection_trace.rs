@@ -2,6 +2,63 @@
 use turbo_surf_render::PageSession;
 
 const TRACE: &str = include_str!("../../../../harness/detection/interface-trace.js");
+const INPUT_STATE: &str = include_str!("../../../../harness/detection/input-state.js");
+
+#[tokio::test(flavor = "current_thread")]
+async fn query_diagnostics_skip_hidden_fields_before_and_after_real_controls() {
+    let mut page = PageSession::open("<body></body>", "https://example.test/", "", "", 5000)
+        .await
+        .unwrap();
+    let expression = format!(
+        r#"(() => {{
+          const captureInputState = {INPUT_STATE}
+          const cases = [
+            '<input type="HIDDEN" name="q" value="fixture-hidden"><input name="q" value="rust lang">',
+            '<input name="q" value="rust lang"><input type="hidden" name="q" value="fixture-hidden">',
+            '<input type="hidden" name="q" value="fixture-hidden"><textarea name="q">rust lang</textarea>',
+            '<textarea name="q">rust lang</textarea><input type="hidden" name="q" value="fixture-hidden">',
+            '<input type="hidden" name="q" value="fixture-hidden">',
+            ''
+          ];
+          return cases.map(html => {{
+            document.body.innerHTML = html;
+            return captureInputState(document, '#W0wltc');
+          }});
+        }})()"#
+    );
+    let raw = page.eval_json_expression(&expression).await.unwrap();
+    let states: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(states.as_array().unwrap().len(), 6);
+    for (index, state) in states.as_array().unwrap().iter().enumerate() {
+        assert_eq!(state["selection"], "first-q-control-with-non-hidden-type");
+        assert_eq!(state["consentPresent"], false);
+        if index < 4 {
+            assert_eq!(state["value"], "rust lang");
+            assert_eq!(state["queryControlCount"], 2);
+            assert_eq!(state["excludedHiddenQueryControls"], 1);
+            assert_eq!(
+                state["controlTag"],
+                if index < 2 { "INPUT" } else { "TEXTAREA" }
+            );
+            if index < 2 {
+                assert_eq!(state["controlType"], "text");
+            } else {
+                // Keep the existing missing textarea.type IDL surface observable.
+                assert!(state["controlType"].is_null());
+            }
+        } else {
+            assert!(state["value"].is_null());
+            assert!(state["controlTag"].is_null());
+            assert!(state["controlType"].is_null());
+            assert_eq!(state["queryControlCount"], usize::from(index == 4));
+            assert_eq!(
+                state["excludedHiddenQueryControls"],
+                usize::from(index == 4)
+            );
+        }
+    }
+    page.close();
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn page_cannot_read_or_overwrite_http_only_cookies() {

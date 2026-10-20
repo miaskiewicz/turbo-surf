@@ -3483,7 +3483,26 @@ fn op_set_host_capabilities(
     Ok(())
 }
 
+/// Window timer scheduling for an owning session. Virtual time remains the crawler default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WindowTimerMode {
+    #[default]
+    Virtual,
+    /// Fire timers only after their monotonic deadline, including during hydration.
+    RealTime,
+}
+
+/// Host-owned policy installed before any document or frame script executes.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PageSessionOptions {
+    pub window_timer_mode: WindowTimerMode,
+    /// Cap this initial hydration without shortening later operation budgets.
+    /// Consumed on open; automatic form destinations inherit only the timer mode.
+    pub initial_hydration_budget_ms: Option<u64>,
+}
+
 struct TimerClock {
+    mode: WindowTimerMode,
     started: std::time::Instant,
     advance: std::cell::Cell<f64>,
     resource_cursor: std::cell::Cell<usize>,
@@ -3491,11 +3510,16 @@ struct TimerClock {
 impl Default for TimerClock {
     fn default() -> Self {
         Self {
+            mode: WindowTimerMode::default(),
             started: std::time::Instant::now(),
             advance: std::cell::Cell::new(0.0),
             resource_cursor: std::cell::Cell::new(0),
         }
     }
+}
+#[op2(fast)]
+fn op_window_timers_realtime(state: &mut OpState) -> bool {
+    state.borrow::<TimerClock>().mode == WindowTimerMode::RealTime
 }
 #[op2(fast)]
 fn op_timer_clock(state: &mut OpState) -> f64 {
@@ -3509,7 +3533,7 @@ fn op_timer_offset(state: &mut OpState) -> f64 {
 #[op2(fast)]
 fn op_timer_advance(state: &mut OpState, due: f64) {
     let clock = state.borrow::<TimerClock>();
-    if due.is_finite() {
+    if clock.mode == WindowTimerMode::Virtual && due.is_finite() {
         clock.advance.set(
             clock
                 .advance
@@ -3517,6 +3541,18 @@ fn op_timer_advance(state: &mut OpState, due: f64) {
                 .max(due - clock.started.elapsed().as_secs_f64() * 1000.0),
         );
     }
+}
+
+fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::Instant> {
+    if !due.is_finite() {
+        return None;
+    }
+    let seconds = ((due - clock.advance.get()) / 1000.0).max(0.0);
+    let delay = std::time::Duration::try_from_secs_f64(seconds).ok()?;
+    clock
+        .started
+        .checked_add(delay)
+        .map(tokio::time::Instant::from_std)
 }
 
 fn run_next_window_timer(
@@ -3560,13 +3596,7 @@ fn run_next_window_timer(
         let clock = state.borrow::<TimerClock>();
         let now = clock.started.elapsed().as_secs_f64() * 1000.0 + clock.advance.get();
         if due > now {
-            let real_delay =
-                std::time::Duration::from_secs_f64(((due - clock.advance.get()) / 1000.0).max(0.0));
-            let deadline = clock
-                .started
-                .checked_add(real_delay)
-                .map(tokio::time::Instant::from_std);
-            return (0, deadline);
+            return (0, window_timer_deadline(clock, due));
         }
     }
     let active = &mut v8::ContextScope::new(scope, context);
@@ -6780,6 +6810,7 @@ deno_core::extension!(
         op_frame_resources,
         op_timer_clock,
         op_timer_offset,
+        op_window_timers_realtime,
         op_timer_advance,
         op_run_frame_timers,
         op_frame_pending,
@@ -7496,6 +7527,7 @@ let __tid = 1;
 // work (microtasks / the React scheduler) still drains promptly (it never advances the
 // clock); only delayed polls are time-gated.
 const __timerNow = () => ops.op_timer_clock();
+const __realWindowTimers = ops.op_window_timers_realtime();
 // Virtual-time ceiling, RELATIVE to the start of the current pump/drain (`__budgetBase`).
 // Once the clock passes base+budget, delayed timers stop firing so a never-idle poll can't
 // hold a drain open. RELATIVE (not absolute) is essential: virtual time accumulates across a
@@ -7512,7 +7544,8 @@ const __activeTimers = new Map();
 const __timerGet = Map.prototype.get.bind(__activeTimers), __timerSet = Map.prototype.set.bind(__activeTimers), __timerDelete = Map.prototype.delete.bind(__activeTimers), __timerClear = Map.prototype.clear.bind(__activeTimers);
 const __createTimer = (name, repeat, handler, delay, args) => {
   const source=typeof handler === "function" ? null : ops.op_trusted_type_string(__timerDocument,handler,"TrustedScript","Window "+name,"Failed to execute '"+name+"' on 'Window': ");
-  delay=+delay || 0;
+  // Window timers take a signed32-bit delay before negative values clamp to zero.
+  delay=(+delay)|0;if(delay<0)delay=0;
   const id=__tid++;
   if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return id;
   const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+Math.max(0,delay),delay:Math.max(1,delay),repeat,args};
@@ -7611,13 +7644,16 @@ const __nextLocalTimer = () => {
   let index=0;
   for(let i=1;i<__timers.length;i++)if(__timers[i].due<__timers[index].due)index=i;
   const due=__timers[index].due;
-  return due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
+  return !__realWindowTimers && due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
 };
 const __runLocalTimers = (max=100000) => {
   let fired=0;
   while(fired<max){
     const index=__nextLocalTimer();if(index<0)break;
-    const timer=__timers[index];__timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;
+    const timer=__timers[index];
+    // Every caller, including hydration and child-frame drains, obeys this policy.
+    if(__realWindowTimers && timer.due>__timerNow())break;
+    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;
     if(!timer.repeat)__timerDelete(timer.id);
     try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
     if(timer.repeat&&__timerGet(timer.id)===timer){timer.due=__timerNow()+timer.delay;__timerPush(timer);}
@@ -10281,8 +10317,13 @@ __G.tcApplyHover = function (el) {
 // Pending-work signal for the Rust pump loop: "1" while timers are queued, a
 // <script> hasn't run, an ES module is unclaimed, or a fetch is in-flight (more to do
 // after the next async drain), else "0".
+const __pendingWindowTimer = () => {
+  if(!__realWindowTimers)return __timers.length>0;
+  const index=__nextLocalTimer();
+  return index>=0 && __timers[index].due<=__timerNow();
+};
 __G.pendingWork = () =>
-  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __timers.length > 0 || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
+  (!__G.isFrame && ops.op_frame_pending() > 0) || (globalThis.__pendingFetches || 0) > 0 || __resourcePromises.size > 0 || __dictionaryPending > 0 || __dictionaryTaskCount > 0 || __pendingWindowTimer() || ((__G.esmSrcQueue || []).length) > 0 || (!__G.isFrame && __initialResourceScripts.length > 0) ? "1" : "0";
 // In-flight fetch count — the interaction drain must keep pumping while > 0 even if
 // the visible tree looks stable (the response's re-render hasn't happened yet).
 __G.pendingFetchCount = () => String(globalThis.__pendingFetches || 0);
@@ -12208,6 +12249,24 @@ fn make_runtime_with_storage(
     client_hints: ClientHints,
     storage: BrowserStorage,
 ) -> OwnedRuntime {
+    make_runtime_with_storage_and_options(
+        base,
+        cookies,
+        ua,
+        client_hints,
+        storage,
+        PageSessionOptions::default(),
+    )
+}
+
+fn make_runtime_with_storage_and_options(
+    base: &str,
+    cookies: &str,
+    ua: &str,
+    client_hints: ClientHints,
+    storage: BrowserStorage,
+    options: PageSessionOptions,
+) -> OwnedRuntime {
     #[cfg(turbo_surf_native_proxy)]
     assert_eq!(v8::V8::get_version(), env!("TURBO_SURF_EXPECTED_NATIVE_V8"), "the exact-engine runtime requires its verified native SDK; use the matching engine build helper");
     pin_timezone();
@@ -12333,7 +12392,10 @@ fn make_runtime_with_storage(
     state.put(module_stages);
     state.put(ClassicScripts::default());
     state.put(FrameContexts::default());
-    state.put(TimerClock::default());
+    state.put(TimerClock {
+        mode: options.window_timer_mode,
+        ..TimerClock::default()
+    });
     state.put::<Base>(Base(base.to_string()));
     let root_cookie_target = Rc::downgrade(&jar);
     state.put(ReportCookieTargets(std::collections::HashMap::from([(
@@ -12742,6 +12804,8 @@ async fn drain_event_loop_until_completion(
     condition: Option<&str>,
     completion: Option<&v8::Global<v8::Value>>,
 ) -> Result<(), String> {
+    let real_timers =
+        rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::RealTime;
     let mut frame_timer_budget = 200000u32;
     let mut window_timer_wake: Option<(
         tokio::time::Instant,
@@ -13043,7 +13107,8 @@ async fn drain_event_loop_until_completion(
             // Native I/O and official system timers use real monotonic time.
             // Do not leap a Window timer past their earlier wake-up. Keep one
             // precise wake so a stalled native request cannot starve the timer.
-            if frame_timer_budget > 0 && result.is_pending() {
+            let await_window_timer = real_timers && (completion.is_some() || condition.is_some());
+            if frame_timer_budget > 0 && (result.is_pending() || await_window_timer) {
                 if let Some(deadline) = window_deadline {
                     if window_timer_wake
                         .as_ref()
@@ -13061,13 +13126,18 @@ async fn drain_event_loop_until_completion(
                 } else {
                     window_timer_wake = None;
                 }
-            } else if frame_timer_budget > 0 {
+            } else if frame_timer_budget > 0 && !real_timers {
                 window_timer_wake = None;
                 let (fired, _) = run_next_window_timer(rt, true);
                 frame_timer_budget = frame_timer_budget.saturating_sub(fired);
                 if fired > 0 {
                     return std::task::Poll::Ready(None);
                 }
+            }
+            // A Window timer is not a Deno op. Keep an explicit awaited task alive,
+            // but leave unrelated future timers queued when an idle pump returns.
+            if await_window_timer && window_timer_wake.is_some() {
+                return std::task::Poll::Pending;
             }
             // A JS Promise can await another native worker's storage task even
             // when Deno has no pending op. The inbox wakes this host future.
@@ -14080,6 +14150,26 @@ impl Drop for Watchdog {
     }
 }
 
+// The V8 watchdog interrupts synchronous work; an opted-in async deadline also
+// wakes a session awaiting a timer or native I/O beyond that same budget.
+async fn with_async_execution_budget<T>(
+    enforce_deadline: bool,
+    budget_ms: u64,
+    exceeded: &std::sync::atomic::AtomicBool,
+    future: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    if !enforce_deadline {
+        return future.await;
+    }
+    match tokio::time::timeout(std::time::Duration::from_millis(budget_ms), future).await {
+        Ok(result) => result,
+        Err(_) => {
+            exceeded.store(true, std::sync::atomic::Ordering::Relaxed);
+            Err(format!("render budget exceeded ({budget_ms}ms)"))
+        }
+    }
+}
+
 // Drive the event loop to quiescence: drain async ops (microtasks + fetches), fire any
 // queued virtual timers (React's scheduler posts work through them), and repeat until
 // nothing is pending. Used after an interaction event re-enters the running app (the
@@ -14222,6 +14312,7 @@ pub struct PageSession {
     rt: OwnedRuntime,
     hydration_diagnostics: HydrationDiagnostics,
     budget_ms: u64,
+    options: PageSessionOptions,
     closed: bool,
 }
 
@@ -14383,6 +14474,39 @@ impl PageSession {
         response_metadata: crate::DocumentResponseMetadata,
         activation: Option<NavigationActivationSnapshot>,
     ) -> Result<Self, String> {
+        Self::open_with_document_response_and_options(
+            html,
+            base,
+            cookies,
+            ua,
+            budget_ms,
+            init_script,
+            client_hints,
+            response_headers,
+            storage,
+            response_metadata,
+            activation,
+            PageSessionOptions::default(),
+        )
+        .await
+    }
+
+    /// Install host scheduling policy before hydration. Existing constructors retain virtual time.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_with_document_response_and_options(
+        html: &str,
+        base: &str,
+        cookies: &str,
+        ua: &str,
+        budget_ms: u64,
+        init_script: &str,
+        client_hints: ClientHints,
+        response_headers: &[(String, String)],
+        storage: BrowserStorage,
+        response_metadata: crate::DocumentResponseMetadata,
+        activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
+    ) -> Result<Self, String> {
         let mut session = Self::open_with_document_response_unfollowed(
             html,
             base,
@@ -14395,6 +14519,7 @@ impl PageSession {
             storage,
             response_metadata,
             activation,
+            options,
         )
         .await?;
         session.follow_form_navigation().await?;
@@ -14414,8 +14539,16 @@ impl PageSession {
         storage: BrowserStorage,
         response_metadata: crate::DocumentResponseMetadata,
         activation: Option<NavigationActivationSnapshot>,
+        options: PageSessionOptions,
     ) -> Result<Self, String> {
-        let mut rt = make_runtime_with_storage(base, cookies, ua, client_hints, storage);
+        let mut rt = make_runtime_with_storage_and_options(
+            base,
+            cookies,
+            ua,
+            client_hints,
+            storage,
+            options,
+        );
         user_activation::seed(&mut rt, base, activation);
         let mut script_inventory = std::env::var_os("TURBO_SURF_JS_TRACE")
             .map(|root| {
@@ -14435,13 +14568,26 @@ impl PageSession {
             let _activation = rt.activation_key().enter();
             prepare_hydration(&mut rt, html, base)?;
         }
-        let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), budget_ms);
+        let enforce_initial_deadline = options.window_timer_mode == WindowTimerMode::RealTime
+            || options.initial_hydration_budget_ms.is_some();
+        let initial_budget_ms = options
+            .initial_hydration_budget_ms
+            .map_or(budget_ms, |limit| limit.min(budget_ms));
+        let options = PageSessionOptions {
+            initial_hydration_budget_ms: None,
+            ..options
+        };
+        let watchdog = Watchdog::start(rt.v8_isolate().thread_safe_handle(), initial_budget_ms);
         let exceeded = watchdog.exceeded.clone();
         rt.park();
         let key = rt.activation_key();
-        let result = key
-            .during(hydrate_installed_document(&mut rt, base, init_script))
-            .await;
+        let result = with_async_execution_budget(
+            enforce_initial_deadline,
+            initial_budget_ms,
+            &exceeded,
+            key.during(hydrate_installed_document(&mut rt, base, init_script)),
+        )
+        .await;
         drop(watchdog);
         if let Some(inventory) = &mut script_inventory {
             let _activation = key.enter();
@@ -14468,11 +14614,13 @@ impl PageSession {
                 hydration_diagnostics: HydrationDiagnostics {
                     budget_exceeded,
                     progress,
-                    open_error: budget_exceeded
-                        .then(|| format!("Hydration exceeded its {budget_ms}ms execution budget")),
+                    open_error: budget_exceeded.then(|| {
+                        format!("Hydration exceeded its {initial_budget_ms}ms execution budget")
+                    }),
                     unsupported_csp,
                 },
                 budget_ms,
+                options,
                 closed: false,
             }),
             // Best-effort on a budget-exceed: a dev-mode SPA whose hydration never reaches
@@ -14490,13 +14638,14 @@ impl PageSession {
                         budget_exceeded,
                         progress,
                         open_error: Some(if budget_exceeded {
-                            format!("render budget exceeded ({budget_ms}ms): {e}")
+                            format!("render budget exceeded ({initial_budget_ms}ms): {e}")
                         } else {
                             e
                         }),
                         unsupported_csp,
                     },
                     budget_ms,
+                    options,
                     closed: false,
                 })
             }
@@ -14523,15 +14672,19 @@ impl PageSession {
         const READ: &str = "String(globalThis.__RESULT == null ? '' : globalThis.__RESULT)";
         let budget = self.budget_ms;
         let drained = {
-            let _wd = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
-            let r = async {
-                self.rt
-                    .execute_script("<session-eval>", script.to_string())
-                    .map_err(|e| e.to_string())?;
-                drain_to_quiescence(&mut self.rt).await
-            }
-            .await;
-            r
+            let watchdog = Watchdog::start(self.rt.v8_isolate().thread_safe_handle(), budget);
+            with_async_execution_budget(
+                self.options.window_timer_mode == WindowTimerMode::RealTime,
+                budget,
+                &watchdog.exceeded,
+                async {
+                    self.rt
+                        .execute_script("<session-eval>", script.to_string())
+                        .map_err(|e| e.to_string())?;
+                    drain_to_quiescence(&mut self.rt).await
+                },
+            )
+            .await
         };
         // The watchdog may have terminated mid-drain. Clear that terminate state so the
         // isolate is usable again, then read the result BEST-EFFORT: an interaction's
@@ -15037,5 +15190,25 @@ mod browsing_tab_tests {
         drop(areas);
         profile.0.lock().unwrap().next_tab = u64::MAX;
         assert!(profile.new_tab().is_err());
+    }
+}
+
+#[cfg(test)]
+mod window_timer_deadline_tests {
+    use super::{window_timer_deadline, TimerClock};
+    use std::time::Duration;
+
+    #[test]
+    fn unrepresentable_window_timer_deadlines_do_not_panic() {
+        let clock = TimerClock::default();
+        assert_eq!(
+            window_timer_deadline(&clock, 1000.0),
+            Some(tokio::time::Instant::from_std(
+                clock.started + Duration::from_secs(1)
+            ))
+        );
+        for due in [f64::NAN, f64::INFINITY, f64::MAX, 1e300, 1e22] {
+            assert_eq!(window_timer_deadline(&clock, due), None, "deadline {due}");
+        }
     }
 }

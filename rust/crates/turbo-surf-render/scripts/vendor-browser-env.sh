@@ -74,7 +74,7 @@ done
 for file in css_descriptor_cases.json css_descriptor_probe.js css_descriptor_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
-for file in computed_intrinsics_cases.json computed_intrinsics_probe.js computed_intrinsics_chrome155.json computed_intrinsics_font_probe.js computed_intrinsics_font_chrome155.json computed_intrinsics_font_realms_probe.js computed_intrinsics_font_realms_chrome155.json; do
+for file in computed_intrinsics_cases.json computed_intrinsics_probe.js computed_intrinsics_chrome155.json computed_intrinsics_font_probe.js computed_intrinsics_font_chrome155.json computed_intrinsics_font_realms_probe.js computed_intrinsics_font_realms_chrome155.json computed_button_ua_probe.js computed_button_ua_chrome155.json computed_border_priority_probe.js computed_border_priority_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
 git -C "$repo" show "${source_rev}:src/event_handlers.rs" > "$dest/event_handlers.rs"

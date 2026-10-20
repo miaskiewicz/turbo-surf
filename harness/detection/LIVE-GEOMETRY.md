@@ -1,7 +1,25 @@
 # Native live geometry
 
-The renderer uses public Git-pinned `turbo-html2pdf-core 0.3.8` candidate
-`dcbfd20` from producer PR #23; the published registry release is0.3.7.
+The renderer uses a public Git-pinned `turbo-html2pdf-core 0.3.8` candidate from
+producer [PR24](https://github.com/miaskiewicz/turbo-html2pdf/pull/24), stacked on
+PR23; the published registry release is0.3.7. The exact revision is recorded in
+both consumer manifests and `rust/Cargo.lock`.
+
+The October20 follow-up supports ordinary static block descendants in split
+inline flow, including nested/decorated links and retained continuation boxes.
+Collapsed margins and native intrinsic-width quantization preserve the following
+control's geometry. The producer at public `2ea52368` passes858 local workspace tests,15 xref controls,
+strict Clippy, formatting and complexity checks. Exact-head CI passes all three
+jobs, including100% coverage. Turbo-surf preserves zero-size client rectangles while excluding empty
+continuation points from offset extents, and supplies measured button defaults
+at UA priority. The current rebuilt native integration passes 66 tests, including
+all nine measured border controls and two same-embedded-font Range scenes,
+affected-crate strict Clippy and formatting. Times glyph advances still differ
+from Chrome and remain in issue #28. The default workspace/consumer gate and all
+13 paired controls pass; the full native-feature gate remains pending. Bounded
+results do not establish complete geometry parity.
+
+The following checkpoint describes predecessor `dcbfd20` and implementation a005.
 Native source-run admission, float transform stages and real whitespace ownership
 now include complete bare-text UTF-16 cells, wrapped Range endpoints and caret
 canonicalization at the winning edge. Visible leading spaces, pre/nowrap glyphs,
@@ -142,8 +160,9 @@ Remaining bounds:
   A matching Linux Chrome/font capture is still required.
 
 - Ordinary inline boxes still reject top/bottom/middle alignment and
-  absolute/fixed/sticky positioning. RTL/vertical writing and block-in-inline
-  splitting also remain unsupported.
+  absolute/fixed/sticky positioning. RTL/vertical writing and positioned/floating
+  block-in-inline contexts remain unsupported; ordinary static splitting has
+  the bounded controls described above.
 - Complete stacking contexts, scroll methods/events, RTL/vertical overflow and
   scrollbars; existing metrics/clamping and ancestor projection are tested subsets.
 - Downloaded fonts, image source-density/intrinsic loading and animation/pseudo epochs.

@@ -566,6 +566,12 @@ mod tests {
         reset();
     }
     #[test]
+    fn projected_node_constructor_tracks_the_public_listener_backed_event_target() {
+        fixture(
+            r#"(()=>{if(Object.getPrototypeOf(Node)!==EventTarget||Object.getPrototypeOf(Node.prototype)!==EventTarget.prototype||Node.prototype.constructor!==Node||EventTarget.prototype.constructor!==EventTarget||Object.getPrototypeOf(Element)!==Node||Object.getPrototypeOf(Document)!==Node||Object.getPrototypeOf(AbortSignal)!==EventTarget)throw new Error('constructor inheritance');const node=document.createElement('div');let called=0;EventTarget.prototype.addEventListener.call(node,'linked',()=>called++);node.dispatchEvent(new Event('linked'));if(called!==1||!(node instanceof EventTarget)||Object.getOwnPropertyDescriptor(Node,'prototype').writable)throw new Error('node prototype changed');return true})()"#,
+        );
+    }
+    #[test]
     fn generic_targets_and_abort_events_have_private_real_listener_state() {
         fixture(
             r#"(()=>{const target=new EventTarget(),rows=[];target.addEventListener('probe',e=>rows.push(['bubble',e.eventPhase,e.currentTarget===target,e.target===target,e.composedPath().length]));target.addEventListener('probe',e=>rows.push(['capture',e.eventPhase,e.currentTarget===target,e.target===target,e.composedPath().length]),true);target.dispatchEvent(new Event('probe'));if(JSON.stringify(rows)!=='[["bubble",2,true,true,1],["capture",2,true,true,1]]'||Reflect.ownKeys(target).length)throw new Error('target '+JSON.stringify(rows));let called=0;const controller=new AbortController(),callback=()=>called++;controller.signal.onabort=callback;controller.signal.addEventListener('abort',callback);let abort;controller.signal.addEventListener('abort',e=>abort=[e.isTrusted,e.eventPhase,e.currentTarget===controller.signal,e.target===controller.signal]);controller.abort();controller.abort();if(called!==2||JSON.stringify(abort)!=='[true,2,true,true]'||Reflect.ownKeys(controller.signal).length||controller.signal.reason.name!=='AbortError'||controller.signal.reason.code!==20||!(controller.signal.reason instanceof DOMException))throw new Error('abort '+called+' '+JSON.stringify(abort)+' '+Reflect.ownKeys(controller.signal));class Custom extends EventTarget{}const custom=new Custom();custom.addEventListener('x',()=>called++);custom.dispatchEvent(new Event('x'));if(!(custom instanceof EventTarget)||Reflect.ownKeys(custom).length||called!==3)throw new Error('subclass');return true})()"#,

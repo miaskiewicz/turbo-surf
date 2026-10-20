@@ -4,7 +4,107 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { summarizeRun } from "./summarize-run.mjs";
+import { processSummary, summarizeRun } from "./summarize-run.mjs";
+
+test("fresh process evidence rejects abort, output failure and malformed flags even with complete results", () => {
+  fixture((directory, write) => {
+    const manifest = JSON.parse(readFileSync(join(directory, "manifest.json")));
+    const original = { ...manifest.runs[0] };
+    const secret = "PRIVATE_PROCESS_ERROR_7319";
+    for (const change of [
+      { aborted: true },
+      { aborted: 0 },
+      { aborted: null },
+      { timedOut: true },
+      { timedOut: 0 },
+      { timedOut: null },
+      { error: "https://private.invalid/?token=" + secret },
+      { error: "" },
+      { error: false },
+      { error: {} },
+      { signal: "SIGTERM" },
+      { signal: secret },
+      { signal: false },
+      { signal: {} },
+      { signal: [] },
+      { code: false },
+    ]) {
+      manifest.runs[0] = { ...original, ...change };
+      write("manifest.json", manifest);
+      const result = summarizeRun(directory);
+      assert.equal(result.nativeBaseline.successful, 0);
+      assert.equal(result.runs["0/native-baseline"].process.complete, false);
+      assert.doesNotMatch(JSON.stringify(result), /PRIVATE_PROCESS_ERROR_7319|private\.invalid/);
+    }
+    for (const key of ["timedOut", "aborted", "error", "signal", "code"]) {
+      manifest.runs[0] = { ...original };
+      delete manifest.runs[0][key];
+      write("manifest.json", manifest);
+      const result = summarizeRun(directory);
+      assert.equal(result.nativeBaseline.processMeasured, 0);
+      assert.equal(result.nativeBaseline.successful, 0);
+      assert.equal(result.runs["0/native-baseline"].process.evidence, "unmeasured");
+      assert.equal(result.runs["0/native-baseline"].process.complete, null);
+    }
+    manifest.runs[0] = original;
+    write("manifest.json", manifest);
+    assert.equal(summarizeRun(directory).nativeBaseline.successful, 1);
+  });
+});
+
+test("malformed collector error evidence cannot become a successful public baseline", () => {
+  fixture((directory, write) => {
+    const path = "native-baseline/trace.json";
+    const original = JSON.parse(readFileSync(join(directory, path)));
+    for (const collectorErrors of [{}, false, null, undefined, "", { length: 0 }]) {
+      write(path, { ...original, collectorErrors });
+      const summary = summarizeRun(directory);
+      const run = summary.runs["0/native-baseline"];
+      assert.equal(run.collectorComplete, false);
+      assert.equal(run.collectorErrorCount, null);
+      assert.equal(run.observation.complete, false);
+      assert.equal(summary.nativeBaseline.successful, 0);
+    }
+    write(path, original);
+    assert.equal(summarizeRun(directory).nativeBaseline.successful, 1);
+    const legacy = { ...original };
+    for (const key of ["captureComplete", "collectorErrors", "observation"]) delete legacy[key];
+    write(path, { ...legacy, errors: [] });
+    const historical = summarizeRun(directory);
+    assert.equal(
+      historical.runs["0/native-baseline"].collectorCompletionSource,
+      "legacy-error-heuristic",
+    );
+    assert.equal(historical.runs["0/native-baseline"].observation.evidence, "unmeasured");
+    assert.equal(historical.nativeBaseline.successful, 0);
+  });
+});
+
+test("historical process rows remain unmeasured rather than silently becoming fresh successes", () => {
+  const terminated = processSummary({
+    code: null,
+    timedOut: false,
+    aborted: true,
+    error: null,
+    signal: "SIGTERM",
+  });
+  assert.equal(terminated.evidence, "measured");
+  assert.equal(terminated.complete, false);
+  assert.deepEqual(processSummary({ code: 0, timedOut: false }), {
+    evidence: "unmeasured",
+    complete: null,
+    exitCode: 0,
+    timedOut: false,
+    aborted: null,
+    errorPresent: null,
+    terminationSignal: null,
+  });
+  assert.equal(
+    processSummary({ code: 0, timedOut: false, aborted: false, error: null, signal: null })
+      .complete,
+    true,
+  );
+});
 
 function fixture(body) {
   const directory = mkdtempSync(join(tmpdir(), "capture-summary-"));
@@ -13,7 +113,18 @@ function fixture(body) {
   writeFileSync(join(directory, "native-executable"), "frozen executable");
   write("manifest.json", {
     binaryHash: createHash("sha256").update("frozen executable").digest("hex"),
-    runs: [{ runtime: "native", pass: "baseline", repeat: 0, code: 0 }],
+    runs: [
+      {
+        runtime: "native",
+        pass: "baseline",
+        repeat: 0,
+        code: 0,
+        timedOut: false,
+        aborted: false,
+        error: null,
+        signal: null,
+      },
+    ],
   });
   write("baseline-config.json", {
     url: "https://www.google.com/",
@@ -22,6 +133,16 @@ function fixture(body) {
   });
   write("native-baseline/trace.json", {
     captureComplete: true,
+    collectorErrors: [],
+    windowTimerMode: "real-time",
+    observation: {
+      policy: "fixed-deadline-before-enter",
+      triggerStepIndex: 5,
+      requestedMs: 1000,
+      elapsedMs: 1001.5,
+      overrunMs: 1.5,
+      completed: true,
+    },
     navigationSource: "native-form",
     errors: ["private-error"],
     pages: [
@@ -62,7 +183,12 @@ test("public evidence excludes cookie values, queries, bodies and diagnostics wh
       rows.map(JSON.stringify).join("\n"),
     );
     const result = summarizeRun(directory);
-    assert.deepEqual(result.nativeBaseline, { captured: 1, successful: 1 });
+    assert.deepEqual(result.nativeBaseline, {
+      captured: 1,
+      processMeasured: 1,
+      observationMeasured: 1,
+      successful: 1,
+    });
     const run = result.runs["0/native-baseline"];
     assert.equal(run.consent.responseBeforeFirstSearch, true);
     assert.deepEqual(run.navigationRequests[0].cookieNames, ["BUCKET"]);
@@ -253,7 +379,7 @@ test("public transport evidence preserves negotiated counts without leaking raw 
     mkdirSync(join(directory, "chrome-baseline"));
     write("chrome-baseline/trace.json", trace);
     const result = summarizeRun(directory);
-    assert.equal(result.schemaVersion, 4);
+    assert.equal(result.schemaVersion, 6);
     const transport = result.runs["0/chrome-baseline"].responseTransport;
     assert.equal(transport.responses, 3);
     assert.equal(transport.observed, 2);
@@ -272,8 +398,12 @@ test("public transport evidence preserves negotiated counts without leaking raw 
   });
 });
 
-test("old captures expose missing transport evidence without guessing negotiation", () => {
-  fixture((directory) => {
+test("old captures expose missing transport and observation evidence without guessing acceptance", () => {
+  fixture((directory, write) => {
+    const trace = JSON.parse(readFileSync(join(directory, "native-baseline/trace.json")));
+    delete trace.observation;
+    delete trace.windowTimerMode;
+    write("native-baseline/trace.json", trace);
     const result = summarizeRun(directory);
     const transport = result.runs["0/native-baseline"].responseTransport;
     assert.equal(transport.responses, 0);
@@ -281,7 +411,11 @@ test("old captures expose missing transport evidence without guessing negotiatio
     assert.equal(transport.protocols.h3, 0);
     assert.equal(transport.tlsDetails, "not-collected");
     assert.equal(transport.source, "native-application-response");
-    assert.equal(result.nativeBaseline.successful, 1);
+    assert.equal(result.runs["0/native-baseline"].observation.evidence, "unmeasured");
+    assert.equal(result.nativeBaseline.observationMeasured, 0);
+    assert.equal(result.runs["0/native-baseline"].observation.complete, null);
+    assert.equal(result.runs["0/native-baseline"].windowTimerMode, null);
+    assert.equal(result.nativeBaseline.successful, 0);
   });
 });
 
@@ -332,5 +466,70 @@ test("hydration progress exposes only known native phases and valid pump counts"
       completedPumps: null,
     });
     assert.doesNotMatch(JSON.stringify(result), /private-/);
+  });
+});
+
+test("a fixed-window native result requires complete observation and genuine real-time mode", () => {
+  fixture((directory, write) => {
+    const trace = JSON.parse(readFileSync(join(directory, "native-baseline/trace.json")));
+    for (const change of [
+      {
+        observation: {
+          ...trace.observation,
+          pendingNavigation: "https://www.google.com/?private-token",
+        },
+      },
+      { observation: { ...trace.observation, navigationFailed: true } },
+      { observation: { ...trace.observation, navigationWaitTimedOut: true } },
+      { observation: { ...trace.observation, navigationHopLimit: true } },
+      { observation: { ...trace.observation, completed: false } },
+      { observation: { ...trace.observation, completed: 1 } },
+      { observation: { ...trace.observation, elapsedMs: 999 } },
+      { collectorErrors: [{ error: "private-collector-error" }] },
+      { captureComplete: 1 },
+      { windowTimerMode: "virtual" },
+      { windowTimerMode: undefined },
+    ]) {
+      write("native-baseline/trace.json", { ...trace, ...change });
+      const result = summarizeRun(directory);
+      assert.equal(result.nativeBaseline.successful, 0, JSON.stringify(change));
+      assert.doesNotMatch(JSON.stringify(result), /private-token|private-collector-error/);
+    }
+  });
+});
+
+test("public observation evidence excludes pending URLs, request identifiers and absolute timestamps", () => {
+  fixture((directory, write) => {
+    const trace = JSON.parse(readFileSync(join(directory, "native-baseline/trace.json")));
+    trace.observation = {
+      ...trace.observation,
+      startedMs: 123456789,
+      deadlineMs: 123457789,
+      finishedMs: 123457791,
+      pendingNavigation: "https://192.0.2.7/?q=private-token",
+      pendingNavigationRequest: {
+        url: "https://192.0.2.7/?q=private-token",
+        requestId: "private-request",
+        loaderId: "private-loader",
+      },
+      failedNavigationRequest: { errorText: "private-error-text" },
+    };
+    write("native-baseline/trace.json", trace);
+    const run = summarizeRun(directory).runs["0/native-baseline"];
+    assert.equal(run.observation.pendingNavigation, true);
+    assert.equal(run.observation.complete, false);
+    assert.equal(run.observation.requestedMs, 1000);
+    assert.equal(run.observation.elapsedMs, 1001.5);
+    assert.equal(run.windowTimerMode, "real-time");
+    assert.equal(run.collectorComplete, true);
+    assert.equal(run.collectorCompletionSource, "collector");
+    assert.equal(run.collectorErrorCount, 0);
+    assert.doesNotMatch(
+      JSON.stringify(run.observation),
+      /private-|192\.0\.2\.7|123456789|123457789|123457791|startedMs|deadlineMs|finishedMs|requestId|loaderId|errorText/,
+    );
+    trace.navigationSource = "script";
+    write("native-baseline/trace.json", trace);
+    assert.equal(summarizeRun(directory).runs["0/native-baseline"].navigationSource, "script");
   });
 });

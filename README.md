@@ -308,7 +308,8 @@ budget; guest scripts cannot access that capability. Neither path establishes
 server acceptance. Fresh native-cookie Google controls complete genuine consent
 and form navigation, but reliable native SERP acceptance remains unresolved. See
 the [latest sanitized capture](./harness/detection/GOOGLE-LAST-RUN.json),
-[reusable differential harness](./harness/detection/README.md) and
+[reusable differential harness](./harness/detection/README.md),
+[exact Chrome155 setup and flags](./harness/detection/CHROME-PARITY-RUNBOOK.md) and
 [dated observations](./harness/detection/FINDINGS.md).
 
 **Render-tier realism.** The isolate is shaped to match real Chrome structurally, verified by
@@ -339,7 +340,9 @@ and in-isolate via the `fp_snapshot` example). Highlights:
   time is **real**: `performance.now()`/`Date.now()` derive from real monotonic hrtime + virtual timer
   advance, so `setTimeout(fn, 100)` observes ~100ms elapsed (was 0ms — a chronometric-trap tell) and
   `timeOrigin + performance.now() == Date.now()` holds (verified by the shared clock probe, not a Google clearance result);
-  timer *delays* stay virtual so the crawler never blocks. Plus **distinct**
+  timer *delays* default to virtual scheduling for fast crawling. The detection
+  example selects real-time Window/frame timers before hydration; Rust consumers
+  can opt in with `PageSessionOptions`. Plus **distinct**
   `Intersection`/`Resize`/`MutationObserver` constructors, real `MessagePort`/`MessageChannel`/
   `MessageEvent` instances, spec-shaped `navigator.permissions`, and general **nested-iframe realms**
   (loaded iframe/`srcdoc` scripts have their own V8 contexts and ECMAScript intrinsics,
@@ -361,14 +364,27 @@ for acceptance results and remaining limits.
 A shell must be executed before classifying the final outcome; `/sorry` alone does not
 prove IP reputation is the cause.
 
-The current implementation (`a005140`) passes full stock/native155 workspace gates
+The October17 implementation (`a005140`) passes full stock/native155 workspace gates
 (1,411/1,456 tests), strict checks and rebuilt addon/Node/CDP controls. Fresh API
 measurement still records64 original-interface missing own members and374
-measured descriptor differences. In the latest two-repeat Google run, both Chrome
+measured descriptor differences. In its frozen two-repeat Google run, both Chrome
 and native baselines receive429 with no SERP markers; native homepage hydration
 also exhausts its20-second budget. These are explicit remaining limits, not a
 claim of full Chrome parity. See the [current evidence](./harness/detection/FINDINGS.md)
 and [remaining work](./harness/detection/PARITY-GAPS.md).
+
+The October19 follow-up verifies the same executed Chrome/native localhost flow:
+real consent coordinates/response/cookie ordering, focused textarea typing,
+genuine form submission and final results. It repairs a native attribute-selector
+bug that selected a hidden query field, records action completion and enforces
+shared custom-step types before either backend launches. A signed-out Chrome
+Incognito UI control reaches Google results, but current traced/native Google
+acceptance remains unverified until fresh collection. The October20 default
+`npm run check` passes1,450 Rust tests, strict checks and rebuilt addon consumers;
+the full native-feature gate and fresh optimized comparison remain pending.
+These bounded controls do not establish
+complete Chrome parity.
+
 
 
 ---

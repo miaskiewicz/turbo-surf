@@ -102,22 +102,28 @@ pub(crate) fn element_geometry(
 }
 
 fn all_fragment_bounds(rects: &[Rect]) -> Rect {
-    let left = rects
+    // Split inlines retain zero-area continuation points in getClientRects, but
+    // those points do not enlarge an offset box that has actual fragments.
+    // A zero-width line with height still contributes to the offset extent.
+    let mut fragments = rects
         .iter()
-        .map(|rect| rect.x)
-        .fold(f32::INFINITY, f32::min);
-    let top = rects
-        .iter()
-        .map(|rect| rect.y)
-        .fold(f32::INFINITY, f32::min);
-    let right = rects
-        .iter()
-        .map(|rect| rect.x + rect.width)
-        .fold(f32::NEG_INFINITY, f32::max);
-    let bottom = rects
-        .iter()
-        .map(|rect| rect.y + rect.height)
-        .fold(f32::NEG_INFINITY, f32::max);
+        .filter(|rect| rect.width != 0.0 || rect.height != 0.0);
+    let Some(first) = fragments.next() else {
+        return rects
+            .first()
+            .copied()
+            .unwrap_or_else(|| empty_geometry().bounds);
+    };
+    let mut left = first.x;
+    let mut top = first.y;
+    let mut right = first.x + first.width;
+    let mut bottom = first.y + first.height;
+    for rect in fragments {
+        left = left.min(rect.x);
+        top = top.min(rect.y);
+        right = right.max(rect.x + rect.width);
+        bottom = bottom.max(rect.y + rect.height);
+    }
     Rect {
         x: left,
         y: top,
@@ -125,6 +131,7 @@ fn all_fragment_bounds(rects: &[Rect]) -> Rect {
         height: bottom - top,
     }
 }
+
 fn integer(value: f32) -> Result<i32, String> {
     if !value.is_finite() || value < 0.0 || f64::from(value) > f64::from(i32::MAX) {
         return Err("native CSSOM metric is outside its integer range".into());
@@ -383,6 +390,47 @@ mod tests {
             .unwrap_err()
             .contains("missing"));
     }
+    #[test]
+    fn offset_extents_ignore_empty_continuation_points_but_keep_zero_width_lines() {
+        let before = Rect {
+            x: 8.0,
+            y: 18.71875,
+            width: 0.0,
+            height: 0.0,
+        };
+        let block = Rect {
+            x: 8.0,
+            y: 18.71875,
+            width: 1264.0,
+            height: 21.5,
+        };
+        let after = Rect {
+            x: 8.0,
+            y: 58.9375,
+            width: 0.0,
+            height: 0.0,
+        };
+        assert_eq!(all_fragment_bounds(&[before, block, after]), block);
+        let line = Rect {
+            x: 8.0,
+            y: 50.0,
+            width: 0.0,
+            height: 12.0,
+        };
+        assert_eq!(
+            all_fragment_bounds(&[before, block, line, after]),
+            Rect {
+                x: 8.0,
+                y: 18.71875,
+                width: 1264.0,
+                height: 43.28125,
+            }
+        );
+        assert_eq!(all_fragment_bounds(&[before, after]), before);
+        assert_eq!(all_fragment_bounds(&[line]), line);
+        assert_eq!(all_fragment_bounds(&[]), empty_geometry().bounds);
+    }
+
     #[test]
     fn cssom_bounding_union_ignores_empty_fragments_unless_all_are_empty() {
         let empty = Rect {

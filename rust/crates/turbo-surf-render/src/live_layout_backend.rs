@@ -12,6 +12,16 @@ use turbo_html2pdf_core::{Diagnostics, FontRegistry, ImageCtx, NoImages};
 // Loading every installed font per isolate thread multiplies native memory.
 static SYSTEM_FONTS: std::sync::OnceLock<FontRegistry> = std::sync::OnceLock::new();
 
+// Native font discovery is process startup work, not part of a trusted input turn.
+// Geometry installation primes this same immutable registry before page execution.
+pub(crate) fn initialize_system_fonts() -> &'static FontRegistry {
+    SYSTEM_FONTS.get_or_init(|| {
+        let mut registry = FontRegistry::new();
+        registry.load_system_fonts_for_html();
+        registry
+    })
+}
+
 #[derive(PartialEq)]
 struct CacheKey {
     realm: u64,
@@ -223,11 +233,7 @@ fn resolve(
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::RulesKey);
     let profile = crate::layout_profile::LayoutProfile::current(scope);
     let rules = crate::live_stylesheets::active_rule_snapshots(sheets, viewport)?;
-    let fonts = SYSTEM_FONTS.get_or_init(|| {
-        let mut registry = FontRegistry::new();
-        registry.load_system_fonts_for_html();
-        registry
-    });
+    let fonts = initialize_system_fonts();
     let images = ImageCtx {
         resolver: &NoImages,
         body_height: None,

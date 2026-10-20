@@ -1,5 +1,7 @@
 # Chrome versus turbo-surf detection harness
 
+Start with the [Chrome155 parity runbook](./CHROME-PARITY-RUNBOOK.md) for exact SDK/build commands, every comparison flag, opt-in timing and bridge settings, artifact checks and test order.
+
 This diagnostic compares real Chrome with the native V8/rtdom engine using fresh,
 independent cookies. Chrome is an oracle; its cookie values are never imported by
 the native run. The native example does not invoke a solver or sidecar, or read an
@@ -86,7 +88,8 @@ On a Mac with a real Metal GPU:
 
 ```bash
 npm install
-npm install --prefix scripts/browser-sidecar
+# Optional: legacy Playwright/Patchright collectors only; raw CDP needs neither.
+# npm install --prefix scripts/browser-sidecar
 cd rust
 cargo build --release -p turbo-surf-mcp --features trust-anchors,gpu-metal,coretext --example detection_trace
 cd ..
@@ -122,6 +125,45 @@ Metal adapter used for pixel execution.
 The Chrome 155 target profile reuses the pinned upstream 154 TLS/H2 recipe and Chromium root store, with separately measured155 headers and seeded client hints. Both target and base recipe versions are recorded. For intentionally reduced
 builds/platforms use `--allow-reduced`, and retain that fact in comparisons.
 
+The Chrome baseline is CDP-observed: it still enables protocol domains, applies
+configured environment overrides and reads page snapshots. `interfaces: false`
+disables interface wrappers, not all observation. Record signed-in state, cookie
+isolation and extension/environment differences separately when comparing a native
+UI or Incognito control. A single signed-out Incognito UI success does not certify
+the fresh-profile traced runner or native acceptance.
+
+For a signed-out Incognito comparison, add `--chrome-incognito` with the default
+CDP backend. Chrome still uses a separate temporary profile. The collector creates
+a disposable empty browser context and verifies its returned ID against the page
+target and CDP context list. The list covers explicitly created contexts; it cannot
+certify an arbitrary window opened with Chrome's Incognito launch flag.
+This is separate from the earlier native-UI Incognito control, whose existing
+cookie/extension state was not measured.
+
+The shared default plan excludes hidden query fields, moves/clicks/focuses the
+search control, types the query, waits350ms and presses Enter. Both collectors
+record each completed action and per-step snapshots. Native comparison input now
+honors the readiness selector, real dwell and a minimum110ms host-wall character
+cadence. The native detection example opts into real-time Window timers before
+hydration, including iframe and automatic-form navigation. The crawler's existing
+constructors retain virtual scheduling. Matching stages does not imply identical
+pointer behavior. Native hydration-budget failures remain explicit even if later
+input/navigation succeeds.
+
+Native geometry setup initializes the shared system-font registry before guest
+execution. Cold font loading is an engine startup cost; it is not charged to a
+later first click's input budget. Frames reuse the same immutable registry.
+
+The paired offline action test uses an authored localhost form in baseline and
+interface modes. It verifies actual trusted input, consent coordinates/204/cookie
+before search, selected query field, submitted query, real typing duration and
+final results. An absent readiness selector must fail before input in both engines.
+Run it with Node22+ and a freshly built native example explicitly selected:
+
+```sh
+TURBO_SURF_DETECTION_BINARY=/absolute/path/to/detection_trace node --test harness/detection/action-parity.test.mjs
+```
+
 The default four passes are Chrome/native baseline, then Chrome/native interface
 tracing. `--native-first` reverses each pair; `--repeat 2` repeats the matrix with
 fresh state. Change order/repeat when testing instrumentation or time/rate effects.
@@ -131,6 +173,25 @@ set a nonzero exit code, preserve logs, and allow the other passes to complete.
 readiness and actual navigation determine whether execution completed. A consent
 `clicked` flag records accepted input dispatch; verify the response, cookie effects
 and subsequent page state before treating consent as completed.
+
+New Chrome captures separate `collectorErrors` from guest `errors` and explicitly
+record `captureComplete`. Historical captures without that field retain the
+labeled legacy heuristic. Input diagnostics skip `type=hidden` query fields,
+record excluded/control counts and state their type-based selection rule; this
+is not computed-visibility measurement and does not change input targeting.
+`chromeSearchOutcome` requires a complete collector, terminal same-origin
+`/search`, actual document HTTP200, complete DOM and positive organic `h3` markers.
+It rejects a200 shell without results and a429 challenge. HTTP attribution follows
+the current main-document loader, including same-document history changes;
+unavailable evidence is reported rather than inferred from an old response.
+This classification does not assess content relevance.
+
+The comparison also reports `interaction.configuredPlansMatch` and each runtime's
+completed action count, exact action order and per-type query/tag observations.
+A failed action never counts as completed. Those fields are bounded stage evidence;
+they do not prove element identity, matching event timing or Google acceptance.
+Failure captures from the paired localhost test remain in its printed temporary
+artifact directory for diagnosis; successful captures are removed.
 
 ```bash
 node harness/detection/run.mjs --live --out /tmp/search-trace --native-first --repeat 2
@@ -180,20 +241,33 @@ cargo test -p turbo-surf-render --test dom_utf16 --test dom_utf16_frames --test 
 The native155 SDK runs the real frame/module cases; those cases return early on
 the default SDK. Successful inline modules are observed through their actual body
 execution, because normal Chrome does not fire load for successful inline scripts.
-(Chrome wall-time dwell; native drains its existing lifecycle/virtual-timer pump).
+The interaction harness applies real elapsed-time waits on both engines; native
+also pumps pending lifecycle callbacks between sleeps. For a plan containing Enter,
+`--observation-ms` sets one fixed observation window starting immediately before
+the final Enter action (default: `--wait`, normally2500ms). It accepts integers
+from0 to60000. The deadline never restarts after input or redirects and does not
+end early on results, an HTTP200 shell or HTTP429. Captures retain elapsed time,
+overrun, pending navigation, hop-limit and timeout evidence. Blocking input or
+snapshot work can overrun this deadline; the trace records that limit rather than
+claiming exact wall-time alignment. Plans without Enter retain the ordinary dwell.
 `--steps` is a JSON array replacing default interactions. Supported steps are
 `{move:{selector}}`, `{click:selector}`, `{focus:selector}`, `{type:text}`,
-`{press:key}`, `{wait:ms}`. The Chrome input delay is 110ms; native uses its
+`{press:key}`, `{wait:ms}`. The common driver validates operands before either
+backend launches: typing requires a string, waits require integers in0..60000,
+and selectors/keys require nonempty strings. Empty typing and zero waits are valid.
+The Chrome input delay is 110ms; native uses its
 private native host-input driver, captured in a context slot before page scripts.
 Input respects cancellation and its execution budget; timed-out queued edits are
 canceled, and the session remains usable. These gestures are comparable intent, not identical
 motion/clock samples. The default Google dismissal selector is `#W0wltc`;
 an empty `--dismiss-selector ''` disables it. Other sites default to no dismissal.
 The harness runs explicit wait steps and the post-dismissal wait against real
-monotonic elapsed time, pumping pending native callbacks between sleeps. The
-underlying host input driver uses virtual timers; advancing those timers alone
-would allow search to replace the document before delayed consent responses and
-their cookies arrive. Explicit waits accept integers from 0 to 60000 ms.
+monotonic elapsed time, pumping pending native callbacks between sleeps. Its
+real-time session policy prevents a virtual110ms key delay plus another110ms of
+real waiting from double-counting the guest clock. Delayed consent responses and
+their cookies must arrive before search. Explicit waits accept integers from0
+to60000ms. A bounded redirect opening can cap initial hydration to the remaining
+observation time; later operations retain the configured page budget.
 The conditional click is recorded before typing; its presence alone does not
 prove that the consent dialog closed. Snapshots retain the query value, focus and
 consent state so an unsuccessful input flow is distinguishable from a rejected
@@ -337,12 +411,12 @@ It covers the tested contracts, rather than complete Chrome conformance.
 stylesheet telemetry codes and stdout/stderr counts with an explicit capture date;
 these are distinct from the structured `trace.errors` array. Historical telemetry
 is retained separately when the next live page takes a different execution path.
-The latest October17 retry rejects native baselines while clean Chrome reaches7/8
-result markers; both instrumented Chrome passes are challenged. Earlier same-day
-Chrome baseline rejections remain historical evidence.
-The latest retry exhausts20s in3/4 native homepage opens, including one clean
-baseline; dismiss retains the original diagnostic, and later navigation completion
-does not erase it. See [the parity checklist](./PARITY-GAPS.md)
+The last published `a005140` matrix records0/2 accepted native and0/2 accepted
+Chrome baselines, all ending at real HTTP429; all four native homepage opens
+exhaust20s. The older `59f` retry has Chrome7/8 result markers and native0/2,
+with3/4 native homepage budget failures. These distinct historical runs do not
+validate the pending runner changes. Dismiss retains the original diagnostic,
+and later navigation completion does not erase it. See [the parity checklist](./PARITY-GAPS.md)
 for the full-trace budget and acceptance residuals.
 
 - `manifest.json`: checkout commit/branch, dirty diff hash, executable hash/mtime,
@@ -389,8 +463,9 @@ for the full-trace budget and acceptance residuals.
   The companion `layout-profile.json` retains host-stage call counts/durations and
   layout-cache hits/misses for initial hydration only. Capture/composition/tree/
   stylesheet/rule-key/layout spans overlap inclusively; do not add them as disjoint
-  costs. The rule/key stage includes lazy system-font initialization when cold;
-  attribute that separately before treating it as repeated key construction cost.
+  costs. Older captures included cold system-font initialization in the rule/key
+  stage. Current geometry setup primes that registry before guest hydration, so
+  measure cold process startup separately from these hydration spans.
   Profiling is disabled in clean controls and can change execution timing.
   Direct native configs use `nativeCpuProfile: true` together with `debugger: true`.
 - Native hydration snapshots retain a host-owned `progress.phase` and
@@ -414,8 +489,10 @@ node harness/detection/summarize-run.mjs /tmp/search-trace /tmp/search-summary.j
 
 The summarizer verifies the executable hash, retains missing captures and process
 failures, and excludes cookie values, query strings, bodies and error text. It
-uses schema4 for fixed protocol/TLS histograms, availability counts, known
-collector scopes and hydration phases. Certificate names/SANs, addresses,
+uses schema6 for fixed protocol/TLS histograms, availability counts, known
+collector scopes, hydration phases and typed process-completion evidence.
+Modern captures require an actual empty `collectorErrors` array; absent legacy
+process/collector evidence stays unmeasured. Certificate names/SANs, addresses,
 connection IDs and absolute response timing remain in private raw captures.
 Native protocol counts do not imply native TLS details were collected. Old
 captures remain explicitly unknown where the metadata was not recorded. It
@@ -423,7 +500,8 @@ records actual consent ordering and fallback configuration. `nativeBaseline` is 
 Google acceptance metric: both the configured starting URL and final page must
 have the exact origin `https://www.google.com`. Custom URLs remain captured but
 do not count toward this metric. A native baseline counts as successful only
-with a complete, successful capture, genuine native form navigation,
+with a complete, successful process/capture, real-time native scheduling,
+complete fixed observation, genuine native form navigation,
 disabled/unused fallback and positive result markers on the last settled HTTP200
 `/search` page, with complete readiness and no budget failure or pending
 navigation. Other origins are redacted as `<other>`. This does not certify
@@ -449,7 +527,9 @@ contexts. The native Inspector inventories generated sources without replacing
 proof of complete coverage or the server's rejection reason. This runner does
 not capture TLS/HTTP2 packets; the localhost ClientHello control is separate.
 
-Current installed controls record Chrome155.0.8059.80 / V815.5.35.23. The genuine
+Historical installed controls record Chrome155.0.8059.80 / V815.5.35.23. The current
+frozen oracle is Chrome155.0.8059.85 / V815.5.35.25, differing from native
+15.5.35.23-rusty/profile155.0.8059.80. Preserve older control metadata. The genuine
 [155 source profile](./engine-155/README.md) builds actual V815.5.35.23-rusty
 from the Chrome155.0.8059.79 source pin; the older155.40 / V815.5.35.20 profile
 is retained explicitly for historical reproduction. The HTTP profile targets155
@@ -521,6 +601,95 @@ hashes. The binary is frozen before collection. These are API contract differenc
 not evidence that a site queried them or used them to reject a request. A
 `[native code]` string is only the measured string; it does not prove native
 implementation. Raw localhost trace artifacts remain in the chosen output directory.
+
+The reusable [IDL constructor probe](./fixtures/idl-constructor-probe.js) directly
+calls and constructs ten interfaces, checks constructor/prototype links and
+descriptors, and exercises ShadowRoot cloning, duplicate attachment and insertion.
+Its [saved Chrome control](./fixtures/idl-constructor-chrome155.json) contains the
+actual Chrome 155.0.8059.85 / V8 15.5.35.25 result, exact probe hash, capture and
+receipt hashes, and unchanged source/bundle evidence. The probe bytes are preserved
+from that capture. To repeat the paired measurement after building the native
+example, use a fresh output directory and the frozen Chrome executable:
+
+```bash
+TURBO_SURF_CHROME_PATH="$PWD/.native-builds/oracles/chrome155-8059.85-oct20-3/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  node harness/detection/api-shape.mjs --run \
+    --binary "$PWD/.native-builds/sdk155-8059.79/target/debug/examples/detection_trace" \
+    --probe harness/detection/fixtures/idl-constructor-probe.js \
+    --out /private/tmp/turbo-idl-constructors-fresh
+```
+
+This uses an empty localhost document and fresh owned Chrome/native sessions;
+it neither submits a search nor imports cookies. Inspect `comparison.json`'s
+`chrome`, `native` and `differences` fields, and compare each measurement with the
+saved control's `result`. The runner records differences without making them a
+failing exit status or automatically checking the saved control. This generic
+probe returns an array of constructor observations, so the runner's `members`
+inventory is not a prototype-member coverage measurement for this probe. Passing
+these checks establishes only the recorded constructor and ShadowRoot behavior.
+
+The [timer conversion probe](./fixtures/timer-conversion-probe.js) reuses the same
+command with `--probe harness/detection/fixtures/timer-conversion-probe.js` and a
+fresh `--out` path. Its [genuine Chrome control](./fixtures/timer-conversion-chrome155.json)
+records both timeout and interval boundary values under a fixed 200ms observation,
+then clears every retained timer. In that capture, huge/nonfinite and signed32
+overflow delays fired promptly; `2**32+5` fired after about 6ms, while `2**31-1`
+remained pending. Compare firing/pending states and errors; elapsed values and
+callback ordering are observations, not exact equality requirements across runs.
+This control verifies numeric conversion behavior without waiting for long timers.
+
+The [embedded-font Range control](./fixtures/embedded-font-range-chrome155.json)
+records block-only and mixed inline continuations using the producer's exact IBM
+Plex Mono Regular bytes at 20px/400 with a 24px line height. The font and its OFL
+license are retained under `fixtures/fonts/ibm-plex-mono/`. Its standalone
+[DOM/Range probe](./fixtures/embedded-font-range-probe.js) is shared with native
+tests; a separate [Chrome setup probe](./fixtures/embedded-font-range-chrome-setup.js)
+loads the font and records the digest before measurement. To reproduce a Chrome
+case, serve only the public fixtures in one terminal:
+
+```bash
+python3 -m http.server 8765 --bind 127.0.0.1 --directory harness/detection/fixtures
+```
+
+In another terminal, create the collector config and use a fresh private output:
+
+```bash
+node --input-type=module - <<'JS'
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+writeFileSync('/private/tmp/embedded-font-range-config.json', JSON.stringify({
+  url: 'http://127.0.0.1:8765/embedded-font-range-block-only.html',
+  viewport: { width: 1280, height: 800 }, screen: { width: 1920, height: 1080 },
+  outerWindow: { width: 1280, height: 888 }, deviceScaleFactor: 2,
+  waitMs: 0, interfaces: false, steps: [],
+  probes: ['embedded-font-range-chrome-setup.js', 'embedded-font-range-probe.js']
+    .map(name => resolve('harness/detection/fixtures', name)),
+}), { mode: 0o600 });
+JS
+TURBO_SURF_CHROME_PATH="$PWD/.native-builds/oracles/chrome155-8059.85-oct20-3/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  node harness/detection/chrome-cdp-trace.mjs /private/tmp/embedded-font-range-config.json \
+    /private/tmp/embedded-font-range-block-fresh
+```
+
+Select `embedded-font-range-mixed.html` and another fresh output for the second
+case. Compare the font digest in `trace.probes[0].result` and the complete measured
+rows in `trace.probes[1].result` with the saved case. The original Times control
+remains unchanged: its small glyph-width mismatch is deferred in issue28, while
+its element and button boxes remain exact assertions. The saved
+[font diagnostic](./fixtures/font-range-diagnostic-chrome155.json) can be repeated
+with the earlier API runner command and
+`--probe harness/detection/fixtures/font-range-diagnostic-probe.js`; it records
+the discrepancy, including the predecessor native canvas path's requested-weight
+limitation, without treating it as resolved font parity.
+
+The [border cascade control](./fixtures/border-cascade-chrome155.json) retains
+the exact nine native regression cases and its shared
+[probe](./fixtures/border-cascade-probe.js). With the fixture server above running,
+repeat the earlier API runner command using
+`--fixture-url http://127.0.0.1:8765/border-cascade.html
+--probe harness/detection/fixtures/border-cascade-probe.js` and a fresh output.
+Each row compares actual client borders with public computed widths, including
+source order, physical-side shorthands, `!important` and normal inline styles.
 
 ```bash
 npm run test:detection
@@ -915,6 +1084,7 @@ The fixture records 100 rectangle reads and a 11000 total-width checksum in
 including cache hits/misses, and keep clean and instrumented outcomes separate.
 The instrumented runner also wraps interfaces; direct native configurations can
 set `interfaces: false` with `debugger: true` and `nativeCpuProfile: true` to
-measure without those wrappers. Cold font initialization and overlapping host
-stages must remain explicit when comparing results. This local control does not
+measure without those wrappers. Current cold font initialization happens during
+geometry setup before guest profiling; retain process startup separately and do
+not add overlapping host stages as disjoint costs. This local control does not
 establish live Google acceptance.

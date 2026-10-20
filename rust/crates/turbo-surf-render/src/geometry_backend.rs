@@ -56,6 +56,7 @@ pub(crate) fn install<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     core: v8::Local<'s, v8::Object>,
 ) -> Result<(), String> {
+    crate::live_layout_backend::initialize_system_fonts();
     crate::live_layout_backend::capture_viewport(scope)?;
     let global = scope.get_current_context().global(scope);
     let name = v8::String::new(scope, "ts").ok_or("Geometry namespace allocation interrupted")?;

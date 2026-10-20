@@ -12,6 +12,11 @@ test("resource-order Chrome control pins its authored fixture and collection too
     sha256(extractResourceFixture(read(fixtureSource).toString())),
   );
   assert.equal(control.collectorSha256, sha256(read("harness/detection/chrome-cdp-trace.mjs")));
+  assert.equal(control.inputStateSha256, sha256(read("harness/detection/input-state.js")));
+  assert.equal(control.observationSha256, sha256(read("harness/detection/observation-window.mjs")));
+  assert.equal(control.navigationSha256, sha256(read("harness/detection/main-navigation.mjs")));
+  assert.equal(control.lifecycleSha256, sha256(read("harness/detection/collector-lifecycle.mjs")));
+  assert.equal(control.effectiveInputSha256, sha256(read("harness/detection/effective-input.mjs")));
   assert.equal(
     control.generatorSha256,
     sha256(read("harness/detection/resource-scan-order-chrome.mjs")),

@@ -1,6 +1,6 @@
 // Reusable Chrome/native differential. Live network is explicit; native never imports
 // the Chrome jar. All raw artifacts are local, mode 0600, and excluded from Git.
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import {
@@ -18,6 +18,10 @@ import {
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkoutProvenance } from "./checkout-provenance.mjs";
+import { inputCadenceMs, searchSelector, searchSteps } from "./search-plan.mjs";
+import { validateSteps } from "./validate-steps.mjs";
+import { superviseChild } from "./child-supervision.mjs";
+import { observationMilliseconds } from "./observation-window.mjs";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "../..");
 const argv = process.argv.slice(2);
@@ -36,7 +40,7 @@ const binary = resolve(flag("--binary", join(root, "rust/target/debug/examples/d
 if (!existsSync(binary))
   throw new Error(`Build current detection_trace with all features first: ${binary}`);
 const query = flag("--query", "rust lang");
-const selector = flag("--selector", "textarea[name=q],input[name=q]");
+const selector = flag("--selector", searchSelector);
 const targetUrl = flag("--url", "https://www.google.com/");
 const config = {
   url: targetUrl,
@@ -48,6 +52,7 @@ const config = {
   ),
   locale: "en-US",
   chromeBackend: flag("--chrome-backend", "cdp"),
+  chromeIncognito: argv.includes("--chrome-incognito"),
   chromePath: flag("--chrome-path", process.env.TURBO_SURF_CHROME_PATH),
   languages: ["en-US", "en"],
   viewport: { width: Number(flag("--width", "1280")), height: Number(flag("--height", "800")) },
@@ -55,10 +60,15 @@ const config = {
   deviceScaleFactor: 2,
   timezone: flag("--tz", "America/Los_Angeles"),
   waitMs: Number(flag("--wait", "2500")),
+  observationMs: Number(flag("--observation-ms", flag("--wait", "2500"))),
+  inputCadenceMs,
   pageBudgetMs: Number(flag("--page-budget", "20000")),
   interfaceScript: resolve(flag("--interface-script", join(here, "interface-trace.js"))),
   successSelector: flag("--success-selector", "#rso a h3, #search a h3"),
-  readySelector: flag("--ready-selector", ""),
+  readySelector: flag(
+    "--ready-selector",
+    argv.includes("--no-interaction") || flag("--steps") ? "" : selector,
+  ),
   probes: argv.includes("--probes")
     ? [
         join(here, "capabilities.js"),
@@ -67,16 +77,7 @@ const config = {
         join(root, "scripts/browser-sidecar/probes/webgl-fp.js"),
       ]
     : [],
-  steps: argv.includes("--no-interaction")
-    ? []
-    : [
-        { move: { selector } },
-        { click: selector },
-        { focus: selector },
-        { type: query },
-        { wait: 350 },
-        { press: "Enter" },
-      ],
+  steps: argv.includes("--no-interaction") ? [] : searchSteps(query, selector),
 };
 config.outerWindow = { width: config.viewport.width, height: config.viewport.height + 88 };
 for (const [index, argument] of argv.entries()) {
@@ -94,7 +95,11 @@ if (
 )
   throw new Error("Configured window must fit the shared screen");
 if (flag("--steps")) config.steps = JSON.parse(readFileSync(flag("--steps"), "utf8"));
+if (config.chromeIncognito && config.chromeBackend !== "cdp")
+  throw new Error("--chrome-incognito currently requires --chrome-backend cdp");
 const captureTimeoutMs = Number(flag("--capture-timeout", "180000"));
+if (!Number.isInteger(config.waitMs) || config.waitMs < 0 || config.waitMs > 60000)
+  throw new Error("--wait must be an integer in 0..60000 milliseconds");
 for (const [value, maximum] of [
   [config.pageBudgetMs, 120000],
   [captureTimeoutMs, 600000],
@@ -103,57 +108,38 @@ for (const [value, maximum] of [
     throw new Error(
       `Page budget / capture timeout must be an integer in 1..${maximum} milliseconds`,
     );
-if (
-  !Array.isArray(config.steps) ||
-  config.steps.some(
-    (s) =>
-      !s ||
-      Object.keys(s).length !== 1 ||
-      !["move", "click", "focus", "type", "press", "wait"].includes(Object.keys(s)[0]),
-  )
-)
-  throw new Error("Each step must have one supported action");
-const run = (cmd, args, dest, env = {}) =>
-  new Promise((done) => {
-    const logs = ["stdout", "stderr"].map((name) =>
-      openSync(join(dest, `${name}.log`), "w", 0o600),
-    );
-    const startedAt = new Date().toISOString();
-    let error,
-      timedOut = false;
-    const child = spawn(cmd, args, {
-      cwd: root,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
-      env: { ...process.env, ...env },
-    });
-    for (const [i, stream] of [child.stdout, child.stderr].entries())
-      stream.on("data", (data) => {
-        writeSync(logs[i], data);
-        (i ? process.stderr : process.stdout).write(data);
-      });
-    let forceTimer;
-    const kill = (signal) => {
-      try {
-        if (process.platform === "win32") child.kill(signal);
-        else process.kill(-child.pid, signal);
-      } catch {}
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      kill("SIGTERM");
-      forceTimer = setTimeout(() => kill("SIGKILL"), 5000);
-    }, captureTimeoutMs);
-    child.on("error", (e) => {
-      error = String(e);
-    });
-    child.on("close", (code, signal) => {
-      clearTimeout(timer);
-      clearTimeout(forceTimer);
-      for (const fd of logs) closeSync(fd);
-      done({ startedAt, finishedAt: new Date().toISOString(), code, signal, timedOut, error });
-    });
+observationMilliseconds(config);
+validateSteps(config.steps);
+const captureAbort = new AbortController();
+for (const signal of ["SIGTERM", "SIGINT"])
+  process.on(signal, () => {
+    process.exitCode = signal === "SIGINT" ? 130 : 143;
+    captureAbort.abort(new Error(`Differential interrupted by ${signal}`));
   });
+const run = async (cmd, args, dest, env = {}) => {
+  const logs = Object.fromEntries(
+    ["stdout", "stderr"].map((name) => [name, openSync(join(dest, `${name}.log`), "w", 0o600)]),
+  );
+  const startedAt = new Date().toISOString();
+  try {
+    const {
+      stdout: _stdout,
+      stderr: _stderr,
+      ...status
+    } = await superviseChild(cmd, args, {
+      signal: captureAbort.signal,
+      timeoutMs: captureTimeoutMs,
+      spawnOptions: { cwd: root, env: { ...process.env, ...env } },
+      onOutput(name, bytes) {
+        writeSync(logs[name], bytes);
+        process[name].write(bytes);
+      },
+    });
+    return { startedAt, finishedAt: new Date().toISOString(), ...status };
+  } finally {
+    for (const fd of Object.values(logs)) closeSync(fd);
+  }
+};
 mkdirSync(out, { recursive: true, mode: 0o700 });
 if (existsSync(join(out, "manifest.json")))
   throw new Error("Output directory already has a run; use a fresh directory");
@@ -174,10 +160,20 @@ const manifest = {
       "chrome-trace.mjs",
       "chrome-cdp-trace.mjs",
       "cdp-connection.mjs",
+      "input-state.js",
+      "search-plan.mjs",
+      "validate-steps.mjs",
+      "observation-window.mjs",
+      "main-navigation.mjs",
+      "collector-lifecycle.mjs",
+      "effective-input.mjs",
+      "child-supervision.mjs",
+      "freeze-chrome.mjs",
       "interface-trace.js",
       "capabilities.js",
       "api-shape.js",
       "compare.mjs",
+      "summarize-run.mjs",
       "protocol-headers.mjs",
       "chrome-network-metadata.mjs",
       "checkout-provenance.mjs",
@@ -211,7 +207,7 @@ if (missingFeatures.length && !argv.includes("--allow-reduced"))
 const repeats = Number(flag("--repeat", "1"));
 if (!Number.isInteger(repeats) || repeats < 1 || repeats > 10)
   throw new Error("--repeat must be 1..10");
-for (let repeat = 0; repeat < repeats; repeat++) {
+captureMatrix: for (let repeat = 0; repeat < repeats; repeat++) {
   const runOut = repeats === 1 ? out : join(out, `repeat-${repeat}`);
   mkdirSync(runOut, { recursive: true, mode: 0o700 });
   for (const instrumented of [false, true]) {
@@ -248,6 +244,7 @@ for (let repeat = 0; repeat < repeats; repeat++) {
       }
       manifest.runs.push({ repeat, runtime, pass, ...status });
       saveManifest();
+      if (captureAbort.signal.aborted) break captureMatrix;
     }
   }
   if (config.probes.length) {
@@ -294,6 +291,7 @@ for (let repeat = 0; repeat < repeats; repeat++) {
             : await run(frozenBinary, [path, dest], dest, { TURBO_SURF_TZ: config.timezone });
         manifest.runs.push({ repeat, runtime, pass: "probes", ...status });
         saveManifest();
+        if (captureAbort.signal.aborted) break captureMatrix;
       }
     } finally {
       probeServer.closeAllConnections();
@@ -305,4 +303,5 @@ for (let repeat = 0; repeat < repeats; repeat++) {
   saveManifest();
   console.log(`Saved differential: ${join(runOut, "comparison.json")}`);
 }
-if (manifest.runs.some((r) => r.code !== 0 || r.error)) process.exitCode = 1;
+if (manifest.runs.some((r) => r.code !== 0 || r.error || r.timedOut || r.aborted))
+  process.exitCode ||= 1;

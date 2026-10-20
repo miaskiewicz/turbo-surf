@@ -15,8 +15,15 @@ and generated bindings remain
 pass with this artifact; the normal build helper still reruns all SDK smoke,
 WindowProxy, module-unit and code-generation gates when accepting it.
 See [Trusted Types controls](../TRUSTED-TYPES.md) for the stock SDK limitations.
-Installed Chrome controls now record155.0.8059.80 with the same V815.5.35.23;
+The October15 installed-Chrome controls record155.0.8059.80 with V815.5.35.23;
 the exact source-engine profile remains pinned to155.0.8059.79.
+Installed Chrome updated to155.0.8059.85 during October20 controls. Record each
+capture's actual browser/V8 identity; those earlier controls remain historical.
+The frozen .85 oracle now measures actual V815.5.35.25, so its engine patch differs
+from the native15.5.35.23-rusty SDK. The source profile is not silently relabeled;
+this remaining alignment work is tracked in [issue28](https://github.com/miaskiewicz/turbo-surf/issues/28).
+Use the [Chrome parity runbook](../CHROME-PARITY-RUNBOOK.md) for the complete
+feature, timing, tracing and executable-selection procedure and current validation limits.
 On2026-10-15 the version smoke, WindowProxy/security, original module-source units
 and code-generation regressions all pass with the matching guarded archive.
 Historical renderer cohort counts below apply to their recorded source; the

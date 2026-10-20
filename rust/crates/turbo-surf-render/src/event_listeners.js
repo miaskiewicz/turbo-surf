@@ -1,9 +1,9 @@
 (function(){
   'use strict';
   const g=globalThis,ns=g[Symbol.for('ts')],native=g.__windowListenerNative;delete g.__windowListenerNative;
-  const make=ns.makeNativeFunction,apply=Reflect.apply,create=Object.create,StringValue=String,ErrorType=TypeError,define=Object.defineProperty;
+  const make=ns.makeNativeFunction,apply=Reflect.apply,create=Object.create,StringValue=String,ErrorType=TypeError,define=Object.defineProperty,getPrototype=Object.getPrototypeOf,setPrototype=Object.setPrototypeOf;
   let Exception=g.DOMException;
-  const oldHost=g.__captureHostEventDispatch,BaseTarget=g.EventTarget,EventType=g.Event,document=g.document;
+  const oldHost=g.__captureHostEventDispatch,BaseTarget=g.EventTarget,NodeConstructor=g.Node,EventType=g.Event,document=g.document;
   const ownIndex=(value,index,item)=>define(value,index,{__proto__:null,value:item,writable:true,configurable:true,enumerable:true});
   const push=(value,item)=>{ownIndex(value,value.length,item);return value.length;};
   const slice=value=>{const result=[];for(let index=0;index<value.length;index++)ownIndex(result,index,value[index]);return result;};
@@ -12,6 +12,9 @@
   const splice=(value,index)=>{for(let at=index;at+1<value.length;at++)ownIndex(value,at,value[at+1]);delete value[value.length-1];value.length--;};
   const NativeTarget=make(class EventTarget extends BaseTarget{constructor(){super();native('targetSet',this,{__proto__:null,listeners:[],handlers:create(null)})}},'EventTarget',0,true,true);
   NativeTarget.prototype=BaseTarget.prototype;define(NativeTarget.prototype,'constructor',{value:NativeTarget,writable:true,configurable:true});define(NativeTarget,'prototype',{writable:false});define(g,'EventTarget',{value:NativeTarget,writable:true,configurable:true});
+  // Node was projected before the listener-backed constructor replaced EventTarget.
+  // Keep its constructor inheritance aligned without replacing its instance prototype.
+  if(getPrototype(NodeConstructor)===BaseTarget)setPrototype(NodeConstructor,NativeTarget);
   const readEvent=event=>{const state=native('event',event);if(!state)throw new ErrorType('Argument must be an Event');return state;};
   const method=(object,name,fn,length)=>define(object,name,{value:make(fn,name,length),writable:true,configurable:true,enumerable:true});
   const getter=(object,name,fn)=>define(object,name,{get:make(fn,'get '+name,0),configurable:true,enumerable:true});

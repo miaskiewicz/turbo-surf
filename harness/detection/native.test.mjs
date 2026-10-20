@@ -1,8 +1,10 @@
 import { test } from "node:test";
+import { superviseTestChild } from "./child-supervision.mjs";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
 import {
+  appendFileSync,
+  mkdirSync,
   existsSync,
   readFileSync,
   writeFileSync,
@@ -20,29 +22,27 @@ const binary = resolve(
   process.env.TURBO_SURF_DETECTION_BINARY ||
     join(root, "rust/target/debug/examples/detection_trace"),
 );
-const run = (cmd, args) =>
-  new Promise((done, fail) => {
-    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let output = "";
-    child.stdout.on("data", (d) => {
-      output += d;
-    });
-    child.stderr.on("data", (d) => {
-      output += d;
-    });
-    const timer = setTimeout(() => child.kill("SIGKILL"), 45000);
-    child.on("error", fail);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      code === 0 ? done(output) : fail(new Error(`${code}: ${output}`));
-    });
+async function run(t, command, args) {
+  const directory = args.at(-1);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  for (const name of ["stdout", "stderr"])
+    writeFileSync(join(directory, `${name}.log`), "", { mode: 0o600 });
+  const result = await superviseTestChild(t, command, args, {
+    timeoutMs: 45000,
+    onOutput: (name, bytes) => appendFileSync(join(directory, `${name}.log`), bytes),
   });
+  const output = result.stdout + result.stderr;
+  if (result.code !== 0 || result.error || result.timedOut || result.aborted)
+    throw new Error(`${result.code}: ${output}\n${JSON.stringify(result)}`);
+  return output;
+}
 
 test(
   "native trace follows a localhost JS retry and preserves payloads without exposing HttpOnly",
   { skip: !existsSync(binary) },
-  async () => {
+  async (t) => {
     const out = mkdtempSync(join(tmpdir(), "detection-native-test-"));
+    let complete = false;
     const seen = [];
     const server = createServer((req, res) => {
       const url = new URL(req.url, "http://localhost");
@@ -98,7 +98,7 @@ test(
           steps: [{ focus: "input[name=q]" }, { type: "fixture query" }, { press: "Enter" }],
         }),
       );
-      await run(frozen, [config, join(out, "capture")]);
+      await run(t, frozen, [config, join(out, "capture")]);
       const trace = JSON.parse(readFileSync(join(out, "capture/trace.json")));
       assert.deepEqual(trace.errors, []);
       assert.equal(trace.navigationSource, "native-form");
@@ -132,10 +132,12 @@ test(
       assert(
         trace.pages.some((p) => p.interfaces?.accesses.some((a) => a.name.endsWith(".cookie"))),
       );
+      complete = true;
     } finally {
       server.closeAllConnections();
       await new Promise((done) => server.close(done));
-      rmSync(out, { recursive: true, force: true });
+      if (complete) rmSync(out, { recursive: true, force: true });
+      else t.diagnostic(`Native failure evidence retained at ${out}`);
     }
   },
 );
@@ -143,8 +145,9 @@ test(
 test(
   "native trace retains a same-URL POST response without a fallback refetch",
   { skip: !existsSync(binary) },
-  async () => {
+  async (t) => {
     const out = mkdtempSync(join(tmpdir(), "detection-native-post-"));
+    let complete = false;
     const seen = [];
     const server = createServer((req, res) => {
       let body = "";
@@ -169,7 +172,7 @@ test(
       const url = `http://127.0.0.1:${server.address().port}/same`;
       const config = join(out, "config.json");
       writeFileSync(config, JSON.stringify({ url, steps: [], requireNativeFormNavigation: true }));
-      await run(binary, [config, join(out, "capture")]);
+      await run(t, binary, [config, join(out, "capture")]);
       const trace = JSON.parse(readFileSync(join(out, "capture/trace.json")));
       assert.deepEqual(trace.errors, []);
       assert.equal(trace.navigationSource, "native-form");
@@ -187,10 +190,12 @@ test(
         readFileSync(join(out, "capture", `${final.phase}.html`), "utf8"),
         /Actual POST response/,
       );
+      complete = true;
     } finally {
       server.closeAllConnections();
       await new Promise((done) => server.close(done));
-      rmSync(out, { recursive: true, force: true });
+      if (complete) rmSync(out, { recursive: true, force: true });
+      else t.diagnostic(`Native failure evidence retained at ${out}`);
     }
   },
 );
@@ -198,8 +203,9 @@ test(
 test(
   "native trace preserves trusted handler location activation before automatic retries",
   { skip: !existsSync(binary) },
-  async () => {
+  async (t) => {
     const out = mkdtempSync(join(tmpdir(), "detection-handler-navigation-"));
+    let complete = false;
     const seen = [];
     const server = createServer((req, res) => {
       const parsed = new URL(req.url, "http://localhost");
@@ -242,7 +248,7 @@ test(
           config,
           JSON.stringify({ url: `http://127.0.0.1:${server.address().port}/`, steps }),
         );
-        await run(frozen, [config, join(out, name)]);
+        await run(t, frozen, [config, join(out, name)]);
         const trace = JSON.parse(readFileSync(join(out, name, "trace.json")));
         assert.deepEqual(trace.errors, []);
         assert.equal(trace.navigationSource, "script");
@@ -260,10 +266,12 @@ test(
           );
         }
       }
+      complete = true;
     } finally {
       server.closeAllConnections();
       await new Promise((done) => server.close(done));
-      rmSync(out, { recursive: true, force: true });
+      if (complete) rmSync(out, { recursive: true, force: true });
+      else t.diagnostic(`Native failure evidence retained at ${out}`);
     }
   },
 );
@@ -271,8 +279,9 @@ test(
 test(
   "consent dismissal waits real elapsed time and installs delayed response cookies before search",
   { skip: !existsSync(binary) },
-  async () => {
+  async (t) => {
     const out = mkdtempSync(join(tmpdir(), "detection-consent-wait-"));
+    let complete = false;
     const seen = [];
     const server = createServer((req, res) => {
       const path = new URL(req.url, "http://localhost").pathname;
@@ -312,7 +321,7 @@ test(
           ],
         }),
       );
-      await run(binary, [config, join(out, "capture")]);
+      await run(t, binary, [config, join(out, "capture")]);
       const home = seen.find((request) => request.path === "/");
       const saved = seen.find((request) => request.path === "/save");
       const search = seen.find((request) => request.path === "/search");
@@ -323,10 +332,12 @@ test(
       const trace = JSON.parse(readFileSync(join(out, "capture/trace.json")));
       assert.deepEqual(trace.errors, []);
       assert.equal(trace.dismissal.clicked, true);
+      complete = true;
     } finally {
       server.closeAllConnections();
       await new Promise((done) => server.close(done));
-      rmSync(out, { recursive: true, force: true });
+      if (complete) rmSync(out, { recursive: true, force: true });
+      else t.diagnostic(`Native failure evidence retained at ${out}`);
     }
   },
 );

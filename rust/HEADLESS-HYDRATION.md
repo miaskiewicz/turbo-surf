@@ -47,6 +47,44 @@ Validated end to end: a mock SPA hydrates into `#root`, an XHR/`fetch`-driven pa
 fills from a localhost server, and **real jQuery** (`quotes.toscrape.com/js`) renders
 its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 
+
+**October19 trusted input follow-up:** the private driver captures native current
+layout geometry for target centers, replaces live input/textarea selections and
+preserves cancellation. Geometry setup initializes the unchanged shared system
+font registry before guest execution; cold discovery is an engine startup cost
+rather than a later input-budget cost. The detection example applies actual
+readiness checks, real dwell/character cadence and per-step snapshots. The
+subsequent real-time comparison mode is described below. Paired Chrome/native localhost
+controls verify trusted consent, cookie ordering, target/query, form navigation
+and results; failed readiness prevents input. The actual native155 focused input
+and diagnostic targets pass19/19. These controls do not certify live Google
+acceptance or identical browser event timing.
+
+**October20 comparison timing:** the detection example now selects
+`PageSessionOptions { window_timer_mode: WindowTimerMode::RealTime,
+..Default::default() }` through `open_with_document_response_and_options` before
+hydration. Existing constructors keep fast virtual timers. The host policy gates
+all Window/frame timer drains and uses real deadlines for awaited timers; idle
+pumps leave unrelated future timers queued. Form navigation inherits timer mode.
+An optional `initial_hydration_budget_ms` caps only initial hydration, is consumed
+after opening, and cannot enlarge the configured budget for later operations.
+Ten focused default-engine controls pass with strict render Clippy and formatting,
+including clock agreement, frames, cancellation and the one-shot budget cap.
+The subsequent genuine-native155 integration passes 66 focused tests, including
+13 timer controls and the measured signed32 delay conversion/overflow guards,
+affected-crate strict Clippy and formatting. Paired timing and full workspace
+validation remain separate pending gates.
+
+The October20 diagnostic startup initializes the compiled hooks through
+`turbo_surf_mcp::initialize_render_hooks()` without loading solver configuration
+or `.env`. Production `Session::new()` keeps its existing solver setup. Optional
+private host-input evidence steps retain the actual control and expected UTF-16
+insertion, verify its connection/focus/value after typing and before Enter, and
+release it on completion or budget cancellation. They dispatch no input events
+and do not refocus or repair page text. The earlier native checkpoint passes47 integration
+and four example tests; the expanded66-test checkpoint is described above. Full
+workspace, consumer and combined browser gates remain separate.
+
 **Execution model and remaining gaps:**
 
 - Native WebCrypto uses the hardened licensed Deno provider and genuine X-Wing
@@ -78,7 +116,7 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
   endpoints and caret affinity. Producer767 full tests and41 focused controls pass;
   its test-only follow-up `4999290` passes768 tests with9,806/9,806 coverage and identical
   production bytes. All nineteen whitespace scenes compare exactly through actual
-  DOM/CSS. Implementation a005140 passes the full stock-V8-150 workspace1,411
+  DOM/CSS. The October17 implementation a005140 passes the full stock-V8-150 workspace1,411
   tests and native-V8-155 workspace1,456, strict Clippy and formatting, preserving
   all1,457 selected implementation source hashes. Rebuilt native addon/Node/CDP
   gates also pass; fresh75-interface API residuals remain unchanged. Fresh Google

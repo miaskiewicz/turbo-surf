@@ -1,3 +1,4 @@
+import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -6,7 +7,27 @@ import { join, resolve } from "node:path";
 // Fresh Chrome oracle; no cookies leave this process or feed the native attempt.
 import { enrichProtocolHeaders } from "./protocol-headers.mjs";
 import { enrichResponseTransport, responseNetworkEvents } from "./chrome-network-metadata.mjs";
+import {
+  captureStableDocument,
+  finishObservation,
+  observationMilliseconds,
+  observationTriggerIndex,
+  startObservation,
+  waitForObservation,
+} from "./observation-window.mjs";
+import { createMainNavigationTracker } from "./main-navigation.mjs";
+import { collectorLifecycle, captureOwnedLaunch } from "./collector-lifecycle.mjs";
+import {
+  chromeExecutable,
+  effectiveTypedControl,
+  prepareTypedControl,
+  requireEffectiveInput,
+} from "./effective-input.mjs";
 const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const observationMs = observationMilliseconds(config);
+const observationClock = { monotonic: () => performance.now(), wall: () => Date.now() };
+let observationWindow = null;
+const mainNavigation = createMainNavigationTracker();
 if (config.chromeBackend !== "patchright") {
   await import("./chrome-cdp-trace.mjs");
   process.exit(process.exitCode || 0);
@@ -17,12 +38,17 @@ const require = createRequire(
 const { chromium } = require("patchright");
 const out = resolve(process.argv[3]);
 const instrumented = config.interfaces;
+const inputStateSource = readFileSync(new URL("./input-state.js", import.meta.url), "utf8");
 mkdirSync(out, { recursive: true });
 const profile = mkdtempSync(join(tmpdir(), "turbo-search-oracle-"));
-let context;
+let context, networkSession, browserVersion, browserV8Version;
+const executable = chromeExecutable(config);
 const requests = [],
+  actions = [],
+  dwell = [],
   responses = [],
   errors = [],
+  collectorErrors = [],
   pages = [],
   pending = [];
 const scripts = [],
@@ -30,28 +56,63 @@ const scripts = [],
   frames = [],
   probes = [];
 const protocolNetwork = [];
+let captureComplete = false,
+  dismissal = null;
+const lifecycle = collectorLifecycle({
+  onAbort(signal) {
+    captureComplete = false;
+    collectorError({ phase: "interrupted", signal });
+    process.exitCode = signal === "SIGINT" ? 130 : 143;
+    writeTrace();
+    void context?.close().catch(() => {});
+  },
+});
+async function pageDwell(stage) {
+  const span = { stage, requestedMs: config.waitMs || 0, startedMs: Date.now(), completed: false };
+  dwell.push(span);
+  const deadline = span.startedMs + span.requestedMs;
+  while (Date.now() < deadline) await lifecycle.pause(deadline - Date.now());
+  span.finishedMs = Date.now();
+  span.completed = true;
+}
+function collectorError(error) {
+  errors.push(error);
+  collectorErrors.push(error);
+}
 const requestIds = new WeakMap();
 const requestRows = new WeakMap();
 const startedAt = new Date().toISOString();
 let sequence = 0;
-try {
-  context = await chromium.launchPersistentContext(profile, {
-    channel: "chrome",
-    headless: false,
-    viewport: config.viewport || { width: 1280, height: 800 },
-    screen: config.screen || { width: 1920, height: 1080 },
-    deviceScaleFactor: config.deviceScaleFactor ?? 2,
-    // Playwright's locale override narrows navigator.languages to a single entry.
-    // Browser preferences retain the same ordered language list as the native profile.
-    args: [
-      `--lang=${config.locale || "en-US"}`,
-      `--accept-lang=${(config.languages || ["en-US", "en"]).join(",")}`,
-    ],
-    timezoneId: config.timezone,
-  });
+async function capture() {
+  context = await captureOwnedLaunch(
+    childProcess,
+    profile,
+    () =>
+      chromium.launchPersistentContext(profile, {
+        ...(executable ? { executablePath: executable } : { channel: "chrome" }),
+        handleSIGTERM: false,
+        handleSIGINT: false,
+        handleSIGHUP: false,
+        headless: false,
+        viewport: config.viewport || { width: 1280, height: 800 },
+        screen: config.screen || { width: 1920, height: 1080 },
+        deviceScaleFactor: config.deviceScaleFactor ?? 2,
+        // Playwright's locale override narrows navigator.languages to a single entry.
+        // Browser preferences retain the same ordered language list as the native profile.
+        args: [
+          `--lang=${config.locale || "en-US"}`,
+          `--accept-lang=${(config.languages || ["en-US", "en"]).join(",")}`,
+        ],
+        timezoneId: config.timezone,
+      }),
+    (child) => lifecycle.own(child),
+  );
   if (instrumented) await context.addInitScript({ path: config.interfaceScript });
   const page = context.pages()[0] || (await context.newPage());
   const windowSession = await context.newCDPSession(page);
+  const actualVersion = await windowSession.send("Browser.getVersion");
+  browserVersion = actualVersion.product;
+  browserV8Version = actualVersion.jsVersion;
   const { windowId } = await windowSession.send("Browser.getWindowForTarget");
   const viewport = config.viewport || { width: 1280, height: 800 };
   await windowSession.send("Browser.setWindowBounds", {
@@ -63,8 +124,14 @@ try {
   // debugger off in baseline runs; it can alter the detector's verdict on its own.
   {
     const cdp = await context.newCDPSession(page);
+    networkSession = cdp;
     const { frameTree } = await cdp.send("Page.getFrameTree");
     const mainFrameId = frameTree.frame.id;
+    mainNavigation.setScope({ sessionId: "main", frameId: mainFrameId });
+    cdp.on("Page.frameNavigated", ({ frame }) => mainNavigation.commit(frame, "main"));
+    cdp.on("Network.requestWillBeSent", (params) => mainNavigation.request(params, "main"));
+    cdp.on("Network.loadingFailed", (params) => mainNavigation.failed(params, "main"));
+    await cdp.send("Page.enable");
     // Network metadata is collected in both passes. This does not enable the
     // Debugger or inject page JavaScript; it still observes through CDP.
     for (const event of responseNetworkEvents) {
@@ -100,7 +167,7 @@ try {
                 startLine: s.startLine,
               });
             })
-            .catch((e) => errors.push(`script source: ${e}`)),
+            .catch((e) => collectorError(`script source: ${e}`)),
         );
       });
       await cdp.send("Debugger.enable");
@@ -179,115 +246,222 @@ try {
             row.bodyError = String(e);
           }
         }
-      })().catch((e) => errors.push(String(e))),
+      })().catch((e) => collectorError(String(e))),
     );
   });
   page.on("pageerror", (e) => errors.push(String(e)));
   const snapshot = async (phase) => {
-    let html;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        html = await page.content();
-        break;
-      } catch (e) {
-        if (attempt === 2) {
-          pages.push({ phase, url: page.url(), error: String(e) });
-          return;
+    const mainNavigationBeforeSnapshot = mainNavigation.snapshot();
+    const identity = async () => {
+      const { frameTree } = await networkSession.send("Page.getFrameTree");
+      return `${frameTree.frame.id}/${frameTree.frame.loaderId}`;
+    };
+    const { value, retries } = await captureStableDocument(identity, async () => {
+      const html = await page.content();
+      writeFileSync(join(out, `${phase}.html`), html, { mode: 0o600 });
+      const url = page.url();
+      const { frameTree } = await networkSession.send("Page.getFrameTree");
+      const frame = frameTree.frame;
+      const documentResponse = frame.loaderId
+        ? protocolNetwork.findLast(
+            (row) =>
+              row.event === "responseReceived" &&
+              row.params.type === "Document" &&
+              row.params.frameId === frame.id &&
+              row.params.loaderId === frame.loaderId,
+          )?.params.response
+        : null;
+      const childFrames = [];
+      if (instrumented)
+        for (const frame of page.frames().filter((f) => f !== page.mainFrame())) {
+          try {
+            childFrames.push({
+              url: frame.url(),
+              interfaces: await frame.evaluate(
+                () => globalThis[Symbol.for("turbo-surf.interface-trace")]?.snapshot(),
+                undefined,
+                false,
+              ),
+            });
+          } catch (e) {
+            childFrames.push({ url: frame.url(), error: String(e) });
+          }
         }
-        await page.waitForTimeout(200);
-      }
-    }
-    writeFileSync(join(out, `${phase}.html`), html, { mode: 0o600 });
-    const childFrames = [];
-    if (instrumented)
-      for (const frame of page.frames().filter((f) => f !== page.mainFrame())) {
-        try {
-          childFrames.push({
-            url: frame.url(),
-            interfaces: await frame.evaluate(
-              () => globalThis[Symbol.for("turbo-surf.interface-trace")]?.snapshot(),
-              undefined,
-              false,
-            ),
-          });
-        } catch (e) {
-          childFrames.push({ url: frame.url(), error: String(e) });
-        }
-      }
-    pages.push({
-      phase,
-      childFrames,
-      browserFixture: await page
-        .evaluate(
-          () => JSON.parse(JSON.stringify(globalThis.__browserFixture || null)),
+      return {
+        phase,
+        childFrames,
+        browserFixture: await page
+          .evaluate(
+            () => JSON.parse(JSON.stringify(globalThis.__browserFixture || null)),
+            undefined,
+            false,
+          )
+          .catch(() => null),
+        inputState: await page.evaluate(
+          `(()=>{const captureInputState=${inputStateSource}\nreturn captureInputState(document,${JSON.stringify(config.dismissSelector || "#W0wltc")});})()`,
           undefined,
           false,
-        )
-        .catch(() => null),
-      environment: await page
-        .evaluate(
-          () => ({
-            languages: navigator.languages,
-            language: navigator.language,
-            locale: Intl.DateTimeFormat().resolvedOptions().locale,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            timeZoneOffset: new Date().getTimezoneOffset(),
-            viewport: { width: innerWidth, height: innerHeight },
-            outerWindow: { width: outerWidth, height: outerHeight },
-            deviceScaleFactor: devicePixelRatio,
-            screen: {
-              width: screen.width,
-              height: screen.height,
-              availWidth: screen.availWidth,
-              availHeight: screen.availHeight,
-            },
-          }),
-          undefined,
-          false,
-        )
-        .catch((e) => ({ error: String(e) })),
-      url: page.url(),
-      bytes: Buffer.byteLength(html),
-      results: await page
-        .locator(config.successSelector || "#rso a h3, #search a h3")
-        .count()
-        .catch(() => null),
-      cookies: (await context.cookies()).map((c) => ({ name: c.name, domain: c.domain })),
-      interfaces: instrumented
-        ? await page
-            .evaluate(
-              () => globalThis[Symbol.for("turbo-surf.interface-trace")]?.snapshot(),
-              undefined,
-              false,
-            )
-            .catch((e) => ({ error: String(e) }))
-        : null,
+        ),
+        environment: await page
+          .evaluate(
+            () => ({
+              languages: navigator.languages,
+              language: navigator.language,
+              locale: Intl.DateTimeFormat().resolvedOptions().locale,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              timeZoneOffset: new Date().getTimezoneOffset(),
+              viewport: { width: innerWidth, height: innerHeight },
+              outerWindow: { width: outerWidth, height: outerHeight },
+              deviceScaleFactor: devicePixelRatio,
+              screen: {
+                width: screen.width,
+                height: screen.height,
+                availWidth: screen.availWidth,
+                availHeight: screen.availHeight,
+              },
+            }),
+            undefined,
+            false,
+          )
+          .catch((e) => ({ error: String(e) })),
+        url,
+        status: documentResponse?.status ?? null,
+        statusSource: documentResponse ? "cdp-main-document-loader" : "unavailable",
+        statusDocumentUrl: documentResponse?.url ?? null,
+        readyState: await page.evaluate(() => document.readyState, undefined, false),
+        bytes: Buffer.byteLength(html),
+        results: await page
+          .locator(config.successSelector || "#rso a h3, #search a h3")
+          .count()
+          .catch(() => null),
+        cookies: (await context.cookies()).map((c) => ({ name: c.name, domain: c.domain })),
+        interfaces: instrumented
+          ? await page
+              .evaluate(
+                () => globalThis[Symbol.for("turbo-surf.interface-trace")]?.snapshot(),
+                undefined,
+                false,
+              )
+              .catch((e) => ({ error: String(e) }))
+          : null,
+      };
     });
+    value.navigationSnapshotRetries = retries;
+    value.mainNavigationBeforeSnapshot = mainNavigationBeforeSnapshot;
+    pages.push(value);
   };
   await page.goto(config.url, {
     waitUntil: config.waitUntil || "domcontentloaded",
     timeout: 30000,
   });
   if (config.readySelector)
-    await page.locator(config.readySelector).waitFor({ state: "attached", timeout: 5000 });
-  await page.waitForTimeout(config.waitMs);
+    await page.locator(config.readySelector).waitFor({
+      state: "attached",
+      timeout: config.readyTimeoutMs ?? 5000,
+    });
+  await pageDwell("home");
   await snapshot("home");
-  if (config.dismissSelector && (await page.locator(config.dismissSelector).count())) {
-    await page.locator(config.dismissSelector).first().click();
-    await page.waitForTimeout(config.waitMs);
-    await snapshot("dismiss");
+  if (config.dismissSelector) {
+    const present = !!(await page.locator(config.dismissSelector).count());
+    dismissal = { selector: config.dismissSelector, present, clicked: false };
+    if (present) {
+      await page.locator(config.dismissSelector).first().hover();
+      await page.locator(config.dismissSelector).first().click();
+      dismissal.clicked = true;
+      await pageDwell("dismiss");
+      await snapshot("dismiss");
+    }
   }
+  let focusSelector = null,
+    typedInput = null;
+  const controlCall = (handle, fn, value) => handle.evaluate(fn, value, false);
+  const verifyTypedInput = async () => {
+    const evidence = await controlCall(
+      typedInput.handle,
+      effectiveTypedControl,
+      typedInput.expected,
+    );
+    try {
+      return requireEffectiveInput(evidence);
+    } catch (error) {
+      collectorError({ phase: "effective-input", evidence });
+      throw error;
+    }
+  };
+  const observationIndex = observationTriggerIndex(config.steps || []);
   for (const [i, step] of config.steps.entries()) {
+    if (i === observationIndex)
+      observationWindow = startObservation(observationMs, i, observationClock);
+    lifecycle.throwIfAborted();
+    const startedMs = Date.now();
+    let inputEvidence;
     if (step.move) await page.locator(step.move.selector).first().hover();
     if (step.click) await page.locator(step.click).first().click();
-    if (step.focus) await page.locator(step.focus).first().focus();
-    if (step.type !== undefined) await page.keyboard.type(step.type, { delay: 110 });
-    if (step.press) await page.keyboard.press(step.press);
+    if (step.focus) {
+      focusSelector = step.focus;
+      await page.locator(step.focus).first().focus();
+      if (
+        !(await page.evaluate(
+          (selector) => document.activeElement === document.querySelector(selector),
+          step.focus,
+        ))
+      )
+        throw new Error("Focus selector did not become active");
+    }
+    if (step.type !== undefined) {
+      await typedInput?.handle.dispose();
+      const handle = (
+        await page.evaluateHandle(
+          focusSelector
+            ? `document.querySelector(${JSON.stringify(focusSelector)})`
+            : "document.activeElement",
+          undefined,
+          false,
+        )
+      ).asElement();
+      if (!handle) throw new Error("Typing control is unavailable");
+      typedInput = {
+        handle,
+        ...(await controlCall(handle, prepareTypedControl, String(step.type))),
+      };
+      await page.keyboard.type(step.type, { delay: config.inputCadenceMs ?? 110 });
+      inputEvidence = await verifyTypedInput();
+    }
+    if (step.press) {
+      if (step.press === "Enter" && typedInput) await verifyTypedInput();
+      await page.keyboard.press(step.press);
+    }
     if (step.wait) await page.waitForTimeout(step.wait);
+    actions.push({
+      index: i,
+      action: Object.keys(step)[0],
+      ...(inputEvidence ? { inputEvidence } : {}),
+      completed: true,
+      startedMs,
+      finishedMs: Date.now(),
+    });
     await snapshot(`step-${i}`);
   }
-  await page.waitForTimeout(config.waitMs);
+  if (observationWindow)
+    await waitForObservation(observationWindow, observationClock, (milliseconds) =>
+      page.waitForTimeout(milliseconds),
+    );
+  else await pageDwell("search");
+  const snapshotStarted = observationClock.monotonic();
+  if (observationWindow) observationWindow.record.snapshotStartedMs = Date.now();
   await snapshot("search");
+  if (observationWindow) {
+    const navigation = mainNavigation.snapshot();
+    finishObservation(
+      observationWindow,
+      observationClock,
+      !navigation.pendingNavigation && !navigation.navigationFailed,
+      {
+        ...navigation,
+        snapshotElapsedMs: observationClock.monotonic() - snapshotStarted,
+      },
+    );
+  }
   for (const path of config.probes || []) {
     try {
       const raw = await page.evaluate(readFileSync(path, "utf8"), undefined, false);
@@ -296,16 +470,49 @@ try {
       probes.push({ path, error: String(e) });
     }
   }
+  lifecycle.throwIfAborted();
+  captureComplete = true;
+}
+try {
+  await lifecycle.race(capture());
 } catch (e) {
-  errors.push({ phase: "capture", error: String(e) });
+  if (observationWindow) finishObservation(observationWindow, observationClock, false);
+  collectorError({ phase: "capture", error: String(e) });
   process.exitCode = 1;
 } finally {
-  // Close only after draining the response/source tasks; closing first loses bodies.
-  for (let i = 0; i < pending.length; ) {
-    const batch = pending.slice(i);
-    i = pending.length;
-    await Promise.allSettled(batch);
+  try {
+    // Close only after draining the response/source tasks; closing first loses bodies.
+    for (let i = 0; i < pending.length; ) {
+      const batch = pending.slice(i);
+      i = pending.length;
+      if (lifecycle.signal.aborted) break;
+      await lifecycle.race(Promise.allSettled(batch)).catch(() => {});
+    }
+    writeTrace();
+    console.log(
+      JSON.stringify({
+        out,
+        instrumented,
+        requests: requests.length,
+        final: {
+          path: new URL(pages.at(-1)?.url || "about:blank").pathname,
+          results: pages.at(-1)?.results,
+        },
+        errors: errors.length,
+      }),
+    );
+  } finally {
+    await Promise.race([
+      context?.close().catch(() => {}),
+      new Promise((done) => setTimeout(done, 500)),
+    ]);
+    await lifecycle.stopBrowser();
+    lifecycle.dispose();
+    rmSync(profile, { recursive: true, force: true });
   }
+}
+
+function writeTrace() {
   enrichProtocolHeaders(requests, protocolNetwork);
   enrichResponseTransport(requests, responses, protocolNetwork);
   writeFileSync(
@@ -315,8 +522,16 @@ try {
         runtime: "chrome",
         backend: "patchright",
         instrumented,
+        captureComplete: captureComplete && collectorErrors.length === 0,
+        collectorErrors,
+        actions,
+        dwell,
+        observation: observationWindow?.record ?? null,
+        dismissal,
         startedAt,
-        browserVersion: context?.browser()?.version(),
+        browserVersion,
+        browserV8Version,
+        executable: executable || "installed-channel:chrome",
         config,
         pages,
         requests,
@@ -344,18 +559,4 @@ try {
     ),
     { mode: 0o600 },
   );
-  console.log(
-    JSON.stringify({
-      out,
-      instrumented,
-      requests: requests.length,
-      final: {
-        path: new URL(pages.at(-1)?.url || "about:blank").pathname,
-        results: pages.at(-1)?.results,
-      },
-      errors: errors.length,
-    }),
-  );
-  await context?.close();
-  rmSync(profile, { recursive: true, force: true });
 }

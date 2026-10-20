@@ -182,9 +182,18 @@ fn declarations(
         (true, &block.important_declarations),
     ] {
         for property in properties {
-            // The producer inherits font longhands. Expand the parser's typed
-            // shorthand before that seam, preserving resets and source order.
-            let expanded = if matches!(property, Property::Font(_) | Property::Animation(..)) {
+            // Expand typed shorthands before ranking: a retained UA longhand
+            // must not override a stronger authored border or font shorthand.
+            let expanded = if matches!(
+                property,
+                Property::Font(_)
+                    | Property::Animation(..)
+                    | Property::Border(_)
+                    | Property::BorderTop(_)
+                    | Property::BorderRight(_)
+                    | Property::BorderBottom(_)
+                    | Property::BorderLeft(_)
+            ) {
                 property
                     .property_id()
                     .longhands()

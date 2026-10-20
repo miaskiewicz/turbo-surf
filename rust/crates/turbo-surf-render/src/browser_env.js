@@ -1,6 +1,6 @@
 (function(){
   var g = globalThis;
-  var compatibilityElementPrototype,computedStyleNativeMatches,computedStyleNativeOwner;
+  var compatibilityElementPrototype,computedStyleNativeMatches,computedStyleNativeOwner,computedStyleNativeTag,computedStyleNativeNamespace,computedStyleNativeConnected,computedStyleNativeRoot;
   var normalizeComputedColor=g.__normalizeComputedColor;delete g.__normalizeComputedColor;
   var computedFontContext=g.__computedFontContext;delete g.__computedFontContext;
   var cssFontNumber=Number,cssFontString=String,cssFontFinite=Number.isFinite,cssFontPrecision=Number.prototype.toPrecision,cssFontLower=String.prototype.toLowerCase;
@@ -17,6 +17,9 @@
   var cssNativeParse=__ns.parseCssNative,cssSetPrototype=Object.setPrototypeOf,cssApply=Reflect.apply,cssMapGet=Function.prototype.call.bind(Map.prototype.get),cssTagUpper=Function.prototype.call.bind(String.prototype.toUpperCase);
   if (typeof g.__domAccessor === 'function') { __ns.domAccessor = g.__domAccessor; delete g.__domAccessor; }
   computedStyleNativeOwner=__ns.domAccessor('ownerDocument',false,'Node');
+  computedStyleNativeTag=__ns.domAccessor('tagName',false,'Element');
+  computedStyleNativeNamespace=__ns.domAccessor('namespaceURI',false,'Element');
+  computedStyleNativeConnected=__ns.domAccessor('isConnected',false,'Node');
   if (typeof g.__nativeDOMFunction === 'function') { __ns.makeNativeFunction = g.__nativeDOMFunction; delete g.__nativeDOMFunction; }
   if (typeof g.__nativeNamedObject === 'function') { __ns.makeNamedObject = g.__nativeNamedObject; delete g.__nativeNamedObject; }
   if (typeof g.navigator === 'undefined') g.navigator = { userAgent: 'turbo-test', platform: 'rust', language: 'en-US', languages: ['en-US'], clipboard: {}, maxTouchPoints: 0 };
@@ -154,8 +157,9 @@
     var camel = function(p){ return p.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); }); };
     var decl = { __proto__:null, getPropertyValue: function(p){ var v = this[p]; if (v == null) v = this[camel(p)]; return v == null ? '' : String(v); }, getPropertyPriority: function(){ return ''; }, length: 0 };
     // Minimal cascade: merge declarations from every injected stylesheet rule whose selector matches
-    // `el` (emotion's `sx` -> `.css-xxx{...}`), then overlay the element's inline style (highest
-    // priority). Common authored values remain observable before layout-dependent resolution.
+    // `el` (emotion's `sx` -> `.css-xxx{...}`), then overlay inline declarations,
+    // retaining per-longhand importance through shorthand expansion. Common authored
+    // values remain observable before layout-dependent resolution.
     // Properties are exposed both kebab and camelCase.
     // Normalize comma-spacing ("a,b" -> "a, b"): minified emotion rules drop the space, but jest-dom
     // toHaveStyle's expected value is normalized by the browser's CSS parser (which inserts ", "),
@@ -170,33 +174,44 @@
     };
     // Length-valued properties resolve a bare zero to the computed "0px" spelling.
     var LEN_PROP = /(width|height|^top$|^right$|^bottom$|^left$|^inset|margin|padding|gap|^flex-basis$|radius|^font-size$|letter-spacing|word-spacing|text-indent|^outline-offset$|^column-(width|gap)$|size$)/;
-    var setProp = function(name, val){ name = String(name).trim(); if (!name) return; if (typeof val === 'string'){ var t = val.trim(); if (t.charAt(0) === '#') val = normColor(t); else if (t === '0' && LEN_PROP.test(name)) val = '0px'; else if (val.indexOf(',') >= 0) val = cssPrelude(val,true); } decl[name] = val; decl[camel(name)] = val;
-      if (typeof val === 'string') expandShorthand(name, val, setProp);
+    // Priority is private per computed snapshot; public CSSStyleDeclaration methods
+    // and page overrides cannot change the importance of parsed declarations.
+    var uaValues=null,priorities={__proto__:null};
+    var setProp = function(name, val, important){ name = String(name).trim(); if (!name) return; if(important!==undefined){if(priorities[name]&&!important)return;priorities[name]=important;} if(uaValues&&typeof val==='string'&&/^revert$/i.test(val.trim())&&uaValues[name]!==undefined)val=uaValues[name]; if (typeof val === 'string'){ var t = val.trim(); if (t.charAt(0) === '#') val = normColor(t); else if (t === '0' && LEN_PROP.test(name)) val = '0px'; else if (val.indexOf(',') >= 0) val = cssPrelude(val,true); } decl[name] = val; decl[camel(name)] = val;
+      if (typeof val === 'string') expandShorthand(name, val, function(property,value){setProp(property,value,important);});
     };
+    function applyDeclarations(record){for(var index=0;index<record.names.length;index++){var name=record.names[index],value=cssMapGet(record.values,name);setProp(name,value.text,value.priority==='important');}}
+    // Measured Chrome button defaults are UA declarations: every matching author
+    // rule (including a universal selector) and inline value takes precedence.
+    var ua = null;
+    try { if(cssApply(computedStyleNativeTag,el,[])==='BUTTON'&&cssApply(computedStyleNativeNamespace,el,[])==='http://www.w3.org/1999/xhtml'&&cssApply(computedStyleNativeConnected,el,[])){var fontContext=computedFontContext(el);if(fontContext&&fontContext[4])ua={'display':'inline-block','font':'13.3333px Arial','margin':'0px','padding':'1px 6px','border-width':'2px','vertical-align':'baseline'};} } catch(e){}
+    if(ua){Object.keys(ua).forEach(function(name){setProp(name,ua[name]);});uaValues=Object.create(null);Object.keys(decl).forEach(function(name){if(typeof decl[name]==='string')uaValues[name]=decl[name];});}
     try {
       var owner=el?cssApply(computedStyleNativeOwner,el,[]):null;
       // A live list refreshes on every indexed/length read. Refresh its private
       // backing array once per computation; retained declarations still recompute.
       var ownerRecord=owner&&collectionGet(owner),host=ownerRecord&&ownerRecord.cssHost;
       var sheets = host ? host.readSheets() : [];
+      // Document adoption follows ordinary sheets, but is not a shadow-tree scope.
+      var adopted=adoptionStates&&adoptionStates.get(owner);
+      if(adopted&&cssApply(computedStyleNativeRoot,el,[])===owner){var active=[];cssSetPrototype(active,null);for(var index=0;index<sheets.length;index++)active[active.length]=sheets[index];for(var index=0;index<adopted.target.length;index++)active[active.length]=adopted.target[index];sheets=active;}
       for (var si=0; si<sheets.length; si++) {
         if(sheetRecord(sheets[si]).disabled)continue;
         var rules = appliedSheetRuleRecords(sheets[si]);
         for (var ri=0; ri<rules.length; ri++) {
           var txt = String(cssRuleText(rules[ri]) || ''); var br = txt.indexOf('{'); if (br < 0) continue;
-          var sel = txt.slice(0, br).trim(); var body = txt.slice(br+1, txt.lastIndexOf('}'));
+          var sel = txt.slice(0, br).trim();
           var matched = false;
           var parts = sel.split(',');
           for (var pi=0; pi<parts.length; pi++){ var s = parts[pi].trim(); if (!s) continue; try { if (cssApply(computedStyleNativeMatches,el,[s])) { matched = true; break; } } catch(e){} }
           if (!matched) continue;
-          var ds = body.split(';');
-          for (var di=0; di<ds.length; di++){ var c = ds[di].indexOf(':'); if (c<0) continue; setProp(ds[di].slice(0,c), ds[di].slice(c+1).trim()); }
+          applyDeclarations(declarationRecord(rules[ri].style));
         }
       }
     } catch(e){}
     // overlay inline style (own props React/components set: background, height, display, ...)
     var st = el && __ns.makeInlineStyleDeclaration(el);
-    if (st) { var inline=declarationText(declarationRecord(st));cssParts(inline,';').forEach(function(part){var colon=part.indexOf(':');if(colon>0)setProp(part.slice(0,colon),part.slice(colon+1).trim().replace(/\s*!important$/,''));}); }
+    if (st) applyDeclarations(declarationRecord(st));
     // Native cascade resolves authored inheritance; CSS-wide keywords and the
     // CanvasText initial value still require computed-value resolution here.
     var color = decl.color || '';
@@ -2114,6 +2129,7 @@ if(typeof __ns.makeNativeFunction==='function'){
       });
     });
     computedStyleNativeMatches=Object.getOwnPropertyDescriptor(prototypes.Element,'matches').value;
+    computedStyleNativeRoot=Object.getOwnPropertyDescriptor(prototypes.Node,'getRootNode').value;
     ['querySelector','querySelectorAll','append','prepend','replaceChildren'].forEach(function(name){
       var descriptor=Object.getOwnPropertyDescriptor(d,name)||Object.getOwnPropertyDescriptor(elementProto,name);
       if(descriptor)Object.defineProperty(documentProto,name,descriptor);

@@ -1,0 +1,54 @@
+{
+  "browser": "Chrome/155.0.8059.85",
+  "v8": "15.5.35.25",
+  "scope": "Derived from the unchanged genuine old-SERP fixture capture; element rectangles and integer metrics retained verbatim. HTML script/whitespace do not contribute layout boxes.",
+  "fullControlSha256": "ac4ac7b9996f06743fee21d0b3c242e1a9ab8139ccb6ebd405446488c72e90ef",
+  "captureSha256": "24409fa0ac662ba63fe3af9b09566530206ce0bb14708f58af24b8cbe93b0446",
+  "captureProbeSha256": "d234d2c96c6afa7377adec0ca7be4f65c5e22a51dd951dcdbf01697e6305f9cf",
+  "receiptSha256": "8921c6b8c866b7d99d28024c9453bd43281c11bc70c1c695c55516d171585d81",
+  "result": {
+    "bounds": [8, 18.71875, 1264, 21.5],
+    "rects": [[8, 18.71875, 0, 0], [8, 18.71875, 1264, 21.5], [8, 58.9375, 0, 0]],
+    "offset": [8, 19, 1264, 22],
+    "client": [0, 0, 0, 0],
+    "dismissCenterHitsButton": true,
+    "linkRange": {
+      "bounds": [8, 18.71875, 1264, 21.5],
+      "rects": [[8, 18.71875, 1264, 21.5], [8, 18.71875, 80.2578125, 21.5]]
+    },
+    "headingRange": {
+      "bounds": [8, 18.71875, 80.2578125, 21.5],
+      "rects": [[8, 18.71875, 80.2578125, 21.5]]
+    },
+    "dismiss": {
+      "bounds": [8, 58.9375, 53.7890625, 21.5],
+      "rects": [[8, 58.9375, 53.7890625, 21.5]],
+      "offset": [8, 59, 54, 22],
+      "client": [2, 2, 50, 18],
+      "style": {
+        "display": "inline-block",
+        "fontFamily": "Arial",
+        "fontSize": "13.3333px",
+        "fontWeight": "400",
+        "lineHeight": "normal",
+        "marginTop": "0px",
+        "marginRight": "0px",
+        "marginBottom": "0px",
+        "marginLeft": "0px",
+        "paddingTop": "1px",
+        "paddingRight": "6px",
+        "paddingBottom": "1px",
+        "paddingLeft": "6px",
+        "borderTopWidth": "2px",
+        "borderRightWidth": "2px",
+        "borderBottomWidth": "2px",
+        "borderLeftWidth": "2px",
+        "verticalAlign": "baseline",
+        "fontStyle": "normal",
+        "fontStretch": "100%",
+        "fontVariantCaps": "normal"
+      }
+    }
+  },
+  "buttonStyleControlSha256": "8608e00e140cf6b9136cd0aa4edd2a488d3af2cf6e52dac2b4b7efb0c583e8ea"
+}

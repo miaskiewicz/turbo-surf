@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const g=globalThis,native=g.__domImplementationNative;delete g.__domImplementationNative;
-  const make=g[Symbol.for('ts')].makeNativeFunction, define=Object.defineProperty,apply=Reflect.apply,setPrototype=Object.setPrototypeOf;
+  const make=g[Symbol.for('ts')].makeNativeFunction, define=Object.defineProperty,apply=Reflect.apply,setPrototype=Object.setPrototypeOf,getPrototype=Object.getPrototypeOf;
   const TypeErrorValue=TypeError,StringValue=String,Exception=g.DOMException,regexTest=RegExp.prototype.test,regexExec=RegExp.prototype.exec,stringSlice=String.prototype.slice;
   const string=value=>{if(typeof value==='symbol')throw new TypeErrorValue('Cannot convert a Symbol value to a string');return StringValue(value);};
   const type=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
@@ -74,6 +74,25 @@
   define(DocumentConstructor,'prototype',{__proto__:null,writable:false});
   define(g,'Document',{__proto__:null,value:DocumentConstructor,writable:true,configurable:true});
   setPrototype(HTMLDocument,DocumentConstructor);
+  const createText=Document.prototype.createTextNode,createFragment=Document.prototype.createDocumentFragment;
+  function nodeConstructor(name,parent,factory){
+    const instancePrototype=g[name].prototype;
+    const Constructor=make(function(data){
+      if(!new.target)throw new TypeErrorValue("Please use the new operator");
+      const node=apply(factory,contextDocument,name==='Text'?[data===undefined?'':string(data)]:[]),target=new.target.prototype;
+      setPrototype(node,target!==null&&(typeof target==='object'||typeof target==='function')?target:instancePrototype);
+      return node;
+    },name,0,true,true);
+    Constructor.prototype=instancePrototype;setPrototype(Constructor,parent);
+    define(instancePrototype,'constructor',{__proto__:null,value:Constructor,writable:true,configurable:true});
+    define(Constructor,'prototype',{__proto__:null,writable:false});
+    define(g,name,{__proto__:null,value:Constructor,writable:true,configurable:true,enumerable:false});
+    return Constructor;
+  }
+  nodeConstructor('Text',CharacterData,createText);
+  const OldFragment=DocumentFragment,Fragment=nodeConstructor('DocumentFragment',Node,createFragment);
+  if(getPrototype(ShadowRoot)===OldFragment)setPrototype(ShadowRoot,Fragment);
+
   const XMLDocument=make(function(){throw new TypeErrorValue('Illegal constructor');},'XMLDocument',0,true,true);
   setPrototype(XMLDocument,Document);setPrototype(XMLDocument.prototype,Document.prototype);
   define(XMLDocument.prototype,Symbol.toStringTag,{__proto__:null,value:'XMLDocument',configurable:true});

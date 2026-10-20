@@ -4,8 +4,11 @@
   const document = globalThis.document;
   const query = document.querySelector.bind(document);
   const focus = HTMLElement.prototype.focus;
+  const elementGeometry = ops.op_live_element_geometry;
+  const slice = String.prototype.slice;
   const apply = Reflect.apply;
   const activeElement = Object.getOwnPropertyDescriptor(Document.prototype, "activeElement").get;
+  const connected = Object.getOwnPropertyDescriptor(Node.prototype, "isConnected").get;
   const requestSubmit = HTMLFormElement.prototype.requestSubmit;
   const controls = document.querySelectorAll.bind(document);
   const matches = Element.prototype.matches;
@@ -36,6 +39,9 @@
       value: Object.getOwnPropertyDescriptor(prototype, "value"),
       disabled: Object.getOwnPropertyDescriptor(prototype, "disabled").get,
       readOnly: Object.getOwnPropertyDescriptor(prototype, "readOnly").get,
+      selectionStart: Object.getOwnPropertyDescriptor(prototype, "selectionStart").get,
+      selectionEnd: Object.getOwnPropertyDescriptor(prototype, "selectionEnd").get,
+      setSelectionRange: prototype.setSelectionRange,
     };
   }
   function editingControl(target) {
@@ -44,6 +50,56 @@
     } catch {
       return null;
     }
+  }
+  // Optional embedder evidence retains the actual control across snapshots, never a guest global.
+  let guardedInput = null;
+  function inputGuard(request) {
+    if (request === "clear") {
+      guardedInput = null;
+      return;
+    }
+    if (request && typeof request.begin === "string") {
+      guardedInput = null;
+      const target = request.selector
+        ? query(request.selector)
+        : apply(activeElement, document, []);
+      const getters = editingControl(target);
+      if (
+        !getters ||
+        apply(activeElement, document, []) !== target ||
+        !apply(connected, target, [])
+      )
+        throw new Error(
+          "Typing requires the intended connected editable control to remain focused",
+        );
+      const value = apply(getters.value.get, target, []);
+      const start = apply(getters.selectionStart, target, []) ?? value.length;
+      const end = apply(getters.selectionEnd, target, []) ?? value.length;
+      guardedInput = {
+        target,
+        getters,
+        expected: apply(slice, value, [0, start]) + request.begin + apply(slice, value, [end]),
+      };
+      return;
+    }
+    if (request !== "verify") throw new TypeError("Unsupported input guard request");
+    if (!guardedInput) throw new Error("No retained input control to verify");
+    const retained = guardedInput;
+    guardedInput = null;
+    const { target, getters, expected } = retained;
+    const state = {
+      expected,
+      value: apply(getters.value.get, target, []),
+      connected: apply(connected, target, []),
+      focused: apply(activeElement, document, []) === target,
+    };
+    if (!state.connected || !state.focused || state.value !== expected) {
+      throw new Error(
+        "Trusted typing did not produce the expected focused query; Enter was not sent: " +
+          JSON.stringify(state),
+      );
+    }
+    guardedInput = retained;
   }
   const schedule = setTimeout.bind(globalThis),
     clear = clearTimeout.bind(globalThis);
@@ -59,6 +115,7 @@
     });
   const cancel = () => {
     activeRun++;
+    guardedInput = null;
     for (const [timer, resolve] of waits) {
       clear(timer);
       resolve();
@@ -85,6 +142,26 @@
     const result = query(selector);
     if (!result) throw new Error("Missing input selector " + selector);
     return result;
+  }
+  function replaceSelection(target, getters, text) {
+    const value = apply(getters.value.get, target, []);
+    const start = apply(getters.selectionStart, target, []);
+    const end = apply(getters.selectionEnd, target, []);
+    if (start === null || end === null) {
+      apply(getters.value.set, target, [value + text]);
+      return;
+    }
+    apply(getters.value.set, target, [
+      apply(slice, value, [0, start]) + text + apply(slice, value, [end]),
+    ]);
+    const caret = start + text.length;
+    apply(getters.setSelectionRange, target, [caret, caret, "none"]);
+  }
+  // The driver installs before public geometry methods; use the captured native op.
+  function targetCenter(target) {
+    const box = elementGeometry(target).bounds;
+    cursorX = box[0] + box[2] / 2;
+    cursorY = box[1] + box[3] / 2;
   }
   async function edit(target, text, run) {
     const getters = editingControl(target);
@@ -118,7 +195,7 @@
       ) {
         const init = { data: char, inputType: "insertText", bubbles: true, composed: true };
         if (fire(target, "InputEvent", "beforeinput", { ...init, cancelable: true })) {
-          apply(getters.value.set, target, [String(apply(getters.value.get, target, [])) + char]);
+          replaceSelection(target, getters, char);
           fire(target, "InputEvent", "input", init);
         }
       }
@@ -169,6 +246,10 @@
     const run = ++activeRun;
     for (const step of steps) {
       if (run !== activeRun) return;
+      if (step.inputGuard != null) {
+        inputGuard(step.inputGuard);
+        continue;
+      }
       if (step.wait != null) {
         await wait(Math.max(0, Number(step.wait)));
         continue;
@@ -178,10 +259,8 @@
         continue;
       }
       if (step.move) {
-        const target = element(step.move.selector),
-          rectangle = target.getBoundingClientRect();
-        cursorX = rectangle.left + rectangle.width / 2;
-        cursorY = rectangle.top + rectangle.height / 2;
+        const target = element(step.move.selector);
+        targetCenter(target);
         const init = {
           clientX: cursorX,
           clientY: cursorY,
@@ -216,6 +295,7 @@
       }
       if (step.click) {
         const target = element(step.click);
+        targetCenter(target);
         const init = {
           clientX: cursorX,
           clientY: cursorY,

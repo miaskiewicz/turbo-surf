@@ -8,6 +8,8 @@ import {
   summarizeResponseTransport,
 } from "./chrome-network-metadata.mjs";
 
+import { captureSummary, observationSummary } from "./compare.mjs";
+
 const read = (path) => readFileSync(path, "utf8");
 const json = (path) => JSON.parse(read(path));
 const sha = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -50,6 +52,84 @@ const hydrationProgress = (page) => {
   };
 };
 
+const nonnegativeNumber = (value) =>
+  typeof value === "number" &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  value <= Number.MAX_SAFE_INTEGER
+    ? value
+    : null;
+const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+const safeObservation = (trace) => {
+  const observed = observationSummary(trace);
+  return {
+    evidence: observed.evidence,
+    complete: observed.complete,
+    policy: observed.policy === "fixed-deadline-before-enter" ? observed.policy : null,
+    triggerStepIndex: count(observed.triggerStepIndex),
+    requestedMs: count(observed.requestedMs),
+    elapsedMs: nonnegativeNumber(observed.elapsedMs),
+    overrunMs: nonnegativeNumber(observed.overrunMs),
+    ...Object.fromEntries(
+      ["pendingNavigation", "navigationFailed", "navigationWaitTimedOut", "navigationHopLimit"].map(
+        (key) => [key, typeof observed[key] === "boolean" ? observed[key] : null],
+      ),
+    ),
+  };
+};
+
+const terminationSignals = new Set([
+  "SIGINT",
+  "SIGTERM",
+  "SIGKILL",
+  "SIGABRT",
+  "SIGSEGV",
+  "SIGHUP",
+  "SIGQUIT",
+  "SIGBUS",
+  "SIGILL",
+  "SIGPIPE",
+  "SIGTRAP",
+  "SIGSYS",
+  "SIGXCPU",
+  "SIGXFSZ",
+  "SIGUSR1",
+  "SIGUSR2",
+]);
+export function processSummary(run) {
+  const fields = ["code", "timedOut", "aborted", "error", "signal"];
+  const present = fields.every((field) => Object.hasOwn(run, field));
+  const valid =
+    (Number.isInteger(run.code) || run.code === null) &&
+    typeof run.timedOut === "boolean" &&
+    typeof run.aborted === "boolean" &&
+    (run.error === null || typeof run.error === "string") &&
+    (run.signal === null || typeof run.signal === "string");
+  const evidence = !present ? "unmeasured" : valid ? "measured" : "invalid";
+  return {
+    evidence,
+    complete:
+      evidence === "unmeasured"
+        ? null
+        : valid &&
+          run.code === 0 &&
+          run.timedOut === false &&
+          run.aborted === false &&
+          run.error === null &&
+          run.signal === null,
+    exitCode: Number.isInteger(run.code) ? run.code : null,
+    timedOut: typeof run.timedOut === "boolean" ? run.timedOut : null,
+    aborted: typeof run.aborted === "boolean" ? run.aborted : null,
+    errorPresent: run.error === null ? false : typeof run.error === "string" ? true : null,
+    terminationSignal:
+      typeof run.signal === "string"
+        ? terminationSignals.has(run.signal)
+          ? run.signal
+          : "other"
+        : null,
+  };
+}
+
 export function summarizeRun(directory) {
   const manifest = json(join(directory, "manifest.json"));
   if (sha(join(directory, "native-executable")) !== manifest.binaryHash)
@@ -66,9 +146,11 @@ export function summarizeRun(directory) {
     const key = `${run.repeat}/${name}`;
     if (Object.hasOwn(runs, key)) throw new Error(`Duplicate capture ${key}`);
     const tracePath = join(repeatDirectory, name, "trace.json");
+    const process = processSummary(run);
     const entry = {
-      exitCode: run.code ?? null,
-      timedOut: Boolean(run.timedOut),
+      exitCode: process.exitCode,
+      timedOut: process.timedOut,
+      process,
       traceMissing: !existsSync(tracePath),
     };
     runs[key] = entry;
@@ -96,8 +178,15 @@ export function summarizeRun(directory) {
     const searchTimes = requests.filter((row) => pathname(row) === "/search").map(timestamp);
     const firstSearch =
       searchTimes.length && searchTimes.every(Number.isFinite) ? Math.min(...searchTimes) : null;
+    const capture = captureSummary(trace);
     Object.assign(entry, {
-      collectorComplete: trace.captureComplete ?? null,
+      collectorComplete: capture.complete,
+      collectorCompletionSource: capture.completionSource,
+      collectorErrorCount: capture.collectorErrorCount,
+      observation: safeObservation(trace),
+      windowTimerMode: ["real-time", "virtual"].includes(trace.windowTimerMode)
+        ? trace.windowTimerMode
+        : null,
       recordedErrorCount: trace.errors?.length || 0,
       responseTransport: (run.runtime === "chrome"
         ? summarizeResponseTransport
@@ -126,7 +215,9 @@ export function summarizeRun(directory) {
       startOrigin: publicOrigin(config),
       formFallbackDisabled: config.disableFormFallback === true,
       formFallbackUsed: Boolean(trace.formFallback),
-      navigationSource: ["native-form", "fallback", "none"].includes(trace.navigationSource)
+      navigationSource: ["native-form", "script", "form-fallback", "fallback", "none"].includes(
+        trace.navigationSource,
+      )
         ? trace.navigationSource
         : null,
       consent: {
@@ -177,7 +268,7 @@ export function summarizeRun(directory) {
   }
   const baselines = Object.entries(runs).filter(([key]) => key.endsWith("/native-baseline"));
   return {
-    schemaVersion: 4,
+    schemaVersion: 6,
     collectedAt: manifest.createdAt,
     baseCommit: manifest.commit,
     dirtyDiffHash: manifest.dirtyDiffHash,
@@ -189,12 +280,16 @@ export function summarizeRun(directory) {
       "Counts trace.errors; process stdout/stderr and debugger diagnostics remain separate.",
     nativeBaseline: {
       captured: baselines.length,
+      processMeasured: baselines.filter(([, run]) => run.process.evidence === "measured").length,
+      observationMeasured: baselines.filter(([, run]) => run.observation?.evidence === "measured")
+        .length,
       successful: baselines.filter(([, run]) => {
         const page = run.pages?.at(-1);
         return (
-          run.exitCode === 0 &&
-          !run.timedOut &&
+          run.process.complete === true &&
           run.collectorComplete === true &&
+          run.observation.complete === true &&
+          run.windowTimerMode === "real-time" &&
           run.formFallbackDisabled &&
           !run.formFallbackUsed &&
           run.navigationSource === "native-form" &&

@@ -10,6 +10,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 export const fixtureSource = "rust/crates/turbo-surf-render/tests/resource_scan_order.rs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const collectorSource = "harness/detection/chrome-cdp-trace.mjs";
+const inputStateSource = "harness/detection/input-state.js";
+const observationSource = "harness/detection/observation-window.mjs";
+const navigationSource = "harness/detection/main-navigation.mjs";
+const lifecycleSource = "harness/detection/collector-lifecycle.mjs";
+const effectiveInputSource = "harness/detection/effective-input.mjs";
 const generatorSource = "harness/detection/resource-scan-order-chrome.mjs";
 export const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 export function extractResourceFixture(source) {
@@ -76,6 +81,11 @@ async function generate(output) {
       fixtureSource,
       fixtureSha256: sha256(html),
       collectorSha256: sha256(readFileSync(join(root, collectorSource))),
+      inputStateSha256: sha256(readFileSync(join(root, inputStateSource))),
+      observationSha256: sha256(readFileSync(join(root, observationSource))),
+      navigationSha256: sha256(readFileSync(join(root, navigationSource))),
+      lifecycleSha256: sha256(readFileSync(join(root, lifecycleSource))),
+      effectiveInputSha256: sha256(readFileSync(join(root, effectiveInputSource))),
       generatorSha256: sha256(readFileSync(join(root, generatorSource))),
       errors: trace.errors,
       result: trace.pages[0]?.browserFixture ?? null,

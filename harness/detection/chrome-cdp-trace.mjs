@@ -10,7 +10,26 @@ import { cdpConnection } from "./cdp-connection.mjs";
 import { enrichProtocolHeaders } from "./protocol-headers.mjs";
 import { responseNetworkEvents, responseTransport } from "./chrome-network-metadata.mjs";
 
+import {
+  captureStableDocument,
+  finishObservation,
+  observationMilliseconds,
+  observationTriggerIndex,
+  startObservation,
+  waitForObservation,
+} from "./observation-window.mjs";
+import { createMainNavigationTracker } from "./main-navigation.mjs";
+import { collectorLifecycle } from "./collector-lifecycle.mjs";
+import {
+  effectiveTypedControl,
+  prepareTypedControl,
+  requireEffectiveInput,
+} from "./effective-input.mjs";
 const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const observationMs = observationMilliseconds(config);
+const observationClock = { monotonic: () => performance.now(), wall: () => Date.now() };
+let observationWindow = null;
+const mainNavigation = createMainNavigationTracker();
 const out = resolve(process.argv[3]);
 mkdirSync(out, { recursive: true, mode: 0o700 });
 const profile = mkdtempSync(join(tmpdir(), "turbo-cdp-oracle-"));
@@ -20,7 +39,10 @@ const executable =
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const instrumented = !!config.interfaces,
   startedAt = new Date().toISOString();
+const inputStateSource = readFileSync(new URL("./input-state.js", import.meta.url), "utf8");
 const requests = [],
+  actions = [],
+  dwell = [],
   responses = [],
   pages = [],
   scripts = [],
@@ -28,6 +50,7 @@ const requests = [],
   sockets = [],
   probes = [],
   errors = [],
+  collectorErrors = [],
   protocolNetwork = [],
   targets = [],
   consoles = [];
@@ -45,16 +68,42 @@ let chrome,
   mainFrame,
   domReady = false;
 let stage = "launch",
-  chromeStderr = "";
+  chromeStderr = "",
+  captureComplete = false,
+  dismissal = null;
 let effectiveExtensionFlags = [];
+let browserContext = null;
 const handlers = new Map();
 const targetSessions = new Map();
 const networkKey = (session, id) => `${session || "browser"}:${id}`;
-const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+const lifecycle = collectorLifecycle({
+  onAbort(signal) {
+    captureComplete = false;
+    collectorError({ phase: "interrupted", signal });
+    process.exitCode = signal === "SIGINT" ? 130 : 143;
+    writeTrace();
+    connection?.close();
+    socket?.close();
+  },
+});
+const pause = (ms) => lifecycle.pause(ms);
+async function pageDwell(stage) {
+  const span = { stage, requestedMs: config.waitMs || 0, startedMs: Date.now(), completed: false };
+  dwell.push(span);
+  const deadline = span.startedMs + span.requestedMs;
+  while (Date.now() < deadline) await pause(deadline - Date.now());
+  span.finishedMs = Date.now();
+  span.completed = true;
+}
 const save = (name, data) => writeFileSync(join(out, name), data, { mode: 0o600 });
 const on = (event, callback) => handlers.set(event, [...(handlers.get(event) || []), callback]);
+function collectorError(error) {
+  errors.push(error);
+  collectorErrors.push(error);
+}
 function call(method, params = {}, sessionId = mainSession) {
-  return connection.call(method, params, sessionId);
+  lifecycle.throwIfAborted();
+  return lifecycle.race(connection.call(method, params, sessionId));
 }
 async function evaluate(expression, contextId, sessionId = mainSession) {
   const result = await call(
@@ -90,53 +139,81 @@ async function debugPort() {
   return port;
 }
 async function snapshot(phase) {
-  const state = await evaluate(
-    `JSON.stringify({url:location.href,html:(document.doctype?'<!DOCTYPE '+document.doctype.name+'>':'')+document.documentElement.outerHTML,browserFixture:globalThis.__browserFixture||null,inputState:(()=>{const input=document.querySelector('textarea[name=q],input[name=q]');return {value:input?.value??null,activeTag:document.activeElement?.tagName??null,activeName:document.activeElement?.getAttribute('name')??null,disabled:input?.disabled??null,readOnly:input?.readOnly??null,consentPresent:!!document.querySelector(${JSON.stringify(config.dismissSelector || "#W0wltc")})};})(),results:document.querySelectorAll(${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")}).length,environment:{webdriver:navigator.webdriver,userAgent:navigator.userAgent,languages:navigator.languages,language:navigator.language,locale:Intl.DateTimeFormat().resolvedOptions().locale,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timeZoneOffset:new Date().getTimezoneOffset(),viewport:{width:innerWidth,height:innerHeight},outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}},interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})`,
-  );
-  const row = JSON.parse(state),
-    html = row.html;
-  delete row.html;
-  save(phase + ".html", html);
-  const cookies = (await call("Network.getCookies")).cookies.map(({ name, domain }) => ({
-    name,
-    domain,
-  }));
-  const childFrames = [];
-  if (instrumented)
-    for (const [frameId, { contextId, sessionId }] of contexts)
-      if (frameId !== mainFrame) {
+  const mainNavigationBeforeSnapshot = mainNavigation.snapshot();
+  const identity = async () => {
+    const { frameTree } = await call("Page.getFrameTree");
+    const frame = frameTree.frame;
+    if (mainFrame !== frame.id)
+      mainNavigation.setScope({ sessionId: mainSession, frameId: frame.id });
+    mainFrame = frame.id;
+    frameRows.set(frame.id, frame);
+    return `${mainSession}/${frame.id}/${frame.loaderId}`;
+  };
+  const { value, retries } = await captureStableDocument(identity, async () => {
+    const state = await evaluate(
+      `JSON.stringify({url:location.href,readyState:document.readyState,html:(document.doctype?'<!DOCTYPE '+document.doctype.name+'>':'')+document.documentElement.outerHTML,browserFixture:globalThis.__browserFixture||null,inputState:(()=>{const captureInputState=${inputStateSource}\nreturn captureInputState(document,${JSON.stringify(config.dismissSelector || "#W0wltc")});})(),results:document.querySelectorAll(${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")}).length,environment:{webdriver:navigator.webdriver,userAgent:navigator.userAgent,languages:navigator.languages,language:navigator.language,locale:Intl.DateTimeFormat().resolvedOptions().locale,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timeZoneOffset:new Date().getTimezoneOffset(),viewport:{width:innerWidth,height:innerHeight},outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}},interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})`,
+    );
+    const row = JSON.parse(state),
+      html = row.html;
+    delete row.html;
+    const loaderId = frameRows.get(mainFrame)?.loaderId;
+    const documentResponse = loaderId
+      ? responses.findLast(
+          (response) =>
+            response.sessionId === mainSession &&
+            response.frameId === mainFrame &&
+            response.loaderId === loaderId &&
+            response.type === "document",
+        )
+      : null;
+    row.status = documentResponse?.status ?? null;
+    row.statusSource = documentResponse ? "cdp-main-document-loader" : "unavailable";
+    row.statusDocumentUrl = documentResponse?.url ?? null;
+    save(phase + ".html", html);
+    const cookies = (await call("Network.getCookies")).cookies.map(({ name, domain }) => ({
+      name,
+      domain,
+    }));
+    const childFrames = [];
+    if (instrumented)
+      for (const [frameId, { contextId, sessionId }] of contexts)
+        if (frameId !== mainFrame) {
+          try {
+            childFrames.push({
+              url: frameRows.get(frameId)?.url,
+              interfaces: await evaluate(
+                `globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null`,
+                contextId,
+                sessionId,
+              ),
+            });
+          } catch (error) {
+            childFrames.push({ url: frameRows.get(frameId)?.url, error: String(error) });
+          }
+        }
+    const workers = [];
+    if (instrumented)
+      for (const [sessionId, target] of targetSessions) {
+        if (!["worker", "shared_worker", "service_worker"].includes(target.type)) continue;
         try {
-          childFrames.push({
-            url: frameRows.get(frameId)?.url,
+          workers.push({
+            type: target.type,
+            url: target.url,
             interfaces: await evaluate(
               `globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null`,
-              contextId,
+              undefined,
               sessionId,
             ),
           });
         } catch (error) {
-          childFrames.push({ url: frameRows.get(frameId)?.url, error: String(error) });
+          workers.push({ type: target.type, url: target.url, error: String(error) });
         }
       }
-  const workers = [];
-  if (instrumented)
-    for (const [sessionId, target] of targetSessions) {
-      if (!["worker", "shared_worker", "service_worker"].includes(target.type)) continue;
-      try {
-        workers.push({
-          type: target.type,
-          url: target.url,
-          interfaces: await evaluate(
-            `globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null`,
-            undefined,
-            sessionId,
-          ),
-        });
-      } catch (error) {
-        workers.push({ type: target.type, url: target.url, error: String(error) });
-      }
-    }
-  pages.push({ phase, ...row, bytes: Buffer.byteLength(html), cookies, childFrames, workers });
+    return { phase, ...row, bytes: Buffer.byteLength(html), cookies, childFrames, workers };
+  });
+  value.navigationSnapshotRetries = retries;
+  value.mainNavigationBeforeSnapshot = mainNavigationBeforeSnapshot;
+  pages.push(value);
 }
 async function point(selector) {
   // Headed oracle processes may share the desktop with another collector.
@@ -168,7 +245,7 @@ async function key(key, type, text) {
     ...(text ? { text, unmodifiedText: text } : {}),
   });
 }
-try {
+async function capture() {
   effectiveExtensionFlags = chromeExtensionArgs(config);
   if (!existsSync(executable) || typeof WebSocket === "undefined")
     throw new Error("Installed Chrome and Node.js 22+ are required");
@@ -187,25 +264,38 @@ try {
     ],
     { stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32" },
   );
+  lifecycle.own(chrome);
+  let spawnError;
+  chrome.on("error", (error) => {
+    spawnError = error;
+  });
   chrome.stderr.on("data", (chunk) => {
     if (chromeStderr.length < 1_048_576) chromeStderr += chunk;
   });
   await until(() => {
+    if (spawnError) throw spawnError;
     if (chrome.exitCode !== null)
       throw new Error(`Chrome exited during startup (${chrome.exitCode})`);
     return chromeStderr.includes(`DevTools listening on ws://127.0.0.1:${port}/`);
   }, 30000);
   stage = "connect";
-  const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+  const version = await (
+    await fetch(`http://127.0.0.1:${port}/json/version`, { signal: lifecycle.signal })
+  ).json();
   browserVersion = version.Browser;
   browserV8Version = version["V8-Version"];
-  const tabs = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-  const tab = tabs.find((tab) => tab.type === "page");
+  const tabs = await (
+    await fetch(`http://127.0.0.1:${port}/json/list`, { signal: lifecycle.signal })
+  ).json();
+  let tab = tabs.find((tab) => tab.type === "page");
   socket = new WebSocket(version.webSocketDebuggerUrl);
-  await new Promise((done, fail) => {
-    socket.onopen = done;
-    socket.onerror = fail;
-  });
+  await lifecycle.race(
+    new Promise((done, fail) => {
+      socket.onopen = done;
+      socket.onerror = fail;
+      socket.onclose = () => fail(new Error("Chrome websocket closed during startup"));
+    }),
+  );
   connection = cdpConnection(socket, (data) => {
     if (responseNetworkEvents.some((event) => data.method === `Network.${event}`))
       protocolNetwork.push({
@@ -218,7 +308,7 @@ try {
       try {
         callback(data.params, data.sessionId);
       } catch (error) {
-        errors.push(String(error));
+        collectorError(String(error));
       }
     }
   });
@@ -243,7 +333,12 @@ try {
     if (sessionId === mainSession) domReady = true;
   });
   on("Page.frameNavigated", ({ frame }, sessionId) => {
-    if (!frame.parentId && sessionId === mainSession) mainFrame = frame.id;
+    if (!frame.parentId && sessionId === mainSession) {
+      if (mainFrame !== frame.id)
+        mainNavigation.setScope({ sessionId: mainSession, frameId: frame.id });
+      mainFrame = frame.id;
+    }
+    mainNavigation.commit(frame, sessionId);
     frameRows.set(frame.id, frame);
     frames.push({
       url: frame.url,
@@ -253,6 +348,7 @@ try {
     });
   });
   on("Network.requestWillBeSent", (event, sessionId) => {
+    mainNavigation.request(event, sessionId);
     const requestKey = networkKey(sessionId, event.requestId);
     if (event.redirectResponse) {
       const previous = requestRows.get(networkKey(sessionId, event.requestId));
@@ -301,6 +397,8 @@ try {
         id: ++sequence,
         protocolRequestId: event.requestId,
         sessionId,
+        frameId: event.frameId,
+        loaderId: event.loaderId,
         requestId: requestRows.get(networkKey(sessionId, event.requestId))?.id,
         timeMs: Date.now(),
         url: response.url,
@@ -311,12 +409,13 @@ try {
       };
     responses.push(row);
   });
-  on("Network.loadingFailed", (event, sessionId) =>
+  on("Network.loadingFailed", (event, sessionId) => {
+    mainNavigation.failed(event, sessionId);
     errors.push({
       url: requestRows.get(networkKey(sessionId, event.requestId))?.url,
       failure: { errorText: event.errorText },
-    }),
-  );
+    });
+  });
   on("Network.loadingFinished", (event, sessionId) => {
     const row = responses.findLast(
       (response) =>
@@ -378,7 +477,7 @@ try {
         await call("Debugger.setSkipAllPauses", { skip: true }, sessionId);
       }
     } catch (error) {
-      errors.push({
+      collectorError({
         phase: "target setup",
         targetType: targetInfo.type,
         url: targetInfo.url,
@@ -386,7 +485,7 @@ try {
       });
     } finally {
       await call("Runtime.runIfWaitingForDebugger", {}, sessionId).catch((error) =>
-        errors.push(String(error)),
+        collectorError(String(error)),
       );
     }
   }
@@ -401,6 +500,21 @@ try {
     for (const [frame, entry] of contexts)
       if (entry.sessionId === sessionId) contexts.delete(frame);
   });
+  let createdBrowserContext;
+  if (config.chromeIncognito) {
+    ({ browserContextId: createdBrowserContext } = await call(
+      "Target.createBrowserContext",
+      { disposeOnDetach: true },
+      null,
+    ));
+    const { targetId } = await call(
+      "Target.createTarget",
+      { url: "about:blank", browserContextId: createdBrowserContext },
+      null,
+    );
+    await call("Target.closeTarget", { targetId: tab.id }, null);
+    tab = { id: targetId };
+  }
   ({ sessionId: mainSession } = await call(
     "Target.attachToTarget",
     { targetId: tab.id, flatten: true },
@@ -408,7 +522,28 @@ try {
   ));
   // Explicit attachment emits the same event as automatic child attachment.
   await childSetup.get(mainSession);
+  const contextList = await call("Target.getBrowserContexts", {}, null);
+  const targetState = await call("Target.getTargetInfo", { targetId: tab.id }, null);
+  const nonDefaultContext = (contextList.browserContextIds || []).includes(
+    targetState.targetInfo.browserContextId,
+  );
+  browserContext = {
+    requestedIncognito: !!config.chromeIncognito,
+    nonDefaultContext,
+    createdContextVerified:
+      !!createdBrowserContext && targetState.targetInfo.browserContextId === createdBrowserContext,
+    isolation: "temporary-user-data-directory",
+    source: config.chromeIncognito
+      ? "cdp-created-context-target-and-browser-context-list"
+      : "cdp-target-and-browser-context-list",
+  };
+  if (config.chromeIncognito && (!nonDefaultContext || !browserContext.createdContextVerified))
+    throw new Error("Requested Incognito target was not verified in a non-default browser context");
   await call("Page.enable");
+  const { frameTree: initialFrameTree } = await call("Page.getFrameTree");
+  mainFrame = initialFrameTree.frame.id;
+  frameRows.set(mainFrame, initialFrameTree.frame);
+  mainNavigation.setScope({ sessionId: mainSession, frameId: mainFrame });
   await call("Runtime.enable");
   if (config.localCertificate) {
     const target = new URL(config.url);
@@ -448,7 +583,7 @@ try {
               startLine: event.startLine,
             });
           })
-          .catch((error) => errors.push(`script source: ${error}`)),
+          .catch((error) => collectorError(`script source: ${error}`)),
       ),
     );
     await call("Debugger.enable");
@@ -473,18 +608,21 @@ try {
   await until(() => domReady, 30000);
   stage = "fixture readiness";
   if (config.readySelector)
-    await until(() =>
-      evaluate(`!!document.querySelector(${JSON.stringify(config.readySelector)})`),
+    await until(
+      () => evaluate(`!!document.querySelector(${JSON.stringify(config.readySelector)})`),
+      config.readyTimeoutMs ?? 5000,
     );
   stage = "snapshots and input";
-  await pause(config.waitMs || 0);
+  await pageDwell("home");
   await snapshot("home");
   if (config.dismissSelector) {
     const present = await evaluate(
       `!!document.querySelector(${JSON.stringify(config.dismissSelector)})`,
     );
+    dismissal = { selector: config.dismissSelector, present, clicked: false };
     if (present) {
       const coordinates = await point(config.dismissSelector);
+      await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...coordinates });
       await call("Input.dispatchMouseEvent", {
         type: "mousePressed",
         button: "left",
@@ -499,11 +637,45 @@ try {
         clickCount: 1,
         ...coordinates,
       });
-      await pause(config.waitMs || 0);
+      dismissal.clicked = true;
+      await pageDwell("dismiss");
       await snapshot("dismiss");
     }
   }
+  let focusSelector = null,
+    typedInput = null;
+  const controlCall = async (handle, fn, value) => {
+    const result = await call("Runtime.callFunctionOn", {
+      objectId: handle,
+      functionDeclaration: `function(value){return (${fn.toString()})(this,value);}`,
+      arguments: [{ value }],
+      returnByValue: true,
+    });
+    if (result.exceptionDetails)
+      throw new Error(
+        result.exceptionDetails.exception?.description || result.exceptionDetails.text,
+      );
+    return result.result.value;
+  };
+  const verifyTypedInput = async () => {
+    const evidence = await controlCall(
+      typedInput.handle,
+      effectiveTypedControl,
+      typedInput.expected,
+    );
+    try {
+      return requireEffectiveInput(evidence);
+    } catch (error) {
+      collectorError({ phase: "effective-input", evidence });
+      throw error;
+    }
+  };
+  const observationIndex = observationTriggerIndex(config.steps || []);
   for (const [index, step] of (config.steps || []).entries()) {
+    if (index === observationIndex)
+      observationWindow = startObservation(observationMs, index, observationClock);
+    const startedMs = Date.now();
+    let inputEvidence;
     if (step.move) {
       const coordinates = await point(step.move.selector);
       await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...coordinates });
@@ -525,22 +697,65 @@ try {
         ...coordinates,
       });
     }
-    if (step.focus) await evaluate(`document.querySelector(${JSON.stringify(step.focus)}).focus()`);
-    if (step.type !== undefined)
+    if (step.focus) {
+      focusSelector = step.focus;
+      await evaluate(
+        `(()=>{const control=document.querySelector(${JSON.stringify(step.focus)});if(!control)throw new Error('Focus selector is absent');control.focus();if(document.activeElement!==control)throw new Error('Focus selector did not become active');})()`,
+      );
+    }
+    if (step.type !== undefined) {
+      if (typedInput) await call("Runtime.releaseObject", { objectId: typedInput.handle });
+      const control = await call("Runtime.evaluate", {
+        expression: focusSelector
+          ? `document.querySelector(${JSON.stringify(focusSelector)})`
+          : "document.activeElement",
+        returnByValue: false,
+      });
+      if (!control.result.objectId) throw new Error("Typing control is unavailable");
+      typedInput = {
+        handle: control.result.objectId,
+        ...(await controlCall(control.result.objectId, prepareTypedControl, String(step.type))),
+      };
       for (const character of String(step.type)) {
         await key(character, "keyDown", character);
-        await pause(110);
+        await pause(config.inputCadenceMs ?? 110);
         await key(character, "keyUp");
       }
+      inputEvidence = await verifyTypedInput();
+    }
     if (step.press) {
+      if (step.press === "Enter" && typedInput) await verifyTypedInput();
       await key(step.press, "keyDown", step.press === "Enter" ? "\r" : undefined);
       await key(step.press, "keyUp");
     }
     if (step.wait) await pause(step.wait);
+    actions.push({
+      index,
+      action: Object.keys(step)[0],
+      ...(inputEvidence ? { inputEvidence } : {}),
+      completed: true,
+      startedMs,
+      finishedMs: Date.now(),
+    });
     await snapshot(`step-${index}`);
   }
-  await pause(config.waitMs || 0);
+  if (observationWindow) await waitForObservation(observationWindow, observationClock, pause);
+  else await pageDwell("search");
+  const snapshotStarted = observationClock.monotonic();
+  if (observationWindow) observationWindow.record.snapshotStartedMs = Date.now();
   await snapshot("search");
+  if (observationWindow) {
+    const navigation = mainNavigation.snapshot();
+    finishObservation(
+      observationWindow,
+      observationClock,
+      !navigation.pendingNavigation && !navigation.navigationFailed,
+      {
+        ...navigation,
+        snapshotElapsedMs: observationClock.monotonic() - snapshotStarted,
+      },
+    );
+  }
   for (const path of config.probes || []) {
     try {
       const raw = await evaluate(readFileSync(path, "utf8"));
@@ -549,15 +764,52 @@ try {
       probes.push({ path, error: String(error) });
     }
   }
+  lifecycle.throwIfAborted();
+  captureComplete = true;
+}
+try {
+  await lifecycle.race(capture());
 } catch (error) {
-  errors.push({ phase: "capture", stage, error: String(error) });
+  if (observationWindow) finishObservation(observationWindow, observationClock, false);
+  collectorError({ phase: "capture", stage, error: String(error) });
   process.exitCode = 1;
 } finally {
-  for (let index = 0; index < tasks.length; ) {
-    const batch = tasks.slice(index);
-    index = tasks.length;
-    await Promise.allSettled(batch);
+  try {
+    for (let index = 0; index < tasks.length; ) {
+      const batch = tasks.slice(index);
+      index = tasks.length;
+      if (lifecycle.signal.aborted) break;
+      await lifecycle.race(Promise.allSettled(batch)).catch(() => {});
+    }
+    writeTrace();
+  } finally {
+    if (!lifecycle.signal.aborted && connection)
+      await Promise.race([
+        call("Browser.close", {}, null).catch(() => {}),
+        new Promise((done) => setTimeout(done, 500)),
+      ]);
+    await lifecycle.stopBrowser();
+    connection?.close();
+    socket?.close();
+    lifecycle.dispose();
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    console.log(
+      JSON.stringify({
+        out,
+        backend: "raw-cdp",
+        instrumented,
+        requests: requests.length,
+        final: {
+          path: new URL(pages.at(-1)?.url || "about:blank").pathname,
+          results: pages.at(-1)?.results,
+        },
+        errors: errors.length,
+      }),
+    );
   }
+}
+
+function writeTrace() {
   enrichProtocolHeaders(requests, protocolNetwork);
   save(
     "trace.json",
@@ -566,6 +818,13 @@ try {
         runtime: "chrome",
         backend: "raw-cdp",
         instrumented,
+        captureComplete: captureComplete && collectorErrors.length === 0,
+        collectorErrors,
+        actions,
+        dwell,
+        observation: observationWindow?.record ?? null,
+        dismissal,
+        browserContext,
         startedAt,
         browserVersion,
         browserV8Version,
@@ -599,37 +858,4 @@ try {
     ),
   );
   save("chrome-stderr.log", chromeStderr);
-  if (chrome) {
-    const running = () => chrome.exitCode === null && chrome.signalCode === null;
-    const exited = running() ? new Promise((done) => chrome.once("exit", done)) : Promise.resolve();
-    if (connection)
-      await Promise.race([call("Browser.close", {}, null).catch(() => {}), pause(1000)]);
-    const stop = (signal) => {
-      try {
-        if (process.platform === "win32") {
-          if (running()) chrome.kill(signal);
-        } else process.kill(-chrome.pid, signal);
-      } catch {}
-    };
-    stop("SIGTERM");
-    await Promise.race([exited, pause(2000)]);
-    // Helpers can outlive the browser process and still write its owned profile.
-    stop("SIGKILL");
-  }
-  connection?.close();
-  socket?.close();
-  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  console.log(
-    JSON.stringify({
-      out,
-      backend: "raw-cdp",
-      instrumented,
-      requests: requests.length,
-      final: {
-        path: new URL(pages.at(-1)?.url || "about:blank").pathname,
-        results: pages.at(-1)?.results,
-      },
-      errors: errors.length,
-    }),
-  );
 }

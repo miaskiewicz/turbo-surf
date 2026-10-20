@@ -5835,7 +5835,7 @@ dependencies = [
 [[package]]
 name = "turbo-dom"
 version = "0.5.7"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=aaeb290c4fea12a1ed98185f1d0628758da53db1#aaeb290c4fea12a1ed98185f1d0628758da53db1"
+source = "git+https://github.com/miaskiewicz/turbo-dom?rev=d01d6a5911e3f7a47c0d91d619de01c1008dc28a#d01d6a5911e3f7a47c0d91d619de01c1008dc28a"
 dependencies = [
  "html5ever",
  "log",
@@ -5848,7 +5848,7 @@ dependencies = [
 [[package]]
 name = "turbo-html2pdf-core"
 version = "0.3.8"
-source = "git+https://github.com/miaskiewicz/turbo-html2pdf?rev=dcbfd20ea9139051b784dcb7a81d2ba6d87e8eba#dcbfd20ea9139051b784dcb7a81d2ba6d87e8eba"
+source = "git+https://github.com/miaskiewicz/turbo-html2pdf?rev=2ea52368a5d78e7ab584e06f4505bad0f58f4680#2ea52368a5d78e7ab584e06f4505bad0f58f4680"
 dependencies = [
  "chrono",
  "core-foundation",

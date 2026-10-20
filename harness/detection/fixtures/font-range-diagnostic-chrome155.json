@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "scope": "Genuine Chrome diagnostic for the deferred system-font Range/shaping and canvas face-selection differences in issue 28. These rows are retained diagnostics, not a native parity assertion.",
+  "browserVersion": "Chrome/155.0.8059.85",
+  "v8Version": "15.5.35.25",
+  "platform": "macOS",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "deviceScaleFactor": 2,
+  "probeSha256": "c35aba66fb4e7a3657253120c836a0f4c6d796e7a46a936c272dc5a2b0ac29fc",
+  "html": "<!doctype html><html><head></head><body></body></html>",
+  "capture": {
+    "process": {
+      "code": 0,
+      "signal": null,
+      "timedOut": false,
+      "aborted": false,
+      "error": null
+    },
+    "sourceUnchanged": true,
+    "frozenChromeBundleSha256": "bb503dca511c156891ab90c35489a2d100bd3d163a4f8198e26d13e8c3ac8330",
+    "originalResultSha256": "d44196cf1134111b722e9d90b5e7ab54b799c761a3ed046462768982d3ade118"
+  },
+  "result": {
+    "ranges": [
+      {
+        "text": "Old",
+        "size": "18.72px",
+        "attribute": "font-size:18.72px;font-family:Times;font-weight:700",
+        "width": 30.171875
+      },
+      {
+        "text": "Old",
+        "size": "18.71875px",
+        "attribute": "font-size:18.71875px;font-family:Times;font-weight:700",
+        "width": 30.171875
+      },
+      {
+        "text": "result",
+        "size": "18.72px",
+        "attribute": "font-size:18.72px;font-family:Times;font-weight:700",
+        "width": 45.4140625
+      },
+      {
+        "text": "result",
+        "size": "18.71875px",
+        "attribute": "font-size:18.71875px;font-family:Times;font-weight:700",
+        "width": 45.4140625
+      },
+      {
+        "text": "Old result",
+        "size": "18.72px",
+        "attribute": "font-size:18.72px;font-family:Times;font-weight:700",
+        "width": 80.2578125
+      },
+      {
+        "text": "Old result",
+        "size": "18.71875px",
+        "attribute": "font-size:18.71875px;font-family:Times;font-weight:700",
+        "width": 80.2578125
+      }
+    ],
+    "canvases": [
+      {
+        "font": "700 18.72px Times",
+        "accepted": "bold 18.72px Times",
+        "Old": 30.157058715820312,
+        "result": 45.39546203613281,
+        "full": 80.23001098632812
+      },
+      {
+        "font": "bold 18.72px Times",
+        "accepted": "bold 18.72px Times",
+        "Old": 30.157058715820312,
+        "result": 45.39546203613281,
+        "full": 80.23001098632812
+      },
+      {
+        "font": "400 18.72px Times",
+        "accepted": "18.72px Times",
+        "Old": 28.064971923828125,
+        "result": 41.56758117675781,
+        "full": 74.31004333496094
+      },
+      {
+        "font": "700 18.71875px Times",
+        "accepted": "bold 18.7188px Times",
+        "Old": 30.157058715820312,
+        "result": 45.39546203613281,
+        "full": 80.23001098632812
+      },
+      {
+        "font": "700 18.72px 'Times New Roman'",
+        "accepted": "bold 18.72px \"Times New Roman\"",
+        "Old": 30.157058715820312,
+        "result": 45.386322021484375,
+        "full": 80.22087097167969
+      },
+      {
+        "font": "400 13.3333px Arial",
+        "accepted": "13.3333px Arial",
+        "Old": 20.743484497070312,
+        "result": 32.595947265625,
+        "full": 57.04292297363281
+      }
+    ]
+  }
+}

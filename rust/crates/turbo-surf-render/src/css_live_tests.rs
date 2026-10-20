@@ -429,6 +429,33 @@ fn computed_font_values_match_source_bound_chrome155_inheritance_and_lifecycle()
 }
 
 #[test]
+fn button_ua_computed_values_match_chrome_and_remain_below_author_styles() {
+    use sha2::{Digest, Sha256};
+    let source = include_str!("computed_button_ua_probe.js");
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("computed_button_ua_chrome155.json")).unwrap();
+    assert_eq!(
+        fixture["probeSha256"],
+        format!("{:x}", Sha256::digest(source.as_bytes()))
+    );
+    assert_eq!(fixture["errors"], serde_json::json!([]));
+    let actual = run_with_font_defaults(
+        "<!doctype html><html><head></head><body></body></html>",
+        &format!("JSON.stringify({})", source.trim().trim_end_matches(';')),
+        Some(("Times", 16.0)),
+    );
+    for (index, row) in fixture["result"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(actual["rows"][index], *row, "button UA row {}", row["name"]);
+    }
+    assert_eq!(actual, fixture["result"]);
+}
+
+#[test]
 fn computed_font_host_preferences_are_private_and_used_by_css_initial_values() {
     let result = run_with_font_defaults("<!doctype html><body><div id=parent style='font:italic 30px/2 serif'><span id=child style='font:initial'></span></div>", r#"JSON.stringify((()=>{
         const style=getComputedStyle(document.getElementById('child'));
@@ -643,4 +670,113 @@ fn computed_font_case_normalization_uses_private_intrinsics_and_preserves_author
         );
     }
     assert!(!cssom_parser::parse("x {font: INITIALgarbage}").contains("font:"));
+}
+
+#[test]
+fn important_border_computed_longhands_match_the_genuine_chrome_control() {
+    use sha2::{Digest, Sha256};
+    let source = include_str!("computed_border_priority_probe.js");
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("computed_border_priority_chrome155.json")).unwrap();
+    assert_eq!(
+        fixture["probeSha256"],
+        format!("{:x}", Sha256::digest(source.as_bytes()))
+    );
+    assert_eq!(
+        fixture["htmlSha256"],
+        format!(
+            "{:x}",
+            Sha256::digest(fixture["html"].as_str().unwrap().as_bytes())
+        )
+    );
+    assert_eq!(fixture["browserVersion"], "Chrome/155.0.8059.85");
+    assert_eq!(fixture["errors"], serde_json::json!([]));
+    let actual = run(fixture["html"].as_str().unwrap(), source);
+    let rows = actual.as_array().unwrap();
+    let expected = fixture["result"].as_array().unwrap();
+    assert_eq!(rows.len(), 9);
+    assert_eq!(rows.len(), expected.len());
+    // The canonical binding owns computed values; Surf's native layout test
+    // separately asserts the same capture's clientLeft/clientTop columns.
+    for (row, expected) in rows.iter().zip(expected) {
+        assert_eq!(row[0], expected[0]);
+        assert_eq!(
+            &row.as_array().unwrap()[3..],
+            &expected.as_array().unwrap()[3..]
+        );
+    }
+}
+
+#[test]
+fn computed_importance_tracks_live_adoption_and_inline_priority_without_public_methods() {
+    let actual = run(
+        "<!doctype html><html><head><style>.target{padding-left:3px}</style></head><body><section style='width:256px'><div id=target class=target style='border:8px solid!important;color:blue;width:75%'></div></section></body></html>",
+        r#"(()=>{
+          const target=document.getElementById('target'),a=new CSSStyleSheet(),b=new CSSStyleSheet();
+          a.replaceSync('.target{border-left-width:7px!important;color:#f00!important;width:50%!important;padding-left:5px}');
+          b.replaceSync('.target{border-left-width:9px!important;color:#0f0!important}');
+          document.adoptedStyleSheets=[a,b];
+          const retained=getComputedStyle(target),rows=[],ordinaryFirst=retained.paddingLeft==='5px';
+          function read(){rows.push([retained.borderLeftWidth,retained.borderTopWidth,retained.color,retained.width,retained.getPropertyPriority('border-left-width')]);}
+          read();
+          target.style.setProperty('border','8px solid');read();
+          document.adoptedStyleSheets=[b,a];read();
+          a.cssRules[0].style.setProperty('border-left-width','11px','important');read();
+          const host=document.createElement('section');document.body.appendChild(host);const shadow=host.attachShadow({mode:'open'}),inside=document.createElement('div');inside.className='target';shadow.appendChild(inside);const shadowWidth=getComputedStyle(inside).borderLeftWidth;
+          let reads=0;
+          const priority=Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype,'getPropertyPriority');
+          Object.defineProperty(CSSStyleDeclaration.prototype,'getPropertyPriority',{...priority,value(){reads++;throw Error('public priority method reached');}});
+          Object.defineProperty(target,'getRootNode',{configurable:true,value(){reads++;throw Error('public root method reached');}});
+          Object.defineProperty(document,'adoptedStyleSheets',{configurable:true,get(){reads++;throw Error('public adoption getter reached');}});
+          try{rows.push([retained.borderLeftWidth,retained.color,retained.width]);}
+          finally{Object.defineProperty(CSSStyleDeclaration.prototype,'getPropertyPriority',priority);}
+          return JSON.stringify({rows,reads,shadowWidth,ordinaryFirst});
+        })()"#,
+    );
+    assert_eq!(
+        actual,
+        serde_json::json!({"rows":[
+        ["8px","8px","rgb(0, 255, 0)","128px",""],
+        ["9px","8px","rgb(0, 255, 0)","128px",""],
+        ["7px","8px","rgb(255, 0, 0)","128px",""],
+        ["11px","8px","rgb(255, 0, 0)","128px",""],
+        ["11px","rgb(255, 0, 0)","128px"]
+    ],"reads":0,"shadowWidth":"","ordinaryFirst":true})
+    );
+}
+
+#[test]
+fn computed_priority_uses_parsed_tokens_and_preserves_quoted_values() {
+    let actual = run(
+        "<!doctype html><html><head><style>#target{padding-left:1px ! IMPORTANT;padding-left:2px;border-top-width:3px !/**/important;border-top-width:4px;content:\"left;!important\"}</style></head><body><div id=target></div></body></html>",
+        r#"JSON.stringify((()=>{const style=getComputedStyle(document.getElementById('target'));return [style.paddingLeft,style.borderTopWidth,style.content];})())"#,
+    );
+    assert_eq!(
+        actual,
+        serde_json::json!(["1px", "3px", "\"left;!important\""])
+    );
+}
+
+#[test]
+fn adopted_computed_sheet_copy_does_not_expose_private_collection_to_array_setters() {
+    let actual = run(
+        "<!doctype html><html><head></head><body><button id=target>x</button></body></html>",
+        r#"(()=>{
+          const target=document.getElementById('target'),sheet=new CSSStyleSheet();
+          sheet.replaceSync('#target{border:4px solid!important}');document.adoptedStyleSheets=[sheet];
+          const define=Object.defineProperty,previous=Object.getOwnPropertyDescriptor(Array.prototype,'0');
+          let reads=0,value;
+          define(Array.prototype,'0',{configurable:true,get(){return undefined;},set(item){
+            if(item===sheet){reads++;throw Error('private sheet collection reached guest setter');}
+            define(this,'0',{value:item,writable:true,enumerable:true,configurable:true});
+          }});
+          try{value=getComputedStyle(target).borderLeftWidth;}
+          finally{if(previous)define(Array.prototype,'0',previous);else delete Array.prototype[0];}
+          return JSON.stringify({value,reads,sameAdoption:document.adoptedStyleSheets[0]===sheet});
+        })()"#,
+    );
+    assert_eq!(
+        actual,
+        serde_json::json!({"value":"4px","reads":0,"sameAdoption":true})
+    );
 }

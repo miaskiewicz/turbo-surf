@@ -1,5 +1,5 @@
 // Localhost API differential; never visits a search engine or imports cookies.
-import { spawn, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { createHash } from "node:crypto";
@@ -10,9 +10,13 @@ import {
   existsSync,
   copyFileSync,
   chmodSync,
+  openSync,
+  closeSync,
 } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { superviseChild } from "./child-supervision.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "../..");
@@ -82,30 +86,40 @@ export function memberInventory(chrome, native) {
   );
 }
 
-const run = (command, args, out, env = {}) =>
-  new Promise((done, fail) => {
-    const child = spawn(command, args, {
-      cwd: root,
-      env: { ...process.env, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
+export async function runApiCollector(
+  command,
+  args,
+  out,
+  { env = {}, signal, timeoutMs = 60000, killGraceMs = 5000 } = {},
+) {
+  const logs = {};
+  try {
+    for (const name of ["stdout", "stderr"])
+      logs[name] = openSync(join(out, `${name}.log`), "w", 0o600);
+    const {
+      stdout: _stdout,
+      stderr: _stderr,
+      ...status
+    } = await superviseChild(command, args, {
+      signal,
+      timeoutMs,
+      killGraceMs,
+      spawnOptions: { cwd: root, env: { ...process.env, ...env } },
+      onOutput(name, bytes) {
+        writeFileSync(logs[name], bytes);
+      },
     });
-    let stdout = "",
-      stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    const timeout = setTimeout(() => child.kill("SIGKILL"), 60_000);
-    child.on("error", fail);
-    child.on("close", (code) => {
-      clearTimeout(timeout);
-      writeFileSync(join(out, "stdout.log"), stdout, { mode: 0o600 });
-      writeFileSync(join(out, "stderr.log"), stderr, { mode: 0o600 });
-      code === 0 ? done() : fail(new Error(`${command} failed (${code}): ${stderr}`));
-    });
-  });
+    writeFileSync(join(out, "process.json"), JSON.stringify(status, null, 2), { mode: 0o600 });
+    if (status.code !== 0 || status.signal || status.timedOut || status.aborted || status.error) {
+      const error = new Error(`API collector failed: ${JSON.stringify(status)}`);
+      error.processResult = status;
+      throw error;
+    }
+    return status;
+  } finally {
+    for (const descriptor of Object.values(logs)) closeSync(descriptor);
+  }
+}
 
 export function localFixtureUrl(input) {
   const url = new URL(input);
@@ -128,6 +142,7 @@ export async function captureApiShape({
   out,
   collector = join(here, "api-shape.js"),
   fixtureUrl,
+  signal,
 }) {
   if (fixtureUrl !== undefined) fixtureUrl = localFixtureUrl(fixtureUrl);
   if (!existsSync(binary)) throw new Error(`Build the detection_trace example first: ${binary}`);
@@ -175,12 +190,16 @@ export async function captureApiShape({
     const targets = ["chrome", "native"].map((name) => join(out, name));
     for (const target of targets) mkdirSync(target, { mode: 0o700 });
     const runs = await Promise.allSettled([
-      run(
+      runApiCollector(
         process.execPath,
         [join(here, "chrome-cdp-trace.mjs"), configPath, targets[0]],
         targets[0],
+        { signal },
       ),
-      run(frozen, [configPath, targets[1]], targets[1], { TURBO_SURF_TZ: config.timezone }),
+      runApiCollector(frozen, [configPath, targets[1]], targets[1], {
+        signal,
+        env: { TURBO_SURF_TZ: config.timezone },
+      }),
     ]);
     for (const result of runs) if (result.status === "rejected") throw result.reason;
     const traces = targets.map((target) => JSON.parse(readFileSync(join(target, "trace.json"))));
@@ -225,14 +244,34 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     );
   } else {
     const out = resolve(flag("--out", join(here, "artifacts", `api-${Date.now()}`)));
-    const result = await captureApiShape({
-      binary: resolve(flag("--binary", join(root, "rust/target/debug/examples/detection_trace"))),
-      collector: resolve(flag("--probe", join(here, "api-shape.js"))),
-      fixtureUrl: flag("--fixture-url", undefined),
-      out,
-    });
-    console.log(
-      JSON.stringify({ out, engine: result.build.engine, differences: result.differences.length }),
+    const controller = new AbortController();
+    const handlers = new Map(
+      ["SIGTERM", "SIGINT"].map((name) => [
+        name,
+        () => {
+          process.exitCode = name === "SIGINT" ? 130 : 143;
+          controller.abort(new Error(`API capture interrupted by ${name}`));
+        },
+      ]),
     );
+    for (const [name, handler] of handlers) process.on(name, handler);
+    try {
+      const result = await captureApiShape({
+        binary: resolve(flag("--binary", join(root, "rust/target/debug/examples/detection_trace"))),
+        collector: resolve(flag("--probe", join(here, "api-shape.js"))),
+        fixtureUrl: flag("--fixture-url", undefined),
+        out,
+        signal: controller.signal,
+      });
+      console.log(
+        JSON.stringify({
+          out,
+          engine: result.build.engine,
+          differences: result.differences.length,
+        }),
+      );
+    } finally {
+      for (const [name, handler] of handlers) process.off(name, handler);
+    }
   }
 }

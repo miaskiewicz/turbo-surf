@@ -93,14 +93,142 @@ export const requestSummary = (row) => {
         : "browser-reported headers"),
   };
 };
+const collectorComplete = (trace) =>
+  trace.captureComplete === true &&
+  Array.isArray(trace.collectorErrors) &&
+  trace.collectorErrors.length === 0;
+
 export const captureSummary = (trace) => ({
-  complete: trace.captureComplete ?? (Array.isArray(trace.pages) && !(trace.errors || []).length),
+  complete:
+    typeof trace.captureComplete === "boolean"
+      ? collectorComplete(trace)
+      : Array.isArray(trace.pages) && !(trace.errors || []).length,
+  completionSource:
+    typeof trace.captureComplete === "boolean" ? "collector" : "legacy-error-heuristic",
+  collectorErrorCount: Array.isArray(trace.collectorErrors) ? trace.collectorErrors.length : null,
   hydrationBudgetExceeded: (trace.pages || []).some((page) => page.hydration?.budget_exceeded),
   inputError: (trace.pages || []).find((page) => page.phase === "interaction-error")?.error || null,
   inputState:
     [...(trace.pages || [])].reverse().find((page) => page.inputState)?.inputState || null,
   dismissal: trace.dismissal || null,
 });
+export const observationSummary = (trace) => {
+  const window = trace.observation;
+  if (!window || typeof window !== "object") return { evidence: "unmeasured", complete: null };
+  return {
+    evidence: "measured",
+    complete:
+      collectorComplete(trace) &&
+      window.completed === true &&
+      window.policy === "fixed-deadline-before-enter" &&
+      Number.isInteger(window.requestedMs) &&
+      window.requestedMs >= 0 &&
+      window.requestedMs <= 60000 &&
+      Number.isFinite(window.overrunMs) &&
+      window.overrunMs >= 0 &&
+      Number.isFinite(window.elapsedMs) &&
+      window.elapsedMs >= window.requestedMs &&
+      ["navigationFailed", "navigationWaitTimedOut", "navigationHopLimit"].every(
+        (key) => !Object.hasOwn(window, key) || window[key] === false,
+      ) &&
+      (window.pendingNavigation == null || window.pendingNavigation === false),
+    policy: window.policy,
+    triggerStepIndex: window.triggerStepIndex,
+    requestedMs: window.requestedMs,
+    elapsedMs: window.elapsedMs,
+    overrunMs: window.overrunMs,
+    navigationFailed: window.navigationFailed === true,
+    navigationWaitTimedOut: window.navigationWaitTimedOut === true,
+    navigationHopLimit: window.navigationHopLimit === true,
+    pendingNavigation: !!window.pendingNavigation,
+    scope:
+      "Common fixed observation policy; actual elapsed and overrun are preserved and do not establish exact wall-time alignment.",
+  };
+};
+export const interactionSummary = (trace) => {
+  const steps = trace.config?.steps;
+  const actions = trace.actions;
+  const measured = Array.isArray(steps) && Array.isArray(actions);
+  const typed = (steps || []).flatMap((step, index) => {
+    if (typeof step.type !== "string") return [];
+    const state = trace.pages?.find((page) => page.phase === `step-${index}`)?.inputState;
+    return [
+      {
+        index,
+        valueMatchesTypedText: state ? state.value === step.type : null,
+        activeTagMatchesControl: state
+          ? state.controlTag !== null && state.activeTag === state.controlTag
+          : null,
+      },
+    ];
+  });
+  return {
+    evidence: measured ? "measured" : "unmeasured",
+    configuredSteps: Array.isArray(steps) ? steps.length : null,
+    completedSteps: Array.isArray(actions)
+      ? actions.filter((action) => action.completed === true).length
+      : null,
+    configuredActionsExecuted: measured
+      ? actions.length === steps.length &&
+        actions.every(
+          (action, index) =>
+            action.completed === true &&
+            action.index === index &&
+            action.action === Object.keys(steps[index])[0],
+        )
+      : null,
+    typed,
+    scope:
+      "Completed host actions and per-type snapshots; matching control tags alone does not prove element identity or equivalent event timing.",
+  };
+};
+const parsedUrl = (value) => {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+};
+export const chromeSearchOutcome = (trace) => {
+  const page = trace.pages?.at(-1);
+  const url = parsedUrl(page?.url);
+  const start = parsedUrl(trace.config?.url);
+  const checks = {
+    collectorComplete: collectorComplete(trace),
+    fixedObservationComplete:
+      trace.observation == null && trace.config?.observationMs == null
+        ? true
+        : observationSummary(trace).complete === true,
+    terminalSnapshot: page?.phase === "search",
+    configuredOrigin: !!url && !!start && url.origin === start.origin,
+    searchDocument: url?.pathname === "/search",
+    documentStatus200: page?.status === 200,
+    documentReady: page?.readyState === "complete",
+    organicResultSelector:
+      (trace.config?.successSelector || "#rso a h3, #search a h3") === "#rso a h3, #search a h3",
+    positiveResultMarkers: Number.isInteger(page?.results) && page.results > 0,
+  };
+  const accepted = Object.values(checks).every(Boolean);
+  const challenge = page?.status === 429 || ["/sorry", "/sorry/index"].includes(url?.pathname);
+  const measured =
+    typeof trace.captureComplete === "boolean" &&
+    typeof page?.status === "number" &&
+    typeof page?.readyState === "string";
+  return {
+    accepted,
+    classification: accepted
+      ? "serp"
+      : challenge
+        ? "challenge"
+        : measured
+          ? "not-accepted"
+          : "unmeasured",
+    evidence: measured ? "measured" : "unmeasured",
+    scope:
+      "Final captured same-origin /search document, HTTP 200, complete DOM and organic h3 markers; content relevance is not assessed.",
+    checks,
+  };
+};
 export const compare = (chrome, native, cRequests = [], nRequests = []) => {
   const counts = (rows) => {
     const result = new Map();
@@ -134,6 +262,25 @@ export const compare = (chrome, native, cRequests = [], nRequests = []) => {
     runtimeInterfaces: interfaceDiff(chrome.pages, native.pages, "runtime"),
     features: native.features,
     capture: { chrome: captureSummary(chrome), native: captureSummary(native) },
+    interaction: {
+      configuredPlansMatch:
+        Array.isArray(chrome.config?.steps) && Array.isArray(native.config?.steps)
+          ? JSON.stringify(chrome.config.steps) === JSON.stringify(native.config.steps)
+          : null,
+      chrome: interactionSummary(chrome),
+      native: interactionSummary(native),
+    },
+    observation: {
+      chrome: observationSummary(chrome),
+      native: observationSummary(native),
+      configuredPoliciesMatch:
+        chrome.observation && native.observation
+          ? chrome.observation.policy === native.observation.policy &&
+            chrome.observation.triggerStepIndex === native.observation.triggerStepIndex &&
+            chrome.observation.requestedMs === native.observation.requestedMs
+          : null,
+    },
+    chromeSearchOutcome: chromeSearchOutcome(chrome),
     probes: { chrome: chrome.probes, native: native.probes },
     errors: { chrome: chrome.errors || [], native: native.errors || [] },
     pages: Object.fromEntries(
@@ -149,6 +296,8 @@ export const compare = (chrome, native, cRequests = [], nRequests = []) => {
           bytes: p.bytes,
           results: p.results,
           status: p.status,
+          statusSource: p.statusSource,
+          readyState: p.readyState,
           hydration: p.hydration,
           inputState: p.inputState,
           error: p.error,
@@ -254,5 +403,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         `  ${runtime}: ${final?.results || 0} result markers; ${final?.error ? "runtime error" : new URL(final?.url || "about:blank").pathname}; capture ${diff.capture[runtime].complete ? "complete" : "incomplete"}${diff.capture[runtime].hydrationBudgetExceeded ? "; hydration budget exhausted" : ""}`,
       );
     }
+    console.log(
+      `  chrome SERP: ${diff.chromeSearchOutcome.classification}; accepted ${diff.chromeSearchOutcome.accepted}; evidence ${diff.chromeSearchOutcome.evidence}`,
+    );
   }
 }

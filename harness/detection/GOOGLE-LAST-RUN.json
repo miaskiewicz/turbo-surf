@@ -1,13 +1,15 @@
 {
-  "schemaVersion": 4,
-  "collectedAt": "2026-10-17T14:49:05.787Z",
-  "baseCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
+  "schemaVersion": 6,
+  "collectedAt": "2026-10-20T22:53:04.794Z",
+  "baseCommit": "546d5111c4e04ee148d37d375adc583f773ce3b9",
   "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "binaryHash": "3a3e99742fe28ec2671e782b7527312979f3c1f713969429bccbd75ee0370a45",
+  "binaryHash": "895e374ab0b0fe74446387a34fe5929063e3be1e14dfb1e00bbfbcf80f4abe32",
   "repeats": 2,
   "errorCountScope": "Counts trace.errors; process stdout/stderr and debugger diagnostics remain separate.",
   "nativeBaseline": {
     "captured": 2,
+    "processMeasured": 2,
+    "observationMeasured": 2,
     "successful": 0
   },
   "build": {
@@ -29,68 +31,87 @@
     }
   },
   "harnessHashes": {
-    "run.mjs": "ca8fef9ff00b2692addb14dbb608e700ebc1b61ff074b4a052c3fc7a48d708df",
-    "chrome-trace.mjs": "4acb9fef7dd1ba1d98cd98c9ab735e824d399b5d78efc7e761c705abac28aeca",
-    "chrome-cdp-trace.mjs": "09c6f14e992b00cc8f5fe5bd4c6f71e22648cf3244ba9cf8ee91dc187e422b15",
+    "run.mjs": "cda1f393702235cebe9355076fd0ff642b3d749ecdd5fd6065e3dac724e86679",
+    "chrome-trace.mjs": "fc2462a8dfc53125cb09de08401d515d2b9589c3c80af361df61308411068d19",
+    "chrome-cdp-trace.mjs": "e940b655785f6e28bbc981b86c7c62770375c1adc12e596785f8e59ab1ef7308",
     "cdp-connection.mjs": "7b9f522db23484f79575ee46cf320277a4a516de53becba1eef5730d5a5549a0",
+    "input-state.js": "b3ff2009d74d1c2b92671c398f870a0138d7a84105a0a660e8082f88062922e1",
+    "search-plan.mjs": "53e8810a30d7f12c97dee849f761e3e3992263cef3ed30e42023182add5ba531",
+    "validate-steps.mjs": "5527d9befaabce1e13f1bfdb25aaf713f704c2dce60ed6b31ccc9ae958dd4577",
+    "observation-window.mjs": "e352eea8fe8d7760c949b49abf54e84f9582f891e9f7ea4edd7cbf493d4f0be8",
+    "main-navigation.mjs": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",
+    "collector-lifecycle.mjs": "2bdf67c2680b1b7b7fad2c5cbe818995312d3108043b6485e7f334f8372ecd8f",
+    "effective-input.mjs": "090613d6430405193eca5a639cb044f855c9a5aa05520f28a541192079d56f82",
+    "child-supervision.mjs": "0047d191db5f2b2a0936903fb72d6f8d7a117eab36146f0ff315d49438c8ba9c",
+    "freeze-chrome.mjs": "cf8452dea2f3066ad8c94de364eba6ab355dad484405bc0c27a45f3a0d3e8cc3",
     "interface-trace.js": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc",
     "capabilities.js": "787246288936c57d61b5ad4920ed69184891d38e79908cdcf4ca45b831092b84",
     "api-shape.js": "21d5aafbdf94c61e6f8a7216b51d448b750ff099688e1a26ff9c3d31e1975bae",
-    "compare.mjs": "4a1f3a0984045e76c3cdc3b4ea94684256011126b56280a2d31d11b539ed82c7",
+    "compare.mjs": "63169adda55fa6d841c23fa4ee0a23b10714b92062163db0587d837d9b76a818",
+    "summarize-run.mjs": "f14c1d037d6361515461033130d730df94e235287279c534cec19072a440aafa",
     "protocol-headers.mjs": "763b85da53476f6352dfd6e2dbaed07eb2571b2bca4fe7f934b165ae9da5b5e1",
     "chrome-network-metadata.mjs": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2",
     "checkout-provenance.mjs": "48ba6b48298454542d134055d4560c7d380962f27d7d98695ccdf8e11373a6a2"
   },
   "runs": {
     "0/chrome-baseline": {
-      "exitCode": 0,
+      "exitCode": 1,
       "timedOut": false,
+      "process": {
+        "evidence": "measured",
+        "complete": false,
+        "exitCode": 1,
+        "timedOut": false,
+        "aborted": false,
+        "errorPresent": false,
+        "terminationSignal": null
+      },
       "traceMissing": false,
-      "collectorComplete": null,
+      "collectorComplete": false,
       "recordedErrorCount": 1,
-      "traceSha256": "8ff3312f5450d2a8f629f7177770a336a7a654728937a3c45297be4081a8be9f",
+      "traceSha256": "a69be6f9d58238ba59fc6a2b8b06210990a531484ccce379dab1bb6bc555f335",
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 108,
-        "observed": 108,
+        "responses": 51,
+        "observed": 51,
         "unknown": 0,
         "protocols": {
-          "h2": 11,
-          "h3": 84,
+          "h2": 4,
+          "h3": 39,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 13,
+          "other": 8,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
-          "TLS 1.3": 11,
-          "QUIC": 84,
+          "TLS 1.3": 4,
+          "QUIC": 39,
           "other": 0,
-          "unknown": 13
+          "unknown": 8
         },
         "securityDetails": {
-          "present": 95,
-          "missing": 13
+          "present": 43,
+          "missing": 8
         },
         "timing": {
-          "present": 94,
-          "missing": 14
+          "present": 43,
+          "missing": 8
         },
         "connectionReused": {
-          "true": 76,
-          "false": 32,
+          "true": 35,
+          "false": 16,
           "unknown": 0
         },
         "fromDiskCache": {
-          "true": 3,
-          "false": 105,
+          "true": 0,
+          "false": 51,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 108,
+          "false": 51,
           "unknown": 0
         }
       },
@@ -105,69 +126,20 @@
       "formFallbackUsed": false,
       "navigationSource": null,
       "consent": {
-        "requests": 1,
-        "responseStatuses": [204],
-        "responseBeforeFirstSearch": true
+        "requests": 0,
+        "responseStatuses": [],
+        "responseBeforeFirstSearch": null
       },
-      "navigationRequests": [
-        {
-          "path": "/save",
-          "method": "POST",
-          "context": {
-            "sec-fetch-site": "same-site",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-dest": "empty"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
-        },
-        {
-          "path": "/search",
-          "method": "GET",
-          "context": {
-            "sec-fetch-user": "?1",
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "path": "/search",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "path": "/sorry/index",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        }
-      ],
+      "navigationRequests": [],
       "pages": [
         {
           "phase": "home",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -180,154 +152,143 @@
           "phase": "dismiss",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-0",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-1",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-2",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-3",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-4",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-5",
-          "path": "/search",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
+        }
+      ],
+      "captureStages": {
+        "interaction": {
+          "evidence": "measured",
+          "configuredSteps": 6,
+          "completedSteps": 0,
+          "configuredActionsExecuted": false,
+          "typed": [
+            {
+              "index": 3,
+              "valueMatchesTypedText": null,
+              "activeTagMatchesControl": null
+            }
           ]
         },
-        {
-          "phase": "search",
-          "path": "/sorry/index",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
+        "actions": [],
+        "dwell": [
+          {
+            "stage": "home",
+            "requestedMs": 2500,
+            "elapsedMs": 2503,
+            "completed": true
           },
+          {
+            "stage": "<other>",
+            "requestedMs": 2500,
+            "elapsedMs": 2502,
+            "completed": true
+          }
+        ],
+        "readiness": {
+          "complete": null,
+          "selectorRequested": null,
+          "elapsedMs": null
+        },
+        "dismissalClicked": true,
+        "collectorErrorCount": 1,
+        "inputStates": [
+          {
+            "phase": "home",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "dismiss",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "<other>",
+            "consentPresent": true
+          }
+        ],
+        "scope": "Recorded host action completion, configured dwell and typed-value/tag booleans. No query values, tokens, selector text or absolute timestamps. Completed actions alone do not establish real SERP or identical trusted events.",
+        "observation": {
+          "evidence": "unmeasured",
+          "complete": null,
+          "policy": null,
+          "triggerStepIndex": null,
+          "requestedMs": null,
+          "elapsedMs": null,
+          "overrunMs": null,
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "navigationFailed": null,
+          "navigationWaitTimedOut": null,
+          "navigationHopLimit": null
+        },
+        "windowTimerMode": null,
+        "typingTiming": {
+          "configuredMinimumCharacterMs": 110,
+          "actions": [],
+          "scope": "Host action timestamps only; guest clock equality and exact event timing are not established."
+        },
+        "chromeSearchOutcome": {
+          "accepted": false,
+          "classification": "not-accepted",
+          "evidence": "measured",
+          "checks": {
+            "collectorComplete": false,
+            "fixedObservationComplete": false,
+            "terminalSnapshot": false,
+            "documentRootPresent": true,
+            "configuredOrigin": true,
+            "searchDocument": false,
+            "documentStatus200": true,
+            "documentReady": true,
+            "organicResultSelector": true,
+            "positiveResultMarkers": false
+          }
+        },
+        "browserContext": {
+          "requestedIncognito": true,
+          "nonDefaultContext": true,
+          "createdContextVerified": true
         }
-      ]
+      }
     },
     "0/native-baseline": {
       "exitCode": 0,
       "timedOut": false,
+      "process": {
+        "evidence": "measured",
+        "complete": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "aborted": false,
+        "errorPresent": false,
+        "terminationSignal": null
+      },
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "8de435bb17377e880ae45a39e78ba8f626ee4fd4974b97d3be4fe84c79a8d7e3",
+      "traceSha256": "c0a208837dbd6a5ab206296e972a594803126ca1bfd0c49cab475f94e2cc7efc",
       "responseTransport": {
         "source": "native-application-response",
         "packetCapture": false,
-        "responses": 30,
-        "observed": 30,
+        "responses": 35,
+        "observed": 35,
         "unknown": 0,
         "protocols": {
-          "h2": 30,
+          "h2": 35,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
@@ -370,7 +331,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "path": "/search",
@@ -380,14 +341,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         },
         {
           "path": "/sorry/index",
@@ -397,14 +351,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -438,10 +385,90 @@
             "completedPumps": 0
           },
           "pendingNavigation": false,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
-          "phase": "interaction",
+          "phase": "step-0",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-1",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-2",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-3",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-4",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-5",
           "path": "/search",
           "origin": "https://www.google.com",
           "status": 200,
@@ -454,40 +481,10 @@
             "completedPumps": 1
           },
           "pendingNavigation": true,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "native-final",
-          "path": "/search",
-          "origin": "https://www.google.com",
-          "status": 200,
-          "results": 0,
-          "nativeNavigationCount": 1,
-          "readyState": "complete",
-          "hydrationBudgetExceeded": false,
-          "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 1
-          },
-          "pendingNavigation": true,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "phase": "navigation-0",
           "path": "/sorry/index",
           "origin": "https://www.google.com",
           "status": 429,
@@ -500,66 +497,244 @@
             "completedPumps": 1
           },
           "pendingNavigation": false,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         }
-      ]
+      ],
+      "captureStages": {
+        "interaction": {
+          "evidence": "measured",
+          "configuredSteps": 6,
+          "completedSteps": 6,
+          "configuredActionsExecuted": true,
+          "typed": [
+            {
+              "index": 3,
+              "valueMatchesTypedText": true,
+              "activeTagMatchesControl": true
+            }
+          ]
+        },
+        "actions": [
+          {
+            "index": 0,
+            "action": "move",
+            "completed": true,
+            "elapsedMs": 125
+          },
+          {
+            "index": 1,
+            "action": "click",
+            "completed": true,
+            "elapsedMs": 31
+          },
+          {
+            "index": 2,
+            "action": "focus",
+            "completed": true,
+            "elapsedMs": 3
+          },
+          {
+            "index": 3,
+            "action": "type",
+            "completed": true,
+            "elapsedMs": 1081
+          },
+          {
+            "index": 4,
+            "action": "wait",
+            "completed": true,
+            "elapsedMs": 362
+          },
+          {
+            "index": 5,
+            "action": "press",
+            "completed": true,
+            "elapsedMs": 241
+          }
+        ],
+        "dwell": [
+          {
+            "stage": "home",
+            "requestedMs": 2500,
+            "elapsedMs": 2504,
+            "completed": true
+          }
+        ],
+        "readiness": {
+          "complete": true,
+          "selectorRequested": true,
+          "elapsedMs": 3
+        },
+        "dismissalClicked": true,
+        "collectorErrorCount": 0,
+        "inputStates": [
+          {
+            "phase": "home",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "<other>",
+            "consentPresent": true
+          },
+          {
+            "phase": "dismiss",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-0",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-1",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-2",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-3",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-4",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-5",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 0,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          },
+          {
+            "phase": "native-final",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 1,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          }
+        ],
+        "scope": "Recorded host action completion, configured dwell and typed-value/tag booleans. No query values, tokens, selector text or absolute timestamps. Completed actions alone do not establish real SERP or identical trusted events.",
+        "observation": {
+          "evidence": "measured",
+          "complete": true,
+          "policy": "fixed-deadline-before-enter",
+          "triggerStepIndex": 5,
+          "requestedMs": 2500,
+          "elapsedMs": 2506.278334,
+          "overrunMs": 6.278334000000086,
+          "pendingNavigation": false,
+          "navigationFailed": false,
+          "navigationWaitTimedOut": false,
+          "navigationHopLimit": false
+        },
+        "windowTimerMode": "real-time",
+        "typingTiming": {
+          "configuredMinimumCharacterMs": 110,
+          "actions": [
+            {
+              "index": 3,
+              "minimumHostWallCadenceMet": true
+            }
+          ],
+          "scope": "Host action timestamps only; guest clock equality and exact event timing are not established."
+        }
+      }
     },
     "0/chrome-interfaces": {
-      "exitCode": 0,
+      "exitCode": 1,
       "timedOut": false,
+      "process": {
+        "evidence": "measured",
+        "complete": false,
+        "exitCode": 1,
+        "timedOut": false,
+        "aborted": false,
+        "errorPresent": false,
+        "terminationSignal": null
+      },
       "traceMissing": false,
-      "collectorComplete": null,
+      "collectorComplete": false,
       "recordedErrorCount": 1,
-      "traceSha256": "aecc1a8a183df23c11155fb85a46379f9a21c6720051426530a0905d56f4bf89",
+      "traceSha256": "ac0bb5f620ffc32b4e63924dacb5765aae6974d5f931c226c853ec1b9e40fc64",
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 106,
-        "observed": 106,
+        "responses": 51,
+        "observed": 51,
         "unknown": 0,
         "protocols": {
-          "h2": 12,
-          "h3": 82,
+          "h2": 2,
+          "h3": 41,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 12,
+          "other": 8,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
-          "TLS 1.3": 12,
-          "QUIC": 82,
+          "TLS 1.3": 2,
+          "QUIC": 41,
           "other": 0,
-          "unknown": 12
+          "unknown": 8
         },
         "securityDetails": {
-          "present": 94,
-          "missing": 12
+          "present": 43,
+          "missing": 8
         },
         "timing": {
-          "present": 93,
-          "missing": 13
+          "present": 43,
+          "missing": 8
         },
         "connectionReused": {
-          "true": 75,
-          "false": 31,
+          "true": 37,
+          "false": 14,
           "unknown": 0
         },
         "fromDiskCache": {
-          "true": 3,
-          "false": 103,
+          "true": 0,
+          "false": 51,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 106,
+          "false": 51,
           "unknown": 0
         }
       },
@@ -574,69 +749,20 @@
       "formFallbackUsed": false,
       "navigationSource": null,
       "consent": {
-        "requests": 1,
-        "responseStatuses": [204],
-        "responseBeforeFirstSearch": true
+        "requests": 0,
+        "responseStatuses": [],
+        "responseBeforeFirstSearch": null
       },
-      "navigationRequests": [
-        {
-          "path": "/save",
-          "method": "POST",
-          "context": {
-            "sec-fetch-site": "same-site",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-dest": "empty"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
-        },
-        {
-          "path": "/search",
-          "method": "GET",
-          "context": {
-            "sec-fetch-user": "?1",
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "path": "/search",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "path": "/sorry/index",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        }
-      ],
+      "navigationRequests": [],
       "pages": [
         {
           "phase": "home",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -649,601 +775,135 @@
           "phase": "dismiss",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-0",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-1",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-2",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-3",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-4",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-5",
-          "path": "/search",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "search",
-          "path": "/sorry/index",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
         }
-      ]
+      ],
+      "captureStages": {
+        "interaction": {
+          "evidence": "measured",
+          "configuredSteps": 6,
+          "completedSteps": 0,
+          "configuredActionsExecuted": false,
+          "typed": [
+            {
+              "index": 3,
+              "valueMatchesTypedText": null,
+              "activeTagMatchesControl": null
+            }
+          ]
+        },
+        "actions": [],
+        "dwell": [
+          {
+            "stage": "home",
+            "requestedMs": 2500,
+            "elapsedMs": 2503,
+            "completed": true
+          },
+          {
+            "stage": "<other>",
+            "requestedMs": 2500,
+            "elapsedMs": 2503,
+            "completed": true
+          }
+        ],
+        "readiness": {
+          "complete": null,
+          "selectorRequested": null,
+          "elapsedMs": null
+        },
+        "dismissalClicked": true,
+        "collectorErrorCount": 1,
+        "inputStates": [
+          {
+            "phase": "home",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "dismiss",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "<other>",
+            "consentPresent": true
+          }
+        ],
+        "scope": "Recorded host action completion, configured dwell and typed-value/tag booleans. No query values, tokens, selector text or absolute timestamps. Completed actions alone do not establish real SERP or identical trusted events.",
+        "observation": {
+          "evidence": "unmeasured",
+          "complete": null,
+          "policy": null,
+          "triggerStepIndex": null,
+          "requestedMs": null,
+          "elapsedMs": null,
+          "overrunMs": null,
+          "pendingNavigation": null,
+          "navigationFailed": null,
+          "navigationWaitTimedOut": null,
+          "navigationHopLimit": null
+        },
+        "windowTimerMode": null,
+        "typingTiming": {
+          "configuredMinimumCharacterMs": 110,
+          "actions": [],
+          "scope": "Host action timestamps only; guest clock equality and exact event timing are not established."
+        },
+        "chromeSearchOutcome": {
+          "accepted": false,
+          "classification": "not-accepted",
+          "evidence": "measured",
+          "checks": {
+            "collectorComplete": false,
+            "fixedObservationComplete": false,
+            "terminalSnapshot": false,
+            "documentRootPresent": true,
+            "configuredOrigin": true,
+            "searchDocument": false,
+            "documentStatus200": true,
+            "documentReady": true,
+            "organicResultSelector": true,
+            "positiveResultMarkers": false
+          }
+        },
+        "browserContext": {
+          "requestedIncognito": true,
+          "nonDefaultContext": true,
+          "createdContextVerified": true
+        }
+      }
     },
     "0/native-interfaces": {
       "exitCode": 0,
       "timedOut": false,
+      "process": {
+        "evidence": "measured",
+        "complete": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "aborted": false,
+        "errorPresent": false,
+        "terminationSignal": null
+      },
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "e81ccdeb03fd36100584891306da445df378ce0eca78aa754439def80ac0b82b",
-      "responseTransport": {
-        "source": "native-application-response",
-        "packetCapture": false,
-        "responses": 29,
-        "observed": 29,
-        "unknown": 0,
-        "protocols": {
-          "h2": 29,
-          "h3": 0,
-          "http/1.1": 0,
-          "http/1.0": 0,
-          "other": 0,
-          "unknown": 0
-        },
-        "tlsDetails": "not-collected"
-      },
-      "networkCoverage": {
-        "source": "native-application-response",
-        "scope": "native-network-stack",
-        "packetCapture": false
-      },
-      "startOrigin": "https://www.google.com",
-      "formFallbackDisabled": true,
-      "formFallbackUsed": false,
-      "navigationSource": "native-form",
-      "consent": {
-        "requests": 1,
-        "responseStatuses": [204],
-        "responseBeforeFirstSearch": true
-      },
-      "navigationRequests": [
-        {
-          "path": "/save",
-          "method": "POST",
-          "context": {
-            "sec-fetch-site": "same-site",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-dest": "empty"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
-        },
-        {
-          "path": "/search",
-          "method": "GET",
-          "context": {
-            "sec-fetch-user": "?1",
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "path": "/search",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "path": "/sorry/index",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        }
-      ],
-      "pages": [
-        {
-          "phase": "home",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": 200,
-          "results": 0,
-          "nativeNavigationCount": 0,
-          "readyState": "complete",
-          "hydrationBudgetExceeded": true,
-          "hydrationProgress": {
-            "phase": "post-load-hydration",
-            "completedPumps": 0
-          },
-          "pendingNavigation": false,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
-        },
-        {
-          "phase": "dismiss",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": 200,
-          "results": 0,
-          "nativeNavigationCount": 0,
-          "readyState": "complete",
-          "hydrationBudgetExceeded": true,
-          "hydrationProgress": {
-            "phase": "post-load-hydration",
-            "completedPumps": 0
-          },
-          "pendingNavigation": false,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "interaction",
-          "path": "/search",
-          "origin": "https://www.google.com",
-          "status": 200,
-          "results": 0,
-          "nativeNavigationCount": 1,
-          "readyState": "complete",
-          "hydrationBudgetExceeded": false,
-          "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 1
-          },
-          "pendingNavigation": true,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "phase": "native-final",
-          "path": "/search",
-          "origin": "https://www.google.com",
-          "status": 200,
-          "results": 0,
-          "nativeNavigationCount": 1,
-          "readyState": "complete",
-          "hydrationBudgetExceeded": false,
-          "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 1
-          },
-          "pendingNavigation": true,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "phase": "navigation-0",
-          "path": "/sorry/index",
-          "origin": "https://www.google.com",
-          "status": 429,
-          "results": 0,
-          "nativeNavigationCount": 0,
-          "readyState": "complete",
-          "hydrationBudgetExceeded": false,
-          "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 1
-          },
-          "pendingNavigation": false,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        }
-      ]
-    },
-    "1/chrome-baseline": {
-      "exitCode": 0,
-      "timedOut": false,
-      "traceMissing": false,
-      "collectorComplete": null,
-      "recordedErrorCount": 1,
-      "traceSha256": "e4c27aefa7f0e76ac6c9a967dfd068fbb74afffaf5a27be2217d39fef17a4d36",
-      "responseTransport": {
-        "source": "cdp-response",
-        "packetCapture": false,
-        "responses": 108,
-        "observed": 108,
-        "unknown": 0,
-        "protocols": {
-          "h2": 11,
-          "h3": 83,
-          "http/1.1": 0,
-          "http/1.0": 0,
-          "other": 14,
-          "unknown": 0
-        },
-        "tlsProtocols": {
-          "TLS 1.2": 0,
-          "TLS 1.3": 11,
-          "QUIC": 83,
-          "other": 0,
-          "unknown": 14
-        },
-        "securityDetails": {
-          "present": 94,
-          "missing": 14
-        },
-        "timing": {
-          "present": 93,
-          "missing": 15
-        },
-        "connectionReused": {
-          "true": 76,
-          "false": 32,
-          "unknown": 0
-        },
-        "fromDiskCache": {
-          "true": 3,
-          "false": 105,
-          "unknown": 0
-        },
-        "fromServiceWorker": {
-          "true": 0,
-          "false": 108,
-          "unknown": 0
-        }
-      },
-      "networkCoverage": {
-        "source": "cdp-network",
-        "scope": "attached-target-sessions",
-        "packetCapture": false,
-        "enabledInBaseline": true
-      },
-      "startOrigin": "https://www.google.com",
-      "formFallbackDisabled": true,
-      "formFallbackUsed": false,
-      "navigationSource": null,
-      "consent": {
-        "requests": 1,
-        "responseStatuses": [204],
-        "responseBeforeFirstSearch": true
-      },
-      "navigationRequests": [
-        {
-          "path": "/save",
-          "method": "POST",
-          "context": {
-            "sec-fetch-site": "same-site",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-dest": "empty"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
-        },
-        {
-          "path": "/search",
-          "method": "GET",
-          "context": {
-            "sec-fetch-user": "?1",
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "path": "/search",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "path": "/sorry/index",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        }
-      ],
-      "pages": [
-        {
-          "phase": "home",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
-        },
-        {
-          "phase": "dismiss",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-0",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-1",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-2",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-3",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-4",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "step-5",
-          "path": "/",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        },
-        {
-          "phase": "search",
-          "path": "/sorry/index",
-          "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
-          "nativeNavigationCount": null,
-          "readyState": null,
-          "hydrationBudgetExceeded": null,
-          "hydrationProgress": {
-            "phase": "unknown",
-            "completedPumps": null
-          },
-          "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
-        }
-      ]
-    },
-    "1/native-baseline": {
-      "exitCode": 0,
-      "timedOut": false,
-      "traceMissing": false,
-      "collectorComplete": true,
-      "recordedErrorCount": 0,
-      "traceSha256": "aa34d1b2890fb48a3f58b12064a0ddc945d2d87e69057d178af78b56a58edade",
+      "traceSha256": "ee2d04fd0ec5a810810b6e9cdae927c91f03b8f7d9be77c07b68e44473ac6235",
       "responseTransport": {
         "source": "native-application-response",
         "packetCapture": false,
@@ -1294,7 +954,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "path": "/search",
@@ -1304,14 +964,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         },
         {
           "path": "/sorry/index",
@@ -1321,14 +974,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -1362,10 +1008,90 @@
             "completedPumps": 0
           },
           "pendingNavigation": false,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
-          "phase": "interaction",
+          "phase": "step-0",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-1",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-2",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-3",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-4",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-5",
           "path": "/search",
           "origin": "https://www.google.com",
           "status": 200,
@@ -1378,40 +1104,10 @@
             "completedPumps": 1
           },
           "pendingNavigation": true,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "native-final",
-          "path": "/search",
-          "origin": "https://www.google.com",
-          "status": 200,
-          "results": 0,
-          "nativeNavigationCount": 1,
-          "readyState": "complete",
-          "hydrationBudgetExceeded": false,
-          "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 1
-          },
-          "pendingNavigation": true,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "phase": "navigation-0",
           "path": "/sorry/index",
           "origin": "https://www.google.com",
           "status": 429,
@@ -1424,66 +1120,244 @@
             "completedPumps": 1
           },
           "pendingNavigation": false,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         }
-      ]
+      ],
+      "captureStages": {
+        "interaction": {
+          "evidence": "measured",
+          "configuredSteps": 6,
+          "completedSteps": 6,
+          "configuredActionsExecuted": true,
+          "typed": [
+            {
+              "index": 3,
+              "valueMatchesTypedText": true,
+              "activeTagMatchesControl": true
+            }
+          ]
+        },
+        "actions": [
+          {
+            "index": 0,
+            "action": "move",
+            "completed": true,
+            "elapsedMs": 108
+          },
+          {
+            "index": 1,
+            "action": "click",
+            "completed": true,
+            "elapsedMs": 26
+          },
+          {
+            "index": 2,
+            "action": "focus",
+            "completed": true,
+            "elapsedMs": 3
+          },
+          {
+            "index": 3,
+            "action": "type",
+            "completed": true,
+            "elapsedMs": 1070
+          },
+          {
+            "index": 4,
+            "action": "wait",
+            "completed": true,
+            "elapsedMs": 366
+          },
+          {
+            "index": 5,
+            "action": "press",
+            "completed": true,
+            "elapsedMs": 486
+          }
+        ],
+        "dwell": [
+          {
+            "stage": "home",
+            "requestedMs": 2500,
+            "elapsedMs": 2512,
+            "completed": true
+          }
+        ],
+        "readiness": {
+          "complete": true,
+          "selectorRequested": true,
+          "elapsedMs": 3
+        },
+        "dismissalClicked": true,
+        "collectorErrorCount": 0,
+        "inputStates": [
+          {
+            "phase": "home",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "<other>",
+            "consentPresent": true
+          },
+          {
+            "phase": "dismiss",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-0",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-1",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-2",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-3",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-4",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-5",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 0,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          },
+          {
+            "phase": "native-final",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 1,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          }
+        ],
+        "scope": "Recorded host action completion, configured dwell and typed-value/tag booleans. No query values, tokens, selector text or absolute timestamps. Completed actions alone do not establish real SERP or identical trusted events.",
+        "observation": {
+          "evidence": "measured",
+          "complete": true,
+          "policy": "fixed-deadline-before-enter",
+          "triggerStepIndex": 5,
+          "requestedMs": 2500,
+          "elapsedMs": 2507.283417,
+          "overrunMs": 7.2834170000000995,
+          "pendingNavigation": false,
+          "navigationFailed": false,
+          "navigationWaitTimedOut": false,
+          "navigationHopLimit": false
+        },
+        "windowTimerMode": "real-time",
+        "typingTiming": {
+          "configuredMinimumCharacterMs": 110,
+          "actions": [
+            {
+              "index": 3,
+              "minimumHostWallCadenceMet": true
+            }
+          ],
+          "scope": "Host action timestamps only; guest clock equality and exact event timing are not established."
+        }
+      }
     },
-    "1/chrome-interfaces": {
+    "1/chrome-baseline": {
       "exitCode": 0,
       "timedOut": false,
+      "process": {
+        "evidence": "measured",
+        "complete": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "aborted": false,
+        "errorPresent": false,
+        "terminationSignal": null
+      },
       "traceMissing": false,
-      "collectorComplete": null,
-      "recordedErrorCount": 1,
-      "traceSha256": "1751d723228b60c977e77ad9e44d3b8937dab4a1c08c3419986456fff0b19908",
+      "collectorComplete": true,
+      "recordedErrorCount": 0,
+      "traceSha256": "e60eab0f5316daae365f98f0622815895248433f6127cb75666756dd60321023",
       "responseTransport": {
         "source": "cdp-response",
         "packetCapture": false,
-        "responses": 106,
-        "observed": 106,
+        "responses": 178,
+        "observed": 178,
         "unknown": 0,
         "protocols": {
-          "h2": 11,
-          "h3": 82,
+          "h2": 8,
+          "h3": 141,
           "http/1.1": 0,
           "http/1.0": 0,
-          "other": 13,
+          "other": 29,
           "unknown": 0
         },
         "tlsProtocols": {
           "TLS 1.2": 0,
-          "TLS 1.3": 11,
-          "QUIC": 82,
+          "TLS 1.3": 8,
+          "QUIC": 141,
           "other": 0,
-          "unknown": 13
+          "unknown": 29
         },
         "securityDetails": {
-          "present": 93,
-          "missing": 13
+          "present": 149,
+          "missing": 29
         },
         "timing": {
-          "present": 92,
-          "missing": 14
+          "present": 149,
+          "missing": 29
         },
         "connectionReused": {
-          "true": 74,
-          "false": 32,
+          "true": 135,
+          "false": 43,
           "unknown": 0
         },
         "fromDiskCache": {
-          "true": 3,
-          "false": 103,
+          "true": 1,
+          "false": 177,
           "unknown": 0
         },
         "fromServiceWorker": {
           "true": 0,
-          "false": 106,
+          "false": 178,
           "unknown": 0
         }
       },
@@ -1522,7 +1396,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "path": "/search",
@@ -1532,24 +1406,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "path": "/sorry/index",
-          "method": "GET",
-          "context": {
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-dest": "document"
-          },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -1557,10 +1414,10 @@
           "phase": "home",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
@@ -1573,154 +1430,360 @@
           "phase": "dismiss",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "step-0",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "step-1",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "step-2",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "step-3",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "step-4",
           "path": "/",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "step-5",
           "path": "/search",
           "origin": "https://www.google.com",
-          "status": null,
+          "status": 200,
           "results": 0,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "loading",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "search",
-          "path": "/sorry/index",
+          "path": "/search",
           "origin": "https://www.google.com",
-          "status": null,
-          "results": 0,
+          "status": 200,
+          "results": 9,
           "nativeNavigationCount": null,
-          "readyState": null,
+          "readyState": "complete",
           "hydrationBudgetExceeded": null,
           "hydrationProgress": {
             "phase": "unknown",
             "completedPumps": null
           },
           "pendingNavigation": null,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "DV", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         }
-      ]
+      ],
+      "captureStages": {
+        "interaction": {
+          "evidence": "measured",
+          "configuredSteps": 6,
+          "completedSteps": 6,
+          "configuredActionsExecuted": true,
+          "typed": [
+            {
+              "index": 3,
+              "valueMatchesTypedText": true,
+              "activeTagMatchesControl": true
+            }
+          ]
+        },
+        "actions": [
+          {
+            "index": 0,
+            "action": "move",
+            "completed": true,
+            "elapsedMs": 226
+          },
+          {
+            "index": 1,
+            "action": "click",
+            "completed": true,
+            "elapsedMs": 18
+          },
+          {
+            "index": 2,
+            "action": "focus",
+            "completed": true,
+            "elapsedMs": 2
+          },
+          {
+            "index": 3,
+            "action": "type",
+            "completed": true,
+            "elapsedMs": 1064
+          },
+          {
+            "index": 4,
+            "action": "wait",
+            "completed": true,
+            "elapsedMs": 351
+          },
+          {
+            "index": 5,
+            "action": "press",
+            "completed": true,
+            "elapsedMs": 8
+          }
+        ],
+        "dwell": [
+          {
+            "stage": "home",
+            "requestedMs": 2500,
+            "elapsedMs": 2501,
+            "completed": true
+          },
+          {
+            "stage": "<other>",
+            "requestedMs": 2500,
+            "elapsedMs": 2500,
+            "completed": true
+          }
+        ],
+        "readiness": {
+          "complete": null,
+          "selectorRequested": null,
+          "elapsedMs": null
+        },
+        "dismissalClicked": true,
+        "collectorErrorCount": 0,
+        "inputStates": [
+          {
+            "phase": "home",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "dismiss",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BODY",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-0",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BODY",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-1",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-2",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-3",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-4",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-5",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 0,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": null,
+            "activeTag": "<other>",
+            "consentPresent": false
+          },
+          {
+            "phase": "search",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 2,
+            "excludedHiddenQueryControls": 1,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BODY",
+            "consentPresent": false
+          }
+        ],
+        "scope": "Recorded host action completion, configured dwell and typed-value/tag booleans. No query values, tokens, selector text or absolute timestamps. Completed actions alone do not establish real SERP or identical trusted events.",
+        "observation": {
+          "evidence": "measured",
+          "complete": true,
+          "policy": "fixed-deadline-before-enter",
+          "triggerStepIndex": 5,
+          "requestedMs": 2500,
+          "elapsedMs": 2569.1495000000014,
+          "overrunMs": 69.14950000000135,
+          "pendingNavigation": false,
+          "navigationFailed": false,
+          "navigationWaitTimedOut": false,
+          "navigationHopLimit": false
+        },
+        "windowTimerMode": null,
+        "typingTiming": {
+          "configuredMinimumCharacterMs": 110,
+          "actions": [
+            {
+              "index": 3,
+              "minimumHostWallCadenceMet": true
+            }
+          ],
+          "scope": "Host action timestamps only; guest clock equality and exact event timing are not established."
+        },
+        "chromeSearchOutcome": {
+          "accepted": true,
+          "classification": "serp",
+          "evidence": "measured",
+          "checks": {
+            "collectorComplete": true,
+            "fixedObservationComplete": true,
+            "terminalSnapshot": true,
+            "documentRootPresent": true,
+            "configuredOrigin": true,
+            "searchDocument": true,
+            "documentStatus200": true,
+            "documentReady": true,
+            "organicResultSelector": true,
+            "positiveResultMarkers": true
+          }
+        },
+        "browserContext": {
+          "requestedIncognito": true,
+          "nonDefaultContext": true,
+          "createdContextVerified": true
+        }
+      }
     },
-    "1/native-interfaces": {
+    "1/native-baseline": {
       "exitCode": 0,
       "timedOut": false,
+      "process": {
+        "evidence": "measured",
+        "complete": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "aborted": false,
+        "errorPresent": false,
+        "terminationSignal": null
+      },
       "traceMissing": false,
       "collectorComplete": true,
       "recordedErrorCount": 0,
-      "traceSha256": "6764a2a761d9eec8e920757626710c71834368698ae658b0751ae1c748042659",
+      "traceSha256": "5c16382fbcea761dffdce305fa62fdd8cd1385887dcbfbed0cb0080c57ca4a4a",
       "responseTransport": {
         "source": "native-application-response",
         "packetCapture": false,
-        "responses": 30,
-        "observed": 30,
+        "responses": 35,
+        "observed": 35,
         "unknown": 0,
         "protocols": {
-          "h2": 30,
+          "h2": 35,
           "h3": 0,
           "http/1.1": 0,
           "http/1.0": 0,
@@ -1763,7 +1826,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
           "path": "/search",
@@ -1773,14 +1836,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         },
         {
           "path": "/sorry/index",
@@ -1790,14 +1846,7 @@
             "sec-fetch-mode": "navigate",
             "sec-fetch-dest": "document"
           },
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         }
       ],
       "pages": [
@@ -1831,10 +1880,90 @@
             "completedPumps": 0
           },
           "pendingNavigation": false,
-          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-BUCKET", "__Secure-ENID"]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
         },
         {
-          "phase": "interaction",
+          "phase": "step-0",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-1",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-2",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-3",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-4",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-5",
           "path": "/search",
           "origin": "https://www.google.com",
           "status": 200,
@@ -1847,40 +1976,10 @@
             "completedPumps": 1
           },
           "pendingNavigation": true,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         },
         {
           "phase": "native-final",
-          "path": "/search",
-          "origin": "https://www.google.com",
-          "status": 200,
-          "results": 0,
-          "nativeNavigationCount": 1,
-          "readyState": "complete",
-          "hydrationBudgetExceeded": false,
-          "hydrationProgress": {
-            "phase": "complete",
-            "completedPumps": 1
-          },
-          "pendingNavigation": true,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
-        },
-        {
-          "phase": "navigation-0",
           "path": "/sorry/index",
           "origin": "https://www.google.com",
           "status": 429,
@@ -1893,40 +1992,1067 @@
             "completedPumps": 1
           },
           "pendingNavigation": false,
-          "cookieNames": [
-            "AEC",
-            "SEARCH_SAMESITE",
-            "SG_SS",
-            "SOCS",
-            "__Secure-BUCKET",
-            "__Secure-ENID"
-          ]
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
         }
-      ]
-    }
-  },
-  "publicationProvenance": {
-    "implementationSourceCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
-    "selectedSourceCount": 1457,
-    "selectedSourceManifestSha256": "5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a",
-    "scope": "Actual implementation and selected code/configuration/fixture hashes verified before and after execution. This later publication changes documentation and measurement data only; it does not assert a new engine build.",
-    "sourceBeforeReceiptSha256": "63844e77525bd121ffe21f37a8f353ff476c499c0b4ffa9d72043d5ae826b6ef",
-    "matrixReceiptSha256": "4c8d75f18f99285079018c91dcc82fd4764fb13bc2609cf267cb7d4f1d0665eb",
-    "captureManifestSha256": "7294623ce3a55f9109cfeacf680b061ac823bd0d30e465f3b68fda327635464a",
-    "sanitizedCaptureSha256": "d5f2ca0890ea24519f949c60d7feac432d251b0c6f5e50f4aa3c720f26de499f",
-    "processCompletionScope": "All 14 collectors exited zero without timeout; this is not SERP acceptance.",
-    "sanitizedInputVariant": "Read-only extraction with replay of eight historical fixed-code positive controls; sanitizedCaptureSha256 identifies that extractor output before publication metadata or formatting."
-  },
-  "previousCheckpoint": {
-    "immutableReport": "https://github.com/miaskiewicz/turbo-surf/blob/a005140fabeb02c6c3c23711125944cf445a1bb9/harness/detection/GOOGLE-LAST-RUN.json",
-    "reportSha256": "c07cf9e935462c7265ce681a9351ac757abbe3093073a4a3f1cbeed2b59a1943",
-    "captureBaseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
-    "scope": "Historical capture retained at the immutable report link; not the fresh a005 measurement.",
-    "nativeBaseline": {
-      "captured": 2,
-      "successful": 0
+      ],
+      "captureStages": {
+        "interaction": {
+          "evidence": "measured",
+          "configuredSteps": 6,
+          "completedSteps": 6,
+          "configuredActionsExecuted": true,
+          "typed": [
+            {
+              "index": 3,
+              "valueMatchesTypedText": true,
+              "activeTagMatchesControl": true
+            }
+          ]
+        },
+        "actions": [
+          {
+            "index": 0,
+            "action": "move",
+            "completed": true,
+            "elapsedMs": 122
+          },
+          {
+            "index": 1,
+            "action": "click",
+            "completed": true,
+            "elapsedMs": 33
+          },
+          {
+            "index": 2,
+            "action": "focus",
+            "completed": true,
+            "elapsedMs": 3
+          },
+          {
+            "index": 3,
+            "action": "type",
+            "completed": true,
+            "elapsedMs": 1065
+          },
+          {
+            "index": 4,
+            "action": "wait",
+            "completed": true,
+            "elapsedMs": 452
+          },
+          {
+            "index": 5,
+            "action": "press",
+            "completed": true,
+            "elapsedMs": 374
+          }
+        ],
+        "dwell": [
+          {
+            "stage": "home",
+            "requestedMs": 2500,
+            "elapsedMs": 2510,
+            "completed": true
+          }
+        ],
+        "readiness": {
+          "complete": true,
+          "selectorRequested": true,
+          "elapsedMs": 2
+        },
+        "dismissalClicked": true,
+        "collectorErrorCount": 0,
+        "inputStates": [
+          {
+            "phase": "home",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "<other>",
+            "consentPresent": true
+          },
+          {
+            "phase": "dismiss",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-0",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-1",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-2",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-3",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-4",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-5",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 0,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          },
+          {
+            "phase": "native-final",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 1,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          }
+        ],
+        "scope": "Recorded host action completion, configured dwell and typed-value/tag booleans. No query values, tokens, selector text or absolute timestamps. Completed actions alone do not establish real SERP or identical trusted events.",
+        "observation": {
+          "evidence": "measured",
+          "complete": true,
+          "policy": "fixed-deadline-before-enter",
+          "triggerStepIndex": 5,
+          "requestedMs": 2500,
+          "elapsedMs": 2507.5959169999996,
+          "overrunMs": 7.595916999999645,
+          "pendingNavigation": false,
+          "navigationFailed": false,
+          "navigationWaitTimedOut": false,
+          "navigationHopLimit": false
+        },
+        "windowTimerMode": "real-time",
+        "typingTiming": {
+          "configuredMinimumCharacterMs": 110,
+          "actions": [
+            {
+              "index": 3,
+              "minimumHostWallCadenceMet": true
+            }
+          ],
+          "scope": "Host action timestamps only; guest clock equality and exact event timing are not established."
+        }
+      }
     },
-    "chromeBaselineFinalResultMarkers": [7, 8]
-  },
-  "harnessHashScope": "harnessHashes contains the recorded harness subset only; publicationProvenance separately identifies the complete 1457-file selected source manifest."
+    "1/chrome-interfaces": {
+      "exitCode": 0,
+      "timedOut": false,
+      "process": {
+        "evidence": "measured",
+        "complete": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "aborted": false,
+        "errorPresent": false,
+        "terminationSignal": null
+      },
+      "traceMissing": false,
+      "collectorComplete": true,
+      "recordedErrorCount": 1,
+      "traceSha256": "453d70c39d7dc12870fa2070c5e4dbd5e1bf4c939f2bdf585366ffd863814df3",
+      "responseTransport": {
+        "source": "cdp-response",
+        "packetCapture": false,
+        "responses": 110,
+        "observed": 110,
+        "unknown": 0,
+        "protocols": {
+          "h2": 3,
+          "h3": 93,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 14,
+          "unknown": 0
+        },
+        "tlsProtocols": {
+          "TLS 1.2": 0,
+          "TLS 1.3": 3,
+          "QUIC": 93,
+          "other": 0,
+          "unknown": 14
+        },
+        "securityDetails": {
+          "present": 96,
+          "missing": 14
+        },
+        "timing": {
+          "present": 95,
+          "missing": 15
+        },
+        "connectionReused": {
+          "true": 85,
+          "false": 25,
+          "unknown": 0
+        },
+        "fromDiskCache": {
+          "true": 3,
+          "false": 107,
+          "unknown": 0
+        },
+        "fromServiceWorker": {
+          "true": 0,
+          "false": 110,
+          "unknown": 0
+        }
+      },
+      "networkCoverage": {
+        "source": "cdp-network",
+        "scope": "attached-target-sessions",
+        "packetCapture": false,
+        "enabledInBaseline": true
+      },
+      "startOrigin": "https://www.google.com",
+      "formFallbackDisabled": true,
+      "formFallbackUsed": false,
+      "navigationSource": null,
+      "consent": {
+        "requests": 1,
+        "responseStatuses": [204],
+        "responseBeforeFirstSearch": true
+      },
+      "navigationRequests": [
+        {
+          "path": "/save",
+          "method": "POST",
+          "context": {
+            "sec-fetch-site": "same-site",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-dest": "empty"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "path": "/search",
+          "method": "GET",
+          "context": {
+            "sec-fetch-user": "?1",
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "path": "/search",
+          "method": "GET",
+          "context": {
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "path": "/sorry/index",
+          "method": "GET",
+          "context": {
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        }
+      ],
+      "pages": [
+        {
+          "phase": "home",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
+        },
+        {
+          "phase": "dismiss",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-0",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-1",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-2",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-3",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-4",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-5",
+          "path": "/sorry/index",
+          "origin": "https://www.google.com",
+          "status": 429,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "interactive",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "search",
+          "path": "/sorry/index",
+          "origin": "https://www.google.com",
+          "status": 429,
+          "results": 0,
+          "nativeNavigationCount": null,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": null,
+          "hydrationProgress": {
+            "phase": "unknown",
+            "completedPumps": null
+          },
+          "pendingNavigation": null,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        }
+      ],
+      "captureStages": {
+        "interaction": {
+          "evidence": "measured",
+          "configuredSteps": 6,
+          "completedSteps": 6,
+          "configuredActionsExecuted": true,
+          "typed": [
+            {
+              "index": 3,
+              "valueMatchesTypedText": true,
+              "activeTagMatchesControl": true
+            }
+          ]
+        },
+        "actions": [
+          {
+            "index": 0,
+            "action": "move",
+            "completed": true,
+            "elapsedMs": 30
+          },
+          {
+            "index": 1,
+            "action": "click",
+            "completed": true,
+            "elapsedMs": 50
+          },
+          {
+            "index": 2,
+            "action": "focus",
+            "completed": true,
+            "elapsedMs": 0
+          },
+          {
+            "index": 3,
+            "action": "type",
+            "completed": true,
+            "elapsedMs": 1070
+          },
+          {
+            "index": 4,
+            "action": "wait",
+            "completed": true,
+            "elapsedMs": 351
+          },
+          {
+            "index": 5,
+            "action": "press",
+            "completed": true,
+            "elapsedMs": 4
+          }
+        ],
+        "dwell": [
+          {
+            "stage": "home",
+            "requestedMs": 2500,
+            "elapsedMs": 2502,
+            "completed": true
+          },
+          {
+            "stage": "<other>",
+            "requestedMs": 2500,
+            "elapsedMs": 2501,
+            "completed": true
+          }
+        ],
+        "readiness": {
+          "complete": null,
+          "selectorRequested": null,
+          "elapsedMs": null
+        },
+        "dismissalClicked": true,
+        "collectorErrorCount": 0,
+        "inputStates": [
+          {
+            "phase": "home",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "dismiss",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BODY",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-0",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BODY",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-1",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-2",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-3",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-4",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-5",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 1,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          },
+          {
+            "phase": "search",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 1,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          }
+        ],
+        "scope": "Recorded host action completion, configured dwell and typed-value/tag booleans. No query values, tokens, selector text or absolute timestamps. Completed actions alone do not establish real SERP or identical trusted events.",
+        "observation": {
+          "evidence": "measured",
+          "complete": true,
+          "policy": "fixed-deadline-before-enter",
+          "triggerStepIndex": 5,
+          "requestedMs": 2500,
+          "elapsedMs": 2605.500458999999,
+          "overrunMs": 105.50045899999895,
+          "pendingNavigation": false,
+          "navigationFailed": false,
+          "navigationWaitTimedOut": false,
+          "navigationHopLimit": false
+        },
+        "windowTimerMode": null,
+        "typingTiming": {
+          "configuredMinimumCharacterMs": 110,
+          "actions": [
+            {
+              "index": 3,
+              "minimumHostWallCadenceMet": true
+            }
+          ],
+          "scope": "Host action timestamps only; guest clock equality and exact event timing are not established."
+        },
+        "chromeSearchOutcome": {
+          "accepted": false,
+          "classification": "challenge",
+          "evidence": "measured",
+          "checks": {
+            "collectorComplete": true,
+            "fixedObservationComplete": true,
+            "terminalSnapshot": true,
+            "documentRootPresent": true,
+            "configuredOrigin": true,
+            "searchDocument": false,
+            "documentStatus200": false,
+            "documentReady": true,
+            "organicResultSelector": true,
+            "positiveResultMarkers": false
+          }
+        },
+        "browserContext": {
+          "requestedIncognito": true,
+          "nonDefaultContext": true,
+          "createdContextVerified": true
+        }
+      }
+    },
+    "1/native-interfaces": {
+      "exitCode": 0,
+      "timedOut": false,
+      "process": {
+        "evidence": "measured",
+        "complete": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "aborted": false,
+        "errorPresent": false,
+        "terminationSignal": null
+      },
+      "traceMissing": false,
+      "collectorComplete": true,
+      "recordedErrorCount": 0,
+      "traceSha256": "e9ef9d92f288e4f0a905b4ba8fc6fac7fc71d1da24b5be4dba82d56d0806afb1",
+      "responseTransport": {
+        "source": "native-application-response",
+        "packetCapture": false,
+        "responses": 29,
+        "observed": 29,
+        "unknown": 0,
+        "protocols": {
+          "h2": 29,
+          "h3": 0,
+          "http/1.1": 0,
+          "http/1.0": 0,
+          "other": 0,
+          "unknown": 0
+        },
+        "tlsDetails": "not-collected"
+      },
+      "networkCoverage": {
+        "source": "native-application-response",
+        "scope": "native-network-stack",
+        "packetCapture": false
+      },
+      "startOrigin": "https://www.google.com",
+      "formFallbackDisabled": true,
+      "formFallbackUsed": false,
+      "navigationSource": "native-form",
+      "consent": {
+        "requests": 1,
+        "responseStatuses": [204],
+        "responseBeforeFirstSearch": true
+      },
+      "navigationRequests": [
+        {
+          "path": "/save",
+          "method": "POST",
+          "context": {
+            "sec-fetch-site": "same-site",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-dest": "empty"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "path": "/search",
+          "method": "GET",
+          "context": {
+            "sec-fetch-user": "?1",
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "path": "/search",
+          "method": "GET",
+          "context": {
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "path": "/sorry/index",
+          "method": "GET",
+          "context": {
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document"
+          },
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
+        }
+      ],
+      "pages": [
+        {
+          "phase": "home",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "__Secure-ENID"]
+        },
+        {
+          "phase": "dismiss",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-0",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-1",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-2",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-3",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-4",
+          "path": "/",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": true,
+          "hydrationProgress": {
+            "phase": "post-load-hydration",
+            "completedPumps": 0
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "step-5",
+          "path": "/search",
+          "origin": "https://www.google.com",
+          "status": 200,
+          "results": 0,
+          "nativeNavigationCount": 1,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
+          "pendingNavigation": true,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
+        },
+        {
+          "phase": "native-final",
+          "path": "/sorry/index",
+          "origin": "https://www.google.com",
+          "status": 429,
+          "results": 0,
+          "nativeNavigationCount": 0,
+          "readyState": "complete",
+          "hydrationBudgetExceeded": false,
+          "hydrationProgress": {
+            "phase": "complete",
+            "completedPumps": 1
+          },
+          "pendingNavigation": false,
+          "cookieNames": ["AEC", "SEARCH_SAMESITE", "SG_SS", "SOCS", "__Secure-ENID"]
+        }
+      ],
+      "captureStages": {
+        "interaction": {
+          "evidence": "measured",
+          "configuredSteps": 6,
+          "completedSteps": 6,
+          "configuredActionsExecuted": true,
+          "typed": [
+            {
+              "index": 3,
+              "valueMatchesTypedText": true,
+              "activeTagMatchesControl": true
+            }
+          ]
+        },
+        "actions": [
+          {
+            "index": 0,
+            "action": "move",
+            "completed": true,
+            "elapsedMs": 92
+          },
+          {
+            "index": 1,
+            "action": "click",
+            "completed": true,
+            "elapsedMs": 25
+          },
+          {
+            "index": 2,
+            "action": "focus",
+            "completed": true,
+            "elapsedMs": 3
+          },
+          {
+            "index": 3,
+            "action": "type",
+            "completed": true,
+            "elapsedMs": 1060
+          },
+          {
+            "index": 4,
+            "action": "wait",
+            "completed": true,
+            "elapsedMs": 359
+          },
+          {
+            "index": 5,
+            "action": "press",
+            "completed": true,
+            "elapsedMs": 501
+          }
+        ],
+        "dwell": [
+          {
+            "stage": "home",
+            "requestedMs": 2500,
+            "elapsedMs": 2508,
+            "completed": true
+          }
+        ],
+        "readiness": {
+          "complete": true,
+          "selectorRequested": true,
+          "elapsedMs": 3
+        },
+        "dismissalClicked": true,
+        "collectorErrorCount": 0,
+        "inputStates": [
+          {
+            "phase": "home",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "<other>",
+            "consentPresent": true
+          },
+          {
+            "phase": "dismiss",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-0",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "BUTTON",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-1",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-2",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-3",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-4",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": "TEXTAREA",
+            "activeTag": "TEXTAREA",
+            "consentPresent": true
+          },
+          {
+            "phase": "step-5",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 0,
+            "excludedHiddenQueryControls": 0,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          },
+          {
+            "phase": "native-final",
+            "selection": "first-q-control-with-non-hidden-type",
+            "queryControlCount": 1,
+            "excludedHiddenQueryControls": 1,
+            "controlTag": null,
+            "activeTag": "BODY",
+            "consentPresent": false
+          }
+        ],
+        "scope": "Recorded host action completion, configured dwell and typed-value/tag booleans. No query values, tokens, selector text or absolute timestamps. Completed actions alone do not establish real SERP or identical trusted events.",
+        "observation": {
+          "evidence": "measured",
+          "complete": true,
+          "policy": "fixed-deadline-before-enter",
+          "triggerStepIndex": 5,
+          "requestedMs": 2500,
+          "elapsedMs": 2518.2637919999997,
+          "overrunMs": 18.26379199999974,
+          "pendingNavigation": false,
+          "navigationFailed": false,
+          "navigationWaitTimedOut": false,
+          "navigationHopLimit": false
+        },
+        "windowTimerMode": "real-time",
+        "typingTiming": {
+          "configuredMinimumCharacterMs": 110,
+          "actions": [
+            {
+              "index": 3,
+              "minimumHostWallCadenceMet": true
+            }
+          ],
+          "scope": "Host action timestamps only; guest clock equality and exact event timing are not established."
+        }
+      }
+    }
+  }
 }

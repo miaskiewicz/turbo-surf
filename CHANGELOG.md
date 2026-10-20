@@ -11,6 +11,21 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Runner timing follow-up — 2026-10-20
 
+- Publish the fresh546d511 API and Google measurements. All75 interfaces are
+  measured:64 original-four missing own members,142 expanded missing members and
+  374 difference paths. One fresh signed-out Chrome baseline reaches200/search
+  with nine markers; the other fails effective consent dismissal before input.
+  Both native baselines save consent, perform all six actions and use real forms,
+  then receive429 with zero markers. Early homepage budget exhaustion persists.
+  All14 process records and unchanged-source/artifact guards are retained; four
+  Chrome captures exit1, so the matrix is not a complete successful comparison.
+  The sanitizer passes21 privacy/schema controls and eight historical positive
+  diagnostic controls. Native clearance and broader residuals stay in issue28;
+  audio stays in issue27. Raw traces remain private.
+- Remove closed stock/native debug caches and five duplicate test executables.
+  Archive and hash-verify eight failed-test temporary directories before clearing
+  their originals, plus27 empty directories. Preserve operative binaries,
+  addons, SDK archives/source and all diagnostic evidence.
 - Fix a real Chrome post-submit collector failure when the current document has
   no root. Both Chrome backends read root presence, markup and result counts in
   one synchronous evaluation; preserve each backend's doctype serialization and

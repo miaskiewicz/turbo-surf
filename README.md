@@ -373,18 +373,29 @@ also exhausts its20-second budget. These are explicit remaining limits, not a
 claim of full Chrome parity. See the [current evidence](./harness/detection/FINDINGS.md)
 and [remaining work](./harness/detection/PARITY-GAPS.md).
 
-The October19 follow-up verifies the same executed Chrome/native localhost flow:
-real consent coordinates/response/cookie ordering, focused textarea typing,
-genuine form submission and final results. It repairs a native attribute-selector
-bug that selected a hidden query field, records action completion and enforces
-shared custom-step types before either backend launches. A signed-out Chrome
-Incognito UI control reaches Google results, but current traced/native Google
-acceptance remains unverified until fresh collection. The October20 default
-`npm run check` passes1,450 Rust tests, strict checks and rebuilt addon consumers;
-the full native-feature gate and fresh optimized comparison remain pending.
-These bounded controls do not establish
-complete Chrome parity.
+The October20 collector checkpoint is546d511. The full stock/native workspace
+gates pass1,451/1,496 Rust tests on their recorded3a77122 source, with strict
+checks and formatting. The later collector repair passes200 Node22 detection
+tests without skips,191 Node20 tests with nine documented browser skips,
+sixteen paired controls and the focused Rust resource control. Explicit source
+bridges preserve the unchanged optimized native engine and earlier addon results.
 
+The fresh signed-out comparison reached a real HTTP200 search with nine result
+markers in one Chrome baseline. The other Chrome baseline stopped before typing
+because consent dismissal had no observable effect and the query was obscured.
+Both native baselines completed all six actions, saved consent through native
+requests and used native form navigation, but ended at HTTP429 with zero results.
+Early native homepage hydration still exceeded its budget; a completed final429
+document does not erase that earlier failure. Native SERP clearance is unresolved.
+
+The current75-interface audit records142 missing own members across its expanded
+inventory, including64 in the original four interfaces, and374 difference paths.
+These are descriptor/ownership measurements, not142 wholly absent features.
+See the [fresh evidence](./harness/detection/FINDINGS.md),
+[exact configuration](./harness/detection/CHROME-PARITY-RUNBOOK.md) and
+[remaining work](./harness/detection/PARITY-GAPS.md). Audio stays in issue27;
+the other measured residuals, including live clearance and consent reliability,
+stay in issue28. Full Chrome parity is not established.
 
 
 ---

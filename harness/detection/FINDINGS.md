@@ -8,6 +8,53 @@ Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
+## Latest frozen Google and API capture — 2026-10-20 UTC
+
+The546d511 matrix contains all14 expected process records with no timeout or
+abort. Its overall exit is1: ten child processes exit0 and four Chrome captures
+exit1. Source, the81 explicit literal guards, optimized executable and full frozen
+Chrome bundle stay unchanged. Cookies are independent and native uses no Chrome
+sidecar, imported jar or serialized-form fallback.
+
+| Baseline | Chrome | Native |
+|---|---|---|
+| Repeat0 | Stops before query input: consent click has no observed save/cookie effect; input is obscured. No search conclusion. | Consent save204 before search; all six actions; native form; final429, zero markers. |
+| Repeat1 | Verified fresh Incognito context; consent save204; all six actions; completed200 search with nine markers. | Consent save204 before search; all six actions; native form; final429, zero markers. |
+
+Native baseline acceptance is0/2. Both native observations complete in real-time
+mode, but homepage hydration exceeds the20-second budget before the first
+post-load pump; that flag is carried through step4 in baseline and interface
+captures. The final429 document does not exceed its budget. Preserve every
+checkpoint rather than treating final completion as proof of successful initial
+hydration. The rejection cause is not established by these observations.
+
+The failed Chrome baseline retains identical home/dismiss HTML, no consent-save
+request or new consent cookie, and zero query actions. Its click-dispatch flag is
+not a consent-success flag. The available trace does not establish why that input
+had no effect. The successful signed-out baseline demonstrates a real SERP
+control, without establishing reliability across captures. Chrome's other
+nonzero captures remain explicit failures in the saved report.
+
+The fresh75-interface API audit has no unmeasured constructors:64 original-four
+missing own members,142 across the expanded inventory and374 difference paths.
+Both API collectors finish without errors. Native uses actualV815.5.35.23-rusty;
+Chrome155.0.8059.85 uses15.5.35.25, while the native profile reports155.0.8059.80
+and the transport recipe derives from154. Those differences remain in issue28.
+
+The sanitizer passes21 privacy/schema controls and four actual tampered-proof
+rejections. All eight historical positivejc/lc controls still match their saved
+route/status/order counts. Fresh fixedjc/lc tokens are measured separately and
+do not establish the rejection cause. Read the sanitized
+[Google report](./GOOGLE-LAST-RUN.json),
+[diagnostics](./GOOGLE-DIAGNOSTICS.json),
+[challenge markers](./GOOGLE-CHALLENGES.json),
+[API inventory](./API-INVENTORY.json) and
+[validation record](./VALIDATION-LAST-RUN.json).
+Raw URLs, query values, cookies, bodies and error text remain private.
+The dated sections below preserve earlier checkpoints and do not supersede this
+capture. Audio stays in issue27; the remaining measured gaps and live clearance
+stay in issue28.
+
 ## Rootless-document collector repair — 2026-10-20
 
 A fresh Google matrix at3a77122 exposed a raw Chrome collector error after Enter:
@@ -34,7 +81,8 @@ value and changes only collector/observation source hashes. Its stock Rust
 consumer passes. The golden is formatted with identical parsed JSON values
 after validation; raw capture and tested bytes remain preserved. Native Rust,
 its optimized executable and the81 explicit literal fixture guards are unchanged.
-Fresh API and full Google measurements remain pending after this collector repair.
+The subsequent fresh API and Google measurements are recorded above; native
+Google clearance is still unresolved.
 
 The current3a full stock gate independently passes1,451 Rust tests, strict/fmt,
 rebuilt addon/loader, shim96+1 intentional skip, E2E20, detection188+7 documented
@@ -45,7 +93,7 @@ matching optimized-artifact query. Native consumers retain their original4a
 identity through the reviewed test-only byte bridge. Node20/22 CI passes on3a.
 These receipts are not relabelled as executions of later collector/report commits.
 
-## Current integration checkpoint — 2026-10-20
+## Earlier integration checkpoint — 2026-10-20
 
 The latest four paired localhost suites pass14 tests with zero failures/skips,
 covering10 navigation variants and19 actual captures. They use the frozen

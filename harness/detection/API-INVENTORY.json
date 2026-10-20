@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "collectedAt": "2026-10-17T14:47:46.593Z",
+  "collectedAt": "2026-10-20T22:52:33.504Z",
   "note": "Uninstrumented localhost API contract queries; no site detection conclusion.",
   "build": {
     "version": "0.5.4",
@@ -20,8 +20,8 @@
       "reportedFullVersion": "155.0.8059.80"
     }
   },
-  "chromeVersion": "Chrome/155.0.8059.80",
-  "binaryHash": "3a3e99742fe28ec2671e782b7527312979f3c1f713969429bccbd75ee0370a45",
+  "chromeVersion": "Chrome/155.0.8059.85",
+  "binaryHash": "895e374ab0b0fe74446387a34fe5929063e3be1e14dfb1e00bbfbcf80f4abe32",
   "collectorHash": "21d5aafbdf94c61e6f8a7216b51d448b750ff099688e1a26ff9c3d31e1975bae",
   "totals": {
     "interfaceCount": 75,
@@ -14988,17 +14988,5 @@
         "Symbol(Symbol.toStringTag)"
       ]
     }
-  ],
-  "sourceComparison": "harness/detection/API-SHAPE-LAST-RUN.json",
-  "publicationProvenance": {
-    "implementationSourceCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
-    "selectedSourceCount": 1457,
-    "selectedSourceManifestSha256": "5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a",
-    "scope": "Actual implementation and selected code/configuration/fixture hashes verified before and after execution. This later publication changes documentation and measurement data only; it does not assert a new engine build.",
-    "apiGateLogSha256": "eee33a3ad9a06f6d03d9ec61ee9c3572d4339418c0f13c0cf1505a938d621f02",
-    "comparisonSha256": "e9265d120c6c23896119addf8a776bb4a0fe7c88e5e8ad067f22bc1deda7991e",
-    "previousInventorySha256": "073bbac6e35904a6a37c6c95331a5ec47712f6a9473f53abbf084a83c03307bf",
-    "semanticComparisonToPrevious": "All 75 interface records, missing/extra/changed arrays and all 374 difference entries, including values, are unchanged. This publication refreshes execution metadata and provenance.",
-    "historicalShapeScope": "API-SHAPE.json remains the older 28-interface snapshot with the historical 94 own-member observation; current coverage is API-SHAPE-LAST-RUN.json and this 75-interface inventory."
-  }
+  ]
 }

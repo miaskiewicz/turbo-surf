@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "collectedAt": "2026-10-17T14:47:46.593Z",
+  "collectedAt": "2026-10-20T22:52:33.504Z",
   "note": "Uninstrumented localhost API contract queries; no site detection conclusion.",
   "build": {
     "version": "0.5.4",
@@ -20,11 +20,11 @@
       "reportedFullVersion": "155.0.8059.80"
     }
   },
-  "chromeVersion": "Chrome/155.0.8059.80",
-  "binaryHash": "3a3e99742fe28ec2671e782b7527312979f3c1f713969429bccbd75ee0370a45",
+  "chromeVersion": "Chrome/155.0.8059.85",
+  "binaryHash": "895e374ab0b0fe74446387a34fe5929063e3be1e14dfb1e00bbfbcf80f4abe32",
   "collectorHash": "21d5aafbdf94c61e6f8a7216b51d448b750ff099688e1a26ff9c3d31e1975bae",
   "collector": "harness/detection/api-shape.js",
-  "collectorSnapshot": "harness/detection/api-shape.js",
+  "collectorSnapshot": "collector.js",
   "chrome": {
     "objects": {
       "navigator": {
@@ -154092,15 +154092,5 @@
         "Symbol(Symbol.toStringTag)"
       ]
     }
-  ],
-  "publicationProvenance": {
-    "implementationSourceCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
-    "selectedSourceCount": 1457,
-    "selectedSourceManifestSha256": "5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a",
-    "scope": "Actual implementation and selected code/configuration/fixture hashes verified before and after execution. This later publication changes documentation and measurement data only; it does not assert a new engine build.",
-    "rawComparisonSha256": "177c84580b4a8e9ac02b4303ffdcc00c7a90b41fefde3af28d49747a0fe4c96d",
-    "apiGateReceiptSha256": "ae56fc362638db569f0322605e7a7dcd23bb1623826fb90755bb8056897188c0",
-    "apiGateLogSha256": "eee33a3ad9a06f6d03d9ec61ee9c3572d4339418c0f13c0cf1505a938d621f02",
-    "collectorSnapshotScope": "The recorded collector snapshot and committed api-shape.js are byte-identical under collectorHash. Paths are repository-relative."
-  }
+  ]
 }

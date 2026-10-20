@@ -9,15 +9,14 @@ Do not close either issue merely because the PR merges.
 
 Reproduce the current configuration with the [Chrome155 parity runbook](./CHROME-PARITY-RUNBOOK.md); it separates required opt-ins and measured evidence from remaining parity gaps.
 
-The current [API-SHAPE-LAST-RUN.json](./API-SHAPE-LAST-RUN.json) records the
-a005 fresh75-interface/374-difference audit;
-[API-INVENTORY.json](./API-INVENTORY.json) retains every measured member/path.
+The current [API-SHAPE-LAST-RUN.json](./API-SHAPE-LAST-RUN.json) and
+[API-INVENTORY.json](./API-INVENTORY.json) record the fresh546d511 audit:
+all75 interfaces measured,64 missing original-four own members,142 expanded
+missing members and374 difference paths. Actual Chrome is155.0.8059.85 /
+V815.5.35.25; native uses15.5.35.23-rusty and the unchanged optimized executable.
 The older [API-SHAPE.json](./API-SHAPE.json) is a historical28-interface snapshot,
-not the current audit. That capture used Chrome
-155.0.8059.40 / V8 15.5.35.20. The newer
-[API-INVENTORY.json](./API-INVENTORY.json) preserves the full measured lists and
-source/executable hashes for its Chrome155.80/native155.23 snapshot. Neither
-snapshot describes changes integrated after its frozen executable was built.
+including the old94 count, not today's inventory. Keep all listed member and
+descriptor paths open under issue28 until behavior and ownership are repaired.
 A missing **own prototype member** is an observed descriptor/ownership difference;
 it does not by itself prove the feature is entirely absent. Existing inherited
 methods and aliases must be tested before adding another implementation.
@@ -25,10 +24,10 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
 
 ## Active runner comparison — 2026-10-20
 
-- [x] Verify a signed-out real Chrome UI control. One Incognito `rust lang`
-  submission reaches real results with the sign-in link visible. This is not an
-  empty-profile or reliability measurement; earlier Incognito cookies were
-  unmeasured and extensions were present.
+- [x] Verify a fresh signed-out traced Chrome baseline. Repeat1 uses a verified
+  newly created Incognito context, saves consent and reaches a completed200
+  search with nine markers. Repeat0 fails effective consent dismissal and stops
+  before typing; that capture is not a successful comparison or search verdict.
 - [x] Repair collector completion and current-document HTTP attribution. Preserve
   guest errors separately, reject malformed completion metadata and leave absent
   legacy evidence unmeasured. Hidden query fields are excluded by the shared
@@ -40,8 +39,8 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
   ineffective input fails before Enter; no silent refocus or text repair occurs.
 - [x] Install real-time Window scheduling before hydration and retain the default
   crawler's virtual mode. The fixed deadline starts before Enter. Four paired
-  suites now pass14 tests with zero failures/skips, including10 variants /19
-  actual captures. Retry clocks and actual document/server evidence determine
+  suites now pass16 tests with zero failures/skips, including both genuine
+  rootless-document controls. Retry clocks and actual document/server evidence determine
   shell, terminal or incomplete outcomes. A separate timer-free302 control
   requires429. Deterministic tracker tests cover provisional navigation without
   requiring a transient state to be sampled. Forty focused checks pass on both
@@ -75,13 +74,24 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
   Default gates now record the external test as ignored. The earlier interrupted
   request and ambiguous historical auto-return passes remain documented in
   [FINDINGS.md](./FINDINGS.md); this does not certify complete transport parity.
-- [ ] Remeasure the75-interface inventory using the optimized current native
-  artifact and frozen Chrome. Historical94/64/374 counts are not current results.
-- [ ] Run fresh equivalent Chrome/native Google comparisons with independent
-  cookies and the optimized current artifact. Native SERP acceptance and the
-  previously observed first-pump budget exhaustion remain unresolved.
-- [ ] Commit/push the tested integrations and reports, refresh the PR description
-  and verify exact-head CI. No new merge, tag or release is included.
+- [x] Remeasure all75 interfaces with the current optimized artifact and frozen
+  Chrome. Counts are64 original-four missing members,142 expanded missing and
+  374 difference paths; every path is retained in API-INVENTORY.json and issue28.
+- [x] Run the fresh independent-cookie Google matrix. All14 process records are
+  measured; ten exit0 and four Chrome captures fail, with no timeout/abort.
+  One signed-out Chrome baseline reaches a nine-marker SERP. Both native
+  baselines save consent, execute all six actions and use native forms, then
+  receive429 with zero markers. Complete source/artifact guards pass.
+- [ ] Resolve native Google clearance and initial homepage hydration exhaustion
+  under issue28. Native home through step4 still records budget exhaustion
+  before its first post-load pump; final429 completion does not erase it.
+- [ ] Resolve the observed Chrome consent precondition failure under issue28.
+  A dispatched click without save/cookie/overlay effect must not count as
+  successful dismissal; its cause remains unproved.
+- [x] Record tested changes and sanitized reports, refresh the changelog, docs
+  and PR description. Current-head CI remains an independently required check:
+  use the [PR checks](https://github.com/miaskiewicz/turbo-surf/pull/26/checks).
+  No merge, tag or release is included in this publication batch.
 
 Current integrated public producers:
 

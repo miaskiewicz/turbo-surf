@@ -18,6 +18,22 @@ active work separately from historical full-gate and live Google measurements.
 The [compression dictionary controls](./COMPRESSION-DICTIONARIES.md) document genuine
 discovery, policy/lifecycle, independent codec fixtures and current streaming bounds.
 
+The latest546d511 measurement has one valid signed-out Chrome baseline
+(HTTP200 search, nine markers), one Chrome baseline blocked by ineffective
+consent dismissal, and two native baselines ending429 with zero markers.
+Both native baselines execute all six actions with their own consent cookie
+flow and native form navigation. Early native homepage hydration still exhausts
+its budget. Process completion is not Google acceptance, and dispatched consent
+input is not proof of dismissal. See the [fresh findings](./FINDINGS.md) and
+[validation record](./VALIDATION-LAST-RUN.json) for errors, budgets and scope.
+
+Both Chrome collectors atomically read the current root, markup and result
+count. A rootless snapshot retains its loader response with empty HTML and zero
+markers; final observation stays incomplete. It adds no wait and borrows no
+earlier result. Actual raw-CDP/Patchright regression controls and the combined
+sixteen-test suite pass. Full detection passes200 on Node22 and191 on Node20
+with nine documented browser skips, plus two Python checks each.
+
 ## Same-font geometry control
 
 Compare run advances, decorated inline boxes, partial text Ranges and rotation

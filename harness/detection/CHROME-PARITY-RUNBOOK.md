@@ -1,10 +1,14 @@
 # Chrome 155 parity runbook
 
-**Prepared from current code; final verification of this PR is pending.** These commands are a reproducible setup, not a
-record that a new run passed. Successful, reliable native Google SERP remains unverified. Keep historical checkpoints tied to
-their recorded commit/binary. Track scope in [PARITY-GAPS.md](./PARITY-GAPS.md), outcomes in [FINDINGS.md](./FINDINGS.md),
-deferred audio in [issue 27](https://github.com/miaskiewicz/turbo-surf/issues/27), and broader work in [issue
-28](https://github.com/miaskiewicz/turbo-surf/issues/28).
+These commands document the verified setup and every opt-in. The latest frozen
+capture uses546d511 with the unchanged optimized native engine; full stock/native
+Rust gates retain their3a77122 identities. Signed-out Chrome reaches a SERP in
+one baseline; native reaches HTTP429 with zero results in both. Another Chrome
+baseline fails effective consent dismissal. Native clearance and full Chrome
+parity remain unresolved. Keep historical checkpoints tied to their recorded
+source/binary. See [PARITY-GAPS.md](./PARITY-GAPS.md),
+[FINDINGS.md](./FINDINGS.md), audio [issue27](https://github.com/miaskiewicz/turbo-surf/issues/27)
+and broader [issue28](https://github.com/miaskiewicz/turbo-surf/issues/28).
 
 Order: environment → verified SDK → all-feature binary → localhost controls → final gates → fresh comparison → evidence
 review. Run timed checks sequentially; do not overlap builds, Chrome collectors or other heavy workloads.
@@ -226,18 +230,30 @@ For the native155 SDK, use the same test arguments after `build.py ... --surf`
 instead of ordinary Cargo. The default localhost `client_hello` test still checks
 actual TLS bytes. Neither control alone proves complete Chrome transport parity.
 
-Earlier `chrome-cdp-trace.test.mjs` controls hardcoded installed Chrome, and Patchright ignored the explicit path. The
-current code selects the configured executable in both backends and all four control suites. Reverify the actual captured
-versions after building; code changes alone do not establish a uniformly pinned-browser suite. Earlier attempts retain a45s
-Patchright timeout and a Chrome input/focus failure: the query was truncated before Enter. The repaired interruption controls
-pass for both Chrome backends, and the subsequent combined run passes12 tests with one native geometry failure. An inline
-link containing a block heading caused the whole native layout snapshot to reject before consent or search. The producer
-repair is integrated at public `2ea52368`, with measured native button defaults and canonical `a49544f` bindings. The rebuilt
-native integration passes 66 tests, strict affected-crate Clippy and formatting. The unchanged four paired suites pass 13 tests,
-including 9 observation variants / 17 captures. The complete default workspace/addon gate passes; full native-feature
-and optimized live checks remain separate pending gates.
-Preserve the earlier failure and valid fixture. Six completed host calls alone do not
-prove six effective page actions; retain all earlier failures separately.
+Both Chrome backends and the control suites use the explicit frozen executable.
+The latest sixteen paired controls pass without skips, including both rootless
+document cases. Full detection passes200 tests on Node22 and191 on Node20 with
+nine documented browser skips, plus two Python checks each. The genuine resource
+oracle retains every observed value; only collector source hashes change, with
+the updated stock Rust consumer passing. The stock/native Rust workspaces pass
+1,451/1,496 tests on3a77122; optimized native compile/addon consumers retain their
+original4a evidence through reviewed source bridges. Latest CI belongs to the
+[PR checks](https://github.com/miaskiewicz/turbo-surf/pull/26/checks).
+
+A current document may temporarily have no root or remove it itself. Both Chrome
+collectors read root presence, markup and result markers atomically. Missing
+roots produce empty HTML/zero results and incomplete final observation while
+preserving actual loader-scoped HTTP evidence. No readiness retry, added dwell,
+fake pending navigation or older-page fallback is used. Preserve the original
+failed null-root capture and other dated failures in the findings.
+
+Consent input must have an observable effect. A dispatched click alone does not
+prove a save request, cookie or dismissed overlay. The fresh matrix preserves
+one Chrome baseline with ineffective consent and an obscured query field;
+it stops before typing. Its cause is unproved. A separate fresh Chrome baseline
+saves consent and reaches nine result markers. Both native baselines save consent,
+complete all six actions and navigate a real form, then receive429/zero results.
+Keep the failed precondition separate from anti-bot rejection and reliability.
 Native pointer input currently dispatches to the selected node at its measured center; Chrome routes the coordinates through
 browser hit testing. Occlusion, clipping and `pointer-events` behavior remain tracked in issue28. Verify actual consent and
 query effects rather than claiming complete pointer-routing parity from coordinates or trusted event flags alone.

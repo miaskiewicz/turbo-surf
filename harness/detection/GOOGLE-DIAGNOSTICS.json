@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "capturedDate": "2026-10-17",
-  "captureBaseCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
-  "binarySha256": "3a3e99742fe28ec2671e782b7527312979f3c1f713969429bccbd75ee0370a45",
-  "extractorSha256": "cb54e1b1a333e8ac67c1d378dbe06289530f0965a7b5b91273c9bea6583eecaf",
+  "capturedDate": "2026-10-20",
+  "captureBaseCommit": "546d5111c4e04ee148d37d375adc583f773ce3b9",
+  "binarySha256": "895e374ab0b0fe74446387a34fe5929063e3be1e14dfb1e00bbfbcf80f4abe32",
+  "extractorSha256": "a0fd048f564ab03670e18fc5229abcf3aa52742db831a6be711fc235e9a00606",
   "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "interfaceTracerSha256": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc",
   "scope": "Selected standalone fixed jc/lc tokens only. No raw URLs, query values, cookies, payloads or addresses. Counts are not a rejection cause or complete JS observation.",
@@ -57,7 +57,7 @@
   "runs": [
     {
       "run": "repeat-0/chrome-baseline",
-      "traceSha256": "8ff3312f5450d2a8f629f7177770a336a7a654728937a3c45297be4081a8be9f",
+      "traceSha256": "a69be6f9d58238ba59fc6a2b8b06210990a531484ccce379dab1bb6bc555f335",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -69,7 +69,7 @@
     },
     {
       "run": "repeat-0/native-baseline",
-      "traceSha256": "8de435bb17377e880ae45a39e78ba8f626ee4fd4974b97d3be4fe84c79a8d7e3",
+      "traceSha256": "c0a208837dbd6a5ab206296e972a594803126ca1bfd0c49cab475f94e2cc7efc",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -78,11 +78,11 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "5b70a8b4cc71646b6c1cbd932b830fdddaa82430a2de51f75dfe158c21c90405"
+      "networkSha256": "c7a0e0e7173208599a21a90aed357b7bd19254e7f34098affc11acc263a0b71e"
     },
     {
       "run": "repeat-0/chrome-interfaces",
-      "traceSha256": "aecc1a8a183df23c11155fb85a46379f9a21c6720051426530a0905d56f4bf89",
+      "traceSha256": "ac0bb5f620ffc32b4e63924dacb5765aae6974d5f931c226c853ec1b9e40fc64",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -94,7 +94,7 @@
     },
     {
       "run": "repeat-0/native-interfaces",
-      "traceSha256": "e81ccdeb03fd36100584891306da445df378ce0eca78aa754439def80ac0b82b",
+      "traceSha256": "ee2d04fd0ec5a810810b6e9cdae927c91f03b8f7d9be77c07b68e44473ac6235",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -103,12 +103,12 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "f5c4cc383cfee912d83fc651f75b43b90960a38d5645726a01360402eb3ca7be"
+      "networkSha256": "bce2b238726857b0b153b91834eb32ad714575a5999156acbf0c60457bf493eb"
     },
     {
       "run": "repeat-1/chrome-baseline",
-      "traceSha256": "e4c27aefa7f0e76ac6c9a967dfd068fbb74afffaf5a27be2217d39fef17a4d36",
-      "recordedErrorCount": 1,
+      "traceSha256": "e60eab0f5316daae365f98f0622815895248433f6127cb75666756dd60321023",
+      "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
       "stylesheetTelemetry": [],
@@ -119,7 +119,7 @@
     },
     {
       "run": "repeat-1/native-baseline",
-      "traceSha256": "aa34d1b2890fb48a3f58b12064a0ddc945d2d87e69057d178af78b56a58edade",
+      "traceSha256": "5c16382fbcea761dffdce305fa62fdd8cd1385887dcbfbed0cb0080c57ca4a4a",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -128,11 +128,11 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "fc9f67e9a20fc2f78bfd297897145a81a73d901c0cb8651933b08d365ae4e4da"
+      "networkSha256": "942c79733418a900f6a85c641c54988ea9a08b3c7f5fb2d69f15abb06b5a5260"
     },
     {
       "run": "repeat-1/chrome-interfaces",
-      "traceSha256": "1751d723228b60c977e77ad9e44d3b8937dab4a1c08c3419986456fff0b19908",
+      "traceSha256": "453d70c39d7dc12870fa2070c5e4dbd5e1bf4c939f2bdf585366ffd863814df3",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -144,7 +144,7 @@
     },
     {
       "run": "repeat-1/native-interfaces",
-      "traceSha256": "6764a2a761d9eec8e920757626710c71834368698ae658b0751ae1c748042659",
+      "traceSha256": "e9ef9d92f288e4f0a905b4ba8fc6fac7fc71d1da24b5be4dba82d56d0806afb1",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -153,26 +153,7 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "3915003faa6c21eec412998087b3312c88780cdc6e19c69b37a341cfc948ad3f"
+      "networkSha256": "aca79cb605865fb0b7527472a0632001e3a7d153228d2358d72743b8daa82b44"
     }
-  ],
-  "publicationProvenance": {
-    "implementationSourceCommit": "a005140fabeb02c6c3c23711125944cf445a1bb9",
-    "selectedSourceCount": 1457,
-    "selectedSourceManifestSha256": "5a998aae41483c6ce229c39c4e23a9ca9096b73cd4a6b122afa3480b7e06378a",
-    "scope": "Actual implementation and selected code/configuration/fixture hashes verified before and after execution. This later publication changes documentation and measurement data only; it does not assert a new engine build.",
-    "sourceBeforeReceiptSha256": "63844e77525bd121ffe21f37a8f353ff476c499c0b4ffa9d72043d5ae826b6ef",
-    "matrixReceiptSha256": "4c8d75f18f99285079018c91dcc82fd4764fb13bc2609cf267cb7d4f1d0665eb",
-    "captureManifestSha256": "7294623ce3a55f9109cfeacf680b061ac823bd0d30e465f3b68fda327635464a",
-    "sanitizedCaptureSha256": "6a76c7d51df6dbb63c82ad8f471c78b8d627ea0048c9d7eb0438f5363f5fea08",
-    "processCompletionScope": "All 14 collectors exited zero without timeout; this is not SERP acceptance.",
-    "sanitizedInputVariant": "Read-only extraction with replay of eight historical fixed-code positive controls; sanitizedCaptureSha256 identifies that extractor output before publication metadata or formatting."
-  },
-  "previousCheckpoint": {
-    "immutableReport": "https://github.com/miaskiewicz/turbo-surf/blob/a005140fabeb02c6c3c23711125944cf445a1bb9/harness/detection/GOOGLE-DIAGNOSTICS.json",
-    "reportSha256": "58cea4a040f409faf1b97460f6afa0e23611fdc32ac45a2866d504f73e205051",
-    "captureBaseCommit": "59f78355a188ccb0716147db0948612afc458a2f",
-    "scope": "Historical capture retained at the immutable report link; not the fresh a005 measurement."
-  },
-  "historicalOrderingCaveat": "The four selected historical repeat-0 native-baseline jc/lc requests followed the save REQUEST but preceded its RESPONSE. Offline replay of those eight historical captures verifies extraction only, not current Google acceptance or a rejection cause."
+  ]
 }

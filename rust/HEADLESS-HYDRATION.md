@@ -3,6 +3,15 @@
 "Headless hydration" in turbo-surf means two distinct things. Both are tracked
 here so the requirements are explicit.
 
+The current source-pinned validation and live outcomes are recorded in
+[FINDINGS.md](../harness/detection/FINDINGS.md) and
+[VALIDATION-LAST-RUN.json](../harness/detection/VALIDATION-LAST-RUN.json).
+The latest546d511 capture reaches a SERP in one signed-out Chrome baseline;
+both native baselines end429 with zero results, and early native homepage
+hydration still exhausts its budget. Dated cycles and checkpoints below preserve
+historical evidence. A report that page JavaScript executed is not a report
+that Google accepted a native search.
+
 ## 1. No-JS hydration-state mining (`hydration.mjs`)
 
 Recover SPA data **without executing any JS** by mining the server-shipped state
@@ -35,7 +44,7 @@ Requirements and where each stands:
 | Real V8 isolate, host heap unreachable from guest (+ runaway budget) | ✅ deno_core + watchdog |
 | Native DOM bound to `rtdom::Tree` (`document`/Element — jQuery/React run) | ✅ `browser_env` (vendored from turbo-test); partial Web IDL coverage |
 | `window`/`navigator`/`location`/`localStorage`/`console` + Event classes | ✅ binding + env bootstrap |
-| Timers (`setTimeout`/`rAF`/`queueMicrotask`) | ✅ virtual (drained by delay) |
+| Timers (setTimeout/rAF/queueMicrotask) | Fast virtual scheduling by default; opt-in real-time Window/frame deadlines through PageSessionOptions before hydration; microtasks remain promise-driven |
 | Promise / `async`-`await` / microtask resolution (event loop) | ✅ `render_html_async` |
 | `fetch` + `XMLHttpRequest` over the real net stack (relative-URL aware) | ✅ `op_fetch` → `turbo_surf_core::net` |
 | `document.cookie` ↔ `CookieJar` bridge | ✅ `op_cookie_get/set`; HttpOnly cookies hidden/protected from JS |
@@ -70,10 +79,13 @@ An optional `initial_hydration_budget_ms` caps only initial hydration, is consum
 after opening, and cannot enlarge the configured budget for later operations.
 Ten focused default-engine controls pass with strict render Clippy and formatting,
 including clock agreement, frames, cancellation and the one-shot budget cap.
-The subsequent genuine-native155 integration passes 66 focused tests, including
-13 timer controls and the measured signed32 delay conversion/overflow guards,
-affected-crate strict Clippy and formatting. Paired timing and full workspace
-validation remain separate pending gates.
+The subsequent66-test integration and67-test font-startup follow-up are
+historical focused checkpoints. Full stock/native workspace validation later
+passes1,451/1,496 Rust tests on3a77122, with strict checks and formatting.
+The546d511 collector repair passes sixteen paired controls and full detection
+200/0skips on Node22 and191/9 documented skips on Node20. Original native
+compile/addon receipts retain their4a identity through explicit source bridges;
+these counts do not imply all gates were rerun on every documentation commit.
 
 The October20 diagnostic startup initializes the compiled hooks through
 `turbo_surf_mcp::initialize_render_hooks()` without loading solver configuration
@@ -82,8 +94,11 @@ private host-input evidence steps retain the actual control and expected UTF-16
 insertion, verify its connection/focus/value after typing and before Enter, and
 release it on completion or budget cancellation. They dispatch no input events
 and do not refocus or repair page text. The earlier native checkpoint passes47 integration
-and four example tests; the expanded66-test checkpoint is described above. Full
-workspace, consumer and combined browser gates remain separate.
+and four example tests; the expanded66-test checkpoint is described above. Those historical focused counts do not supersede the later completed workspace
+and browser controls above. Fresh live Google evidence still records native
+HTTP429/zero results and early homepage budget exhaustion; Chrome reaches a
+SERP in one baseline while another fails effective consent dismissal. See the
+[current findings](../harness/detection/FINDINGS.md).
 
 **Execution model and remaining gaps:**
 
@@ -1520,10 +1535,10 @@ implemented browser behavior.
 
 The October17 source-pinned Google matrix uses fresh native cookies, actual consent and
 genuine forms with no Chrome cookie import or fallback. Native fetches `/search` with HTTP200
-then follows retry to `/sorry` with HTTP429. The latest fresh retry accepts0/2 native SERPs while clean Chrome reaches7/8
+then follows retry to `/sorry` with HTTP429. That historical retry accepts0/2 native SERPs while its Chrome baselines record7/8
 result markers. Instrumented Chrome is challenged; the native rejection signal
 remains unidentified.
-The latest retry exhausts20s during3/4 native homepage opens, including one clean
+That historical retry exhausts20s during3/4 native homepage opens, including one clean
 baseline and both instrumented passes. Dismiss retains the original open diagnostic;
 later navigation budget=false does not erase that failure. See the
 [latest sanitized run](../harness/detection/GOOGLE-LAST-RUN.json) and

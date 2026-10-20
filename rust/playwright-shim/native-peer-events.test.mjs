@@ -22,7 +22,7 @@ const control = JSON.parse(
 );
 
 async function fixture(run) {
-  let started, closed;
+  let started, closed, heldResponse;
   const holdStarted = new Promise((resolve) => {
     started = resolve;
   });
@@ -39,6 +39,7 @@ async function fixture(run) {
     if (_request.url === "/hold") {
       response.setHeader("Cache-Control", "no-store");
       response.write("pending");
+      heldResponse = response;
       response.on("close", closed);
       started();
       return;
@@ -101,7 +102,16 @@ async function fixture(run) {
     }
   };
   try {
-    await run({ open, invoke, peer, evaluate, base, holdStarted, holdClosed });
+    await run({
+      open,
+      invoke,
+      peer,
+      evaluate,
+      base,
+      holdStarted,
+      holdClosed,
+      holdIsOpen: () => heldResponse && !heldResponse.writableEnded && !heldResponse.destroyed,
+    });
   } finally {
     for (const page of pages) {
       native.liveClose(page.session);
@@ -294,7 +304,7 @@ test("shim page.evaluate awaits a storage Promise from another page", async () =
 });
 
 test("closing an idle receiver cancels storage-handler stalled IO without another receiver RPC", async () => {
-  await fixture(async ({ base, holdStarted, holdClosed }) => {
+  await fixture(async ({ base, holdStarted, holdClosed, holdIsOpen }) => {
     const modulePath = createRequire(import.meta.url).resolve("../crates/turbo-surf-napi/index.js");
     const code = `import {createRequire} from 'node:module';
       const native=createRequire(import.meta.url)(${JSON.stringify(modulePath)});
@@ -302,13 +312,16 @@ test("closing an idle receiver cancels storage-handler stalled IO without anothe
       const source=await native.liveOpen('<body>',${JSON.stringify(base + "source")},'[]','',a);
       const peer=await native.liveOpen('<body>',${JSON.stringify(base + "peer")},'[]','',b);
       await native.liveEval(peer, "addEventListener('storage',async()=>{await(await fetch('/hold')).text()});globalThis.__RESULT='ready'");
+      const command=expected=>new Promise((resolve,reject)=>process.once('message',value=>value===expected?resolve():reject(new Error('unexpected close-test command'))));
+      const start=command('start');process.send('ready');await start;
+      const close=command('close');
       await native.liveEval(source,"localStorage.setItem('start','value');globalThis.__RESULT='sent'");
-      await new Promise(resolve=>setTimeout(resolve,100));
+      await close;
       native.liveClose(peer);native.liveClose(source);
       native.requestStateClose(a);native.requestStateClose(b);native.requestStateClose(parent);
-      process.stdout.write('closed');`;
+      process.stdout.write('closed');process.disconnect();`;
     const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     let stdout = "",
       stderr = "";
@@ -320,23 +333,48 @@ test("closing an idle receiver cancels storage-handler stalled IO without anothe
     });
     const exited = new Promise((resolve, reject) => {
       child.once("error", reject);
-      child.once("exit", (code, signal) => resolve({ code, signal }));
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    const ready = new Promise((resolve, reject) => {
+      child.once("message", (message) => {
+        if (message === "ready") resolve();
+        else reject(new Error("unexpected close-test readiness message"));
+      });
+    });
+    const prematureExit = exited.then((result) => {
+      throw new Error(
+        `idle receiver exited before stalled IO: ${JSON.stringify(result)} ${stdout} ${stderr}`,
+      );
     });
     let timer;
-    try {
-      const deadline = new Promise((_, reject) => {
+    const deadline = (phase, milliseconds) =>
+      new Promise((_, reject) => {
         timer = setTimeout(() => {
           child.kill("SIGKILL");
-          reject(new Error("idle close timed out: " + stderr));
-        }, 5000);
+          reject(new Error(`idle close ${phase} timed out: ${stdout} ${stderr}`));
+        }, milliseconds);
       });
-      await Promise.race([holdStarted, deadline]);
-      assert.deepEqual(await Promise.race([exited, deadline]), { code: 0, signal: null }, stderr);
-      await Promise.race([holdClosed, deadline]);
+    try {
+      // Whole-system font discovery is cold process startup; cancellation keeps
+      // its original five-second bound after the receiver is actually ready.
+      await Promise.race([ready, prematureExit, deadline("startup", 30000)]);
+      clearTimeout(timer);
+      const operationDeadline = deadline("operation", 5000);
+      child.send("start");
+      await Promise.race([holdStarted, prematureExit, operationDeadline]);
+      assert.equal(holdIsOpen(), true, "receiver fetch must still be stalled before close");
+      child.send("close");
+      assert.deepEqual(
+        await Promise.race([exited, operationDeadline]),
+        { code: 0, signal: null },
+        stderr,
+      );
+      await Promise.race([holdClosed, operationDeadline]);
       assert.equal(stdout, "closed");
     } finally {
       clearTimeout(timer);
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await exited.catch(() => {});
     }
   });
 });

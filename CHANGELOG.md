@@ -11,6 +11,18 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Runner timing follow-up — 2026-10-20
 
+- Synchronize the idle-receiver cancellation regression with explicit child
+  readiness and server-confirmed stalled I/O, without another receiver RPC.
+  Separate bounded30-second process startup from the original five-second
+  cancellation operation; the original five-second-from-spawn failures remain
+  preserved. A traced cold open spent18.07 seconds loading system fonts with
+  a2.6GB footprint before cancellation was reached. All190 sampled worker
+  stacks are font-loading work; source shows complete TTC bytes copied per face.
+  The startup cost remains in issue #28. Await child `close` and socket teardown
+  before asserting output; passing cancellation does not certify cold startup.
+  Both complete shim suites pass96 tests with one intentional skip each on
+  actual stock and native addons; compiled Rust/artifact bytes are unchanged.
+
 - Complete the full default `npm run check`:1,450 Rust tests, strict Clippy,
   formatting, rebuilt addon/shim96, E2E20, detection184 and Python2 pass.
   Explicit skips remain nine Rust, one framework and seven Node20 browser

@@ -19,6 +19,7 @@ residual work beyond this PR, with audio separately deferred in
   then receive429 with zero markers. Early homepage budget exhaustion persists.
   All14 process records and unchanged-source/artifact guards are retained; four
   Chrome captures exit1, so the matrix is not a complete successful comparison.
+  Zero completed hydration pumps does not establish that no pump began.
   The sanitizer passes21 privacy/schema controls and eight historical positive
   diagnostic controls. Native clearance and broader residuals stay in issue28;
   audio stays in issue27. Raw traces remain private.

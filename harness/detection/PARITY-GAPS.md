@@ -84,7 +84,8 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
   receive429 with zero markers. Complete source/artifact guards pass.
 - [ ] Resolve native Google clearance and initial homepage hydration exhaustion
   under issue28. Native home through step4 still records budget exhaustion
-  before its first post-load pump; final429 completion does not erase it.
+  during post-load hydration with zero completed pumps; final429 completion does
+  not erase it.
 - [ ] Resolve the observed Chrome consent precondition failure under issue28.
   A dispatched click without save/cookie/overlay effect must not count as
   successful dismissal; its cause remains unproved.
@@ -375,7 +376,7 @@ the issue retains the specific unclosed requirements.
 | Distribution | Stock/native V8 alignment, native patch distribution, layout publication and registry-ready transport/crypto dependencies | #28 |
 | Browser lifecycle | Watchdog/async-op admission recovery, timeout-signal delivery/GC, listener-count release and retained detached-window active-time suspension | #28 |
 | Validation | Broader lifecycle regressions and additional conformance controls beyond the completed default/native/addon gates | #28 |
-| Transport / GPU / Google | Unmeasured wire/rendering differences and reliable native-cookie SERP acceptance; latest a005 retry rejects both native and Chrome baselines with zero markers; homepage boundedness remains open for clean and instrumented runs | #28 |
+| Transport / GPU / Google | Unmeasured wire/rendering differences and reliable native-cookie SERP acceptance; current546 native baselines both end429/zero markers, while one Chrome baseline reaches a SERP and the other fails consent dismissal before typing; homepage boundedness remains open for clean and instrumented runs | #28 |
 | Audio | Realtime/feedback/parameter connections/multichannel/custom waves/oversampling/suspend-resume | [#27](https://github.com/miaskiewicz/turbo-surf/issues/27) |
 
 When an item is finished, record the relevant test/capture and commit before

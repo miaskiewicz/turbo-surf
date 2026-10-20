@@ -22,8 +22,8 @@ sidecar, imported jar or serialized-form fallback.
 | Repeat1 | Verified fresh Incognito context; consent save204; all six actions; completed200 search with nine markers. | Consent save204 before search; all six actions; native form; final429, zero markers. |
 
 Native baseline acceptance is0/2. Both native observations complete in real-time
-mode, but homepage hydration exceeds the20-second budget before the first
-post-load pump; that flag is carried through step4 in baseline and interface
+mode, but homepage hydration exceeds the20-second budget during post-load
+hydration with zero completed pumps; that flag is carried through step4 in baseline and interface
 captures. The final429 document does not exceed its budget. Preserve every
 checkpoint rather than treating final completion as proof of successful initial
 hydration. The rejection cause is not established by these observations.

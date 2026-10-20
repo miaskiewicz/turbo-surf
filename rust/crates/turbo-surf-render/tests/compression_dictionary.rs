@@ -47,6 +47,130 @@ fn hints() -> ClientHints {
     })
 }
 
+fn lifecycle_projection(events: &Value, omitted: &str) -> Vec<(Value, Value)> {
+    events
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event[0] != omitted)
+        .map(|event| (event[0].clone(), event[2].clone()))
+        .collect()
+}
+
+fn lifecycle_events_match(actual: &Value, expected: &Value) -> bool {
+    // Resource errors and Window timers use independent task sources. Each
+    // projection keeps every other event, its count, lifecycle state and order.
+    ["link:error", "future-timer"].iter().all(|omitted| {
+        lifecycle_projection(actual, omitted) == lifecycle_projection(expected, omitted)
+    })
+}
+
+#[test]
+fn dictionary_lifecycle_order_keeps_barriers_counts_and_states() {
+    let control: Value = serde_json::from_str(include_str!(
+        "../../../../harness/detection/fixtures/compression-dictionary-chrome155.json"
+    ))
+    .unwrap();
+    for (id, case) in control["cases"].as_array().unwrap().iter().enumerate() {
+        if !case["lifecycleDelay"].is_string() {
+            continue;
+        }
+        let expected = &control["result"][id]["events"];
+        let index = |name: &str| {
+            expected
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|event| event[0] == name)
+                .unwrap()
+        };
+        let error = index("link:error");
+        let future = index("future-timer");
+        assert_eq!(
+            error.abs_diff(future),
+            1,
+            "independent pair must remain adjacent"
+        );
+        assert!(lifecycle_events_match(expected, expected));
+        let mut reversed = expected.clone();
+        reversed.as_array_mut().unwrap().swap(error, future);
+        assert!(
+            lifecycle_events_match(&reversed, expected),
+            "{}",
+            case["name"]
+        );
+
+        let mut missing = expected.clone();
+        missing.as_array_mut().unwrap().remove(error);
+        assert!(
+            !lifecycle_events_match(&missing, expected),
+            "missing error: {}",
+            case["name"]
+        );
+        let mut duplicated = expected.clone();
+        duplicated
+            .as_array_mut()
+            .unwrap()
+            .insert(error, expected[error].clone());
+        assert!(
+            !lifecycle_events_match(&duplicated, expected),
+            "duplicate error: {}",
+            case["name"]
+        );
+        let mut duplicate_timer = expected.clone();
+        duplicate_timer
+            .as_array_mut()
+            .unwrap()
+            .insert(future, expected[future].clone());
+        assert!(
+            !lifecycle_events_match(&duplicate_timer, expected),
+            "duplicate timer: {}",
+            case["name"]
+        );
+        let mut timer_order = expected.clone();
+        timer_order
+            .as_array_mut()
+            .unwrap()
+            .swap(index("timer"), future);
+        assert!(
+            !lifecycle_events_match(&timer_order, expected),
+            "timer order: {}",
+            case["name"]
+        );
+        let mut load_barrier = expected.clone();
+        load_barrier
+            .as_array_mut()
+            .unwrap()
+            .swap(index("load"), index("DOMContentLoaded"));
+        assert!(
+            !lifecycle_events_match(&load_barrier, expected),
+            "load barrier: {}",
+            case["name"]
+        );
+        if case["lifecycleDelay"] != "image" {
+            let mut script_barrier = expected.clone();
+            script_barrier
+                .as_array_mut()
+                .unwrap()
+                .swap(index("script"), index("DOMContentLoaded"));
+            assert!(
+                !lifecycle_events_match(&script_barrier, expected),
+                "script barrier: {}",
+                case["name"]
+            );
+        }
+        for event in [error, future] {
+            let mut state = expected.clone();
+            state[event][2] = json!("complete");
+            assert!(
+                !lifecycle_events_match(&state, expected),
+                "event state: {}",
+                case["name"]
+            );
+        }
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() {
     let (_fixture, urls) = fixture();
@@ -230,32 +354,25 @@ async fn dictionary_discovery_policies_and_nonblocking_lifecycle_match_chrome() 
                 );
             }
         }
-        let names = |rows: &Value| {
-            rows.as_array()
-                .unwrap()
-                .iter()
-                .map(|event| event[0].clone())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            names(&events),
-            names(&control["result"][id]["events"]),
-            "events: {}",
-            case["name"]
-        );
         if case["lifecycleDelay"].is_string() {
-            let states = |events: &Value| {
-                events
-                    .as_array()
+            assert!(
+                lifecycle_events_match(&events, &control["result"][id]["events"]),
+                "resource task lifecycle events: {}: actual {events}, expected {}",
+                case["name"],
+                control["result"][id]["events"]
+            );
+        } else {
+            let names = |rows: &Value| {
+                rows.as_array()
                     .unwrap()
                     .iter()
-                    .map(|event| event[2].clone())
+                    .map(|event| event[0].clone())
                     .collect::<Vec<_>>()
             };
             assert_eq!(
-                states(&events),
-                states(&control["result"][id]["events"]),
-                "resource task lifecycle states: {}",
+                names(&events),
+                names(&control["result"][id]["events"]),
+                "events: {}",
                 case["name"]
             );
         }

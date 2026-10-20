@@ -11,6 +11,23 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Runner timing follow-up — 2026-10-20
 
+- Correct the compression-dictionary lifecycle regression after Linux CI observed
+  an independent resource-error task after an already-due Window timer. Preserve
+  every event count, readyState and other ordering constraint; permit only the
+  adjacent `link:error` / `future-timer` reversal. Positive and mutation-negative
+  controls retain parser/load barriers and reject missing or duplicate events.
+  Runtime, fixture, genuine Chrome golden and deadlines are unchanged. Nine
+  focused native dictionary tests, full-workspace strict Clippy and fmt pass.
+  The original Linux failure remains recorded; exact scheduling parity is not
+  claimed. A current full workspace rerun and new exact-head CI follow.
+- Complete the native gate at4a734d6:1,496 Rust tests, strict Clippy, fmt,
+  optimized CLI/addon and loader proof, shim96+1 intentional skip, E2E20,
+  Node22 detection195 with zero skips and Python2 pass. Six generated Rust
+  doc cases remain ignored. Fresh warm-artifact queries and source/fixture/full
+  Chrome guards pass. These retain their actual4a identity; the subsequent
+  test-only correction changes no production or harness input. Current default,
+  optimized API inventory and fresh Google validation remain pending.
+
 - Separate fixed observation semantics from timer delivery speed. Preserve the
   original600/20ms delays and100/1000ms windows, carry created/fired clocks on
   the existing retry navigation, and verify actual document responses and server

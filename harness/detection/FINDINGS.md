@@ -44,14 +44,40 @@ produce modern completion. Earlier native Google traces still have their actual
 429/zero-marker outcomes and are not reclassified as successful searches.
 
 The native startup repair passes67 focused tests, strict affected-crate Clippy
-and formatting. The prior581d default gate passed1,450 Rust tests, strict Clippy,
-formatting, rebuilt addon/shim96, E2E20, detection184 and Python2, with nine Rust,
-one framework and seven Node20 browser skips. Its native workspace passed1,495
-Rust tests and strict/fmt, but later consumer checks exposed failures. Those are
-historical artifacts, preceding the startup repair. Full current-source native
-and default gates, fresh optimized API inventory and Google validation remain
-pending. Native SERP acceptance remains unverified. Audio stays in issue #27;
-Times glyph width, engine/transport patches and broader residuals stay in #28.
+and formatting. The complete native gate at4a734d6 passes1,496 Rust tests,
+strict Clippy, fmt, optimized CLI/addon and loader checks, shim96+1 intentional
+skip, E2E20, Node22 detection195 with zero skips and Python2. Six generated Rust
+doc cases are ignored. Warm release queries are fresh and artifact bytes remain
+unchanged; the full frozen Chrome bundle and source/fixtures pass before/after
+guards. The optimized CLI has all four requested capabilities enabled. A later
+test-only correction changes no production or harness input; its full workspace
+rerun, the current default gate and fresh API/Google validation remain pending.
+
+The earlier581d default gate passed1,450 Rust tests, strict Clippy, formatting,
+rebuilt addon/shim96, E2E20, detection184 and Python2, with nine Rust, one
+framework and seven Node20 browser skips. Those default artifacts precede the
+startup repair. Native SERP acceptance remains unverified. Audio stays in issue
+#27; Times glyph width, engine/transport patches and broader residuals stay in #28.
+
+## Linux dictionary lifecycle follow-up — 2026-10-20
+
+Linux Node20 CI at4a734d6 observed `future-timer` before `link:error` in the
+blocked delayed-image case; its other events and readyStates matched the saved
+Chrome control. The runtime selects already-due Window timers before background
+resource tasks. The failure alone does not identify why the timer became due.
+The HTML event-loop model permits implementations to choose among runnable task
+queues while retaining ordering within a task source.
+[HTML event-loop processing model](https://html.spec.whatwg.org/multipage/webappapis.html#event-loop-processing-model).
+
+The corrected test compares two projections of event names and readyStates,
+omitting only one of the independent pair in each projection. Together they
+permit only that adjacent pair to reverse, retaining all other order, state and
+count constraints. Both observed orders pass; missing/duplicate events, broken
+parser/load barriers and wrong states fail. Nine actual focused native dictionary
+tests and full-workspace strict Clippy/fmt pass. Runtime, fixture, saved genuine
+Chrome capture and all delays/budgets stay unchanged. Existing clock tests
+separately guard future-timer advancement. Keep the original CI failure and
+scheduling differences in issue #28; this is not proof of identical scheduling.
 
 ## Measured runner timing mismatch — 2026-10-20
 

@@ -58,12 +58,15 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
 - [x] Isolate diagnostic hooks from implicit `.env`/solver initialization. The
   example initializes render hooks directly; production sessions retain their
   existing configuration behavior. Actual subprocess regressions pass.
-- [ ] Complete both full current-source native and default gates after the
-  startup repair. The focused native integration passes67 tests and strict/fmt;
-  it does not replace a full gate. Earlier581d artifacts passed default1,450
-  Rust tests and native1,495 workspace tests, with the recorded strict/fmt and
-  consumer results. They precede the current Rust changes. Current exact-head
-  CI must also cover the latest harness/schema corrections.
+- [ ] Complete the remaining current-source gates. Native4a734d6 passes1,496
+  Rust tests, strict/fmt, optimized CLI/addon/loader, shim96+1 skip, E2E20,
+  Node22 detection195+Python2 and warm/source/browser guards. Linux CI exposed
+  an independent resource-error/Window-timer ordering assumption; the test-only
+  correction passes nine focused dictionary tests and strict/fmt while preserving
+  every other ordering/state/count constraint. Its current full workspace rerun
+  and exact-head CI are pending. Production/harness inputs are unchanged.
+  The full current default gate, API and Google checks remain pending; the older
+  default1,450 result precedes the startup repair and is historical.
 - [ ] Remeasure the75-interface inventory using the optimized current native
   artifact and frozen Chrome. Historical94/64/374 counts are not current results.
 - [ ] Run fresh equivalent Chrome/native Google comparisons with independent

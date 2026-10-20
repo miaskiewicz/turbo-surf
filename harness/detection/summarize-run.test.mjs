@@ -80,6 +80,32 @@ test("malformed collector error evidence cannot become a successful public basel
   });
 });
 
+test("actual native trace schema remains measured without a Chrome error channel", () => {
+  fixture((directory, write) => {
+    const path = "native-baseline/trace.json";
+    const native = JSON.parse(readFileSync(join(directory, path)));
+    native.runtime = "turbo-surf";
+    native.errors = [];
+    delete native.collectorErrors;
+    write(path, native);
+    const result = summarizeRun(directory);
+    assert.equal(result.nativeBaseline.successful, 1);
+    assert.equal(result.runs["0/native-baseline"].collectorComplete, true);
+    assert.equal(result.runs["0/native-baseline"].collectorErrorCount, 0);
+    assert.equal(result.runs["0/native-baseline"].observation.complete, true);
+    for (const errors of [undefined, null, false, {}, ["private-native-host-failure"]]) {
+      write(path, { ...native, errors });
+      const invalid = summarizeRun(directory);
+      assert.equal(invalid.nativeBaseline.successful, 0);
+      assert.equal(invalid.runs["0/native-baseline"].collectorComplete, false);
+      assert.equal(invalid.runs["0/native-baseline"].observation.complete, false);
+      assert.doesNotMatch(JSON.stringify(invalid), /private-native-host-failure/);
+    }
+    write(path, { ...native, collectorErrors: ["private-conflicting-channel"] });
+    assert.equal(summarizeRun(directory).nativeBaseline.successful, 0);
+  });
+});
+
 test("historical process rows remain unmeasured rather than silently becoming fresh successes", () => {
   const terminated = processSummary({
     code: null,

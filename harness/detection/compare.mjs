@@ -93,10 +93,20 @@ export const requestSummary = (row) => {
         : "browser-reported headers"),
   };
 };
+const collectorErrorCount = (trace) => {
+  // Native captures report host failures in errors; Chrome keeps guest exceptions
+  // there and reports collector failures through its separate channel.
+  const native = trace.runtime === "turbo-surf";
+  const errors = native ? trace.errors : trace.collectorErrors;
+  if (!Array.isArray(errors)) return null;
+  if (native && Object.hasOwn(trace, "collectorErrors")) {
+    if (!Array.isArray(trace.collectorErrors)) return null;
+    return errors.length + trace.collectorErrors.length;
+  }
+  return errors.length;
+};
 const collectorComplete = (trace) =>
-  trace.captureComplete === true &&
-  Array.isArray(trace.collectorErrors) &&
-  trace.collectorErrors.length === 0;
+  trace.captureComplete === true && collectorErrorCount(trace) === 0;
 
 export const captureSummary = (trace) => ({
   complete:
@@ -105,7 +115,7 @@ export const captureSummary = (trace) => ({
       : Array.isArray(trace.pages) && !(trace.errors || []).length,
   completionSource:
     typeof trace.captureComplete === "boolean" ? "collector" : "legacy-error-heuristic",
-  collectorErrorCount: Array.isArray(trace.collectorErrors) ? trace.collectorErrors.length : null,
+  collectorErrorCount: collectorErrorCount(trace),
   hydrationBudgetExceeded: (trace.pages || []).some((page) => page.hydration?.budget_exceeded),
   inputError: (trace.pages || []).find((page) => page.phase === "interaction-error")?.error || null,
   inputState:

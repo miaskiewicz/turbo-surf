@@ -11,6 +11,25 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Runner timing follow-up — 2026-10-20
 
+- Separate fixed observation semantics from timer delivery speed. Preserve the
+  original600/20ms delays and100/1000ms windows, carry created/fired clocks on
+  the existing retry navigation, and verify actual document responses and server
+  events. A shell stays a rejected search; unresolved navigation stays incomplete.
+  A timer-free302 control independently requires the real429 destination. Keep
+  provisional-loader behavior under deterministic tracker tests rather than require
+  a snapshot to sample a transient pending state. Original timing failures remain
+  preserved; this does not establish scheduling parity. The four paired suites
+  pass14 tests with zero skips, covering10 variants /19 actual captures; source,
+  native debug binary and complete frozen Chrome bundle remain unchanged.
+- Fix shared completion reporting for the actual native trace schema: native
+  top-level `errors` contains collector failures, while Chrome uses
+  `collectorErrors` and records guest exceptions separately. Missing, malformed,
+  nonempty or conflicting channels fail closed. Matching public-summary and
+  navigation regressions pass40 focused checks on both Node20 and22. Earlier
+  native Google captures retain their actual429/zero-result outcomes; this fix
+  does not turn them into successful searches. Full current-source native/default,
+  optimized API and fresh Google checks remain pending.
+
 - Prime the existing shared system-font cache on a blocking worker before
   PageSession creates V8. Cold discovery now leaves the current-thread network
   driver responsive, retaining eager geometry startup and the existing guest/input
@@ -43,11 +62,12 @@ residual work beyond this PR, with audio separately deferred in
   Both complete shim suites pass96 tests with one intentional skip each on
   actual stock and native addons; compiled Rust/artifact bytes are unchanged.
 
-- Complete the full default `npm run check`:1,450 Rust tests, strict Clippy,
+- At the earlier581d checkpoint, complete default `npm run check`:1,450 Rust tests, strict Clippy,
   formatting, rebuilt addon/shim96, E2E20, detection184 and Python2 pass.
   Explicit skips remain nine Rust, one framework and seven Node20 browser
   controls requiring Node22. Actual addon loading/code identity is verified;
-  full native-feature and fresh optimized API/Google checks remain pending.
+  these precede the subsequent startup repair and do not validate current Rust.
+  Full current-source native/default and fresh optimized API/Google checks remain pending.
 
 - Re-vendor public canonical `a49544f`: computed styles preserve parsed
   declaration importance through shorthand expansion, respect private document

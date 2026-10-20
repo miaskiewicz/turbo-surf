@@ -38,15 +38,18 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
   its box, response204/cookie before search, retained textarea identity and focus,
   genuine native form navigation and final results. Missing readiness or
   ineffective input fails before Enter; no silent refocus or text repair occurs.
-- [x] Correct the measured timer/observation mismatch and rerun delayed navigation.
-  Real-time Window scheduling is installed before hydration and inherited by
-  frames/form navigation; default crawler scheduling stays virtual. The common
-  deadline starts before Enter. The final four paired suites pass 13 tests with
-  zero failures/skips, including 9 observation variants / 17 actual captures and the
-  previously failing existing-results layout scenario. Short 100ms controls retain
-  real overruns and may observe different progress; they do not establish exact
-  scheduling parity. The original doubled-clock, timeout, lost-focus and layout
-  failures remain recorded in [FINDINGS.md](./FINDINGS.md).
+- [x] Install real-time Window scheduling before hydration and retain the default
+  crawler's virtual mode. The fixed deadline starts before Enter. Four paired
+  suites now pass14 tests with zero failures/skips, including10 variants /19
+  actual captures. Retry clocks and actual document/server evidence determine
+  shell, terminal or incomplete outcomes. A separate timer-free302 control
+  requires429. Deterministic tracker tests cover provisional navigation without
+  requiring a transient state to be sampled. Forty focused checks pass on both
+  Node20 and22. Original native/Chrome timing failures remain recorded in
+  [FINDINGS.md](./FINDINGS.md); scheduling/throughput parity remains in issue #28.
+  Native completion summaries now validate the producer's actual host-error
+  channel and reject malformed/conflicting evidence; old failed Google captures
+  remain failed.
 - [x] Freeze browser identity throughout the paired suite. The complete owned
   Chrome155.0.8059.85 bundle, current native binary and selected source/compiled
   fixtures are unchanged before and after the successful run. Chrome's actual
@@ -55,12 +58,12 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
 - [x] Isolate diagnostic hooks from implicit `.env`/solver initialization. The
   example initializes render hooks directly; production sessions retain their
   existing configuration behavior. Actual subprocess regressions pass.
-- [ ] Complete the full current-source native-feature gate. The default
-  `npm run check` passes1,450 Rust tests, strict Clippy, formatting, rebuilt
-  addon/shim96, E2E20, detection184 and Python2. Its explicit skips are nine Rust,
-  one framework and seven Node20 browser controls requiring Node22. Actual
-  addon loading/code identity is verified. The focused native integration
-  passes66 tests and strict/fmt; it does not replace the full native gate.
+- [ ] Complete both full current-source native and default gates after the
+  startup repair. The focused native integration passes67 tests and strict/fmt;
+  it does not replace a full gate. Earlier581d artifacts passed default1,450
+  Rust tests and native1,495 workspace tests, with the recorded strict/fmt and
+  consumer results. They precede the current Rust changes. Current exact-head
+  CI must also cover the latest harness/schema corrections.
 - [ ] Remeasure the75-interface inventory using the optimized current native
   artifact and frozen Chrome. Historical94/64/374 counts are not current results.
 - [ ] Run fresh equivalent Chrome/native Google comparisons with independent

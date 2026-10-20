@@ -10,33 +10,48 @@ its retry. Chrome oracle cookies were never reused in native tests.
 
 ## Current integration checkpoint — 2026-10-20
 
-The current native build passes 66 focused tests, strict affected-crate Clippy
-and formatting. The unchanged four paired localhost suites pass 13 tests with
-zero failures/skips. Their final observation fixture covers 9 variants and17
-actual captures, including the former block-in-inline geometry failure. The
-source, compiled PNG/font fixtures, native binary and full frozen Chrome bundle
-remain unchanged. Successful unit fixtures remove their raw directories by
-design; retained receipts/logs and test assertions support these results, not a
-claim that every successful raw trace is archived.
+The latest four paired localhost suites pass14 tests with zero failures/skips,
+covering10 navigation variants and19 actual captures. They use the frozen
+Chrome155.0.8059.85 bundle and native155 debug executable, with unchanged
+source, binary, browser bundle and compiled fixtures throughout collection.
+This is a correctness control, not an optimized performance or live Google result.
+Successful fixtures remove their raw directories; retained receipts/logs and
+assertions support the result, not an archive of every successful raw trace.
 
-The complete default `npm run check` passes1,450 Rust tests, workspace strict
-Clippy and formatting, rebuilt addon/shim96, E2E20, detection184 and Python2.
-Nine Rust, one framework and seven Node20 browser controls are explicitly
-ignored/skipped. The latter need Node22; the separate paired run above exercises
-its selected real-Chrome controls. Full native-feature, fresh API and optimized
-Google validation remain pending. The 100ms boundary control records Chrome429 and a native200 shell
-with explicit elapsed-time overruns; passing harness assertions do not establish
-identical scheduling or universal page behavior. Times glyph width and the
-Chrome/native engine patch gap remain tracked in issue #28. Earlier failures
-below retain their original outcomes and precede the current fixes.
+The retry controls preserve600/20ms delays and100/1000ms observation windows.
+Created/fired Date/performance clocks survive the existing terminal navigation.
+Actual server events and matching document responses establish each observed
+shell or429; pending navigation remains incomplete and no shell counts as SERP.
+An independent timer-free302 control requires the real429 destination. The
+old-result control requires the initial result and final429 without stale markers;
+deterministic tracker tests cover provisional state independently of whether a
+snapshot happens to sample it. Forty focused schema, summary, tracker and retry
+checks pass on both Node20 and22.
 
-Private addon-proof preflights initially reject Cargo's inode-only refresh and
-the signing allocation retained after signature removal. Those attempts are
-preserved. A separate completion proof verifies the actual consumed addon,
-current Cargo artifact/profile and all code/data bytes, allowing only validated
-`__LINKEDIT.vmsize` signing padding. Actual code-byte and unrelated-header
-mutations fail the comparison; source, test budgets and consumed addon stay
-unchanged. These helper corrections do not erase the original gate evidence.
+Earlier runs exposed two different timing assumptions: native installed a600ms
+retry timer70ms after the1000ms deadline; real Chrome later installed it early
+enough but had not dispatched it at the final snapshot. A passive isolated Chrome
+run reached429 with observed visible/focused state. The cause of the earlier
+Chrome delay is unproved. Retain those failed runs and the measured bootstrap/
+dispatch differences in issue #28; the revised passing assertions do not establish
+scheduler performance parity. A separate Chrome failure correctly committed429
+but never sampled the transient pending state before that commit.
+
+Shared summaries now follow the actual producer schemas. Native top-level
+`errors` records collector failures; Chrome uses `collectorErrors` separately
+from guest exceptions. Malformed, absent or conflicting error channels cannot
+produce modern completion. Earlier native Google traces still have their actual
+429/zero-marker outcomes and are not reclassified as successful searches.
+
+The native startup repair passes67 focused tests, strict affected-crate Clippy
+and formatting. The prior581d default gate passed1,450 Rust tests, strict Clippy,
+formatting, rebuilt addon/shim96, E2E20, detection184 and Python2, with nine Rust,
+one framework and seven Node20 browser skips. Its native workspace passed1,495
+Rust tests and strict/fmt, but later consumer checks exposed failures. Those are
+historical artifacts, preceding the startup repair. Full current-source native
+and default gates, fresh optimized API inventory and Google validation remain
+pending. Native SERP acceptance remains unverified. Audio stays in issue #27;
+Times glyph width, engine/transport patches and broader residuals stay in #28.
 
 ## Measured runner timing mismatch — 2026-10-20
 

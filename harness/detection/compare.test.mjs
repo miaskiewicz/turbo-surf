@@ -96,6 +96,51 @@ test("collector completion stays independent of guest exceptions", () => {
   assert.equal(historical.collectorErrorCount, null);
 });
 
+test("native completion uses its actual host-error channel and rejects conflicting evidence", () => {
+  const trace = {
+    runtime: "turbo-surf",
+    captureComplete: true,
+    errors: [],
+    pages: [{ phase: "native-final", errors: ["guest page exception"] }],
+    observation: {
+      policy: "fixed-deadline-before-enter",
+      requestedMs: 100,
+      elapsedMs: 101,
+      overrunMs: 1,
+      completed: true,
+    },
+  };
+  assert.equal(captureSummary(trace).complete, true);
+  assert.equal(captureSummary(trace).collectorErrorCount, 0);
+  assert.equal(observationSummary(trace).complete, true);
+  assert.equal(captureSummary({ ...trace, collectorErrors: [] }).complete, true);
+  for (const errors of [undefined, null, {}, false, "", { length: 0 }, ["native host failure"]]) {
+    const invalid = { ...trace, errors };
+    assert.equal(captureSummary(invalid).complete, false);
+    assert.equal(observationSummary(invalid).complete, false);
+    assert.equal(captureSummary(invalid).collectorErrorCount, Array.isArray(errors) ? 1 : null);
+  }
+  const missing = { ...trace };
+  delete missing.errors;
+  assert.equal(captureSummary(missing).complete, false);
+  for (const collectorErrors of [undefined, null, {}, false, ["conflicting failure"]]) {
+    const invalid = { ...trace, collectorErrors };
+    assert.equal(captureSummary(invalid).complete, false);
+    assert.equal(observationSummary(invalid).complete, false);
+  }
+  assert.equal(captureSummary({ ...trace, runtime: "chrome" }).complete, false);
+  assert.equal(captureSummary({ ...trace, runtime: "unknown" }).complete, false);
+  assert.equal(
+    captureSummary({
+      ...trace,
+      runtime: "chrome",
+      collectorErrors: [],
+      errors: ["guest exception"],
+    }).complete,
+    true,
+  );
+});
+
 test("modern collector completion requires an actual empty error array", () => {
   const trace = {
     captureComplete: true,

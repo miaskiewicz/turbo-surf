@@ -59,6 +59,25 @@ framework and seven Node20 browser skips. Those default artifacts precede the
 startup repair. Native SERP acceptance remains unverified. Audio stays in issue
 #27; Times glyph width, engine/transport patches and broader residuals stay in #28.
 
+## Offline gate and live transport diagnostic — 2026-10-20
+
+The next full workspace follow-up was interrupted after an existing public TLS
+echo request took roughly145 seconds. That attempt is incomplete, not passed.
+The old test returned successfully on a network error without reaching its
+fingerprint assertions, so historical nominal passes cannot prove those live
+assertions ran. No specific fingerprint mismatch is established by that stall.
+
+The live test is now explicitly ignored in default workspace gates. An opted-in
+run fails on request errors or a30-second deadline; all JA4, HTTP2 priority/order,
+UA, client-hint and header assertions remain intact. The localhost test still
+captures and checks actual emitted ClientHello bytes in the default gate. Both
+that offline control and one explicit live run pass; the latter finishes its
+assertions in0.69 seconds. Strict workspace Clippy and formatting also pass.
+Source, optimized artifacts and the frozen Chrome bundle remain unchanged across
+these focused checks. The full current workspace/default gates remain pending;
+report their measured passes and explicit live-test ignore separately. This
+limited transport check does not establish complete Chrome or Google parity.
+
 ## Linux dictionary lifecycle follow-up — 2026-10-20
 
 Linux Node20 CI at4a734d6 observed `future-timer` before `link:error` in the

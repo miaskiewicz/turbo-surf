@@ -11,6 +11,14 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Runner timing follow-up — 2026-10-20
 
+- Keep the public TLS echo diagnostic out of default offline gates. Explicit
+  runs now fail on a request error or30-second deadline rather than returning
+  before their wire assertions. The unchanged localhost ClientHello control and
+  one explicit live run both pass; JA4, HTTP2, UA and header checks are retained.
+  Strict workspace Clippy and formatting pass. Preserve the earlier interrupted
+  workspace attempt and its roughly145-second external request; historical
+  nominal passes do not prove the old live assertions executed. This is a test
+  procedure repair, not a production transport change or Google clearance.
 - Correct the compression-dictionary lifecycle regression after Linux CI observed
   an independent resource-error task after an already-due Window timer. Preserve
   every event count, readyState and other ordering constraint; permit only the

@@ -212,6 +212,20 @@ parity_env python3 harness/detection/engine-155/build.py "$PARITY_SDK" --jobs 2 
 parity_env cargo fmt --manifest-path rust/Cargo.toml --check
 ```
 
+The public TLS echo is a separate live diagnostic. Default workspace gates
+record it as ignored; network errors no longer count as asserted passes. Its
+request has a30-second deadline, and explicit failures remain failures. Run:
+
+```sh
+parity_env cargo test --manifest-path rust/Cargo.toml -p turbo-surf-core \
+  --features impersonate --test impersonate -- --ignored \
+  --exact presents_a_chrome_tls_and_http2_fingerprint --nocapture
+```
+
+For the native155 SDK, use the same test arguments after `build.py ... --surf`
+instead of ordinary Cargo. The default localhost `client_hello` test still checks
+actual TLS bytes. Neither control alone proves complete Chrome transport parity.
+
 Earlier `chrome-cdp-trace.test.mjs` controls hardcoded installed Chrome, and Patchright ignored the explicit path. The
 current code selects the configured executable in both backends and all four control suites. Reverify the actual captured
 versions after building; code changes alone do not establish a uniformly pinned-browser suite. Earlier attempts retain a45s

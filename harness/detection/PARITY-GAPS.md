@@ -67,6 +67,12 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
   and exact-head CI are pending. Production/harness inputs are unchanged.
   The full current default gate, API and Google checks remain pending; the older
   default1,450 result precedes the startup repair and is historical.
+- [x] Separate offline transport regression coverage from an optional external
+  TLS echo diagnostic. The actual localhost ClientHello control and one bounded
+  explicit live echo run pass with unchanged wire assertions; strict/fmt pass.
+  Default gates now record the external test as ignored. The earlier interrupted
+  request and ambiguous historical auto-return passes remain documented in
+  [FINDINGS.md](./FINDINGS.md); this does not certify complete transport parity.
 - [ ] Remeasure the75-interface inventory using the optimized current native
   artifact and frozen Chrome. Historical94/64/374 counts are not current results.
 - [ ] Run fresh equivalent Chrome/native Google comparisons with independent

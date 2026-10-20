@@ -122,3 +122,10 @@ export async function captureOwnedLaunch(childProcess, profile, launch, own) {
   }
   return context;
 }
+
+// Abort must remain a rejected command Promise, including commands issued by
+// background-target cleanup after the capture has already been interrupted.
+export async function callWithLifecycle(lifecycle, connection, method, params = {}, sessionId) {
+  lifecycle.throwIfAborted();
+  return lifecycle.race(connection.call(method, params, sessionId));
+}

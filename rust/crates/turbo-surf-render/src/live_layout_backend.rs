@@ -15,11 +15,26 @@ static SYSTEM_FONTS: std::sync::OnceLock<FontRegistry> = std::sync::OnceLock::ne
 // Native font discovery is process startup work, not part of a trusted input turn.
 // Geometry installation primes this same immutable registry before page execution.
 pub(crate) fn initialize_system_fonts() -> &'static FontRegistry {
-    SYSTEM_FONTS.get_or_init(|| {
-        let mut registry = FontRegistry::new();
-        registry.load_system_fonts_for_html();
-        registry
+    SYSTEM_FONTS.get_or_init(load_system_fonts)
+}
+
+fn load_system_fonts() -> FontRegistry {
+    let mut registry = FontRegistry::new();
+    registry.load_system_fonts_for_html();
+    registry
+}
+
+pub(crate) async fn initialize_system_fonts_async() -> Result<(), String> {
+    if SYSTEM_FONTS.get().is_some() {
+        return Ok(());
+    }
+    // Cold discovery must leave a current-thread runtime free to retire pooled
+    // connections while preserving the eager cache before any guest turn.
+    tokio::task::spawn_blocking(|| {
+        initialize_system_fonts();
     })
+    .await
+    .map_err(|error| format!("Native font initialization failed: {error}"))
 }
 
 #[derive(PartialEq)]
@@ -883,4 +898,114 @@ pub(crate) fn op_live_media_match<'s>(
     let viewport = viewport(scope, context).map_err(JsErrorBox::generic)?;
     crate::live_stylesheets::Conditions::media(viewport.as_ref(), source)
         .map_err(JsErrorBox::generic)
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn release_initializer_after_network_progress(
+        listener: tokio::net::TcpListener,
+        release: std::sync::mpsc::SyncSender<()>,
+    ) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let address = listener.local_addr().unwrap();
+        let client = async {
+            let mut socket = tokio::net::TcpStream::connect(address).await?;
+            socket.write_all(&[7]).await?;
+            let mut reply = [0];
+            socket.read_exact(&mut reply).await?;
+            assert_eq!(reply, [9]);
+            Ok::<_, std::io::Error>(())
+        };
+        let server = async {
+            let (mut socket, _) = listener.accept().await?;
+            let mut request = [0];
+            socket.read_exact(&mut request).await?;
+            assert_eq!(request, [7]);
+            socket.write_all(&[9]).await?;
+            Ok::<_, std::io::Error>(())
+        };
+        tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::try_join!(client, server)
+        })
+        .await
+        .expect("session startup prevented the network driver from progressing")
+        .unwrap();
+        release.send(()).unwrap();
+    }
+
+    fn cold_session_startup() {
+        assert!(
+            SYSTEM_FONTS.get().is_none(),
+            "subprocess font cache was warm"
+        );
+        let (started, initialization_started) = std::sync::mpsc::sync_channel(1);
+        let (release, released) = std::sync::mpsc::sync_channel(1);
+        let initializer = std::thread::spawn(move || {
+            SYSTEM_FONTS.get_or_init(|| {
+                started.send(()).unwrap();
+                released.recv_timeout(Duration::from_secs(2)).expect(
+                    "PageSession blocked its current-thread network driver during font startup",
+                );
+                load_system_fonts()
+            });
+        });
+        initialization_started.recv().unwrap();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let network = tokio::spawn(release_initializer_after_network_progress(
+                    listener, release,
+                ));
+                let mut page = crate::PageSession::open(
+                    "<body>cold startup</body>",
+                    "https://startup.invalid/",
+                    "",
+                    "",
+                    5000,
+                )
+                .await
+                .unwrap();
+                network.await.unwrap();
+                assert_eq!(
+                    page.eval("globalThis.__RESULT=document.body.textContent")
+                        .await
+                        .unwrap(),
+                    "cold startup"
+                );
+                page.close();
+            });
+        initializer.join().unwrap();
+        assert!(SYSTEM_FONTS.get().is_some());
+    }
+
+    #[test]
+    fn cold_session_startup_keeps_current_thread_network_driven() {
+        const CHILD: &str = "TURBO_SURF_FONT_STARTUP_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            cold_session_startup();
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "live_layout_backend::startup_tests::cold_session_startup_keeps_current_thread_network_driven",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "cold startup subprocess failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

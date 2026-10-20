@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
-import { captureOwnedLaunch, collectorLifecycle } from "./collector-lifecycle.mjs";
+import {
+  callWithLifecycle,
+  captureOwnedLaunch,
+  collectorLifecycle,
+} from "./collector-lifecycle.mjs";
+import { cdpConnection } from "./cdp-connection.mjs";
 
 test("interrupt rejects blocked work, checkpoints once and retires only owned group", async () => {
   const signals = new EventEmitter(),
@@ -97,4 +102,46 @@ test("duplicate owned profile is rejected before an untracked child can spawn", 
   );
   assert.equal(spawned, 1);
   assert.equal(module.spawn, original);
+});
+
+test("aborting target setup keeps its finally command catchable without dispatching after abort", async () => {
+  const signals = new EventEmitter();
+  const lifecycle = collectorLifecycle({ signals, graceMs: 1 });
+  const sent = [];
+  const socket = { send: (message) => sent.push(JSON.parse(message)) };
+  const connection = cdpConnection(socket, () => {});
+  let setupError, cleanupError;
+  const setup = (async () => {
+    try {
+      await callWithLifecycle(lifecycle, connection, "Network.enable", {}, "worker");
+    } catch (error) {
+      setupError = error;
+    } finally {
+      await callWithLifecycle(
+        lifecycle,
+        connection,
+        "Runtime.runIfWaitingForDebugger",
+        {},
+        "worker",
+      ).catch((error) => {
+        cleanupError = error;
+      });
+    }
+  })();
+  try {
+    assert.deepEqual(
+      sent.map(({ method, sessionId }) => ({ method, sessionId })),
+      [{ method: "Network.enable", sessionId: "worker" }],
+    );
+    signals.emit("SIGTERM");
+    connection.close();
+    await assert.doesNotReject(setup);
+    assert.equal(setupError, lifecycle.signal.reason);
+    assert.equal(cleanupError, lifecycle.signal.reason);
+    assert.equal(sent.length, 1, "post-abort cleanup must not send a protocol command");
+  } finally {
+    connection.close();
+    lifecycle.dispose();
+    await lifecycle.stopBrowser();
+  }
 });

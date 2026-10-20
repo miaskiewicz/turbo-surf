@@ -11,6 +11,26 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Runner timing follow-up — 2026-10-20
 
+- Prime the existing shared system-font cache on a blocking worker before
+  PageSession creates V8. Cold discovery now leaves the current-thread network
+  driver responsive, retaining eager geometry startup and the existing guest/input
+  budget boundaries. A fresh-subprocess regression holds the real cache initializer
+  until a real localhost round trip progresses through PageSession startup.
+  The native focused gate passes67 tests, strict affected-crate Clippy and formatting.
+  The unchanged same-URL POST regression passes; its observed POST precedes idle
+  expiry, while the deterministic startup test separately verifies driver progress.
+  Earlier repeated failures attempting POST4.29 seconds after server socket closure
+  remain preserved. Full current-source validation follows this integration;
+  cold-font latency/memory and bootstrap performance remain in issue #28.
+- Keep aborted CDP commands as rejected Promises, so background-target finalizers
+  catch them and finish owned browser/profile cleanup. Actual lifecycle/connection
+  tests pass7/7 on Node20 and22, and real CDP/Patchright interruption controls
+  pass2/2 at the original45-second limits. The old synchronous contract fails the
+  regression. Re-capture the source-pinned resource-order Chrome oracle genuinely;
+  its observable results remain unchanged and both Node versions pass source pins.
+  Retain the earlier188-pass/3-failure Node22 run, including the truthful200 shell
+  when native page bootstrap consumed the fixed retry observation window.
+
 - Synchronize the idle-receiver cancellation regression with explicit child
   readiness and server-confirmed stalled I/O, without another receiver RPC.
   Separate bounded30-second process startup from the original five-second

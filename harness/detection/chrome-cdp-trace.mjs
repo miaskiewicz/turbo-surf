@@ -19,7 +19,7 @@ import {
   waitForObservation,
 } from "./observation-window.mjs";
 import { createMainNavigationTracker } from "./main-navigation.mjs";
-import { collectorLifecycle } from "./collector-lifecycle.mjs";
+import { callWithLifecycle, collectorLifecycle } from "./collector-lifecycle.mjs";
 import {
   effectiveTypedControl,
   prepareTypedControl,
@@ -102,8 +102,7 @@ function collectorError(error) {
   collectorErrors.push(error);
 }
 function call(method, params = {}, sessionId = mainSession) {
-  lifecycle.throwIfAborted();
-  return lifecycle.race(connection.call(method, params, sessionId));
+  return callWithLifecycle(lifecycle, connection, method, params, sessionId);
 }
 async function evaluate(expression, contextId, sessionId = mainSession) {
   const result = await call(

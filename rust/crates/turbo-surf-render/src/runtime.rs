@@ -14541,6 +14541,7 @@ impl PageSession {
         activation: Option<NavigationActivationSnapshot>,
         options: PageSessionOptions,
     ) -> Result<Self, String> {
+        crate::live_layout_backend::initialize_system_fonts_async().await?;
         let mut rt = make_runtime_with_storage_and_options(
             base,
             cookies,

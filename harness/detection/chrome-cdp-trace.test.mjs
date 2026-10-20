@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { summarizeResponseTransport } from "./chrome-network-metadata.mjs";
-import { chromeSearchOutcome } from "./compare.mjs";
+import { chromeSearchOutcome, observationSummary } from "./compare.mjs";
 import { superviseTestChild } from "./child-supervision.mjs";
 
 const chrome =
@@ -611,3 +611,97 @@ test(
     }
   },
 );
+
+for (const backend of ["cdp", "patchright"]) {
+  test(
+    `${backend} Chrome records a rootless post-Enter document without borrowing earlier results`,
+    {
+      skip:
+        !existsSync(chrome) ||
+        typeof WebSocket === "undefined" ||
+        (backend === "patchright" &&
+          !existsSync(
+            new URL(
+              "../../scripts/browser-sidecar/node_modules/patchright/package.json",
+              import.meta.url,
+            ),
+          )),
+      timeout: 45000,
+    },
+    async (t) => {
+      const directory = mkdtempSync(join(tmpdir(), `turbo-${backend}-rootless-fixture-`));
+      let passed = false;
+      const server = createServer((request, response) => {
+        const terminal = new URL(request.url, "http://fixture.test").pathname === "/search";
+        response.writeHead(terminal ? 429 : 200, { "content-type": "text/html" });
+        response.end(
+          terminal
+            ? '<!doctype html><html><body><script>addEventListener("DOMContentLoaded",()=>document.removeChild(document.documentElement));</script></body></html>'
+            : '<!DOCTYPE html PUBLIC "fixture-public" "fixture-system"><html><body data-ready><div id="rso"><a><h3>Old result</h3></a></div><form action="/search"><input id="q" name="q"></form></body></html>',
+        );
+      });
+      try {
+        await new Promise((done, fail) => {
+          server.once("error", fail);
+          server.listen(0, "127.0.0.1", done);
+        });
+        const configPath = join(directory, "config.json");
+        writeFileSync(
+          configPath,
+          JSON.stringify({
+            chromePath: chrome,
+            chromeBackend: backend,
+            url: `http://127.0.0.1:${server.address().port}/`,
+            readySelector: "body[data-ready]",
+            interfaces: false,
+            debugger: false,
+            disableExtensions: true,
+            observationMs: 100,
+            steps: [{ focus: "#q" }, { type: "root fixture" }, { press: "Enter" }],
+          }),
+        );
+        const result = await collect(
+          t,
+          backend === "cdp" ? "./chrome-cdp-trace.mjs" : "./chrome-trace.mjs",
+          configPath,
+          directory,
+        );
+        const trace = JSON.parse(readFileSync(join(directory, "trace.json"), "utf8"));
+        assert.equal(result.code, 0, JSON.stringify(trace.collectorErrors));
+        assert.equal(trace.captureComplete, true);
+        assert.deepEqual(trace.collectorErrors, []);
+        assert.equal(trace.pages[0].results, 1);
+        assert.equal(trace.pages[0].status, 200);
+        assert.equal(trace.pages[0].documentElementPresent, true);
+        assert.ok(
+          readFileSync(join(directory, "home.html"), "utf8").startsWith(
+            backend === "patchright"
+              ? '<!DOCTYPE html PUBLIC "fixture-public" "fixture-system">'
+              : "<!DOCTYPE html>",
+          ),
+        );
+        const final = trace.pages.at(-1);
+        assert.equal(final.documentElementPresent, false);
+        assert.equal(final.results, 0);
+        assert.equal(final.bytes, 0);
+        assert.equal(readFileSync(join(directory, "search.html"), "utf8"), "");
+        assert.equal(new URL(final.url).pathname, "/search");
+        assert.equal(new URL(final.statusDocumentUrl).pathname, "/search");
+        assert.equal(final.statusSource, "cdp-main-document-loader");
+        assert.equal(final.status, 429);
+        assert.equal(trace.observation.requestedMs, 100);
+        assert.equal(trace.observation.documentElementPresent, false);
+        assert.equal(trace.observation.completed, false);
+        assert.equal(trace.observation.pendingNavigation, false);
+        assert.equal(trace.observation.navigationFailed, false);
+        assert.equal(observationSummary(trace).complete, false);
+        assert.equal(chromeSearchOutcome(trace).accepted, false);
+        passed = true;
+      } finally {
+        server.closeAllConnections();
+        await new Promise((done) => server.close(done));
+        disposeEvidence(t, directory, passed);
+      }
+    },
+  );
+}

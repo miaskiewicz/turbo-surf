@@ -11,6 +11,18 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Runner timing follow-up — 2026-10-20
 
+- Fix a real Chrome post-submit collector failure when the current document has
+  no root. Both Chrome backends read root presence, markup and result counts in
+  one synchronous evaluation; preserve each backend's doctype serialization and
+  current-loader HTTP attribution. A rootless document produces empty markup,
+  zero markers and an incomplete observation, with no extra wait or stale-page
+  fallback. Focused Node20/22 checks pass29 each; two genuine rootless controls
+  and all16 paired controls pass. Full detection passes200 on Node22 with zero
+  skips and191 on Node20 with nine documented browser skips; Python passes twice
+  on each. The genuine resource-order recapture changes only two source hashes;
+  its focused Rust consumer passes. Rust engine, optimized binary and budgets
+  are unchanged. Preserve the original incomplete Google attempt; fresh full
+  API/Google captures follow the repair.
 - Keep the public TLS echo diagnostic out of default offline gates. Explicit
   runs now fail on a request error or30-second deadline rather than returning
   before their wire assertions. The unchanged localhost ClientHello control and

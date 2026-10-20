@@ -58,15 +58,17 @@ A repair is closed only after behavior tests and a fresh paired audit pass.
 - [x] Isolate diagnostic hooks from implicit `.env`/solver initialization. The
   example initializes render hooks directly; production sessions retain their
   existing configuration behavior. Actual subprocess regressions pass.
-- [ ] Complete the remaining current-source gates. Native4a734d6 passes1,496
-  Rust tests, strict/fmt, optimized CLI/addon/loader, shim96+1 skip, E2E20,
-  Node22 detection195+Python2 and warm/source/browser guards. Linux CI exposed
-  an independent resource-error/Window-timer ordering assumption; the test-only
-  correction passes nine focused dictionary tests and strict/fmt while preserving
-  every other ordering/state/count constraint. Its current full workspace rerun
-  and exact-head CI are pending. Production/harness inputs are unchanged.
-  The full current default gate, API and Google checks remain pending; the older
-  default1,450 result precedes the startup repair and is historical.
+- [x] Complete stock/native engine validation and the collector follow-up.
+  At3a77122 stock passes1,451 Rust tests and native1,496, with strict/fmt,
+  verified optimized artifacts and loader/consumer guards. The subsequent
+  harness-only rootless-document repair passes29 focused checks per Node20/22,
+  both real browser controls, all16 paired controls and full detection200/0skips
+  on Node22 and191/9 documented browser skips on Node20, plus Python2 each.
+  Its genuinely refreshed resource oracle preserves every observed value and
+  passes its stock Rust consumer. Original receipts keep their source identities;
+  reviewed byte/parsed-JSON bridges cover unchanged native production inputs.
+  Exact-head CI must pass after each code change. Final API/Google collection
+  and the final report/description commit remain below.
 - [x] Separate offline transport regression coverage from an optional external
   TLS echo diagnostic. The actual localhost ClientHello control and one bounded
   explicit live echo run pass with unchanged wire assertions; strict/fmt pass.

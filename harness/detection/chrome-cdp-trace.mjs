@@ -12,6 +12,7 @@ import { responseNetworkEvents, responseTransport } from "./chrome-network-metad
 
 import {
   captureStableDocument,
+  documentSnapshotState,
   finishObservation,
   observationMilliseconds,
   observationTriggerIndex,
@@ -150,7 +151,7 @@ async function snapshot(phase) {
   };
   const { value, retries } = await captureStableDocument(identity, async () => {
     const state = await evaluate(
-      `JSON.stringify({url:location.href,readyState:document.readyState,html:(document.doctype?'<!DOCTYPE '+document.doctype.name+'>':'')+document.documentElement.outerHTML,browserFixture:globalThis.__browserFixture||null,inputState:(()=>{const captureInputState=${inputStateSource}\nreturn captureInputState(document,${JSON.stringify(config.dismissSelector || "#W0wltc")});})(),results:document.querySelectorAll(${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")}).length,environment:{webdriver:navigator.webdriver,userAgent:navigator.userAgent,languages:navigator.languages,language:navigator.language,locale:Intl.DateTimeFormat().resolvedOptions().locale,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timeZoneOffset:new Date().getTimezoneOffset(),viewport:{width:innerWidth,height:innerHeight},outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}},interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})`,
+      `JSON.stringify({url:location.href,readyState:document.readyState,...(${documentSnapshotState.toString()})(document,${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")}),browserFixture:globalThis.__browserFixture||null,inputState:(()=>{const captureInputState=${inputStateSource}\nreturn captureInputState(document,${JSON.stringify(config.dismissSelector || "#W0wltc")});})(),environment:{webdriver:navigator.webdriver,userAgent:navigator.userAgent,languages:navigator.languages,language:navigator.language,locale:Intl.DateTimeFormat().resolvedOptions().locale,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,timeZoneOffset:new Date().getTimezoneOffset(),viewport:{width:innerWidth,height:innerHeight},outerWindow:{width:outerWidth,height:outerHeight},deviceScaleFactor:devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight}},interfaces:globalThis[Symbol.for('turbo-surf.interface-trace')]?.snapshot()||null})`,
     );
     const row = JSON.parse(state),
       html = row.html;
@@ -748,9 +749,12 @@ async function capture() {
     finishObservation(
       observationWindow,
       observationClock,
-      !navigation.pendingNavigation && !navigation.navigationFailed,
+      !navigation.pendingNavigation &&
+        !navigation.navigationFailed &&
+        pages.at(-1).documentElementPresent === true,
       {
         ...navigation,
+        documentElementPresent: pages.at(-1).documentElementPresent,
         snapshotElapsedMs: observationClock.monotonic() - snapshotStarted,
       },
     );

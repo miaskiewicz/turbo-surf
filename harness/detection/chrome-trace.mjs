@@ -9,6 +9,7 @@ import { enrichProtocolHeaders } from "./protocol-headers.mjs";
 import { enrichResponseTransport, responseNetworkEvents } from "./chrome-network-metadata.mjs";
 import {
   captureStableDocument,
+  documentSnapshotState,
   finishObservation,
   observationMilliseconds,
   observationTriggerIndex,
@@ -257,9 +258,17 @@ async function capture() {
       return `${frameTree.frame.id}/${frameTree.frame.loaderId}`;
     };
     const { value, retries } = await captureStableDocument(identity, async () => {
-      const html = await page.content();
+      const documentState = JSON.parse(
+        await page.evaluate(
+          `JSON.stringify({url:location.href,readyState:document.readyState,...(${documentSnapshotState.toString()})(document,${JSON.stringify(config.successSelector || "#rso a h3, #search a h3")},doctype=>new XMLSerializer().serializeToString(doctype))})`,
+          undefined,
+          false,
+        ),
+      );
+      // Match page.content's doctype serialization in the same DOM read.
+      const html = documentState.html;
       writeFileSync(join(out, `${phase}.html`), html, { mode: 0o600 });
-      const url = page.url();
+      const url = documentState.url;
       const { frameTree } = await networkSession.send("Page.getFrameTree");
       const frame = frameTree.frame;
       const documentResponse = frame.loaderId
@@ -328,12 +337,10 @@ async function capture() {
         status: documentResponse?.status ?? null,
         statusSource: documentResponse ? "cdp-main-document-loader" : "unavailable",
         statusDocumentUrl: documentResponse?.url ?? null,
-        readyState: await page.evaluate(() => document.readyState, undefined, false),
+        readyState: documentState.readyState,
+        documentElementPresent: documentState.documentElementPresent,
         bytes: Buffer.byteLength(html),
-        results: await page
-          .locator(config.successSelector || "#rso a h3, #search a h3")
-          .count()
-          .catch(() => null),
+        results: documentState.results,
         cookies: (await context.cookies()).map((c) => ({ name: c.name, domain: c.domain })),
         interfaces: instrumented
           ? await page
@@ -455,9 +462,12 @@ async function capture() {
     finishObservation(
       observationWindow,
       observationClock,
-      !navigation.pendingNavigation && !navigation.navigationFailed,
+      !navigation.pendingNavigation &&
+        !navigation.navigationFailed &&
+        pages.at(-1).documentElementPresent === true,
       {
         ...navigation,
+        documentElementPresent: pages.at(-1).documentElementPresent,
         snapshotElapsedMs: observationClock.monotonic() - snapshotStarted,
       },
     );

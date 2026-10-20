@@ -60,6 +60,21 @@ export function finishObservation(window, clock, completed, extra = {}) {
   return window.record;
 }
 
+// A committed document may temporarily have no root, or remove it itself.
+// Preserve that document rather than borrowing markup from an earlier loader.
+export function documentSnapshotState(
+  document,
+  successSelector,
+  serializeDoctype = (doctype) => "<!DOCTYPE " + doctype.name + ">",
+) {
+  const root = document.documentElement;
+  return {
+    documentElementPresent: !!root,
+    html: root ? (document.doctype ? serializeDoctype(document.doctype) : "") + root.outerHTML : "",
+    results: root ? document.querySelectorAll(successSelector).length : 0,
+  };
+}
+
 export async function captureStableDocument(identity, capture) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const before = await identity();

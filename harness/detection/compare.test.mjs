@@ -604,3 +604,58 @@ test("fixed observation diagnostics never accept incomplete or pending navigatio
   assert.equal(observationSummary({}).evidence, "unmeasured");
   assert.equal(chromeSearchOutcome({ ...trace, observation: undefined }).accepted, false);
 });
+
+test("an explicitly rootless final document is neither a complete observation nor a SERP", () => {
+  const page = {
+    phase: "search",
+    url: "https://www.google.com/search",
+    status: 200,
+    readyState: "complete",
+    results: 1,
+    documentElementPresent: true,
+  };
+  const trace = {
+    config: { url: "https://www.google.com/", observationMs: 0 },
+    captureComplete: true,
+    collectorErrors: [],
+    pages: [page],
+    observation: {
+      policy: "fixed-deadline-before-enter",
+      requestedMs: 0,
+      elapsedMs: 1,
+      overrunMs: 1,
+      completed: true,
+      documentElementPresent: true,
+    },
+  };
+  assert.equal(chromeSearchOutcome(trace).accepted, true);
+  assert.equal(observationSummary(trace).complete, true);
+  for (const value of [false, null, "true", 0]) {
+    const absent = { ...trace, pages: [page, { ...page, documentElementPresent: value }] };
+    assert.equal(chromeSearchOutcome(absent).accepted, false);
+    assert.equal(observationSummary(absent).complete, false);
+    const invalidWindow = {
+      ...trace,
+      observation: { ...trace.observation, documentElementPresent: value },
+    };
+    assert.equal(observationSummary(invalidWindow).complete, false);
+    assert.equal(chromeSearchOutcome(invalidWindow).accepted, false);
+  }
+  const rootless = {
+    ...trace,
+    pages: [page, { ...page, documentElementPresent: false, results: 0 }],
+    observation: { ...trace.observation, completed: false, documentElementPresent: false },
+  };
+  assert.equal(captureSummary(rootless).complete, true); // Measurement succeeded.
+  assert.equal(observationSummary(rootless).complete, false);
+  assert.equal(chromeSearchOutcome(rootless).accepted, false);
+  assert.equal(
+    chromeSearchOutcome({ ...rootless, observation: undefined, config: { url: trace.config.url } })
+      .accepted,
+    false,
+  );
+  const legacy = structuredClone(trace);
+  delete legacy.pages[0].documentElementPresent;
+  delete legacy.observation.documentElementPresent;
+  assert.equal(chromeSearchOutcome(legacy).accepted, true);
+});

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   captureStableDocument,
+  documentSnapshotState,
   finishObservation,
   observationMilliseconds,
   observationTriggerIndex,
@@ -146,4 +147,83 @@ test("document capture bounds navigation retries and surfaces unrelated failures
     ),
     /CDP transport disconnected/,
   );
+});
+
+test("rootless current documents retain no earlier markup or result markers", async () => {
+  const oldDocument = {
+    documentElement: { outerHTML: '<html><div id="rso"><a><h3>Old result</h3></a></div></html>' },
+    doctype: { name: "html" },
+    querySelectorAll: () => [{}],
+  };
+  assert.deepEqual(documentSnapshotState(oldDocument, "#rso a h3"), {
+    documentElementPresent: true,
+    html: '<!DOCTYPE html><html><div id="rso"><a><h3>Old result</h3></a></div></html>',
+    results: 1,
+  });
+  const rootless = {
+    documentElement: null,
+    doctype: { name: "html" },
+    querySelectorAll: () => {
+      throw new Error("Rootless documents must not reuse marker queries");
+    },
+  };
+  let loader = "old";
+  let calls = 0;
+  const result = await captureStableDocument(
+    async () => loader,
+    async () => {
+      if (++calls === 1) {
+        loader = "new";
+        return { ...documentSnapshotState(oldDocument, "#rso a h3"), status: 200 };
+      }
+      return { ...documentSnapshotState(rootless, "#rso a h3"), status: 429 };
+    },
+  );
+  assert.deepEqual(result, {
+    retries: 1,
+    value: { documentElementPresent: false, html: "", results: 0, status: 429 },
+  });
+  const stable = await captureStableDocument(
+    async () => "new",
+    async () => {
+      calls++;
+      return documentSnapshotState(rootless, "#rso a h3");
+    },
+  );
+  assert.equal(stable.retries, 0);
+  assert.equal(calls, 3); // Root absence does not create readiness retries.
+});
+
+test("snapshot markup preserves each collector's doctype policy in one root read", () => {
+  let rootReads = 0;
+  const doctype = { name: "html", publicId: "fixture-public", systemId: "fixture-system" };
+  const document = {
+    get documentElement() {
+      rootReads++;
+      return { outerHTML: "<html></html>" };
+    },
+    doctype,
+    querySelectorAll: () => [],
+  };
+  assert.equal(documentSnapshotState(document, "h3").html, "<!DOCTYPE html><html></html>");
+  assert.equal(rootReads, 1);
+  const serialized = '<!DOCTYPE html PUBLIC "fixture-public" "fixture-system">';
+  const calls = [];
+  assert.equal(
+    documentSnapshotState(document, "h3", (value) => {
+      calls.push(value);
+      return serialized;
+    }).html,
+    serialized + "<html></html>",
+  );
+  assert.deepEqual(calls, [doctype]);
+  assert.equal(rootReads, 2);
+  for (const root of [null, undefined]) {
+    assert.deepEqual(
+      documentSnapshotState({ documentElement: root, doctype }, "h3", () => {
+        throw new Error("Rootless documents must not serialize an old doctype");
+      }),
+      { documentElementPresent: false, html: "", results: 0 },
+    );
+  }
 });

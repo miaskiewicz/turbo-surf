@@ -130,6 +130,10 @@ export const observationSummary = (trace) => {
     complete:
       collectorComplete(trace) &&
       window.completed === true &&
+      (!Object.hasOwn(window, "documentElementPresent") ||
+        window.documentElementPresent === true) &&
+      (!Object.hasOwn(trace.pages?.at(-1) || {}, "documentElementPresent") ||
+        trace.pages.at(-1).documentElementPresent === true) &&
       window.policy === "fixed-deadline-before-enter" &&
       Number.isInteger(window.requestedMs) &&
       window.requestedMs >= 0 &&
@@ -210,6 +214,8 @@ export const chromeSearchOutcome = (trace) => {
         ? true
         : observationSummary(trace).complete === true,
     terminalSnapshot: page?.phase === "search",
+    documentRootPresent:
+      !Object.hasOwn(page || {}, "documentElementPresent") || page.documentElementPresent === true,
     configuredOrigin: !!url && !!start && url.origin === start.origin,
     searchDocument: url?.pathname === "/search",
     documentStatus200: page?.status === 200,

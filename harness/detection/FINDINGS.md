@@ -8,6 +8,43 @@ Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
 
+## Rootless-document collector repair — 2026-10-20
+
+A fresh Google matrix at3a77122 exposed a raw Chrome collector error after Enter:
+`document.documentElement` was null while the snapshot read `outerHTML`. That
+baseline is incomplete. The matrix was stopped through its owned-process
+supervisor after four process records; source, binary and frozen browser guards
+remain unchanged. The completed native baseline and Chrome interfaces capture
+both ended at HTTP429 with zero results. Those partial observations establish
+neither successful native search nor reliability or parity.
+
+Both Chrome backends now read root presence, markup and result counts together.
+A missing root retains the current URL/loader response, empty HTML and zero
+markers. It does not invent a pending navigation. Terminal root absence leaves
+observation incomplete even when collection succeeds. There is no added dwell,
+root-readiness retry or reuse of an earlier document. Genuine post-Enter controls
+replace an old HTTP200 result page with a rootless HTTP429 document and verify
+both raw CDP and Patchright behavior, including their original doctype policies.
+
+Focused tests pass29 each on Node20/22; both real rootless controls and all16
+paired controls pass. Full detection passes200/0fail/0skip on Node22 and
+191/0fail/9 documented browser skips on Node20; both run two passing Python
+checks. A genuine resource-order oracle recapture preserves every observed
+value and changes only collector/observation source hashes. Its stock Rust
+consumer passes. The golden is formatted with identical parsed JSON values
+after validation; raw capture and tested bytes remain preserved. Native Rust,
+its optimized executable and the81 explicit literal fixture guards are unchanged.
+Fresh API and full Google measurements remain pending after this collector repair.
+
+The current3a full stock gate independently passes1,451 Rust tests, strict/fmt,
+rebuilt addon/loader, shim96+1 intentional skip, E2E20, detection188+7 documented
+Node20 browser skips and Python2. Its ten Rust ignores are six generated doc
+examples, three native-codegen callback controls and one explicit live echo.
+The current3a native workspace passes1,496/0fail/7ignored, strict/fmt and a fresh
+matching optimized-artifact query. Native consumers retain their original4a
+identity through the reviewed test-only byte bridge. Node20/22 CI passes on3a.
+These receipts are not relabelled as executions of later collector/report commits.
+
 ## Current integration checkpoint — 2026-10-20
 
 The latest four paired localhost suites pass14 tests with zero failures/skips,

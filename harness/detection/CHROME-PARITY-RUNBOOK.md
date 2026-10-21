@@ -239,6 +239,11 @@ unchanged. The root MCP smoke controls exercise a real Git checkout of all 32
 assets and reproduce the old missing-rule failure. Existing worktrees with
 already-converted files need an explicit restore before rebuilding; fresh CI
 checkouts apply the rule automatically.
+Thirteen literal shipping MIT/notice paths are also byte-preserved. Root tests
+  reproduce their old Windows CRLF drift and require complete canonical bytes
+  in fresh checkouts, including all nine workspace license copies. Artifact
+  audits still compare exact bytes; complete license text with altered line
+  endings is not accepted as an identical published payload.
 This check proves source reproduction, not installed runtime success. Release
 artifacts must also pass actual native JavaScript smoke tests outside the build
 source tree; a successful MCP initialize response alone does not exercise V8.

@@ -15,5 +15,20 @@ rust/crates/turbo-surf-render/src/vendor/deno_extensions/** -text -whitespace
 rust/crates/turbo-surf-render/src/xpath_provider/xpath.js -text -whitespace
 rust/crates/turbo-surf-render/src/xpath_provider/LICENSE -text -whitespace
 
+# Preserve full shipping license/notice payloads exactly across platforms.
+/LICENSE -text -whitespace
+/THIRD_PARTY_NOTICES.md -text -whitespace
+/rust/crates/turbo-surf-core/LICENSE -text -whitespace
+/rust/crates/turbo-surf-page/LICENSE -text -whitespace
+/rust/crates/turbo-surf-view/LICENSE -text -whitespace
+/rust/crates/turbo-surf-render/LICENSE -text -whitespace
+/rust/crates/turbo-surf-raster/LICENSE -text -whitespace
+/rust/crates/turbo-surf-transform/LICENSE -text -whitespace
+/rust/crates/turbo-surf-napi/LICENSE -text -whitespace
+/rust/crates/turbo-surf-py/LICENSE -text -whitespace
+/rust/crates/turbo-surf-mcp/LICENSE -text -whitespace
+/rust/crates/turbo-surf-render/THIRD_PARTY_NOTICES.md -text -whitespace
+/rust/crates/turbo-surf-py/python/turbo_surf/THIRD_PARTY_NOTICES.md -text -whitespace
+
 # Unified diffs require a space prefix on empty context lines.
 harness/detection/engine-154/patches/*.patch -whitespace

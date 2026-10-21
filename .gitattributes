@@ -14,6 +14,7 @@ rust/crates/turbo-surf-render/src/vendor/deno_extensions/** -text -whitespace
 # Preserve the exact published MIT XPath provider and license bytes.
 rust/crates/turbo-surf-render/src/xpath_provider/xpath.js -text -whitespace
 rust/crates/turbo-surf-render/src/xpath_provider/LICENSE -text -whitespace
+/rust/LICENSE -text -whitespace
 
 # Preserve full shipping license/notice payloads exactly across platforms.
 /LICENSE -text -whitespace

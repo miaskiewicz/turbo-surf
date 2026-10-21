@@ -93,10 +93,12 @@ residual work beyond this PR, with audio separately deferred in
   the existing source-hash adapters remain unchanged and fail closed. Fresh
   Windows release artifacts remain an independent installed-runtime gate.
 
-- Preserve the exact full MIT and third-party notice bytes in all 13 shipping
+- Preserve the exact full MIT and third-party notice bytes in all 14 shipping
   source copies. The former Windows wheel contained complete text with CRLF
   drift; literal Git attributes and real LF/CRLF checkout controls keep payloads
   byte-identical without relaxing installed-artifact or publication audits.
+  Include the workspace `rust/LICENSE` copy: controlled Windows-style checkouts
+  now run the actual notices checker and reproduce its missing-rule failure.
 
 - Keep the authored Python package module, type stub and installed smoke-test
   source at canonical LF on every platform. Actual Windows wheel bytes exposed

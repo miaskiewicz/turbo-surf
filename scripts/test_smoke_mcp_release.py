@@ -225,12 +225,12 @@ class _GitCheckoutCase(unittest.TestCase):
         self.assertEqual(result.returncode, 0, (args, result.stdout, result.stderr))
         return result.stdout
 
-    def checkout(self, attributes):
+    def checkout(self, attributes, additional=()):
         (self.repo / ".gitattributes").write_bytes(attributes)
-        self.git("-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "add", "--force", "--", ".gitattributes", *self.assets)
+        self.git("-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "add", "--force", "--", ".gitattributes", *self.assets, *additional)
         output = self.root / "checkout"
         output.mkdir()
-        self.git("-c", "core.autocrlf=true", "checkout-index", "--prefix=" + output.as_posix() + "/", "--", *self.assets)
+        self.git("-c", "core.autocrlf=true", "checkout-index", "--prefix=" + output.as_posix() + "/", "--", *self.assets, *additional)
         return {name: (output / name).read_bytes() for name in self.assets}
 
 
@@ -289,6 +289,7 @@ class LicenseCheckoutTests(_GitCheckoutCase):
 
     PATHS = (
         'LICENSE',
+        'rust/LICENSE',
         'THIRD_PARTY_NOTICES.md',
         'rust/crates/turbo-surf-core/LICENSE',
         'rust/crates/turbo-surf-page/LICENSE',
@@ -309,7 +310,7 @@ class LicenseCheckoutTests(_GitCheckoutCase):
         notices = "cd4183df9fc32fd278134e4f5b562d9a68de3d48ccb40bf3da846871b1ff7804"
         for name in self.PATHS:
             self.read_asset(Path(name), mit if name.endswith("LICENSE") else notices)
-        self.assertEqual(len(self.assets), 13)
+        self.assertEqual(len(self.assets), 14)
         for name, data in self.assets.items():
             self.assertEqual(data, self.assets["LICENSE" if name.endswith("LICENSE") else "THIRD_PARTY_NOTICES.md"], name)
         self.rules = {("/" + name + " -text -whitespace").encode() for name in self.PATHS}
@@ -321,7 +322,7 @@ class LicenseCheckoutTests(_GitCheckoutCase):
         values = self.git("check-attr", "-z", "text", "whitespace", "--", *self.assets).decode().split("\0")
         self.assertEqual(values[-1], "")
         rows = [values[index:index + 3] for index in range(0, len(values) - 1, 3)]
-        self.assertEqual(len(rows), 26)
+        self.assertEqual(len(rows), 28)
         self.assertEqual({row[0] for row in rows}, set(self.assets))
         self.assertTrue(all(row[1] in ("text", "whitespace") and row[2] == "unset" for row in rows))
 
@@ -339,6 +340,43 @@ class LicenseCheckoutTests(_GitCheckoutCase):
     def test_crlf_attributes_without_license_rules_reproduce_drift(self):
         self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
         self.test_missing_license_rules_reproduces_full_payload_byte_drift()
+
+    def notices_check(self, attributes):
+        manifests = sorted(self.source.glob("rust/crates/turbo-surf-*/Cargo.toml"))
+        self.assertEqual(len(manifests), 9)
+        support = [Path("scripts/sync-third-party-notices.py")] + [path.relative_to(self.source) for path in manifests]
+        for name in support:
+            destination = self.repo / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes((self.source / name).read_bytes())
+        actual = self.checkout(attributes, [path.as_posix() for path in support])
+        checkout = self.root / "checkout"
+        result = subprocess.run([sys.executable, "-B", str(checkout / support[0]), "--check"], cwd=checkout, env=self.env, capture_output=True, text=True, timeout=15)
+        return actual, result
+
+    def test_actual_notices_checker_accepts_windows_checkout(self):
+        actual, result = self.notices_check(self.attributes)
+        self.assertEqual(actual, self.assets)
+        self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+        self.assertIn("match their root sources", result.stdout)
+
+    def test_actual_notices_checker_rejects_unprotected_workspace_license(self):
+        rule = b"/rust/LICENSE -text -whitespace"
+        self.assertIn(rule, self.attributes.splitlines())
+        attributes = b"".join(line for line in self.attributes.splitlines(keepends=True) if line.rstrip(b"\r\n") != rule)
+        actual, result = self.notices_check(attributes)
+        self.assertEqual({name for name in self.assets if actual[name] != self.assets[name]}, {"rust/LICENSE"})
+        self.assertEqual(result.returncode, 1, (result.stdout, result.stderr))
+        self.assertIn("Stale package notices or license:", result.stderr)
+        self.assertIn("rust/LICENSE", result.stderr.replace("\\", "/"))
+
+    def test_actual_notices_checker_accepts_crlf_attribute_checkout(self):
+        self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        self.test_actual_notices_checker_accepts_windows_checkout()
+
+    def test_actual_notices_checker_rejects_crlf_attributes_without_workspace_rule(self):
+        self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        self.test_actual_notices_checker_rejects_unprotected_workspace_license()
 
 
 class PythonSourceCheckoutTests(_GitCheckoutCase):

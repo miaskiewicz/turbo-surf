@@ -1,4 +1,4 @@
-# Google detection audit — 2026-10-09; follow-up 2026-10-20
+# Google detection audit — 2026-10-09; follow-up 2026-10-21
 
 The canonical pending-work checklist is [PARITY-GAPS.md](./PARITY-GAPS.md).
 Residual work beyond PR26 is tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28),
@@ -7,6 +7,72 @@ with deferred audio in [issue #27](https://github.com/miaskiewicz/turbo-surf/iss
 Native Google SERP clearance is **unresolved**. The harness now distinguishes
 receiving a JS shell, executing that shell, and obtaining accepted results after
 its retry. Chrome oracle cookies were never reused in native tests.
+
+## Startup and scheduling investigation — 2026-10-21
+
+This follow-up is in progress in PR26. A separate homepage-only diagnostic uses
+its preserved optimized native executable, all four native bridges, the original
+20-second page budget, Inspector CPU profiling and no interface wrappers. It
+performs no consent, input or search actions and is not a SERP validation.
+The capture completes without host errors, while initial hydration still exceeds
+its budget in post-load hydration with zero completed pumps.
+
+Of roughly20.27 seconds of sampled initial hydration, private CSS record lookup
+accounts for7.78 seconds and computed-style calculation for5.57 seconds. Native
+layout capture takes2.66 seconds inclusively; nine actual layout calculations
+account for0.38 seconds. Host stages overlap and must not be added together.
+This reproduces the CSS cost without the interface wrapper's descriptor probes.
+
+The earlier cold-start sample independently identifies whole-TTC copies for
+each accepted font face. The public producer fix in turbo-html2pdf PR25 shares
+immutable program bytes while preserving face indexes, selection, parsing and
+shaping caches. Its863 workspace tests,15 xref controls and strict checks pass;
+exact-head CI is green. One matched optimized process-cold probe measures
+registry initialization1,653→165ms and peak RSS3.83→1.40GB. Peak RSS includes
+later fingerprinting; all983 faces and930 selected metric/glyph rows match.
+OS disk-cache state is unspecified, and this probe does not measure whole-browser
+startup or memory.
+
+The public turbo-test PR27 fix reuses resolved ancestor snapshots within one
+public calculation, with fresh calculation on later live reads. The old binding
+fails the new control with100 stylesheet scans against a28-scan bound; the fix
+also matches private selectors before reading declarations. A separate old-code
+control performs3,528 unmatched-declaration reads versus zero after the fix;
+quoted brace/comma selector behavior matches genuine Chrome. Canonical checks
+pass33 CSS,304 library,63 Node and52 compatibility cases, with one explicit
+known-gap ignore. Running that unchanged Chrome selector-admission expectation
+explicitly still fails; it is tracked in issue28, alongside the preexisting
+implicit inherited-color/CSSOM synchronization defect. Surf consumes the
+font producer and officially re-vendored binding. The first rebuilt all-feature
+native homepage diagnostic completes HTTP200 hydration with one completed pump,
+no budget exhaustion and no host errors. Whole-run time is18.52 seconds and
+peak RSS is1.24GB, including Inspector profiling and snapshots. The old diagnostic
+exceeded its20-second guest budget with zero completed pumps; its whole-run RSS
+was not recorded, so there is no matched whole-browser memory comparison.
+
+The new17.83-second guest CPU profile still spends5.12 seconds in private CSS
+record lookup and4.65 seconds in computed-style snapshots. Its104 native layout
+captures take3.00 seconds inclusively, with17 actual layouts taking0.46 seconds;
+these are different completed-work counts from the truncated old run. The
+remaining measured cost motivated the selector-first follow-up; its rebuilt
+native diagnostic also completes HTTP200 hydration with one pump and no budget
+exhaustion or host errors. Its whole run takes16.35 seconds with957MB peak RSS;
+the guest profile lasts14.70 seconds, including3.86 seconds of computed snapshots
+and3.05 seconds of private CSS lookup. These are live page diagnostics rather
+than a controlled page-content benchmark. Full native/default gates and a fresh
+Google comparison remain pending; neither homepage completion establishes
+timing reliability or SERP clearance.
+
+The reusable frozen-Chrome control measures same-Window nesting through direct,
+Promise and queued-microtask callbacks: the first six tasks are immediate, then
+the minimum delay is clamped. Alternating Window targets reset nesting. Native
+task checkpoints and scoped nesting cleanup pass21 native integration tests
+and an isolated seven-variant nesting/retirement/watchdog regression. The new
+optimized executable has all four native bridges enabled; its first homepage
+measurement is recorded above. Interval cadence and broader deadline parity
+remain open.
+The saved Google matrix below retains its original outcome. Raw profiles and
+original failures stay private, and timing budgets remain unchanged.
 
 ## Latest frozen Google and API capture — 2026-10-20 UTC
 

@@ -10,7 +10,13 @@ The latest546d511 capture reaches a SERP in one signed-out Chrome baseline;
 both native baselines end429 with zero results, and early native homepage
 hydration still exhausts its budget. Dated cycles and checkpoints below preserve
 historical evidence. A report that page JavaScript executed is not a report
-that Google accepted a native search.
+that Google accepted a native search. The October21 startup candidate adds
+shared font programs, per-read ancestor snapshots, selector-first CSS matching
+and timer task checkpoints/nesting. Focused native checks pass22; its latest
+homepage-only diagnostic completes HTTP200 hydration under the unchanged20-second
+budget in16.35s whole-run with957MB peak RSS including profiling. Combined gates
+and a fresh Google comparison are pending. Broader timing and selector-admission
+gaps remain in [PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md).
 
 ## 1. No-JS hydration-state mining (`hydration.mjs`)
 
@@ -44,7 +50,7 @@ Requirements and where each stands:
 | Real V8 isolate, host heap unreachable from guest (+ runaway budget) | ✅ deno_core + watchdog |
 | Native DOM bound to `rtdom::Tree` (`document`/Element — jQuery/React run) | ✅ `browser_env` (vendored from turbo-test); partial Web IDL coverage |
 | `window`/`navigator`/`location`/`localStorage`/`console` + Event classes | ✅ binding + env bootstrap |
-| Timers (setTimeout/rAF/queueMicrotask) | Fast virtual scheduling by default; opt-in real-time Window/frame deadlines through PageSessionOptions before hydration; microtasks remain promise-driven |
+| Timers (setTimeout/rAF/queueMicrotask) | Fast virtual scheduling by default; opt-in real-time Window/frame deadlines through PageSessionOptions before hydration; individual Window timer tasks finish their microtask checkpoints, with measured per-Window nesting clamps; broader cadence/task-source parity remains open |
 | Promise / `async`-`await` / microtask resolution (event loop) | ✅ `render_html_async` |
 | `fetch` + `XMLHttpRequest` over the real net stack (relative-URL aware) | ✅ `op_fetch` → `turbo_surf_core::net` |
 | `document.cookie` ↔ `CookieJar` bridge | ✅ `op_cookie_get/set`; HttpOnly cookies hidden/protected from JS |

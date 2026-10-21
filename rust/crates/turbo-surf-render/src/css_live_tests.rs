@@ -29,6 +29,22 @@ fn run_with_font_defaults(html: &str, code: &str, fonts: Option<(&str, f64)>) ->
     let host = record.get(scope, key.into()).unwrap();
     let key = v8::String::new(scope, "__cssTestHost").unwrap();
     global.set(scope, key.into(), host);
+    if code.contains("__cssTestCollectionRecord") {
+        fn read_collection_record<'s>(
+            scope: &mut v8::PinScope<'s, '_>,
+            args: v8::FunctionCallbackArguments<'s>,
+            mut rv: v8::ReturnValue,
+        ) {
+            if let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(0)) {
+                if let Some(record) = get_interface_record(scope, object) {
+                    rv.set(record);
+                }
+            }
+        }
+        let getter = v8::Function::new(scope, read_collection_record).unwrap();
+        let key = v8::String::new(scope, "__cssTestCollectionRecord").unwrap();
+        global.set(scope, key.into(), getter.into());
+    }
     if code.contains("__fontInertDoc") {
         let document = parse_html_document(scope, "<!doctype html><body><b>inert</b>", false);
         let key = v8::String::new(scope, "__fontInertDoc").unwrap();
@@ -361,6 +377,205 @@ fn inherited_computed_values_use_linear_stylesheet_scans_and_keep_live_results()
             assert_eq!(row["height"], format!("{}px", 512_u64 >> depth), "{row}");
         }
     }
+}
+
+#[test]
+fn computed_ancestor_snapshots_keep_auto_percentage_paths_linear() {
+    let value = run(
+        "<!doctype html><head><style>.unused {color:red}</style></head><body>",
+        r#"(()=>{
+          const query=document.querySelectorAll,rows=[];let scans=0;
+          document.querySelectorAll=function(selector){if(selector==='style,link')scans++;return Reflect.apply(query,this,arguments);};
+          try {
+            for(const mode of ['auto','alternating'])for(const depth of [3,5,7]){
+              const root=document.createElement('section');root.style.cssText='color:red;width:256px;height:512px;font:20px/2 serif';document.body.appendChild(root);
+              let leaf=root,halves=0;
+              for(let index=0;index<depth;index++){const child=document.createElement('div'),percentage=mode==='alternating'&&index%2===0;child.style.cssText='color:inherit;width:'+(percentage?'50%':'auto')+';height:auto';if(percentage)halves++;leaf.appendChild(child);leaf=child;}
+              const target=document.createElement('span');target.style.cssText='width:50%;height:50%;font-size:50%';leaf.appendChild(target);halves++;
+              scans=0;const retained=getComputedStyle(target),width=retained.width,height=retained.height,font=retained.fontSize;
+              rows.push({mode,depth,scans,width,height,font,expectedWidth:256/2**halves});root.remove();
+            }
+          } finally {document.querySelectorAll=query;}
+          return JSON.stringify(rows);
+        })()"#,
+    );
+    for row in value.as_array().unwrap() {
+        let depth = row["depth"].as_u64().unwrap();
+        assert!(
+            row["scans"].as_u64().unwrap() <= 4 * (depth + 4),
+            "a public read revisited resolved ancestors: {row}"
+        );
+        assert_eq!(row["width"], format!("{}px", row["expectedWidth"]), "{row}");
+        assert_eq!(row["font"], "10px", "{row}");
+    }
+}
+
+#[test]
+fn computed_ancestor_snapshots_expire_before_later_public_reads() {
+    let value = run(
+        "<!doctype html><head><style id=s>.host {color:red;width:256px;font:20px/2 serif}</style></head><body><section id=a class=host><div style='color:inherit;width:auto'><span id=t style='color:inherit;width:50%;font-size:50%'></span></div></section><section id=b style='color:blue;width:512px;font:30px/3 serif'></section>",
+        r#"(()=>{
+          const target=document.getElementById('t'),first=document.getElementById('a'),second=document.getElementById('b'),rule=document.getElementById('s').sheet.cssRules[0],retained=getComputedStyle(target),rows=[];
+          const capture=()=>rows.push([retained.color,retained.width,retained.fontSize,retained.lineHeight]);
+          capture();rule.style.width='128px';rule.style.color='green';capture();
+          second.appendChild(target.parentElement);capture();second.style.fontSize='40px';capture();
+          target.parentElement.remove();rows.push([retained.color,retained.fontSize]);first.appendChild(target);capture();
+          return JSON.stringify(rows);
+        })()"#,
+    );
+    assert_eq!(
+        value,
+        serde_json::json!([
+            ["rgb(255, 0, 0)", "128px", "10px", "20px"],
+            ["rgb(0, 128, 0)", "64px", "10px", "20px"],
+            ["rgb(0, 0, 255)", "256px", "15px", "45px"],
+            ["rgb(0, 0, 255)", "256px", "20px", "60px"],
+            ["", ""],
+            ["rgb(0, 128, 0)", "64px", "10px", "20px"]
+        ])
+    );
+}
+
+#[test]
+fn computed_ancestor_snapshot_cache_ignores_public_weakmap_hooks() {
+    let value = run(
+        "<!doctype html><body><section style='color:red;width:256px;font:20px serif'><div style='width:auto'><span id=t style='width:50%;font-size:50%'></span></div></section>",
+        r#"(()=>{
+          const target=document.getElementById('t'),OriginalWeakMap=WeakMap,prototype=WeakMap.prototype,get=prototype.get,set=prototype.set;let hooks=0,result;
+          const poisoned=()=>{hooks++;throw Error('public WeakMap hook');};
+          globalThis.WeakMap=poisoned;prototype.get=prototype.set=poisoned;
+          try {const style=getComputedStyle(target);result=[style.color,style.width,style.fontSize];}
+          finally {globalThis.WeakMap=OriginalWeakMap;prototype.get=get;prototype.set=set;}
+          return JSON.stringify({result,hooks});
+        })()"#,
+    );
+    assert_eq!(
+        value,
+        serde_json::json!({"result":["rgb(255, 0, 0)","128px","10px"],"hooks":0})
+    );
+}
+
+#[test]
+fn computed_style_matches_private_selector_lists_before_declaration_work() {
+    let value = run(
+        "<!doctype html><head><style id=s>.target{width:5px;color:green}</style></head><body><div id=t class=target data-token='{,}'></div><div id=other></div>",
+        r#"(()=>{
+          const target=document.getElementById('t'),other=document.getElementById('other'),sheet=document.getElementById('s').sheet;
+          for(let index=0;index<24;index++)sheet.insertRule('.never-'+index+'{width:99px;color:red;--unused:'+index+'}',sheet.cssRules.length);
+          sheet.insertRule('.target{width:11px;color:blue}',sheet.cssRules.length);
+          const matched=sheet.cssRules[sheet.cssRules.length-1],matchedStyle=matched.style,selectorSetter=Object.getOwnPropertyDescriptor(CSSStyleRule.prototype,'selectorText').set,unmatched=Array.from(sheet.cssRules).slice(1,-1);
+          let declarationReads=0,publicReads=0;
+          for(const rule of unmatched){
+            const record=__cssTestCollectionRecord(rule.style).css.declaration,names=record.names;
+            record.names=new Proxy(names,{get(target,key,receiver){declarationReads++;return Reflect.get(target,key,receiver);}});
+          }
+          for(const rule of [...unmatched,matched])for(const key of ['cssText','selectorText','style'])Object.defineProperty(rule,key,{configurable:true,get(){publicReads++;throw Error('public rule getter');}});
+          Object.defineProperty(target,'matches',{configurable:true,get(){publicReads++;throw Error('public matcher getter');}});
+          const saved=Object.getOwnPropertyDescriptor(Element.prototype,'matches');
+          Object.defineProperty(Element.prototype,'matches',{...saved,value(){publicReads++;throw Error('public prototype matcher');}});
+          const retained=getComputedStyle(target),rows=[];
+          try {
+            rows.push([retained.width,retained.color]);
+            matchedStyle.width='17px';rows.push([retained.width,retained.color]);
+            selectorSetter.call(matched,'.never');rows.push([retained.width,retained.color]);
+          }finally{Object.defineProperty(Element.prototype,'matches',saved);}
+          return JSON.stringify({rows,declarationReads,publicReads,otherUntouched:other.id==='other'});
+        })()"#,
+    );
+    assert_eq!(
+        value["publicReads"], 0,
+        "private style computation used public hooks: {value}"
+    );
+    assert_eq!(
+        value["rows"],
+        serde_json::json!([
+            ["11px", "rgb(0, 0, 255)"],
+            ["17px", "rgb(0, 0, 255)"],
+            ["5px", "rgb(0, 128, 0)"]
+        ])
+    );
+    assert_eq!(value["otherUntouched"], true);
+    assert_eq!(
+        value["declarationReads"], 0,
+        "unmatched declarations were serialized: {value}"
+    );
+}
+
+#[test]
+fn computed_selector_lists_preserve_quoted_delimiters_and_live_invalid_assignment() {
+    let value=run(
+        "<!doctype html><head><style id=s>.target{width:7px}[data-token='{,}'] {width:13px} .target, [data-other='a,b'] {height:19px}</style></head><body><div id=t class=target data-token='{,}'></div><div id=other data-other='a,b'></div>",
+        r#"(()=>{
+          const target=document.getElementById('t'),other=document.getElementById('other'),sheet=document.getElementById('s').sheet,rule=sheet.cssRules[1],style=getComputedStyle(target),rows=[];
+          const read=()=>rows.push([style.width,style.height,getComputedStyle(other).height]);
+          read();rule.style.width='23px';read();
+          rule.selectorText="[data-token='missing,{']";read();
+          rule.selectorText="[data-token='{,}']";read();
+          rule.selectorText='.target, ???';read();
+          const invalid=[];
+          for(const selector of ['.target, ???']){
+            try{sheet.insertRule(selector+' {width:99px}',sheet.cssRules.length);invalid.push('accepted');}catch(error){invalid.push(error.name);}
+          }
+          return JSON.stringify({rows,invalid,ruleCount:sheet.cssRules.length,selectorStillMatches:target.matches(rule.selectorText)});
+        })()"#,
+    );
+    assert_eq!(
+        value["rows"],
+        serde_json::json!([
+            ["13px", "19px", "19px"],
+            ["23px", "19px", "19px"],
+            ["7px", "19px", "19px"],
+            ["23px", "19px", "19px"],
+            ["23px", "19px", "19px"]
+        ]),
+        "quoted selector list behavior diverged: {value}"
+    );
+    assert_eq!(
+        value["invalid"],
+        serde_json::json!(["SyntaxError"]),
+        "invalid selector list admission diverged: {value}"
+    );
+    assert_eq!(value["ruleCount"], 3);
+    assert_eq!(value["selectorStillMatches"], true);
+}
+
+#[test]
+#[ignore = "Known Chrome155 unknown-pseudo CSSOM admission gap: https://github.com/miaskiewicz/turbo-surf/issues/28"]
+fn cssom_unknown_pseudo_selector_admission_matches_chrome155() {
+    let value=run(
+        "<!doctype html><head><style id=s>.target{width:7px}[data-token='{,}'] {width:13px} .target, [data-other='a,b'] {height:19px}</style></head><body><div id=t class=target data-token='{,}'></div><div id=other data-other='a,b'></div>",
+        r#"(()=>{
+          const target=document.getElementById('t'),other=document.getElementById('other'),sheet=document.getElementById('s').sheet,rule=sheet.cssRules[1],style=getComputedStyle(target),rows=[];
+          const read=()=>rows.push([style.width,style.height,getComputedStyle(other).height]);
+          read();rule.style.width='23px';read();
+          rule.selectorText="[data-token='missing,{']";read();
+          rule.selectorText="[data-token='{,}']";read();
+          rule.selectorText='.target, ???';read();
+          const invalid=[];
+          for(const selector of ['.target, ???','.target, :definitely-unknown']){
+            try{sheet.insertRule(selector+' {width:99px}',sheet.cssRules.length);invalid.push('accepted');}catch(error){invalid.push(error.name);}
+          }
+          return JSON.stringify({rows,invalid,ruleCount:sheet.cssRules.length,selectorStillMatches:target.matches(rule.selectorText)});
+        })()"#,
+    );
+    assert_eq!(
+        value["rows"],
+        serde_json::json!([
+            ["13px", "19px", "19px"],
+            ["23px", "19px", "19px"],
+            ["7px", "19px", "19px"],
+            ["23px", "19px", "19px"],
+            ["23px", "19px", "19px"]
+        ]),
+        "quoted selector list behavior diverged: {value}"
+    );
+    assert_eq!(
+        value["invalid"],
+        serde_json::json!(["SyntaxError", "SyntaxError"]),
+        "invalid selector list admission diverged: {value}"
+    );
+    assert_eq!(value["ruleCount"], 3);
+    assert_eq!(value["selectorStillMatches"], true);
 }
 
 #[test]

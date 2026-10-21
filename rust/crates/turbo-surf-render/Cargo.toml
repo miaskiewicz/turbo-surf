@@ -28,8 +28,8 @@ deno_error = "=0.7.1"
 v8 = { package = "deno_v8", version = "=0.4.0" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.5.7", git = "https://github.com/miaskiewicz/turbo-dom", rev = "d01d6a5911e3f7a47c0d91d619de01c1008dc28a" }
 # Public live-tree snapshots preserve source provenance without HTML serialization.
-# PR23/24 candidate; switch to the registry only after0.3.8 is published.
-turbo-html2pdf-core = { version = "0.3.8", git = "https://github.com/miaskiewicz/turbo-html2pdf", rev = "2ea52368a5d78e7ab584e06f4505bad0f58f4680" }
+# PR23–25 candidate; switch to the registry only after0.3.8 is published.
+turbo-html2pdf-core = { version = "0.3.8", git = "https://github.com/miaskiewicz/turbo-html2pdf", rev = "8f0aa139490573e7ef7a27a4c392195f265f900f" }
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
 # fetch backend, so downstream non-binary consumers (the PyO3 wheel) avoid its
 # extra transport build. V8, native crypto and audio still require native toolchains.

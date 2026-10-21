@@ -388,6 +388,15 @@ requests and used native form navigation, but ended at HTTP429 with zero results
 Early native homepage hydration still exceeded its budget; a completed final429
 document does not erase that earlier failure. Native SERP clearance is unresolved.
 
+The October21 startup follow-up adds shared immutable font programs, per-read
+ancestor snapshots, selector-first CSS matching and timer task checkpoints with
+measured per-Window nesting. Its latest optimized all-feature homepage diagnostic
+completes HTTP200 hydration under the unchanged20-second budget:16.35s whole run
+and957MB peak RSS including profiling. Focused native checks pass22; current
+combined gates and a fresh Google comparison are pending. Homepage completion
+does not establish search clearance or full timing parity. The known CSSOM
+color-sync and selector-admission gaps remain explicitly tracked in issue28.
+
 The current75-interface audit records142 missing own members across its expanded
 inventory, including64 in the original four interfaces, and374 difference paths.
 These are descriptor/ownership measurements, not142 wholly absent features.

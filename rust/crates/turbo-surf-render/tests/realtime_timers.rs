@@ -320,3 +320,64 @@ async fn virtual_timeout_and_interval_delay_conversion_matches_saved_chrome() {
         .unwrap();
     check_saved_timer_conversion(&mut page).await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn realtime_initial_timers_preserve_full_microtask_checkpoints() {
+    let mut page = realtime(
+        r#"<body><script>
+          globalThis.timerEvents=[];
+          document.addEventListener('DOMContentLoaded',()=>{
+            setTimeout(()=>{
+              timerEvents.push('first');
+              Promise.resolve().then(()=>Promise.resolve()).then(()=>timerEvents.push('deep microtask'));
+            },0);
+            setTimeout(()=>timerEvents.push('second'),0);
+          });
+        </script></body>"#,
+        "https://timer.test/",
+        2000,
+    )
+    .await;
+    assert_eq!(
+        value(&mut page, "timerEvents").await,
+        json!(["first", "deep microtask", "second"])
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn timer_cancellation_converts_fractional_and_wrapped_ids_to_webidl_long() {
+    let mut page = realtime("<body>", "https://timer.test/", 2000).await;
+    let observed = value(
+        &mut page,
+        r#"(async()=>{
+          const out=[];
+          for(const [clear,offset] of [[clearTimeout,0.75],[clearInterval,4294967296.75]]){
+            let fired=false;
+            const id=setTimeout(()=>fired=true,0);
+            clear(id+offset);
+            await new Promise(resolve=>setTimeout(resolve,20));
+            out.push(fired);
+          }
+          return out;
+        })()"#,
+    )
+    .await;
+    assert_eq!(observed, json!([false, false]));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn timer_admission_does_not_call_guest_replacements_of_math_max() {
+    let mut page = realtime("<body>", "https://timer.test/", 2000).await;
+    let observed = value(
+        &mut page,
+        r#"new Promise(resolve=>{
+          const original=Math.max;
+          try{
+            Math.max=()=>{throw new Error('guest Math.max called by timer admission');};
+            setTimeout(()=>resolve('timer delivered'),0);
+          }finally{Math.max=original;}
+        })"#,
+    )
+    .await;
+    assert_eq!(observed, "timer delivered");
+}

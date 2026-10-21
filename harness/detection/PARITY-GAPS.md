@@ -22,6 +22,31 @@ it does not by itself prove the feature is entirely absent. Existing inherited
 methods and aliases must be tested before adding another implementation.
 A repair is closed only after behavior tests and a fresh paired audit pass.
 
+## Startup and scheduling follow-up — in progress
+
+These issue28 items are now being addressed in PR26. They remain open until
+producer fixes, integration, regressions and fresh measurements pass:
+
+- [ ] Share immutable font collection bytes across faces while preserving indexed
+  font identity, shaping results and the installed font set. Measure actual cold
+  initialization and peak memory independently of guest watchdogs.
+- [ ] Remove repeated ancestor computed-style work within a single calculation,
+  preserving live results after CSSOM, tree and document mutations. The clean
+  homepage CPU profile reproduces the cost without interface wrappers.
+- [ ] Run timer tasks with their required microtask checkpoints, preserve real
+  deadlines and implement measured nesting behavior without changing budgets.
+- [ ] Rebuild and validate the actual native engine, then remeasure homepage
+  hydration and the equivalent Google flow. The existing native429 outcome
+  remains unresolved until new evidence is recorded.
+
+The first rebuilt all-feature homepage diagnostic now completes HTTP200 hydration
+with one completed pump and no budget exhaustion:18.52s whole run and1.24GB peak
+RSS including profiling/snapshots. Its17.83s guest profile still spends about9.77s
+in private CSS lookup/computation. After the selector-first follow-up, a new
+diagnostic completes HTTP200 hydration in16.35s whole-run with957MB peak RSS;
+guest profiling takes14.70s. Full combined gates and fresh Google validation are
+pending. These live diagnostics do not close reliability or native search clearance.
+
 ## Active runner comparison — 2026-10-20
 
 - [x] Verify a fresh signed-out traced Chrome baseline. Repeat1 uses a verified
@@ -99,8 +124,8 @@ Current integrated public producers:
 | Component | Revision and measured validation |
 |---|---|
 | turbo-dom | `d01d6a5`, [PR15](https://github.com/miaskiewicz/turbo-dom/pull/15): all six consumers and lockfile pinned; producer gate and exact-head CI pass. |
-| turbo-html2pdf | `2ea52368`, [PR24](https://github.com/miaskiewicz/turbo-html2pdf/pull/24):858 local workspace tests,15 xref controls, strict Clippy, formatting and complexity checks; all three CI jobs pass, including100% coverage. |
-| turbo-test | `a49544f`, [PR26](https://github.com/miaskiewicz/turbo-test/pull/26): official committed-HEAD re-vendor;299 library,52 compatibility and63 Node tests pass, with all four platform CI jobs green. A supplemental strict run retains28 unchanged-baseline diagnostics; it is not a passing Surf strict gate. |
+| turbo-html2pdf | `8f0aa13`, [PR25](https://github.com/miaskiewicz/turbo-html2pdf/pull/25), stacked on PR24: shared immutable font programs preserve indexed face identity;863 local workspace tests,15 xref controls, strict Clippy, formatting and complexity checks pass. Exact-head CI passes, including100% coverage. Surf integration is awaiting its rebuilt gates. |
+| turbo-test | `e3b4817`, [PR27](https://github.com/miaskiewicz/turbo-test/pull/27), stacked on PR26: official committed-HEAD re-vendor; ancestor snapshots and selector-first matching pass304 library,52 compatibility and63 Node tests, with one explicit known-gap ignore retaining a failing Chrome admission expectation. All four platform CI jobs pass. A supplemental historical strict run retains28 unchanged-baseline diagnostics; it is not a passing Surf strict gate. |
 
 The native66-test integration covers static split-inline layout, continuation
 metrics, measured UA button styles, all nine border/priority controls, two genuine
@@ -110,6 +135,23 @@ The separate Times Range width is80.2734375 versus Chrome80.2578125; native canv
 weight/face selection also needs work. Both remain under issue #28's existing
 system-font/GPOS/platform-metrics scope. The genuine Times golden and failures
 are preserved; same-font passing controls do not certify Times parity.
+
+Default inherited color can remain stale after `CSSStyleRule.style.color` changes:
+when a descendant has no authored color, native cascade fallback can still read
+original DOM stylesheet text while the JS CSSOM contains the edited value. The
+old and candidate bindings reproduce the same failure. Explicit `color: inherit`
+uses a separately supported path; its cache-lifetime test does not close this
+native CSSOM/source synchronization gap. Track the broader fix in issue28.
+
+CSS selector admission also remains broader than Chrome: the existing parser
+accepts `.target, :definitely-unknown` in `CSSStyleSheet.insertRule`, whereas the
+frozen Chrome155 control throws `SyntaxError`. Both the old and optimized
+bindings reproduce this gap. The exact failing expectation is retained as a
+separate known-gap regression under issue28. A browser syntax policy must preserve
+valid newer/vendor forms and forgiving `:is()`/`:where()` branches; private
+selector-first computation does not implement that admission policy. Coordinate
+stylesheet parsing, insertion, `selectorText`, query/matches and `CSS.supports`
+validation rather than using the current DOM matcher as a syntax validator.
 
 Computed custom-property own values/case, unusual foreign `Reflect.construct`
 prototype fallback and broader pointer hit-test/retargeting also remain in

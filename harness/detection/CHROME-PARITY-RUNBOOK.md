@@ -371,6 +371,30 @@ inventories, initial hydration only. Check profiler acknowledgements/errors; hos
 font initialization precedes guest profiling. There is no runner `--host-profile` flag; external OS sampling is a separate
 diagnostic, with its own process/timing proof.
 
+For font startup, the pinned turbo-html2pdf producer includes
+[`font_startup.rs`](https://github.com/miaskiewicz/turbo-html2pdf/blob/8f0aa139490573e7ef7a27a4c392195f265f900f/crates/turbo-html2pdf-core/examples/font_startup.rs).
+From that producer checkout, build with `cargo build --release -p turbo-html2pdf-core --example font_startup
+--message-format=json-render-diagnostics`, then run the actual Cargo-reported executable directly in a fresh process.
+On macOS, wrap the executable with `/usr/bin/time -l` to retain peak RSS without including compilation. Its directory
+arguments select font files for diagnostic fingerprints; they do not change the registry's normal discovery policy.
+Compare the same installed-file manifest, face count, selection/index/program hashes, metrics and glyph rows. Registry
+initialization timings exclude later fingerprinting; whole-process peak RSS includes it. Process-cold initialization
+does not establish cold OS disk caches or whole-browser startup performance.
+
+For a saved profile, use `node harness/detection/cpu-profile-summary.mjs /absolute/private/cpu-profile.json`.
+The helper aggregates sampled self time across recursive call stacks. It preserves Inspector script IDs and zero-based
+line/column locations; resolve those against the same capture's `inventory.json`. Sample counts are not invocation counts,
+and inclusive host layout stages must not be added together. URLs are omitted, but function names can contain page data:
+keep this analysis private and review any later publication separately.
+
+To isolate native homepage startup from interface-wrapper overhead, copy a capture config into a fresh private directory
+and explicitly set `debugger: true`, `nativeCpuProfile: true`, `interfaces: false`, `probes: []`, `steps: []`,
+`dismissSelector: ""`, `readySelector: ""`, `waitMs: 0`, `observationMs: 0` and `requireNativeFormNavigation: false`.
+Keep the original `pageBudgetMs`, identity and native feature settings. Invoke the same optimized `detection_trace` executable
+with that config and a fresh output directory. This is a homepage-only diagnostic with no consent or search actions;
+it is not a successful Google flow or SERP acceptance measurement. Record the binary's actual build source and hash rather
+than attributing a preserved executable to uncompiled checkout edits.
+
 After collector/helper changes, recapture this genuine oracle **before final gates/capture**:
 
 ```sh

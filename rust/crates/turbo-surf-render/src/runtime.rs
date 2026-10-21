@@ -3501,6 +3501,60 @@ pub struct PageSessionOptions {
     pub initial_hydration_budget_ms: Option<u64>,
 }
 
+#[derive(Default)]
+struct WindowTimerNesting {
+    level: std::cell::Cell<u32>,
+}
+
+fn window_timer_nesting(context: v8::Local<v8::Context>) -> Rc<WindowTimerNesting> {
+    context.get_slot::<WindowTimerNesting>().unwrap_or_else(|| {
+        let nesting = Rc::new(WindowTimerNesting::default());
+        context.set_slot(nesting.clone());
+        nesting
+    })
+}
+
+#[op2(fast)]
+fn op_timer_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> u32 {
+    document
+        .get_creation_context(scope)
+        .map_or(0, |context| window_timer_nesting(context).level.get())
+}
+
+#[op2(fast)]
+fn op_timer_set_nesting(scope: &mut v8::PinScope, document: v8::Local<v8::Object>, level: u32) {
+    if let Some(context) = document.get_creation_context(scope) {
+        window_timer_nesting(context).level.set(level);
+    }
+}
+
+// Keep a Window's timer task active through its complete microtask checkpoint.
+// A native guard also clears it on watchdog errors without executing more JS or
+// retaining the owning frame context after the checkpoint.
+struct WindowTimerTask {
+    nesting: Rc<WindowTimerNesting>,
+    previous: u32,
+}
+impl WindowTimerTask {
+    fn new(context: v8::Local<v8::Context>) -> Self {
+        let nesting = window_timer_nesting(context);
+        let previous = nesting.level.get();
+        Self { nesting, previous }
+    }
+}
+impl Drop for WindowTimerTask {
+    fn drop(&mut self) {
+        self.nesting.level.set(self.previous);
+    }
+}
+
+#[derive(Default)]
+struct WindowTimerTurn {
+    fired: u32,
+    deadline: Option<tokio::time::Instant>,
+    _task: Option<WindowTimerTask>,
+}
+
 struct TimerClock {
     mode: WindowTimerMode,
     started: std::time::Instant,
@@ -3555,10 +3609,7 @@ fn window_timer_deadline(clock: &TimerClock, due: f64) -> Option<tokio::time::In
         .map(tokio::time::Instant::from_std)
 }
 
-fn run_next_window_timer(
-    rt: &mut JsRuntime,
-    allow_advance: bool,
-) -> (u32, Option<tokio::time::Instant>) {
+fn run_next_window_timer(rt: &mut JsRuntime, allow_advance: bool) -> WindowTimerTurn {
     let mut contexts = vec![rt.main_context()];
     contexts.extend(
         rt.op_state()
@@ -3588,7 +3639,7 @@ fn run_next_window_timer(
         }
     }
     let Some((due, context)) = next else {
-        return (0, None);
+        return WindowTimerTurn::default();
     };
     if !allow_advance {
         let state = JsRuntime::op_state_from(scope);
@@ -3596,15 +3647,49 @@ fn run_next_window_timer(
         let clock = state.borrow::<TimerClock>();
         let now = clock.started.elapsed().as_secs_f64() * 1000.0 + clock.advance.get();
         if due > now {
-            return (0, window_timer_deadline(clock, due));
+            return WindowTimerTurn {
+                deadline: window_timer_deadline(clock, due),
+                ..Default::default()
+            };
         }
     }
+    let task = WindowTimerTask::new(context);
     let active = &mut v8::ContextScope::new(scope, context);
     let fired = call_frame_helper(active, "runNextTimer", &[])
         .and_then(|value| value.uint32_value(active))
         .unwrap_or(0);
-    (fired, None)
+    WindowTimerTurn {
+        fired,
+        deadline: None,
+        _task: Some(task),
+    }
 }
+// Each callback is a Window task: finish its complete microtask queue before
+// selecting another timer, including timers owned by a different frame realm.
+fn checkpoint_window_timer(rt: &mut JsRuntime) -> Result<(), String> {
+    rt.v8_isolate().perform_microtask_checkpoint();
+    if rt.v8_isolate().is_execution_terminating() {
+        return Err("Timer task microtasks were interrupted".into());
+    }
+    Ok(())
+}
+
+fn run_window_timers(rt: &mut JsRuntime, max: u32) -> Result<u32, String> {
+    checkpoint_window_timer(rt)?;
+    let allow_advance =
+        rt.op_state().borrow().borrow::<TimerClock>().mode == WindowTimerMode::Virtual;
+    let mut total = 0;
+    while total < max {
+        let turn = run_next_window_timer(rt, allow_advance);
+        if turn.fired == 0 {
+            break;
+        }
+        total += turn.fired;
+        checkpoint_window_timer(rt)?;
+    }
+    Ok(total)
+}
+
 fn run_next_background_resource_task(rt: &mut JsRuntime) -> u32 {
     let mut contexts = vec![rt.main_context()];
     contexts.extend(
@@ -4097,6 +4182,7 @@ fn call_frame_helper<'s>(
             | "setCurrentScript"
             | "timerNextDue"
             | "runNextTimer"
+            | "runLocalTimers"
             | "runNextBackgroundResourceTask"
             | "cancelDocumentTasks"
             | "retireResourceDocument"
@@ -5433,6 +5519,22 @@ fn allocate_frame<'s>(
         .contexts
         .push(retained);
     Ok(global)
+}
+
+#[op2(nofast, reentrant)]
+fn op_run_local_timers<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    max: v8::Local<'s, v8::Value>,
+) -> u32 {
+    let Some(context) = document.get_creation_context(scope) else {
+        return 0;
+    };
+    let _task = WindowTimerTask::new(context);
+    let active = &mut v8::ContextScope::new(scope, context);
+    call_frame_helper(active, "runLocalTimers", &[max])
+        .and_then(|value| value.uint32_value(active))
+        .unwrap_or(0)
 }
 
 #[op2(fast, reentrant)]
@@ -6812,6 +6914,9 @@ deno_core::extension!(
         op_timer_offset,
         op_window_timers_realtime,
         op_timer_advance,
+        op_timer_nesting,
+        op_timer_set_nesting,
+        op_run_local_timers,
         op_run_frame_timers,
         op_frame_pending,
         op_queue_frame_script,
@@ -6940,8 +7045,9 @@ deno_core::extension!(
 // Non-DOM browser globals, layered over the ops AFTER the native DOM binding is
 // installed (`browser_env` owns document/Element/window/navigator/Event/etc.; this
 // adds what a network-free test env lacks and overrides a few brand/host values).
-// Virtual timers are queued and drained synchronously by `__G.runTimers`, ordered by
-// delay — no wall-clock waits. `fetch`/XHR go over the tier-1 net stack.
+// Window timers are queued here and selected one task at a time by the host,
+// with microtask checkpoints between callbacks. Virtual mode advances deadlines;
+// real-time mode leaves future timers queued. `fetch`/XHR use the tier-1 net stack.
 //
 // Wrapped in an IIFE so it is RE-RUNNABLE on a reused isolate: a persistent
 // runtime (see `run_with_dom`) re-installs the page per call, which re-runs this;
@@ -7515,6 +7621,7 @@ const __timerPush = Array.prototype.push.bind(__timers);
 const __timerSplice = Array.prototype.splice.bind(__timers);
 const __timerFindIndex = Array.prototype.findIndex.bind(__timers);
 const __timerApply = Reflect.apply;
+const __timerMax = Math.max;
 let __tid = 1;
 // One native clock is shared by the agent's Window realms. A timer's deadline is
 // its actual scheduling time plus delay; the drain advances the shared virtual
@@ -7548,16 +7655,18 @@ const __createTimer = (name, repeat, handler, delay, args) => {
   delay=(+delay)|0;if(delay<0)delay=0;
   const id=__tid++;
   if(source!==null&&!ops.op_timer_code_allowed(__timerDocument,source))return id;
-  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+Math.max(0,delay),delay:Math.max(1,delay),repeat,args};
+  const level=ops.op_timer_nesting(__timerDocument);
+  const nesting=level<7?level+1:7;
+  const timer={__proto__:null,id,fn:typeof handler==="function"?handler:null,source,due:__timerNow()+(nesting>6?__timerMax(4,delay):delay),delay,nesting,repeat,args};
   __timerSet(id,timer);__timerPush(timer);return id;
 };
 globalThis.setTimeout=(handler,delay=0,...args)=>__createTimer("setTimeout",false,handler,delay,args);
 globalThis.setInterval=(handler,delay=0,...args)=>__createTimer("setInterval",true,handler,delay,args);
 globalThis.clearTimeout=(id)=>{
-  id=+id;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
+  id=(+id)|0;__timerDelete(id);const index=__timerFindIndex(timer=>timer.id===id);if(index>=0)__timerSplice(index,1);
 };
 globalThis.clearInterval=globalThis.clearTimeout;
-ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timers.length=0;__timerClear();}});
+ops.op_set_host_capabilities({cancelDocumentTasks:()=>{__timers.length=0;__timerClear();ops.op_timer_set_nesting(__timerDocument,0);}});
 // The origin-relative clock combines elapsed native monotonic time with the virtual
 // timer scheduler. Timers advance their scheduled delay; synchronous work consumes
 // real elapsed time. Date/rAF/Event timestamps share this navigation origin.
@@ -7646,7 +7755,7 @@ const __nextLocalTimer = () => {
   const due=__timers[index].due;
   return !__realWindowTimers && due>__timerNow() && due-__budgetBase>__VIRTUAL_BUDGET_MS ? -1 : index;
 };
-const __runLocalTimers = (max=100000) => {
+const __runLocalTimers = (max=100000,keepTask=false) => {
   let fired=0;
   while(fired<max){
     const index=__nextLocalTimer();if(index<0)break;
@@ -7655,21 +7764,29 @@ const __runLocalTimers = (max=100000) => {
     if(__realWindowTimers && timer.due>__timerNow())break;
     __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;
     if(!timer.repeat)__timerDelete(timer.id);
-    try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
-    if(timer.repeat&&__timerGet(timer.id)===timer){timer.due=__timerNow()+timer.delay;__timerPush(timer);}
+    const previous=ops.op_timer_nesting(__timerDocument);
+    ops.op_timer_set_nesting(__timerDocument,timer.nesting);
+    try{
+      try{if(timer.fn)__timerApply(timer.fn,globalThis,timer.args);else ops.op_run_timer_code(timer.source);}catch(error){__print("timer error: "+(error&&error.stack?error.stack:error)+"\n");}
+      if(timer.repeat&&__timerGet(timer.id)===timer){
+        if(timer.nesting<7)timer.nesting++;
+        timer.due=__timerNow()+(timer.nesting>6?__timerMax(4,timer.delay):timer.delay);__timerPush(timer);
+      }
+    }finally{if(!keepTask)ops.op_timer_set_nesting(__timerDocument,previous);}
   }
   return fired;
 };
 __G.runTimers = (max=100000) => {
   let fired=ops.op_storage_events();
   if(fired)return fired;
-  fired=__runLocalTimers(max);
+  fired=ops.op_run_local_timers(__timerDocument,max);
   if(!__G.isFrame)fired+=ops.op_run_frame_timers();
   return fired;
 };
 ops.op_set_host_capabilities({
   timerNextDue:()=>{const index=__nextLocalTimer();return index<0?null:__timers[index].due;},
-  runNextTimer:()=>__runLocalTimers(1)
+  runNextTimer:()=>__runLocalTimers(1,true),
+  runLocalTimers:max=>__runLocalTimers(max)
 });
 // NOTE: getElementsByTagName/ClassName/Name, lastChild/previous*/nextElementSibling,
 // and document.write/writeln are provided by the vendored binding (browser_env.js,
@@ -12648,8 +12765,7 @@ fn run_sync(rt: &mut JsRuntime, html: &str, script: &str) -> Result<String, Stri
     install_dom(rt, html, "about:blank")?;
     rt.execute_script(page_script_name("about:blank"), script.to_string())
         .map_err(|e| e.to_string())?;
-    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
-        .map_err(|e| e.to_string())?;
+    run_window_timers(rt, 100000)?;
     Ok(crate::browser_env::document_html())
 }
 
@@ -13088,10 +13204,13 @@ async fn drain_event_loop_until_completion(
             // resource event must not advance the clock to a future timer.
             let mut window_deadline = None;
             if frame_timer_budget > 0 {
-                let (fired, deadline) = run_next_window_timer(rt, false);
-                window_deadline = deadline;
-                frame_timer_budget = frame_timer_budget.saturating_sub(fired);
-                if fired > 0 {
+                let turn = run_next_window_timer(rt, false);
+                window_deadline = turn.deadline;
+                frame_timer_budget = frame_timer_budget.saturating_sub(turn.fired);
+                if turn.fired > 0 {
+                    if let Err(error) = checkpoint_window_timer(rt) {
+                        return std::task::Poll::Ready(Some(Err(error)));
+                    }
                     return std::task::Poll::Ready(None);
                 }
             }
@@ -13128,9 +13247,12 @@ async fn drain_event_loop_until_completion(
                 }
             } else if frame_timer_budget > 0 && !real_timers {
                 window_timer_wake = None;
-                let (fired, _) = run_next_window_timer(rt, true);
-                frame_timer_budget = frame_timer_budget.saturating_sub(fired);
-                if fired > 0 {
+                let turn = run_next_window_timer(rt, true);
+                frame_timer_budget = frame_timer_budget.saturating_sub(turn.fired);
+                if turn.fired > 0 {
+                    if let Err(error) = checkpoint_window_timer(rt) {
+                        return std::task::Poll::Ready(Some(Err(error)));
+                    }
                     return std::task::Poll::Ready(None);
                 }
             }
@@ -13807,8 +13929,7 @@ async fn run_async(
     exec_page_scripts(rt, script, base)?;
     run_lifecycle(rt, "dispatchDocumentInteractive")?; // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page
-    rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
-        .map_err(|e| e.to_string())?;
+    run_window_timers(rt, 100000)?;
     drain_event_loop(rt).await?; // promises queued by timer callbacks
     drain_to_quiescence_with_scripts(rt, false).await?;
     run_lifecycle(rt, "dispatchDocumentComplete")?; // complete + window load + pageshow
@@ -13919,8 +14040,7 @@ pub async fn eval_async(html: &str, base: &str, script: &str) -> Result<String, 
             rt.execute_script("<script>", script.to_string())
                 .map_err(|e| e.to_string())?;
             drain_event_loop(&mut rt).await?;
-            rt.execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers()")
-                .map_err(|e| e.to_string())?;
+            run_window_timers(&mut rt, 100000)?;
             drain_event_loop(&mut rt).await?;
             let g = rt
                 .execute_script("<result>", "String(globalThis.__RESULT || '')")
@@ -14009,7 +14129,7 @@ async fn hydrate_installed_document(
     for round in 0..MAX_PUMPS {
         rt.execute_script(
             "<hydrate>",
-            "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
+            "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate(300,200000,false);",
         )
         .map_err(|e| e.to_string())?;
         drain_event_loop(rt).await?;
@@ -14205,7 +14325,7 @@ async fn drain_to_quiescence_with_scripts(
         if execute_document_scripts {
             rt.execute_script(
                 "<hydrate>",
-                "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate();",
+                "globalThis[Symbol.for('ts')].tcHydrate = globalThis[Symbol.for('ts')].hydrate(300,200000,false);",
             )
             .map_err(|e| e.to_string())?;
         }
@@ -14214,9 +14334,7 @@ async fn drain_to_quiescence_with_scripts(
             let base = rt.op_state().borrow().borrow::<Base>().0.clone();
             drain_module_scripts(rt, &base).await?;
         }
-        let fired = rt
-            .execute_script("<timers>", "globalThis[Symbol.for('ts')].runTimers(2000)")
-            .map_err(|e| e.to_string())?;
+        let fired = run_window_timers(rt, 2000)?;
         drain_event_loop(rt).await?;
         let pending = rt
             .execute_script("<pending>", "globalThis[Symbol.for('ts')].pendingWork()")
@@ -14231,7 +14349,7 @@ async fn drain_to_quiescence_with_scripts(
             )
             .map_err(|e| e.to_string())?;
         let still = read_string(rt, pending)? == "1";
-        let fired_any = read_string(rt, fired)? != "0";
+        let fired_any = fired != 0;
         let awaiting_fetch = read_string(rt, fetches)? != "0";
         if !still && !fired_any {
             break; // genuinely idle
@@ -15211,5 +15329,188 @@ mod window_timer_deadline_tests {
         for due in [f64::NAN, f64::INFINITY, f64::MAX, 1e300, 1e22] {
             assert_eq!(window_timer_deadline(&clock, due), None, "deadline {due}");
         }
+    }
+}
+
+#[cfg(test)]
+mod window_timer_task_tests {
+    use super::*;
+
+    async fn page(budget: u64) -> PageSession {
+        PageSession::open(
+            "<body><iframe id=frame></iframe></body>",
+            "https://timer.test/",
+            "",
+            "",
+            budget,
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn chain(kind: &str) {
+        let mut page = page(5000).await;
+        let _activation = page.rt.activation_key().enter();
+        page.rt
+            .execute_script(
+                "<timer-chain>",
+                format!(
+                    r#"(()=>{{
+                      const kind={kind:?},frame=document.querySelector('#frame').contentWindow;
+                      const rows=globalThis.timerRows=[];
+                      let previous=performance.now(),id;
+                      const schedule=()=>{{
+                        const target=kind.startsWith('crossRealm')&&rows.length%2?frame:window;
+                        const created=performance.now();
+                        target.setTimeout(()=>{{
+                          rows.push(performance.now()-created);
+                          if(rows.length===12)return;
+                          if(kind.endsWith('Promise')||kind==='promise')Promise.resolve().then(schedule);
+                          else if(kind.endsWith('QueueMicrotask')||kind==='queueMicrotask')queueMicrotask(schedule);
+                          else schedule();
+                        }},0);
+                      }};
+                      if(kind==='interval')id=setInterval(()=>{{
+                        const now=performance.now();rows.push(now-previous);previous=now;
+                        if(rows.length===12)clearInterval(id);
+                      }},0);else schedule();
+                    }})()"#
+                ),
+            )
+            .unwrap();
+        checkpoint_window_timer(&mut page.rt).unwrap();
+        for index in 0..12 {
+            let turn = run_next_window_timer(&mut page.rt, true);
+            assert_eq!(turn.fired, 1, "{kind} task {index}");
+            let nesting = turn._task.as_ref().unwrap().nesting.clone();
+            let expected = if kind.starts_with("crossRealm") {
+                1
+            } else {
+                (index + 1).min(7)
+            };
+            assert_eq!(nesting.level.get(), expected, "{kind} task {index}");
+            checkpoint_window_timer(&mut page.rt).unwrap();
+            assert_eq!(nesting.level.get(), expected, "{kind} checkpoint {index}");
+            drop(turn);
+            assert_eq!(nesting.level.get(), 0, "{kind} finished task {index}");
+        }
+        let value = page
+            .rt
+            .execute_script("<timer-rows>", "JSON.stringify(timerRows)")
+            .unwrap();
+        let rows: Vec<f64> =
+            serde_json::from_str(&read_string(&mut page.rt, value).unwrap()).unwrap();
+        assert_eq!(rows.len(), 12);
+        if !kind.starts_with("crossRealm") && kind != "interval" {
+            // The public clock has a 100us grid. No wall-time upper bound is
+            // imposed on the six structurally unclamped tasks or on the host.
+            assert!(
+                rows[6..].iter().all(|delay| *delay >= 3.9 - 1e-6),
+                "{kind}: {rows:?}"
+            );
+        }
+        assert_eq!(run_next_window_timer(&mut page.rt, true).fired, 0);
+    }
+
+    async fn retired_task() {
+        let mut page = page(5000).await;
+        let _activation = page.rt.activation_key().enter();
+        page.rt.execute_script("<retired-timer>", "const frame=document.querySelector('#frame');frame.contentWindow.setTimeout(()=>{frame.remove();Promise.resolve().then(()=>setTimeout(()=>{},0));},0)").unwrap();
+        let turn = run_next_window_timer(&mut page.rt, true);
+        assert_eq!(turn.fired, 1);
+        let retired = turn._task.as_ref().unwrap().nesting.clone();
+        checkpoint_window_timer(&mut page.rt).unwrap();
+        drop(turn);
+        assert_eq!(retired.level.get(), 0);
+        assert!(page
+            .rt
+            .op_state()
+            .borrow()
+            .borrow::<FrameContexts>()
+            .contexts
+            .is_empty());
+        let next = run_next_window_timer(&mut page.rt, true);
+        assert_eq!(next.fired, 1);
+        assert_eq!(next._task.as_ref().unwrap().nesting.level.get(), 1);
+        checkpoint_window_timer(&mut page.rt).unwrap();
+    }
+
+    async fn legacy_reentrancy() {
+        let mut page = page(5000).await;
+        let _activation = page.rt.activation_key().enter();
+        page.rt.execute_script("<nested-legacy-batch>", "setTimeout(()=>{setTimeout(()=>{},0);globalThis[Symbol.for('ts')].runTimers(1);setTimeout(()=>{},0);},0)").unwrap();
+        let turn = run_next_window_timer(&mut page.rt, true);
+        assert_eq!(turn.fired, 1);
+        assert_eq!(turn._task.as_ref().unwrap().nesting.level.get(), 1);
+        checkpoint_window_timer(&mut page.rt).unwrap();
+        drop(turn);
+        let next = run_next_window_timer(&mut page.rt, true);
+        assert_eq!(next.fired, 1);
+        assert_eq!(next._task.as_ref().unwrap().nesting.level.get(), 2);
+        checkpoint_window_timer(&mut page.rt).unwrap();
+    }
+
+    async fn interrupted_checkpoint(legacy: bool) {
+        let mut page = page(100).await;
+        let expression = if legacy {
+            "(()=>{setTimeout(()=>{while(true){}},0);globalThis[Symbol.for('ts')].runTimers();return 'unreachable';})()"
+        } else {
+            "new Promise(()=>setTimeout(()=>Promise.resolve().then(()=>{while(true){}}),0))"
+        };
+        let error = page.eval_json_expression(expression).await.unwrap_err();
+        assert!(error.contains("budget"), "{error}");
+        let _activation = page.rt.activation_key().enter();
+        let nesting = {
+            deno_core::scope!(scope, page.rt);
+            window_timer_nesting(scope.get_current_context())
+        };
+        assert_eq!(nesting.level.get(), 0);
+        page.rt
+            .execute_script("<after-interruption>", "setTimeout(()=>{},0)")
+            .unwrap();
+        let turn = run_next_window_timer(&mut page.rt, true);
+        assert_eq!(turn.fired, 1);
+        assert_eq!(turn._task.as_ref().unwrap().nesting.level.get(), 1);
+        checkpoint_window_timer(&mut page.rt).unwrap();
+    }
+
+    #[test]
+    fn timer_nesting_is_per_window_and_survives_only_its_task_checkpoint() {
+        const CHILD: &str = "TURBO_SURF_TIMER_TASK_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    for kind in [
+                        "direct",
+                        "promise",
+                        "queueMicrotask",
+                        "crossRealm",
+                        "crossRealmPromise",
+                        "crossRealmQueueMicrotask",
+                        "interval",
+                    ] {
+                        chain(kind).await;
+                    }
+                    retired_task().await;
+                    legacy_reentrancy().await;
+                    interrupted_checkpoint(false).await;
+                    interrupted_checkpoint(true).await;
+                });
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "runtime::window_timer_task_tests::timer_nesting_is_per_window_and_survives_only_its_task_checkpoint", "--nocapture"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "timer task subprocess failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

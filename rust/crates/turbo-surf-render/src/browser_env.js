@@ -15,6 +15,7 @@
   var __ns = g[Symbol.for('ts')] || (Object.defineProperty(g, Symbol.for('ts'), { value: {}, configurable: true, enumerable: false }), g[Symbol.for('ts')]);
   if (typeof g.__parseCssNative === 'function') { __ns.parseCssNative = g.__parseCssNative; delete g.__parseCssNative; }
   var cssNativeParse=__ns.parseCssNative,cssSetPrototype=Object.setPrototypeOf,cssApply=Reflect.apply,cssMapGet=Function.prototype.call.bind(Map.prototype.get),cssTagUpper=Function.prototype.call.bind(String.prototype.toUpperCase);
+  var computedSnapshotMap=WeakMap,computedSnapshotGet=Function.prototype.call.bind(WeakMap.prototype.get),computedSnapshotSet=Function.prototype.call.bind(WeakMap.prototype.set);
   if (typeof g.__domAccessor === 'function') { __ns.domAccessor = g.__domAccessor; delete g.__domAccessor; }
   computedStyleNativeOwner=__ns.domAccessor('ownerDocument',false,'Node');
   computedStyleNativeTag=__ns.domAccessor('tagName',false,'Element');
@@ -152,8 +153,13 @@
     return state;
   }
   if (typeof g.getComputedStyle === 'undefined') g.getComputedStyle = function computeStyle(el){
-    var parentSnapshotNode=null,parentSnapshot=null;
-    function parentStyle(node){if(parentSnapshotNode!==node){parentSnapshot=computeStyle(node);parentSnapshotNode=node;}return parentSnapshot;}
+    return computeStyleSnapshot(el,new computedSnapshotMap());
+  };
+  function computeStyleSnapshot(el,snapshots){
+    var cached=el&&computedSnapshotGet(snapshots,el);if(cached)return cached;
+    // Percentage lookup may visit several ancestors before font inheritance asks
+    // for the immediate parent again. Reuse each resolved ancestor only in this read.
+    function parentStyle(node){return computeStyleSnapshot(node,snapshots);}
     var camel = function(p){ return p.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); }); };
     var decl = { __proto__:null, getPropertyValue: function(p){ var v = this[p]; if (v == null) v = this[camel(p)]; return v == null ? '' : String(v); }, getPropertyPriority: function(){ return ''; }, length: 0 };
     // Minimal cascade: merge declarations from every injected stylesheet rule whose selector matches
@@ -199,13 +205,18 @@
         if(sheetRecord(sheets[si]).disabled)continue;
         var rules = appliedSheetRuleRecords(sheets[si]);
         for (var ri=0; ri<rules.length; ri++) {
-          var txt = String(cssRuleText(rules[ri]) || ''); var br = txt.indexOf('{'); if (br < 0) continue;
-          var sel = txt.slice(0, br).trim();
-          var matched = false;
-          var parts = sel.split(',');
-          for (var pi=0; pi<parts.length; pi++){ var s = parts[pi].trim(); if (!s) continue; try { if (cssApply(computedStyleNativeMatches,el,[s])) { matched = true; break; } } catch(e){} }
+          var rule=rules[ri],matched=false;
+          if(rule.type===1){
+            // Match the private selector list before touching declarations. Native
+            // parsing preserves quoted delimiters that serialized text splitting loses.
+            try{matched=cssApply(computedStyleNativeMatches,el,[rule.selectorText]);}catch(e){}
+          }else{
+            var txt = String(cssRuleText(rule) || ''); var br = txt.indexOf('{'); if (br < 0) continue;
+            var sel = txt.slice(0, br).trim(),parts = sel.split(',');
+            for (var pi=0; pi<parts.length; pi++){ var s = parts[pi].trim(); if (!s) continue; try { if (cssApply(computedStyleNativeMatches,el,[s])) { matched = true; break; } } catch(e){} }
+          }
           if (!matched) continue;
-          applyDeclarations(declarationRecord(rules[ri].style));
+          applyDeclarations(declarationRecord(rule.style));
         }
       }
     } catch(e){}
@@ -267,8 +278,10 @@
       });
     } catch(e){}
     var fontState=computedFonts(decl,el,parentStyle,connected);
-    return __ns.makeComputedStyleDeclaration(decl,el,fontState);
-  };
+    var snapshot=__ns.makeComputedStyleDeclaration(decl,el,fontState);
+    if(el)computedSnapshotSet(snapshots,el,snapshot);
+    return snapshot;
+  }
   if (typeof g.requestAnimationFrame === 'undefined') g.requestAnimationFrame = function(cb){ return setTimeout(function(){ cb(Date.now()); }, 0); };
   if (typeof g.cancelAnimationFrame === 'undefined') g.cancelAnimationFrame = function(id){ clearTimeout(id); };
   if (typeof g.matchMedia === 'undefined') g.matchMedia = function(q){ return { matches:false, media:q, addListener:function(){}, removeListener:function(){}, addEventListener:function(){}, removeEventListener:function(){}, dispatchEvent:function(){return false;} }; };

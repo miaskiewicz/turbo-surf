@@ -9,6 +9,50 @@ checklist; [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) trac
 residual work beyond this PR, with audio separately deferred in
 [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
 
+### Startup and scheduling follow-up — 2026-10-21
+
+- Consume the public font-sharing producer fix from turbo-html2pdf PR25.
+  It preserves collection-face indexes, shaping caches and PDF subset identity;
+  863 workspace tests,15 xref controls and strict checks pass. One matched
+  optimized font probe measures registry initialization1,653→165ms and peak
+  RSS3.83→1.40GB, including later fingerprinting. All983 faces and930 selection,
+  metric and glyph results match. OS disk-cache state is unspecified.
+- Officially re-vendor the tested per-read ancestor snapshot and selector-first
+  fixes from turbo-test PR27. Old code fails the ancestor control with100 scans
+  against its28 bound and performs3,528 unmatched-declaration reads where the
+  fix performs zero. Complete private selector-list matching also preserves
+  quoted braces/commas, verified against genuine Chrome. Canonical checks pass
+  33 CSS,304 library,63 Node and52 compatibility cases; one explicitly ignored
+  selector-admission gap retains its Chrome expectation and fails when run
+  explicitly. Caches expire before the next public read. That preexisting gap
+  and default-inherited color/CSSOM synchronization remain documented in issue28.
+- Add a genuine frozen-Chrome timer control, reusable collector/probe and native
+  regressions. Chrome155 carries same-Window nesting through Promise/microtask
+  callbacks and clamps after six immediate tasks; alternating Window targets
+  reset nesting. Native task checkpoints, cancellation conversion and scoped
+  nesting cleanup pass21 native integration tests plus an isolated native
+  regression covering seven nesting variants, frame retirement, reentrant
+  legacy drains and watchdog recovery. Rebuilt homepage validation is pending.
+- Add a reusable private CPU-profile summary with source locations and sampled
+  self-time aggregation. It sorts out-of-order Inspector timestamps together
+  with their samples; the real profile contains one negative1us delta. Node20
+  and22 each pass four focused summary/source-pin controls. This analysis is not
+  a publication sanitizer or a count of function invocations.
+- Reproduce homepage hydration exhaustion without interface wrappers using the
+  preserved optimized all-feature executable and unchanged20-second budget.
+  CPU profiling identifies repeated private CSS record/ancestor-style work;
+  native layout time is measured separately. The homepage-only diagnostic has
+  no consent or search actions and does not establish native SERP clearance.
+  The first rebuilt optimized all-feature diagnostic completes HTTP200 hydration
+  with one pump and no budget exhaustion:18.52s whole run,1.24GB peak RSS including
+  profiling and snapshots. The selector-first follow-up also completes hydration:
+  16.35s whole run,957MB peak RSS and14.70s guest profiling. These live homepage
+  diagnostics do not establish SERP clearance, reliability or complete timing
+  parity. Full combined validation and a fresh Google comparison remain pending.
+- Remove consumed producer debug/release caches after source, ownership,
+  ignored/untracked, retained-proof and closed-consumer checks. Actual free disk
+  space increases6.53GB; independent font probes and all source/SDK evidence remain.
+
 ### Runner timing follow-up — 2026-10-20
 
 - Publish the fresh546d511 API and Google measurements. All75 interfaces are

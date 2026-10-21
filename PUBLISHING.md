@@ -259,6 +259,12 @@ never treat an accepted upload alone as completed registry verification.
 
 ## Native third-party notices
 
+All nine Rust packages inherit the MIT license file at `rust/LICENSE`, which
+`sync-third-party-notices.py` keeps byte-identical to the root `LICENSE`. Keep
+this copy inside the Rust workspace: maturin rejects an inherited license path
+outside that workspace even though Cargo accepts it. Actual wheel/sdist and
+crate audits must verify the complete license bytes.
+
 The native audio kernels, XPath provider, RustFFT and hardened crypto provider
 retain their source licenses. `THIRD_PARTY_NOTICES.md` also accompanies the npm
 launcher, standalone platform artifacts and Python extension package. After

@@ -436,7 +436,7 @@ cargo test -p turbo-surf-core --test client_hello
 The offline ClientHello regression checks the cipher sequence, signature-algorithm
 GREASE, ML-DSA44/65/87, and exact public trust-anchor IDs against a local Chrome
 154.0.8037.98 capture. The former empty trust-anchor patch is superseded by upstream
-support. Published Surf libraries use the explicit named registry dependency
+support. Surf libraries published from this source use the explicit named registry dependency
 graph, so consumers do not need the former workspace Git patches. Preparing or
 publishing those dependencies is separate from a passing
 [actual packaged-consumer check](rust/release-deps/surf-consumer/README.md);

@@ -3,7 +3,9 @@
 The upstream directory preserves the full BSD-licensed Biquad, Delay, ARM NEON
 delay and StereoPanner sources from Chrome155.0.8059.40. PROVENANCE.json records
 SHA-256 for each original; the sibling compiled copies differ only by an isolated
-namespace and the standalone platform-header include. Compatibility headers
+namespace and the standalone platform-header include. The compiled ARM NEON
+delay copy also includes <cmath> directly for std::isnan, without relying on
+platform-specific transitive headers. Compatibility headers
 provide containers and checked call boundaries without a browser runtime.
 
 The adapter preserves macOS Accelerate double-precision Biquad processing,

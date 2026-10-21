@@ -44,7 +44,7 @@
   {
     "path": "delay_neon.cc",
     "sha256": "ac5137ffff0b2a9f44a048f1f8ac97e9688048460f9374cba5f932ca18bae92a",
-    "changes": "isolated namespace; platform include only",
+    "changes": "isolated namespace; platform include; explicit <cmath> for std::isnan",
     "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/audio/cpu/arm/delay_neon.cc?format=TEXT",
     "upstreamPath": "third_party/blink/renderer/platform/audio/cpu/arm/delay_neon.cc"
   },

@@ -6,6 +6,7 @@
 #include <arm_neon.h>
 
 #include <array>
+#include <cmath>
 
 #include "base/compiler_specific.h"
 #include "base/numerics/safe_conversions.h"

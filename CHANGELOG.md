@@ -158,6 +158,14 @@ residual work beyond this PR, with audio separately deferred in
   MIT license file in all nine Rust packages; a focused Cargo packaging control
   confirms SPDX metadata alone omitted it and the inherited file retains its
   exact bytes. Actual product archive inspection remains a separate gate.
+  Keep that file inside the Rust workspace for maturin compatibility, with
+  `rust/LICENSE` synchronized byte-for-byte from the root MIT license. A genuine
+  source-distribution control rejects the old outside-workspace path and verifies
+  the full license payload after the correction.
+- Include `<cmath>` directly in the compiled ARM NEON delay source for
+  `std::isnan`. The Linux ARM release build exposed reliance on a transitive
+  platform header. Preserve the audio algorithm and original upstream hashes;
+  document this portable-header adaptation in its provenance.
 
 - Validate the prepared thirteen-archive Surf graph in both profiles: stock
   passes 1,464 workspace tests with 11 documented ignores; native 155 passes 1,509

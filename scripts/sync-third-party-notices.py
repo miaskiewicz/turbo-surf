@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep notices in the published Rust and Python package roots."""
+"""Keep package notices and the Rust workspace MIT license synchronized."""
 import argparse
 from pathlib import Path
 
@@ -9,21 +9,28 @@ def main():
     parser.add_argument("--check", action="store_true")
     options = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    notices = (root / "THIRD_PARTY_NOTICES.md").read_bytes()
-    destinations = [
-        root / "rust/crates/turbo-surf-render/THIRD_PARTY_NOTICES.md",
-        root / "rust/crates/turbo-surf-py/python/turbo_surf/THIRD_PARTY_NOTICES.md",
+    copies = [
+        (
+            root / "THIRD_PARTY_NOTICES.md",
+            [
+                root / "rust/crates/turbo-surf-render/THIRD_PARTY_NOTICES.md",
+                root / "rust/crates/turbo-surf-py/python/turbo_surf/THIRD_PARTY_NOTICES.md",
+            ],
+        ),
+        (root / "LICENSE", [root / "rust/LICENSE"]),
     ]
     stale = []
-    for destination in destinations:
-        if options.check:
-            if not destination.exists() or destination.read_bytes() != notices:
-                stale.append(str(destination.relative_to(root)))
-        else:
-            destination.write_bytes(notices)
+    for source, destinations in copies:
+        content = source.read_bytes()
+        for destination in destinations:
+            if options.check:
+                if not destination.exists() or destination.read_bytes() != content:
+                    stale.append(str(destination.relative_to(root)))
+            else:
+                destination.write_bytes(content)
     if stale:
-        parser.exit(1, "Stale third-party notices: " + ", ".join(stale) + "\n")
-    print("Third-party notices match all package copies.")
+        parser.exit(1, "Stale package notices or license: " + ", ".join(stale) + "\n")
+    print("Package notices and Rust workspace license match their root sources.")
 
 
 if __name__ == "__main__":

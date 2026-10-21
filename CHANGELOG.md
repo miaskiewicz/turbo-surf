@@ -79,12 +79,27 @@ residual work beyond this PR, with audio separately deferred in
 - Disable only dev/test debug symbols in CI to reduce accumulated build storage.
   The previous9304df9 Node22 job passes; Node20 exhausts runner disk during addon
   linking. Test selection, assertions, overflow checks and release settings stay
-  unchanged; the repaired workflow requires a fresh CI result.
+  unchanged. The repaired workflow passes on Node20 and22 at final tested
+  head46f4340 ([CI run](https://github.com/miaskiewicz/turbo-surf/actions/runs/39533940495)).
 - Remove consumed producer debug/release caches after source, ownership,
   ignored/untracked, retained-proof and closed-consumer checks. Actual free disk
   space increases6.53GB; independent font probes and all source/SDK evidence remain.
   After the successful combined gates, remove only their closed native/stock
   debug caches (33.47GB and30.65GB); retain verified release artifacts and proofs.
+
+### Release readiness — 2026-10-21
+
+- Keep npm, Rust, NAPI and Python at the next patch version0.5.4. The release
+  requires `v0.5.4` and `pyv0.5.4` on the same merge commit for npm/crates.io
+  and PyPI respectively; no release tag has been created yet.
+- Preserve explicit packaging gaps: clean registry consumers do not inherit the
+  workspace transport, hardened WebCrypto or Rusty V8 patches. Public DOM0.5.7
+  and layout0.3.8 source candidates also need compatible registry releases.
+  Passing workspace CI does not establish packaged-consumer compatibility.
+  The actual `cargo package -p turbo-surf-core --no-verify --locked` preflight
+  fails dependency resolution: registry wreq0.16.1 lacks `chromium-roots`.
+  This is a packaging failure before compilation, not a failed engine test.
+  See [PUBLISHING.md](./PUBLISHING.md) for the release prerequisites.
 
 ### Runner timing follow-up — 2026-10-20
 

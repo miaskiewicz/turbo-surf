@@ -73,6 +73,17 @@ can't be reused) — only cut a tag when a release is intended.
   is declared in `scripts/browser-sidecar/package.json`. Other comparison crawlers
   are installed ad-hoc. None is an engine runtime dependency.
 
+## Shipping profiles
+
+The current npm release workflow builds the stock workspace with
+`cargo build --locked --release -p turbo-surf-mcp`. It enables default transport
+impersonation, uses the patched stock V8 150 backend and does not enable the
+experimental Chrome155 SDK, GPU bridge or CoreText feature union used in the
+native parity captures. Do not describe release CI outputs as that measured
+all-feature artifact. Python wheels use the PyO3 crate's default profile; unpack
+and build the actual sdist to verify that its sources and required workspace
+patches survive packaging.
+
 ## Current development transport and crate publishing
 
 The Chrome 155 target profile uses the measured headers/client hints and the
@@ -96,7 +107,13 @@ path passes clean packaged-consumer checks, and do not infer authorization to
 publish a differently named dependency crate.
 
 Build development binaries with Rust 1.98.0 and the committed workspace lockfile
-(`cargo build --locked`). This PR does not authorize a turbo-surf release.
+(`cargo build --locked`). Release authorization does not establish registry
+compatibility; resolve the concrete prerequisites below before tagging.
+
+The October21 core package preflight (`cargo package -p turbo-surf-core
+--no-verify --locked`) fails before compilation: registry wreq0.16.1 does not
+provide the requested `chromium-roots` feature. `--no-verify` here only skips
+compilation for the diagnostic; it is not a passing package-consumer gate.
 
 Crates.io publishing remains blocked: workspace patches do not propagate to
 library consumers, and registry `wreq` 0.16.1 / `wreq-util` 0.2.0 do not contain the
@@ -114,21 +131,24 @@ hardened provider or an upstream release containing the fix before publishing
 Surf crates; silently falling back to the unpatched registry crate is unsafe.
 Check the source archive/patch with `python3 rust/vendor/update-deno-crypto.py --check`.
 
-The DOM API dependency is published as turbo-dom0.5.6 (PR #12, actual tagged
-merge commit `ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`). Its parser provenance
-and template extraction APIs resolve from the registry. Current ElementInternals/
-checkedness work additionally requires the public0.5.7 development candidate
-`fb60e6f90a5d373165cfd1045b090407ca945d47` (PR14, including PR13). All six DOM
-consumers use that same immutable Git source. Release the reviewed producer and
-switch to the registry0.5.7 floor before publishing Surf crates. The geometry producer turbo-html2pdf-core0.3.7 is also published
-from PR #21's tagged merge `33853374bdeae040e596858bcbf3da9670543b0e`.
-The composed-layout integration requires the tested0.3.8 PR23 candidate. Render
-and raster therefore use the immutable public Git revision
-`9d7f02fb27a9664baedb468475098b785a7d3bec`; this is an explicit development
-source pin, not a claim that0.3.8 is available on crates.io. Before publishing Surf,
-release the reviewed producer, replace the Git dependency with the registry0.3.8
-floor and regenerate/verify the production lockfile. Local private path patches
-are never committed as dependency metadata.
+The current DOM consumers use the immutable public turbo-dom0.5.7 candidate
+`d01d6a5911e3f7a47c0d91d619de01c1008dc28a` (PR15). All six consumers use the
+same source; registry compatibility must include that candidate's parser and
+selector changes, not merely a matching version number. Release the reviewed
+producer and switch to a compatible registry floor before publishing Surf crates.
+Render and raster use the public turbo-html2pdf-core0.3.8 candidate
+`8f0aa139490573e7ef7a27a4c392195f265f900f` (PR25, stacked on PR24), including
+composed layout and shared font programs. Release the reviewed producer, replace
+the Git source with a compatible registry dependency and regenerate/verify the
+production lockfile. Local private path patches are never committed as dependency
+metadata.
+
+The default engine also patches Rusty V8 150.4.0 for native weak-handle teardown.
+That ownership fix is required by the retained regression; silently resolving the
+unpatched registry crate would lose it. A distributable dependency path or fixed
+upstream release is required, including its transitive deno_v8/deno_core users.
+See [rust/vendor/RUSTY_V8.md](./rust/vendor/RUSTY_V8.md). Workspace binary tests
+cannot substitute for clean downstream package tests.
 
 The transport API requirement above still blocks clean crate consumers until
 compatible registry versions or reviewed distributable forks are available. A local

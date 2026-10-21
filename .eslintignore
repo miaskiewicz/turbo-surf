@@ -25,6 +25,7 @@ rust/crates/turbo-surf-render/src/dom_implementation.js
 rust/crates/turbo-surf-render/src/dom_implementation_probe.js
 rust/crates/turbo-surf-render/src/dom_implementation_chrome155.json
 rust/vendor/**
+rust/crates/turbo-surf-render/src/vendor/deno_extensions/**
 rust/crates/turbo-surf-render/src/document_xpath.js
 rust/crates/turbo-surf-render/src/event_listeners.js
 rust/crates/turbo-surf-render/src/range_contents.js

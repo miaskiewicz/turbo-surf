@@ -58,6 +58,16 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   — re-vendor from turbo-test's committed HEAD via
   `rust/crates/turbo-surf-render/scripts/vendor-browser-env.sh`.
 
+## Embedded Deno extension sources
+
+`rust/crates/turbo-surf-render/src/vendor/deno_extensions/` and the generated
+`src/deno_extension_source_table.rs` preserve exact licensed published Deno JS.
+Never hand-edit or format these files. Reproduce them with the render crate's
+`scripts/vendor-deno-extension-sources.py --check` (or `--write` only for a
+reviewed update), using the checksum-pinned `.crate` archives. The crate-local
+`DENO-EXTENSIONS.md` documents source identity and the portability boundary.
+This generator is independent of turbo-test's DOM-binding vendor script.
+
 ## The gates
 
 The engine gate is **Rust** (`cd rust`): `cargo test --workspace`, `cargo clippy

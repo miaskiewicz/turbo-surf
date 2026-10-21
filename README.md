@@ -461,6 +461,12 @@ and native clone API through its matching Deno/V8 registry graph. See the
 [itemized browser parity backlog](harness/detection/PARITY-GAPS.md) for remaining
 behavior and validation limits.
 
+Deno Web, WebIDL and Crypto JavaScript is compiled into the render crate in both
+stock and native SDK builds; no runtime opt-in or build-machine Cargo source tree
+is required. The [crate-local source manifest and reproducer](rust/crates/turbo-surf-render/DENO-EXTENSIONS.md)
+retain all 28 exact licensed modules. CI verifies their published archive bytes;
+installed-artifact JavaScript tests remain a separate portability gate.
+
 The default render tier's `deno_core` alias resolves
 `turbo-surf-deno-core` 0.412.0. Its `v8` alias resolves the facade
 `turbo-surf-deno-v8` 0.4.0, backed by the teardown-hardened

@@ -1,5 +1,7 @@
 //! Official native WebCrypto classes; no replacement of the rtdom Web globals.
 use deno_core::Extension;
+#[path = "deno_extension_sources.rs"]
+mod deno_extension_sources;
 #[path = "web_event_arrays.rs"]
 mod web_event_arrays;
 
@@ -84,16 +86,23 @@ pub(crate) fn install<'s>(
 
 pub(crate) fn extensions() -> Vec<Extension> {
     vec![
-        web_event_arrays::harden_webidl(deno_webidl::deno_webidl::init())
-            .expect("Pinned official Deno private WebIDL sequence array adapter"),
-        web_event_arrays::harden(deno_web::deno_web::init(
-            deno_web::BlobStore::default_arc(),
-            None,
-            false,
-            deno_web::InMemoryBroadcastChannel::default(),
-        ))
+        web_event_arrays::harden_webidl(
+            deno_extension_sources::embed(deno_webidl::deno_webidl::init())
+                .expect("Pinned embedded official Deno WebIDL sources"),
+        )
+        .expect("Pinned official Deno private WebIDL sequence array adapter"),
+        web_event_arrays::harden(
+            deno_extension_sources::embed(deno_web::deno_web::init(
+                deno_web::BlobStore::default_arc(),
+                None,
+                false,
+                deno_web::InMemoryBroadcastChannel::default(),
+            ))
+            .expect("Pinned embedded official Deno web sources"),
+        )
         .expect("Pinned official Deno private event array adapter"),
-        deno_crypto::deno_crypto::init(None),
+        deno_extension_sources::embed(deno_crypto::deno_crypto::init(None))
+            .expect("Pinned embedded official Deno crypto sources"),
         crate::crypto_hybrid::extension(),
     ]
 }

@@ -47,7 +47,12 @@ changelog entries and unrelated dependency versions must retain their own versio
 2. Add the new version's entry to `CHANGELOG.md`, then run `npm run check` from
    the root. This includes version consistency, dependency preparation controls,
    notices/audio source checks, workspace tests, strict Clippy, formatting, a
-   rebuilt addon, shim/E2E tests and offline detection/Python controls. Keep
+   rebuilt addon, shim/E2E tests and offline detection/Python controls. It also
+   tests the release smoke supervisor and Deno source reproducer, then checks all
+   28 embedded modules against the actual locked archives after Cargo's gate.
+   Source verification uses the normal `CARGO_HOME` archive cache; the render
+   crate's [provenance guide](./rust/crates/turbo-surf-render/DENO-EXTENSIONS.md)
+   documents explicit archive-directory verification. Keep
    default/stock and optional native feature gates and their artifact identities
    separate. When reusing a prior result, retain a bridge proving its actual
    compiled inputs and resolved feature graph still match.
@@ -86,11 +91,15 @@ changelog entries and unrelated dependency versions must retain their own versio
    deliberately shipping without Python; never move a published tag for recovery.
 5. The workflows build and publish. The npm and Python workflows reject tags
    that differ from release metadata. Each of the four npm build hosts sends an
-   offline stdio `initialize` request to its actual staged binary, with a bounded
-   timeout and private cwd without `.env`, and requires the exact release version.
+   offline stdio `initialize`, loopback navigation and `evaluate` requests to its
+   actual staged binary, with a 60-second execution deadline and private cwd
+   without `.env`. It requires the exact release version and real DOM, native
+   random-byte and stream behavior, with private Deno globals hidden. Initialization
+   alone cannot establish that installed JavaScript modules are usable.
    Before publication, npm packs the assembled package, verifies its integrity,
    all four binaries, launchers and license files, extracts that exact tarball
-   outside the checkout and repeats initialization through its packaged Node CLI.
+   outside the checkout and repeats the same three-request JavaScript smoke through
+   its packaged Node CLI using `scripts/smoke-mcp-release.py`.
    Only a tag-push event passes the verified tarball to `npm publish`; receipts
    retain hashes, actual artifact paths and subprocess results. Manual dispatch
    runs the same four builds and assembled-tarball smoke without publishing,

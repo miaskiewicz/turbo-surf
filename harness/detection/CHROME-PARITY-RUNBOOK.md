@@ -218,6 +218,25 @@ version are different identities. Keep `PARITY_BIN` pointing to the SDK155 execu
 
 ## 4. Local controls and final gates
 
+Deno extension source embedding is automatic in both stock and native builds;
+it requires no comparison flag or environment variable. All 28 licensed
+Web/WebIDL/Crypto modules are crate-local compile-time inputs, so installed
+artifacts must not read build-machine Cargo paths. `npm test` runs six offline
+reproducer controls and, after Cargo has fetched the locked packages, verifies
+all generated sources against their exact published archives. Recheck directly
+from the repository root when diagnosing source or packaging drift:
+
+```sh
+python3 rust/crates/turbo-surf-render/scripts/vendor-deno-extension-sources.py --check
+```
+
+The helper uses `CARGO_HOME`'s archive cache without modifying it; pass
+`--archive-dir /absolute/path/to/archives` if the three checksum-pinned archives
+are elsewhere. See the [crate provenance](../../rust/crates/turbo-surf-render/DENO-EXTENSIONS.md).
+This check proves source reproduction, not installed runtime success. Release
+artifacts must also pass actual native JavaScript smoke tests outside the build
+source tree; a successful MCP initialize response alone does not exercise V8.
+
 These first controls are localhost-only and verify consent/input/query/clock and slow-form/retry observation stages using the
 explicitly selected binary:
 

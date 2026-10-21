@@ -89,6 +89,15 @@ residual work beyond this PR, with audio separately deferred in
 
 ### Release readiness — 2026-10-21
 
+- Embed the exact 28 licensed Deno Web, WebIDL and Crypto extension JavaScript
+  sources in the render crate before its existing hash-checked private-array
+  adapters. Deno 0.412 extension declarations record build-machine filesystem
+  paths; a Linux wheel installed outside that build container exposed permission
+  failures when hydration loaded those modules. The reproducible source table
+  replaces all four extension source lists without a filesystem fallback, while
+  preserving upstream bytes, specifiers, ops, state and adapter checks. Source
+  inventory changes fail closed. Relocation and actual installed artifacts remain
+  explicit validation gates; embedding alone is not a wheel success claim.
 - Keep npm, Rust, NAPI and Python at the next patch version0.5.4. The release
   requires `v0.5.4` and `pyv0.5.4` on the same merge commit for npm/crates.io
   and PyPI respectively; no release tag has been created yet.
@@ -148,9 +157,14 @@ residual work beyond this PR, with audio separately deferred in
   registry before uploading the sdist. Preserve artifact hashes, extension paths
   and JUnit results. Missing PyPI credentials fail a requested tagged release.
 
-- Exercise each staged npm platform binary over MCP stdio before upload. Pack
-  the assembled launcher, verify all four binary payloads and licenses, then
-  initialize the extracted launcher before publishing that exact tarball.
+- Exercise each staged npm platform binary over MCP stdio before upload. A shared
+  bounded supervisor requires initialization, genuine loopback navigation and
+  evaluated DOM/native random-byte/stream behavior with Deno globals hidden.
+  Thirteen offline supervisor controls cover protocol failures, cancellation,
+  timeout cleanup and lingering children. Pack the assembled launcher, verify all
+  four binary payloads and licenses, then repeat actual JavaScript execution through
+  the extracted launcher before publishing that exact tarball. Initialization alone
+  did not expose missing build-machine extension sources.
   Manual npm/Python dispatches validate artifacts without publishing; Rust
   publication requires the exact release tag and keeps the verified lockfile.
   Linux binary/crate release jobs explicitly install libclang for the transport

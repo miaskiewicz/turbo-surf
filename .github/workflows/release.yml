@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Test the offline release smoke supervisor
+        run: python3 -B scripts/test_smoke_mcp_release.py
       - name: Check release versions and exact tag
         shell: bash
         run: |
@@ -89,44 +91,11 @@ jobs:
         env:
           STAGED_BINARY: turbo-surf-mcp-${{ matrix.node }}${{ matrix.ext }}
         run: |
-          python - <<'PYCODE'
-          import hashlib, json, os, signal, subprocess
-          from pathlib import Path
-          root = Path.cwd().resolve()
-          binary = root / 'out' / os.environ['STAGED_BINARY']
-          version = json.loads((root / 'package.json').read_text())['version']
-          work = Path(os.environ['RUNNER_TEMP']) / 'staged-mcp-smoke'
-          work.mkdir()
-          if any((parent / '.env').exists() for parent in [work, *work.parents]):
-              raise SystemExit('The isolated MCP smoke cwd must have no ancestor .env')
-          env = {key: value for key, value in os.environ.items() if key not in ('HYPER_API_KEY', 'SCRAPFLY_API_KEY', 'TURBO_SURF_SOLVER', 'TURBO_SURF_BROWSER_CMD')}
-          request = {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2024-11-05', 'capabilities': {}, 'clientInfo': {'name': 'release-smoke', 'version': '1'}}}
-          child = subprocess.Popen([str(binary)], cwd=work, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=os.name != 'nt')
-          timed_out = False
-          try:
-              stdout, stderr = child.communicate(json.dumps(request) + '\n', timeout=60)
-          except subprocess.TimeoutExpired:
-              timed_out = True
-              if os.name == 'nt':
-                  child.kill()
-              else:
-                  os.killpg(child.pid, signal.SIGKILL)
-              stdout, stderr = child.communicate()
-          proof = root / 'smoke-proof'
-          proof.mkdir()
-          (proof / 'stdout.log').write_text(stdout)
-          (proof / 'stderr.log').write_text(stderr)
-          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'binary': str(binary), 'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'cwd': str(work), 'timeoutSeconds': 60, 'timedOut': timed_out, 'exitCode': child.returncode, 'expectedVersion': version}
-          (proof / 'initialize.json').write_text(json.dumps(receipt, indent=2) + '\n')
-          if timed_out or child.returncode != 0:
-              raise SystemExit('Staged MCP initialization failed; see smoke-proof')
-          rows = [json.loads(line) for line in stdout.splitlines() if line.strip()]
-          if len(rows) != 1 or rows[0].get('jsonrpc') != '2.0' or rows[0].get('id') != 1 or 'error' in rows[0] or rows[0].get('result', {}).get('serverInfo') != {'name': 'turbo-surf', 'version': version}:
-              raise SystemExit('Staged MCP initialize response does not match the release')
-          receipt['initializeVerified'] = True
-          (proof / 'initialize.json').write_text(json.dumps(receipt, indent=2) + '\n')
-          print(json.dumps(receipt, indent=2))
-          PYCODE
+          version=$(python -c "import json; print(json.load(open('package.json'))['version'])")
+          python scripts/smoke-mcp-release.py \
+            --binary "$PWD/out/$STAGED_BINARY" --expected-version "$version" \
+            --source-commit "$GITHUB_SHA" --work "$RUNNER_TEMP/staged-mcp-smoke" \
+            --output "$PWD/smoke-proof"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -214,28 +183,25 @@ jobs:
           for name in bins - {'turbo-surf-mcp-win32-x64.exe'}:
               if not (installed / 'bin' / name).stat().st_mode & 0o111:
                   raise SystemExit('Packed native binary lost executable permissions: ' + name)
-          env = {key: value for key, value in os.environ.items() if key not in ('HYPER_API_KEY', 'SCRAPFLY_API_KEY', 'TURBO_SURF_SOLVER', 'TURBO_SURF_BROWSER_CMD')}
-          request = {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2024-11-05', 'capabilities': {}, 'clientInfo': {'name': 'npm-release-smoke', 'version': '1'}}}
-          child = subprocess.Popen([shutil.which('node'), str(installed / 'cli.js')], cwd=work, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
-          timed_out = False
-          try:
-              stdout, stderr = child.communicate(json.dumps(request) + '\n', timeout=60)
-          except subprocess.TimeoutExpired:
-              timed_out = True
-              # The packaged Node launcher owns a native child in this same group.
-              os.killpg(child.pid, signal.SIGKILL)
-              stdout, stderr = child.communicate()
-          (output / 'initialize.stdout.log').write_text(stdout)
-          (output / 'initialize.stderr.log').write_text(stderr)
-          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'archive': str(archive), 'sha256': hashlib.sha256(archive_bytes).hexdigest(), 'integrity': integrity, 'version': version, 'fileSha256': hashes, 'cli': str(installed / 'cli.js'), 'cwd': str(work), 'timeoutSeconds': 60, 'timedOut': timed_out, 'exitCode': child.returncode}
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('release_smoke', root / 'scripts/smoke-mcp-release.py')
+          smoke = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(smoke)
+          for name in ('SIGINT', 'SIGTERM', 'SIGHUP'):
+              if hasattr(signal, name):
+                  signal.signal(getattr(signal, name), smoke.interrupted)
+          smoke_output = output / 'javascript-smoke'
+          receipt = smoke.smoke([shutil.which('node'), str(installed / 'cli.js')], version,
+              os.environ['GITHUB_SHA'], Path(os.environ['RUNNER_TEMP']) / 'npm-javascript-smoke', smoke_output)
+          for stream in ('stdout', 'stderr'):
+              log = smoke_output / (stream + '.log')
+              if log.is_file():
+                  shutil.copyfile(log, output / ('initialize.' + stream + '.log'))
+          receipt.update(archive=str(archive), sha256=hashlib.sha256(archive_bytes).hexdigest(),
+              integrity=integrity, version=version, fileSha256=hashes, cli=str(installed / 'cli.js'))
           (output / 'initialize.json').write_text(json.dumps(receipt, indent=2) + '\n')
-          if timed_out or child.returncode != 0:
-              raise SystemExit('Packaged npm CLI initialization failed; see retained package evidence')
-          rows = [json.loads(line) for line in stdout.splitlines() if line.strip()]
-          if len(rows) != 1 or rows[0].get('jsonrpc') != '2.0' or rows[0].get('id') != 1 or 'error' in rows[0] or rows[0].get('result', {}).get('serverInfo') != {'name': 'turbo-surf', 'version': version}:
-              raise SystemExit('Packaged npm CLI initialize response does not match the release')
-          receipt['initializeVerified'] = True
-          (output / 'initialize.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          if not receipt['initializeVerified'] or not receipt['javascriptVerified']:
+              raise SystemExit(128 + smoke.STOP if smoke.STOP is not None else 'Packaged npm CLI JavaScript execution failed; see retained package evidence')
           with open(os.environ['GITHUB_ENV'], 'a') as github_env:
               github_env.write('RELEASE_TARBALL=' + str(archive) + '\n')
           print(json.dumps(receipt, indent=2))

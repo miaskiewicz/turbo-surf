@@ -1,0 +1,277 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "6a380fea70ec3fca53f0dc347f081e0d656492897f43deee40f4564c456b4b5a",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "cases": [
+      {
+        "name": "content-box",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 54,
+          "height": 34
+        },
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 54,
+            "height": 34
+          }
+        ],
+        "client": [2, 2, 50, 30],
+        "offset": [54, 34]
+      },
+      {
+        "name": "border-box",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 40,
+          "height": 20
+        },
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 40,
+            "height": 20
+          }
+        ],
+        "client": [2, 2, 36, 16],
+        "offset": [40, 20]
+      },
+      {
+        "name": "translate-scale",
+        "rect": {
+          "x": 3,
+          "y": 7,
+          "width": 108,
+          "height": 68
+        },
+        "rects": [
+          {
+            "x": 3,
+            "y": 7,
+            "width": 108,
+            "height": 68
+          }
+        ],
+        "client": [2, 2, 50, 30],
+        "offset": [54, 34]
+      },
+      {
+        "name": "fractional",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 44.75,
+          "height": 25
+        },
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 44.75,
+            "height": 25
+          }
+        ],
+        "client": [1, 1, 43, 23],
+        "offset": [45, 25]
+      },
+      {
+        "name": "hidden",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 40,
+          "height": 20
+        },
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 40,
+            "height": 20
+          }
+        ],
+        "client": [0, 0, 40, 20],
+        "offset": [40, 20]
+      },
+      {
+        "name": "transparent",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 40,
+          "height": 20
+        },
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 40,
+            "height": 20
+          }
+        ],
+        "client": [0, 0, 40, 20],
+        "offset": [40, 20]
+      },
+      {
+        "name": "display-none",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "rects": [],
+        "client": [0, 0, 0, 0],
+        "offset": [0, 0]
+      },
+      {
+        "name": "margin",
+        "rect": {
+          "x": 7,
+          "y": 3,
+          "width": 40,
+          "height": 20
+        },
+        "rects": [
+          {
+            "x": 7,
+            "y": 3,
+            "width": 40,
+            "height": 20
+          }
+        ],
+        "client": [0, 0, 40, 20],
+        "offset": [40, 20]
+      }
+    ],
+    "mutation": {
+      "before": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 40,
+          "height": 20
+        },
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 40,
+            "height": 20
+          }
+        ],
+        "client": [0, 0, 40, 20],
+        "offset": [40, 20]
+      },
+      "after": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 63,
+          "height": 20
+        },
+        "rects": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 63,
+            "height": 20
+          }
+        ],
+        "client": [0, 0, 63, 20],
+        "offset": [63, 20]
+      }
+    },
+    "adoption": {
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 63,
+        "height": 37
+      },
+      "rects": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 63,
+          "height": 37
+        }
+      ],
+      "client": [0, 0, 63, 37],
+      "offset": [63, 37]
+    },
+    "privateReads": {
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 63,
+        "height": 37
+      },
+      "rects": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 63,
+          "height": 37
+        }
+      ],
+      "client": [0, 0, 63, 37],
+      "offset": [63, 37]
+    },
+    "list": {
+      "tag": "[object DOMRectList]",
+      "prototype": true,
+      "array": false,
+      "length": 1,
+      "indexEqualsItem": true,
+      "nullOutOfBounds": true,
+      "indexTag": "[object DOMRect]",
+      "keys": ["0"],
+      "descriptors": [
+        ["length", true, true, null],
+        ["item", true, true, true],
+        ["constructor", false, true, true]
+      ]
+    },
+    "errors": ["TypeError", "TypeError", "TypeError", "TypeError", "TypeError", "TypeError"],
+    "detached": {
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "rects": [],
+      "client": [0, 0, 0, 0],
+      "offset": [0, 0]
+    },
+    "inert": {
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "rects": [],
+      "client": [0, 0, 0, 0],
+      "offset": [0, 0]
+    }
+  }
+}

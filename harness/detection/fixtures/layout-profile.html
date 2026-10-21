@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Native layout capture profile control</title>
+<style>
+  body { margin: 0; }
+  .controller { width: 120px; height: 8px; margin-left: 2px; }
+  .controller:nth-child(2n) { width: 100px; }
+  .controller:hover { height: 10px; }
+  .controller:focus { height: 12px; }
+</style>
+<body>
+<script>
+  const fragment = document.createDocumentFragment();
+  for (let index = 0; index < 100; index++) {
+    const node = document.createElement("div");
+    node.className = "controller";
+    node.setAttribute("jscontroller", "fixture");
+    fragment.appendChild(node);
+  }
+  document.body.appendChild(fragment);
+  let measured = 0;
+  let totalWidth = 0;
+  for (const node of document.querySelectorAll("[jscontroller]")) {
+    totalWidth += node.getBoundingClientRect().width;
+    measured++;
+  }
+  globalThis.__browserFixture = { measured, totalWidth };
+</script>

@@ -7,30 +7,65 @@ repository.workspace = true
 description = "turbo-surf JS-execution tier (tier 3): deno_core isolate + rtdom↔V8 DOM binding"
 
 [dependencies]
-deno_core = "0.404"
+deno_core = { package = "turbo-surf-deno-core", version = "=0.412.0" }
+# Official native WebCrypto and its lazy Web IDL/console dependencies share the
+# existing deno_core/V8 facade; they do not replace the rtdom DOM globals.
+deno_crypto = { package = "turbo-surf-deno-crypto", version = "=0.273.0" }
+deno_web = { package = "turbo-surf-deno-web", version = "=0.290.0" }
+deno_webidl = { package = "turbo-surf-deno-webidl", version = "=0.259.0" }
+# X-Wing uses the same reviewed primitives already pulled in by deno_crypto.
+fips203 = "=0.4.3"
+x25519-dalek = "=2.0.1"
+sha3 = "=0.10.9"
+zeroize = "1"
+subtle = "2"
 # Error type for the ESM ModuleLoader (deno_core's ModuleLoaderError = deno_error::JsErrorBox);
-# pinned to the version deno_core 0.404 resolves so the types unify.
+# pinned to the version deno_core 0.412 resolves so the types unify.
 deno_error = "=0.7.1"
-# Direct v8 dep so the verbatim vendored `browser_env_upstream.rs` (which references
-# the `v8` crate by its bare name) compiles. Pinned to the exact version deno_core
-# resolves so both share one v8 — the binding installs into deno_core's own context.
-v8 = "=149.4.0"
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.1" }
+# Use deno_core's facade for the binding's bare `v8` imports as well. The facade's
+# V8 backend uses official rusty_v8 150.4; mixing in a second native V8 library
+# would make the DOM handles incompatible with the runtime's context.
+v8 = { package = "turbo-surf-deno-v8", version = "=0.4.0" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.7" }
+# Public live-tree snapshots preserve source provenance without HTML serialization.
+# Published0.3.8 includes the composed-layout and shared-font producer fixes.
+turbo-html2pdf-core = { version = "0.3.8" }
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
-# fetch backend, so downstream non-binary consumers (the PyO3 wheel) don't drag it in
-# and need a C toolchain. The shipped mcp binary still gets impersonate — it requests
+# fetch backend, so downstream non-binary consumers (the PyO3 wheel) avoid its
+# extra transport build. V8, native crypto and audio still require native toolchains.
+# The shipped mcp binary gets impersonate — it requests
 # `turbo-surf-core/impersonate` explicitly (its own default).
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.3", default-features = false }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.4", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+url = "2"
+psl = "2"
+sfv = "=0.15.0"
+encoding_rs = "0.8"
+getrandom = "0.4"
+# Chrome 155 Blink uses this exact RustFFT implementation for PeriodicWave.
+rustfft = "=6.4.1"
 # base64-encode raster PNG bytes for the toDataURL op boundary (op returns a base64 string).
 base64 = "0.22"
+# CSP hash-source checks operate on the parser's actual UTF-8 script text.
+sha2 = "0.10"
+# Resource loads decode actual image bytes before reporting dimensions/load success.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# The canonical DOM binding validates CSS grammar before building its CSSOM facade.
+lightningcss = { version = "1.0.0-alpha.71", default-features = false }
+cssparser = "0.37"
 # For the async `RecaptchaEngine` trait impl (same trait style as turbo-surf-core).
 async-trait = "0.1"
 # The reCAPTCHA engine drives the (`!Send`) deno_core render on a dedicated thread with
 # its own current-thread runtime, and returns the token over a oneshot channel — so the
 # engine/solver future stays `Send`. rt/time/net/io-util back deno_core's op_fetch loop.
-tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "net", "io-util"] }
+
+[build-dependencies]
+cc = "1"
 
 [dev-dependencies]
+httpdate = "1"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }
+
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

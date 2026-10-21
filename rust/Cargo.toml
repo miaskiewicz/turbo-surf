@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["vendor/deno_crypto", "vendor/rusty_v8"]
 members = [
     "crates/turbo-surf-core",
     "crates/turbo-surf-napi",
@@ -14,7 +15,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.5.3"
+version = "0.5.4"
 license = "MIT"
 repository = "https://github.com/miaskiewicz/turbo-surf"
 
@@ -25,22 +26,3 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 [profile.release]
 opt-level = 3
 lto = "thin"
-
-# Vendored fork of wreq (6.0.0-rc.29): adds a `trust_anchors` field to `TlsOptions`
-# + a builder method, and applies it via BoringSSL's
-# `SSL_CTX_set1_requested_trust_anchors` in `tls/conn.rs`, so we can emit Chrome
-# 152+'s `trust_anchors` ClientHello extension (codepoint 0xCA34). Gated in
-# turbo-surf-core behind the (off-by-default) `trust-anchors` feature; the field is
-# inert (`None`) otherwise, so the default build behaves exactly as stock wreq. The
-# diff lives under vendor/wreq — see the "turbo-surf patch" comments in tls.rs and
-# tls/conn.rs.
-#
-# NOTE: the Chrome request-#1 network-fingerprint fixes (HEADERS priority weight
-# 220 -> 256, `upgrade-insecure-requests`, the Chrome header ORDER, and dropping
-# high-entropy client hints from a cold request) are NOT patched into wreq-util —
-# they all live in turbo-surf-core's net.rs `emulate()`, which tunes the resolved
-# `Emulation` (its public `headers`/`orig_headers`/`http2_options` fields). Keeping
-# them there (rather than a vendored wreq-util) means they survive a stock wreq-util
-# and reach crates.io consumers of turbo-surf-core.
-[patch.crates-io]
-wreq = { path = "vendor/wreq" }

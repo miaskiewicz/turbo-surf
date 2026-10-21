@@ -1,0 +1,93 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "1bd9fe89935feec3e5912b99176cd64edcb85eae6aa0de504a62ab3461bfc2fe",
+  "result": {
+    "setOrder": [["dup", "replacement"], ["other", "middle"]],
+    "members": {
+      "formdata": [
+        "append",
+        "delete",
+        "get",
+        "getAll",
+        "has",
+        "set",
+        "entries",
+        "forEach",
+        "keys",
+        "values",
+        "constructor",
+        "Symbol(Symbol.toStringTag)",
+        "Symbol(Symbol.iterator)"
+      ],
+      "file": [
+        "name",
+        "lastModified",
+        "lastModifiedDate",
+        "webkitRelativePath",
+        "constructor",
+        "Symbol(Symbol.toStringTag)"
+      ]
+    },
+    "date": {
+      "millis": 42,
+      "fresh": true
+    },
+    "cross": {
+      "distinct": true,
+      "name": "foreign",
+      "same": true,
+      "retained": "ok",
+      "retainedName": "foreign"
+    },
+    "poisoned": {
+      "value": ["dup", "replacement"],
+      "brand": "TypeError"
+    },
+    "first": {
+      "done": false,
+      "value": ["dup", "replacement"]
+    },
+    "remaining": [["other", "middle"], ["usv�", "v�"], ["late", "value"]],
+    "done": {
+      "done": true
+    },
+    "finalDone": {
+      "done": false,
+      "value": ["after-done", "x"]
+    },
+    "values": [
+      {
+        "key": "file",
+        "name": "original",
+        "size": 2,
+        "type": "",
+        "same": true,
+        "modified": 42
+      },
+      {
+        "key": "renamed",
+        "name": "new",
+        "size": 2,
+        "type": "",
+        "same": false,
+        "modified": 42
+      },
+      {
+        "key": "blob",
+        "name": "blob",
+        "size": 1,
+        "type": "text/plain",
+        "same": false,
+        "modified": "clock"
+      }
+    ],
+    "errors": ["TypeError", "TypeError", "TypeError", "TypeError", "TypeError"],
+    "foreach": [["a", "1", true], ["b", "2", true]],
+    "own": [],
+    "tag": "[object FormData]",
+    "iteratorTag": "[object FormData Iterator]",
+    "descriptor": false,
+    "alias": true
+  }
+}

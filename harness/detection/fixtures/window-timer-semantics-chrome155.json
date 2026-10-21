@@ -1,0 +1,53 @@
+{
+  "browser": "Chrome/155.0.8059.85",
+  "v8": "15.5.35.25",
+  "sourceHashes": {
+    "window-timer-semantics-chrome.mjs": "b791e5dd27eae511ab6c54f0c9ff45954a483ff09c4abcff3e23783d26c545a9",
+    "window-timer-semantics-probe.js": "1f0a569bb175d9d15958f4026aa18178fe97af849aeaf588345485beb029cbd6",
+    "window-timer-semantics.html": "87fc84585c06abfb7358d6c1d26fbb3aa91863b919a9cd12233593d860092084",
+    "chrome-cdp-trace.mjs": "e940b655785f6e28bbc981b86c7c62770375c1adc12e596785f8e59ab1ef7308",
+    "observation-window.mjs": "e352eea8fe8d7760c949b49abf54e84f9582f891e9f7ea4edd7cbf493d4f0be8",
+    "main-navigation.mjs": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",
+    "collector-lifecycle.mjs": "2bdf67c2680b1b7b7fad2c5cbe818995312d3108043b6485e7f334f8372ecd8f"
+  },
+  "errors": [],
+  "result": {
+    "semantics": {
+      "initialCheckpoint": ["first", "microtask", "deep microtask", "observer", "second"],
+      "initialRealmOrder": ["frame", "parent"],
+      "cancellations": [false, false],
+      "intervalCancellation": 1,
+      "mathReplacement": {
+        "created": true,
+        "fired": true
+      }
+    },
+    "protocol": {
+      "requestedDelayMs": 0,
+      "cycles": 12,
+      "initialParentDelayMs": 100,
+      "resetSource": "MessageChannel"
+    },
+    "timing": {
+      "direct": [0, 0, 0, 0, 0, 0, 4.599999964237213, 4.5, 4.5, 4.5, 4.5, 4.600000023841858],
+      "promise": [
+        0, 0, 0, 0.09999996423721313, 0, 0, 4.5, 4.5, 4.600000023841858, 4.5, 4.5, 4.599999964237213
+      ],
+      "queueMicrotask": [
+        0.10000002384185791, 0, 0, 0, 0, 0, 4.5, 4.5, 4.600000023841858, 4.5, 4.599999964237213, 4.5
+      ],
+      "crossRealm": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "crossRealmPromise": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "crossRealmQueueMicrotask": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.10000002384185791],
+      "interval": [
+        0, 0, 0, 0, 0, 0, 4.599999964237213, 4.600000023841858, 3.399999976158142, 4.5, 3.5, 4.5
+      ]
+    },
+    "pageState": {
+      "visibility": "visible",
+      "hidden": false,
+      "focused": false
+    }
+  },
+  "scope": "Genuine localhost task semantics and observed nesting delays. Timing is not an execution-time guarantee."
+}

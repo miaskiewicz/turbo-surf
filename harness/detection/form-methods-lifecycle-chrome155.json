@@ -1,0 +1,60 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "494dfb74574ed43ef265698743d9472289020ad08da2382edab5e23fd58adff4",
+  "probeSha256": "30b3928c6d327ec1df35ad41087949fa262831a9e636f43857a8aa3b29e35e08",
+  "collectorSha256": "e05506ca8896f15986cb92bdf3d8e8d41f32d5298760c2415bd229bca3df24ab",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "validation-and-request-submission",
+      "result": {
+        "first": {
+          "rows": [
+            {
+              "kind": "released",
+              "alive": [false, false, false, false, false]
+            },
+            {
+              "kind": "validity",
+              "alive": [true, true, true, true, false]
+            },
+            {
+              "kind": "event",
+              "alive": [true, true, true, true, true]
+            }
+          ],
+          "retainedValidity": true,
+          "retainedSubmitter": "field"
+        },
+        "afterRelease": {
+          "rows": [
+            {
+              "kind": "released",
+              "alive": [false, false, false, false, false]
+            },
+            {
+              "kind": "validity",
+              "alive": [false, false, false, false, false]
+            },
+            {
+              "kind": "event",
+              "alive": [false, false, false, false, false]
+            }
+          ],
+          "retainedValidity": null,
+          "retainedSubmitter": null
+        }
+      }
+    }
+  ]
+}

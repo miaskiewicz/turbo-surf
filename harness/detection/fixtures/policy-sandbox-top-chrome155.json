@@ -1,0 +1,329 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "d2ee8bb8c1998f477683d682e83ad5cf113d0da8033996a2bc214492c739807e",
+  "probeSha256": "998fdc0e1c7e3d1b2109158b41d6fa3afbf668b669259dd9ce04cc4855841c11",
+  "collectorSha256": "d258e82d4b79e3752baa6d87b5eb6b76773d0ed881ab387d74d541c4d969ab64",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "sharedClone": null,
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          }
+        ],
+        "origin": "<127.0.0.1>",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": false,
+        "script": true,
+        "handler": true,
+        "cookie": null,
+        "storage": null
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "sharedClone": null,
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          }
+        ],
+        "origin": "null",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": false,
+        "script": false,
+        "handler": false,
+        "cookie": "SecurityError",
+        "storage": "SecurityError"
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "sharedClone": null,
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          }
+        ],
+        "origin": "null",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": false,
+        "script": true,
+        "handler": true,
+        "cookie": "SecurityError",
+        "storage": "SecurityError"
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "sharedClone": null,
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          }
+        ],
+        "origin": "<127.0.0.1>",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": false,
+        "script": false,
+        "handler": false,
+        "cookie": null,
+        "storage": null
+      }
+    },
+    {
+      "id": "4",
+      "result": {
+        "sharedClone": null,
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          }
+        ],
+        "origin": "<127.0.0.1>",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": false,
+        "script": true,
+        "handler": true,
+        "cookie": null,
+        "storage": null
+      }
+    },
+    {
+      "id": "5",
+      "result": {
+        "sharedClone": null,
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          }
+        ],
+        "origin": "null",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": false,
+        "script": false,
+        "handler": false,
+        "cookie": "SecurityError",
+        "storage": "SecurityError"
+      }
+    },
+    {
+      "id": "6",
+      "result": {
+        "sharedClone": null,
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          }
+        ],
+        "origin": "<127.0.0.1>",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": false,
+        "script": true,
+        "handler": true,
+        "cookie": null,
+        "storage": null
+      }
+    },
+    {
+      "id": "7",
+      "result": {
+        "sharedClone": null,
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": ["<127.0.0.1>"]
+          }
+        ],
+        "origin": "<127.0.0.1>",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": false,
+        "script": false,
+        "handler": false,
+        "cookie": null,
+        "storage": null
+      }
+    },
+    {
+      "id": "8",
+      "result": {
+        "sharedClone": {
+          "brand": "[object SharedArrayBuffer]",
+          "sameIdentity": false,
+          "sharedByte": 11
+        },
+        "features": [
+          {
+            "name": "geolocation",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          },
+          {
+            "name": "camera",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          },
+          {
+            "name": "cross-origin-isolated",
+            "self": true,
+            "nullTarget": false,
+            "list": []
+          }
+        ],
+        "origin": "null",
+        "locationOrigin": "<127.0.0.1>",
+        "secure": true,
+        "isolated": true,
+        "script": true,
+        "handler": true,
+        "cookie": "SecurityError",
+        "storage": "SecurityError"
+      }
+    }
+  ]
+}

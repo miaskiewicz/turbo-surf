@@ -1,0 +1,152 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "f9994e555b1be0b526f3c0f9896cb718d7d7498555b4559fc0157a825a0b62a1",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "events": {
+      "local": [
+        {
+          "key": [107, 55296],
+          "old": null,
+          "new": [118, 56320],
+          "trusted": true,
+          "target": true,
+          "area": "local",
+          "url": "http://127.0.0.1:PORT/"
+        },
+        {
+          "key": [107, 55296],
+          "old": [118, 56320],
+          "new": [110, 101, 120, 116],
+          "trusted": true,
+          "target": true,
+          "area": "local",
+          "url": "http://127.0.0.1:PORT/"
+        },
+        {
+          "key": [107, 55296],
+          "old": [110, 101, 120, 116],
+          "new": null,
+          "trusted": true,
+          "target": true,
+          "area": "local",
+          "url": "http://127.0.0.1:PORT/"
+        },
+        {
+          "key": [111, 116, 104, 101, 114],
+          "old": null,
+          "new": [111, 110, 101],
+          "trusted": true,
+          "target": true,
+          "area": "local",
+          "url": "http://127.0.0.1:PORT/"
+        },
+        {
+          "key": null,
+          "old": null,
+          "new": null,
+          "trusted": true,
+          "target": true,
+          "area": "local",
+          "url": "http://127.0.0.1:PORT/"
+        }
+      ],
+      "session": [
+        {
+          "key": [115, 101, 115, 115, 105, 111, 110],
+          "old": null,
+          "new": [116, 119, 111],
+          "trusted": true,
+          "target": true,
+          "area": "session",
+          "url": "http://127.0.0.1:PORT/"
+        }
+      ]
+    },
+    "self": ["child-source"],
+    "shape": {
+      "handler": {
+        "local": [
+          [[107, 55296], true, true, "local"],
+          [[107, 55296], true, true, "local"],
+          [[107, 55296], true, true, "local"],
+          [[111, 116, 104, 101, 114], true, true, "local"],
+          [null, true, true, "local"]
+        ],
+        "session": [[[115, 101, 115, 115, 105, 111, 110], true, true, "session"]]
+      },
+      "handlerInitial": true,
+      "childSource": [
+        {
+          "key": "child-source",
+          "url": "about:blank",
+          "area": true
+        }
+      ],
+      "childSelf": [],
+      "borrowedShape": {
+        "same": true,
+        "prototype": true
+      },
+      "legacyShape": {
+        "initial": {
+          "type": "",
+          "key": null,
+          "old": null,
+          "new": null,
+          "url": "",
+          "area": null,
+          "trusted": false
+        },
+        "initialized": ["legacy", true, true, "key", "old", "new", "url", true],
+        "foreign": true
+      },
+      "conversion": [
+        "type",
+        "bubbles",
+        "cancelable",
+        "composed",
+        "key",
+        "newValue",
+        "oldValue",
+        "storageArea",
+        "url"
+      ],
+      "nullURL": "null",
+      "members": [
+        ["key", true, true, null, 0],
+        ["oldValue", true, true, null, 0],
+        ["newValue", true, true, null, 0],
+        ["url", true, true, null, 0],
+        ["storageArea", true, true, null, 0],
+        ["initStorageEvent", true, true, true, 1],
+        ["constructor", false, true, true, 1]
+      ],
+      "globalFlags": [true, false, true],
+      "constructorLength": 1,
+      "constructorParent": true,
+      "prototypeParent": true,
+      "ctorNative": true,
+      "tag": "[object StorageEvent]",
+      "authored": {
+        "key": 55296,
+        "old": "7",
+        "url": "x�",
+        "trusted": false,
+        "area": true
+      },
+      "brands": ["TypeError", "TypeError", "TypeError", "TypeError"]
+    }
+  }
+}

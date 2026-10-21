@@ -34,7 +34,9 @@ pip install turbo-surf
 ```
 
 Prebuilt abi3 wheels (CPython 3.8+) are published for Linux (x86_64/aarch64),
-macOS (arm64), and Windows (x64).
+macOS (arm64), and Windows (x64). Linux wheels require glibc 2.28 or later
+(`manylinux_2_28`). The CPython 3.8+ abi3 contract is unchanged; it does not imply
+compatibility with older Linux C libraries.
 
 ## API
 

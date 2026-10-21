@@ -1,0 +1,78 @@
+{
+  "chromeVersion": "155.0.8059.40",
+  "sourceRoot": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/",
+  "originalFiles": [
+    {
+      "path": "third_party/blink/renderer/platform/audio/dynamics_compressor.cc",
+      "sha256": "14f1ac7ee487ba94d6f244b0efbad5c27c7cbf36ea9aa7abdeab7bf1f1f6e86a"
+    },
+    {
+      "path": "third_party/blink/renderer/platform/audio/dynamics_compressor.h",
+      "sha256": "3db6b7dce689adf832d2f5d6cfe2f0feff1e814138cbd3b2c3ebe37b4e865576"
+    },
+    {
+      "path": "third_party/fdlibm/ieee754.cc",
+      "sha256": "661b229dd99d262594df7a25d1c709d63f0af202c9bae252b3cabbaeb27d7d2f"
+    },
+    {
+      "path": "third_party/fdlibm/ieee754.h",
+      "sha256": "67ac025f301eb38f63a4523f94f0cc30a4c0aa2f441f40f6e139026a84d49072"
+    },
+    {
+      "path": "third_party/fdlibm/overflowing-math.h",
+      "sha256": "7f4aa5f970161181a698e9c70a9d1015fd04ce6be5e281e79ff1abfebf1cfc42"
+    }
+  ],
+  "rustfft": {
+    "version": "6.4.1",
+    "source": "third_party/blink/renderer/platform/audio/rustfft_ffi.rs",
+    "adaptation": "CXX bridge removed; forward/inverse implementation preserved; dead-code allowance for unused forward path",
+    "originalSha256": "52a5317f5074fcfa50dedb7aac8b88cdfd007c75e01f4438a27e144cd613400d",
+    "adaptedSha256": "b4b5d2add81728505df2e31ef93d8375c8fddd6872b2b92a7cdca70dbf0a547b"
+  },
+  "adapters": "Other native headers are bounded standalone adapters for the unchanged compressor, not Chromium source. The local base/bit_cast.h adapter preserves std::bit_cast when available and uses equal-size, trivially-copyable checked runtime memcpy conversions when older manylinux standard libraries omit it; no upstream audio algorithm or license is changed.",
+  "portedSources": [
+    {
+      "path": "third_party/blink/renderer/modules/webaudio/periodic_wave.cc",
+      "sha256": "e0618f1f7596329522da6d19452ba39750efac38cccfe220c022298655dc65fe",
+      "adaptation": "Rust audio_dsp.rs bounded offline oscillator, no source-generated or fixed waveform outputs",
+      "storedPath": "upstream/periodic_wave.cc"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/webaudio/oscillator_handler.cc",
+      "sha256": "b6ae1efa2314ea66746c632abfcd3340c05adb207cd973a54514f197c5acbd92",
+      "adaptation": "Rust audio_dsp.rs bounded offline oscillator, no source-generated or fixed waveform outputs",
+      "storedPath": "upstream/oscillator_handler.cc"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/webaudio/cpu/arm/oscillator_kernel_neon.cc",
+      "sha256": "1fc3990f7c13f91a3c6d8506cd257bfb29cddec9929e67512b8319166001b7da",
+      "adaptation": "Rust audio_dsp.rs bounded offline oscillator, no source-generated or fixed waveform outputs",
+      "storedPath": "upstream/oscillator_kernel_neon.cc"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/webaudio/audio_param_handler.cc",
+      "sha256": "9735c5fe6d68e08924be63331546a4f575e5fbe7a7fbd78e018d8b3e2a31d44f",
+      "adaptation": "Bounded native AudioParam scheduling and buffer playback in audio_timeline.rs/audio_buffer.rs; original preserved under native/audio/upstream",
+      "storedPath": "upstream/audio_param_handler.cc"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/webaudio/audio_buffer_source_handler.cc",
+      "sha256": "646b7dd906715a3196bc29aa4bad1077a870400e9ccb73a4134668cc84fc0f73",
+      "adaptation": "Bounded native AudioParam scheduling and buffer playback in audio_timeline.rs/audio_buffer.rs; original preserved under native/audio/upstream",
+      "storedPath": "upstream/audio_buffer_source_handler.cc"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/webaudio/audio_scheduled_source_handler.cc",
+      "sha256": "3ddc166bcfa186460feee5b817ecf292c16dc392002df2294e4efbf46df80ed0",
+      "adaptation": "Bounded native AudioParam scheduling and buffer playback in audio_timeline.rs/audio_buffer.rs; original preserved under native/audio/upstream",
+      "storedPath": "upstream/audio_scheduled_source_handler.cc"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/webaudio/oscillator_handler.h",
+      "sha256": "039a9d1f4c7bef660b3051c534a7ec7b48f78d3d82c04ee145cc60498ab5655c",
+      "storedPath": "upstream/oscillator_handler.h",
+      "adaptation": "Immutable interpolation threshold and lifecycle reference"
+    }
+  ]
+}

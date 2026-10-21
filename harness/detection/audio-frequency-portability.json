@@ -1,0 +1,74 @@
+{
+  "scope": "Authored adapter portability fix; exact independent macOS ARM Chrome assertions retained on every platform. Linux Chrome browser output remains unmeasured (issue27).",
+  "referenceFixture": "harness/detection/fixtures/audio-effects-frequency-chrome155.json",
+  "referenceFixtureSha256": "93bb060fb51c0ba27bb3cd855d8c5aa2646817a987901eedece725f2b909f912",
+  "grid": {
+    "filters": 8,
+    "frequencies": 11,
+    "outputsPerFrequency": 2,
+    "totalCells": 176,
+    "finiteCells": 112,
+    "linuxDifferentFiniteCellsBeforeFix": 39,
+    "linuxMaximumFloat32UlpsBeforeFix": 2,
+    "differentFiniteCellsAfterFix": 0
+  },
+  "platforms": {
+    "macOS-arm64": "Exact finite values; signed zero compares equal",
+    "macOS-x86_64-Rosetta": "Exact finite values; signed zero compares equal",
+    "linux-x86_64": "GCC14.4.0 fixed adapter; all112finite cells exact and64NaN cells preserved"
+  },
+  "container": {
+    "image": "gcc:14",
+    "digest": "sha256:6f37e44a9b41181de5dd97366ec732652f5d895a72b5549c64694efed50a97e8",
+    "network": "none",
+    "sourceMount": "read-only"
+  },
+  "diagnostic": {
+    "expression": "exp2(detune/1200), detune=float(120)",
+    "ratio": 0.10000000149011612,
+    "macOSResultTypeBytes": 4,
+    "macOSResult": 1.0717734098434448,
+    "linuxResultTypeBytes": 8,
+    "linuxResult": 1.0717734636432956,
+    "explanation": "Unqualified cmath exp2 selected float on macOS and double on Linux. Explicit std::exp2 preserves the float overload on all targets."
+  },
+  "fix": "Qualify std::exp2(float), ensuring the same float overload on macOS Clang and Linux GCC.",
+  "fixedAdapterSha256": "d8cff54135441ce41644631cbf4fd687bd83671d8dcf44bbde020c672de00346",
+  "fixedReferenceResults": [
+    {
+      "arch": "arm64",
+      "differences": [],
+      "nanCells": 64,
+      "equivalentSignedZeroCells": 1
+    },
+    {
+      "arch": "x86_64",
+      "differences": [],
+      "nanCells": 64,
+      "equivalentSignedZeroCells": 1
+    },
+    {
+      "arch": "linux-x86_64",
+      "differences": [],
+      "nanCells": 64,
+      "equivalentSignedZeroCells": 1
+    }
+  ],
+  "sourceHashesBeforeFix": [
+    {
+      "path": "rust/crates/turbo-surf-render/native/audio/effects/biquad.cc",
+      "sha256": "4e055960164e1d1bfe359efcd15b06c6510700b65139f5feb923f357033239c6",
+      "matchesExistingProofSource": true
+    },
+    {
+      "path": "rust/crates/turbo-surf-render/native/audio/effects/adapter.cc",
+      "sha256": "72827c078499bee48d7fa0d02ac87fb11588f1cc6f6fab1e351994536661eaea",
+      "matchesExistingProofSource": true
+    },
+    {
+      "path": "rust/crates/turbo-surf-render/native/audio/third_party/fdlibm/ieee754.cc",
+      "sha256": "661b229dd99d262594df7a25d1c709d63f0af202c9bae252b3cabbaeb27d7d2f",
+      "matchesExistingProofSource": true
+    }
+  ]
+}

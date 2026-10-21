@@ -1,0 +1,9 @@
+[
+  {
+    "id": "lifetime",
+    "headers": [
+      ["Content-Security-Policy", "trusted-types default; require-trusted-types-for 'script'"]
+    ],
+    "html": "<!doctype html><html><head></head><body></body></html>"
+  }
+]

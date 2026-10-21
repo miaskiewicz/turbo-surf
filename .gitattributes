@@ -1,0 +1,40 @@
+# Source-hashed authored probes and controls must retain LF on every platform.
+harness/detection/*.js text eol=lf
+harness/detection/*.mjs text eol=lf
+harness/detection/*.json text eol=lf
+harness/detection/fixtures/*.json text eol=lf
+harness/detection/fixtures/*.html text eol=lf
+rust/crates/turbo-surf-render/src/*.js text eol=lf
+rust/crates/turbo-surf-render/src/*.json text eol=lf
+rust/crates/turbo-surf-render/tests/*.rs text eol=lf
+
+# Preserve exact published Deno JS, license and provenance bytes on every checkout.
+rust/crates/turbo-surf-render/src/vendor/deno_extensions/** -text -whitespace
+
+# Preserve the exact published MIT XPath provider and license bytes.
+rust/crates/turbo-surf-render/src/xpath_provider/xpath.js -text -whitespace
+rust/crates/turbo-surf-render/src/xpath_provider/LICENSE -text -whitespace
+/rust/LICENSE -text -whitespace
+
+# Preserve full shipping license/notice payloads exactly across platforms.
+/LICENSE -text -whitespace
+/THIRD_PARTY_NOTICES.md -text -whitespace
+/rust/crates/turbo-surf-core/LICENSE -text -whitespace
+/rust/crates/turbo-surf-page/LICENSE -text -whitespace
+/rust/crates/turbo-surf-view/LICENSE -text -whitespace
+/rust/crates/turbo-surf-render/LICENSE -text -whitespace
+/rust/crates/turbo-surf-raster/LICENSE -text -whitespace
+/rust/crates/turbo-surf-transform/LICENSE -text -whitespace
+/rust/crates/turbo-surf-napi/LICENSE -text -whitespace
+/rust/crates/turbo-surf-py/LICENSE -text -whitespace
+/rust/crates/turbo-surf-mcp/LICENSE -text -whitespace
+/rust/crates/turbo-surf-render/THIRD_PARTY_NOTICES.md -text -whitespace
+/rust/crates/turbo-surf-py/python/turbo_surf/THIRD_PARTY_NOTICES.md -text -whitespace
+
+# Authored Python wheel payloads and smoke receipt hashes use canonical LF.
+rust/crates/turbo-surf-py/tests/test_smoke.py text eol=lf
+rust/crates/turbo-surf-py/python/turbo_surf/__init__.py text eol=lf
+rust/crates/turbo-surf-py/python/turbo_surf/__init__.pyi text eol=lf
+
+# Unified diffs require a space prefix on empty context lines.
+harness/detection/engine-154/patches/*.patch -whitespace

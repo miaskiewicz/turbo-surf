@@ -22,6 +22,9 @@ async fn main() {
         .find(|a| !a.starts_with("--"))
         .expect("usage: fp_snapshot [--render] <collector.js>");
     let collector = fs::read_to_string(path).expect("read collector");
+    // Repository collectors are expressions ending in `;`; parentheses around
+    // that statement terminator would make the async render wrapper invalid JS.
+    let collector = collector.trim().trim_end_matches(';');
     // Side effect: installs set_measure_fn / set_raster_fn (+ set_webgl_fn under gpu-metal).
     let _s = turbo_surf_mcp::Session::new();
     if sync_render {
@@ -68,7 +71,7 @@ async fn main() {
         }
     } else {
         let html = "<html><head></head><body></body></html>";
-        match turbo_surf_render::run_with_dom(html, &collector) {
+        match turbo_surf_render::run_with_dom(html, collector) {
             Ok(json) => println!("{json}"),
             Err(e) => {
                 eprintln!("collector error: {e}");

@@ -1,0 +1,80 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "7d6ef4beb9020eb6f24e6637c6420a345822fe33a0788076d773ac69006c8ea5",
+  "collectorSha256": "579f2152c8ff18f38b6b22f68fcc71fae09795d86801d8a47dd5528c68802f49",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "held": {
+      "status": 200,
+      "length": 16384
+    },
+    "gc": {
+      "status": 200,
+      "length": 16384
+    },
+    "cancel": {
+      "error": "TypeError"
+    },
+    "abort": {
+      "error": "TypeError"
+    },
+    "retire": {
+      "error": "TypeError"
+    },
+    "held-65536": {
+      "status": 200,
+      "length": 65536
+    },
+    "gc-65536": {
+      "status": 200,
+      "length": 65536
+    },
+    "held-262144": {
+      "status": 200,
+      "length": 262144
+    },
+    "gc-262144": {
+      "status": 200,
+      "length": 262144
+    },
+    "held-1048576": {
+      "status": 200,
+      "length": 1048576
+    },
+    "gc-1048576": {
+      "status": 200,
+      "length": 1048576
+    },
+    "held-2097152": {
+      "status": 200,
+      "length": 2097152
+    },
+    "gc-2097152": {
+      "status": 200,
+      "length": 2097152
+    },
+    "gc-absent": {
+      "status": 200,
+      "length": 16384
+    },
+    "gc-no-cache": {
+      "status": 200,
+      "length": 16384
+    },
+    "gc-no-store": {
+      "error": "TypeError"
+    },
+    "holdClosed": 0
+  },
+  "requests": []
+}

@@ -1,0 +1,70 @@
+{
+  "collectedAt": "2026-10-13T23:20:18.271Z",
+  "browserVersion": "Chrome/155.0.8059.79",
+  "collectorSha256": "4894d452fb734f6f862c40c364646b6647a4ccfda432563eaee4b9f07e0356c2",
+  "result": {
+    "constructor": {
+      "error": "TypeError"
+    },
+    "shape": {
+      "port": "[object MessagePort]",
+      "channel": "[object MessageChannel]",
+      "keys": [],
+      "eventTarget": true
+    },
+    "cloneWithoutTransfer": {
+      "error": "DataCloneError",
+      "code": 25
+    },
+    "portBufferDetached": 0,
+    "portBuffer": {
+      "bytes": [1, 2, 3, 4],
+      "alias": true,
+      "ports": 0,
+      "trusted": true,
+      "origin": "",
+      "source": null,
+      "phase": 2
+    },
+    "queueBeforeTurn": [],
+    "movedQueued": ["one", "two"],
+    "retransferDetached": {
+      "error": "DataCloneError",
+      "code": 25
+    },
+    "duplicateAtomic": {
+      "error": "DataCloneError",
+      "code": 25
+    },
+    "duplicateLength": 3,
+    "selfTransfer": {
+      "error": "DataCloneError",
+      "code": 25
+    },
+    "getterFailure": {
+      "error": "RangeError"
+    },
+    "getterFailureState": [1, 2],
+    "windowDetached": [
+      0,
+      {
+        "error": "DataCloneError",
+        "code": 25
+      }
+    ],
+    "windowTransfer": {
+      "payloadPort": true,
+      "portRealm": true,
+      "bytes": [7, 8],
+      "portsFrozen": true,
+      "reply": "reply",
+      "originMatches": true,
+      "source": true,
+      "trusted": true
+    },
+    "originMismatch": [0, 1],
+    "closedTransfer": true
+  },
+  "browserV8Version": "15.5.35.23",
+  "effectiveExtensionFlags": ["--disable-extensions"]
+}

@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "scope": "Saved independent Chrome155 Google capture; no new live traffic, no cookie values or private URLs. Native request logs are explicit-header scope, not all final wire headers.",
+  "chromeTraceSha256": "cd756af418b6a577787391de848e9af4924f154749ebf43d0cb4a7f89a4df511",
+  "headers": {
+    "origin-trial": {
+      "requestCount": 0,
+      "responseCount": 0
+    },
+    "use-as-dictionary": {
+      "requestCount": 0,
+      "responseCount": 3
+    },
+    "available-dictionary": {
+      "requestCount": 87,
+      "responseCount": 0
+    },
+    "dictionary-id": {
+      "requestCount": 0,
+      "responseCount": 0
+    }
+  },
+  "responseEncodings": {
+    "br": 76,
+    "gzip": 19,
+    "dcb": 1
+  },
+  "nativeAuthoredSetter": "rust/crates/turbo-surf-core/src/net.rs:591 base gzip, deflate, br, zstd",
+  "primarySources": [
+    "https://www.rfc-editor.org/rfc/rfc9842.html",
+    "https://chromium.googlesource.com/chromium/src/+/refs/tags/132.0.6833.0/docs/experiments/compression-dictionary-transport.md"
+  ],
+  "boundedGap": "Compression-dictionary Link fetch, validated scoped store, Available-Dictionary negotiation and genuine dcb/dcz decoding; never append unsupported codings.",
+  "dictionaryPrefetchControls": [
+    {
+      "method": "GET",
+      "headerScope": "cdp-extra-info",
+      "headers": {
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "accept": "*/*",
+        "priority": "u=4, i"
+      },
+      "cookiePresent": false,
+      "refererPresent": false,
+      "originPresent": false
+    },
+    {
+      "method": "GET",
+      "headerScope": "cdp-extra-info",
+      "headers": {
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "accept": "*/*",
+        "priority": "u=4, i"
+      },
+      "cookiePresent": false,
+      "refererPresent": false,
+      "originPresent": false
+    },
+    {
+      "method": "GET",
+      "headerScope": "cdp-extra-info",
+      "headers": {
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "accept": "*/*",
+        "priority": "u=4, i"
+      },
+      "cookiePresent": false,
+      "refererPresent": false,
+      "originPresent": false
+    }
+  ],
+  "nativeSourceSha256": "e7e6bb83b7adaa06b99e02f6e745ab5f72fecdc328031edaed07f78b0760a194"
+}

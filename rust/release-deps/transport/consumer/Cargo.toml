@@ -1,0 +1,18 @@
+[package]
+name = "turbo-surf-transport-release-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+prefix-symbols = ["wreq/prefix-symbols"]
+
+[dependencies]
+wreq = { package = "turbo-surf-wreq", version = "=0.16.1", default-features = false, features = ["tokio-rt", "chromium-roots", "stream", "gzip", "brotli", "deflate", "zstd"] }
+wreq-util = { package = "turbo-surf-wreq-util", version = "=0.2.0", features = ["emulation-chromium-pki"] }
+btls = { package = "turbo-surf-btls", version = "=0.5.6" }
+btls-sys = { package = "turbo-surf-btls-sys", version = "=0.5.6" }
+tokio-btls = { package = "turbo-surf-tokio-btls", version = "=0.5.6" }
+tokio = { version = "1", features = ["macros", "rt", "net", "io-util", "time"] }

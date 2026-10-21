@@ -1,11 +1,10 @@
 //! Trusted-`__Secure-ENID` mint + cache for the native google `web_search` path.
 //!
-//! google's `/search` serves the real SERP to a plain NATIVE (no-browser) wreq
-//! request *iff* it carries a **trusted** `__Secure-ENID` cookie; without one it
-//! returns the `enablejs` JS shell. A trusted ENID is minted only by a real
-//! browser's homepage load (the headed Chrome sidecar) but is long-lived (~2027)
-//! and client-agnostic, so we mint it RARELY via the sidecar and reuse it across
-//! many native searches. This module owns:
+//! The configured `mode:"enid"` strategy requires a live cached ENID or invokes
+//! the headed sidecar, then tries a native request. Cookie presence/expiry is
+//! checked here; server trust is not. This is a legacy strategy, not a universal
+//! Google requirement: fresh Chrome can execute a search shell and reach results
+//! without ENID. See harness/detection/FINDINGS.md. This module owns:
 //!   * [`EnidCookie`] — the minted cookie record (persisted + injected into a jar),
 //!   * [`EnidCache`] — a gitignored on-disk cache with `get_valid` / `set`,
 //!   * [`mint_enid_cmd`] — the sidecar `{"mint":true}` contract (env-independent
@@ -42,8 +41,8 @@ fn default_path() -> String {
     "/".to_string()
 }
 
-/// The cookie name that ALONE gates the real SERP (AEC/SOCS are cached too but not
-/// required — see the module doc). A cache without a live one of these is a miss.
+/// The cookie required by this cache policy. A cache without a live one is a
+/// miss; presence is not proof of server trust or a universal SERP requirement.
 pub const ENID_NAME: &str = "__Secure-ENID";
 
 impl EnidCookie {

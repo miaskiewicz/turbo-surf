@@ -1,0 +1,192 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "serverSha256": "4c11e1d561d9663cabcaf1b060e5a228dd557baf57d6e625f606bd07e3192f1c",
+  "probeSha256": "7542f04b5a073455a45b3c3387bd9dc7cdaa7b812531b3ee4643ec8524817bc7",
+  "collectorSha256": "3551df9ebdca966ad4d006d9b8ed168b3267218709acbc23561992564e029643",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "constructor": {
+      "name": "XMLHttpRequest",
+      "length": 0,
+      "prototype": {
+        "writable": false
+      }
+    },
+    "tag": {
+      "value": "XMLHttpRequest",
+      "writable": false,
+      "enumerable": false,
+      "configurable": true
+    },
+    "prototypeBrand": "[object XMLHttpRequest]",
+    "global": {
+      "writable": true,
+      "enumerable": false,
+      "configurable": true
+    },
+    "methods": {
+      "abort": {
+        "value": {
+          "name": "abort",
+          "length": 0
+        },
+        "writable": true,
+        "enumerable": true,
+        "configurable": true
+      },
+      "getAllResponseHeaders": {
+        "value": {
+          "name": "getAllResponseHeaders",
+          "length": 0
+        },
+        "writable": true,
+        "enumerable": true,
+        "configurable": true
+      },
+      "getResponseHeader": {
+        "value": {
+          "name": "getResponseHeader",
+          "length": 1
+        },
+        "writable": true,
+        "enumerable": true,
+        "configurable": true
+      },
+      "open": {
+        "value": {
+          "name": "open",
+          "length": 2
+        },
+        "writable": true,
+        "enumerable": true,
+        "configurable": true
+      },
+      "send": {
+        "value": {
+          "name": "send",
+          "length": 0
+        },
+        "writable": true,
+        "enumerable": true,
+        "configurable": true
+      },
+      "setRequestHeader": {
+        "value": {
+          "name": "setRequestHeader",
+          "length": 2
+        },
+        "writable": true,
+        "enumerable": true,
+        "configurable": true
+      }
+    },
+    "constants": {
+      "UNSENT": {
+        "constructor": {
+          "value": 0,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        },
+        "prototype": {
+          "value": 0,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        }
+      },
+      "OPENED": {
+        "constructor": {
+          "value": 1,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        },
+        "prototype": {
+          "value": 1,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        }
+      },
+      "HEADERS_RECEIVED": {
+        "constructor": {
+          "value": 2,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        },
+        "prototype": {
+          "value": 2,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        }
+      },
+      "LOADING": {
+        "constructor": {
+          "value": 3,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        },
+        "prototype": {
+          "value": 3,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        }
+      },
+      "DONE": {
+        "constructor": {
+          "value": 4,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        },
+        "prototype": {
+          "value": 4,
+          "writable": false,
+          "enumerable": true,
+          "configurable": false
+        }
+      }
+    },
+    "receivers": {
+      "abort": ["TypeError", "TypeError", "TypeError"],
+      "getAllResponseHeaders": ["TypeError", "TypeError", "TypeError"],
+      "getResponseHeader": ["TypeError", "TypeError", "TypeError"],
+      "open": ["TypeError", "TypeError", "TypeError"],
+      "send": ["TypeError", "TypeError", "TypeError"],
+      "setRequestHeader": ["TypeError", "TypeError", "TypeError"]
+    },
+    "subclass": {
+      "brand": "[object XMLHttpRequest]",
+      "headers": ""
+    },
+    "detachedPrototypeReceiver": "",
+    "privateStorage": {
+      "brand": "[object XMLHttpRequest]",
+      "headers": "",
+      "hooks": 0
+    },
+    "openBrand": "[object XMLHttpRequest]",
+    "network": {
+      "brand": "[object XMLHttpRequest]",
+      "status": 200,
+      "text": "xhr-response",
+      "contentType": "text/plain",
+      "states": [1, 2, 3, 4]
+    }
+  }
+}

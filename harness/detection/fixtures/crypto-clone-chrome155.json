@@ -1,0 +1,227 @@
+{
+  "browserVersion": "Chrome/155.0.8059.40",
+  "browserV8Version": "15.5.35.20",
+  "fixture": "authored localhost native key/platform cloning, Window delivery and ArrayBuffer transfers",
+  "result": {
+    "graph": {
+      "distinct": true,
+      "alias": true,
+      "cycle": true,
+      "map": true,
+      "set": true,
+      "date": 1234,
+      "bytes": [1, 2, 3],
+      "key": true,
+      "type": "secret",
+      "extractable": false,
+      "algorithm": {
+        "name": "AES-GCM",
+        "length": 128
+      },
+      "usages": ["encrypt"],
+      "ownKeys": 0
+    },
+    "protection": {
+      "hooks": 0,
+      "extractable": false,
+      "ownKeys": 0
+    },
+    "platform": {
+      "exception": {
+        "brand": true,
+        "distinct": true,
+        "alias": true,
+        "name": "InvalidStateError",
+        "message": "authored",
+        "code": 11
+      }
+    },
+    "timing": {
+      "key": true,
+      "distinct": true,
+      "permission": true,
+      "exception": true,
+      "exceptionName": "InvalidStateError",
+      "same": true
+    },
+    "realms": {
+      "child": true,
+      "object": true,
+      "date": true,
+      "borrowed": true,
+      "parentReceiver": true,
+      "invalidReceiver": {
+        "name": "TypeError",
+        "dom": false
+      },
+      "nullReceiver": null,
+      "original": true,
+      "exception": true
+    },
+    "rejection": {
+      "function": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "proxy": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "node": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "crypto": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "subtle": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "event": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "xpathEvaluator": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "xpathExpression": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "xpathResult": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "tokens": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "emptyList": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "url": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "search": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "fakePlain": true
+    },
+    "message": {
+      "delivery": {
+        "key": true,
+        "alias": true,
+        "distinct": true,
+        "permission": true,
+        "source": true,
+        "origin": true
+      },
+      "mismatchedGetter": true,
+      "invalidOrigin": {
+        "name": "SyntaxError",
+        "dom": false,
+        "childDom": true,
+        "syntax": false,
+        "childSyntax": false
+      }
+    },
+    "transfers": {
+      "length": 0,
+      "sourceLength": 0,
+      "bytes": [1, 2, 3],
+      "alias": true,
+      "unusedLength": 0,
+      "failureAttached": true,
+      "duplicate": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "uncloneable": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "detached": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "invalid": {
+        "name": "DataCloneError",
+        "dom": true
+      },
+      "resizable": true,
+      "maximum": 8,
+      "resized": 4,
+      "first": 7,
+      "dictionaries": [
+        null,
+        null,
+        null,
+        {
+          "name": "TypeError",
+          "dom": false
+        },
+        {
+          "name": "TypeError",
+          "dom": false
+        },
+        {
+          "name": "TypeError",
+          "dom": false
+        },
+        {
+          "name": "TypeError",
+          "dom": false
+        }
+      ],
+      "sequences": [
+        {
+          "name": "TypeError",
+          "dom": false
+        },
+        {
+          "name": "TypeError",
+          "dom": false
+        },
+        {
+          "name": "TypeError",
+          "dom": false
+        },
+        {
+          "name": "TypeError",
+          "dom": false
+        },
+        null,
+        {
+          "name": "TypeError",
+          "dom": false
+        },
+        {
+          "name": "DataCloneError",
+          "dom": true
+        }
+      ],
+      "iterator": {
+        "error": {
+          "name": "TypeError",
+          "dom": false
+        },
+        "transferReads": 1,
+        "iteratorReads": 1,
+        "nextCalls": 1,
+        "closes": 0
+      },
+      "helperHooks": {
+        "calls": 0,
+        "error": null,
+        "source": 0,
+        "result": 7
+      }
+    }
+  }
+}

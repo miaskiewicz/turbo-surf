@@ -1,0 +1,282 @@
+{
+  "pendingWake": "wake",
+  "delayedAck": "delayed",
+  "idleAck": "value",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "1a01439f52a58835b3f45026ce08d3732a8bb361fb87dce3b3a7fb00c349a368",
+  "collectorSha256": "1e5d3a2b037673b6633c4721788b05a6e419f2f92a9de0405d313e499837ea45",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "firstSource": {
+      "events": [],
+      "writeTrace": ["write", "microtask"],
+      "local": null,
+      "session": "alpha"
+    },
+    "firstPeer": {
+      "events": [
+        [
+          "event",
+          [107, 101, 121, 55296],
+          null,
+          [118, 97, 108, 117, 101, 57343],
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [107, 101, 121, 55296]]
+      ],
+      "writeTrace": [],
+      "local": null,
+      "session": null
+    },
+    "burstSource": {
+      "events": [],
+      "writeTrace": ["write", "microtask"],
+      "local": null,
+      "session": "alpha"
+    },
+    "burstPeer": {
+      "events": [
+        [
+          "event",
+          [107, 101, 121, 55296],
+          null,
+          [118, 97, 108, 117, 101, 57343],
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [107, 101, 121, 55296]],
+        [
+          "event",
+          [98, 117, 114, 115, 116],
+          null,
+          [111, 110, 101],
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [98, 117, 114, 115, 116]],
+        [
+          "event",
+          [98, 117, 114, 115, 116],
+          [111, 110, 101],
+          [116, 119, 111],
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [98, 117, 114, 115, 116]],
+        [
+          "event",
+          [107, 101, 121, 55296],
+          [118, 97, 108, 117, 101, 57343],
+          null,
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [107, 101, 121, 55296]],
+        [
+          "event",
+          null,
+          null,
+          null,
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", null]
+      ],
+      "writeTrace": [],
+      "local": null,
+      "session": null
+    },
+    "latePeer": {
+      "events": [],
+      "writeTrace": [],
+      "local": null,
+      "session": null
+    },
+    "reverseSource": {
+      "events": [
+        [
+          "event",
+          [107, 101, 121, 55296],
+          null,
+          [118, 97, 108, 117, 101, 57343],
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [107, 101, 121, 55296]],
+        [
+          "event",
+          [98, 117, 114, 115, 116],
+          null,
+          [111, 110, 101],
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [98, 117, 114, 115, 116]],
+        [
+          "event",
+          [98, 117, 114, 115, 116],
+          [111, 110, 101],
+          [116, 119, 111],
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [98, 117, 114, 115, 116]],
+        [
+          "event",
+          [107, 101, 121, 55296],
+          [118, 97, 108, 117, 101, 57343],
+          null,
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [107, 101, 121, 55296]],
+        [
+          "event",
+          null,
+          null,
+          null,
+          "/writer#source",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", null]
+      ],
+      "writeTrace": ["write", "microtask"],
+      "local": "returned",
+      "session": "beta"
+    },
+    "reversePeer": {
+      "events": [
+        [
+          "event",
+          [98, 97, 99, 107],
+          null,
+          [114, 101, 116, 117, 114, 110, 101, 100],
+          "/peer#target",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [98, 97, 99, 107]]
+      ],
+      "writeTrace": ["write", "microtask"],
+      "local": "returned",
+      "session": "alpha"
+    },
+    "lateAfter": {
+      "events": [
+        [
+          "event",
+          [98, 97, 99, 107],
+          null,
+          [114, 101, 116, 117, 114, 110, 101, 100],
+          "/peer#target",
+          true,
+          "local",
+          true,
+          true,
+          true,
+          false,
+          false,
+          false
+        ],
+        ["microtask", [98, 97, 99, 107]]
+      ],
+      "writeTrace": [],
+      "local": "returned",
+      "session": null
+    }
+  }
+}

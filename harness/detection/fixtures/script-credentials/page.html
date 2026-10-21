@@ -1,0 +1,15 @@
+<!doctype html><html><head><script>
+window.scriptEvents=[];
+function scriptEvent(event){scriptEvents.push([event.target.id,event.type,event.isTrusted]);}
+</script>
+<script id="module" type="module" crossorigin="use-credentials" src="{{CROSS}}/entry.mjs" onload="scriptEvent(event)" onerror="scriptEvent(event)"></script>
+<script id="anonymous" type="module" src="{{CROSS}}/anonymous.mjs" onload="scriptEvent(event)" onerror="scriptEvent(event)"></script>
+<script id="classic" crossorigin="use-credentials" src="{{CROSS}}/classic.js" onload="scriptEvent(event)" onerror="scriptEvent(event)"></script>
+<script id="denied" type="module" crossorigin="use-credentials" src="{{CROSS}}/denied" onload="scriptEvent(event)" onerror="scriptEvent(event)"></script>
+<script id="redirect" type="module" crossorigin="use-credentials" src="{{CROSS}}/redirect" onload="scriptEvent(event)" onerror="scriptEvent(event)"></script>
+<script id="nosniff" src="{{CROSS}}/nosniff.js" onload="scriptEvent(event)" onerror="scriptEvent(event)"></script>
+<script id="legacy" src="{{CROSS}}/legacy.js" onload="scriptEvent(event)" onerror="scriptEvent(event)"></script>
+<script id="json" type="module" src="{{CROSS}}/json.mjs" onload="scriptEvent(event)" onerror="scriptEvent(event)"></script>
+</head><body><script>
+window.addEventListener('load',()=>{globalThis.__browserFixture={module:globalThis.credentialModule,anonymous:globalThis.anonymousModule,classic:globalThis.credentialClassic,redirect:globalThis.redirectModule,cookie:document.cookie,legacy:globalThis.legacyMime===true,nosniff:globalThis.nosniffExecuted===undefined,json:globalThis.jsonExecuted===undefined,events:scriptEvents};document.body.setAttribute('data-browser-fixture','complete');});
+</script></body></html>

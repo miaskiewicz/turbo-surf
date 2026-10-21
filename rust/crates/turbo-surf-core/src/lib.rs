@@ -18,16 +18,21 @@ pub mod browser;
 pub mod cache;
 pub mod challenge;
 pub mod cloudflare;
+pub mod compression_dictionary;
 pub mod consent;
 pub mod cookies;
 pub mod crawl;
 pub mod fingerprint;
 pub mod frontier;
+mod http_trace;
 pub mod measure;
 pub mod net;
 pub mod recaptcha;
+pub mod referrer_policy;
+pub mod request_context;
 pub mod robots;
 pub mod sorry;
+pub mod upload;
 pub mod url;
 
 /// The active HTTP backend, re-exported so this crate's `net` module and every
@@ -43,4 +48,10 @@ pub use reqwest as http_backend;
 pub use wreq as http_backend;
 
 /// Library version — kept in lockstep with `package.json` per the release rules.
-pub const VERSION: &str = "0.5.3";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod http_cache;
+
+mod http_cache_ranges;
+
+pub mod upload_body;

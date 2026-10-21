@@ -3,12 +3,23 @@
 // JS shim that wraps this addon.
 
 export function version(): string;
+/** Actual V8 version linked into the native renderer; host-only diagnostics. */
+export function engineVersion(): string;
 
 /** Fetch a URL → JSON `{ html, finalUrl, status, redirected }`. */
 export function fetchHtml(url: string): Promise<string>;
 /** Fetch a URL as raw bytes → a Buffer (no charset decode). For binary
  * resources — images to pass to `screenshotWithAssets`. */
-export function fetchBytes(url: string): Promise<Buffer>;
+export function fetchBytes(
+  url: string,
+  requestStateId?: number,
+  sourceUrl?: string,
+  cookies?: string,
+): Promise<Buffer>;
+/** Create/close origin-scoped client-hint state shared by a browsing context. */
+/** Derive a tab sharing a parent's local storage, HTTP cache and client hints. */
+export function requestStateNew(parentContextId?: number): number;
+export function requestStateClose(id: number): void;
 
 /** Crawl from a JSON options string → JSON array of page records. */
 export function crawl(optsJson: string): Promise<string>;
@@ -28,18 +39,27 @@ export function hydrate(
   baseUrl: string,
   cookies?: string,
   userAgent?: string,
+  requestStateId?: number,
+  documentResponse?: string,
 ): Promise<string>;
 
-/** Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
+/** documentResponse is host JSON {status, referrer, headers: [[name, value], ...]}.
+ * initScript runs through the trusted native entry before authored scripts.
+ * Live session: hydrate + keep the app's JS isolate ALIVE so interactions dispatch
  * real DOM events into the running app. Returns a session id. */
 export function liveOpen(
   html: string,
   baseUrl: string,
   cookies?: string,
   userAgent?: string,
+  requestStateId?: number,
+  documentResponse?: string,
+  initScript?: string,
 ): Promise<number>;
 /** Run JS in a live session, drain to quiescence, return String(globalThis.__RESULT). */
 export function liveEval(id: number, script: string): Promise<string>;
+/** Await an expression’s actual native Promise completion. */
+export function liveEvalExpression(id: number, expression: string): Promise<string>;
 /** Serialize the live session's current DOM to HTML. */
 export function liveSerialize(id: number): string;
 /** The live session's cookies (storageState JSON), incl. HttpOnly session cookies. */
@@ -69,6 +89,9 @@ export function fetchWithCookies(
   method?: string,
   body?: string,
   headers?: string,
+  bypassConsent?: boolean,
+  requestStateId?: number,
+  contextJson?: string,
 ): Promise<string>;
 
 // Actions by selector — mutate the DOM and return the new HTML.

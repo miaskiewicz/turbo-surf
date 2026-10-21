@@ -1,0 +1,61 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "d6fc3e19f3ecc29dcb5564d3163efeb1b5439201908093757b2fd87975d5d745",
+  "result": [
+    {
+      "method": "get",
+      "enctype": "application/x-www-form-urlencoded",
+      "entries": [
+        ["a b", "x+y"],
+        ["dup", "1"],
+        ["dup", "2"],
+        ["line\rname", "a\nb\rc\r\nd"],
+        ["unicode", "é😀"]
+      ],
+      "wire": {
+        "url": "/wire?a+b=x%2By&dup=1&dup=2&line%0D%0Aname=a%0D%0Ab%0D%0Ac%0D%0Ad&unicode=%C3%A9%F0%9F%98%80",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#retained"
+    },
+    {
+      "method": "get",
+      "enctype": "text/plain",
+      "entries": [],
+      "wire": {
+        "url": "/wire?",
+        "method": "GET",
+        "contentType": null,
+        "body": ""
+      },
+      "fragment": "#retained"
+    },
+    {
+      "method": "post",
+      "enctype": "application/x-www-form-urlencoded",
+      "entries": [["a&=", "x y+"], ["line", "\r\n\n\r"]],
+      "wire": {
+        "url": "/wire?old=1",
+        "method": "POST",
+        "contentType": "application/x-www-form-urlencoded",
+        "body": "a%26%3D=x+y%2B&line=%0D%0A%0D%0A%0D%0A"
+      },
+      "fragment": "#retained"
+    },
+    {
+      "method": "post",
+      "enctype": "text/plain",
+      "entries": [["a=b", "hello\nworld"], ["unicode", "é😀"]],
+      "wire": {
+        "url": "/wire?old=1",
+        "method": "POST",
+        "contentType": "text/plain",
+        "body": "a=b=hello\r\nworld\r\nunicode=é😀\r\n"
+      },
+      "fragment": "#retained"
+    }
+  ]
+}

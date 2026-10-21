@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "scope": "Genuine Chrome constructor identity, descriptors, direct construction and bare calls; ShadowRoot cloning, duplicate attachment and child insertion; EventTarget constructor links. Captured on an empty localhost document; no native execution or Google requests.",
+  "browserVersion": "Chrome/155.0.8059.85",
+  "browserV8Version": "15.5.35.25",
+  "probeSha256": "05f12e70f3dc065d00fd187dd88eab1c98847806a0ef1868c76fc46bad967b1c",
+  "sourceControlSha256": "854335dc0c06dedf630f4fb1724285d8aa667a768cddc73f0fbcd6ad45f93d64",
+  "sourceTraceSha256": "c82196111705346d30bbe57376bfa9a80e28f4675146cb3c4da80668194a6274",
+  "sourceReceiptSha256": "c20a237f2973bc6dcedc231cf37ba6ddbec679b6c6ddece03520d665cacf3af3",
+  "chromeBundleSha256": "bb503dca511c156891ab90c35489a2d100bd3d163a4f8198e26d13e8c3ac8330",
+  "collectorSourcesSha256": {
+    "chrome-cdp-trace.mjs": "62eb7f0c47923b6e3569d58dd5f84d126b0bab02ae94badc80ca456fd9755e19",
+    "cdp-connection.mjs": "7b9f522db23484f79575ee46cf320277a4a516de53becba1eef5730d5a5549a0",
+    "input-state.js": "b3ff2009d74d1c2b92671c398f870a0138d7a84105a0a660e8082f88062922e1",
+    "collector-lifecycle.mjs": "ce110114bae9e8eea3c1b21081598809f63e36eb34103cc7b062c34553455b7a",
+    "effective-input.mjs": "090613d6430405193eca5a639cb044f855c9a5aa05520f28a541192079d56f82",
+    "observation-window.mjs": "474c88c02a8ad355c3e6da5b38d8227e5ed5d2efcc84e7c5c189aa99e50f8ddf",
+    "main-navigation.mjs": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",
+    "chrome-launch-policy.mjs": "6961d1c3ff7011216b77a6850c361e31a20fe9686fb63aa02346cb8803970cb0",
+    "chrome-network-metadata.mjs": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2",
+    "protocol-headers.mjs": "763b85da53476f6352dfd6e2dbaed07eb2571b2bca4fe7f934b165ae9da5b5e1",
+    "child-supervision.mjs": "0047d191db5f2b2a0936903fb72d6f8d7a117eab36146f0ff315d49438c8ba9c"
+  },
+  "sourceUnchanged": true,
+  "chromeBundleUnchanged": true,
+  "captureComplete": true,
+  "collectorErrors": [],
+  "errors": [],
+  "process": {
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "aborted": false,
+    "error": null
+  },
+  "result": {
+    "constructors": [
+      {
+        "name": "Node",
+        "parent": "EventTarget",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": "TypeError",
+        "created": null
+      },
+      {
+        "name": "Element",
+        "parent": "Node",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": "TypeError",
+        "created": null
+      },
+      {
+        "name": "HTMLElement",
+        "parent": "Element",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": "TypeError",
+        "created": null
+      },
+      {
+        "name": "HTMLDivElement",
+        "parent": "HTMLElement",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": "TypeError",
+        "created": null
+      },
+      {
+        "name": "Document",
+        "parent": "Node",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": null,
+        "created": {
+          "prototype": true,
+          "nodeType": 9,
+          "nodeName": "#document",
+          "ownerDocumentIsCurrent": false,
+          "ownerDocumentIsNull": true,
+          "parentNodeIsNull": true,
+          "childCount": 0,
+          "data": null,
+          "defaultViewIsNull": true,
+          "contentType": "application/xml"
+        }
+      },
+      {
+        "name": "HTMLDocument",
+        "parent": "Document",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": "TypeError",
+        "created": null
+      },
+      {
+        "name": "DocumentFragment",
+        "parent": "Node",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": null,
+        "created": {
+          "prototype": true,
+          "nodeType": 11,
+          "nodeName": "#document-fragment",
+          "ownerDocumentIsCurrent": true,
+          "ownerDocumentIsNull": false,
+          "parentNodeIsNull": true,
+          "childCount": 0,
+          "data": null,
+          "defaultViewIsNull": null,
+          "contentType": null
+        }
+      },
+      {
+        "name": "Text",
+        "parent": "CharacterData",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": null,
+        "created": {
+          "prototype": true,
+          "nodeType": 3,
+          "nodeName": "#text",
+          "ownerDocumentIsCurrent": true,
+          "ownerDocumentIsNull": false,
+          "parentNodeIsNull": true,
+          "childCount": 0,
+          "data": "",
+          "defaultViewIsNull": null,
+          "contentType": null
+        }
+      },
+      {
+        "name": "HTMLAudioElement",
+        "parent": "HTMLMediaElement",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": "TypeError",
+        "created": null
+      },
+      {
+        "name": "AbortSignal",
+        "parent": "EventTarget",
+        "parentIdentity": true,
+        "prototypeParentIdentity": true,
+        "prototypeWritable": false,
+        "globalEnumerable": false,
+        "callError": "TypeError",
+        "constructionError": "TypeError",
+        "created": null
+      }
+    ],
+    "shadow": {
+      "cloneError": "NotSupportedError",
+      "duplicateError": "NotSupportedError",
+      "appendError": null,
+      "returnedRoot": true,
+      "emptyRoot": true,
+      "movedChild": true,
+      "rootHost": true,
+      "hostRoot": true,
+      "rootParentNull": true,
+      "rootDocument": true,
+      "childDocumentRoot": true
+    },
+    "eventTarget": {
+      "constructorParentIsFunctionPrototype": true,
+      "nodeConstructorParent": true,
+      "nodePrototypeParent": true,
+      "abortConstructorParent": true,
+      "abortPrototypeParent": true
+    }
+  }
+}

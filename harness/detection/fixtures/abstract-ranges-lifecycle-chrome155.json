@@ -1,0 +1,50 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "c3e302f543c6ec7e1ebd06be74ff1c8bd4d862d5c2e3b573ac328facc0576266",
+  "probeSha256": "0a73c9058af9dea384474aa1c79ae903d8c24cfdc1ac1487eb6da78d5d0e3047",
+  "collectorSha256": "333700b6ba1af4ead4d2c450be4942ebe43ee0f1e7203381c7a9913ac7fd6deb",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "static-range-owner-lifetime",
+      "result": {
+        "first": {
+          "rows": [
+            {
+              "kind": "released",
+              "alive": [false, false, false, false]
+            },
+            {
+              "kind": "held",
+              "alive": [true, true, true, true]
+            }
+          ],
+          "retained": ["retained source", 2, 7]
+        },
+        "afterRelease": {
+          "rows": [
+            {
+              "kind": "released",
+              "alive": [false, false, false, false]
+            },
+            {
+              "kind": "held",
+              "alive": [false, false, false, false]
+            }
+          ],
+          "retained": null
+        }
+      }
+    }
+  ]
+}

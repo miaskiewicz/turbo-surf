@@ -4,9 +4,10 @@
 //! provide (rustls can't forge the ClientHello). This is the check that a WAF
 //! doing Akamai-style fingerprinting would run against us.
 //!
-//! Live network: auto-skips (does not fail) when offline, matching the repo's
-//! harness convention. The whole file compiles away unless built with
-//! `--features impersonate`.
+//! Optional live network check; default workspace gates stay offline. Run with
+//! `cargo test -p turbo-surf-core --features impersonate --test impersonate -- --ignored`.
+//! Explicit runs fail on network errors or the request deadline. The offline
+//! ClientHello regression remains in `tests/client_hello.rs`.
 #![cfg(feature = "impersonate")]
 
 use turbo_surf_core::net::{fetch_html, FetchOptions};
@@ -15,18 +16,17 @@ use turbo_surf_core::net::{fetch_html, FetchOptions};
 const ECHO: &str = "https://tls.peet.ws/api/all";
 
 #[tokio::test]
+#[ignore = "live TLS echo; run explicitly with --ignored"]
 async fn presents_a_chrome_tls_and_http2_fingerprint() {
     let opts = FetchOptions {
         allow_non_html: true, // the echo serves application/json
         ..Default::default()
     };
-    let body = match fetch_html(ECHO, opts).await {
-        Ok(r) => r.html,
-        Err(e) => {
-            eprintln!("skipping fingerprint e2e (network unavailable): {e}");
-            return;
-        }
-    };
+    let body = tokio::time::timeout(std::time::Duration::from_secs(30), fetch_html(ECHO, opts))
+        .await
+        .expect("TLS fingerprint echo did not answer within 30 seconds")
+        .expect("TLS fingerprint echo request failed")
+        .html;
     let json: serde_json::Value = serde_json::from_str(&body).expect("echo returned non-JSON");
 
     // JA4: a TLS 1.3 ClientHello shaped like Chrome's (`t13d…`). The stock rustls
@@ -51,8 +51,7 @@ async fn presents_a_chrome_tls_and_http2_fingerprint() {
     assert!(ua.contains("Chrome/"), "unexpected UA: {ua}");
 
     // `emulate` pins the wire UA to `fingerprint::default_profile` so the reported
-    // version stays current even though wreq's bundled emulation lags a few Chrome
-    // versions behind. Regression guard: the on-wire UA must be exactly that pinned
+    // full patch version matches the browser registry. Regression guard: the on-wire UA must be exactly that pinned
     // identity (not wreq's older bundled UA), keeping every layer on one version.
     let expected_ua = turbo_surf_core::fingerprint::default_profile().user_agent;
     assert_eq!(
@@ -79,8 +78,7 @@ async fn presents_a_chrome_tls_and_http2_fingerprint() {
         .map(|h| h.split(':').next().unwrap_or_default().trim())
         .collect();
 
-    // 1. HEADERS-frame priority weight is Chrome's 256 (wire byte 255), not
-    //    wreq-util's stock 220 — closed via the vendored wreq-util patch.
+    // 1. The upstream Chrome154 profile sends priority weight256 (wire byte255).
     assert_eq!(
         headers_frame["priority"]["weight"].as_u64(),
         Some(256),

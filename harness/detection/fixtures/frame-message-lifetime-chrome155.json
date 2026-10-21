@@ -1,0 +1,70 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "first": {
+    "rows": [
+      {
+        "name": "removed-unretained",
+        "alive": [false, false, false, false]
+      },
+      {
+        "name": "removed-retained-window",
+        "alive": [false, true, true, true]
+      },
+      {
+        "name": "removed-retained-document",
+        "alive": [false, true, true, true]
+      },
+      {
+        "name": "navigated-unretained-old-document",
+        "alive": [true, false, false, false]
+      },
+      {
+        "name": "navigated-retained-old-document",
+        "alive": [true, true, true, true]
+      },
+      {
+        "name": "removed-retained-document-timer-payload",
+        "alive": [false, true]
+      }
+    ],
+    "events": [
+      ["transferred-child-ready", 1],
+      ["removed-window-transfer", 0, null],
+      ["parent-message-after-child-removal", true]
+    ]
+  },
+  "afterRelease": {
+    "rows": [
+      {
+        "name": "removed-unretained",
+        "alive": [false, false, false, false]
+      },
+      {
+        "name": "removed-retained-window",
+        "alive": [false, false, false, false]
+      },
+      {
+        "name": "removed-retained-document",
+        "alive": [false, false, false, false]
+      },
+      {
+        "name": "navigated-unretained-old-document",
+        "alive": [true, false, false, false]
+      },
+      {
+        "name": "navigated-retained-old-document",
+        "alive": [true, false, false, false]
+      },
+      {
+        "name": "removed-retained-document-timer-payload",
+        "alive": [false, false]
+      }
+    ],
+    "events": [
+      ["transferred-child-ready", 1],
+      ["removed-window-transfer", 0, null],
+      ["parent-message-after-child-removal", true]
+    ]
+  }
+}

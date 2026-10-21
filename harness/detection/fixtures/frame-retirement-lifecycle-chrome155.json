@@ -1,0 +1,71 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "casesSha256": "c59abc5d2a0aa2724085e593ac44c7a3128898d37b8096ba836834ffda262905",
+  "probeSha256": "bf7b55e8b0531597c92c169d114e797e370e2194a4e3a4c06950a9dd73448b37",
+  "collectorSha256": "333700b6ba1af4ead4d2c450be4942ebe43ee0f1e7203381c7a9913ac7fd6deb",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "nested-retirement-and-navigation-ownership",
+      "result": {
+        "first": {
+          "rows": [
+            {
+              "mode": "released-nested",
+              "alive": [false, false, false, false, false, false, false, false]
+            },
+            {
+              "mode": "retained-nested-document",
+              "alive": [false, false, false, false, true, true, true, false]
+            },
+            {
+              "mode": "retained-nested-function",
+              "alive": [false, false, false, false, true, true, true, true]
+            },
+            {
+              "mode": "navigated-retained-nested-document",
+              "alive": [true, false, false, false, true, true, true, false]
+            }
+          ],
+          "retained": [
+            ["document", "retained-nested-document", true],
+            ["function", "retained-nested-function"],
+            ["document", "navigated-retained-nested-document", true],
+            ["frame", "replacement"]
+          ]
+        },
+        "afterRelease": {
+          "rows": [
+            {
+              "mode": "released-nested",
+              "alive": [false, false, false, false, false, false, false, false]
+            },
+            {
+              "mode": "retained-nested-document",
+              "alive": [false, false, false, false, false, false, false, false]
+            },
+            {
+              "mode": "retained-nested-function",
+              "alive": [false, false, false, false, false, false, false, false]
+            },
+            {
+              "mode": "navigated-retained-nested-document",
+              "alive": [true, false, false, false, false, false, false, false]
+            }
+          ],
+          "retained": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Window timer task control</title></head>
+  <body>
+    <div id="timer-target"></div><iframe id="timer-frame"></iframe>
+    <script>
+      globalThis.__initialTimerEvents = [];
+      globalThis.__initialRealmEvents = [];
+      let finishInitialTimers;
+      globalThis.__initialTimersDone = new Promise(resolve => { finishInitialTimers = resolve; });
+      const timerTarget = document.querySelector('#timer-target');
+      new MutationObserver(() => __initialTimerEvents.push('observer')).observe(timerTarget, { attributes: true });
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => {
+          __initialTimerEvents.push('first');
+          Promise.resolve().then(() => {
+            __initialTimerEvents.push('microtask');
+            return Promise.resolve();
+          }).then(() => {
+            __initialTimerEvents.push('deep microtask');
+            timerTarget.setAttribute('data-ready', 'true');
+          });
+        }, 0);
+        setTimeout(() => __initialTimerEvents.push('second'), 0);
+        document.querySelector('#timer-frame').contentWindow.setTimeout(() => __initialRealmEvents.push('frame'), 0);
+        setTimeout(() => { __initialRealmEvents.push('parent'); finishInitialTimers(); }, 100);
+      });
+    </script>
+  </body>
+</html>

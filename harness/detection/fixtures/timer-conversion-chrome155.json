@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "scope": "Genuine Chrome setTimeout/setInterval numeric delay conversion boundary controls; fixed200ms observation, clear all retained timers; no native engine execution.",
+  "browserVersion": "Chrome/155.0.8059.85",
+  "browserV8Version": "15.5.35.25",
+  "probeSha256": "aa34d4deadfa7eebc68f88f6d3f0ca2642d9996e4c03231f1494b1202ca7e232",
+  "sourceControlSha256": "28ac1aed34397a8f5dda052017960f16dd0776869239535532594ef508bd2ece",
+  "sourceTraceSha256": "21e1fff45dfa771243f7c13aeb7037a8456c6291eab0faa913c47dbcf400524f",
+  "sourceReceiptSha256": "3c7418f9349e548d6a67b8c7de5bfab29c986e5493d20a0f20725e9246711282",
+  "chromeBundleSha256": "bb503dca511c156891ab90c35489a2d100bd3d163a4f8198e26d13e8c3ac8330",
+  "collectorSourcesSha256": {
+    "chrome-cdp-trace.mjs": "62eb7f0c47923b6e3569d58dd5f84d126b0bab02ae94badc80ca456fd9755e19",
+    "cdp-connection.mjs": "7b9f522db23484f79575ee46cf320277a4a516de53becba1eef5730d5a5549a0",
+    "input-state.js": "b3ff2009d74d1c2b92671c398f870a0138d7a84105a0a660e8082f88062922e1",
+    "collector-lifecycle.mjs": "ce110114bae9e8eea3c1b21081598809f63e36eb34103cc7b062c34553455b7a",
+    "effective-input.mjs": "090613d6430405193eca5a639cb044f855c9a5aa05520f28a541192079d56f82",
+    "observation-window.mjs": "474c88c02a8ad355c3e6da5b38d8227e5ed5d2efcc84e7c5c189aa99e50f8ddf",
+    "main-navigation.mjs": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",
+    "chrome-launch-policy.mjs": "6961d1c3ff7011216b77a6850c361e31a20fe9686fb63aa02346cb8803970cb0",
+    "chrome-network-metadata.mjs": "1fb12b172f939cda179f0fe1e9794879c970ba14820ade57e3a8d2315269d9d2",
+    "protocol-headers.mjs": "763b85da53476f6352dfd6e2dbaed07eb2571b2bca4fe7f934b165ae9da5b5e1",
+    "child-supervision.mjs": "0047d191db5f2b2a0936903fb72d6f8d7a117eab36146f0ff315d49438c8ba9c"
+  },
+  "sourceUnchanged": true,
+  "chromeBundleUnchanged": true,
+  "captureComplete": true,
+  "collectorErrors": [],
+  "errors": [],
+  "process": {
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "aborted": false,
+    "error": null
+  },
+  "result": {
+    "observationMs": 200,
+    "elapsedMs": 201.60000002384186,
+    "immediateFired": 0,
+    "rows": [
+      {
+        "kind": "timeout",
+        "label": "zero",
+        "fired": true,
+        "elapsedMs": 0.10000002384185791,
+        "error": null
+      },
+      {
+        "kind": "timeout",
+        "label": "huge-finite",
+        "fired": true,
+        "elapsedMs": 0.10000002384185791,
+        "error": null
+      },
+      {
+        "kind": "timeout",
+        "label": "infinity",
+        "fired": true,
+        "elapsedMs": 0.10000002384185791,
+        "error": null
+      },
+      {
+        "kind": "timeout",
+        "label": "nan",
+        "fired": true,
+        "elapsedMs": 0.10000002384185791,
+        "error": null
+      },
+      {
+        "kind": "timeout",
+        "label": "int32-max",
+        "fired": false,
+        "elapsedMs": null,
+        "error": null
+      },
+      {
+        "kind": "timeout",
+        "label": "int32-overflow",
+        "fired": true,
+        "elapsedMs": 0.10000002384185791,
+        "error": null
+      },
+      {
+        "kind": "timeout",
+        "label": "int32-overflow-plus-one",
+        "fired": true,
+        "elapsedMs": 0.10000002384185791,
+        "error": null
+      },
+      {
+        "kind": "timeout",
+        "label": "uint32-wrap-five",
+        "fired": true,
+        "elapsedMs": 5.800000011920929,
+        "error": null
+      },
+      {
+        "kind": "timeout",
+        "label": "negative-one",
+        "fired": true,
+        "elapsedMs": 0.10000002384185791,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "zero",
+        "fired": true,
+        "elapsedMs": 0.10000002384185791,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "huge-finite",
+        "fired": true,
+        "elapsedMs": 0.19999998807907104,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "infinity",
+        "fired": true,
+        "elapsedMs": 0.19999998807907104,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "nan",
+        "fired": true,
+        "elapsedMs": 0.19999998807907104,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "int32-max",
+        "fired": false,
+        "elapsedMs": null,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "int32-overflow",
+        "fired": true,
+        "elapsedMs": 0.19999998807907104,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "int32-overflow-plus-one",
+        "fired": true,
+        "elapsedMs": 0.19999998807907104,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "uint32-wrap-five",
+        "fired": true,
+        "elapsedMs": 5.899999976158142,
+        "error": null
+      },
+      {
+        "kind": "interval",
+        "label": "negative-one",
+        "fired": true,
+        "elapsedMs": 0.19999998807907104,
+        "error": null
+      }
+    ],
+    "fireOrder": [
+      "timeout:zero",
+      "timeout:huge-finite",
+      "timeout:infinity",
+      "timeout:nan",
+      "timeout:int32-overflow",
+      "timeout:int32-overflow-plus-one",
+      "timeout:negative-one",
+      "interval:zero",
+      "interval:huge-finite",
+      "interval:infinity",
+      "interval:nan",
+      "interval:int32-overflow",
+      "interval:int32-overflow-plus-one",
+      "interval:negative-one",
+      "timeout:uint32-wrap-five",
+      "interval:uint32-wrap-five"
+    ]
+  }
+}

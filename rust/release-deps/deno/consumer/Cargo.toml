@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name="deno-archive-consumer"
+version="0.0.0"
+edition="2024"
+
+[dependencies]
+deno_core = { package = "turbo-surf-deno-core", version = "=0.412.0" }
+deno_crypto = { package = "turbo-surf-deno-crypto", version = "=0.273.0" }
+deno_web = { package = "turbo-surf-deno-web", version = "=0.290.0" }
+deno_webidl = { package = "turbo-surf-deno-webidl", version = "=0.259.0" }
+deno_bench_util = { package = "turbo-surf-deno-bench-util", version = "=0.253.0" }
+serde_v8 = { package = "turbo-surf-serde-v8", version = "=0.321.0" }
+v8 = { package = "turbo-surf-deno-v8", version = "=0.4.0" }

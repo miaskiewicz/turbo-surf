@@ -1,0 +1,72 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "0bc9339a46b63387d6ac109b5a583fcf9121e379168a44416aedc4691422f484",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "kind": "none",
+      "before": "<origin>/",
+      "afterPolicy": "<origin>/",
+      "afterWrite": "<origin>/",
+      "beforeRemove": "<origin>/",
+      "afterRemove": "<origin>/",
+      "secondHref": "/second/root/"
+    },
+    {
+      "kind": "default",
+      "before": "<origin>/allowed/root/",
+      "afterPolicy": "<origin>/allowed/root/",
+      "afterWrite": "<origin>/changed/root/",
+      "beforeRemove": "<origin>/changed/root/",
+      "afterRemove": "<origin>/second/root/",
+      "secondHref": "/second/root/"
+    },
+    {
+      "kind": "frozen",
+      "before": "<origin>/allowed/root/",
+      "afterPolicy": "<origin>/allowed/root/",
+      "afterWrite": "<origin>/",
+      "beforeRemove": "<origin>/",
+      "afterRemove": "<origin>/",
+      "secondHref": "/second/root/"
+    },
+    {
+      "kind": "self",
+      "before": "<origin>/",
+      "afterPolicy": "<origin>/",
+      "afterWrite": "<origin>/same/root/",
+      "beforeRemove": "<origin>/same/root/",
+      "afterRemove": "<origin>/second/root/",
+      "secondHref": "/second/root/"
+    },
+    {
+      "kind": "body-meta",
+      "before": "<origin>/allowed/root/",
+      "afterPolicy": "<origin>/allowed/root/",
+      "afterWrite": "<origin>/changed/root/",
+      "beforeRemove": "<origin>/changed/root/",
+      "afterRemove": "<origin>/second/root/",
+      "secondHref": "/second/root/"
+    },
+    {
+      "kind": "two-bases",
+      "before": "<origin>/allowed/root/",
+      "afterPolicy": "<origin>/allowed/root/",
+      "afterWrite": "<origin>/changed/root/",
+      "beforeRemove": "<origin>/changed/root/",
+      "afterRemove": "<origin>/second/root/",
+      "secondHref": "/second/root/"
+    }
+  ]
+}

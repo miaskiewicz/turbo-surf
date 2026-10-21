@@ -1,0 +1,83 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "16b59a6169b8fd25bd49d336558b16e671c3b632f3bd857decde33dcb876c835",
+  "collectorSha256": "283ad6661eb021063535d4484ed6fc5743acce50139395f63f82162793476d00",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "wire": [
+    {
+      "host": "127.0.0.1:PORT",
+      "method": "GET",
+      "path": "/",
+      "cookie": null,
+      "bodyHex": ""
+    },
+    {
+      "host": "127.0.0.1:PORT",
+      "method": "POST",
+      "path": "/echo",
+      "cookie": null,
+      "bodyHex": "636c6f6e65"
+    }
+  ],
+  "result": {
+    "responsearrayBuffer": {
+      "text": "plain",
+      "type": "text/plain;charset=UTF-8",
+      "called": 0
+    },
+    "responsegetReader": {
+      "text": "plain",
+      "type": "text/plain;charset=UTF-8",
+      "called": 0
+    },
+    "locked": {
+      "error": "TypeError"
+    },
+    "disturbed": {
+      "error": "TypeError"
+    },
+    "nullOverride": {
+      "used": true,
+      "locked": true,
+      "text": "copied"
+    },
+    "usedOverride": "new",
+    "cloneAfterBody": {
+      "status": 200,
+      "echo": "clone",
+      "used": true,
+      "original": "clone"
+    },
+    "responseSnapshot": "A",
+    "blobPrivate": {
+      "text": "blob",
+      "type": "text/plain",
+      "called": 0
+    },
+    "paramsPrivate": {
+      "text": "a=one",
+      "called": 0
+    },
+    "streamPrivate": {
+      "text": "A",
+      "called": 0
+    },
+    "symbol": {
+      "error": "TypeError"
+    },
+    "nullObject": "text",
+    "byteViewOffset": "A",
+    "emptyStream": "",
+    "invalidChunks": ["TypeError", "TypeError", "TypeError", "TypeError"]
+  }
+}

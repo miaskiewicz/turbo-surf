@@ -1,0 +1,50 @@
+[
+  {
+    "id": "0",
+    "headers": [["Permissions-Policy", "geolocation=(\"https://*.example.test\")"]]
+  },
+  {
+    "id": "1",
+    "headers": [["Permissions-Policy", "geolocation=(\"https://*.example.test:8443\")"]]
+  },
+  {
+    "id": "2",
+    "headers": [["Permissions-Policy", "geolocation=(\"https://example.test:*\")"]]
+  },
+  {
+    "id": "3",
+    "headers": [["Permissions-Policy", "geolocation=(\"https://foreign.test/path\")"]]
+  },
+  {
+    "id": "4",
+    "headers": [["Permissions-Policy", "geolocation=\"https://foreign.test\""]]
+  },
+  {
+    "id": "5",
+    "headers": [["Permissions-Policy", "geolocation=\"*\""]]
+  },
+  {
+    "id": "6",
+    "headers": [["Permissions-Policy", "geolocation=(\"null\")"]]
+  },
+  {
+    "id": "7",
+    "headers": [["Permissions-Policy", "geolocation=(self \"https://*.example.test\")"]]
+  },
+  {
+    "id": "8",
+    "headers": [["Permissions-Policy", "geolocation=(\"https://a.example.test:443\")"]]
+  },
+  {
+    "id": "9",
+    "headers": [["Permissions-Policy", "geolocation=(self),camera=(),geolocation=()"]]
+  },
+  {
+    "id": "10",
+    "headers": [["Permissions-Policy", "geolocation=(\"https://*.test\")"]]
+  },
+  {
+    "id": "11",
+    "headers": [["Permissions-Policy", "geolocation=(\"http://localhost:*\")"]]
+  }
+]

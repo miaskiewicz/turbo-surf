@@ -1,0 +1,12 @@
+<!doctype html><html><head><title>parent</title></head><body>
+<iframe id='a' src='/modules/frame-child.html'></iframe><iframe id='b' src='/modules/frame-child.html'></iframe>
+<script>
+window.addEventListener('load',()=>{
+  globalThis.__browserFixture={parent:document.title,unpolluted:globalThis.entryRuns===undefined,
+    frames:['a','b'].map(id=>{const win=document.getElementById(id).contentWindow;
+      const result={...win.moduleResult},inline={...win.inlineModule};
+      result.url=new URL(result.url).pathname;inline.url=new URL(inline.url).pathname;
+      return {title:win.document.title,result,inline,depRuns:win.depRuns,entryRuns:win.entryRuns,events:win.frameLog,ownArray:win.Array!==Array};})};
+  document.body.setAttribute('data-browser-fixture','complete');
+});
+</script></body></html>

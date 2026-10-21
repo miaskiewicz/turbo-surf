@@ -1,0 +1,162 @@
+{
+  "captureBaseCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
+  "binarySha256": "5341249bc9ed698acb83884a42580c83e48da43bedceee33a31166a9484123ab",
+  "extractorSha256": "057efe4a3e3b5bd5f30c1a1b65ee9ec48282bb8cfad5e6f414a1579419d9525d",
+  "capturedDate": "2026-10-21",
+  "scope": "Fixed structural markers from already saved final HTML only; no raw URL/query/token/text/cookie/body output. Markers do not prove visible CAPTCHA interaction.",
+  "userObservationsCarriedForward": false,
+  "runs": [
+    {
+      "repeat": 0,
+      "runtime": "chrome",
+      "pass": "baseline",
+      "final": {
+        "path": "/",
+        "results": 0,
+        "hydrationBudgetExceeded": null,
+        "status": 200
+      },
+      "sorryPath": false,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": false,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": false,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": false,
+      "htmlSha256": "e7e6f57b00e0b6aaa4b51f14d76476a4f336bbc8c60cd397b503dfae4417737b"
+    },
+    {
+      "repeat": 0,
+      "runtime": "native",
+      "pass": "baseline",
+      "final": {
+        "path": "/sorry/index",
+        "results": 0,
+        "hydrationBudgetExceeded": false,
+        "status": 429
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "4bb947e715127ec4e51f9db19b3e7c72ae7842a621f9578bdda324e10f98c3b4"
+    },
+    {
+      "repeat": 0,
+      "runtime": "chrome",
+      "pass": "interfaces",
+      "final": {
+        "path": "/",
+        "results": 0,
+        "hydrationBudgetExceeded": null,
+        "status": 200
+      },
+      "sorryPath": false,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": false,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": false,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": false,
+      "htmlSha256": "4cd9df2ff0e9d111d6677b8bca1294110de0aa1400a35293ba93dc517db038f7"
+    },
+    {
+      "repeat": 0,
+      "runtime": "native",
+      "pass": "interfaces",
+      "final": {
+        "path": "/sorry/index",
+        "results": 0,
+        "hydrationBudgetExceeded": false,
+        "status": 429
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "c59c552c62f6ae2e9817bf1387ac073e6920287a1fdea0ba3df5aabf529b7251"
+    },
+    {
+      "repeat": 1,
+      "runtime": "chrome",
+      "pass": "baseline",
+      "final": {
+        "path": "/",
+        "results": 0,
+        "hydrationBudgetExceeded": null,
+        "status": 200
+      },
+      "sorryPath": false,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": false,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": false,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": false,
+      "htmlSha256": "f722ee73fcf959534b88671038085ea68c1eaced1656108285de46a81657b490"
+    },
+    {
+      "repeat": 1,
+      "runtime": "native",
+      "pass": "baseline",
+      "final": {
+        "path": "/sorry/index",
+        "results": 0,
+        "hydrationBudgetExceeded": false,
+        "status": 429
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "4f0fb7a29c4f7a799826e032802adc9d9dcd7438cf9ba0e20939905029bd5e2b"
+    },
+    {
+      "repeat": 1,
+      "runtime": "chrome",
+      "pass": "interfaces",
+      "final": {
+        "path": "/",
+        "results": 0,
+        "hydrationBudgetExceeded": null,
+        "status": 200
+      },
+      "sorryPath": false,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": false,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": false,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": false,
+      "htmlSha256": "0ed9ac67879443c9d4e51863d83335966ffec62f4b506c53745381c9ae68ab2a"
+    },
+    {
+      "repeat": 1,
+      "runtime": "native",
+      "pass": "interfaces",
+      "final": {
+        "path": "/sorry/index",
+        "results": 0,
+        "hydrationBudgetExceeded": false,
+        "status": 429
+      },
+      "sorryPath": true,
+      "finalHTMLAvailable": true,
+      "recaptchaElementPresent": true,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": true,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": true,
+      "htmlSha256": "af23bfe7c879f2383c31b38a9992eb73fb31f508885ac082ea67b1118def515e"
+    }
+  ]
+}

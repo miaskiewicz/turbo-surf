@@ -1,14 +1,15 @@
 [build-system]
-requires = ["maturin>=1.5,<2.0"]
+requires = ["maturin>=1.9.3,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "turbo-surf"
-version = "0.5.3"
+version = "0.5.4"
 description = "Browserless, native-speed web crawler + extractor with a V8 JS-render tier (PyO3 binding over the turbo-surf Rust engine)."
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "turbo-surf contributors" }]
 keywords = ["crawler", "scraper", "html", "extract", "markdown", "rust", "browserless"]
 classifiers = [
@@ -34,3 +35,6 @@ python-source = "python"
 module-name = "turbo_surf._turbo_surf"
 # Build the stable-ABI (abi3) wheel matching the crate's pyo3 features.
 features = ["pyo3/extension-module"]
+
+# Preserve the compiled audio/provider licenses alongside the installed extension.
+include = [{ path = "python/turbo_surf/THIRD_PARTY_NOTICES.md", format = ["sdist", "wheel"] }]

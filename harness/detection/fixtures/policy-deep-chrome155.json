@@ -1,0 +1,224 @@
+{
+  "childProbeSha256": "a0648d324b730e74f6ce5c18e200a6762ad553b00f860673a2d4e7d61125eef1",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "966bebec3b6e8b09b3f7dfbbf3fd0ea7e63027e52915d58a693b4e56264e26b3",
+  "probeSha256": "1bf56e9b2cfeb8abc59bdd80a51ee88bf37695aae9f7f6b087d05d464a655a17",
+  "collectorSha256": "bbef884769808001478fbe0e7a8ca639c10f7177b8acc4a03a0a3e5ba65ef9a3",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, true, true],
+        "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [true, true, true, true],
+          "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+          "permission": "prompt"
+        }
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, true, true, true],
+        "lists": [[], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "denied",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [false, true, true, true],
+          "lists": [[], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+          "permission": "denied"
+        }
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, true, true],
+        "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [true, false, true, false],
+          "lists": [["<127.0.0.1>"], [], ["<127.0.0.1>"], []],
+          "permission": "prompt"
+        }
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, true, true, true],
+        "lists": [[], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "denied",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [false, true, true, true],
+          "lists": [[], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+          "permission": "denied"
+        }
+      }
+    },
+    {
+      "id": "4",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, false, true, true],
+        "lists": [["<127.0.0.1>"], [], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [true, false, true, true],
+          "lists": [["<127.0.0.1>"], [], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+          "permission": "prompt"
+        }
+      }
+    },
+    {
+      "id": "5",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [false, false, false, false],
+        "lists": [[], [], [], []],
+        "permission": "denied",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [false, false, false, false],
+          "lists": [[], [], [], []],
+          "permission": "denied"
+        }
+      }
+    },
+    {
+      "id": "6",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, false, true],
+        "lists": [["<localhost>"], ["<localhost>"], [], ["<localhost>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [true, true, false, true],
+          "lists": [["<localhost>"], ["<localhost>"], [], ["<localhost>"]],
+          "permission": "prompt"
+        }
+      }
+    },
+    {
+      "id": "7",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, true, true],
+        "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [false, false, false, false],
+          "lists": [[], [], [], []],
+          "permission": "denied"
+        }
+      }
+    },
+    {
+      "id": "8",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, true, true],
+        "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [true, true, false, true],
+          "lists": [["<localhost>"], ["<localhost>"], [], ["<localhost>"]],
+          "permission": "prompt"
+        }
+      }
+    },
+    {
+      "id": "9",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, false, true],
+        "lists": [["<localhost>"], ["<localhost>"], [], ["<localhost>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [true, true, false, true],
+          "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], [], ["<127.0.0.1>"]],
+          "permission": "prompt"
+        }
+      }
+    },
+    {
+      "id": "10",
+      "result": {
+        "depth": 1,
+        "isolated": true,
+        "allowed": [true, true, true, true],
+        "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": true,
+          "allowed": [true, true, true, true],
+          "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"], ["<127.0.0.1>"]],
+          "permission": "prompt"
+        }
+      }
+    },
+    {
+      "id": "11",
+      "result": {
+        "depth": 1,
+        "isolated": false,
+        "allowed": [true, true, false, true],
+        "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], [], ["<127.0.0.1>"]],
+        "permission": "prompt",
+        "child": {
+          "depth": 2,
+          "isolated": false,
+          "allowed": [true, true, false, true],
+          "lists": [["<127.0.0.1>"], ["<127.0.0.1>"], [], ["<127.0.0.1>"]],
+          "permission": "prompt"
+        }
+      }
+    }
+  ]
+}

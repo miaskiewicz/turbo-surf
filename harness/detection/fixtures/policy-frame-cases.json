@@ -1,0 +1,807 @@
+[
+  {
+    "id": "0",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "1",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "2",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "3",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "4",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "5",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "6",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "7",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "8",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "9",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "10",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "11",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "12",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "13",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "14",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "15",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "16",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "17",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "18",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "19",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "20",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "21",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "22",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "23",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "24",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "25",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "26",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "27",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "unsafe-none"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "28",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "29",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "30",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "31",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "require-corp"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "32",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": false,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "33",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": false,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "34",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": true,
+    "credentialless": false,
+    "allow": ""
+  },
+  {
+    "id": "35",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [["Cross-Origin-Embedder-Policy", "credentialless"]],
+    "cross": true,
+    "credentialless": true,
+    "allow": ""
+  },
+  {
+    "id": "36",
+    "headers": [],
+    "childHeaders": [],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "37",
+    "headers": [],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation"
+  },
+  {
+    "id": "38",
+    "headers": [],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation *"
+  },
+  {
+    "id": "39",
+    "headers": [],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'none'"
+  },
+  {
+    "id": "40",
+    "headers": [],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'self'"
+  },
+  {
+    "id": "41",
+    "headers": [["Permissions-Policy", "geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "42",
+    "headers": [["Permissions-Policy", "geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation"
+  },
+  {
+    "id": "43",
+    "headers": [["Permissions-Policy", "geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation *"
+  },
+  {
+    "id": "44",
+    "headers": [["Permissions-Policy", "geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'none'"
+  },
+  {
+    "id": "45",
+    "headers": [["Permissions-Policy", "geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'self'"
+  },
+  {
+    "id": "46",
+    "headers": [["Permissions-Policy", "geolocation=()"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "47",
+    "headers": [["Permissions-Policy", "geolocation=()"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation"
+  },
+  {
+    "id": "48",
+    "headers": [["Permissions-Policy", "geolocation=()"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation *"
+  },
+  {
+    "id": "49",
+    "headers": [["Permissions-Policy", "geolocation=()"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'none'"
+  },
+  {
+    "id": "50",
+    "headers": [["Permissions-Policy", "geolocation=()"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'self'"
+  },
+  {
+    "id": "51",
+    "headers": [["Permissions-Policy", "geolocation=(self)"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "52",
+    "headers": [["Permissions-Policy", "geolocation=(self)"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation"
+  },
+  {
+    "id": "53",
+    "headers": [["Permissions-Policy", "geolocation=(self)"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation *"
+  },
+  {
+    "id": "54",
+    "headers": [["Permissions-Policy", "geolocation=(self)"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'none'"
+  },
+  {
+    "id": "55",
+    "headers": [["Permissions-Policy", "geolocation=(self)"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'self'"
+  },
+  {
+    "id": "56",
+    "headers": [["Permissions-Policy", "camera=(),geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "57",
+    "headers": [["Permissions-Policy", "camera=(),geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation"
+  },
+  {
+    "id": "58",
+    "headers": [["Permissions-Policy", "camera=(),geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation *"
+  },
+  {
+    "id": "59",
+    "headers": [["Permissions-Policy", "camera=(),geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'none'"
+  },
+  {
+    "id": "60",
+    "headers": [["Permissions-Policy", "camera=(),geolocation=*"]],
+    "childHeaders": [],
+    "cross": true,
+    "allow": "geolocation 'self'"
+  },
+  {
+    "id": "61",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "62",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "63",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "64",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "65",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "66",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "67",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "68",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "69",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "70",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "71",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "72",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "73",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "74",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "75",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "76",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  },
+  {
+    "id": "77",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": ""
+  },
+  {
+    "id": "78",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ],
+    "childHeaders": [
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Cross-Origin-Resource-Policy", "cross-origin"]
+    ],
+    "cross": true,
+    "allow": "cross-origin-isolated"
+  }
+]

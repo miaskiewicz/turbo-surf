@@ -1,0 +1,47 @@
+{
+  "browserVersion": "Chrome/155.0.8059.40",
+  "collectedAt": "2026-10-13T21:44:55.230Z",
+  "source": "https://html.spec.whatwg.org/multipage/obsolete.html#dom-document-clear",
+  "collectorSha256": "f6ac94780ddab29f020e63d0e3c03e20859d3ca842715ae6919a317a8daa80ff",
+  "result": {
+    "clear": {
+      "name": "clear",
+      "length": 0,
+      "enumerable": true,
+      "configurable": true,
+      "writable": true,
+      "constructible": false,
+      "native": true,
+      "undefined": true,
+      "unchanged": true,
+      "hooks": 0,
+      "errors": ["TypeError", "TypeError", "TypeError"]
+    },
+    "captureEvents": {
+      "name": "captureEvents",
+      "length": 0,
+      "enumerable": true,
+      "configurable": true,
+      "writable": true,
+      "constructible": false,
+      "native": true,
+      "undefined": true,
+      "unchanged": true,
+      "hooks": 0,
+      "errors": ["TypeError", "TypeError", "TypeError"]
+    },
+    "releaseEvents": {
+      "name": "releaseEvents",
+      "length": 0,
+      "enumerable": true,
+      "configurable": true,
+      "writable": true,
+      "constructible": false,
+      "native": true,
+      "undefined": true,
+      "unchanged": true,
+      "hooks": 0,
+      "errors": ["TypeError", "TypeError", "TypeError"]
+    }
+  }
+}

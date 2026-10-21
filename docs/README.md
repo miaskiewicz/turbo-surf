@@ -8,10 +8,10 @@ anymore (the engine is Rust; its modules are crates). Start here:
   Playwright drop-in, and the benchmarks.
 - [`../CHANGELOG.md`](../CHANGELOG.md) — what shipped.
 - [`../PUBLISHING.md`](../PUBLISHING.md) — how releases cut (npm launcher + crates).
-- [`../CLAUDE.md`](../CLAUDE.md) — working rules for contributors.
+- [`../AGENTS.md`](../AGENTS.md) — working rules for contributors.
 
 ## Engine (the Rust workspace)
-- [`../rust/README.md`](../rust/README.md) — the 7-crate workspace, the tiers
+- [`../rust/README.md`](../rust/README.md) — the 9-crate workspace, the tiers
   (net/crawl → view/extract → V8 render), and how they fit.
 - [`../rust/HEADLESS-HYDRATION.md`](../rust/HEADLESS-HYDRATION.md) — the no-browser
   JS render tier (a `deno_core` V8 isolate over the native rtdom DOM + the vendored
@@ -20,7 +20,7 @@ anymore (the engine is Rust; its modules are crates). Start here:
   — the dev/harness in-process addon (not published).
 
 ## Agent & test surfaces
-- **MCP server** — 60 tools over stdio; see the "MCP server" section of
+- **MCP server** — 80 tools over stdio; see the "MCP server" section of
   [`../README.md`](../README.md).
 - **Playwright drop-in** — [`../rust/playwright-shim/LIMITATIONS.md`](../rust/playwright-shim/LIMITATIONS.md)
   is the per-method coverage map (what's supported / no-op / throws).
@@ -30,3 +30,9 @@ anymore (the engine is Rust; its modules are crates). Start here:
   same-script parity + timing vs real browsers.
 - [`../harness/crawlers/README.md`](../harness/crawlers/README.md) —
   crawler-vs-crawler throughput.
+
+- [`../harness/detection/README.md`](../harness/detection/README.md) — reusable
+  Chrome/native JS-interface and application-network traces, fresh cookies, controls
+  and all native capability features.
+- [`../harness/detection/FINDINGS.md`](../harness/detection/FINDINGS.md) — dated
+  Google evidence, code audit and remaining gaps.

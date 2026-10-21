@@ -1,0 +1,39 @@
+<!doctype html><html><head><title>iframe lifecycle</title></head><body>
+<script>
+(() => {
+  const result={};
+  const frame=document.createElement('iframe');
+  frame.srcdoc='<body data-generation="first"><script>parent.document.body.setAttribute("data-first-script","ran");<'+ '/script></body>';
+  result.nativeNode=frame instanceof HTMLIFrameElement && frame instanceof Node;
+  result.detached=frame.contentWindow===null && frame.contentDocument===null && !frame.isConnected;
+  result.detachedScript=document.body.getAttribute('data-first-script')===null;
+  result.prototypeAccessors=!Object.hasOwn(frame,'contentWindow') && !Object.hasOwn(frame,'srcdoc');
+  const fragment=document.createDocumentFragment();fragment.appendChild(frame);
+  result.fragmentDetached=frame.contentWindow===null;
+  let generation=0,firstWindow,firstDocument;
+  frame.addEventListener('load',event=>{
+    generation++;
+    result.loadEvent=event instanceof Event && event.isTrusted && event.target===frame && event.currentTarget===frame && event.eventPhase===2;
+    if(generation===1){
+      firstWindow=frame.contentWindow;firstDocument=frame.contentDocument;
+      result.childScript=document.body.getAttribute('data-first-script')==='ran';
+      result.connected=frame.isConnected && frame.parentNode===document.body && document.querySelector('iframe')===frame;
+      result.frameTree=window.length===1 && window[0]===frame.contentWindow && frame.contentWindow.frameElement===frame;
+      frame.remove();
+      result.removed=frame.contentWindow===null && frame.contentDocument===null && window.length===0;
+      frame.srcdoc='<body data-generation="second"><script>parent.document.body.setAttribute("data-second-script","ran");<'+ '/script></body>';
+      result.removedScript=document.body.getAttribute('data-second-script')===null;
+      document.body.appendChild(frame);
+    } else if(generation===2){
+      result.reinserted=frame.contentWindow!==firstWindow && frame.contentDocument!==firstDocument && firstDocument.body.getAttribute('data-generation')==='first' && frame.contentDocument.body.getAttribute('data-generation')==='second';
+      result.secondScript=document.body.getAttribute('data-second-script')==='ran';
+      queueMicrotask(()=>{
+        result.finishedEvent=event.currentTarget===null && event.eventPhase===0;
+        globalThis.__browserFixture=result;
+        document.body.setAttribute('data-browser-fixture',JSON.stringify(result));
+      });
+    }
+  });
+  document.body.appendChild(fragment);
+})();
+</script></body></html>

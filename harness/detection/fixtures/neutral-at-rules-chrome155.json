@@ -1,0 +1,77 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "e129c8ade5743046a70a228cf95b81856ecbf29bda6f9a61d4d5cd2f53daebe7",
+  "result": [
+    {
+      "name": "absent-named-container",
+      "types": [1, 0],
+      "box": [10, 10]
+    },
+    {
+      "name": "eligible-container",
+      "types": [1, 0],
+      "box": [70, 10]
+    },
+    {
+      "name": "inline-container-shorthand",
+      "types": [1, 0],
+      "box": [70, 10]
+    },
+    {
+      "name": "paint-registration",
+      "types": [1, 0, 1],
+      "box": [10, 10]
+    },
+    {
+      "name": "transitive-paint-registration",
+      "types": [1, 0, 1],
+      "box": [10, 10]
+    },
+    {
+      "name": "direct-width-registration",
+      "types": [1, 0, 1],
+      "box": [1264, 10]
+    },
+    {
+      "name": "transitive-width-registration",
+      "types": [1, 0, 1],
+      "box": [1264, 10]
+    },
+    {
+      "name": "border-shorthand-registration",
+      "types": [1, 0, 1],
+      "box": [10, 10]
+    },
+    {
+      "name": "important-padding-registration",
+      "types": [1, 0, 1],
+      "box": [10, 10]
+    },
+    {
+      "name": "inline-width-registration",
+      "types": [1, 0],
+      "box": [1264, 10]
+    },
+    {
+      "name": "escaped-width-registration",
+      "types": [1, 0, 1],
+      "box": [1264, 10]
+    },
+    {
+      "name": "view-transition-auto",
+      "types": [1, 0],
+      "box": [10, 10]
+    },
+    {
+      "name": "view-transition-none",
+      "types": [1, 0],
+      "box": [10, 10]
+    },
+    {
+      "name": "unknown-layer",
+      "types": [1, 0],
+      "box": [10, 10]
+    }
+  ]
+}

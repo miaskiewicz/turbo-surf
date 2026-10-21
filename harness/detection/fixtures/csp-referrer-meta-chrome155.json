@@ -1,0 +1,499 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "1adba2682eca0ff0c53becd71ee529a78a18c01f2185daa63e2fce3c533fcc3a",
+  "probeSha256": "e242bc585424b5e8ffeac50fd6a984806521dfa4016708124b811f9adaf83916",
+  "collectorSha256": "689e6bf8a0c02288b31d797cd05a91a7621dccd80f4362efe18d5d0c3e7c1f54",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "header-unsafe-baseline",
+      "result": {
+        "referrer": "http://metadata.test/start?case=0&private=authored",
+        "location": "http://metadata.test/page?case=0",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/start?case=0&private=authored",
+            "status": 404,
+            "document": "http://metadata.test/page?case=0",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=0",
+        "referrer": "http://metadata.test/start?case=0&private=authored"
+      }
+    },
+    {
+      "id": "parser-head",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=1",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=1",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=1",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "parser-body",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=2",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=2",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=2",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "parser-uppercase",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=3",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=3",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=3",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "parser-padded",
+      "result": {
+        "referrer": "http://metadata.test/start?case=4&private=authored",
+        "location": "http://metadata.test/page?case=4",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/start?case=4&private=authored",
+            "status": 404,
+            "document": "http://metadata.test/page?case=4",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=4",
+        "referrer": "http://metadata.test/start?case=4&private=authored"
+      }
+    },
+    {
+      "id": "parser-legacy-never",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=5",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=5",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=5",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "parser-legacy-always",
+      "result": {
+        "referrer": "http://metadata.test/start?case=6&private=authored",
+        "location": "http://metadata.test/page?case=6",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/start?case=6&private=authored",
+            "status": 404,
+            "document": "http://metadata.test/page?case=6",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=6",
+        "referrer": "http://metadata.test/start?case=6&private=authored"
+      }
+    },
+    {
+      "id": "dynamic-head",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=7",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=7",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=7",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "dynamic-body",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=8",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=8",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=8",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "dynamic-content",
+      "result": {
+        "referrer": "http://metadata.test/start?case=9&private=authored",
+        "location": "http://metadata.test/page?case=9",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/start?case=9&private=authored",
+            "status": 404,
+            "document": "http://metadata.test/page?case=9",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=9",
+        "referrer": "http://metadata.test/start?case=9&private=authored"
+      }
+    },
+    {
+      "id": "dynamic-name",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=10",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=10",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=10",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "dynamic-invalid",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=11",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=11",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=11",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "dynamic-removed",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=12",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=12",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=12",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "template-inert",
+      "result": {
+        "referrer": "http://metadata.test/start?case=13&private=authored",
+        "location": "http://metadata.test/page?case=13",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/start?case=13&private=authored",
+            "status": 404,
+            "document": "http://metadata.test/page?case=13",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=13",
+        "referrer": "http://metadata.test/start?case=13&private=authored"
+      }
+    },
+    {
+      "id": "shadow-inert",
+      "result": {
+        "referrer": "http://metadata.test/start?case=14&private=authored",
+        "location": "http://metadata.test/page?case=14",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/start?case=14&private=authored",
+            "status": 404,
+            "document": "http://metadata.test/page?case=14",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=14",
+        "referrer": "http://metadata.test/start?case=14&private=authored"
+      }
+    },
+    {
+      "id": "foreign-inert",
+      "result": {
+        "referrer": "http://metadata.test/start?case=15&private=authored",
+        "location": "http://metadata.test/page?case=15",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/start?case=15&private=authored",
+            "status": 404,
+            "document": "http://metadata.test/page?case=15",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=15",
+        "referrer": "http://metadata.test/start?case=15&private=authored"
+      }
+    },
+    {
+      "id": "parser-legacy-default-cross",
+      "result": {
+        "referrer": "http://metadata.test/",
+        "location": "http://cross.metadata.test/page?case=16",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/",
+            "status": 404,
+            "document": "http://cross.metadata.test/page?case=16",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=16",
+        "referrer": "http://metadata.test/"
+      }
+    },
+    {
+      "id": "parser-legacy-origin-cross",
+      "result": {
+        "referrer": "http://metadata.test/",
+        "location": "http://cross.metadata.test/page?case=17",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/",
+            "status": 404,
+            "document": "http://cross.metadata.test/page?case=17",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=17",
+        "referrer": "http://metadata.test/"
+      }
+    },
+    {
+      "id": "dynamic-native-attributes",
+      "result": {
+        "referrer": "",
+        "location": "http://metadata.test/page?case=18",
+        "rows": [
+          {
+            "referrer": "",
+            "status": 404,
+            "document": "http://metadata.test/page?case=18",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=18",
+        "referrer": ""
+      }
+    },
+    {
+      "id": "parser-template-inert",
+      "result": {
+        "referrer": "http://metadata.test/start?case=19&private=authored",
+        "location": "http://metadata.test/page?case=19",
+        "rows": [
+          {
+            "referrer": "http://metadata.test/start?case=19&private=authored",
+            "status": 404,
+            "document": "http://metadata.test/page?case=19",
+            "blocked": "inline",
+            "source": "https://csp-probe.test/navigation-probe.js",
+            "line": 30,
+            "column": 12,
+            "target": "STYLE",
+            "trusted": true
+          }
+        ]
+      },
+      "request": {
+        "url": "/page?case=19",
+        "referrer": "http://metadata.test/start?case=19&private=authored"
+      }
+    }
+  ]
+}

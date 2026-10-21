@@ -29,12 +29,25 @@ the JS code that genuinely needs an in-process DOM can run:
   text/role reads — backs `expect(locator)` chains).
 - **actions:** `fill`/`setChecked`/`selectOption`/`click` (by selector) and the
   `*Node` variants (by handle).
-- **JS tier:** `evaluate`, `render`, `transform`.
+- **JS tier:** `evaluate`, `render`, `renderPooled`, `hydrate`, `transform`.
+- **retained sessions:** `Session.call` keeps a parsed DOM and cookie jar;
+  `liveOpen`/`liveEval`/`liveSerialize`/`liveCookies`/`liveClose` keep V8 alive.
+- **request state:** `requestStateNew`/`requestStateClose` create and release
+  origin-scoped client-hint negotiation state. Pass the optional handle to
+  `fetchWithCookies`, `hydrate`, `liveOpen`, and `fetchBytes` to carry Accept-CH
+  from the initial response into page resource fetches and later navigations.
 
-Stateless by design: Node passes the HTML, each call parses with turbo-dom and
-runs the Rust pass. The most recent parse is cached per thread (`PARSE_CACHE`), so a
+The functional view surface takes HTML strings and runs a Rust pass. The most recent parse is cached per thread (`PARSE_CACHE`), so a
 same-HTML follow-up is a string-compare + `Rc` clone, not a re-parse; mutating
-actions own their own tree. Nothing holds a (non-`Send`) DOM tree across the FFI.
+actions own their own tree. Retained sessions own their DOM/V8 on dedicated worker
+threads and expose command channels across the FFI.
+
+The Playwright shim gives each `BrowserContext` its own request-state handle and
+closes it with the context. Navigation, hydration, linked CSS, and image requests
+share that state and use destination-specific request headers. Standalone
+`fetchHtml`, `request`, `render`, and `renderPooled` calls have fresh request state.
+`fetchWithCookies` also accepts optional `contextJson` containing `source`,
+`destination`, `mode`, and `userActivation`; omitted metadata means a navigation.
 
 ## Build
 

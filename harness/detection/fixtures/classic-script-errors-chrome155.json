@@ -1,0 +1,110 @@
+{
+  "browserVersion": "Chrome/155.0.8059.40",
+  "collectedAt": "2026-10-13T20:59:32.335Z",
+  "note": "Normal Chrome on authored two-origin loopback fixture. Independent fresh profile; no external site requests or cookie transfer.",
+  "collectorSha256": "c8dc25da5f60c6dee21b9ff94969e0f5df9a5847b43d36fdb7c8a25f3c31323a",
+  "result": [
+    {
+      "continued": true,
+      "resources": [
+        ["throw", "load", true],
+        ["syntax", "load", true],
+        ["muted", "load", true],
+        ["cors", "load", true]
+      ],
+      "errors": [
+        {
+          "trusted": true,
+          "identity": true,
+          "ownRealm": true,
+          "source": "/",
+          "located": true,
+          "message": "Uncaught Error: inline failure"
+        },
+        {
+          "trusted": true,
+          "identity": true,
+          "ownRealm": true,
+          "source": "/throw.js",
+          "located": true,
+          "message": "Uncaught Error: downloaded failure"
+        },
+        {
+          "trusted": true,
+          "identity": false,
+          "ownRealm": true,
+          "source": "/syntax.js",
+          "located": true,
+          "message": "Uncaught SyntaxError: Unexpected token '='"
+        },
+        {
+          "trusted": true,
+          "identity": false,
+          "ownRealm": false,
+          "source": "",
+          "located": false,
+          "message": "Script error."
+        },
+        {
+          "trusted": true,
+          "identity": true,
+          "ownRealm": true,
+          "source": "/throw.js",
+          "located": true,
+          "message": "Uncaught Error: downloaded failure"
+        }
+      ]
+    },
+    {
+      "continued": true,
+      "resources": [
+        ["throw", "load", true],
+        ["syntax", "load", true],
+        ["muted", "load", true],
+        ["cors", "load", true]
+      ],
+      "errors": [
+        {
+          "trusted": true,
+          "identity": true,
+          "ownRealm": true,
+          "source": "/frame",
+          "located": true,
+          "message": "Uncaught Error: inline failure"
+        },
+        {
+          "trusted": true,
+          "identity": true,
+          "ownRealm": true,
+          "source": "/throw.js",
+          "located": true,
+          "message": "Uncaught Error: downloaded failure"
+        },
+        {
+          "trusted": true,
+          "identity": false,
+          "ownRealm": true,
+          "source": "/syntax.js",
+          "located": true,
+          "message": "Uncaught SyntaxError: Unexpected token '='"
+        },
+        {
+          "trusted": true,
+          "identity": false,
+          "ownRealm": false,
+          "source": "",
+          "located": false,
+          "message": "Script error."
+        },
+        {
+          "trusted": true,
+          "identity": true,
+          "ownRealm": true,
+          "source": "/throw.js",
+          "located": true,
+          "message": "Uncaught Error: downloaded failure"
+        }
+      ]
+    }
+  ]
+}

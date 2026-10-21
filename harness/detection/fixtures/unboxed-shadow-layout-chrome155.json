@@ -1,0 +1,20 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "40c25044c69afcfb6ed8854939a6066b10c6e217d300deb606bc226cfa96a96e",
+  "result": {
+    "before": {
+      "slot": [0, 0, 0, 0],
+      "rectCount": 0,
+      "metrics": [0, 0, 0, 0, 0, 0, true, 0, 0, 0, 0],
+      "child": [10, 10, 40, 20],
+      "hit": true
+    },
+    "after": [0, 0, 0, 0, 0, 0, true, 0, 0, 0, 0],
+    "boxed": {
+      "slot": [10, 10, 60, 30],
+      "rectCount": 1,
+      "child": [10, 10, 40, 20]
+    }
+  }
+}

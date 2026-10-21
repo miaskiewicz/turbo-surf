@@ -1,0 +1,79 @@
+[
+  {
+    "path": "biquad.cc",
+    "sha256": "32307df7178e54a021bcbceb389108f07c60e22d916c13c447f389c4eaf622c8",
+    "changes": "isolated namespace; .cc platform include only",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/audio/biquad.cc?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/platform/audio/biquad.cc"
+  },
+  {
+    "path": "biquad.h",
+    "sha256": "bf0eaa9f25c2036adeaf9c190896c9a9dd55ba715c3f6862b8fd3039ec52dcc9",
+    "changes": "isolated namespace; .cc platform include only",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/audio/biquad.h?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/platform/audio/biquad.h"
+  },
+  {
+    "path": "delay.cc",
+    "sha256": "6d3c166770cb1babf4b08d512a8269dbf4372ed0a4e15e463d663e94f35a5402",
+    "changes": "isolated namespace; .cc platform include only",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/audio/delay.cc?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/platform/audio/delay.cc"
+  },
+  {
+    "path": "delay.h",
+    "sha256": "6c6b588ec495c7616fbfd9accce875c4cbbd7c51d552a98e81d49cefa9eaf95b",
+    "changes": "isolated namespace; .cc platform include only",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/audio/delay.h?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/platform/audio/delay.h"
+  },
+  {
+    "path": "stereo_panner.cc",
+    "sha256": "cc2cbdb6d54cdebf65c3c93524709604229bf1aba60a720289a23ce05f24ee8d",
+    "changes": "isolated namespace; .cc platform include only",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/audio/stereo_panner.cc?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/platform/audio/stereo_panner.cc"
+  },
+  {
+    "path": "stereo_panner.h",
+    "sha256": "fd3d854728d51cfb0ee02ce3505544fa721329d5fd6ce89c539b5a44ba589542",
+    "changes": "isolated namespace; .cc platform include only",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/audio/stereo_panner.h?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/platform/audio/stereo_panner.h"
+  },
+  {
+    "path": "delay_neon.cc",
+    "sha256": "ac5137ffff0b2a9f44a048f1f8ac97e9688048460f9374cba5f932ca18bae92a",
+    "changes": "isolated namespace; platform include; explicit <cmath> for std::isnan",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/platform/audio/cpu/arm/delay_neon.cc?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/platform/audio/cpu/arm/delay_neon.cc"
+  },
+  {
+    "path": "wave_shaper_handler.cc",
+    "sha256": "03c45fac28ad65ef5217a3fa9b023f7789eef3cbd5c80755deb62177f48cc2a4",
+    "changes": "reference preserved unchanged",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/modules/webaudio/wave_shaper_handler.cc?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/modules/webaudio/wave_shaper_handler.cc"
+  },
+  {
+    "path": "biquad_filter_handler.cc",
+    "sha256": "be104a92d00de200d7076e3b83a674224ecdf3d59aef3b6053ea8780121e5566",
+    "changes": "reference preserved unchanged",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/modules/webaudio/biquad_filter_handler.cc?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/modules/webaudio/biquad_filter_handler.cc"
+  },
+  {
+    "path": "audio_handler.cc",
+    "sha256": "d0dbdf20b6e7078a3e43b2111d5719fd5fe3ec4edae80d55eea37f067cde5b55",
+    "changes": "reference preserved unchanged",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/modules/webaudio/audio_handler.cc?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/modules/webaudio/audio_handler.cc"
+  },
+  {
+    "path": "delay_handler.cc",
+    "sha256": "c9ec54f8a5072542668ef3ae0038a4c3338cf0ec225fe7226df5b9916eb96b1b",
+    "changes": "reference preserved unchanged",
+    "url": "https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.40/third_party/blink/renderer/modules/webaudio/delay_handler.cc?format=TEXT",
+    "upstreamPath": "third_party/blink/renderer/modules/webaudio/delay_handler.cc"
+  }
+]

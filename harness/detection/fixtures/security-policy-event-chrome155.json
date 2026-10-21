@@ -1,0 +1,184 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "5fd56a5560c79cfe47032351e0367cc06154a1d366f4ed47049472283c9d98c4",
+  "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "rows": [
+      {
+        "name": "documentURI",
+        "value": "doc",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get documentURI",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "referrer",
+        "value": "ref",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get referrer",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "blockedURI",
+        "value": "blocked",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get blockedURI",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "violatedDirective",
+        "value": "script-src-elem",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get violatedDirective",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "effectiveDirective",
+        "value": "script-src-elem",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get effectiveDirective",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "originalPolicy",
+        "value": "script-src 'none'",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get originalPolicy",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "disposition",
+        "value": "report",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get disposition",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "sourceFile",
+        "value": "source",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get sourceFile",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "statusCode",
+        "value": 201,
+        "enumerable": true,
+        "configurable": true,
+        "get": "get statusCode",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "lineNumber",
+        "value": 42,
+        "enumerable": true,
+        "configurable": true,
+        "get": "get lineNumber",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "columnNumber",
+        "value": 7,
+        "enumerable": true,
+        "configurable": true,
+        "get": "get columnNumber",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      },
+      {
+        "name": "sample",
+        "value": "",
+        "enumerable": true,
+        "configurable": true,
+        "get": "get sample",
+        "length": 0,
+        "set": false,
+        "errors": ["TypeError", "TypeError", "TypeError"]
+      }
+    ],
+    "defaults": [
+      ["documentURI", ""],
+      ["referrer", ""],
+      ["blockedURI", ""],
+      ["violatedDirective", ""],
+      ["effectiveDirective", ""],
+      ["originalPolicy", ""],
+      ["disposition", "enforce"],
+      ["sourceFile", ""],
+      ["statusCode", 0],
+      ["lineNumber", 0],
+      ["columnNumber", 0],
+      ["sample", ""]
+    ],
+    "reads": [
+      "bubbles",
+      "cancelable",
+      "composed",
+      "blockedURI",
+      "columnNumber",
+      "disposition",
+      "documentURI",
+      "effectiveDirective",
+      "lineNumber",
+      "originalPolicy",
+      "referrer",
+      "sample",
+      "sourceFile",
+      "statusCode",
+      "violatedDirective"
+    ],
+    "failures": ["TypeError", "TypeError", "TypeError", "TypeError", "TypeError"],
+    "numbers": [-1, 1, 65535],
+    "event": {
+      "type": "securitypolicyviolation",
+      "bubbles": true,
+      "cancelable": false,
+      "composed": true,
+      "isTrusted": false,
+      "own": ["isTrusted"],
+      "brand": "[object SecurityPolicyViolationEvent]",
+      "parent": true,
+      "constructorParent": true
+    }
+  }
+}

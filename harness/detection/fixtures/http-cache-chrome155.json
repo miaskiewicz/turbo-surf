@@ -1,0 +1,1205 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "probeSha256": "4816d1a656275c46cd7c5e124d688ed26a8cf61f3f9422520b973f7e09d320fc",
+  "collectorSha256": "3daaadd74541f2910951cbfc019fbaf44dbaa67c7d7cbcd14a3dc67b5b7161b9",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": {
+    "default": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "no-store": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "conditional": null,
+          "cacheControl": "no-cache",
+          "pragma": "no-cache",
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "reload": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "conditional": null,
+          "cacheControl": "no-cache",
+          "pragma": "no-cache",
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "conditional": null,
+          "cacheControl": "no-cache",
+          "pragma": "no-cache",
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "no-cache": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "force-cache": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "only-if-cached": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "missing": {
+      "error": "TypeError"
+    },
+    "stale-default": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "3",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "stale-force-cache": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "stale-only-if-cached": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "stale-no-cache": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "3",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "control-no-store": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 3,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "3",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "control-no-cache": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "control-max-age=3600, must-revalidate": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "vary": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": "a",
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": "a",
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": "a",
+          "referer": true
+        },
+        "count": "3",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": "a",
+          "referer": true
+        },
+        "count": "4",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "star": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "3",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "error": "TypeError"
+      }
+    ],
+    "emptyNoCache": {
+      "status": 200,
+      "body": {
+        "count": 1,
+        "conditional": null,
+        "cacheControl": "max-age=0",
+        "pragma": null,
+        "vary": null,
+        "referer": true
+      },
+      "count": "1",
+      "merged": "initial",
+      "redirected": false
+    },
+    "referrer": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "redirect": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": true
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": true
+      }
+    ],
+    "invalidate": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "conditional": null,
+          "cacheControl": "no-cache",
+          "pragma": "no-cache",
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 3,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "3",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "unsafe": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 2,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 3,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "3",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "headFresh": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "count": "1",
+        "body": ""
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "headMissing": [
+      {
+        "status": 200,
+        "count": "1",
+        "body": ""
+      },
+      {
+        "status": 200,
+        "count": "2",
+        "body": ""
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 3,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "3",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "varyReferrer": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "2",
+        "merged": "validated",
+        "redirected": false
+      }
+    ],
+    "status-201": [
+      {
+        "status": 201,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 201,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "status-202": [
+      {
+        "status": 202,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 202,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "status-302": [
+      {
+        "status": 302,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 302,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "status-307": [
+      {
+        "status": 307,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 307,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "status-404": [
+      {
+        "status": 404,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 404,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "status-500": [
+      {
+        "status": 500,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      },
+      {
+        "status": 500,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": false
+      }
+    ],
+    "redirect302": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": true
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": true
+      }
+    ],
+    "redirect307": [
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": true
+      },
+      {
+        "status": 200,
+        "body": {
+          "count": 1,
+          "conditional": null,
+          "cacheControl": null,
+          "pragma": null,
+          "vary": null,
+          "referer": true
+        },
+        "count": "1",
+        "merged": "initial",
+        "redirected": true
+      }
+    ]
+  }
+}

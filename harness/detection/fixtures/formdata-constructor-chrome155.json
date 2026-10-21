@@ -1,0 +1,52 @@
+{
+  "browser": "Chrome/155.0.8059.80",
+  "v8": "15.5.35.23",
+  "probeSha256": "669147c40cf9eb60fe810065d7361fc7be1c979c30dffb240ff5626592a1bda6",
+  "result": {
+    "none": {
+      "entries": [],
+      "error": null
+    },
+    "undefined": {
+      "entries": [],
+      "error": null
+    },
+    "null": {
+      "error": "TypeError"
+    },
+    "undefinedBad": {
+      "error": "TypeError"
+    },
+    "nullBad": {
+      "error": "TypeError"
+    },
+    "badFirst": {
+      "error": "TypeError"
+    },
+    "normal": {
+      "entries": [],
+      "error": null
+    },
+    "nullSubmitter": {
+      "entries": [],
+      "error": null
+    },
+    "undefinedSubmitter": {
+      "entries": [],
+      "error": null
+    },
+    "badSubmitter": {
+      "error": "TypeError"
+    },
+    "submitter": {
+      "entries": [["submit", "yes"]],
+      "error": null
+    },
+    "outside": {
+      "error": "NotFoundError"
+    },
+    "notSubmitter": {
+      "error": "TypeError"
+    }
+  }
+}

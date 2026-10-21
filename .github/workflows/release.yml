@@ -14,7 +14,32 @@ permissions:
   id-token: write # npm provenance
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test the offline release smoke supervisor
+        run: python3 -B scripts/test_smoke_mcp_release.py
+      - name: Check release versions and exact tag
+        shell: bash
+        run: |
+          python3 scripts/check-versions.py
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          version = json.loads(Path('package.json').read_text())['version']
+          if os.environ['GITHUB_EVENT_NAME'] == 'push':
+              expected = 'v' + version
+              if os.environ['GITHUB_REF'] != 'refs/tags/' + expected:
+                  raise SystemExit('Release tag must exactly match ' + expected)
+          print('Release source:', os.environ['GITHUB_SHA'], 'version:', version)
+          PYCODE
+
   build:
+    needs: validate
     name: build ${{ matrix.node }}
     runs-on: ${{ matrix.host }}
     strategy:
@@ -31,29 +56,52 @@ jobs:
           - { host: windows-latest, target: x86_64-pc-windows-msvc, node: win32-x64, ext: .exe }
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.98.0
         with: { targets: "${{ matrix.target }}" }
-      # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
-      - name: Install BoringSSL toolchain (nasm/cmake)
+      # BoringSSL needs cmake/nasm; btls-sys also generates bindings with libclang.
+      - name: Install BoringSSL and binding toolchain
         shell: bash
         run: |
           case "${{ runner.os }}" in
-            Linux)   sudo apt-get update && sudo apt-get install -y nasm cmake ;;
+            Linux)   sudo apt-get update && sudo apt-get install -y clang libclang-dev nasm cmake ;;
             macOS)   brew install nasm cmake || true ;;
             Windows) choco install nasm --no-progress -y && echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH" ;;
           esac
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+          cache: false
       - name: Build the MCP binary
-        # `--features trust-anchors` (Chrome 152+ 0xCA34 ext → JA4 t13d1517h2). It's NOT a crate
-        # default because it needs the vendored wreq's `trust_anchors` field (absent from the
-        # crates.io wreq, which would fail `cargo publish`); enabled here where the vendored wreq
-        # is present, so the shipped binary gets it without breaking crate publishing.
-        run: cargo build --release -p turbo-surf-mcp --features trust-anchors --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
+        # Pinned upstream Chrome 154 transport already includes real trust anchors.
+        run: cargo build --locked --release -p turbo-surf-mcp --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
+      - name: Verify third-party notices
+        run: python3 scripts/sync-third-party-notices.py --check
       - name: Stage platform binary
         shell: bash
         run: |
           mkdir -p out
           cp "rust/target/${{ matrix.target }}/release/turbo-surf-mcp${{ matrix.ext }}" \
              "out/turbo-surf-mcp-${{ matrix.node }}${{ matrix.ext }}"
+          cp LICENSE THIRD_PARTY_NOTICES.md out/
+      - name: Smoke the actual staged binary over stdio
+        shell: bash
+        env:
+          STAGED_BINARY: turbo-surf-mcp-${{ matrix.node }}${{ matrix.ext }}
+        run: |
+          version=$(python -c "import json; print(json.load(open('package.json'))['version'])")
+          python scripts/smoke-mcp-release.py \
+            --binary "$PWD/out/$STAGED_BINARY" --expected-version "$version" \
+            --source-commit "$GITHUB_SHA" --work "$RUNNER_TEMP/staged-mcp-smoke" \
+            --output "$PWD/smoke-proof"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: binary-smoke-${{ matrix.node }}
+          path: smoke-proof/*
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: bin-${{ matrix.node }}
@@ -62,20 +110,109 @@ jobs:
 
   publish:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20, registry-url: "https://registry.npmjs.org" }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@v4
-        with: { path: artifacts }
+        with:
+          pattern: bin-*
+          path: artifacts
       - name: Collect prebuilt binaries into bin/
         run: |
           mkdir -p bin
           find artifacts -type f -name 'turbo-surf-mcp-*' -exec cp {} bin/ \;
           chmod +x bin/* || true
           ls -la bin/
-      - run: npm publish --provenance --access public
+      - name: Pack, inspect and smoke the exact npm release tarball
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import base64, hashlib, json, os, shutil, signal, subprocess, tarfile
+          from pathlib import Path, PurePosixPath
+          root = Path.cwd().resolve()
+          metadata = json.loads((root / 'package.json').read_text())
+          version = metadata['version']
+          output = Path(os.environ['RUNNER_TEMP']) / 'npm-release-package'
+          output.mkdir()
+          packed = subprocess.run(['npm', 'pack', '--json', '--ignore-scripts', '--pack-destination', str(output)], cwd=root, capture_output=True, text=True)
+          (output / 'npm-pack.json').write_text(packed.stdout)
+          (output / 'npm-pack.stderr.log').write_text(packed.stderr)
+          packed.check_returncode()
+          packages = json.loads(packed.stdout)
+          if len(packages) != 1 or packages[0]['name'] != 'turbo-surf' or packages[0]['version'] != version:
+              raise SystemExit('npm pack did not produce the exact release package')
+          archive = output / packages[0]['filename']
+          archive_bytes = archive.read_bytes()
+          integrity = 'sha512-' + base64.b64encode(hashlib.sha512(archive_bytes).digest()).decode()
+          if integrity != packages[0]['integrity'] or hashlib.sha1(archive_bytes).hexdigest() != packages[0]['shasum']:
+              raise SystemExit('npm pack integrity does not match the actual tarball')
+          bins = {'turbo-surf-mcp-darwin-arm64', 'turbo-surf-mcp-linux-x64', 'turbo-surf-mcp-linux-arm64', 'turbo-surf-mcp-win32-x64.exe'}
+          required = {'package.json', 'cli.js', 'index.js', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'CHANGELOG.md'} | {'bin/' + name for name in bins}
+          work = Path(os.environ['RUNNER_TEMP']) / 'npm-installed-smoke'
+          work.mkdir()
+          if any((parent / '.env').exists() for parent in [work, *work.parents]):
+              raise SystemExit('The isolated npm smoke cwd must have no ancestor .env')
+          hashes = {}
+          with tarfile.open(archive, 'r:gz') as tar:
+              members = tar.getmembers()
+              names = [member.name for member in members]
+              if len(names) != len(set(names)):
+                  raise SystemExit('Duplicate tarball paths')
+              for member in members:
+                  path = PurePosixPath(member.name)
+                  if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'package' or not (member.isfile() or member.isdir()):
+                      raise SystemExit('Unsafe npm tarball entry: ' + member.name)
+              files = {member.name.removeprefix('package/') for member in members if member.isfile()}
+              if not required <= files or {name.removeprefix('bin/') for name in files if name.startswith('bin/')} != bins:
+                  raise SystemExit('npm tarball is missing a release file or has unexpected platform binaries')
+              for name in sorted(required):
+                  data = tar.extractfile('package/' + name).read()
+                  if not data or data != (root / name).read_bytes():
+                      raise SystemExit('Packed release file differs from the staged source: ' + name)
+                  hashes[name] = hashlib.sha256(data).hexdigest()
+              tar.extractall(work, filter='data')
+          installed = work / 'package'
+          actual = json.loads((installed / 'package.json').read_text())
+          if actual['name'] != metadata['name'] or actual['version'] != version:
+              raise SystemExit('Extracted npm package identity mismatch')
+          for name in bins - {'turbo-surf-mcp-win32-x64.exe'}:
+              if not (installed / 'bin' / name).stat().st_mode & 0o111:
+                  raise SystemExit('Packed native binary lost executable permissions: ' + name)
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('release_smoke', root / 'scripts/smoke-mcp-release.py')
+          smoke = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(smoke)
+          for name in ('SIGINT', 'SIGTERM', 'SIGHUP'):
+              if hasattr(signal, name):
+                  signal.signal(getattr(signal, name), smoke.interrupted)
+          smoke_output = output / 'javascript-smoke'
+          receipt = smoke.smoke([shutil.which('node'), str(installed / 'cli.js')], version,
+              os.environ['GITHUB_SHA'], Path(os.environ['RUNNER_TEMP']) / 'npm-javascript-smoke', smoke_output)
+          for stream in ('stdout', 'stderr'):
+              log = smoke_output / (stream + '.log')
+              if log.is_file():
+                  shutil.copyfile(log, output / ('initialize.' + stream + '.log'))
+          receipt.update(archive=str(archive), sha256=hashlib.sha256(archive_bytes).hexdigest(),
+              integrity=integrity, version=version, fileSha256=hashes, cli=str(installed / 'cli.js'))
+          (output / 'initialize.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          if not receipt['initializeVerified'] or not receipt['javascriptVerified']:
+              raise SystemExit(128 + smoke.STOP if smoke.STOP is not None else 'Packaged npm CLI JavaScript execution failed; see retained package evidence')
+          with open(os.environ['GITHUB_ENV'], 'a') as github_env:
+              github_env.write('RELEASE_TARBALL=' + str(archive) + '\n')
+          print(json.dumps(receipt, indent=2))
+          PYCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-release-package
+          path: ${{ runner.temp }}/npm-release-package/*
+          if-no-files-found: warn
+      - run: npm publish "$RELEASE_TARBALL" --provenance --access public
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

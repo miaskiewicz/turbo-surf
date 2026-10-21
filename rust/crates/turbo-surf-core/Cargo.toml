@@ -8,22 +8,18 @@ description = "Browserless native-speed crawler core (Rust port, tier 1)"
 
 [features]
 default = ["impersonate"]
-# Swap the stock reqwest+rustls client for wreq (BoringSSL), which presents a
-# real Chrome TLS/JA3/JA4 + HTTP-2 (Akamai) fingerprint. Off by default: wreq
-# pulls BoringSSL, which needs a C toolchain (cmake/nasm) to build. ON by default (anti-bot); disable with --no-default-features. See net.rs.
-impersonate = ["dep:wreq", "dep:wreq-util"]
-# Emit Chrome 152+'s `trust_anchors` TLS extension (codepoint 0xCA34 / 51764) in
-# the ClientHello, so our JA4 matches real Chrome's `t13d1517h2` (wreq-util's
-# Chrome149 profile alone yields `t13d1516h2`). Off by default — it's a new,
-# non-standard extension. Implies `impersonate` (the emitter lives on the wreq
-# path). Uses the vendored wreq fork's `TlsOptions::trust_anchors`; see net.rs
-# `emulate()` and the [patch.crates-io] note in the workspace Cargo.toml.
+# BoringSSL-backed Chrome 154 transport. Uses the reviewed registry stack and
+# Rust 1.98 (workspace Cargo.toml); disable with --no-default-features for rustls.
+impersonate = ["dep:wreq", "dep:wreq-util", "dep:wreq-proto", "dep:tower"]
+# Compatibility alias: the Chrome 154 profile always sends real trust-anchor IDs,
+# sourced from the same Chromium root store used to verify server certificates.
 trust-anchors = ["impersonate"]
 
 [dependencies]
 url = "2"
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
+    "http2",
     "gzip",
     "brotli",
     "deflate",
@@ -34,20 +30,24 @@ reqwest = { version = "0.12", default-features = false, features = [
 # because wreq's Chrome emulation advertises `accept-encoding: gzip, deflate, br,
 # zstd` — without them it can't decode the responses it asks for.
 #
-# Pinned to the 6.0.0-rc / 3.0.0-rc line because Chrome 149 only lands there
-# (stable wreq-util 2.x tops out at Chrome 137); keeps the emulated version in
-# lockstep with the tier-1 HTTP UA + the render-tier navigator. Pre-release, but
-# only pulled by this opt-in feature — the default build never sees it.
-wreq = { version = "6.0.0-rc.29", optional = true, features = [
+# Named registry distributions preserve the reviewed Chrome 154 transport APIs
+# and source pins. The Rust aliases remain unchanged; see PUBLISHING.md.
+wreq = { package = "turbo-surf-wreq", version = "=0.16.1", default-features = false, optional = true, features = [
+    "tokio-rt",
+    "chromium-roots",
     "stream",
     "gzip",
     "brotli",
     "deflate",
     "zstd",
 ] }
-wreq-util = { version = "3.0.0-rc.13", optional = true }
+wreq-util = { package = "turbo-surf-wreq-util", version = "=0.2.0", optional = true, features = ["emulation-chromium-pki"] }
+wreq-proto = { version = "=0.2.5", optional = true }
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
 encoding_rs = "0.8"
 bytes = "1"
+http = "1"
+httpdate = "1"
 tokio = { version = "1", features = [
     "macros",
     "rt",
@@ -60,9 +60,25 @@ futures-util = "0.3"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+psl = "2"
+base64 = "0.22"
+sha2 = "0.10"
+sfv = "=0.15.0"
+urlpattern = "=0.4.2"
+regex = "1"
+brotli-decompressor = "=6.0.1"
+zstd = "0.13"
+
+# Modern Reporting API requests have no Accept default; reqwest inserts one.
+hyper-util = { version="0.1", features=["client-legacy", "tokio", "http1"] }
+http-body-util = "0.1"
+hyper-rustls = { version="0.27", default-features=false, features=["http1", "ring", "tls12"] }
+rustls = { version="0.23", default-features=false, features=["ring", "std", "tls12"] }
+webpki-roots = "1"
 
 [dev-dependencies]
 serde_json = "1"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio = { version = "1", features = [
     "macros",
     "rt-multi-thread",
@@ -72,3 +88,7 @@ tokio = { version = "1", features = [
     "net",
     "io-util",
 ] }
+
+[dependencies.tower]
+version = "0.5"
+optional = true

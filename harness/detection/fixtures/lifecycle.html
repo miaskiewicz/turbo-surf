@@ -1,0 +1,65 @@
+<!doctype html>
+<html><head>
+<script>
+globalThis.fixtureEvents=[];
+globalThis.fixtureLog=(value)=>fixtureEvents.push(value);
+globalThis.fixtureHostEvents=[];
+globalThis.fixtureEventRefs=[];
+globalThis.fixtureTargetName=(target)=>target===window?'window':target===document?'document':target&&target.id||null;
+globalThis.fixtureHostEvent=(event)=>{
+  fixtureHostEvents.push({type:event.type,trusted:event.isTrusted,target:fixtureTargetName(event.target),
+    currentTarget:fixtureTargetName(event.currentTarget),phase:event.eventPhase,
+    pathLength:event.composedPath().length,
+    timestampValid:Number.isFinite(event.timeStamp)&&event.timeStamp>=0});
+  fixtureEventRefs.push(event);
+};
+document.addEventListener('readystatechange',()=>fixtureLog('state:'+document.readyState));
+document.addEventListener('DOMContentLoaded',(event)=>{
+  fixtureHostEvent(event);
+  fixtureLog('dcl:'+document.readyState);
+  globalThis.fixtureImageAtDcl=document.querySelector('#pixel').complete;
+  fetch('/resources-ready');
+});
+window.addEventListener('load',(event)=>{
+  fixtureHostEvent(event);
+  fixtureLog('load:'+document.readyState);
+  const sheet=document.querySelector('#css').sheet;
+  globalThis.__browserFixture={events:fixtureEvents,imageAtDcl:fixtureImageAtDcl,
+    image:{complete:document.querySelector('#pixel').complete,width:document.querySelector('#pixel').naturalWidth,height:document.querySelector('#pixel').naturalHeight},
+    broken:{complete:document.querySelector('#broken').complete,width:document.querySelector('#broken').naturalWidth},
+    linked:{href:sheet.href,rules:Array.from(sheet.cssRules,r=>r.type===3?'import':r.selectorText),imported:sheet.cssRules[0].styleSheet.cssRules[0].selectorText},
+    dynamic:{imageWidth:fixtureDynamicImage.naturalWidth,styleRule:fixtureDynamicStyle.sheet.cssRules[0].selectorText},
+    control:document.querySelector('input').value,hostEvents:fixtureHostEvents,
+    get completedEventStates(){return fixtureCompletedStates||(fixtureCompletedStates=fixtureEventRefs.map(event=>({type:event.type,
+      trusted:event.isTrusted,currentTarget:fixtureTargetName(event.currentTarget),phase:event.eventPhase,pathLength:event.composedPath().length})));},
+    get redispatchStates(){return fixtureRedispatchStates||(fixtureRedispatchStates=fixtureEventRefs.slice(-2).map(event=>{
+      const target=new EventTarget();let accepted=null,error=null;
+      try{accepted=target.dispatchEvent(event);}catch(exception){error=exception.name;}
+      return {type:event.type,accepted,error,trusted:event.isTrusted,currentTarget:fixtureTargetName(event.currentTarget),phase:event.eventPhase,pathLength:event.composedPath().length};
+    }));}};
+});
+window.addEventListener('pageshow',(event)=>{
+  fixtureHostEvent(event);
+  fixtureLog('pageshow');
+  setTimeout(()=>{
+    void __browserFixture.completedEventStates;
+    void __browserFixture.redispatchStates;
+    document.body.setAttribute('data-browser-fixture','complete');
+  },0);
+});
+fixtureLog('classic:'+document.readyState);
+</script>
+<link id="css" rel="stylesheet" href="/main.css">
+<script defer src="/defer.js"></script>
+</head><body>
+<input type="hidden" value="parsed-token">
+<img id="pixel" src="/pixel.png"><img id="broken" src="/broken.png">
+<script>
+document.querySelector('#pixel').addEventListener('load',(event)=>{fixtureHostEvent(event);fixtureLog('image:load');});
+document.querySelector('#broken').addEventListener('error',(event)=>{fixtureHostEvent(event);fixtureLog('image:error');});
+globalThis.fixtureDynamicImage=new Image();fixtureDynamicImage.src='/dynamic.png';
+globalThis.fixtureDynamicStyle=document.createElement('link');fixtureDynamicStyle.setAttribute('rel','stylesheet');fixtureDynamicStyle.setAttribute('href','/dynamic.css');document.head.appendChild(fixtureDynamicStyle);
+globalThis.fixtureCompletedStates=null;globalThis.fixtureRedispatchStates=null;
+fixtureLog('body:'+document.readyState);
+</script>
+</body></html>

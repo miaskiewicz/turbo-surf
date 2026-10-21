@@ -1,0 +1,132 @@
+{
+  "childProbeSha256": "bb558860bce3dd1fc4040c130d929f278707b9efb54c12d039e8b663f4211f9f",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "d923b3bed1040127d6a622f8e766660740c7191d95c5b9c8d11758ba44f34522",
+  "probeSha256": "174f3339f1e987a5ba14af5f4e8f3c9f9527b2ab1d1223d25a2ac02cec13a907",
+  "collectorSha256": "bbef884769808001478fbe0e7a8ca639c10f7177b8acc4a03a0a3e5ba65ef9a3",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "parentIsolated": true,
+        "child": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "parentSend": "accepted",
+        "childSend": "accepted",
+        "parentReceive": "[object SharedArrayBuffer]",
+        "childReceive": "[object SharedArrayBuffer]"
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "parentIsolated": true,
+        "child": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "parentSend": "accepted",
+        "childSend": "accepted",
+        "parentReceive": "[object SharedArrayBuffer]",
+        "childReceive": "[object SharedArrayBuffer]"
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "parentIsolated": true,
+        "child": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "parentSend": "accepted",
+        "childSend": "accepted",
+        "parentReceive": "[object SharedArrayBuffer]",
+        "childReceive": "[object SharedArrayBuffer]"
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "parentIsolated": true,
+        "child": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "parentSend": "accepted",
+        "childSend": "accepted",
+        "parentReceive": "[object SharedArrayBuffer]",
+        "childReceive": "[object SharedArrayBuffer]"
+      }
+    },
+    {
+      "id": "4",
+      "result": {
+        "parentIsolated": true,
+        "child": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "parentSend": "accepted",
+        "childSend": "DataCloneError",
+        "parentReceive": null,
+        "childReceive": "messageerror"
+      }
+    },
+    {
+      "id": "5",
+      "result": {
+        "parentIsolated": true,
+        "child": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "parentSend": "accepted",
+        "childSend": "accepted",
+        "parentReceive": "messageerror",
+        "childReceive": "messageerror"
+      }
+    },
+    {
+      "id": "6",
+      "result": {
+        "parentIsolated": true,
+        "child": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "parentSend": "accepted",
+        "childSend": "DataCloneError",
+        "parentReceive": null,
+        "childReceive": "messageerror"
+      }
+    },
+    {
+      "id": "7",
+      "result": {
+        "parentIsolated": true,
+        "child": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "parentSend": "accepted",
+        "childSend": "accepted",
+        "parentReceive": "messageerror",
+        "childReceive": "messageerror"
+      }
+    }
+  ]
+}

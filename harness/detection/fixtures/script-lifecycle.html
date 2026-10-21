@@ -1,0 +1,10 @@
+<!doctype html><html><head>
+<script>
+window.scriptOrder=['inline:'+document.readyState];
+document.addEventListener('DOMContentLoaded',()=>{scriptOrder.push('dcl:'+document.readyState);fetch('/ready');});
+window.addEventListener('load',()=>{scriptOrder.push('load:'+document.readyState);window.__browserFixture={order:scriptOrder,asyncReady:window.asyncReady,events:window.scriptEvents};document.body.setAttribute('data-browser-fixture',JSON.stringify(window.__browserFixture));});
+window.scriptEvents=[];
+</script>
+<script async src='/async.js'></script>
+<script defer src='/defer.js'></script>
+</head><body><script>scriptOrder.push('body:'+document.readyState);document.querySelector('script[async]').onload=function(event){scriptEvents.push({type:event.type,trusted:event.isTrusted,event:event instanceof Event,target:event.target===this});};</script></body></html>

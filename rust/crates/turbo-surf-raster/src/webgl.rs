@@ -777,7 +777,6 @@ fn glsl_to_wgsl(src: &str, stage: naga::ShaderStage) -> Option<String> {
 struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    #[cfg_attr(not(test), allow(dead_code))]
     info: wgpu::AdapterInfo,
     _adapter: wgpu::Adapter,
     _instance: wgpu::Instance,
@@ -824,6 +823,18 @@ impl Gpu {
 #[cfg(test)]
 fn adapter_backend() -> Result<wgpu::Backend, String> {
     Ok(gpu()?.info.backend)
+}
+
+/// Identity of the actual Metal adapter used for readback, in WebGL's ANGLE
+/// representation. A failed device initialization exposes no fabricated identity.
+pub fn webgl_metadata() -> Option<String> {
+    let info = &gpu().ok()?.info;
+    Some(serde_json::json!({
+        "name": info.name,
+        "backend": "Metal",
+        "vendor": "Google Inc. (Apple)",
+        "renderer": format!("ANGLE (Apple, ANGLE Metal Renderer: {}, Unspecified Version)", info.name),
+    }).to_string())
 }
 
 /// wgpu index format for a GL element type (U8 is widened to U16 on the host).

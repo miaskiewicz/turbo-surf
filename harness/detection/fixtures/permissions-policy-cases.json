@@ -1,0 +1,86 @@
+[
+  {
+    "id": "0",
+    "headers": []
+  },
+  {
+    "id": "1",
+    "headers": [["Permissions-Policy", "geolocation=()"]]
+  },
+  {
+    "id": "2",
+    "headers": [["Permissions-Policy", "geolocation=(self)"]]
+  },
+  {
+    "id": "3",
+    "headers": [["Permissions-Policy", "geolocation=*"]]
+  },
+  {
+    "id": "4",
+    "headers": [["Permissions-Policy", "geolocation=(\"https://foreign.test\")"]]
+  },
+  {
+    "id": "5",
+    "headers": [["Permissions-Policy", "geolocation=(self \"https://foreign.test\")"]]
+  },
+  {
+    "id": "6",
+    "headers": [["Permissions-Policy", "geolocation=(\"http://127.0.0.1:123\")"]]
+  },
+  {
+    "id": "7",
+    "headers": [["Permissions-Policy", "geolocation=(SELF)"]]
+  },
+  {
+    "id": "8",
+    "headers": [["Permissions-Policy", "geolocation=(\"*\")"]]
+  },
+  {
+    "id": "9",
+    "headers": [["Permissions-Policy", "geolocation=(*)"]]
+  },
+  {
+    "id": "10",
+    "headers": [["Permissions-Policy", "geolocation=?0"]]
+  },
+  {
+    "id": "11",
+    "headers": [["Permissions-Policy", "geolocation=?1"]]
+  },
+  {
+    "id": "12",
+    "headers": [["Permissions-Policy", "geolocation=self"]]
+  },
+  {
+    "id": "13",
+    "headers": [["Permissions-Policy", "geolocation=(self);report-to=\"x\""]]
+  },
+  {
+    "id": "14",
+    "headers": [["Permissions-Policy", "geolocation=();x=@123"]]
+  },
+  {
+    "id": "15",
+    "headers": [["Permissions-Policy", "geolocation=(),camera=(self)"]]
+  },
+  {
+    "id": "16",
+    "headers": [["Permissions-Policy", "geolocation=(), geolocation=*"]]
+  },
+  {
+    "id": "17",
+    "headers": [["Permissions-Policy", "autoplay=()"]]
+  },
+  {
+    "id": "18",
+    "headers": [["Permissions-Policy", "cross-origin-isolated=()"]]
+  },
+  {
+    "id": "19",
+    "headers": [["Permissions-Policy", "Geolocation=()"]]
+  },
+  {
+    "id": "20",
+    "headers": [["Permissions-Policy", "geolocation=();x=%\"text\""]]
+  }
+]

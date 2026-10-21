@@ -6,10 +6,8 @@
 # (CPython 3.8+, one wheel per platform) plus an sdist, and publishes them to
 # PyPI on a `pyv*` tag.
 #
-# Gated on its own tag prefix (`pyv*`, e.g. `pyv0.2.4`) so it never fires on the
-# existing `v*` npm/crates release tags, AND on the presence of the `PYPI_TOKEN`
-# repository secret. Until that secret is configured the `publish` job skips with
-# a clear message, so merging this file cannot trigger an accidental release.
+# Its `pyv*` tag must match the release metadata. A real publication requires
+# PYPI_TOKEN; workflow_dispatch builds and tests artifacts without publishing.
 #
 # Wheels are built from rust/crates/turbo-surf-py/ (manifest + pyproject there).
 # =============================================================================
@@ -18,7 +16,7 @@ name: Release (PyPI)
 
 on:
   push:
-    tags: ['pyv*'] # Python-only release tag. First: pyv0.2.4. Never `v*`.
+    tags: ['pyv*'] # Tag the same final merge as the matching v* release.
   workflow_dispatch: # Allow a manual dry-run build with no publish.
 
 permissions:
@@ -28,11 +26,34 @@ env:
   MANIFEST: rust/crates/turbo-surf-py/Cargo.toml
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check release versions and exact tag
+        shell: bash
+        run: |
+          python3 scripts/check-versions.py
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          version = json.loads(Path('package.json').read_text())['version']
+          if os.environ['GITHUB_EVENT_NAME'] == 'push':
+              expected = 'pyv' + version
+              if os.environ['GITHUB_REF'] != 'refs/tags/' + expected:
+                  raise SystemExit('Release tag must exactly match ' + expected)
+          print('Release source:', os.environ['GITHUB_SHA'], 'version:', version)
+          PYCODE
+
   # ---------------------------------------------------------------------------
   # 1. Build abi3 wheels across platforms + an sdist.
   #    Matrix mirrors release.yml MINUS musl (manylinux covers the common case).
   # ---------------------------------------------------------------------------
   build:
+    needs: validate
     name: build wheel ${{ matrix.os }} ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -43,8 +64,8 @@ jobs:
       matrix:
         include:
           - { os: macos-14, target: aarch64 }
-          - { os: ubuntu-24.04, target: x86_64, manylinux: auto }
-          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
+          - { os: ubuntu-24.04, target: x86_64, manylinux: '2_28' }
+          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: '2_28' }
           - { os: windows-latest, target: x64 }
     steps:
       - uses: actions/checkout@v4
@@ -53,32 +74,300 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Verify third-party notices
+        run: python scripts/sync-third-party-notices.py --check
+
+      - uses: dtolnay/rust-toolchain@1.98.0
+
       # maturin-action builds the wheel from the crate's pyproject.toml. abi3
       # means ONE wheel per platform serves every CPython >= 3.8.
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: 'v1.15.0'
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           args: --release --out dist --manifest-path ${{ env.MANIFEST }}
 
+      - name: Record actual Linux wheel ELF requirements
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import hashlib, json, os, re, shutil, stat, subprocess, zipfile
+          from pathlib import Path, PurePosixPath
+          root = Path.cwd().resolve()
+          output = root / 'dist' / 'linux-elf.json'
+          evidence = {'passed': False, 'sourceCommit': os.environ['GITHUB_SHA'], 'expectedManylinux': 'manylinux_2_28', 'libraries': []}
+          def sha(path):
+              with path.open('rb') as stream:
+                  return hashlib.file_digest(stream, 'sha256').hexdigest()
+          def inspect(tool, args):
+              try:
+                  result = subprocess.run([tool, *args], capture_output=True, text=True, timeout=30, env=dict(os.environ, LC_ALL='C'))
+                  return {'arguments': args, 'exitCode': result.returncode, 'timedOut': False, 'stdout': result.stdout, 'stderr': result.stderr}
+              except subprocess.TimeoutExpired as error:
+                  return {'arguments': args, 'exitCode': None, 'timedOut': True, 'stdout': (error.stdout or b'').decode(errors='replace'), 'stderr': (error.stderr or b'').decode(errors='replace')}
+          try:
+              wheels = sorted((root / 'dist').glob('*.whl'))
+              if len(wheels) != 1:
+                  raise RuntimeError('Expected exactly one actual Linux wheel')
+              wheel = wheels[0]
+              platform_tags = wheel.name.removesuffix('.whl').rsplit('-', 1)[-1].split('.')
+              evidence['actualPlatformTags'] = platform_tags
+              if not any(tag.startswith('manylinux_2_28_') for tag in platform_tags):
+                  raise RuntimeError('Actual Linux wheel does not carry its required manylinux_2_28 platform tag')
+              tool = shutil.which('readelf')
+              if not tool:
+                  raise RuntimeError('GNU readelf is required for Linux artifact evidence')
+              work = Path(os.environ['RUNNER_TEMP']) / 'linux-wheel-elf'
+              work.mkdir(mode=0o700)
+              evidence.update(wheel=wheel.name, wheelSha256=sha(wheel), readelf=tool, readelfSha256=sha(Path(tool).resolve()))
+              with zipfile.ZipFile(wheel) as archive:
+                  entries = archive.infolist()
+                  if len(entries) != len({entry.filename for entry in entries}) or sum(entry.file_size for entry in entries) > 2 * 1024**3:
+                      raise RuntimeError('Duplicate or oversized wheel payload')
+                  for entry in entries:
+                      name = PurePosixPath(entry.filename)
+                      if not name.parts or name.is_absolute() or '..' in name.parts or '\\' in entry.filename or stat.S_ISLNK(entry.external_attr >> 16):
+                          raise RuntimeError('Unsafe wheel path or linked entry')
+                      if entry.is_dir() or not (name.name.endswith('.so') or '.so.' in name.name):
+                          continue
+                      if entry.file_size > 1024**3:
+                          raise RuntimeError('Oversized ELF library')
+                      target = work / name
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      with archive.open(entry) as source, target.open('xb') as destination:
+                          shutil.copyfileobj(source, destination, 65536)
+                      with target.open('rb') as stream:
+                          if stream.read(4) != b'\x7fELF':
+                              raise RuntimeError('Wheel shared library is not ELF')
+                      versions = inspect(tool, ['--wide', '--version-info', str(target)])
+                      dynamic = inspect(tool, ['--wide', '-d', str(target)])
+                      required, in_needs = set(), False
+                      for line in versions['stdout'].splitlines():
+                          if line.startswith('Version needs section'):
+                              in_needs = True
+                          elif line.startswith('Version '):
+                              in_needs = False
+                          if in_needs:
+                              required.update(re.findall(r'\b(?:GLIBCXX|GLIBC|CXXABI)_[A-Za-z0-9_.]+', line))
+                      needed = re.findall(r'\(NEEDED\).*?Shared library: \[(.*?)\]', dynamic['stdout'])
+                      evidence['libraries'].append({'wheelPath': entry.filename, 'sha256': sha(target), 'bytes': target.stat().st_size, 'requiredSymbolVersions': sorted(required), 'dtNeeded': needed, 'versionInfo': versions, 'dynamicSection': dynamic})
+                      if any(record['exitCode'] != 0 or record['timedOut'] for record in (versions, dynamic)):
+                          raise RuntimeError('readelf failed or exceeded its deadline; raw output retained')
+              if not evidence['libraries']:
+                  raise RuntimeError('No actual ELF extension or bundled libraries inspected')
+              if sha(wheel) != evidence['wheelSha256']:
+                  raise RuntimeError('Wheel changed during ELF inspection')
+              evidence['passed'] = True
+          except BaseException as error:
+              evidence['error'] = {'type': type(error).__name__, 'message': str(error)}
+              raise
+          finally:
+              output.write_text(json.dumps(evidence, indent=2) + '\n')
+          PYCODE
+
+      - name: Install and test the actual direct-wheel
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import hashlib, json, os, shutil, subprocess, venv, zipfile
+          from email.parser import BytesParser
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          wheels = sorted((root / 'dist').glob('*.whl'))
+          if len(wheels) != 1:
+              raise SystemExit('Expected exactly one matching-platform wheel: ' + repr(wheels))
+          wheel = wheels[0]
+          # Audit actual artifacts before installation; SPDX metadata alone is
+          # insufficient, including after pyproject relocation in an sdist.
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              if len(names) != len(set(names)):
+                  raise SystemExit('Duplicate wheel payload names')
+              metadata_names = [name for name in names if name.endswith('.dist-info/METADATA')]
+              if len(metadata_names) != 1:
+                  raise SystemExit('Expected one actual wheel metadata record')
+              metadata_name = metadata_names[0]
+              license_name = metadata_name.rsplit('/', 1)[0] + '/licenses/LICENSE'
+              notices_name = 'turbo_surf/THIRD_PARTY_NOTICES.md'
+              expected_payloads = {license_name: root / 'LICENSE', notices_name: root / 'THIRD_PARTY_NOTICES.md'}
+              payload_hashes = {}
+              for name, source in expected_payloads.items():
+                  if name not in names or archive.getinfo(name).file_size != source.stat().st_size:
+                      raise SystemExit('Actual wheel lacks the complete project MIT/license notices: ' + name)
+                  data = archive.read(name)
+                  if data != source.read_bytes():
+                      raise SystemExit('Actual wheel license/notices differ from tagged source: ' + name)
+                  payload_hashes[name] = hashlib.sha256(data).hexdigest()
+              metadata = BytesParser().parsebytes(archive.read(metadata_name))
+              if metadata.get('License-Expression') != 'MIT' or metadata.get_all('License-File') != ['LICENSE']:
+                  raise SystemExit('Expected explicit MIT expression and LICENSE metadata in actual wheel')
+          smoke = Path(os.environ['RUNNER_TEMP']) / 'direct-wheel-smoke'
+          smoke.mkdir()
+          shutil.copy2(root / 'rust/crates/turbo-surf-py/tests/test_smoke.py', smoke / 'test_smoke.py')
+          environment = smoke / 'venv'
+          venv.EnvBuilder(with_pip=True).create(environment)
+          python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+          def run(*args):
+              subprocess.run([str(python), *args], cwd=smoke, check=True)
+          run('-m', 'pip', 'install', 'pytest>=7')
+          run('-m', 'pip', 'install', '--no-deps', str(wheel))
+          version = json.loads((root / 'package.json').read_text())['version']
+          run('-I', '-c', "import importlib.metadata,json,sys; from pathlib import Path; import turbo_surf as ts; import turbo_surf._turbo_surf as native; assert ts.version()==importlib.metadata.version('turbo-surf')==sys.argv[1]; extension=Path(native.__file__).resolve(); assert extension.is_relative_to(Path(sys.prefix).resolve()); notices=Path(ts.__file__).with_name('THIRD_PARTY_NOTICES.md'); assert notices.is_file(); print(json.dumps({'installedVersion':ts.version(),'extension':str(extension),'notices':str(notices)}))", version)
+          report = smoke / 'pytest.xml'
+          run('-I', '-m', 'pytest', str(smoke / 'test_smoke.py'), '--junitxml=' + str(report), '-v')
+          cases = list(ET.parse(report).iter('testcase'))
+          if len(cases) != 10 or any(case.find(kind) is not None for case in cases for kind in ('failure', 'error', 'skipped')):
+              raise SystemExit('Expected all ten offline installed-wheel tests to pass without skips')
+          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest(), 'fullProjectMitAndNoticesEqual': True, 'licensePayloadSha256': payload_hashes}
+          (root / 'dist' / 'installed-wheel.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          shutil.copy2(report, root / 'dist' / 'pytest.xml')
+          print(json.dumps(receipt, indent=2))
+          PYCODE
+
       - name: Upload wheels
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.target }}
           path: dist/*.whl
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wheel-smoke-${{ matrix.os }}-${{ matrix.target }}
+          path: |
+            dist/installed-wheel.json
+            dist/linux-elf.json
+            dist/pytest.xml
+            ${{ runner.temp }}/direct-wheel-smoke/pytest.xml
+          if-no-files-found: warn
 
   sdist:
-    name: build sdist
+    needs: validate
+    name: build and test sdist
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Verify third-party notices
+        run: python3 scripts/sync-third-party-notices.py --check
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: 'v1.15.0'
           command: sdist
           args: --out dist --manifest-path rust/crates/turbo-surf-py/Cargo.toml
+      - name: Install source-build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake nasm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+          cache: false
+      - name: Rebuild a wheel from the actual sdist using the registry
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import hashlib, json, os, subprocess, venv
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          archives = sorted((root / 'dist').glob('*.tar.gz'))
+          if len(archives) != 1:
+              raise SystemExit('Expected exactly one source distribution: ' + repr(archives))
+          archive = archives[0]
+          work = Path(os.environ['RUNNER_TEMP']) / 'sdist-rebuild'
+          work.mkdir()
+          environment = work / 'venv'
+          venv.EnvBuilder(with_pip=True).create(environment)
+          python = environment / 'bin/python'
+          output = root / 'sdist-wheels'
+          output.mkdir()
+          # Empty Cargo home, private cwd and no --config/source replacement:
+          # this must resolve the already published dependencies from crates.io.
+          env = os.environ.copy()
+          env['CARGO_HOME'] = str(work / 'cargo-home')
+          env['CARGO_TARGET_DIR'] = str(work / 'target')
+          env['PYO3_PYTHON'] = str(python)
+          subprocess.run([str(python), '-m', 'pip', 'wheel', '--no-deps', str(archive), '--wheel-dir', str(output)], cwd=work, env=env, check=True)
+          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'sdist': str(archive), 'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(), 'cargoHome': env['CARGO_HOME'], 'wheelDirectory': str(output)}
+          (output / 'sdist-build.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps(receipt, indent=2))
+          PYCODE
+
+      - name: Install and test the actual sdist-wheel
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import hashlib, json, os, shutil, subprocess, venv, zipfile
+          from email.parser import BytesParser
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          wheels = sorted((root / 'sdist-wheels').glob('*.whl'))
+          if len(wheels) != 1:
+              raise SystemExit('Expected exactly one matching-platform wheel: ' + repr(wheels))
+          wheel = wheels[0]
+          # Audit actual artifacts before installation; SPDX metadata alone is
+          # insufficient, including after pyproject relocation in an sdist.
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              if len(names) != len(set(names)):
+                  raise SystemExit('Duplicate wheel payload names')
+              metadata_names = [name for name in names if name.endswith('.dist-info/METADATA')]
+              if len(metadata_names) != 1:
+                  raise SystemExit('Expected one actual wheel metadata record')
+              metadata_name = metadata_names[0]
+              license_name = metadata_name.rsplit('/', 1)[0] + '/licenses/LICENSE'
+              notices_name = 'turbo_surf/THIRD_PARTY_NOTICES.md'
+              expected_payloads = {license_name: root / 'LICENSE', notices_name: root / 'THIRD_PARTY_NOTICES.md'}
+              payload_hashes = {}
+              for name, source in expected_payloads.items():
+                  if name not in names or archive.getinfo(name).file_size != source.stat().st_size:
+                      raise SystemExit('Actual wheel lacks the complete project MIT/license notices: ' + name)
+                  data = archive.read(name)
+                  if data != source.read_bytes():
+                      raise SystemExit('Actual wheel license/notices differ from tagged source: ' + name)
+                  payload_hashes[name] = hashlib.sha256(data).hexdigest()
+              metadata = BytesParser().parsebytes(archive.read(metadata_name))
+              if metadata.get('License-Expression') != 'MIT' or metadata.get_all('License-File') != ['LICENSE']:
+                  raise SystemExit('Expected explicit MIT expression and LICENSE metadata in actual wheel')
+          smoke = Path(os.environ['RUNNER_TEMP']) / 'sdist-wheel-smoke'
+          smoke.mkdir()
+          shutil.copy2(root / 'rust/crates/turbo-surf-py/tests/test_smoke.py', smoke / 'test_smoke.py')
+          environment = smoke / 'venv'
+          venv.EnvBuilder(with_pip=True).create(environment)
+          python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+          def run(*args):
+              subprocess.run([str(python), *args], cwd=smoke, check=True)
+          run('-m', 'pip', 'install', 'pytest>=7')
+          run('-m', 'pip', 'install', '--no-deps', str(wheel))
+          version = json.loads((root / 'package.json').read_text())['version']
+          run('-I', '-c', "import importlib.metadata,json,sys; from pathlib import Path; import turbo_surf as ts; import turbo_surf._turbo_surf as native; assert ts.version()==importlib.metadata.version('turbo-surf')==sys.argv[1]; extension=Path(native.__file__).resolve(); assert extension.is_relative_to(Path(sys.prefix).resolve()); notices=Path(ts.__file__).with_name('THIRD_PARTY_NOTICES.md'); assert notices.is_file(); print(json.dumps({'installedVersion':ts.version(),'extension':str(extension),'notices':str(notices)}))", version)
+          report = smoke / 'pytest.xml'
+          run('-I', '-m', 'pytest', str(smoke / 'test_smoke.py'), '--junitxml=' + str(report), '-v')
+          cases = list(ET.parse(report).iter('testcase'))
+          if len(cases) != 10 or any(case.find(kind) is not None for case in cases for kind in ('failure', 'error', 'skipped')):
+              raise SystemExit('Expected all ten offline installed-wheel tests to pass without skips')
+          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest(), 'fullProjectMitAndNoticesEqual': True, 'licensePayloadSha256': payload_hashes}
+          (root / 'sdist-wheels' / 'installed-wheel.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          shutil.copy2(report, root / 'sdist-wheels' / 'pytest.xml')
+          print(json.dumps(receipt, indent=2))
+          PYCODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdist-consumer
+          path: |
+            sdist-wheels/*
+            ${{ runner.temp }}/sdist-wheel-smoke/pytest.xml
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
@@ -86,36 +375,38 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # 2. Publish to PyPI — only on a real `pyv*` tag AND only if PYPI_TOKEN is set.
+  # 2. Publish only after actual installed artifacts pass, on a real pyv* tag.
   # ---------------------------------------------------------------------------
   publish:
     name: publish to PyPI
     needs: [build, sdist]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/pyv')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/pyv')
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: wheels-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
 
       - name: Guard on PYPI_TOKEN
-        id: guard
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
           if [ -z "$PYPI_TOKEN" ]; then
-            echo "PYPI_TOKEN not set — skipping publish (token not yet configured)."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "PYPI_TOKEN not set — the requested PyPI release cannot publish."
+            exit 1
           fi
 
       - name: Publish
-        if: steps.guard.outputs.publish == 'true'
         uses: PyO3/maturin-action@v1
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         with:
+          maturin-version: 'v1.15.0'
           command: upload
           args: --non-interactive --skip-existing dist/*

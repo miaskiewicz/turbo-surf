@@ -1,0 +1,320 @@
+[
+  {
+    "id": "unsafe-none:unsafe-none:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ]
+  },
+  {
+    "id": "unsafe-none:unsafe-none:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "unsafe-none:unsafe-none:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "unsafe-none:require-corp:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "unsafe-none:require-corp:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "unsafe-none:require-corp:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "unsafe-none:credentialless:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ]
+  },
+  {
+    "id": "unsafe-none:credentialless:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "unsafe-none:credentialless:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "unsafe-none"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "same-origin:unsafe-none:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ]
+  },
+  {
+    "id": "same-origin:unsafe-none:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "same-origin:unsafe-none:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "same-origin:require-corp:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "same-origin:require-corp:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "same-origin:require-corp:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "same-origin:credentialless:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ]
+  },
+  {
+    "id": "same-origin:credentialless:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "same-origin:credentialless:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:unsafe-none:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:unsafe-none:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:unsafe-none:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:require-corp:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:require-corp:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:require-corp:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:credentialless:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:credentialless:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "same-origin-allow-popups:credentialless:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin-allow-popups"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "restrict-properties:unsafe-none:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"]
+    ]
+  },
+  {
+    "id": "restrict-properties:unsafe-none:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "restrict-properties:unsafe-none:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "unsafe-none"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "restrict-properties:require-corp:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "restrict-properties:require-corp:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "restrict-properties:require-corp:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "restrict-properties:credentialless:default",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"]
+    ]
+  },
+  {
+    "id": "restrict-properties:credentialless:cross-origin-isolated=()",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Permissions-Policy", "cross-origin-isolated=()"]
+    ]
+  },
+  {
+    "id": "restrict-properties:credentialless:cross-origin-isolated=(self)",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "restrict-properties"],
+      ["Cross-Origin-Embedder-Policy", "credentialless"],
+      ["Permissions-Policy", "cross-origin-isolated=(self)"]
+    ]
+  },
+  {
+    "id": "syntax:\"same-origin\"",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "\"same-origin\""],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "syntax:Same-Origin",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "Same-Origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "syntax:same-origin;report-to=\"endpoint\"",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin;report-to=\"endpoint\""],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "syntax:same-origin, same-origin",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin, same-origin"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "syntax:same-origin;p=@123",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin;p=@123"],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  },
+  {
+    "id": "syntax:same-origin;p=%\"test\"",
+    "headers": [
+      ["Cross-Origin-Opener-Policy", "same-origin;p=%\"test\""],
+      ["Cross-Origin-Embedder-Policy", "require-corp"]
+    ]
+  }
+]

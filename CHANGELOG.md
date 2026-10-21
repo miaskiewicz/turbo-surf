@@ -1,7 +1,1072 @@
 # Changelog
 
-All notable changes to turbo-surf are documented here. Format follows
-[Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
+## [0.5.4] — 2026-10-21 — browser parity and reusable detection differential
+
+This release collects the work in PR26. The entries describe the implemented
+subset, not complete Chrome conformance or successful native Google clearance.
+[PARITY-GAPS.md](harness/detection/PARITY-GAPS.md) is the central remaining-work
+checklist; [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) tracks
+residual work beyond this PR, with audio separately deferred in
+[issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+
+### Startup and scheduling follow-up — 2026-10-21
+
+- Consume the public font-sharing producer fix from turbo-html2pdf PR25.
+  It preserves collection-face indexes, shaping caches and PDF subset identity;
+  863 workspace tests,15 xref controls and strict checks pass. One matched
+  optimized font probe measures registry initialization1,653→165ms and peak
+  RSS3.83→1.40GB, including later fingerprinting. All983 faces and930 selection,
+  metric and glyph results match. OS disk-cache state is unspecified.
+- Officially re-vendor the tested per-read ancestor snapshot and selector-first
+  fixes from turbo-test PR27. Old code fails the ancestor control with100 scans
+  against its28 bound and performs3,528 unmatched-declaration reads where the
+  fix performs zero. Complete private selector-list matching also preserves
+  quoted braces/commas, verified against genuine Chrome. Canonical checks pass
+  33 CSS,304 library,63 Node and52 compatibility cases; one explicitly ignored
+  selector-admission gap retains its Chrome expectation and fails when run
+  explicitly. Caches expire before the next public read. That preexisting gap
+  and default-inherited color/CSSOM synchronization remain documented in issue28.
+- Add a genuine frozen-Chrome timer control, reusable collector/probe and native
+  regressions. Chrome155 carries same-Window nesting through Promise/microtask
+  callbacks and clamps after six immediate tasks; alternating Window targets
+  reset nesting. Native task checkpoints, cancellation conversion and scoped
+  nesting cleanup pass21 native integration tests plus an isolated native
+  regression covering seven nesting variants, frame retirement, reentrant
+  legacy drains and watchdog recovery. The combined current native gate also
+  passes; broader interval cadence and task-source timing remain in issue28.
+- Add a reusable private CPU-profile summary with source locations and sampled
+  self-time aggregation. It sorts out-of-order Inspector timestamps together
+  with their samples; the real profile contains one negative1us delta. Node20
+  and22 each pass four focused summary/source-pin controls. This analysis is not
+  a publication sanitizer or a count of function invocations.
+- Reproduce homepage hydration exhaustion without interface wrappers using the
+  preserved optimized all-feature executable and unchanged20-second budget.
+  CPU profiling identifies repeated private CSS record/ancestor-style work;
+  native layout time is measured separately. The homepage-only diagnostic has
+  no consent or search actions and does not establish native SERP clearance.
+  The first rebuilt optimized all-feature diagnostic completes HTTP200 hydration
+  with one pump and no budget exhaustion:18.52s whole run,1.24GB peak RSS including
+  profiling and snapshots. The selector-first follow-up also completes hydration:
+  16.35s whole run,957MB peak RSS and14.70s guest profiling. These live homepage
+  diagnostics do not establish SERP clearance, reliability or complete timing
+  parity. At9304df9 the full gates pass1,509 native and1,464 stock Rust tests, strict
+  Clippy, formatting, verified addons, shim96+1 intentional skip and E2E20 each.
+  Detection passes204 native controls and195 stock controls+9 documented skips;
+  both Python checks pass in each gate. The fresh75-interface inventory remains
+  142 missing own members and374 difference paths.
+- Run a fresh14-process Google comparison on the tested9304df9 source and
+  optimized artifact, with independent cookies and all native bridges. Both
+  native baselines complete initial hydration with one pump inside the unchanged
+  budget, save consent204 and submit real forms. Search200 shells then redirect
+  to429 with zero results: native acceptance remains0/2. Both interface-instrumented
+  native captures still exhaust their initial hydration budget. Four Chrome
+  flow captures fail after ineffective consent clicks, with no save request and
+  an obscured query input. Two standalone Chrome probes fail because the blank
+  fixture inherits the search readiness selector. This is an incomplete SERP
+  comparison; the probe configuration is repaired separately without relabeling
+  these failed captures. No rejection or ineffective-click cause is established.
+  Raw traces remain private.
+- Validate capture supervision and evidence publication with10 supervisor/manifest
+  controls,21 historical privacy controls,25 current privacy/provenance controls,
+  ten real-proof tamper rejections and eight matching historical diagnostic
+  controls. Bind every publication to its actual capture attempt and build.
+- Clear inherited page readiness only for the standalone blank probe fixture.
+  Two actual-runner regressions pass on both Node20 and22; the final Node22
+  detection suite passes206 tests without skips, plus Python2. A genuine local
+  seven-process matrix completes all four probes in Chrome and native. Search
+  readiness and all timing settings are preserved. The earlier Google probe
+  failures remain failed evidence; native engine inputs are unchanged.
+- Disable only dev/test debug symbols in CI to reduce accumulated build storage.
+  The previous9304df9 Node22 job passes; Node20 exhausts runner disk during addon
+  linking. Test selection, assertions, overflow checks and release settings stay
+  unchanged. The repaired workflow passes on Node20 and22 at final tested
+  head46f4340 ([CI run](https://github.com/miaskiewicz/turbo-surf/actions/runs/39533940495)).
+- Remove consumed producer debug/release caches after source, ownership,
+  ignored/untracked, retained-proof and closed-consumer checks. Actual free disk
+  space increases6.53GB; independent font probes and all source/SDK evidence remain.
+  After the successful combined gates, remove only their closed native/stock
+  debug caches (33.47GB and30.65GB); retain verified release artifacts and proofs.
+
+- Preserve all 28 embedded Deno modules, their three licenses and source pins as
+  exact Git bytes on Windows as well as Unix. A real autocrlf checkout regression
+  reproduces the former CRLF drift and verifies the complete 32-file inventory;
+  the existing source-hash adapters remain unchanged and fail closed. Fresh
+  Windows release artifacts remain an independent installed-runtime gate.
+
+- Preserve the exact full MIT and third-party notice bytes in all 14 shipping
+  source copies. The former Windows wheel contained complete text with CRLF
+  drift; literal Git attributes and real LF/CRLF checkout controls keep payloads
+  byte-identical without relaxing installed-artifact or publication audits.
+  Include the workspace `rust/LICENSE` copy: controlled Windows-style checkouts
+  now run the actual notices checker and reproduce its missing-rule failure.
+
+- Keep the authored Python package module, type stub and installed smoke-test
+  source at canonical LF on every platform. Actual Windows wheel bytes exposed
+  CRLF drift; three literal checkout rules and LF/CRLF Git controls preserve the
+  existing exact source and receipt hashes without normalizing artifact audits.
+
+### Release readiness — 2026-10-21
+
+- Embed the exact 28 licensed Deno Web, WebIDL and Crypto extension JavaScript
+  sources in the render crate before its existing hash-checked private-array
+  adapters. Deno 0.412 extension declarations record build-machine filesystem
+  paths; a Linux wheel installed outside that build container exposed permission
+  failures when hydration loaded those modules. The reproducible source table
+  replaces all four extension source lists without a filesystem fallback, while
+  preserving upstream bytes, specifiers, ops, state and adapter checks. Source
+  inventory changes fail closed. Relocation and actual installed artifacts remain
+  explicit validation gates; embedding alone is not a wheel success claim.
+- Align npm, Rust, NAPI and Python at version 0.5.4. The release uses matching
+  annotated `v0.5.4` and `pyv0.5.4` tags on the same final merge commit for
+  npm/crates.io and PyPI respectively.
+- Publish and integrate thirteen reproducible, licensed transport/Deno/V8
+  distributions, preserving the hardening and benchmark/core type edges. Seven
+  explicit Cargo aliases replace the root patches. The normal resolver replaces
+  twelve runtime packages at the same versions; all unrelated lock records stay
+  unchanged. Public DOM0.5.7 and layout0.3.8 are also registry dependencies after
+  all open producer PRs merged. The earlier core package preflight failed before
+  compilation because original registry wreq0.16.1 lacked `chromium-roots`; that
+  failure predates the named dependency integration. The exact reviewed
+  dependency publication passes thirteen normal package verifications and eleven
+  fresh registry consumer tests with no skips. Independent archive audits verify
+  runtime/license bytes, complete normalized manifests and real checksums. Actual
+  Surf package, wheel/sdist and final registry consumers remain separate gates in
+  [PUBLISHING.md](./PUBLISHING.md).
+- Merge all open producer PRs before their single patch releases: turbo-dom
+  0.5.7, turbo-html2pdf0.3.8 and turbo-test0.4.7. Verify their actual registry
+  payloads and immutable merge tags, including HTML2PDF PyPI wheels and sdist.
+  Officially re-vendor from the released turbo-test merge; the source bytes are
+  unchanged from the tested revision, with only the adapter revision updated.
+- Test the actual thirteen dependency archives with coherent Deno/V8/serde
+  runtime types, hardened CryptoKey snapshots, ordinary/snapshot weak-handle
+  retirement, and default/prefixed transport API and local TLS controls. Preserve
+  archive checksums, source guards and failed attempts separately. The upstream
+  V8 test harness lacks its published ICU fixture; independent teardown tests
+  retain the reviewed assertions without claiming that harness passed.
+- Support explicit Deno package names in the experimental SDK build helper using
+  private manifest aliases. Keep verified native155 sources, manifests and
+  archive intact; preserve the native backend and reject foreign alias files.
+  Add offline regression checks and document the generated metadata bridge in
+  the Chrome parity runbook. Full integration remains a separate release gate.
+- Give the four extension/benchmark distributions explicit default V8 forwarding
+  while preserving caller opt-out. Standalone package verification exposed their
+  reliance on an enclosing runtime to select a backend. Twelve isolated feature
+  resolution controls cover old defaults, repaired defaults and opt-out for all
+  four; Rust/JavaScript sources and dependency feature lists remain unchanged.
+
+- Select the existing Tokio runtime by default in the standalone transport
+  utility distribution. Its enclosing Surf graph already selects Tokio, but
+  isolated package verification exposed the missing default. Preserve emulation,
+  dependency opt-outs and explicit Compio selection. Three isolated resolution
+  controls and the failing predecessor regression cover the repaired policy.
+
+- Add a standalone six-library package consumer with exact release requirements,
+  shared DOM/runtime type checks and actual MCP-to-raster canvas execution. The
+  version checker now binds its own version and all six dependency requirements
+  to the release version. Document normal multi-package archive verification,
+  independent registry checks and actual wheel/sdist consumers.
+- Compare the Python binding version with installed distribution metadata in the
+  existing smoke test, replacing its stale0.2.5 expectation. Actual wheel and
+  source-tarball consumers remain required release checks.
+
+- Require exact release tag/version agreement and real installed-wheel checks
+  in publishing CI. Each platform runs all ten existing offline Python smoke
+  tests; a separate source-tarball job rebuilds and tests its wheel against the
+  registry before uploading the sdist. Preserve artifact hashes, extension paths
+  and JUnit results. Missing PyPI credentials fail a requested tagged release.
+
+- Exercise each staged npm platform binary over MCP stdio before upload. A shared
+  bounded supervisor requires initialization, genuine loopback navigation and
+  evaluated DOM/native random-byte/stream behavior with Deno globals hidden.
+  Thirteen offline supervisor controls cover protocol failures, cancellation,
+  timeout cleanup and lingering children. Pack the assembled launcher, verify all
+  four binary payloads and licenses, then repeat actual JavaScript execution through
+  the extracted launcher before publishing that exact tarball. Initialization alone
+  did not expose missing build-machine extension sources.
+  Manual npm/Python dispatches validate artifacts without publishing; Rust
+  publication requires the exact release tag and keeps the verified lockfile.
+  Linux binary/crate release jobs explicitly install libclang for the transport
+  binding generator alongside the BoringSSL build tools.
+- Package the full root MIT text through synchronized local `LICENSE` files in
+  all nine Rust crates, retaining SPDX `MIT` metadata. Cargo archive, maturin
+  source-tarball and wheel-metadata controls verify exact license bytes without
+  manifest warnings. Local discovery also keeps license paths inside the Rust
+  workspace. Actual product archive/wheel audits remain separate gates.
+- Bound the clock test's `Date()` read with its own before/after timestamps,
+  retaining native string round-trip checks and failure snapshots. Separate
+  clock reads may cross a second boundary; six frozen-runtime controls accept
+  that crossing and reject invalid, stale, non-string and ISO-only substitutes.
+  The earlier CI failure lacked those snapshots, so its exact cause remains
+  unconfirmed. Production clocks, timer budgets and coherence assertions stay
+  unchanged.
+- Keep native `std::bit_cast` where supported and supply checked, byte-preserving
+  runtime conversions for older manylinux C++ libraries. Actual ARM wheel
+  compilation exposed the missing library interface. Reusable native/legacy
+  compiler controls cover float32/64 finite values, signed zeros, subnormals,
+  infinities, NaN payloads and array/SIMD bits, plus three invalid-type failures.
+  The old header fails the legacy control; both repaired paths pass on Node20/22.
+  Native constexpr behavior and upstream audio algorithms remain unchanged.
+- Keep the forced legacy bit-cast fixture independent of standard `<array>`,
+  which needs internal `<bit>` helpers on GCC13. The fixture deliberately
+  shadows `<bit>` with an empty legacy header; a plain trivially copyable
+  lane array preserves the bit-pattern and SIMD controls without breaking the
+  compiler library itself. Production audio headers and algorithms are unchanged.
+- Declare Python's MIT expression and `LICENSE` file explicitly under PEP 639
+  with maturin 1.9.3 or later. Actual metadata controls reproduce implicit-license
+  loss after sdist relocation and preserve the full MIT with the explicit policy.
+  Both direct and rebuilt wheel workflows compare actual MIT/notices payloads
+  with the tagged source; Cargo SPDX metadata and local license files are unchanged.
+- Select explicit `manylinux_2_28` for both native Linux Python wheel builds,
+  setting the supported glibc floor to 2.28 while retaining CPython 3.8+ abi3.
+  Both earlier manylinux2014 links failed when GCC10 nonshared exception
+  definitions collided with V8's bundled libc++ definitions. The newer baseline
+  may avoid that supplement through its base shared C++ runtime. Actual linking,
+  ELF compliance and installed tests gate publication; the exact symbol-resolution
+  mechanism remains unconfirmed. The pinned V8 build source targets glibc 2.26 or
+  later, which is not an audit of the actual archive. Compiler, exception and ABI
+  flags remain unchanged; no duplicate-symbol suppression is introduced.
+- Include `<cmath>` directly in the compiled ARM NEON delay source for
+  `std::isnan`. The Linux ARM release build exposed reliance on a transitive
+  platform header. Preserve the audio algorithm and original upstream hashes;
+  document this portable-header adaptation in its provenance.
+
+- Validate the prepared thirteen-archive Surf graph in both profiles: stock
+  passes 1,464 workspace tests with 11 documented ignores; native 155 passes 1,509
+  with 8 ignores. Both pass strict Clippy and formatting with unchanged source
+  guards. The stock addon passes shim 96+1 and E2E 20 on Node 20/22; focused
+  optimized-runner checks close six artifact-dependent skips on Node22. The
+  rebuilt native155 addon passes the same shim/E2E gates on both Node versions;
+  full native detection passes206 on Node22 and197 with nine documented
+  WebSocket-capability skips on Node20. Loaded engine versions and exact artifact
+  paths are verified. These staged integration results remain separate from
+  final registry consumers.
+  Standalone PyO3 feature inspection also confirms reqwest/rustls resources;
+  whole-workspace feature unification must not be reported as wheel defaults.
+
+### Runner timing follow-up — 2026-10-20
+
+- Publish the fresh546d511 API and Google measurements. All75 interfaces are
+  measured:64 original-four missing own members,142 expanded missing members and
+  374 difference paths. One fresh signed-out Chrome baseline reaches200/search
+  with nine markers; the other fails effective consent dismissal before input.
+  Both native baselines save consent, perform all six actions and use real forms,
+  then receive429 with zero markers. Early homepage budget exhaustion persists.
+  All14 process records and unchanged-source/artifact guards are retained; four
+  Chrome captures exit1, so the matrix is not a complete successful comparison.
+  Zero completed hydration pumps does not establish that no pump began.
+  The sanitizer passes21 privacy/schema controls and eight historical positive
+  diagnostic controls. Native clearance and broader residuals stay in issue28;
+  audio stays in issue27. Raw traces remain private.
+- Remove closed stock/native debug caches and five duplicate test executables.
+  Archive and hash-verify eight failed-test temporary directories before clearing
+  their originals, plus27 empty directories. Preserve operative binaries,
+  addons, SDK archives/source and all diagnostic evidence.
+- Fix a real Chrome post-submit collector failure when the current document has
+  no root. Both Chrome backends read root presence, markup and result counts in
+  one synchronous evaluation; preserve each backend's doctype serialization and
+  current-loader HTTP attribution. A rootless document produces empty markup,
+  zero markers and an incomplete observation, with no extra wait or stale-page
+  fallback. Focused Node20/22 checks pass29 each; two genuine rootless controls
+  and all16 paired controls pass. Full detection passes200 on Node22 with zero
+  skips and191 on Node20 with nine documented browser skips; Python passes twice
+  on each. The genuine resource-order recapture changes only two source hashes;
+  its focused Rust consumer passes. Rust engine, optimized binary and budgets
+  are unchanged. Preserve the original incomplete Google attempt; fresh full
+  API/Google captures follow the repair.
+- Keep the public TLS echo diagnostic out of default offline gates. Explicit
+  runs now fail on a request error or30-second deadline rather than returning
+  before their wire assertions. The unchanged localhost ClientHello control and
+  one explicit live run both pass; JA4, HTTP2, UA and header checks are retained.
+  Strict workspace Clippy and formatting pass. Preserve the earlier interrupted
+  workspace attempt and its roughly145-second external request; historical
+  nominal passes do not prove the old live assertions executed. This is a test
+  procedure repair, not a production transport change or Google clearance.
+- Correct the compression-dictionary lifecycle regression after Linux CI observed
+  an independent resource-error task after an already-due Window timer. Preserve
+  every event count, readyState and other ordering constraint; permit only the
+  adjacent `link:error` / `future-timer` reversal. Positive and mutation-negative
+  controls retain parser/load barriers and reject missing or duplicate events.
+  Runtime, fixture, genuine Chrome golden and deadlines are unchanged. Nine
+  focused native dictionary tests, full-workspace strict Clippy and fmt pass.
+  The original Linux failure remains recorded; exact scheduling parity is not
+  claimed. A current full workspace rerun and new exact-head CI follow.
+- Complete the native gate at4a734d6:1,496 Rust tests, strict Clippy, fmt,
+  optimized CLI/addon and loader proof, shim96+1 intentional skip, E2E20,
+  Node22 detection195 with zero skips and Python2 pass. Six generated Rust
+  doc cases remain ignored. Fresh warm-artifact queries and source/fixture/full
+  Chrome guards pass. These retain their actual4a identity; the subsequent
+  test-only correction changes no production or harness input. Current default,
+  optimized API inventory and fresh Google validation remain pending.
+
+- Separate fixed observation semantics from timer delivery speed. Preserve the
+  original600/20ms delays and100/1000ms windows, carry created/fired clocks on
+  the existing retry navigation, and verify actual document responses and server
+  events. A shell stays a rejected search; unresolved navigation stays incomplete.
+  A timer-free302 control independently requires the real429 destination. Keep
+  provisional-loader behavior under deterministic tracker tests rather than require
+  a snapshot to sample a transient pending state. Original timing failures remain
+  preserved; this does not establish scheduling parity. The four paired suites
+  pass14 tests with zero skips, covering10 variants /19 actual captures; source,
+  native debug binary and complete frozen Chrome bundle remain unchanged.
+- Fix shared completion reporting for the actual native trace schema: native
+  top-level `errors` contains collector failures, while Chrome uses
+  `collectorErrors` and records guest exceptions separately. Missing, malformed,
+  nonempty or conflicting channels fail closed. Matching public-summary and
+  navigation regressions pass40 focused checks on both Node20 and22. Earlier
+  native Google captures retain their actual429/zero-result outcomes; this fix
+  does not turn them into successful searches. Full current-source native/default,
+  optimized API and fresh Google checks remain pending.
+
+- Prime the existing shared system-font cache on a blocking worker before
+  PageSession creates V8. Cold discovery now leaves the current-thread network
+  driver responsive, retaining eager geometry startup and the existing guest/input
+  budget boundaries. A fresh-subprocess regression holds the real cache initializer
+  until a real localhost round trip progresses through PageSession startup.
+  The native focused gate passes67 tests, strict affected-crate Clippy and formatting.
+  The unchanged same-URL POST regression passes; its observed POST precedes idle
+  expiry, while the deterministic startup test separately verifies driver progress.
+  Earlier repeated failures attempting POST4.29 seconds after server socket closure
+  remain preserved. Full current-source validation follows this integration;
+  cold-font latency/memory and bootstrap performance remain in issue #28.
+- Keep aborted CDP commands as rejected Promises, so background-target finalizers
+  catch them and finish owned browser/profile cleanup. Actual lifecycle/connection
+  tests pass7/7 on Node20 and22, and real CDP/Patchright interruption controls
+  pass2/2 at the original45-second limits. The old synchronous contract fails the
+  regression. Re-capture the source-pinned resource-order Chrome oracle genuinely;
+  its observable results remain unchanged and both Node versions pass source pins.
+  Retain the earlier188-pass/3-failure Node22 run, including the truthful200 shell
+  when native page bootstrap consumed the fixed retry observation window.
+
+- Synchronize the idle-receiver cancellation regression with explicit child
+  readiness and server-confirmed stalled I/O, without another receiver RPC.
+  Separate bounded30-second process startup from the original five-second
+  cancellation operation; the original five-second-from-spawn failures remain
+  preserved. A traced cold open spent18.07 seconds loading system fonts with
+  a2.6GB footprint before cancellation was reached. All190 sampled worker
+  stacks are font-loading work; source shows complete TTC bytes copied per face.
+  The startup cost remains in issue #28. Await child `close` and socket teardown
+  before asserting output; passing cancellation does not certify cold startup.
+  Both complete shim suites pass96 tests with one intentional skip each on
+  actual stock and native addons; compiled Rust/artifact bytes are unchanged.
+
+- At the earlier581d checkpoint, complete default `npm run check`:1,450 Rust tests, strict Clippy,
+  formatting, rebuilt addon/shim96, E2E20, detection184 and Python2 pass.
+  Explicit skips remain nine Rust, one framework and seven Node20 browser
+  controls requiring Node22. Actual addon loading/code identity is verified;
+  these precede the subsequent startup repair and do not validate current Rust.
+  Full current-source native/default and fresh optimized API/Google checks remain pending.
+
+- Re-vendor public canonical `a49544f`: computed styles preserve parsed
+  declaration importance through shorthand expansion, respect private document
+  adopted sheets in source order, and bypass poisoned public priority/root
+  getters and numeric Array prototype setters. Canonical checks pass 299 library,
+  52 compatibility and63 Node tests; all four exact-head platform CI jobs pass.
+  The unrelated computed custom-property omission
+  remains explicitly tracked in issue #28.
+
+- Expand physical border shorthands before native cascade winner selection, so
+  author declarations retain their origin, importance and source-order priority
+  over UA side widths. All nine measured border controls pass in the rebuilt
+  native engine, alongside genuine same-embedded-font Range controls. The Times
+  glyph-width mismatch remains tracked in issue #28.
+- Reuse supervised children in the API inventory runner, retaining its60-second
+  deadline, full private logs and owned-process cleanup on timeout/abort. Six
+  focused tests pass on both Node20 and22; historical API inventory stays intact.
+
+- Reject malformed collector-error metadata when deciding modern capture,
+  observation and SERP completion. Empty arrays pass; absent legacy evidence stays
+  unmeasured. Focused comparison/summary regressions pass31 each on Node20/22.
+- Preserve a genuine frozen-Chrome timeout/interval conversion control, including
+  huge finite values, Infinity and signed32 boundaries. Matching native coercion
+  and defensive scheduler overflow guards pass the fresh native integration run.
+
+- Integrate the native inline/block layout repair from producer PR24: split real
+  block descendants out of inline flow, preserve continuation and Range ownership,
+  propagate collapsed margins and quantize native intrinsic widths. Preserve
+  zero-size client rectangles without inflating integer offsets. The producer's
+  final local gate at public `2ea52368` passes858 workspace tests and15 xref
+  controls, strict Clippy, formatting and complexity checks. Exact-head CI passes
+  all three jobs, including100% coverage. The rebuilt native integration passes
+  66 tests, affected-crate strict Clippy and formatting with unchanged source and
+  compiled fixtures. The unchanged four paired suites pass13 tests with zero
+  skips, including9 observation variants / 17 captures. Full native-feature
+  validation and optimized live comparison remain pending.
+- Use measured Chrome button defaults at native UA priority, retaining author
+  overrides. Officially re-vendor canonical turbo-test `030c776`: matching computed
+  button styles, repaired Node/EventTarget constructor identity, and real Text and
+  DocumentFragment constructors with native creation, conversion and subclass
+  behavior. Canonical library295 and nine compatibility fixtures52 pass, as do
+  all four platform CI jobs at that exact head. Its
+  supplemental strict attempt still reports28 unchanged-base diagnostics; that
+  result does not replace turbo-surf's required strict gate.
+- Save the genuine Chrome constructor/ShadowRoot probe and control as reusable
+  harness assets. Combined turbo-surf and native155 checks remain pending after
+  these integrations; component passes alone do not establish Google acceptance.
+
+- Add a central [Chrome155 parity runbook](harness/detection/CHROME-PARITY-RUNBOOK.md) with exact native SDK/build commands, feature and tracing flags, timing options, artifact checks, test order and evidence limits; link it from the agent documentation index, SDK, engine and main harness docs. Document inherited environment/`.env` effects, addon shadowing, browser version drift and incomplete control-path selection.
+- Supervise test and matrix children with abort signals, bounded cleanup and full
+  private output logs. Retire owned groups even when their leader exits first;
+  test teardown waits for retirement before starting the next case. Nine offline
+  controls pass under actual Node20 and Node22, including intentional outer-test
+  timeout and resistant-descendant cases. Preserve timeout failures and original
+  success deadlines.
+- Let both Chrome backends and all four collector suites select the explicit
+  Chrome executable. On interruption, checkpoint incomplete captures and retire
+  only the owned browser. Verify actual typed insertion, retained control identity
+  and focus before Enter, accounting for existing text and UTF-16 selections;
+  equivalent native host guards and startup changes pass47 focused native tests
+  and four example tests, strict affected-crate Clippy and formatting.
+- Initialize diagnostic render hooks without loading solver configuration or
+  `.env`; production session initialization retains its existing behavior.
+- Add a reusable complete-app Chrome freezer with signature verification, source
+  before/after and copy content checks, internal-link validation and failure
+  receipts. Nine Node22 offline controls pass. Preserve installed Chrome and user
+  profiles; omit Finder metadata only from the owned copy. Fixed-version actual
+  Chrome controls and a genuine oracle refresh pass8/8. Actual Chrome is
+  155.0.8059.85 / V815.5.35.25; native remains .80 / .23, an open profile/engine gap.
+- Verify both Chrome interruption paths against real owned processes: preserve
+  incomplete traces, retire observed helpers and remove owned profiles. Both
+  controls pass without fallback kills. Public summaries require all measured
+  process-completion fields;14 controls pass on Node20 and Node22. Legacy captures
+  missing these fields remain unmeasured.
+- Preserve a newly exposed native block-in-inline layout failure in the combined
+  run (12 passing tests, one failure). Fifteen paired captures complete; the
+  existing-results fixture fails geometry before consent or search. Keep this
+  layout defect separate from Google acceptance and from the earlier input and
+  timeout failures.
+
+- Run detection test files serially to bound competing browser/V8 workloads,
+  preserving all deadlines, assertions and skips. The prior concurrent failure
+  remains recorded; its cause is unproved. Unchanged isolated controls pass3/3
+  and the full serial diagnostic passes 134 with four existing skips.
+- Measure a real comparison gap with reusable localhost scenarios: a600ms retry
+  produces a Chrome200 shell versus native429 at the current observation point,
+  and native guest typing clocks advance about twice the real typing duration.
+  The slow-response and20ms retry controls agree; the failed timing control is
+  preserved rather than relabeled as a passing comparison.
+- Add opt-in real-time Window scheduling before hydration and through frame/form
+  navigation, preserving default virtual crawler scheduling and original budgets.
+  A one-shot hydration cap leaves later operation budgets unchanged. Ten focused
+  default-engine controls pass; genuine-native155 passes40 integration controls
+  and two example tests, strict affected-crate Clippy and formatting.
+- Observe both engines against one deadline starting before final Enter. Preserve
+  overruns, unfinished/failed main navigation, hop limits and timeouts. Guard
+  snapshots against loader changes and distinguish main-document requests from
+  iframe/XHR traffic. Public summaries require complete observation and real-time
+  native mode; absent legacy evidence remains unmeasured. Thirty focused
+  comparison/navigation tests and twelve public-summary tests pass; actual paired
+  timing controls, final integrated gates and fresh Google verification remain pending.
+
+### Chrome control and diagnostic follow-up — 2026-10-19
+
+A signed-out native Chrome Incognito UI control reaches real results for the
+same `rust lang` query, with Google's sign-in link visible before and after
+submission. This is one successful UI control, not a reliability measurement or
+an empty-profile control: existing Incognito cookie state was not measured and
+extensions were present. It does not establish native search acceptance or the
+cause of the traced collector's challenges. The earlier logged-in control is a
+separate observation. Historical captured Google matrices remain unchanged.
+
+- Separate guest script errors from collector completion. Preserve both kinds of
+  errors and label legacy completion inference explicitly.
+- Exclude hidden query fields from input diagnostics and record the selected
+  control type/counts. This reports type-based selection, not computed visibility.
+- Record the Chrome document's actual HTTP status, ready state and response
+  identity. Accept a Chrome SERP only with a completed capture, a same-origin
+  `/search` document, HTTP200, complete DOM and organic result headings.
+  Receiving an HTTP200 shell alone does not qualify.
+- Align harness readiness, real pre/post dwell, per-step snapshots and minimum
+  host-wall typing cadence. Recompute trusted native click coordinates from the
+  private current-layout operation, and replace live input/textarea selections
+  while respecting canceled editing events. Initialize the existing shared system-font
+  registry during geometry setup so a first click does not incur cold font parsing
+  inside its input budget; this shifts that real cost to engine startup. Add paired localhost action evidence
+  and an explicitly selected Incognito comparison mode. Rebuilt native155
+  diagnostics/input pass19/19, native duration2/2, paired/native-process controls6/6
+  with zero skips, and separate real-Chrome collector controls6/6.
+- Pin the public turbo-dom attribute-selector repair `d01d6a5` in all six
+  consumers and the lockfile. Preserve the shared hidden-field exclusion selector
+  and its failing fixture; the repair belongs in the matcher. Its full producer
+  Rust/JS/native/WASM gate and exact-head CI pass; Surf native155 integration
+  passes the genuine paired action control.
+- Reject malformed custom-step operands in the common driver before artifacts or
+  backend launch. Keep Chrome string/timer coercion from producing a different
+  plan than native; accept empty typing and zero waits explicitly.
+- Verify actual offline action alignment in baseline and interface modes: all six
+  actions, real consent coordinates/response/cookie ordering, focused textarea
+  query, trusted events, genuine native form submission and final HTTP200/results.
+  Missing readiness fails before input on both engines. Full default checks and
+  fresh optimized Google validation remain pending; this does not certify live
+  Google acceptance or identical event timing.
+
+### Previous full validation checkpoint — implementation a005140
+
+Implementation source `a005140` passes the complete stock-V8-150 workspace
+(1,411 tests, nine ignores and six zero-test native-only targets) and genuine
+native-V8-155 workspace (1,456 tests across 134 suites, six generated-doctest
+ignores), with zero failures. Strict all-target Clippy and formatting pass;
+all 1,457 selected implementation source hashes remain unchanged. Both Linux
+Node20/Node22 CI jobs pass. Rebuilt native-addon checks pass: shim96 with one
+intentional skip, E2E20/20, detection123 with two Node20 CDP skips, Python2/2;
+separate Node22 real-Chrome CDP controls pass3/3 with zero skips.
+
+Fresh paired API measurement covers75 interfaces with no unmeasured entries:
+64 missing own members across the original four interfaces,142 expanded missing
+members and374 descriptor difference paths. Complete member/difference arrays
+are unchanged from the preceding inventory; this is measured shape/ownership
+coverage, not full behavioral conformance. All remaining API and browser parity
+work stays in issue #28; advanced audio stays in issue #27.
+
+The fresh `a005140` Google matrix completes all14 processes without process
+timeouts. Both Chrome baselines and both native baselines reach `/sorry/index`
+with HTTP429 and zero result markers: native0/2 and Chrome0/2 accepted SERPs.
+Both instrumented Chrome passes also receive429. All eight consent responses
+are204 before search. Native uses genuine form navigation, with no fallback,
+imported Chrome cookies or sidecar. All four native homepage passes exhaust the
+20-second hydration budget with zero completed pumps; dismiss retains that
+failure, and search subsequently reaches the real native429 response. The budget
+residual remains in issue #28. No jc/lc requests appear in any of the eight
+baseline/instrumented captures; their absence does not establish a rejection cause.
+These Node22 captures are separate from the historical Node24/source59f7835 run
+(Chrome7/8 result markers, native0/2). No native SERP success is claimed.
+
+### Reusable diagnostics and browser identity
+
+- Add reusable normal headed Chrome controls using the producer's exact bundled
+  IBM Plex Mono and Fira Code bytes. Pin font, probe, collector and socket-helper
+  hashes; record selected fonts and preserve separate headless metrics. Capture
+  whole/split runs, decorated boxes, partial Ranges and eleven transform contexts,
+  retaining the explicit unsupported fixed-containing-block boundary. Bound
+  WebSocket startup and cover timeout, early-close and error cleanup offline.
+  Add a nineteen-scene whitespace control with individual collapsed-space,
+  wrapped Range endpoint and caret-affinity observations, plus an exact end-to-end
+  DOM/CSS regression. Genuinely recapture
+  all three modes after collector changes; preserve previous geometry exactly.
+- Pin public layoutdcbfd20, including native source-run advance admission before
+  wrapping and placement, preserving raw glyph intervals for partial Ranges.
+  Apply Chrome's float transform stages to native text selections and actual
+  block/replaced border quads; retain ordinary inline and PDF mapping. Keep
+  same-source merges within compatible projection contexts and collect containing
+  blocks in one pass. Preserve leading spaces inside their real inline boundary,
+  place collapsed successor offsets after the rendered space, and carry collapsed
+  source prefixes with wrapped spans or bare text. Retain actual internal-space
+  UTF-16 cells in bare text, preserve wrapped Range endpoints and canonicalize
+  caret offsets only through connected zero-space cells at the winning edge.
+  Keep positive leading spaces and pre/nowrap glyph provenance; generic/PDF paths
+  stay unchanged. Document the new public Rust source-cluster provenance fields.
+  Producer767 full tests and41 focused controls pass. Current stock/native155
+  inline targets each pass5/5 with1457 unchanged source hashes and all nineteen
+  Chrome scenes. Final a005 full stock/native gates pass1,411/1,456 tests,
+  strict checks and formatting; rebuilt native addon/Node/CDP gates also pass.
+  The subsequent test-only producer follow-up `4999290` passes768 tests and coverage
+  9,806/9,806 without changing pinned dcb production bytes.
+
+- Preserve per-element custom-element reaction order across reentrant adoption,
+  including definition-realm callbacks and error routing. Parse Range fragments in
+  their actual post-conversion context with native namespace, form-ancestor,
+  quirks-mode and UTF-16 handling; preserve scoped registries and inert-template
+  ownership without premature upgrades or spurious observer events. Clear retained
+  shadow-root adopted stylesheet lists before cross-document adoption callbacks,
+  preserving same-document moves and disconnected roots. Stop automatic construction
+  and queued reactions after a definition frame retires, retaining registry lookup
+  and existing instance identity. Re-vendor
+  canonical turbo-test 3ed91fb and pin the additive public turbo-dom aaeb290 API
+  consistently across all six consumers.
+
+- Drop collected weak context registrations at host boundaries after actual V8 GC,
+  preserving live retained documents and avoiding native Tree traversal inside GC
+  callbacks. Add independent nested-frame/retained-constructor ownership controls,
+  exact registry reclamation and reentrant Window transfer retirement regressions.
+  Vector backing capacity retains its high-water mark; this is not full OS-memory reclamation.
+  Capture isolate-shared WebCrypto descriptors and native DOMException builders in
+  the main realm before any initial markup iframe can bootstrap. Preserve child
+  crypto/clone exception identity while allowing the first child realm to collect;
+  actual heap traces identify both former strong-root paths. The unchanged
+  reentrant navigation assertion and initial-markup retirement/realm controls pass
+  in the76-test stock focused cohort and20-test genuine-native155 lifetime/crypto
+  cohort; final complete gates remain separate.
+
+- Roll back native ownership when iframe initialization fails before publication,
+  without calling guest helpers in partially installed or terminating realms.
+  Resolve child viewport layout when metrics are read so unsupported parent CSS
+  does not prevent frame scripts from starting. Add host-only one-shot fault
+  controls for exact cleanup and same-host recovery; preserve the existing watchdog.
+
+- Preserve the requested fresh source59f7835 retry separately from the earlier
+  same-day capture: Chrome baselines reach7/8 SERP markers, native baselines remain
+  0/2 accepted, and both instrumented Chrome passes are challenged. All14 processes
+  finish without process timeout; no native cookie import or form fallback is used.
+  Preserve3/4 native homepage watchdog failures, including one clean baseline;
+  later navigation completion does not erase initial-open diagnostics.
+
+- Preserve the earlier source88528ae October17 consent/search rerun: all14 processes finish;
+  native and Chrome baselines both accept0/2 SERPs. Native consent204 and genuine
+  form navigation work without imported cookies or fallback. Clean native flows
+  stay within20s, while one instrumented homepage open exhausts it; its repeated
+  dismiss diagnostic is the same event. Keep full-trace boundedness and reliable
+  acceptance open in issue28, without inferring a rejection cause.
+
+- Pin authored probe/control line endings to LF so source-hash controls remain
+  reproducible on Windows. Preserve the licensed XPath provider's original bytes.
+- Retain Chrome response protocol, TLS/security, timing, connection and cache
+  metadata, including redirects and raw response events. Public summaries use
+  fixed protocol buckets and availability counts; native application-layer
+  observations remain separate from Chrome CDP and packet-level evidence.
+- Trace configurable methods on returned native WebGL/2D contexts and WebGL
+  extensions, including own methods. Report skipped/unsupported surfaces and
+  bounded inspection coverage; clean controls retain their original behavior.
+  Intrusive wrappers remain observable and do not capture every JavaScript access.
+- Traverse ordinary native light-tree children directly during layout capture,
+  retaining private shadow-host/slot distribution and termination checks. Preserve
+  stylesheet scope order with indexed membership rather than repeated linear scans.
+- Reduce repeated resource-order walks during parser hydration while preserving
+  synchronous mutation fallback and native collection order. A narrow HTML-script
+  guard prevents unsupported SVG/uppercase script nodes from discarding queued
+  ordinary HTML scripts; full SVG script execution remains tracked in issue28.
+- Reuse private CSS rule records during computed-style import flattening, keeping
+  nested import/media order and retained declarations live.
+- Warm process-wide font discovery in a separately bounded geometry-test session
+  before the existing five-second neutral-rule conformance controls. Preserve all
+  original assertions and production budgets; retain the failed cold-start evidence.
+- Validate native layout selectors once per invocation before matching current
+  node state, instead of repeating the same validation for every candidate node.
+  Preserve dynamic matching, scope boundaries and first-error behavior.
+- Avoid exponential parent computed-style refresh through inherited color and
+  percentage-size chains. Fresh parent values are shared only within the current
+  calculation; external retained declarations continue refreshing on each read.
+- Refresh the private stylesheet list once per computed-style calculation, keeping
+  retained declarations live. Independent Chrome controls cover stylesheet edits,
+  replacement, disabled state and owner-document behavior.
+- Add native hydration phase/pump diagnostics and opt-in Inspector CPU profiles
+  that survive watchdog termination. The execution budget remains enforced;
+  collected profiles and script sources stay in private local artifacts. Optional
+  host-stage aggregates separate layout input capture, rule/key work, cache hits/
+  misses and actual layout, with explicit inclusive timing scope.
+- Separate source-less native script-pump reads from page queries in interface
+  traces. A real-stack regression preserves page callees, return identity and
+  timing; source/ancestor attribution remains a diagnostic heuristic. Refresh
+  product and engine documentation against the final code and linked evidence.
+- Add fresh-cookie paired Chrome/native tracing with baseline and instrumented
+  controls, JS interface arguments/results/stacks, request payloads, response
+  bodies, debugger source inventories, failure checkpoints and build hashes.
+  Raw CDP captures include out-of-process frames/workers and session-qualified
+  network events. Native runs use compiled wreq, Metal WebGL and CoreText features;
+  Chrome oracle cookies are never imported into the native runtime.
+- Add a reusable sanitized run summarizer with executable-hash verification,
+  consent ordering, missing/failed capture status and explicit native acceptance
+  conditions. Preserve cookie names while excluding values, bodies, query strings
+  and raw diagnostics; reject malformed evidence instead of silently losing rows.
+- Save consent dismissal in the shared harness and both collectors. Await bounded
+  asynchronous probe results privately instead of reading a guest-controlled
+  global slot. Optional capability, crypto, integrity and GPU probes run after
+  the recorded verdict. Offline harness tests are part of the standard CI gate.
+- Expand the API audit to75 interfaces with exact missing/extra members, callable
+  shapes, descriptors, inheritance, raw key order and collector/executable hashes.
+  The fresh Chrome155.80/native155 pair measures all interfaces:64 missing own
+  members across the original four,142 in the expanded scope and374 difference
+  paths. On the same68 previously measured interfaces, missing members fall134→119
+  with15 resolved and none introduced. Both formerly absent collection interfaces
+  are now present; the five added interfaces contribute23 additional missing
+  members. Historical counts and smaller scopes remain explicitly dated.
+- Refresh JS/HTTP identity to independently measured Chrome155.0.8059.80.
+  Preserve historical controls and SDK source provenance155.0.8059.79. The tested
+  native engine is15.5.35.23-rusty; the stock production SDK remains V8150.4.0
+  (engine15.0.245.2). Profile metadata alone does not upgrade the engine.
+- Isolate native SDK manifests/locks from the production workspace. Reproduce
+  native WindowProxy/context, module-source, code-generation and teardown patches
+  from licensed owned source and hash-verified archives. Keep historical154
+  profiles reproducible; final production-engine/distribution alignment is open.
+- Align npm/Rust/Python metadata at0.5.4, derive runtime versions from Cargo and
+  check versions/notices in local/release gates. No Surf publication tag is created.
+
+### Networking, Fetch and storage
+
+- Fix the functional native XMLHttpRequest constructor name, standard tag, global
+  enumerability, six network-method descriptors/arity and readonly ready-state
+  constants. Capture private WeakMap operations and reject forged/proxy receivers
+  before coercion or state access, while allowing genuine subclasses and detached
+  prototypes. An independent Chrome155 control covers descriptors, hostile hooks
+  and real HTTP delivery; four existing request/frame controls also pass. Broader
+  XHR state, hierarchy/upload/progress and transport lifecycle remain in issue28.
+
+- Use the Chrome154 BoringSSL transport recipe with measured155 navigation
+  identity, real trust-anchor IDs, ML-DSA offers and signature GREASE. Pin the
+  additive connector-metadata API to controlled wreq fork4ed3cf0c (upstream
+  basec6fd8b1; upstream PR1327), wreq-util5715529 and btlsf5a8a48. Retain raw
+  ClientHello bytes and measured H2 fields. Matching bounded localhost controls
+  does not establish complete wire parity. Registry APIs/distribution remain open.
+- Negotiate session Accept-CH and construct navigation/script/fetch-specific
+  headers, Origin/referrer/credentials and redirect metadata. Native response
+  effects retain cache/storage notices across overflow/retry without rooting
+  retired realms; late frames do not receive historical clear notifications.
+- Hide HttpOnly cookies from JS while retaining real HTTP cookie behavior and
+  preventing script overwrites. Credentialless frames use an actual ephemeral
+  top-document network/storage partition, shared by relevant siblings and
+  reclaimed on teardown. Native storage persists across same-session navigation;
+  peer, clear, profile and partition tasks use private host-owned state.
+- Implement genuine bounded response streams/cancellation, initiating-policy
+  snapshots and cache/referrer effects. Normalize BodyInit with authentic private
+  brands, constructor-time byte/URLSearchParams snapshots, Request stream ownership
+  and independent clone tees. Reject invalid duplex/keepalive/no-cors/chunk cases.
+- Stream HTTPS/HTTP2 uploads without prebuffering through a one-shot producer,
+  two64KiB chunks and a64MiB host budget. Preserve preflights, reject HTTP/1 before
+  I/O, rewrite303 toGET and reject307 replay. Immediate guest abort and bounded
+  transport cleanup preserve measured cancellation semantics. Resolve fixture
+  script paths before launching Node from linked SDK workspaces.
+- Add a genuine session-owned compression-dictionary store with origin/partition
+  selection, validated hash/ID negotiation, bounded dictionary-dependent Brotli
+  and Zstandard decoding, and decoded-cache/304 reuse. Share one codec engine
+  between buffered callers and incremental Fetch bodies; expose real headers and
+  partial output through bounded workers/channels. Require explicit input/output
+  success and actual transport EOF before cache publication; cancellation, panic
+  and caps cannot publish partial data. Official C-encoder fixtures and real HTTPS
+  controls cover both transports. Chrome publication timing and encoded Range
+  semantics remain open in the parity checklist.
+- Discover dictionary hints in document headers and actual HTML/shadow links
+  through native policy-aware background Fetch, including shared ownership and
+  cancellation. Independent Chrome controls cover resource policies and lifecycle;
+  use a separate bounded resource task queue with per-frame fairness, microtask
+  checkpoints and retirement cleanup. This preserves due-timer/resource/future-timer
+  order without holding document readiness. Final full gates and live acceptance
+  remain unverified.
+  See [implementation and bounds](harness/detection/COMPRESSION-DICTIONARIES.md).
+- Apply all eight standard referrer policies to document/request/redirect paths.
+  Process active meta referrers at parser and mutation boundaries; ignore inert
+  template/shadow/foreign nodes and poisoned getters. Native jobs retain immutable
+  initiating CSP/referrer/embedder snapshots before asynchronous body conversion.
+
+### Native DOM, scripts and ownership
+
+- Initially consume public Git-pinned turbo-dom0.5.7 candidateaaeb290 when the
+  latest registry release was0.5.6, and re-vendor committed turbo-test3ed91fb.
+  The current dependency is released registry0.5.7. Native per-isolate node state preserves
+  original UTF-16 payloads, names, parser positions and mutation-time ancestry.
+  GC callbacks schedule bounded storage scans outside collection; genuine weak
+  wrapper/guest edges and native job pins preserve retained identities without
+  permanent host roots. Thread exit, interruption, disposal and peer sessions
+  have deterministic lifecycle regressions.
+- Allocate actual iframe V8 contexts with independent intrinsics, guarded stable
+  WindowProxy access and authentic Location/document authority. Experimental155
+  contexts include retained/retired-frame ownership controls; stock150 coverage
+  remains partial. Scoped activation restores native world and V8 before yielding.
+- Execute classic scripts directly from the host pump with original sources,
+  lexical scope/currentScript and trusted errors; preserve real load/error/CORS
+  taint behavior. Private preparation replaces guest execution markers and DOM
+  rescans. Modules and srcdoc retain original UTF-16 units. Dynamic ordered
+  downloads, inert/retired documents and host budgets have regression coverage.
+- Use actual V8 microtasks for queueMicrotask and observer delivery, and individual
+  Window tasks on shared clocks across frames. Flush microtasks between tasks;
+  bootstrap pending scripts before advancing delayed timers. Claim cross-document
+  mutation batches before reentrant resource queries to preserve reaction order.
+- Implement native mutation observers, transient removed-subtree records, shadow
+  slots/manual assignment, template ownership and scoped custom-element
+  construction/upgrades/reactions. Genuine brands, private callbacks and
+  cross-realm/adoption controls replace public helper authority. Broader parsing,
+  observer/custom-element and form-associated behavior remains on the checklist.
+- Preserve namespace-aware interface projection, Attr/NamedNodeMap and document
+  collections, HTML/XML document factories, native script text, DOMTokenList/part,
+  scoped ARIA relations, supported moveBefore and innerText/outerText mutations.
+  XPath uses the licensed bounded provider. Standard legacy Document no-effect
+  methods retain genuine receiver/descriptor behavior. Popovers have native
+  lifecycle/events; focus/light-dismiss/top-layer behavior is still bounded.
+- Track live Range boundaries through insertion/removal, split/normalize,
+  replacement, moves and adoption without rooting collected ranges. Add genuine
+  AbstractRange/NodeRange/StaticRange hierarchy, immutable static boundaries,
+  WebIDL conversion and cross-realm receiver checks. Independent native tests
+  cover retained nodes/frames and actual GC rather than prototype presence alone.
+- Add real form validation/ValidityState/SubmitEvent behavior and pre-submit
+  sandbox admission. Queue native top-document text GET/POST submissions through
+  the actual HTTP profile/jar/hints/storage, then install response HTML/status/
+  headers/referrer after leaving the old isolate activation. Preserve redirects,
+  consent cookies, fragments and immutable metadata. Independent UTF-8 and
+  Windows-1252 controls cover encoding and numeric entities. Multipart/file-input/
+  other-target and broader successful-controls behavior stay explicit.
+
+- Add genuine live HTMLFormControlsCollection/RadioNodeList interfaces, native
+  indexed/named properties, SameObject form elements, external association and
+  private receiver/realm ownership. Reflect input/button submitter action, method,
+  encoding and target through native attributes. Preserve radio checked-state
+  grouping, canceled-click restoration, cross-document adoption, nested/fragment
+  moves, shadow boundaries and external ownership. A native scalar candidate index
+  avoids rescanning ordinary moved subtrees and is swept with native storage.
+- Correct the independent radio adoption-GC readiness probe so its Promise does
+  not retain the iframe load Event. Record a real-task/three-GC policy and three
+  repeat Chrome captures; preserve the original contaminated and immediate
+  observations. Check the same exact lifetime states through the production
+  PageSession without adding a native ownership root.
+
+- Add genuine live control `.labels` on the seven existing labelable interfaces,
+  with native light-tree association, first-ID rules and shared ElementInternals
+  ownership. Preserve receiver-realm NodeList identity, hidden-input transitions,
+  adoption and GC. Capture the genuine collection prototype before guest code;
+  use null-namespace UTF-16 attributes so foreign id/for/type cannot change
+  association. Label activation and broader form behavior remain separate.
+- Preserve real native I/O/system-timer ordering while selecting Window tasks.
+  Keep one cancelable monotonic deadline while native work is pending; do not
+  jump a later virtual Window timer ahead of earlier body completion or timeout.
+  Independent Chrome controls cover stalled-body cancellation, retained and
+  no-public-listener timeout delivery. Quiescent virtual fast-forward remains
+  explicit; this is not universal browser timer-policy conformance.
+
+- Harden private abort conversion against guest Array.from, iterator, numeric
+  setter and descriptor hooks using private null-prototype records and a
+  source-pinned official WebIDL dense-array adapter. Preserve measured iterator
+  failure behavior and reason identity; retain the explicit Chrome array
+  fast-path iterator-count difference. Use fixed member comparisons so a poisoned
+  Array.includes cannot expose an official stream controller to guest callbacks.
+  Fresh Chrome controls and actual native attack regressions cover the boundary.
+- Return and await the actual final human-driver sequence Promise, including
+  rejection propagation and native form commits despite forged DOM completion
+  markers. Preserve generic script draining and production execution budgets.
+- Give the600-mutation native reclamation conformance fixture an explicit60-second
+  budget on shared debug CI runners. Preserve all operations,1200-node reclamation
+  and retained-owner assertions; this does not change product limits.
+  Apply the same explicit conformance budget to peer-layout isolation after a
+  native sample proves cold system-font discovery exhausts its old5-second limit;
+  preserve all geometry and ownership assertions. Scope saved macOS shadow Range
+  text metrics to that platform while checking exact font-independent boundaries,
+  positions, line boxes and retirement everywhere; retain the full macOS comparison.
+  Cancellation regressions await actual transport closure separately from worker
+  permit recovery under the existing timeout, preserving both lifecycle checks.
+
+### Layout, CSS and resources
+
+- Expose the actual linked renderer V8 version through the host-only NAPI
+  `engineVersion()` diagnostic. Keep it distinct from package versions, the
+  advertised browser profile and Node's own V8; assert the expected engine during
+  native addon validation without adding a guest global.
+- Resolve measured initial/inherited computed font longhands and shorthand using
+  private owner-context preferences, case-insensitive grammar tokens, typed
+  arithmetic and scalar-versus-length line-height inheritance. Follow actual assigned-slot inheritance and flat-tree availability;
+  refresh retained declarations after mutation, adoption, disconnect and frame
+  retirement. Preserve conversion order and captured numeric intrinsics. Broader
+  UA element defaults and unresolved font expressions remain tracked in issue28.
+- Preserve native inline source boundaries through shaping and wrapping: genuine
+  decorated/empty/mixed-font border fragments, own-font struts, nested baseline
+  shifts, relative offsets and source-owned whitespace/BR Range geometry.
+  Distinguish ordinary inline client metrics from replaced controls; preserve
+  empty fragments in offset bounds without duplicating ancestor paint.
+- Derive child/nested frame viewports from actual content boxes and refresh them
+  on resize without consulting guest dimension getters. Preserve measured
+  Replaceable accessor writes, borrowed media-query receivers, definition-realm
+  errors and cross-origin guards. Retired frames return empty retained geometry
+  and zero viewport dimensions while their retained DOM remains usable.
+- Use genuine iframe default object dimensions, UA borders and content boxes;
+  preserve finite zero-sized child viewports, definite-zero percentage bases and
+  normal-flow relative positioning. Resolve zero-axis aspect-ratio media queries
+  using the native parser and rational comparison. Suppress native iframe fallback
+  layout while retaining DOM/UTF-16 ownership and empty fallback Range rectangles.
+  Preserve the separate generic/PDF behavior. BackCompat body-strut geometry
+  remains explicitly tracked in issue28.
+- Preserve the complete exact macOS UTF-16/font geometry oracle and run exact
+  font-independent code-unit, selection, private access and caret lifetime
+  contracts on every platform. Linux fallback fonts differ from the captured
+  macOS system-font environment; Linux glyph parity remains unmeasured.
+- Connect native live-tree snapshots/private CSSOM to branded per-realm rectangle
+  interfaces, transforms, client/offset metrics, scrolling/clamping, point hits,
+  shaped original-unit text, Range/caret geometry and outer SVG boxes. Preserve
+  real source identities without HTML rewriting or page-owned getters.
+- Integrate composed closed-shadow/slot layout, reassignment, retained/unassigned
+  Range behavior, scoped native matching and real CSP-applied declarations.
+  Host-only realm cache epochs prevent independent sessions with equal document
+  IDs from sharing snapshots. Share actual platform font loading across threads.
+- Initially consume public Git-pinned turbo-html2pdf-core0.3.8 candidate2eac7f6
+  from PR23 when the latest registry release was0.3.7. The current dependency is
+  released registry0.3.8. The producer adds display:contents,
+  matched cascade, fractional anonymous flex/grid text and platform-only fonts.
+  Publication was verified separately from development integration.
+- Parse live CSSOM rules and preserve disabled/media/adopted sheet identity and
+  constructor ownership. ObservableArray adoption has native backing. Public
+  CSS.supports uses private grammar/capability checks; selector matching retains
+  quoted commas/braces and genuine :is/:where specificity and relative :has.
+- Admit parsed font-face/keyframe definitions only when actual matched styles
+  prove them unused. Referenced/unresolved definitions still reject. Complete
+  unsupported inline alignment/writing/positioning and block splitting, used
+  fonts/animations, stacking/scrolling,
+  inner SVG and broader CSS/resource behavior remain tracked in issue28.
+
+### Security, messaging and native APIs
+
+- Add genuine private Trusted Types values/factories/default policies, allowlists
+  and typed HTML/script/attribute/Range/DOMParser conversion. Native155 codegen
+  admission preserves direct eval lexical scope, real EvalErrors, string timers,
+  original report samples and retained-policy GC behavior. Stock SDK enforcement
+  remains conservative; broader sinks/default-policy reentrancy are tracked.
+- Enforce parser/mutation CSP and base-uri with original UTF-16 positions/samples,
+  native branded violation events and bounded trusted report queues. Deliver
+  legacy/modern endpoint reports using immutable profile-owned jobs, cookies,
+  request policy and redirect semantics; frame retirement permits realm collection.
+- Enforce tested CSP sandbox/frame-ancestors/XFO, mixed content, SRI and CORP,
+  including redirect/CORS eligibility, actual ancestor trees and inherited frame
+  policy. Implement tested COOP/COEP isolation, agent-cluster shared-memory
+  restrictions and Permissions Policy capability/delegation. PermissionStatus
+  brands/query conversion/events and clipboard denial have authored controls.
+  Full popup/navigation/directive/deep-policy/Reporting API coverage remains open.
+- Use private native capture/bubble event/listener/handler state with once/passive/
+  signal behavior and cross-realm brands. Blob downloads read authentic bytes.
+  Host input captures private drivers and discards timed-out queued work; guest
+  setup cannot expose host ops even when iframe bootstrap is interrupted.
+- Clone with V8 and genuine native CryptoKey/DOMException/DOMRect records,
+  preserving aliases, nonextractable permissions and receiver realms. Transfers
+  validate serialization/admission before ownership changes; queue limits are
+  host-only4096 snapshots/64MiB. Native weak endpoint graphs, message/task pins
+  and retired-frame cleanup have actual ownership/GC regressions.
+- Transfer ReadableStream/WritableStream/TransformStream through genuine private
+  ports and official raw stream algorithms. Preserve Chrome transfer phase order,
+  overlap partial commits, reentrant generation checks, receiver errors and
+  hidden endpoints. Public port/stream replacements cannot grant authority;
+  abandoned plans/completed transfers collect source realms.
+- Use official Deno WebCrypto with genuine key operations and browser admission,
+  including actual MLKEM768-X25519 X-Wing composition, private formats/wrapping
+  and Chrome interoperability. Reproduce the licensed provider inherited-setter
+  fix; native material/permissions never pass through page setters.
+- Retain native offline audio DSP, genuine PCM output and licensed source pins.
+  Realtime playback, feedback, parameter connections, multichannel/custom waves,
+  oversampling and lifecycle expansion remain deferred in issue27.
+
+- Preserve authoritative installed navigation metadata in the native trace driver,
+  including same-URL POSTs; prohibit synthesized form fallback on request while
+  still following genuine later script redirects. Native host Enter submission
+  uses captured canonical form admission and validation instead of manually
+  constructing a GET URL. Private branded File/FormData values now retain genuine
+  entry lists, conversion/iterator behavior and source-pinned Chrome controls.
+
+- Implement native-backed ElementInternals and CustomStateSet, including genuine
+  admission/ARIA/form association/validation/reactions, UTF-16 custom states and live
+  state iterators. Preserve native checked/defaultChecked/reset/clone behavior and
+  typed :checked matching. The later canonical integration adds real radio grouping,
+  canceled-click restoration, adoption and native owner-index lifecycle controls;
+  broader form-associated behavior remains on the central checklist.
+- Deliver genuine trusted FormData events with shared mutable entry records,
+  reentrancy guards, pre-event metadata and post-event wire serialization/CSP
+  admission. Disconnected forms and forms removed during submit listeners do not
+  submit. Independent controls cover actual HTTP, constructor/brand and GC edges.
+- Fix child form-value callback ownership and return fallible native bootstrap
+  errors under watchdog interruption instead of aborting the process. Existing
+  Fetch/form/host-input lifecycle regressions expose both failures before repair.
+- Compile ARM NEON delay code only for aarch64 targets. Actual x86_64/arm64
+  compilation, linking and delay PCM checks cover the Linux CI build failure;
+  upstream audio kernels/source hashes remain unchanged.
+- Select the portable `std::exp2(float)` overload in the authored audio adapter.
+  The unqualified call selected double on Linux GCC and float on macOS Clang.
+  All 176 cells of the independent Chrome frequency-response control now match
+  exactly on Linux x86, macOS ARM and Rosetta x86; no tolerance or licensed-kernel
+  change is introduced. Advanced audio remains deferred in issue27.
+- Derive navigation activation from private trusted input before pointerdown,
+  mousedown and key handlers run; preserve genuine form/Location admission through
+  HTTP redirects and clear transient activation for subsequent document-script
+  retries. Public UserActivation uses native context state and genuine brands;
+  same-origin navigation retains sticky activation while cross-origin navigation
+  clears it. The reusable 14-case localhost Chrome oracle covers trusted/untrusted
+  input, expiry, Location handlers, redirects, cross-origin state and retries.
+
+- Read genuine macOS accessibility preferences and system appearance for live CSS
+  and matching media queries; derive pointer/hover from the installed input driver.
+  Include captured host media in the layout cache key. Source-pinned independent
+  Chrome controls cover31 queries and real CSS rectangles. Dynamic preference
+  events and other platform backends remain tracked in issue28.
+- Reflect real form attributes with native conversion and receiver behavior; repair
+  input/button prototype placement and text-range editing, storage enumerable flags
+  and ValidityState's readonly constructor prototype. Existing Blob members now use
+  the measured enumerable flags and key order; absent textStream remains tracked.
+
+- Preserve genuine native form navigation in MCP using host-owned URL, response
+  headers/status/referrer and commit count. Keep same-URL POST responses, cookies
+  and history without replaying a GET; destination CSP remains effective on later
+  renders. Preserve committed state before returning a later guest exception. Remove
+  synthetic-form fallback so canceled, invalid and CSP-blocked submissions produce
+  no request, while explicit JavaScript navigation remains supported. The full MCP71
+  suite covers existing GET and new POST, error, admission and lifecycle controls.
+- Regenerate the complete durable API backlog from frozen paired evidence with
+  `api-inventory.mjs`, retaining all observed paths as well as member summaries.
+
+- Retain valid typed `@property` and `@view-transition` descriptor blocks in CSSOM
+  and private native stylesheet exports. Descriptor rules omit child `cssRules`;
+  fresh Chrome shape controls and poisoned-public-getter tests cover both seams.
+  Full property registration and transition lifecycle remain tracked in issue28.
+
+- Admit parsed modern at-rules only after a bounded geometry proof: named container
+  queries with no eligible authored container declarations, color registrations
+  whose transitive variable uses affect only background/color, and navigation-only
+  static transition metadata. Unknown rules and geometry-changing dependencies still
+  error. Fourteen Chrome cases, actual inline/sheet cache mutations and an offline
+  replay of the saved Google declaration graph cover admission and counterexamples.
+
+- Record synchronous interface call durations, cumulative/max time and timed samples
+  using captured clocks, including throws. Preserve guest return/Promise/error
+  identity and exclude trace serialization/stack work from the measured call span.
+- Capture private computed-style selector intrinsics so page overrides do not run
+  as internal matching hooks or appear as page-originated interface queries.
+- Reuse the resolved layout view for geometry and scroll translation. Batch ordinary
+  document selectors through the native query cache; dynamic pseudos and shadow
+  selectors retain their existing matching path and scope behavior.
+- Use real elapsed waits in the comparison harness while pumping pending native
+  callbacks. A delayed-XHR regression verifies that a genuine HttpOnly consent
+  cookie reaches the subsequent search request before document replacement.
+- Harden private dense arrays in two hash-pinned official Deno event modules
+  without changing public Array or the official abort/timer/dependent lifecycle.
+  Preserve translated dependent-signal reason identity before event delivery.
+  Chrome state/timeout controls and the pre-adapter native phase order are retained;
+  the measured stream/listener microtask-order difference remains open in issue28.
+- Retain pending timeout signals in their document heap until delivery, releasing
+  them before dispatch; cover forced GC and retired-document ownership without
+  introducing a native realm root. Listener-count release and detached-window
+  active-time suspension remain open.
+- Pin the experimental155 SDK async-operation admission transaction and generated
+  stubs, with reusable exact-preimage failure, recovery, rejection and all-arity
+  controls. Verify source/patch provenance before compilation and retain genuine
+  rejected-operation errors. Production stock150 and arbitrary interruption
+  reservations remain outside this bounded repair.
+- Separate conformance-fixture budgets from queue-capacity checks. Preserve exact
+  4096-task admission/recovery assertions and reject watchdog termination as a
+  capacity result; give the host-media oracle a conformance budget without
+  changing product execution limits or Chrome expectations.
+
+- Add genuine Input/Button submitter action, method, encoding and target reflection,
+  preserving measured missing-versus-invalid defaults and Input DOMString versus
+  Button USVString action writes. Canonical independent Chrome controls cover
+  brands, owner-document/base resolution and hostile public getters.
+- Expose Element.customElementRegistry through private native associations and
+  preserve unread parser ownership across moves. Rebind global/inert-null registry
+  state during actual adoption, including ShadowRoots, without retaining an old
+  global registry. Forty-four independent Chrome controls pass in the canonical
+  binding; final Surf integration checks remain separate.
+
+### Historical validation checkpoint — source a057a3a
+
+These results describe the earlier source-bound checkpoint; the current follow-up
+requires its own complete gates and fresh measurements.
+
+That default workspace passed1,376 tests with three explicit
+stock-native callback skips and six generated doctest ignores. The final actual155
+six-feature workspace passes1,415 tests with zero failures and six generated
+doctest ignores. Both complete commands cover129 component suites. Both engines pass final XHR5, shadow9,
+all-target strict Clippy and formatting. Both rebuilt addons passed95 shim tests
+(one intentional test-framework skip),20 E2E tests,89 detection controls without
+skips and2 Python SDK-helper tests.
+
+The optimized native CLI/addon includes wreq, trust anchors, Metal and CoreText.
+That75-interface comparison records64 original/142 expanded missing members
+and374 paths. On the same68 previously measured interfaces, missing members fall
+134→119 without additions; both formerly absent collection interfaces are present.
+Both actual detector captures have no strong findings. The fresh two-repeat
+final-source Google matrix completes with all four native features and genuine
+consent/native-cookie forms, without sidecar or fallback. Native baselines reach
+/search200 then/sorry429:0/2 accepted SERPs. Chrome baselines load9 markers each;
+instrumented Chrome is rejected in both repetitions. Native trace.errors is empty
+in all four passes, but stdout records reCAPTCHA fetch failures and homepage
+hydration still reaches its20s budget. Fresh paired capabilities and shared WebGL
+probes match within their measured scope. All four native passes still emit
+Google jc/lc stylesheet telemetry before search; Chrome emits neither. The
+constant-code diagnostic snapshot records this residual without asserting a
+rejection cause.
+
+Source-pinned receipts retain their own measurement dates and commits; newer
+VALIDATION-LAST-RUN.json and GOOGLE-LAST-RUN.json captures supersede this historical
+checkpoint without changing its recorded results. Broader residual behavior and reliable
+native SERP acceptance stay in issue28; advanced audio stays in issue27. See
+FINDINGS.md and PARITY-GAPS.md for current evidence and bounds. No turbo-surf
+publication tag is created here.
 
 ## [0.5.3] — 2026-09-29 — hide internal globals from window fingerprint
 
@@ -84,9 +1149,11 @@ the navigation **header ORDER**, which Chrome reordered in 154.
   so both layers report the same version for any pooled profile.
 
 ### Notes
-- The BoringSSL TLS/HTTP-2 hello stays Chrome 149 (wreq-util), which is byte-stable across
-  Chrome minors — only the *reported* version (UA/`sec-ch-ua`/header order) tracks 154. The
-  browserless google `__Secure-ENID` remains server-scored (unchanged from 0.5.0).
+- The BoringSSL TLS/HTTP-2 template stayed Chrome 149 (wreq-util), while the
+  *reported* version (UA/`sec-ch-ua`/header order) tracked 154. **Corrected 2026-10-10:**
+  the former assertion that this template was byte-stable across Chrome releases was
+  unsupported; newer upstream profiles change TLS options and signature algorithms.
+  The browserless Google `__Secure-ENID` was still rejected in the recorded test.
 
 ## [0.5.0] — 2026-09-29 — client-side fingerprint fidelity + browserless anti-bot recon
 
@@ -525,9 +1592,9 @@ version mismatch on the default impersonate path.
   kept advertising Chrome 149 on the wire even after the rest of the stack moved to
   153 — a cross-layer version mismatch that is itself a bot tell. `emulate()` now
   pins the on-wire UA + `sec-ch-ua` to the same Chrome 153 identity, while wreq still
-  owns the header order and the TLS/HTTP-2 ClientHello (Chrome's TLS hello is stable
-  across minor versions, so the 149 template is byte-for-byte what Chrome 153 sends).
-  Verified against a live TLS/HTTP-2 echo; the impersonate network e2e guards it.
+  owns the header order and the Chrome 149 TLS/HTTP-2 template. **Corrected 2026-10-10:**
+  the live echo checked specific header, priority and JA4 properties; it did not establish
+  byte-for-byte Chrome 153 parity. The newer upstream profiles have different TLS settings.
 
 ## [0.4.2] — screenshot render fidelity
 

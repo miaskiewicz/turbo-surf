@@ -1,0 +1,4641 @@
+{
+  "childProbeSha256": "1a21086776019eb2c532e59b071b2d565539ec740b521d2c60e9531891a58f41",
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "casesSha256": "2ac17f97221e81d94102be7a6e980c3fcb1432a66bee9987049d6b78ce6ddb7e",
+  "probeSha256": "68821c55e3884da4ab209eccc562f7cc9bff7a61cf8b8192d4cf4ede3f12e73f",
+  "collectorSha256": "bbef884769808001478fbe0e7a8ca639c10f7177b8acc4a03a0a3e5ba65ef9a3",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "0",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "1",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "2",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "3",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "4",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "5",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "6",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "7",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "8",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "9",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "10",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "11",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "12",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "13",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "14",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "15",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "16",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "17",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "18",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "19",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "20",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "21",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "22",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "23",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "24",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "25",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "26",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "27",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "28",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "29",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "30",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "31",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "32",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "33",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "accelerometer",
+            "aria-notify",
+            "autoplay",
+            "bluetooth",
+            "browsing-topics",
+            "camera",
+            "captured-surface-control",
+            "ch-device-memory",
+            "ch-downlink",
+            "ch-dpr",
+            "ch-ect",
+            "ch-prefers-color-scheme",
+            "ch-prefers-reduced-motion",
+            "ch-prefers-reduced-transparency",
+            "ch-rtt",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-arch",
+            "ch-ua-bitness",
+            "ch-ua-form-factors",
+            "ch-ua-full-version",
+            "ch-ua-full-version-list",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-model",
+            "ch-ua-platform",
+            "ch-ua-platform-version",
+            "ch-ua-wow64",
+            "ch-viewport-height",
+            "ch-viewport-width",
+            "ch-width",
+            "clipboard-read",
+            "clipboard-write",
+            "compute-pressure",
+            "cross-origin-isolated",
+            "deferred-fetch",
+            "deferred-fetch-minimal",
+            "digital-credentials-create",
+            "digital-credentials-get",
+            "display-capture",
+            "encrypted-media",
+            "fullscreen",
+            "gamepad",
+            "geolocation",
+            "gyroscope",
+            "hid",
+            "identity-credentials-get",
+            "idle-detection",
+            "interest-cohort",
+            "keyboard-map",
+            "language-detector",
+            "language-model",
+            "local-fonts",
+            "local-network",
+            "local-network-access",
+            "loopback-network",
+            "magnetometer",
+            "media-playback-while-not-visible",
+            "microphone",
+            "midi",
+            "on-device-speech-recognition",
+            "otp-credentials",
+            "payment",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "publickey-credentials-create",
+            "publickey-credentials-get",
+            "screen-wake-lock",
+            "serial",
+            "speaker-selection",
+            "storage-access",
+            "summarizer",
+            "sync-xhr",
+            "translator",
+            "unload",
+            "usb",
+            "window-management",
+            "xr-spatial-tracking"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": ["<child-origin>"]
+            }
+          ]
+        },
+        "accessible": true
+      }
+    },
+    {
+      "id": "34",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "35",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "36",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "37",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "geolocation",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "38",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "geolocation",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "39",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "40",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "41",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "42",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "geolocation",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "43",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "geolocation",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "44",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "45",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "46",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "47",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "48",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "49",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "50",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "51",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "52",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "53",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "54",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "55",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "56",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "57",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "geolocation",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "58",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "geolocation",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "59",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "60",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "61",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "62",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "cross-origin-isolated",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "63",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "64",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "cross-origin-isolated",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "65",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "66",
+      "result": {
+        "parent": {
+          "isolated": false,
+          "shared": "undefined"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "cross-origin-isolated",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "67",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "68",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "69",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "70",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "cross-origin-isolated",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "71",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "72",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "cross-origin-isolated",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "73",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "74",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": null,
+        "accessible": false
+      }
+    },
+    {
+      "id": "75",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "76",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "cross-origin-isolated",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "77",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": false,
+          "shared": "undefined",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": []
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    },
+    {
+      "id": "78",
+      "result": {
+        "parent": {
+          "isolated": true,
+          "shared": "function"
+        },
+        "child": {
+          "kind": "policy-frame",
+          "isolated": true,
+          "shared": "function",
+          "allowed": [
+            "aria-notify",
+            "browsing-topics",
+            "ch-save-data",
+            "ch-ua",
+            "ch-ua-high-entropy-values",
+            "ch-ua-mobile",
+            "ch-ua-platform",
+            "cross-origin-isolated",
+            "deferred-fetch-minimal",
+            "gamepad",
+            "interest-cohort",
+            "media-playback-while-not-visible",
+            "picture-in-picture",
+            "private-state-token-issuance",
+            "private-state-token-redemption",
+            "storage-access",
+            "sync-xhr",
+            "unload"
+          ],
+          "allowlists": [
+            {
+              "name": "geolocation",
+              "list": []
+            },
+            {
+              "name": "camera",
+              "list": []
+            },
+            {
+              "name": "cross-origin-isolated",
+              "list": ["<child-origin>"]
+            },
+            {
+              "name": "autoplay",
+              "list": []
+            }
+          ]
+        },
+        "accessible": false
+      }
+    }
+  ]
+}

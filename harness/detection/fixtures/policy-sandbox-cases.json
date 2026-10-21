@@ -1,0 +1,100 @@
+[
+  {
+    "id": "0",
+    "headers": [],
+    "childHeaders": [],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "1",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "sandbox"]],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "2",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "sandbox allow-scripts"]],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "3",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "sandbox allow-same-origin"]],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "4",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "5",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "sandbox ALLOW-SCRIPTS ALLOW-SAME-ORIGIN"]],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "6",
+    "headers": [],
+    "childHeaders": [
+      ["Content-Security-Policy", "sandbox allow-scripts; sandbox allow-same-origin"]
+    ],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "7",
+    "headers": [],
+    "childHeaders": [
+      ["Content-Security-Policy", "sandbox allow-scripts allow-same-origin; sandbox"]
+    ],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "8",
+    "headers": [],
+    "childHeaders": [
+      ["Content-Security-Policy", "sandbox allow-scripts"],
+      ["Content-Security-Policy", "sandbox allow-same-origin"]
+    ],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "9",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]],
+    "sandbox": "allow-scripts",
+    "cross": false
+  },
+  {
+    "id": "10",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]],
+    "sandbox": "allow-same-origin",
+    "cross": false
+  },
+  {
+    "id": "11",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy-Report-Only", "sandbox"]],
+    "sandbox": null,
+    "cross": false
+  },
+  {
+    "id": "12",
+    "headers": [],
+    "childHeaders": [["Content-Security-Policy", "sandbox allow-scripts"]],
+    "sandbox": null,
+    "cross": true
+  }
+]

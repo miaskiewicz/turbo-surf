@@ -1,0 +1,34 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "result": [
+    {
+      "mode": "unchanged",
+      "error": null,
+      "getterCalls": 1,
+      "detached": 0,
+      "events": ["unchanged"]
+    },
+    {
+      "mode": "close-sender",
+      "error": null,
+      "getterCalls": 1,
+      "detached": 0,
+      "events": []
+    },
+    {
+      "mode": "close-receiver",
+      "error": null,
+      "getterCalls": 1,
+      "detached": 0,
+      "events": []
+    },
+    {
+      "mode": "transfer-receiver",
+      "error": null,
+      "getterCalls": 1,
+      "detached": 0,
+      "events": ["transfer-receiver"]
+    }
+  ]
+}

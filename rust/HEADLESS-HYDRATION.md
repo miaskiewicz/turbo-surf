@@ -3,6 +3,25 @@
 "Headless hydration" in turbo-surf means two distinct things. Both are tracked
 here so the requirements are explicit.
 
+The current source-pinned validation and live outcomes are recorded in
+[FINDINGS.md](../harness/detection/FINDINGS.md) and
+[VALIDATION-LAST-RUN.json](../harness/detection/VALIDATION-LAST-RUN.json).
+The latest9304df9 capture has no accepted native SERP: both baselines finish
+initial hydration with one pump inside the unchanged budget, save consent and
+submit real forms, then end429 with zero results. Interface-instrumented initial
+hydration still exhausts its budget. Both Chrome baselines stop after ineffective
+consent clicks, so the latest SERP comparison is incomplete. The earlier546d511
+capture reaches a SERP in one signed-out Chrome baseline. Dated checkpoints below
+preserve their original evidence. Executing page JavaScript does not establish
+that Google accepted a native search. The October21 startup fix adds
+shared font programs, per-read ancestor snapshots, selector-first CSS matching
+and timer task checkpoints/nesting. Current full gates pass1,509 native and1,464
+stock Rust tests, strict checks, formatting and rebuilt addon consumers. Its latest
+homepage-only diagnostic completes HTTP200 hydration under the unchanged20-second
+budget in16.35s whole-run with957MB peak RSS including profiling. Broader timing,
+effective Chrome consent handling and selector-admission
+gaps remain in [PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md).
+
 ## 1. No-JS hydration-state mining (`hydration.mjs`)
 
 Recover SPA data **without executing any JS** by mining the server-shipped state
@@ -33,13 +52,13 @@ Requirements and where each stands:
 | Requirement | Status |
 |---|---|
 | Real V8 isolate, host heap unreachable from guest (+ runaway budget) | ✅ deno_core + watchdog |
-| **Full** DOM bound to native `rtdom::Tree` (real `document`/Element — jQuery/React run) | ✅ `browser_env` (vendored from turbo-test) |
+| Native DOM bound to `rtdom::Tree` (`document`/Element — jQuery/React run) | ✅ `browser_env` (vendored from turbo-test); partial Web IDL coverage |
 | `window`/`navigator`/`location`/`localStorage`/`console` + Event classes | ✅ binding + env bootstrap |
-| Timers (`setTimeout`/`rAF`/`queueMicrotask`) | ✅ virtual (drained by delay) |
+| Timers (setTimeout/rAF/queueMicrotask) | Fast virtual scheduling by default; opt-in real-time Window/frame deadlines through PageSessionOptions before hydration; individual Window timer tasks finish their microtask checkpoints, with measured per-Window nesting clamps; broader cadence/task-source parity remains open |
 | Promise / `async`-`await` / microtask resolution (event loop) | ✅ `render_html_async` |
 | `fetch` + `XMLHttpRequest` over the real net stack (relative-URL aware) | ✅ `op_fetch` → `turbo_surf_core::net` |
-| `document.cookie` ↔ `CookieJar` bridge | ✅ `op_cookie_get/set` |
-| `MutationObserver`/`IntersectionObserver`/`ResizeObserver`, history API | ✅ (observers are no-op stubs; history updates `location.href`) |
+| `document.cookie` ↔ `CookieJar` bridge | ✅ `op_cookie_get/set`; HttpOnly cookies hidden/protected from JS |
+| `MutationObserver`/`IntersectionObserver`/`ResizeObserver`, history API | Native MutationObserver delivery; Intersection/Resize coverage remains bounded; history updates `location.href` |
 | TS/JSX bundle support | ✅ `turbo-surf-transform` (swc) |
 | Entry point | ✅ `render_page(html, base_url, script)` → hydrated HTML |
 
@@ -47,11 +66,324 @@ Validated end to end: a mock SPA hydrates into `#root`, an XHR/`fetch`-driven pa
 fills from a localhost server, and **real jQuery** (`quotes.toscrape.com/js`) renders
 its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 
-**Known gaps / not-yet-required:**
 
-- Bundle/module loading: scripts run as classic scripts; ESM `import` graphs aren't
-  fetched/linked (the harness adapter concatenates a page's classic `<script>`s).
-- Observers are inert stubs (no live mutation callbacks over the static tree).
+**October19 trusted input follow-up:** the private driver captures native current
+layout geometry for target centers, replaces live input/textarea selections and
+preserves cancellation. Geometry setup initializes the unchanged shared system
+font registry before guest execution; cold discovery is an engine startup cost
+rather than a later input-budget cost. The detection example applies actual
+readiness checks, real dwell/character cadence and per-step snapshots. The
+subsequent real-time comparison mode is described below. Paired Chrome/native localhost
+controls verify trusted consent, cookie ordering, target/query, form navigation
+and results; failed readiness prevents input. The actual native155 focused input
+and diagnostic targets pass19/19. These controls do not certify live Google
+acceptance or identical browser event timing.
+
+**October20 comparison timing:** the detection example now selects
+`PageSessionOptions { window_timer_mode: WindowTimerMode::RealTime,
+..Default::default() }` through `open_with_document_response_and_options` before
+hydration. Existing constructors keep fast virtual timers. The host policy gates
+all Window/frame timer drains and uses real deadlines for awaited timers; idle
+pumps leave unrelated future timers queued. Form navigation inherits timer mode.
+An optional `initial_hydration_budget_ms` caps only initial hydration, is consumed
+after opening, and cannot enlarge the configured budget for later operations.
+Ten focused default-engine controls pass with strict render Clippy and formatting,
+including clock agreement, frames, cancellation and the one-shot budget cap.
+The subsequent66-test integration and67-test font-startup follow-up are
+historical focused checkpoints. Full stock/native workspace validation later
+passes1,451/1,496 Rust tests on3a77122, with strict checks and formatting.
+The546d511 collector repair passes sixteen paired controls and full detection
+200/0skips on Node22 and191/9 documented skips on Node20. Original native
+compile/addon receipts retain their4a identity through explicit source bridges;
+these counts do not imply all gates were rerun on every documentation commit.
+
+The October20 diagnostic startup initializes the compiled hooks through
+`turbo_surf_mcp::initialize_render_hooks()` without loading solver configuration
+or `.env`. Production `Session::new()` keeps its existing solver setup. Optional
+private host-input evidence steps retain the actual control and expected UTF-16
+insertion, verify its connection/focus/value after typing and before Enter, and
+release it on completion or budget cancellation. They dispatch no input events
+and do not refocus or repair page text. The earlier native checkpoint passes47 integration
+and four example tests; the expanded66-test checkpoint is described above. Those historical focused counts do not supersede the later completed workspace
+and browser controls above. The earlier546d511 live Google evidence records native
+HTTP429/zero results and early homepage budget exhaustion; Chrome reaches a
+SERP in one baseline while another fails effective consent dismissal. The later
+9304df9 run and its incomplete Chrome comparator are summarized at the top. See the
+[current findings](../harness/detection/FINDINGS.md).
+
+**Execution model and remaining gaps:**
+
+- Native WebCrypto uses the hardened licensed Deno provider and genuine X-Wing
+  composition. Non-extractable key material never crosses a page cloning hook;
+  the private V8 serializer carries native key handles out of band. The original
+  inherited-setter leak and graph/permission/realm behavior have regressions.
+  See [`vendor/DENO_CRYPTO.md`](./vendor/DENO_CRYPTO.md) for the reproducible patch.
+- SHA256/384/512 resource integrity is checked against decoded response bytes
+  before fetch/script/module/frame/style consumption. Module entry integrity does
+  not become the hash for imported dependencies. Native CORP and active HTTPS
+  mixed-content checks also run before consumption/contact, including redirects.
+  Passive image upgrades, signature/Integrity-Policy enforcement and complete
+  embedder/worker/navigation policies remain separate gaps.
+
+- Module scripts now run through the deno_core module loader and ESM graph pump
+  (`NetModuleLoader` in `runtime.rs`); classic scripts are queued by the script-element
+  pump and compiled/executed by the Rust host pump with their document/source URL.
+  Global lexical bindings persist; classic execution no longer uses indirect eval.
+- Observer delivery remains partial. Element box geometry now uses the public native
+  live-tree layout seam, private actual CSSOM rules and transform provenance. Supported
+  client/offset/scroll metrics and point-hit regions have authored Chrome controls;
+  shaped text/Range/caret and composed shadow/slot controls are integrated. Source-owned
+  decorated/empty/mixed-font inline boxes now have independent controls, including
+  corrected macOS generic-serif font selection. The earlier75-test genuine-native155 cohort passes, including the exact20-scene
+  iframe comparison, frame initialization/GC and production custom elements.
+  Default/zero iframe and canonical computed-font corrections are integrated.
+  Public layoutdcbfd20 includes native source-run admission, separate block/Range
+  transform stages and complete leading/internal-space source ownership, wrapped
+  endpoints and caret affinity. Producer767 full tests and41 focused controls pass;
+  its test-only follow-up `4999290` passes768 tests with9,806/9,806 coverage and identical
+  production bytes. All nineteen whitespace scenes compare exactly through actual
+  DOM/CSS. The October17 implementation a005140 passes the full stock-V8-150 workspace1,411
+  tests and native-V8-155 workspace1,456, strict Clippy and formatting, preserving
+  all1,457 selected implementation source hashes. Rebuilt native addon/Node/CDP
+  gates also pass; fresh75-interface API residuals remain unchanged. Fresh Google
+  baselines are0/2 accepted SERPs for both Chrome and native, and all four native
+  homepage passes still exhaust the20-second budget. These limits remain issue28,
+  with advanced audio separately in issue27. Earlier75/78/31bf source-specific
+  proofs remain historical in LIVE-GEOMETRY.md and FINDINGS.md. Unsupported
+  inline alignment/writing/positioning, full stacking contexts and broader scrolling
+  remain explicit bounds. See [the scope and controls](../harness/detection/LIVE-GEOMETRY.md).
+
+**Current interface corrections (2026-10-10):**
+
+- Repeated synchronous evaluations with identical supplied HTML retain the same document
+  and globals. Changed HTML receives a fresh isolate, including its lexical environment
+  and built-ins; repeated top-level let/const names and prototype changes cannot leak
+  across documents. The `render_page_pooled` compatibility API also uses a fresh runtime
+  per call while genuine fresh-main-realm reuse remains unimplemented. This deliberately
+  gives up the former cross-page boot optimization; it is not a navigation cache.
+- Iframes allocate distinct V8 contexts, native DOM trees, native callback caches,
+  event/focus/style state and independently bootstrapped browser API constructors.
+  Same-origin callbacks restore the caller's document after reentrant DOM access;
+  fetched heads and bodies remain separate from the parent tree. Explicit native
+  adoption preserves node identities and changes tree ownership; unsupported node kinds
+  reject instead of treating another tree's handle as a local node.
+  Node/Element/HTMLElement/Document and character-data interfaces have distinct prototype
+  chains. Projected native accessors use the receiver's real tree handle and reject
+  incompatible receivers; document-specific instance properties and compatibility APIs
+  retain partial Web IDL ownership and descriptor coverage.
+- Ordinary HTTP(S) frame globals use V8 origin security tokens. Cross-origin
+  `contentDocument` is null. Native response records bind fetched HTML to its final
+  redirect URL; guest JSON cannot assign an origin to arbitrary srcdoc HTML. The owning
+  context is recorded natively, and loader script execution must match executable inline
+  bodies or external script URLs parsed from that authenticated HTML. External code uses
+  host-recorded fetched bytes; replacing guest RegExp/JSON parsing cannot authorize an
+  injected script. Cookies use the actual native Document's creation context and URL,
+  keeping HttpOnly values hidden. srcdoc/blank contexts inherit the owner's origin and
+  fetch base.
+- Window messages enforce `targetOrigin` and use V8 structured cloning into the
+  receiver realm, including cycles and Maps. Native transfer lists move ArrayBuffer
+  backing stores and MessagePort ownership after successful serialization and queue
+  admission. Endpoint garbage-collection liveness and broader retirement controls
+  remain under validation; see [the ownership contract](../harness/detection/MESSAGE-TRANSFERS.md). The published V8 150 backend uses a limited caller-realm Window view:
+  protected reads throw `SecurityError`, and replacement creates an isolated context with
+  a different `contentWindow` identity. Retained old globals/documents remain isolated
+  and callable. The current experimental native V8 155 build (and historical154 profile) uses genuine V8 global detach/reuse and
+  native access-check callbacks, preserving `contentWindow` and MessageEvent.source
+  identity across same-origin and cross-origin replacements. Same-origin retained
+  Function constructors and precompiled functions resolve the new Document; a retained
+  Document keeps its original tree and metadata. Cross-origin replacement rejects the
+  old Function constructor with TypeError and rejects precompiled document reads with
+  SecurityError. Protected Window reads and prototype writes throw branded DOMException
+  errors; cross-origin prototype reads return null. Accessible cross-origin method
+  functions and descriptor getters are cached in the caller realm. Native per-document
+  Location objects enforce restricted cross-origin reads/reflection, branded SecurityError,
+  `href`/`replace`/Window.location navigation, and caller-based relative URL resolution.
+  Same-origin components, own property order, prototype branding and genuine DOMStringList
+  ancestorOrigins are native. Top-level Location writes retain the existing driver-specific
+  navigation behavior; general history and same-document fragment navigation remain partial.
+  The reusable Chrome operation collector and
+  deterministic localhost tests cover these contracts; see
+  [the native engine build](../harness/detection/engine-154/README.md).
+- Created iframe hosts are native HTMLIFrameElement nodes with prototype accessors and
+  private lifecycle records. Detached hosts have null contentWindow/contentDocument;
+  inserting a node/subtree/fragment starts its context, including native shadow-tree
+  insertion. Initial blank globals survive blank load. Supported DOM mutations and
+  markup setters detect removal and retire frame work; reinsertion creates a new
+  browsing context, and source attribute changes navigate asynchronously. Load events
+  are branded, trusted native Events. Retired timers, descendant timers, classic-script
+  queues and queued message delivery stop. Native Document ownership guards prevent
+  old documents from initiating replacement-realm script/frame work. Retained guest
+  documents, constructors and pending native jobs preserve their actual ownership;
+  unreachable contexts can collect before page teardown. Real V8 GC schedules bounded
+  native-storage collection and pruning of dead weak-context registrations at host
+  boundaries, without traversing Trees inside the GC callback. Registry vector capacity
+  retains its high-water mark. Retired definitions retain registry/instance identity
+  while automatic upgrades and queued reactions stop; retired documents expose empty
+  geometry. Broader reclamation and cancellation of every in-flight async operation
+  remain incomplete.
+- Connected child indices follow browsing-context connection order. Moving an iframe
+  discards its old context and appends the replacement after surviving contexts, matching
+  the measured Chrome behavior even when DOM order differs. Shadow-tree frames own real
+  contexts but do not contribute to window.length/indices. Source removal commits an
+  inherited about:blank document; retained replaced Documents have null defaultView.
+- Native sandbox flags inherit through descendants and snapshot the actual iframe
+  attribute at document initialization. `allow-scripts` gates parsed and injected HTML
+  scripts; `allow-same-origin` controls opaque origins. Same-origin parent-invoked eval
+  remains possible when HTML script execution is disabled, matching Chrome. Opaque
+  documents reject cookie/Storage access with SecurityError and use the native opaque
+  request context. Data HTML/plain frames decode percent/base64 bytes natively, keep
+  authenticated document capabilities, and receive opaque origins; unsupported data
+  content stays opaque. Sandbox top-navigation, popup, form, download and permissions
+  policies, XML/image data documents and full cancellation are not implemented.
+  CSP script/resource restrictions are described below; complete CSP conformance remains partial.
+- The exact native154 SDK gives each child context its own native Deno module map,
+  loader, cache and evaluation lifecycle. Retiring a frame cancels its graphs and
+  releases private script completion gates. Opaque module fetches use Origin:null,
+  omit same-origin credentials and require an allowed CORS response; sandboxed
+  script-disabled frames do not start graphs. The published SDK fallback rejects
+  child modules instead of sharing the parent map. General navigation and full
+  sandbox/CSP policy coverage remain incomplete. Transfer options and full Web IDL descriptor coverage are
+  incomplete. Additional Storage, History and layout behavior remains partial; these
+  tests establish specific contracts rather than full browser or security conformance.
+- Native Node/Element/HTMLElement/CharacterData accessors now live on distinct
+  interface prototypes. Getter/setter functions are native, nonconstructible, named
+  and receiver-checked; their values still route into the owning native tree. Parser,
+  clone and create APIs project the same cached node identities. Shared native methods
+  preserve expando identity. Node constants and DOM event methods live on their owning
+  interfaces; EventTarget subclasses retain separate listener state. A native callable
+  bridge forwards actual receivers and class `new.target` into the guest implementation
+  without replacing Function.prototype.toString. Interface key/descriptor coverage is
+  still incomplete for unsupported APIs. Native elements retain HTML/SVG/MathML, null and
+  custom namespace URIs, prefixes and qualified names through mutation, cloning and import.
+  Namespace-aware attributes compare URI plus local name; native Attr nodes retain identity,
+  live values and single-owner attachment semantics. NamedNodeMap is live and branded, and
+  namespace lookup follows declarations, native prefixes and ancestors. This does not add
+  XML document parsing or serialization.
+- Document forms/images/links/anchors/embeds/scripts collections and supported
+  getElements queries are live native indexed HTMLCollections; getElementsByName and
+  childNodes are live NodeLists, while querySelectorAll returns static NodeLists.
+  ParentNode.children retains stable collection identity. Native property handlers
+  implement indexed/named reflection and supported read-only entries; a private shared
+  V8 Private record gives borrowed getters their actual cross-realm records without accepting
+  fabricated dispatchers or retaining creation contexts on the host. Tree ownership/version
+  stamps refresh query results after
+  mutations and adoption. DocumentType metadata and compatMode use actual native parser state;
+  designMode, title, direction and legacy colors store or reflect real supported state.
+  Document event-handler properties retain native listener ordering and cancellation.
+- adoptNode preserves existing native wrapper identities while moving tree ownership,
+  attached Attr nodes, shadow trees, listeners, control values and nonce state. Created
+  fragments, text, comments, processing instructions, attributes, doctypes and template
+  content are supported. Native custom-element adoption callbacks have independent
+  Chrome controls; broader form-associated/reaction lifecycle remains bounded. Import/clone copy supported
+  live control values and nonce state through captured per-document helpers. HTMLElement
+  nonce keeps its private value independently of the reflected attribute; tabIndex uses
+  measured defaults, HTML integer parsing and Web IDL conversion. These contracts do not
+  implement an editing engine or general focus/layout behavior.
+- ProcessingInstruction is a native CharacterData node with an immutable target, XML-name
+  validation, HTML serialization and clone/import/adoption support. Character-data methods
+  use V8 UTF-16 offsets and throw IndexSizeError for invalid ranges. HTML documents reject
+  createCDATASection with NotSupportedError; XML document factories are bounded and
+  CDATA construction/XML parsing remain incomplete. HTML XML
+  metadata follows the measured null defaults, mutable xmlStandalone and version-1.0-only
+  setter. Native original-unit APIs preserve unpaired UTF-16 through stored DOMString
+  mutations, parser provenance and script sources; serialized Rust strings still
+  require explicit conversion. Broader parsing/DOMString edges remain tracked.
+- Event state lives in private native records. Script dispatch remains untrusted;
+  private record maps capture their native WeakMap operations before guest execution.
+  Trusted lifecycle, message delivery and script/module completion callbacks live in
+  native context slots. Privileged callbacks use strict calling semantics and captured
+  Event/ErrorEvent constructors, preventing guest replacements or Function.caller from
+  obtaining a trust-minting capability. The internal Symbol.for('ts') support namespace
+  remains observable; its remaining frame records do not grant cross-origin document access.
+  Resource, lifecycle and frame events use a host-only dispatch entry point. Event fields
+  are read-only accessors. Element property handlers use private state and the native
+  listener registry, retaining assignment order and cancellation behavior. Window load
+  and pageshow retain their measured Chrome legacy target/dispatch state. Inline event-handler
+  attributes, propagation, listener options and event subclass coverage remain
+  incomplete.
+- DocumentFragment uses a real native fragment node; append/insert moves its children
+  into the destination and empties the fragment. Native ShadowRoot retains distinct
+  branding, host/mode, open/closed lookup, scoped queries and composed root lookup.
+  Slot assignment, event retargeting, shadow options beyond mode and composed layout/CSS
+  remain incomplete; this is not a full Shadow DOM implementation.
+- Child classic scripts execute in their own context through the host queue with
+  document source locations. The native154 SDK also evaluates child module graphs in
+  separate module maps; the published fallback explicitly rejects child imports before
+  touching the main map. Main-document modules retain their own loader. Each frame
+  has its own timer/microtask/resource work; styles finish before initial classic
+  scripts, DOMContentLoaded precedes resource-complete window load. Analytics/auth
+  churn hosts can still use an inert frame stub.
+- CSS Syntax tokenization/error recovery uses `cssparser`, with Lightning CSS validating
+  selectors and supported property values while retaining authored valid declaration
+  text. Unsupported property grammars retain token lists. Style text parses into
+  style/group rules, including `CSSStyleRule` selectors. CSSOM
+  insertion/deletion changes the sheet without changing the DOM text; replacing style
+  text replaces the sheet. CSSRuleList and StyleSheetList are branded live indexed
+  collections with native, receiver-checked list methods and accessors. Style/import rule
+  fields use private state behind native prototype accessors. CSSStyleSheet inherits
+  native branded StyleSheet callbacks with private rules and owner/import metadata;
+  MediaList exposes stable indexed queries and actual mutations. Constructed sheets
+  reject inserted imports and filter them from replacement; single-rule insertions
+  validate their complete token stream. Inline/rule declarations
+  share branded native CSSStyleDeclaration methods with stable identity and private values;
+  inline edits update the native style attribute; authorized external attribute changes refresh
+  existing declarations. CSS records share the isolate's private ephemeron registry so same-origin
+  cross-realm borrowed getters retain their brands. Supported computed values are live and read-only. CSS property
+  enumeration, shorthand serialization, unsupported property grammars and the full
+  computed cascade remain incomplete. Internal stylesheet loading
+  and computed-style reads bypass page-installed CSS accessors in the detection trace. Hydration loads
+  stylesheet links and import graphs with resource request
+  context. Opaque cross-origin sheets protect their rules and mutations with SecurityError;
+  CORS-authorized stylesheet access uses the actual native response policy. Loader functions and
+  internal response metadata stay private. This facade still has partial at-rule, nesting and Web IDL coverage, and CSSOM
+  changes feed the live geometry cascade through private stylesheet exports.
+  Unsupported grammar, dynamic pseudo states, downloaded fonts and composed shadow
+  scoping still limit this native cascade; it is not complete browser layout.
+- Scalar ARIA, editing enums, hidden state and basic HTML properties reflect actual native
+  attributes. Spellcheck, translation and writing suggestions resolve ancestor values;
+  capitalization/correction use associated forms. Reflection of `inert`/`autofocus` does
+  not implement browser input suppression or automatic focus. Nonce internal state,
+  editing services, popovers and full attribute/interactivity coverage remain incomplete.
+- Parsed hidden controls expose populated `.value` properties, including after insertion
+  and cloning. Text input/textarea live values have dirty state separate from their
+  defaults; textarea defaults use text, and select defaults/unmatched values have explicit
+  selection state. Cloning carries live control state. Full input-type sanitization,
+  validation and reset behavior remain incomplete. HTML serialization contains content
+  defaults and does not preserve every live control value across a new runtime.
+- Live hydration advances the document through loading/interactive/complete, runs deferred
+  scripts before DOMContentLoaded, and waits for image/resource loads before window load.
+  PNG/JPEG/GIF/WebP images are fetched as bytes and decoded before success/dimensions are
+  exposed. SVG/AVIF, responsive image selection, CSS image/font initiation, incremental
+  parsing and complete browser async-script scheduling remain outside this resource loader.
+  Image, linked/imported stylesheet and classic-script fetches record their actual duration
+  in the performance resource timeline; unavailable wire sizes and transport phases remain zero.
+  Concurrent resource requests merge their cookie writes and deletions into the shared
+  jar without discarding unrelated response or document.cookie updates.
+- `ClientHints` holds negotiated `Accept-CH` state per origin and a scoped HTTP client.
+  Render sessions share that state with fetch/XHR and module requests; callers must pass
+  the same state through navigation and a replacement runtime to retain it. Request
+  contexts select navigation/resource headers, referrer/Origin and credentials behavior.
+  Simple and preflight CORS authorization checks run before guest-visible responses;
+  every followed redirect applies native origin/cookie/CSP/CORS policy and negotiates
+  a fresh preflight when the rewritten cross-origin method/headers require it. Authorization
+  is preserved on same-origin hops and permanently removed after an origin transition.
+  Public fetch honors follow/manual/error redirects, including opaque redirect filtering
+  and redirect-limit rejection. Connection failures reject with TypeError; HTTP error
+  status codes still resolve to Responses. Permissions-policy hint delegation, Critical-CH
+  retries and a complete browser preflight cache remain unsupported. Request cache/integrity/signal/referrer policies have bounded real network
+  effects; binary bodies, response streams/cancellation and HTTP2 uploads are
+  integrated. Keepalive and full browser Fetch/cache behavior remain incomplete.
+  Genuine multipart FormData BodyInit still throws explicitly. The default
+  referrer policy is strict-origin-when-cross-origin. Full resource-policy and
+  HTTP authentication behavior remain partial.
+
+The reusable [detection harness](../harness/detection/README.md) records baseline and
+instrumented Chrome/native runs separately. The corrected CSSOM sentinel, iframe
+intrinsics and shared GPU probe now match in the measured tests, but the fresh native
+Google runs remain unsuccessful. Earlier baselines reached `/sorry` with HTTP 429;
+the latest run, after the ForcedColors media fix, fails on CSS rule type0 before
+form submission. These checks do not establish complete Chrome parity or identify
+Google's decisive rejection signal.
 
 ## 3. Driving an authenticated SPA (live sessions)
 
@@ -184,7 +516,7 @@ actual Playwright/Chromium against the SAME servers showed the dominant cause wa
    the grid is empty only because `/employments` still 500s). The *real* fix is to
    sync flux-apis code↔DB (check out a June commit, or reset the DB to March).
 
-3. **turbo-surf has full auth + data parity.** Its cookie jar carries the
+3. **The measured auth flow has matching cookies and response data.** Its cookie jar carries the
    cross-domain `refresh_token` cookie (`*.propelauthtest.com`); it performs
    `GET …/api/v1/refresh_token` (×2) → `GET …/auth/me` — **all `200`**, and
    `auth/me` returns the **complete** user + organizations payload (len 2040),
@@ -205,8 +537,11 @@ actual Playwright/Chromium against the SAME servers showed the dominant cause wa
      prototype off a throwaway iframe's `contentWindow`; with none it bailed
      without caching and recreated an iframe on EVERY lookup — **776** iframe
      create/remove churn that also starved the budget. Fix: iframes get a
-     lightweight stub whose `contentWindow` IS our realm (lookup resolves + caches
-     → loop stops, 776→4) and which never enters the rtdom tree.
+     lightweight stub whose `contentWindow` was our realm (lookup resolved + cached
+     → loop stopped, 776→4) and which never entered the rtdom tree. Current unreleased
+     code replaces that shared-intrinsic stub with a distinct V8 context and native
+     document; see the current interface corrections above for the origin boundary
+     and remaining WindowProxy/policy limits.
 
    Result: `/people/active` 2 tags → **485 tags in ~2.2s**; `/home` (459) and
    company-settings (557) also drop to ~1.4–2.2s (were near/over budget). Verified
@@ -261,11 +596,11 @@ work* so the next person doesn't re-walk it.
   drain quiesced (the DOM looks "stable" while waiting) and its success re-render — a
   modal close, a redirect — was lost. A `__pendingFetches` counter now keeps the drain
   pumping until requests settle.
-- **Network log → events.** Each live-app `fetch` is appended to `__netLog`; the shim
-  drains it to emit `page.on('response')` and back a real `waitForResponse`. Tests use
+- **Network log → events.** Each live-app `fetch` is recorded in private native op-state; the shim
+  drains it through the host-only `liveNetworkLog` accessor to emit `page.on('response')` and back a real `waitForResponse`. Tests use
   these to capture API payloads (payroll period, employments lists).
 - **Globals:** `KeyboardEvent` dispatch path, `navigator.clipboard` (in-memory
-  write/read), `structuredClone` (deep clone w/ Date/RegExp/Map/Set/cycles). Apps
+  write/read), `structuredClone` (V8 serializer for Date/RegExp/Map/Set/cycles and typed arrays, ArrayBuffer transfers and native MessagePort ownership). Apps
   probe `globalThis.structuredClone.prototype`; absent it threw.
 
 ### Implemented (shim parity)
@@ -483,17 +818,90 @@ prod bundle.
 
 ## ESM support landed (foundation) + dev-build status
 
-The render tier now runs ES modules (commit `feat(render): ES module support`):
-- `NetModuleLoader` resolves + fetches `import` graphs over the host net (shared
-  cookie jar, same-origin), wired into `make_runtime`.
-- The hydration pump drains `<script type="module">` (and inline import/export
-  scripts) via `load_side_es_module[_from_code]` + `mod_evaluate`; `__execScriptEl`
-  leaves them for the module pump.
-- Tests: `esm_inline_module_script_evaluates`, `esm_module_import_graph_loads_over_net`.
+The current explicit `<script type="module">` path uses native dynamic imports
+and `NetModuleLoader` to resolve and fetch real HTTP(S) graphs over the shared cookie jar,
+client hints and script request context. Async graph loads run concurrently;
+non-async modules wait in document order before DOMContentLoaded. Explicit module
+execution keeps `document.currentScript` null. HTTP failures and non-JavaScript
+MIME responses reject the graph instead of executing their bodies.
 
-**Running the actual Next dev build for named diagnostics — still blocked, separately:**
+The exact native154 SDK adds a `ModuleLoader` evaluation-stage callback. It records
+actual V8 evaluation, parse/link exceptions and graph-load failures; its host pump
+then dispatches script completion. This releases script `load`, DOMContentLoaded
+and window `load` before a pending top-level await finishes. Parse/runtime errors
+produce trusted window `ErrorEvent`s with the original V8 error and source location;
+the fetched external script still receives `load`. Inline modules have distinct
+module-map keys while V8 source URLs and `import.meta.url` identify the document.
+The published Deno SDK fallback waits for the dynamic-import promise, so its TLA
+lifecycle and module exception classification remain partial, and child modules
+reject on that fallback. The exact SDK registers independent native child module
+maps in their actual V8 contexts and polls them with the shared isolate event loop.
+Identical URLs cache within each context, while imports, `import.meta.url` and
+DOM access use that child context. Final response URLs determine redirected module
+source identity and relative imports. Real timer queues continue progressing while
+a graph awaits document lifecycle events; a bounded host pump prevents a timer
+queue from running forever. Child navigation destroys pending graph work rather
+than reusing it for the replacement document. Parent document load waits for child
+navigation and module evaluation gates, including the shared parent-load collector.
+Module graphs inherit the originating script's `crossorigin` credential mode and
+native document origin; `use-credentials` includes the shared HttpOnly-safe cookie
+jar and requires credentialed CORS authorization. Every redirect validates CORS and
+source policy before the next request, preserves redirect-origin taint, and checks
+final JavaScript MIME. Classic scripts honor `crossorigin` and reject non-JavaScript
+responses when `X-Content-Type-Options: nosniff` applies; legacy classic MIME behavior
+is tested separately. `data:` and `blob:` module URL execution, import assertions/types
+and every module fetch option are not implemented.
+
+Response-header CSP is supplied through `PageSession::open_with_response_headers`
+or `open_with_browsing_state`; older signatures provide empty headers. Header policies
+intersect and head meta policies activate at their parsed script positions. Enforced
+contracts include inline nonce/SHA256/SHA384/SHA512 authorization, eval restrictions,
+and per-hop script/connect/image/frame/linked-style source checks. Module dependencies
+retain the initiating script's policy and nonce. A native policy slot prevents guest
+request options from changing the document's policy. Inline style elements and attributes use
+private native authorization with parser-position meta policies. Blocked attributes remain in
+markup while their effective declarations remain unchanged; CSSOM writes follow Chrome's separate
+mutation behavior. The native inheritance cascade filters blocked sources without changing the DOM.
+Authored HTML event attributes compile through V8's native function compiler with
+Document/form/element scope extensions and script-src-attr authorization; assigned
+function handlers retain their separate behavior. Redirected module completion reports
+the initiating requested URL while its source and relative imports use the final URL.
+Supported report-only policies, native violation events/HTTP reports, Trusted Types,
+SRI and bounded form-action admission are integrated. Strict-dynamic and broader
+navigation/form/worker/media directive behavior remain incomplete; diagnostics
+retain unsupported/partial policy paths.
+The HTML tree is parsed before hydration, so incremental parser races are not covered.
+
+`PageSession::hydration_diagnostics()` reports real host-budget termination,
+partial open errors and encountered unsupported CSP features independently of guest
+globals. Its `progress.phase` identifies the last entered host lifecycle gate;
+`progress.completed_pumps` counts completed post-load pump iterations. These describe
+the initial open operation, including after a watchdog interruption. Repeated
+snapshots preserve that initial diagnostic. Reaching the500-pump cap does not
+establish global idle. Callers can inspect diagnostics before using a partially
+hydrated DOM. Optional private Inspector CPU profiles and their acknowledged
+sampling setup are described in the
+[detection harness](../harness/detection/README.md). BrowserStorage can be retained by the owning browsing session
+through the browsing-state APIs rather than shared globally across runtimes.
+
+Classic scripts with genuine module-syntax parse failures retain a separate
+compatibility queue for Turbopack bundles. That path uses `load_side_es_module` +
+`mod_evaluate` and preserves its historical classic `currentScript` behavior. It
+is not the standards path for explicit module elements.
+
+Offline coverage lives in `tests/module_lifecycle.rs`, `tests/frame_modules.rs`
+and the shared `harness/detection/modules.mjs` fixtures (`--evaluation`, `--frames`),
+`script-credentials.mjs` and `csp.mjs`. The evaluation fixture gates a TLA fetch
+on DOMContentLoaded, exercises actual parse/runtime errors and cached graphs, and
+compares native completion to a fresh local Chrome. Historical ESM tests remain.
+
+**Historical Next dev-build diagnosis:** the observations below predate the current
+script pump. It now routes classic sources with genuine module-syntax parse failures
+to the module loader; these older failures are not a claim that ESM source chunks
+are still universally skipped.
+
 - `next dev --turbopack` serves classic `<script src>` chunks whose CONTENT has
-  top-level `import`/`export` → `__execScriptEl` skips them (they're not
+  top-level `import`/`export` → the then-current `__execScriptEl` skipped them (they're not
   `type=module`, so the module pump doesn't claim them either). Routing src chunks
   with import/export to the module pump is the next step.
 - `next dev` (webpack, no turbopack) serves classic `webpackChunk.push` chunks (run
@@ -785,6 +1193,10 @@ unrelated product features filed the same day.
 
 ## Public-site rendering triage (2026-07-08, Cycle 22) — wikipedia / google / nike
 
+Historical rendering log. Google blank-page hypotheses below were superseded by the
+`noscript` CSS isolation fix in v0.4.2 (CHANGELOG). They do not explain the current
+search challenge retry failure. See [current detection findings](../harness/detection/FINDINGS.md).
+
 Goal: render public homepages via the **raster** screenshot path (`hydrate()` → collect
 css/images → `screenshotWithAssets`), not the authenticated SPA path. Harness scripts are in
 the session scratchpad (`wikihydshot.cjs`, `hydshot.cjs`, `googconsent.cjs`) — fetch the DOM
@@ -869,6 +1281,10 @@ engine bugs, all fixed:
    speedy-mode `styleEl.sheet.insertRule` on server-rendered `<style>` tags now works,
    so client-injected CSS is captured (Nike styleChars 483K → 894K through the pure
    hydrate path — no Chromium-CSSOM shortcut needed).
+   This was a historical serialized-style measurement. The current CSSOM correctly
+   keeps `insertRule` changes separate from `style.textContent`; those changes are
+   available through the live sheet but are not automatically included in serialized
+   HTML or a screenshot made from that HTML.
 
 **Nike still not a clean screenshot:** hydration now RUNS but hits a Next.js
 client-side exception → it navigates to `/_error` and the homepage re-renders blank
@@ -984,3 +1400,300 @@ nike-specific.
 - Diagnostic probes live as throwaway `tests/zz_*.rs` (color-inject `background-color:#f00
   !important`, walk `Fragment` boxes / `StyledNode` computed styles). Run in RELEASE
   (`cargo test --release`) — debug full-page layout is too slow.
+
+
+`DOMParser.parseFromString(..., "text/html")`, `Document.parseHTMLUnsafe`, and
+`Document.parseHTML` now parse into independent native Trees in the caller's V8 realm.
+The resulting HTMLDocument has no Window, complete readiness, inert scripts, and an
+empty cookie view. DOMParser captures the active document URL; the static Document
+methods use about:blank. `importNode` copies supported native elements, attributes,
+text, comments, processing instructions, doctypes and fragment subtrees across
+these trees without evaluating markup or moving the source. Supported live control
+values and private nonce state are copied as well. `adoptNode` instead preserves
+the existing wrapper identity while changing its owning tree.
+
+ProcessingInstruction has a real native CharacterData node, target validation and
+clone/import/adoption support. HTML documents reject `createCDATASection` with
+NotSupportedError. Their XML metadata has measured null defaults, mutable
+`xmlStandalone` and a version-1.0-only `xmlVersion` setter; these compatibility
+properties do not implement XML document parsing.
+
+`parseHTML` filters the parsed namespace tree using the default policy captured from
+Chrome154's public `Sanitizer.get()` interface, rejecting disallowed elements,
+attributes, comments, and decoded JavaScript URL schemes. The implementation is
+limited to that default policy: XML MIME types, custom sanitizer configurations,
+template-content imports, and unsupported node kinds throw NotSupportedError.
+The [HTML parsing and sanitization algorithms](https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#html-parsing-methods)
+and `harness/detection/document-parser.mjs` define the measured behavior and reusable
+browser comparison; this is not a claim of complete Sanitizer API coverage.
+
+### Native ownership and mutation delivery
+
+The binding uses weak native lookups with private V8 Document/subtree edges.
+Crypto's native objects trace their actual JavaScript edges through cppgc. The
+workspace consumes a reproducible Rusty V8 150.4.0 ownership teardown fix; see
+[`vendor/RUSTY_V8.md`](./vendor/RUSTY_V8.md). This does not upgrade the default
+engine to Chrome 155.
+
+MutationObserver records are native semantic batches delivered through a V8
+notification microtask. A Document-private consumer receives mutations after
+observer fanout; scalar script preparation flags retain native node history across
+cloning/adoption and retired/inert documents. Resource execution integration and
+full observer lifecycle coverage are still in progress. Raw native heap retention
+diagnostics are available to lifecycle tests through the detection harness.
+
+
+## Native resource preparation checkpoint (2026-10-14)
+
+Resource consumers claim the canonical native PreparedScript state and original
+owner document. Guest getters, Array iterators, JSON hooks and public expando
+markers do not decide whether code executes. The bootstrap captures parser script
+wrappers once; native mutation records supply later real preparation candidates.
+This avoids reviving CharacterData-only, parser-inert or already-started scripts on
+later PageSession calls. Retiring a frame disables its document resource consumer.
+
+Inserted inline classics compile and run directly in the owning V8 context before
+insertion returns. Native currentScript writes are restored after execution and
+budget interruption. Ordered dynamic external classics start their downloads
+concurrently and wait for their predecessor only before execution. Native queued
+PromiseResolver handles replace JS completion maps; interruption performs only
+native state restoration/rejection while temporarily clearing termination.
+
+COEP headers use RFC8941 structured field parsing. require-corp/credentialless and
+CORP cover general no-CORS fetches, scripts, stylesheets and images, while CORS and
+SRI retain separate admission. Aboutblank/srcdoc documents inherit the parent's
+embedder policy. Credentialless transports strip cookies after a cross-origin hop,
+even after returning to the original origin. Saved normal Chrome155 controls and
+localhost Rust contracts cover direct requests, redirects, resource errors and
+frame inheritance. COOP/isolation, navigation embedding compatibility, reporting,
+permissions policy and broader parser/resource lifecycle remain open.
+
+
+CSP base-uri now freezes the accepted base URL at mutation admission rather than
+re-querying guest overrides on every read. Document-owned records use captured
+native DOM callbacks and native URL/source checks. Head meta CSP changes accumulate
+restrictions; body metas have no effect. Original mutation ancestor snapshots
+exclude disconnected construction records from premature policy activation.
+Parser completion applies pending metas before deferred execution/DCL. Normal
+Chrome155 controls measure parser vs compound-fragment order and retained retired
+documents; a metadata-only retired consumer updates fallback bases without
+reviving native scripts. The canonical HTMLMetaElement property/attribute reflection
+fix is required for ordinary httpEquiv/content assignments to reach native state.
+Form-action, violation/reporting behavior and wider CSP remain open.
+
+
+Native isolation is now granted only by secure actual navigation with valid same-origin COOP, compatible COEP and inherited Permissions Policy. The iframe admission path blocks incompatible embedded documents and enforces cross-origin CORP, with genuine credentialless exceptions. Native backing-store snapshots carry agent-group/origin ownership; failed Window/MessagePort deserialization fires trusted asynchronous messageerror. Capability checks cannot be spoofed through public globals. Shared WebAssembly allocation remains available in an ordinary unisolated document, while cloning/messaging is rejected.
+
+Credentialless frames use an ephemeral top-document partition containing a real CookieJar and separate local/session storage backing. Initial navigation, response cookies, document.cookie, fetch, scripts, images and module graphs select that native partition. Credentialless siblings share it; normal frames retain their ordinary state. Native partition teardown reclaims its storage areas. PermissionsPolicy/FeaturePolicy has actual private brands/header parsing and measured defaults; Navigator.permissions query and clipboard reject disabled features.42 top headers,79 iframe admission/delegation cases,8 real shared-memory delivery cases,3 query-effect cases and a network/storage partition control match fresh normal Chrome155. Full popup/reporting/dynamic/deep policy, client-hint delegation and additional controlled APIs remain pending; merged/native155 and live-network validation remain independent.
+
+
+## Historical validated parity checkpoint (2026-10-16)
+
+This section preserves its original source and test counts. The current
+messaging/layout/DOM follow-up and pending delivery gates are recorded in
+[PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md); these earlier results do not
+certify later changes.
+
+Production source at `26bd0f4` vendors committed canonical turbo-test `1e93cae`
+through the normal vendor script. Public DOM 0.5.7 candidate `fb60e6f` and layout 0.3.8
+candidate `9d7f02fb` remain distinct from registry releases 0.5.6 and 0.3.7. The stock
+engine is V8 15.0.245.2-rusty; the managed native 155 profile uses actual
+V8 15.5.35.23-rusty with the matching native callback patches. These are separate
+build configurations, not an engine upgrade achieved through UA strings.
+
+Native AbstractRange/NodeRange/StaticRange, original UTF-16 boundaries, composed
+shadow geometry, scrolling, point hits and caret controls are integrated.
+ElementInternals/CustomStateSet, custom-element admission and form association,
+live control collections, RadioNodeList, native labels, validation and FormData
+lifecycle have independent behavior, receiver-realm and collection controls.
+Genuine top-document text GET/POST form submission uses actual network/cookie
+state and policy checks. Child-frame navigation, multipart parsing/encoding and
+broader form lifecycle remain explicit follow-up work.
+
+Private native ownership backs Window/MessagePort and genuine stream transfers.
+Response/upload streams, cancellation, cache/referrer effects, partitioned and
+credentialless DOM storage, CSP/Trusted Types/resource policies and bounded
+reporting are integrated. Native compression dictionaries now have a real
+partitioned store, discovery, validated negotiation and bounded incremental
+Brotli/Zstandard decoding. The independent HTTPS and Chrome controls cover
+actual partial delivery and cancellation. Publication timing and encoded Range
+behavior remain open; live negotiation alone does not prove live decoding.
+
+Official hardened Deno WebCrypto and native X-Wing keys implement the tested
+Chrome 155 key/KEM contracts. Private abort/controller boundaries, timeout-signal
+GC ownership and actual native/Window timer ordering have regression coverage.
+The human driver awaits its real Promise. XHR identity, descriptors/constants
+and private receiver checks match the independent bounded Chrome/HTTP controls.
+These implementations do not close broader lifecycle, policy or API behavior.
+
+At this checkpoint the complete workspace commands pass **1,376 default / 1,415 native 155
+tests**, zero failures, across 129 component suites each. Default has three
+unavailable native-callback ignores plus six generated doctest ignores; native 155
+has the six doctest ignores. Both strict all-target Clippy and formatting gates
+pass. Rebuilt addons pass the shim/E2E and offline detection gates, with exact
+counts, feature sets and hashes recorded in
+[VALIDATION-LAST-RUN.json](../harness/detection/VALIDATION-LAST-RUN.json).
+Native validation includes the MCP wreq/trust-anchors/Metal/CoreText set and the
+NAPI Metal/CoreText features. The shared GPU scene matches within its tested scope.
+
+The checkpoint’s independent 75-interface pair measures 64 original-scope / 142 expanded
+missing own members and 374 leaf difference paths. All measured interfaces are
+present; this does not certify their full behavior or every browser interface.
+[API-INVENTORY.json](../harness/detection/API-INVENTORY.json) preserves exact lists
+and descriptors; every residual is tracked in #28. Conditional presence-only
+Navigator, database, cache, network and Navigation API fallbacks do not establish
+implemented browser behavior.
+
+The October17 source-pinned Google matrix uses fresh native cookies, actual consent and
+genuine forms with no Chrome cookie import or fallback. Native fetches `/search` with HTTP200
+then follows retry to `/sorry` with HTTP429. That historical retry accepts0/2 native SERPs while its Chrome baselines record7/8
+result markers. Instrumented Chrome is challenged; the native rejection signal
+remains unidentified.
+That historical retry exhausts20s during3/4 native homepage opens, including one clean
+baseline and both instrumented passes. Dismiss retains the original open diagnostic;
+later navigation budget=false does not erase that failure. See the
+[latest sanitized run](../harness/detection/GOOGLE-LAST-RUN.json) and
+[findings](../harness/detection/FINDINGS.md) for the current repetitions, budgets,
+script diagnostics and baseline/instrumentation distinction. The passing shared
+probes do not identify Google's rejection signal.
+
+All broader residuals are itemized in
+[PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md) and
+[issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28). Advanced audio stays
+in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27); the tested offline
+DSP remains implemented. Full Chrome conformance and production release alignment
+remain open. Current-head CI is recorded in the PR checks.
+
+### Earlier integration notes
+
+The notes below preserve intermediate source snapshots, focused counts and the
+older544180d live capture. Statements about pending integration or a next batch
+are historical; the current status and validation links above supersede them.
+
+The earlier candidate includes native AbstractRange/NodeRange/StaticRange,
+real Readable/Writable/TransformStream transfers through private ports, composed
+shadow geometry, original UTF-16 Range/caret controls, Trusted Types/native155
+code-generation admission, parser/HTTP reporting, response/upload streams and
+profile-owned cache/storage effects. That checkpoint uses canonical turbo-test
+`2e27274`; generated consumer files are copied through the normal vendor script.
+
+Genuine ElementInternals and CustomStateSet now provide native custom-element
+admission, form association/validation, live labels, association/disabled/reset
+callbacks, default ARIA, closed-shadow access and native `:state()` matching.
+Cloning/importing starts fresh state; adoption migrates exact UTF-16 membership.
+Private guest-owned records preserve borrowed cross-realm brands and collect
+retired realms after their last retained internals, state set or iterator is released.
+Both live and exhausted state iterators have independent Chrome lifetime controls.
+
+Native SubmitEvent, FormDataEvent, validation and guarded entry-list construction
+are integrated with the runtime's private File/FormData records. Constructor and
+submission events use distinct genuine FormData wrappers sharing the actual mutable
+entries; listener edits affect submitted data. Metadata is captured before the event,
+and form-action CSP admission follows it. Reentrant construction is guarded, canceled
+or invalid submissions produce no wire request, and disconnected forms are checked
+before validation and again after submit listeners. Top-document text GET/POST
+submissions use the actual network profile and replace the response document only
+after the prior isolate activation exits. Native tests cover real response
+scripts/status, redirect cookies, fragments, cancellation/CSP and retained form/Range GC.
+Multipart FormData BodyInit and broader target routing remain unsupported.
+
+Form reflection now includes action/method/enctype/encoding/target/name/acceptCharset/
+autocomplete/rel and a live branded relList. Action URL resolution uses the native
+host-installed document URL; CSP approval of reflected base URLs remains open, and
+wider malformed-URL serialization is unverified. Input/Button prototype placement, control descriptors
+and actual text-selection/replacement behavior have measured Chrome controls.
+ValidityState's genuine constructor prototype is read-only. The next canonical
+batch implements genuine live form controls collections/RadioNodeList and form
+elements/length/iterator; production real-frame/GC validation remains separate
+from canonical focused results.
+
+Host media evaluation now supplies the measured forced-colors, contrast, color-scheme,
+reduced-motion/transparency, pointer and hover capabilities. The last recorded combined
+native cohort passed 371 tests before the subsequent Blob/ValidityState descriptor
+corrections. The subsequent actual155 renderer/API/forms/media337 cohort passes;
+full final consumer gates remain pending.
+Standalone canonical validation at `72da6ea` passes 237 native155 and 236 default-engine
+contracts plus both all-target strict Clippy gates. These are separate validation scopes.
+
+The public layout dependency is a Git-pinned0.3.8 candidate from producer PR23;
+registry0.3.7 is published. The stock production engine remains V8150, while the
+experimental155 configuration uses actual15.5.35.23 and matching patched native
+callbacks. A newer JS/HTTP profile does not establish native engine alignment.
+
+Navigation activation is private native context state. Trusted pointerdown,
+mousedown and key input activate before page handlers run. Genuine form and
+Location admission snapshot transient activation for the outgoing request and its
+HTTP redirects; later new-document script retries do not inherit it. Public
+UserActivation exposes genuine brands and context state, including same-origin
+sticky carry and cross-origin reset. The source-pinned localhost Chrome activation
+oracle covers these paths and real elapsed expiry. These controls do not prove
+server acceptance.
+
+The authored offline-audio adapter uses explicit `std::exp2(float)` to avoid the
+platform-dependent unqualified overload. The independent Chrome 176-cell response
+grid matches exactly on Linux x86, macOS ARM and Rosetta x86, with NaN bounds and
+existing signed-zero equality preserved. Licensed kernels and exact assertions
+remain unchanged. Linux Chrome browser audio output and deferred advanced audio
+remain outside this bounded proof.
+
+The pushed544180d affected renderer cohort passes385 tests with zero failures/
+ignores and the full all-target workspace strict gate passes. The harness now waits
+real elapsed time and pumps callbacks between waits; a delayed-XHR regression
+verifies response-cookie delivery before the next search. Hash-guarded private
+Deno event arrays preserve official abort lifetime/timeout handling. The measured
+stream/listener microtask-order difference and broader descriptor-hook isolation
+remain open in the parity checklist.
+
+The earlier optimized544180d Google matrix repeats twice. Both native baselines
+complete consent/save204 with its HttpOnly BUCKET cookie before search, then follow
+search200 to sorry429 (0/2 native baseline SERP successes). Chrome baselines each
+have9 markers and zero recorded errors. One native traced pass fails Missing promise
+after homepage budget exhaustion; the other reaches sorry. Real elapsed consent
+waits are verified; reliable acceptance remains unresolved. Offline follow-ups
+cover watchdog/async-op admission recovery and premature timeout-signal GC.
+The native155 follow-up passes155 focused tests, including timeout retirement/
+forced GC, and native all-target workspace strict checks. Final integrated full
+gates remain separate. Earlier dated checkpoints above preserve
+their historical scope. Broader DOM/security/Fetch/resource behavior and final
+combined/live validation remain tracked in
+[PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md) and
+[issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28). Deferred audio
+remains in [issue #27](https://github.com/miaskiewicz/turbo-surf/issues/27).
+
+The runtime follow-up default workspace gate passes1,312 tests across120 suites,
+with three explicit native-CSP capability skips and six generated doctest skips.
+Default all-target strict checks and formatting pass. Native155 affected tests
+pass155/155 and native all-target strict checks pass. These results precede the
+next canonical DOM/dictionary integrations; addon/shim/E2E, final integrated gates
+and fresh live validation remain pending.
+
+
+An intermediate integration vendors canonical `51b5b97`: scoped registry provenance,
+submitter reflection, genuine live form collections and node-owned radio grouping,
+canceled-click restoration, adoption and indexed container/owner lifecycle behavior.
+Source-pinned production collection/real-frame GC tests pass2 controls, actual
+form navigation passes12 controls, and geometry passes23 controls under actual155.
+The final actual155 combined cohort passes46 tests, including ordinary radio GC
+and32 exact dictionary resource/lifecycle cases. Stock renderer library326 and
+dictionary/radio integration tests also pass. Focused passes do not replace
+full combined workspace/addon/production gates.
+
+Genuine compression-dictionary support now has independent Chrome resource/policy
+controls and official C-encoder fixtures. Native store/selection/decoding, decoded
+cache reuse and renderer background discovery are being integrated. Guest-supplied
+Available-Dictionary is rejected at network admission while public Headers/Request
+retain it; automatic native negotiation remains separate. Dictionary-coded bodies
+now use bounded incremental workers/channels; real HTTPS gates verify headers
+before body completion, partial output and cancellation without partial caching. See the
+[implementation and explicit bounds](../harness/detection/COMPRESSION-DICTIONARIES.md).
+Neither these source additions nor a passing local control establish Google SERP
+acceptance; the last frozen Google result predates this integration.
+
+The subsequent integration vendors canonical1e93cae for genuine live control
+labels, receiver-realm collection identity and namespace-safe native association.
+Actual155 production behavior/iframe and retired-realm GC tests pass. The host
+pump also waits on a precise real Window deadline while native work is pending,
+preventing virtual timers from overtaking earlier native timeouts or body I/O.
+Independent Chrome controls and `tests/window_timer_clock.rs` retain the exact
+relative outcomes; full combined retries remain separate. See the
+[timer controls](../harness/detection/README.md#window-and-native-timer-clocks).

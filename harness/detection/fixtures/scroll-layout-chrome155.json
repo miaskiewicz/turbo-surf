@@ -1,0 +1,342 @@
+{
+  "browser": "Chrome/155.0.8059.79",
+  "v8": "15.5.35.23",
+  "recordedAt": "2026-10-14T04:20:15.547Z",
+  "fixture": "scroll-layout-probe.js",
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages"
+  ],
+  "result": [
+    {
+      "name": "padded",
+      "before": {
+        "width": 190,
+        "height": 150,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      },
+      "after": {
+        "width": 190,
+        "height": 150,
+        "left": 80,
+        "top": 60,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-73, -53]
+      },
+      "negative": {
+        "width": 190,
+        "height": 150,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      }
+    },
+    {
+      "name": "visible",
+      "before": {
+        "width": 185,
+        "height": 145,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      },
+      "after": {
+        "width": 185,
+        "height": 145,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      },
+      "negative": {
+        "width": 185,
+        "height": 145,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      }
+    },
+    {
+      "name": "hidden",
+      "before": {
+        "width": 190,
+        "height": 150,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      },
+      "after": {
+        "width": 190,
+        "height": 150,
+        "left": 80,
+        "top": 60,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-73, -53]
+      },
+      "negative": {
+        "width": 190,
+        "height": 150,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      }
+    },
+    {
+      "name": "negative",
+      "before": {
+        "width": 110,
+        "height": 90,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-48, -38]
+      },
+      "after": {
+        "width": 110,
+        "height": 90,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-48, -38]
+      },
+      "negative": {
+        "width": 110,
+        "height": 90,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-48, -38]
+      }
+    },
+    {
+      "name": "absolute",
+      "before": {
+        "width": 150,
+        "height": 110,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [122, 92]
+      },
+      "after": {
+        "width": 150,
+        "height": 110,
+        "left": 40,
+        "top": 20,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [82, 72]
+      },
+      "negative": {
+        "width": 150,
+        "height": 110,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [122, 92]
+      }
+    },
+    {
+      "name": "transform",
+      "before": {
+        "width": 175,
+        "height": 125,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [127, 97]
+      },
+      "after": {
+        "width": 175,
+        "height": 125,
+        "left": 65,
+        "top": 35,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [62, 62]
+      },
+      "negative": {
+        "width": 175,
+        "height": 125,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [127, 97]
+      }
+    },
+    {
+      "name": "margin",
+      "before": {
+        "width": 210,
+        "height": 170,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [17, 17]
+      },
+      "after": {
+        "width": 210,
+        "height": 170,
+        "left": 100,
+        "top": 80,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-83, -63]
+      },
+      "negative": {
+        "width": 210,
+        "height": 170,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [17, 17]
+      }
+    },
+    {
+      "name": "scaledContainer",
+      "before": {
+        "width": 190,
+        "height": 150,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [14, 14]
+      },
+      "after": {
+        "width": 190,
+        "height": 150,
+        "left": 80,
+        "top": 60,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-146, -106]
+      },
+      "negative": {
+        "width": 190,
+        "height": 150,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [14, 14]
+      }
+    },
+    {
+      "name": "transformedNegative",
+      "before": {
+        "width": 190,
+        "height": 150,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-93, -73]
+      },
+      "after": {
+        "width": 190,
+        "height": 150,
+        "left": 80,
+        "top": 60,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-173, -133]
+      },
+      "negative": {
+        "width": 190,
+        "height": 150,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [-93, -73]
+      }
+    },
+    {
+      "name": "nestedclip",
+      "before": {
+        "width": 110,
+        "height": 90,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      },
+      "after": {
+        "width": 110,
+        "height": 90,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      },
+      "negative": {
+        "width": 110,
+        "height": 90,
+        "left": 0,
+        "top": 0,
+        "clientWidth": 110,
+        "clientHeight": 90,
+        "rect": [0, 0],
+        "child": [7, 7]
+      }
+    }
+  ]
+}

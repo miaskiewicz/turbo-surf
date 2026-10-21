@@ -1,0 +1,65 @@
+--- a/build/config/mac/mac_sdk.gni
++++ b/build/config/mac/mac_sdk.gni
+@@ -105,46 +105,14 @@
+ }
+ sdk_info_args += [ mac_sdk_name ]
+ 
+-_mac_sdk_result = exec_script(script_name, sdk_info_args, "scope")
++_mac_sdk_result = exec_script("//build/config/apple/clt_sdk_info.py", [], "scope")
+ xcode_version = _mac_sdk_result.xcode_version
+ xcode_version_int = _mac_sdk_result.xcode_version_int
+ xcode_build = _mac_sdk_result.xcode_build
+-if (mac_sdk_path == "" && use_system_xcode) {
+-  mac_sdk_path = _mac_sdk_result.sdk_path
+-}
+-
+-if (use_system_xcode) {
+-  # The tool will print the SDK path on the first line, and the version on the
+-  # second line.
+-  find_sdk_args = [
+-    "--print_sdk_path",
+-    "--print_bin_path",
+-    "--print_sdk_build",
+-    mac_sdk_min,
+-  ]
+-  find_sdk_lines =
+-      exec_script("//build/mac/find_sdk.py", find_sdk_args, "list lines")
+-  mac_sdk_version = find_sdk_lines[3]
+-  mac_sdk_build_version = find_sdk_lines[2]
+-  if (mac_sdk_path == "") {
+-    mac_sdk_path = find_sdk_lines[0]
+-    mac_bin_path = find_sdk_lines[1]
+-  } else {
+-    mac_bin_path = find_sdk_lines[1]
+-  }
+-} else {
+-  mac_sdk_version = mac_sdk_official_version
+-  mac_sdk_build_version = mac_sdk_official_build_version
+-  _dev = _hermetic_xcode_path + "/Contents/Developer"
+-  _sdk = "MacOSX${mac_sdk_version}.sdk"
+-  mac_sdk_path = _dev + "/Platforms/MacOSX.platform/Developer/SDKs/$_sdk"
+-  mac_bin_path = _dev + "/Toolchains/XcodeDefault.xctoolchain/usr/bin/"
+-
+-  # If we're using hermetic Xcode, then we want the paths to be relative so that
+-  # generated ninja files are independent of the directory location.
+-  # TODO(thakis): Do this at the uses of this variable instead.
+-  mac_bin_path = rebase_path(mac_bin_path, root_build_dir)
+-}
++mac_sdk_path = _mac_sdk_result.sdk_path
++mac_sdk_version = _mac_sdk_result.sdk_version
++mac_sdk_build_version = _mac_sdk_result.sdk_build
++mac_bin_path = "/Library/Developer/CommandLineTools/usr/bin/"
+ 
+ _sdk_root = rebase_path(mac_sdk_path, root_build_dir)
+ mac_sdk_logs = [ "mac_sdk_path=${_sdk_root}" ]
+--- a/build/config/mac/BUILD.gn
++++ b/build/config/mac/BUILD.gn
+@@ -102,7 +102,7 @@
+ #
+ # The symbolic link for $mac_sdk_path is set up by
+ # //build/config/apple/sdk_info.py in //build/config/mac/mac_sdk.gni.
+-if (use_system_xcode && current_toolchain == default_toolchain) {
++if (false) {
+   action("sdk_inputs") {
+     script = "//build/noop.py"
+     outputs = [

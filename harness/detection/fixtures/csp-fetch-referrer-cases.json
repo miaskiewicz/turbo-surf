@@ -1,0 +1,62 @@
+[
+  {
+    "id": "dynamic-policy-snapshot",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());globalThis.setMeta=value=>{let meta=document.querySelector('meta[name=referrer]');if(!meta){meta=document.createElement('meta');meta.name='referrer';document.head.append(meta)}meta.content=value};parityFetches.push(ask('before'));setMeta('no-referrer');parityFetches.push(ask('after'));</script></head><body></body>"
+  },
+  {
+    "id": "parser-policy-phases",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());globalThis.setMeta=value=>{let meta=document.querySelector('meta[name=referrer]');if(!meta){meta=document.createElement('meta');meta.name='referrer';document.head.append(meta)}meta.content=value};parityFetches.push(ask('before'));</script><meta name=referrer content=no-referrer><script>parityFetches.push(ask('after'));</script></head><body></body>"
+  },
+  {
+    "id": "explicit-fetch-policy",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());globalThis.setMeta=value=>{let meta=document.querySelector('meta[name=referrer]');if(!meta){meta=document.createElement('meta');meta.name='referrer';document.head.append(meta)}meta.content=value};setMeta('no-referrer');parityFetches.push(ask('explicit',{referrerPolicy:'unsafe-url'}));parityFetches.push(ask('default'));</script></head><body></body>"
+  },
+  {
+    "id": "request-inherits-at-fetch",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());globalThis.setMeta=value=>{let meta=document.querySelector('meta[name=referrer]');if(!meta){meta=document.createElement('meta');meta.name='referrer';document.head.append(meta)}meta.content=value};const req=new Request(new URL('/echo?slot=request',location.href));setMeta('no-referrer');parityFetches.push(fetch(req).then(response=>response.json()));parityFetches.push(ask('explicit',{referrerPolicy:'unsafe-url'}));</script></head><body></body>"
+  },
+  {
+    "id": "request-retains-explicit-policy",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());globalThis.setMeta=value=>{let meta=document.querySelector('meta[name=referrer]');if(!meta){meta=document.createElement('meta');meta.name='referrer';document.head.append(meta)}meta.content=value};const req=new Request(new URL('/echo?slot=request',location.href),{referrerPolicy:'unsafe-url'});setMeta('no-referrer');parityFetches.push(fetch(req).then(response=>response.json()));parityFetches.push(ask('default'));</script></head><body></body>"
+  },
+  {
+    "id": "mutation-retains-initiating-policy",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());globalThis.setMeta=value=>{let meta=document.querySelector('meta[name=referrer]');if(!meta){meta=document.createElement('meta');meta.name='referrer';document.head.append(meta)}meta.content=value};setMeta('no-referrer');parityFetches.push(ask('before'));setMeta('unsafe-url');parityFetches.push(ask('after'));</script></head><body></body>"
+  },
+  {
+    "id": "blob-retains-initiating-policy",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());globalThis.setMeta=value=>{let meta=document.querySelector('meta[name=referrer]');if(!meta){meta=document.createElement('meta');meta.name='referrer';document.head.append(meta)}meta.content=value};parityFetches.push(ask('before',{method:'POST',body:new Blob(['authored'])}));setMeta('no-referrer');parityFetches.push(ask('after'));</script></head><body></body>"
+  },
+  {
+    "id": "blob-retains-initiating-csp",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());parityFetches.push(ask('before',{method:'POST',body:new Blob(['authored'])}).catch(error=>({slot:'before',name:error.name})));const meta=document.createElement('meta');meta.httpEquiv='Content-Security-Policy';meta.content=\"connect-src 'none'\";document.head.append(meta);parityFetches.push(ask('after').catch(error=>({slot:'after',name:error.name})));</script></head><body></body>"
+  },
+  {
+    "id": "template-script-does-not-shift-policy-phase",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><template><script>throw Error('inert script executed')</script></template><meta name=referrer content=no-referrer><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());parityFetches.push(ask('active'));</script></head><body></body>"
+  },
+  {
+    "id": "template-csp-meta-is-inactive",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><template><meta http-equiv=Content-Security-Policy content=\"connect-src 'none'\"></template><script>globalThis.parityFetches=[];globalThis.ask=(slot,init)=>fetch('/echo?slot='+slot,init).then(response=>response.json());parityFetches.push(ask('active').catch(error=>({slot:'active',name:error.name})));</script></head><body></body>"
+  },
+  {
+    "id": "request-url-prototype-getter-cannot-change-transport",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>let reads=0;const request=new Request('/echo?slot=authentic');Object.defineProperty(Request.prototype,'url',{configurable:true,get(){reads++;return new URL('/echo?slot=poisoned',location.href).href}});globalThis.parityFetches=[fetch(request).then(response=>response.json()).then(row=>({...row,getterReads:reads}))];</script></head><body></body>"
+  },
+  {
+    "id": "throwing-request-url-prototype-getter-is-ignored",
+    "headers": [["Referrer-Policy", "unsafe-url"]],
+    "html": "<!doctype html><head><script>let reads=0;const request=new Request('/echo?slot=authentic');Object.defineProperty(Request.prototype,'url',{configurable:true,get(){reads++;throw new Error('guest url getter')}});globalThis.parityFetches=[fetch(request).then(response=>response.json()).then(row=>({...row,getterReads:reads})).catch(error=>({slot:'failed',name:error.name,getterReads:reads}))];</script></head><body></body>"
+  }
+]

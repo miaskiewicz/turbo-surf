@@ -1,0 +1,99 @@
+--- a/src/context.rs
++++ b/src/context.rs
+@@ -2,6 +2,7 @@
+ use crate::scope::PinScope;
+ // Copyright 2019-2021 the Deno authors. All rights reserved. MIT license.
+ use crate::Context;
++use crate::Function;
+ use crate::Local;
+ use crate::MicrotaskQueue;
+ use crate::Object;
+@@ -64,6 +65,10 @@
+     value: *const Value,
+   );
+   pub(super) fn v8__Context__UseDefaultSecurityToken(this: *const Context);
++  fn v8__Context__SetCodeGenerationCallback(
++    this: *const Context,
++    callback: *const Function,
++  ) -> bool;
+   pub(super) fn v8__Context__AllowCodeGenerationFromStrings(
+     this: *const Context,
+     allow: bool,
+@@ -443,6 +448,16 @@
+     }
+   }
+ 
++  /// Install a private per-context callback for actual V8 eval/Function checks.
++  /// Keeps V8's original lexical context. The private callback may return true,
++  /// exact source, or a one-string array carrying a native EvalError message.
++  /// Returns false for proxies, bound functions or another creation context.
++  /// Set `set_allow_generation_from_strings(false)` to route string admission
++  /// through the callback; an unconditional allow bypasses it inside V8.
++  pub fn set_code_generation_callback(&self, callback: Local<Function>) -> bool {
++    unsafe { v8__Context__SetCodeGenerationCallback(self, &*callback) }
++  }
++
+   pub fn set_allow_generation_from_strings(&self, allow: bool) {
+     unsafe {
+       v8__Context__AllowCodeGenerationFromStrings(self, allow);
+--- a/src/binding.cc
++++ b/src/binding.cc
+@@ -2317,6 +2317,58 @@
+   ptr_to_local(&self)->UseDefaultSecurityToken();
+ }
+ 
++static v8::Local<v8::Private> code_generation_callback_key(v8::Isolate* isolate) {
++  return v8::Private::ForApi(
++      isolate, v8::String::NewFromUtf8Literal(isolate, "turbo-surf.code-generation-callback"));
++}
++
++static v8::ModifyCodeGenerationFromStringsResult code_generation_callback(
++    v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool is_code_like) {
++  auto isolate = v8::Isolate::GetCurrent();
++  v8::ModifyCodeGenerationFromStringsResult result;
++  v8::Local<v8::Value> callback;
++  if (!context->Global()->GetPrivate(context, code_generation_callback_key(isolate))
++           .ToLocal(&callback) || !callback->IsFunction()) {
++    result.codegen_allowed = context->IsCodeGenerationFromStringsAllowed();
++    return result;
++  }
++  v8::Local<v8::Value> args[] = {source, v8::Boolean::New(isolate, is_code_like)};
++  v8::Local<v8::Value> allowed;
++  if (callback.As<v8::Function>()->Call(context, v8::Undefined(isolate), 2, args)
++          .ToLocal(&allowed)) {
++    result.codegen_allowed = allowed->IsTrue() || allowed->IsString();
++    if (allowed->IsString()) {
++      result.modified_source = allowed.As<v8::String>();
++    } else if (allowed->IsArray()) {
++      auto detail = allowed.As<v8::Array>();
++      v8::Local<v8::Value> message;
++      if (detail->Length() == 1 && detail->Get(context, 0).ToLocal(&message) &&
++          message->IsString()) {
++        context->SetErrorMessageForCodeGenerationFromStrings(message.As<v8::String>());
++      }
++    }
++  }
++  return result;
++}
++
++bool v8__Context__SetCodeGenerationCallback(const v8::Context& self,
++                                            const v8::Function& callback) {
++  auto context = ptr_to_local(&self);
++  auto isolate = v8::Isolate::GetCurrent();
++  auto function = ptr_to_local(&callback);
++  v8::Local<v8::Context> creation;
++  if (function->IsProxy() || !function->GetBoundFunction()->IsUndefined() ||
++      !function->GetCreationContext(isolate).ToLocal(&creation) || creation != context) {
++    return false;
++  }
++  if (!context->Global()->SetPrivate(context, code_generation_callback_key(isolate),
++                                    ptr_to_local(&callback)).FromMaybe(false)) {
++    return false;
++  }
++  isolate->SetModifyCodeGenerationFromStringsCallback(code_generation_callback);
++  return true;
++}
++
+ void v8__Context__AllowCodeGenerationFromStrings(v8::Context& self,
+                                                  bool allow) {
+   ptr_to_local(&self)->AllowCodeGenerationFromStrings(allow);

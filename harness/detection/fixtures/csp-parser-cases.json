@@ -1,0 +1,7 @@
+[
+  {
+    "id": "0",
+    "headers": [["Content-Security-Policy", "script-src 'unsafe-inline'; style-src 'none'"]],
+    "html": "<!doctype html>\n<script>globalThis.parserRows=[];document.addEventListener('securitypolicyviolation',event=>parserRows.push({target:event.target.localName||'document',sourceFile:event.sourceFile.replace(location.origin,'<origin>'),line:event.lineNumber,column:event.columnNumber,directive:event.effectiveDirective,original:event.originalPolicy,trusted:event.isTrusted}));</script>\n<style>div {color:red}</style><body><div style='color:blue'>x</div></body>"
+  }
+]

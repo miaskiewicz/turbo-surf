@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "scope": "Genuine Chrome same-embedded-font split inline element/Range controls; standalone read-only probe after separate FontFace loader; no native execution.",
+  "probeSha256": "7a8b2e47635af22bfb9bdbe69f854ad49e6c7934c3e4c4f53243d549a3e68093",
+  "chromeSetupSha256": "85273f84b4d96c8204a455420e76f8dee247f0480de2dec75be6143101639960",
+  "sourceReceiptSha256": "b0712e81cc0ae275f3c8617dd62b560ee709232b560d33ffbd9a22f0f5513bd8",
+  "chromeBundleSha256": "bb503dca511c156891ab90c35489a2d100bd3d163a4f8198e26d13e8c3ac8330",
+  "sourceUnchanged": true,
+  "chromeBundleUnchanged": true,
+  "sourceGuardScope": "Collector helpers, standalone probe, Chrome font loader, exact author documents, font and license bytes. Native source changes are outside this capture guard.",
+  "font": {
+    "family": "IBM Plex Mono",
+    "sizePx": 20,
+    "weight": 400,
+    "style": "normal",
+    "lineHeightPx": 24,
+    "sha256": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46",
+    "byteLength": 135580,
+    "producerRevision": "2ea52368a5d78e7ab584e06f4505bad0f58f4680",
+    "producerPath": "crates/turbo-html2pdf-core/assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf",
+    "license": "SIL Open Font License 1.1; see fonts/ibm-plex-mono/OFL.txt",
+    "licenseSha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
+  },
+  "cases": [
+    {
+      "name": "block-only",
+      "browserVersion": "Chrome/155.0.8059.85",
+      "browserV8Version": "15.5.35.25",
+      "process": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false,
+        "aborted": false,
+        "error": null
+      },
+      "captureComplete": true,
+      "collectorErrors": [],
+      "errors": [],
+      "fontLoaded": {
+        "fontFamily": "IBM Plex Mono",
+        "status": "loaded",
+        "sha256": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46",
+        "byteLength": 135580
+      },
+      "authorHtmlSha256": "dd146f2bcbabeafc4ed84f94c3a61ef25d121cbb7e206486cdc6a4840e1dd27a",
+      "traceSha256": "1e57deb79b3be73933ccc99654d9eb2257c6218280d39c3364fb90e315703b66",
+      "resultSha256": "ae3a8d36f94818edcb3c184de5b4d847effc40c5efb7c1a62afc8ba0e8b065e7",
+      "html": "<!doctype html><html><head><style>body{font-family:\"IBM Plex Mono\";font-size:20px;font-weight:400;line-height:24px}h3{font:inherit;margin:12px 0}</style></head><body><div id=scene><a id=link><h3 id=heading>Old result</h3></a></div><button id=dismiss>Reject</button></body></html>",
+      "result": {
+        "rows": {
+          "link": {
+            "bounds": [8, 12, 1264, 24],
+            "rects": [[8, 12, 0, 0], [8, 12, 1264, 24], [8, 48, 0, 0]],
+            "contentsRange": {
+              "bounds": [8, 11, 1264, 26],
+              "rects": [[8, 12, 1264, 24], [8, 11, 120, 26]]
+            },
+            "style": {
+              "fontFamily": "\"IBM Plex Mono\"",
+              "fontSize": "20px",
+              "fontWeight": "400",
+              "fontStyle": "normal",
+              "lineHeight": "24px"
+            }
+          },
+          "heading": {
+            "bounds": [8, 12, 1264, 24],
+            "rects": [[8, 12, 1264, 24]],
+            "contentsRange": {
+              "bounds": [8, 11, 120, 26],
+              "rects": [[8, 11, 120, 26]]
+            },
+            "style": {
+              "fontFamily": "\"IBM Plex Mono\"",
+              "fontSize": "20px",
+              "fontWeight": "400",
+              "fontStyle": "normal",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mixed",
+      "browserVersion": "Chrome/155.0.8059.85",
+      "browserV8Version": "15.5.35.25",
+      "process": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false,
+        "aborted": false,
+        "error": null
+      },
+      "captureComplete": true,
+      "collectorErrors": [],
+      "errors": [],
+      "fontLoaded": {
+        "fontFamily": "IBM Plex Mono",
+        "status": "loaded",
+        "sha256": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46",
+        "byteLength": 135580
+      },
+      "authorHtmlSha256": "d63e71e7d2507464e55930872a1def30250c34043ba7dff3ee84a21f69d49d57",
+      "traceSha256": "59b979f09420b3f7b551b8be124c9ccc92537118862bafc84024a9f36d2de6d6",
+      "resultSha256": "383a6c8b3fdfad200198081d91c7274aebcbad6ff5a11de5b0177c5d883b7c1e",
+      "html": "<!doctype html><html><head><style>body{font-family:\"IBM Plex Mono\";font-size:20px;font-weight:400;line-height:24px}h3{font:inherit;margin:12px 0}</style></head><body><div id=scene><a id=link>Before<h3 id=heading>Old result</h3>After</a></div><button id=dismiss>Reject</button></body></html>",
+      "result": {
+        "rows": {
+          "link": {
+            "bounds": [8, 7, 1264, 98],
+            "rects": [[8, 7, 72, 26], [8, 44, 1264, 24], [8, 79, 60, 26]],
+            "contentsRange": {
+              "bounds": [8, 7, 1264, 98],
+              "rects": [[8, 7, 72, 26], [8, 44, 1264, 24], [8, 43, 120, 26], [8, 79, 60, 26]]
+            },
+            "style": {
+              "fontFamily": "\"IBM Plex Mono\"",
+              "fontSize": "20px",
+              "fontWeight": "400",
+              "fontStyle": "normal",
+              "lineHeight": "24px"
+            }
+          },
+          "heading": {
+            "bounds": [8, 44, 1264, 24],
+            "rects": [[8, 44, 1264, 24]],
+            "contentsRange": {
+              "bounds": [8, 43, 120, 26],
+              "rects": [[8, 43, 120, 26]]
+            },
+            "style": {
+              "fontFamily": "\"IBM Plex Mono\"",
+              "fontSize": "20px",
+              "fontWeight": "400",
+              "fontStyle": "normal",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

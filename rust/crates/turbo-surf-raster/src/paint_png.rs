@@ -191,7 +191,20 @@ fn fill_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, c: Rgba, xf: Trans
         return;
     }
     if let Some(rect) = Rect::from_xywh(x, y, w, h) {
-        pm.fill_rect(rect, &solid(c), xf, None);
+        // The optimized AA rectangle scan assumes a full interior pixel between
+        // fractional edges. A narrow border can cover two partial columns with
+        // none between them; use the general path scan for that valid geometry.
+        if xf.is_identity() && rect.width() < 2.0 {
+            pm.fill_path(
+                &PathBuilder::from_rect(rect),
+                &solid(c),
+                FillRule::Winding,
+                xf,
+                None,
+            );
+        } else {
+            pm.fill_rect(rect, &solid(c), xf, None);
+        }
     }
 }
 
@@ -499,6 +512,75 @@ fn paint_text(
         glyph::trace_glyph(&face, g.glyph_id, pen, &mut sink);
         if let Some(path) = sink.0.finish() {
             pm.fill_path(&path, &paint, FillRule::Winding, xf, None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fractional_border_clips_to_the_viewport_and_ignores_empty_boxes() {
+        let mut pixmap = Pixmap::new(4, 4).unwrap();
+        for x in [-0.5, 3.5] {
+            fill_rect(
+                &mut pixmap,
+                x,
+                0.0,
+                1.0,
+                4.0,
+                Rgba::BLACK,
+                Transform::identity(),
+            );
+        }
+        fill_rect(
+            &mut pixmap,
+            1.0,
+            0.0,
+            0.0,
+            4.0,
+            Rgba::BLACK,
+            Transform::identity(),
+        );
+        fill_rect(
+            &mut pixmap,
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            Rgba::BLACK,
+            Transform::identity(),
+        );
+        for y in 0..4 {
+            for x in [0, 3] {
+                let alpha = pixmap.pixel(x, y).unwrap().alpha();
+                assert!((120..=135).contains(&alpha), "edge coverage {alpha}");
+            }
+            for x in [1, 2] {
+                assert_eq!(pixmap.pixel(x, y).unwrap().alpha(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn fractional_single_pixel_border_preserves_partial_coverage() {
+        let mut pixmap = Pixmap::new(4, 4).unwrap();
+        fill_rect(
+            &mut pixmap,
+            0.5,
+            0.0,
+            1.0,
+            4.0,
+            Rgba::BLACK,
+            Transform::identity(),
+        );
+        for y in 0..4 {
+            let left = pixmap.pixel(0, y).unwrap().alpha();
+            let right = pixmap.pixel(1, y).unwrap().alpha();
+            assert!((120..=135).contains(&left), "left coverage {left}");
+            assert!((120..=135).contains(&right), "right coverage {right}");
+            assert_eq!(pixmap.pixel(2, y).unwrap().alpha(), 0);
         }
     }
 }

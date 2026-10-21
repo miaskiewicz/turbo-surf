@@ -88,6 +88,39 @@ v8 = ["dep:rusty_v8"]
         self.assertEqual(result["dependencies"]["rusty_v8"]["package"], "turbo-surf-v8")
         self.assertEqual(result["dependencies"]["rusty_v8"]["version"], "=150.4.0")
 
+    def test_each_standalone_leaf_selects_v8_only_through_own_default_feature(self):
+        leaves = {"deno_bench_util", "deno_crypto", "deno_webidl", "deno_web"}
+        self.assertEqual(prepare.V8_DEFAULT_LEAVES, leaves)
+        for old, version, new, _ in prepare.PACKAGES:
+            if old not in leaves:
+                continue
+            with self.subTest(package=old):
+                source = f'''[package]
+name = "{old}"
+version = "{version}"
+repository = "https://github.com/denoland/deno"
+license = "MIT"
+[lib]
+name = "{old}"
+[dependencies.deno_core]
+version = "0.412.0"
+default-features = false
+features = ["reactor-tokio", "v8_use_custom_libcxx"]
+'''
+                result = tomllib.loads(prepare.manifest(source, old, version, new))
+                self.assertEqual(result["features"], {"default": ["v8"], "v8": ["deno_core/v8"]})
+                core = result["dependencies"]["deno_core"]
+                self.assertFalse(core["default-features"])
+                self.assertEqual(core["features"], ["reactor-tokio", "v8_use_custom_libcxx"])
+                self.assertEqual(core["package"], "turbo-surf-deno-core")
+                self.assertEqual(core["version"], "=0.412.0")
+                self.assertEqual(result["package"]["license"], "MIT")
+                self.assertEqual(result["lib"]["name"], old)
+
+    def test_new_upstream_leaf_feature_policy_is_not_silently_overwritten(self):
+        with self.assertRaisesRegex(ValueError, "features changed"):
+            prepare.backend_features({"features": {"default": ["future-backend"]}}, "deno_web")
+
     def packaged_fixture(self, root, mutate=None):
         source = root / "prepared/packages/example"
         source.mkdir(parents=True)

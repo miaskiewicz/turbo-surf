@@ -22,6 +22,13 @@ identity. All internal requirements are exact versions. Local candidate paths
 are preparation conveniences; Cargo's actual packaged manifests must retain the
 named registry dependencies and remove paths. No root `[patch]` may be required.
 
+The four extension/benchmark leaves (crypto, WebIDL, web and benchmark utility)
+explicitly default to their own `v8` feature, forwarding `deno_core/v8`. Their
+core dependency still disables defaults and retains its upstream feature list.
+This repairs standalone default package builds, which previously depended on an
+enclosing consumer to select V8. Callers can disable a leaf's defaults rather than
+having V8 forced unconditionally. This is not validation of a QuickJS backend.
+
 The new package names distinguish these distributions from the upstream releases.
 The initial numeric versions intentionally match upstream. V8's unchanged build
 script derives its official native archive and generated-binding URLs from

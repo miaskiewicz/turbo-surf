@@ -59,6 +59,7 @@ description = "web"
 name = "deno_web"
 [dependencies.deno_core]
 version = "0.412.0"
+default-features = false
 [dev-dependencies.deno_bench_util]
 version = "0.253.0"
 [target.'cfg(windows)'.dev-dependencies.deno_webidl]
@@ -67,6 +68,8 @@ version = "0.259.0"
         result = tomllib.loads(deno.manifest(source, 'deno_web', '0.290.0', 'turbo-surf-deno-web'))
         self.assertEqual(result['lib']['name'], 'deno_web')
         self.assertEqual(result['dependencies']['deno_core']['package'], 'turbo-surf-deno-core')
+        self.assertEqual(result['features'], {'default': ['v8'], 'v8': ['deno_core/v8']})
+        self.assertFalse(result['dependencies']['deno_core']['default-features'])
         self.assertEqual(result['dev-dependencies']['deno_bench_util']['package'], 'turbo-surf-deno-bench-util')
         self.assertEqual(result['target']['cfg(windows)']['dev-dependencies']['deno_webidl']['package'], 'turbo-surf-deno-webidl')
         self.assertEqual(result['dev-dependencies']['deno_bench_util']['version'], '=0.253.0')

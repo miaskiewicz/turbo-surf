@@ -27,6 +27,7 @@ PACKAGES = [
     ("deno_webidl", "0.259.0", "turbo-surf-deno-webidl", None),
 ]
 NAMES = {old: (version, new) for old, version, new, _ in PACKAGES}
+V8_DEFAULT_LEAVES = {"deno_bench_util", "deno_crypto", "deno_webidl", "deno_web"}
 
 
 def digest(path):
@@ -92,6 +93,20 @@ def replace_field(body, key, value):
     return re.sub(pattern, lambda _: replacement, body) if re.search(pattern, body) else body + replacement + "\n"
 
 
+def backend_features(parsed, old):
+    if old not in V8_DEFAULT_LEAVES:
+        return ""
+    if "features" in parsed:
+        raise ValueError("Upstream leaf features changed; review backend forwarding")
+    dependency = parsed["dependencies"]["deno_core"]
+    if dependency.get("default-features") is not False:
+        raise ValueError("Upstream leaf backend admission changed")
+    # Upstream extensions rely on an enclosing runtime to select the backend.
+    # Named standalone distributions need a default, while callers must still
+    # be able to disable it and choose a backend on their own core dependency.
+    return '\n[features]\ndefault = ["v8"]\nv8 = ["deno_core/v8"]\n'
+
+
 def manifest(source, old, version, new):
     parsed = tomllib.loads(source)
     if (parsed["package"]["name"], parsed["package"]["version"]) != (old, version):
@@ -118,7 +133,7 @@ def manifest(source, old, version, new):
                 body = replace_field(body, "version", "=" + required)
                 body = replace_field(body, "path", "../" + package)
         sections[index + 1] = body
-    result = "".join(sections)
+    result = "".join(sections) + backend_features(parsed, old)
     return result + "\n[package.metadata.turbo-surf-upstream]\n" + f"name = {json.dumps(old)}\nversion = {json.dumps(version)}\nrepository = {json.dumps(parsed['package']['repository'])}\n"
 
 

@@ -116,6 +116,11 @@ residual work beyond this PR, with audio separately deferred in
   archive intact; preserve the native backend and reject foreign alias files.
   Add offline regression checks and document the generated metadata bridge in
   the Chrome parity runbook. Full integration remains a separate release gate.
+- Give the four extension/benchmark distributions explicit default V8 forwarding
+  while preserving caller opt-out. Standalone package verification exposed their
+  reliance on an enclosing runtime to select a backend. Twelve isolated feature
+  resolution controls cover old defaults, repaired defaults and opt-out for all
+  four; Rust/JavaScript sources and dependency feature lists remain unchanged.
 
 ### Runner timing follow-up — 2026-10-20
 

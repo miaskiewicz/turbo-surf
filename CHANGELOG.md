@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.5.4] — unreleased — browser parity and reusable detection differential
+## [0.5.4] — 2026-10-21 — browser parity and reusable detection differential
 
-This release candidate is the work in PR26. The entries describe the implemented
+This release collects the work in PR26. The entries describe the implemented
 subset, not complete Chrome conformance or successful native Google clearance.
 [PARITY-GAPS.md](harness/detection/PARITY-GAPS.md) is the central remaining-work
 checklist; [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28) tracks
@@ -98,9 +98,9 @@ residual work beyond this PR, with audio separately deferred in
   preserving upstream bytes, specifiers, ops, state and adapter checks. Source
   inventory changes fail closed. Relocation and actual installed artifacts remain
   explicit validation gates; embedding alone is not a wheel success claim.
-- Keep npm, Rust, NAPI and Python at the next patch version0.5.4. The release
-  requires `v0.5.4` and `pyv0.5.4` on the same merge commit for npm/crates.io
-  and PyPI respectively; no release tag has been created yet.
+- Align npm, Rust, NAPI and Python at version 0.5.4. The release uses matching
+  annotated `v0.5.4` and `pyv0.5.4` tags on the same final merge commit for
+  npm/crates.io and PyPI respectively.
 - Publish and integrate thirteen reproducible, licensed transport/Deno/V8
   distributions, preserving the hardening and benchmark/core type edges. Seven
   explicit Cargo aliases replace the root patches. The normal resolver replaces
@@ -202,11 +202,11 @@ residual work beyond this PR, with audio separately deferred in
   setting the supported glibc floor to 2.28 while retaining CPython 3.8+ abi3.
   Both earlier manylinux2014 links failed when GCC10 nonshared exception
   definitions collided with V8's bundled libc++ definitions. The newer baseline
-  may avoid that supplement through its base shared C++ runtime; this mechanism
-  remains unproved until actual link, ELF symbol-compliance and installed-wheel
-  tests pass. The pinned V8 build source targets glibc 2.26 or later, which is
-  not an audit of the actual archive. Compiler, exception and ABI flags remain
-  unchanged; no duplicate-symbol suppression is introduced.
+  may avoid that supplement through its base shared C++ runtime. Actual linking,
+  ELF compliance and installed tests gate publication; the exact symbol-resolution
+  mechanism remains unconfirmed. The pinned V8 build source targets glibc 2.26 or
+  later, which is not an audit of the actual archive. Compiler, exception and ABI
+  flags remain unchanged; no duplicate-symbol suppression is introduced.
 - Include `<cmath>` directly in the compiled ARM NEON delay source for
   `std::isnan`. The Linux ARM release build exposed reliance on a transitive
   platform header. Preserve the audio algorithm and original upstream hashes;

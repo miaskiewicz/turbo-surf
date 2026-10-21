@@ -12,9 +12,9 @@ def check_versions(root: Path) -> str:
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[\w.-]+)?", version):
         raise ValueError(f"Invalid package version: {version}")
 
-    def check(actual, path):
-        if actual != version:
-            raise ValueError(f"{path}: expected {version}, found {actual}")
+    def check(actual, path, expected=version):
+        if actual != expected:
+            raise ValueError(f"{path}: expected {expected}, found {actual}")
 
     lock = json.loads((root / "package-lock.json").read_text())
     check(lock["version"], "package-lock.json")
@@ -29,6 +29,13 @@ def check_versions(root: Path) -> str:
         tomllib.loads((root / "rust/crates/turbo-surf-py/pyproject.toml").read_text())["project"]["version"],
         "Python package",
     )
+    consumer = tomllib.loads((root / "rust/release-deps/surf-consumer/Cargo.toml").read_text())
+    check(consumer["package"]["version"], "Packaged consumer")
+    for name in ("core", "view", "page", "render", "raster", "mcp"):
+        dependency_name = f"turbo-surf-{name}"
+        dependency = consumer["dependencies"].get(dependency_name)
+        requirement = dependency.get("version") if isinstance(dependency, dict) else dependency
+        check(requirement, f"Packaged consumer: {dependency_name}", f"={version}")
     members = set()
     for member in workspace["workspace"]["members"]:
         path = root / "rust" / member / "Cargo.toml"

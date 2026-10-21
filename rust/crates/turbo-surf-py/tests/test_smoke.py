@@ -1,6 +1,7 @@
 """Smoke tests for the turbo-surf PyO3 binding — offline, no network."""
 
 import json
+from importlib.metadata import version
 
 import turbo_surf as ts
 
@@ -15,7 +16,7 @@ HTML = """<!doctype html>
 
 
 def test_version():
-    assert ts.version() == "0.2.5"
+    assert ts.version() == version("turbo-surf")
 
 
 def test_title_trimmed():

@@ -86,6 +86,10 @@ strong ignored Chrome regression and explicit expected exit101.
   checks pass on actual archives. The release helper has fourteen offline
   controls and an independent source review. Full Surf integration, publication
   and real registry consumers remain separate unchecked prerequisites above.
+- [x] Merge all open producer PRs and verify the single patch releases:
+  turbo-dom0.5.7, turbo-html2pdf0.3.8 and turbo-test0.4.7. Their registry
+  payloads and final merge tags are verified. Official re-vendoring changes only
+  the adapter revision annotation; tested binding code and controls are identical.
 - [ ] Verify published npm platform binaries, PyPI wheels/sdist and crates.io
   libraries after the release. Version0.5.4 is prepared; release tags and
   registry verification have not been completed.

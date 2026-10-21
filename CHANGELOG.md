@@ -105,6 +105,11 @@ residual work beyond this PR, with audio separately deferred in
   without dropping any hardening patch or benchmark/core type edge. Actual
   package archives and staged consumers remain separate from publication proof.
   See [PUBLISHING.md](./PUBLISHING.md) for the release prerequisites.
+- Merge all open producer PRs before their single patch releases: turbo-dom
+  0.5.7, turbo-html2pdf0.3.8 and turbo-test0.4.7. Verify their actual registry
+  payloads and immutable merge tags, including HTML2PDF PyPI wheels and sdist.
+  Officially re-vendor from the released turbo-test merge; the source bytes are
+  unchanged from the tested revision, with only the adapter revision updated.
 - Test the actual thirteen dependency archives with coherent Deno/V8/serde
   runtime types, hardened CryptoKey snapshots, ordinary/snapshot weak-handle
   retirement, and default/prefixed transport API and local TLS controls. Preserve
@@ -127,6 +132,15 @@ residual work beyond this PR, with audio separately deferred in
   isolated package verification exposed the missing default. Preserve emulation,
   dependency opt-outs and explicit Compio selection. Three isolated resolution
   controls and the failing predecessor regression cover the repaired policy.
+
+- Add a standalone six-library package consumer with exact release requirements,
+  shared DOM/runtime type checks and actual MCP-to-raster canvas execution. The
+  version checker now binds its own version and all six dependency requirements
+  to the release version. Document normal multi-package archive verification,
+  independent registry checks and actual wheel/sdist consumers.
+- Compare the Python binding version with installed distribution metadata in the
+  existing smoke test, replacing its stale0.2.5 expectation. Actual wheel and
+  source-tarball consumers remain required release checks.
 
 ### Runner timing follow-up — 2026-10-20
 

@@ -189,5 +189,91 @@ class ProcessTests(unittest.TestCase):
                 child.wait(timeout=5)
 
 
+class EmbeddedSourceCheckoutTests(unittest.TestCase):
+    """Real Git checkout conversion must preserve every pinned runtime asset."""
+
+    ASSET_DIR = Path("rust/crates/turbo-surf-render/src/vendor/deno_extensions")
+    ATTRIBUTE_RULE = "rust/crates/turbo-surf-render/src/vendor/deno_extensions/** -text -whitespace"
+
+    def setUp(self):
+        self.source = Path(__file__).resolve().parents[1]
+        self.temp = tempfile.TemporaryDirectory(prefix="surf-source-checkout-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.repo = self.root / "repository"
+        self.repo.mkdir()
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        self.env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+        self.git("init", "--quiet")
+        self.assets = {}
+        pins = json.loads((self.source / self.ASSET_DIR / "pins.json").read_bytes())
+        for package in pins["packages"]:
+            folder = self.ASSET_DIR / package["alias"]
+            for row in package["sources"]:
+                self.read_asset(folder / row["file"], row["sha256"])
+            self.read_asset(folder / package["licenseFile"], package["licenseSha256"])
+        self.read_asset(self.ASSET_DIR / "pins.json")
+        self.assertEqual(len(self.assets), 32)
+        actual = {path.relative_to(self.source).as_posix() for path in (self.source / self.ASSET_DIR).rglob("*") if path.is_file()}
+        self.assertEqual(set(self.assets), actual)
+        self.assertEqual(sum(name.endswith(".js") for name in self.assets), 28)
+        self.assertEqual(sum(name.endswith("/LICENSE.md") for name in self.assets), 3)
+        for name, data in self.assets.items():
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        self.attributes = (self.source / ".gitattributes").read_bytes()
+
+    def read_asset(self, path, expected=None):
+        import hashlib
+        name = path.as_posix()
+        self.assertNotIn(name, self.assets)
+        data = (self.source / path).read_bytes()
+        self.assertIn(b"\n", data)
+        self.assertNotIn(b"\r", data)
+        if expected is not None:
+            self.assertEqual(hashlib.sha256(data).hexdigest(), expected, name)
+        self.assets[name] = data
+
+    def git(self, *args):
+        result = subprocess.run(["git", *args], cwd=self.repo, env=self.env, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, (args, result.stdout, result.stderr))
+        return result.stdout
+
+    def checkout(self, attributes):
+        (self.repo / ".gitattributes").write_bytes(attributes)
+        self.git("-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "add", "--force", "--", ".gitattributes", *self.assets)
+        output = self.root / "checkout"
+        output.mkdir()
+        self.git("-c", "core.autocrlf=true", "checkout-index", "--prefix=" + output.as_posix() + "/", "--", *self.assets)
+        return {name: (output / name).read_bytes() for name in self.assets}
+
+    def test_windows_checkout_preserves_all_pinned_extension_bytes(self):
+        self.assertIn(self.ATTRIBUTE_RULE.encode(), self.attributes.splitlines())
+        actual = self.checkout(self.attributes)
+        self.assertEqual(actual, self.assets)
+        values = self.git("check-attr", "-z", "text", "whitespace", "--", *self.assets).decode().split("\0")
+        self.assertEqual(values[-1], "")
+        rows = [values[index:index + 3] for index in range(0, len(values) - 1, 3)]
+        self.assertEqual(len(rows), 64)
+        self.assertEqual({row[0] for row in rows}, set(self.assets))
+        self.assertTrue(all(row[1] in ("text", "whitespace") and row[2] == "unset" for row in rows))
+
+    def test_missing_nested_rule_reproduces_windows_byte_drift(self):
+        attributes = b"".join(line for line in self.attributes.splitlines(keepends=True) if line.rstrip(b"\r\n") != self.ATTRIBUTE_RULE.encode())
+        actual = self.checkout(attributes)
+        changed = {name for name in self.assets if actual[name] != self.assets[name]}
+        self.assertEqual(changed, set(self.assets))
+        for name, data in self.assets.items():
+            self.assertEqual(actual[name], data.replace(b"\n", b"\r\n"), name)
+
+    def test_windows_checkout_with_crlf_attributes_preserves_all_bytes(self):
+        self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        self.test_windows_checkout_preserves_all_pinned_extension_bytes()
+
+    def test_missing_nested_rule_with_crlf_attributes_reproduces_drift(self):
+        self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        self.test_missing_nested_rule_reproduces_windows_byte_drift()
+
 if __name__ == "__main__":
     unittest.main()

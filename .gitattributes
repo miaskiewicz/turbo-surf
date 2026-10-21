@@ -8,6 +8,9 @@ rust/crates/turbo-surf-render/src/*.js text eol=lf
 rust/crates/turbo-surf-render/src/*.json text eol=lf
 rust/crates/turbo-surf-render/tests/*.rs text eol=lf
 
+# Preserve exact published Deno JS, license and provenance bytes on every checkout.
+rust/crates/turbo-surf-render/src/vendor/deno_extensions/** -text -whitespace
+
 # Preserve the exact published MIT XPath provider and license bytes.
 rust/crates/turbo-surf-render/src/xpath_provider/xpath.js -text -whitespace
 rust/crates/turbo-surf-render/src/xpath_provider/LICENSE -text -whitespace

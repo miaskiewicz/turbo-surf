@@ -87,6 +87,12 @@ residual work beyond this PR, with audio separately deferred in
   After the successful combined gates, remove only their closed native/stock
   debug caches (33.47GB and30.65GB); retain verified release artifacts and proofs.
 
+- Preserve all 28 embedded Deno modules, their three licenses and source pins as
+  exact Git bytes on Windows as well as Unix. A real autocrlf checkout regression
+  reproduces the former CRLF drift and verifies the complete 32-file inventory;
+  the existing source-hash adapters remain unchanged and fail closed. Fresh
+  Windows release artifacts remain an independent installed-runtime gate.
+
 ### Release readiness — 2026-10-21
 
 - Embed the exact 28 licensed Deno Web, WebIDL and Crypto extension JavaScript

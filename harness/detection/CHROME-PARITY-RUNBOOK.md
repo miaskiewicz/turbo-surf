@@ -233,6 +233,12 @@ python3 rust/crates/turbo-surf-render/scripts/vendor-deno-extension-sources.py -
 The helper uses `CARGO_HOME`'s archive cache without modifying it; pass
 `--archive-dir /absolute/path/to/archives` if the three checksum-pinned archives
 are elsewhere. See the [crate provenance](../../rust/crates/turbo-surf-render/DENO-EXTENSIONS.md).
+The embedded subtree is marked `-text -whitespace` in `.gitattributes`: its
+published source, license and pins bytes must survive Windows autocrlf checkout
+unchanged. The root MCP smoke controls exercise a real Git checkout of all 32
+assets and reproduce the old missing-rule failure. Existing worktrees with
+already-converted files need an explicit restore before rebuilding; fresh CI
+checkouts apply the rule automatically.
 This check proves source reproduction, not installed runtime success. Release
 artifacts must also pass actual native JavaScript smoke tests outside the build
 source tree; a successful MCP initialize response alone does not exercise V8.

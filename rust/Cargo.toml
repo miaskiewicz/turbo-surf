@@ -30,7 +30,7 @@ lto = "thin"
 # Chrome 154 requires APIs newer than the published 0.16.1/0.2.0 crates.
 # Pin the coherent upstream stack, including BoringSSL via btls-sys's submodule.
 # Workspace patches do not propagate to crates.io consumers: library publishing
-# remains blocked until these APIs are published or a distributable fork is reviewed.
+# requires verified dependency publication and clean registry consumers.
 [patch.crates-io]
 v8 = { path = "vendor/rusty_v8" }
 deno_crypto = { path = "vendor/deno_crypto" }

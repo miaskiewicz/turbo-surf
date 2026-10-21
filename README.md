@@ -431,7 +431,8 @@ The offline ClientHello regression checks the cipher sequence, signature-algorit
 GREASE, ML-DSA44/65/87, and exact public trust-anchor IDs against a local Chrome
 154.0.8037.98 capture. The former empty trust-anchor patch is superseded by upstream
 support. Workspace patches do not propagate to library consumers, so publishing
-remains blocked until these APIs are published or a distributable fork is reviewed.
+requires published compatible APIs or verified fork distributions and a passing
+clean registry consumer; source review alone does not satisfy that requirement.
 
 The development candidate also negotiates genuine compression dictionaries from
 partitioned native session state and decodes selected Brotli/Zstandard responses.

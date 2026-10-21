@@ -243,13 +243,13 @@ instead of ordinary Cargo. The default localhost `client_hello` test still check
 actual TLS bytes. Neither control alone proves complete Chrome transport parity.
 
 Both Chrome backends and the control suites use the explicit frozen executable.
-The latest sixteen paired controls pass without skips, including both rootless
+The earlier546d511 checkpoint passes sixteen paired controls without skips, including both rootless
 document cases. Full detection passes200 tests on Node22 and191 on Node20 with
 nine documented browser skips, plus two Python checks each. The genuine resource
 oracle retains every observed value; only collector source hashes change, with
 the updated stock Rust consumer passing. The stock/native Rust workspaces pass
 1,451/1,496 tests on3a77122; optimized native compile/addon consumers retain their
-original4a evidence through reviewed source bridges. Latest CI belongs to the
+original4a evidence through reviewed source bridges. The later9304df9/46f4340 checkpoint passes1,464 stock/1,509 native Rust tests and206 Node22 detection controls; retain each receipt's source identity. Latest CI belongs to the
 [PR checks](https://github.com/miaskiewicz/turbo-surf/pull/26/checks).
 
 A current document may temporarily have no root or remove it itself. Both Chrome
@@ -260,12 +260,12 @@ fake pending navigation or older-page fallback is used. Preserve the original
 failed null-root capture and other dated failures in the findings.
 
 Consent input must have an observable effect. A dispatched click alone does not
-prove a save request, cookie or dismissed overlay. The fresh matrix preserves
+prove a save request, cookie or dismissed overlay. The earlier546d511 matrix preserves
 one Chrome baseline with ineffective consent and an obscured query field;
 it stops before typing. Its cause is unproved. A separate fresh Chrome baseline
 saves consent and reaches nine result markers. Both native baselines save consent,
 complete all six actions and navigate a real form, then receive429/zero results.
-Keep the failed precondition separate from anti-bot rejection and reliability.
+The later9304df9 matrix has two ineffective Chrome baseline consent attempts and no completed paired SERP baseline. No fresh Google comparison follows the standalone probe-selector correction. Keep failed preconditions separate from anti-bot rejection and reliability.
 Native pointer input currently dispatches to the selected node at its measured center; Chrome routes the coordinates through
 browser hit testing. Occlusion, clipping and `pointer-events` behavior remain tracked in issue28. Verify actual consent and
 query effects rather than claiming complete pointer-routing parity from coordinates or trusted event flags alone.

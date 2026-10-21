@@ -7,16 +7,16 @@ process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
 `rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
-workspace now resolves the public Git-pinned `turbo-dom` 0.5.7 candidate
-`d01d6a5` ([PR15](https://github.com/miaskiewicz/turbo-dom/pull/15), preserving
-PR13/PR14 custom states, checkedness and detached contextual fragments). Latest
-registry release is0.5.6. The candidate also repairs scalar/original-UTF16
+workspace resolves registry `turbo-dom`0.5.7 from tagged merge
+`5ec17065`, including [PR15](https://github.com/miaskiewicz/turbo-dom/pull/15)
+and PR13/PR14 custom states, checkedness and detached contextual fragments.
+The release also repairs scalar/original-UTF16
 attribute case modifiers and measured HTML name/type defaults; the shared native
 search selector now excludes hidden query fields correctly.
-The candidate adds native custom states and live checked-state reads to the original
+The release adds native custom states and live checked-state reads to the original
 0.5.6 capabilities, including original UTF-16
 payload/name/parser APIs, native mutation batches and bounded storage collection.
-The published0.5.6 annotated release tag identifies PR #12 merge commit
+The earlier published0.5.6 annotated release tag identifies PR #12 merge commit
 `ad52ba51bac82342d81ecb2fed98b8fa6b9dbf10`; npm platform/WASM metadata,
 the successful release workflow and official registry checksums were verified.
 The canonical binding consumes collection through the public API with genuine
@@ -47,8 +47,8 @@ restore the caller before yielding.
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`;
 the root npm test command checks versions, the addon/shim and detection harness too.
 
-The render tier consumes a public, immutable Git-pinned `turbo-html2pdf-core 0.3.8`
-release candidate from producer PR #23 (published registry release: 0.3.7) for native live-tree
+The render tier consumes registry `turbo-html2pdf-core`0.3.8 from tagged merge
+`9591fe69`, including producer PRs23–25, for native live-tree
 box geometry, transforms, element scroll metrics and point-hit regions. It reads
 private actual CSSOM state without guest getters or HTML rewriting. Supported
 contracts and remaining inline/caret/scroll/layout limits are recorded in

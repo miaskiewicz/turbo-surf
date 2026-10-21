@@ -611,8 +611,9 @@ These Node22 captures are separate from the historical Node24/source59f7835 run
 
 ### Native DOM, scripts and ownership
 
-- Consume public Git-pinned turbo-dom0.5.7 candidateaaeb290 (latest registry
-  release0.5.6) and re-vendor committed turbo-test3ed91fb. Native per-isolate node state preserves
+- Initially consume public Git-pinned turbo-dom0.5.7 candidateaaeb290 when the
+  latest registry release was0.5.6, and re-vendor committed turbo-test3ed91fb.
+  The current dependency is released registry0.5.7. Native per-isolate node state preserves
   original UTF-16 payloads, names, parser positions and mutation-time ancestry.
   GC callbacks schedule bounded storage scans outside collection; genuine weak
   wrapper/guest edges and native job pins preserve retained identities without
@@ -743,10 +744,11 @@ These Node22 captures are separate from the historical Node24/source59f7835 run
   Range behavior, scoped native matching and real CSP-applied declarations.
   Host-only realm cache epochs prevent independent sessions with equal document
   IDs from sharing snapshots. Share actual platform font loading across threads.
-- Consume public Git-pinned turbo-html2pdf-core0.3.8 candidate2eac7f6 from PR23;
-  latest published registry release is0.3.7. The producer adds display:contents,
+- Initially consume public Git-pinned turbo-html2pdf-core0.3.8 candidate2eac7f6
+  from PR23 when the latest registry release was0.3.7. The current dependency is
+  released registry0.3.8. The producer adds display:contents,
   matched cascade, fractional anonymous flex/grid text and platform-only fonts.
-  Publication remains separate from development integration.
+  Publication was verified separately from development integration.
 - Parse live CSSOM rules and preserve disabled/media/adopted sheet identity and
   constructor ownership. ObservableArray adoption has native backing. Public
   CSS.supports uses private grammar/capability checks; selector matching retains

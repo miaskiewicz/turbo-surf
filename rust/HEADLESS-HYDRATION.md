@@ -105,9 +105,10 @@ insertion, verify its connection/focus/value after typing and before Enter, and
 release it on completion or budget cancellation. They dispatch no input events
 and do not refocus or repair page text. The earlier native checkpoint passes47 integration
 and four example tests; the expanded66-test checkpoint is described above. Those historical focused counts do not supersede the later completed workspace
-and browser controls above. Fresh live Google evidence still records native
+and browser controls above. The earlier546d511 live Google evidence records native
 HTTP429/zero results and early homepage budget exhaustion; Chrome reaches a
-SERP in one baseline while another fails effective consent dismissal. See the
+SERP in one baseline while another fails effective consent dismissal. The later
+9304df9 run and its incomplete Chrome comparator are summarized at the top. See the
 [current findings](../harness/detection/FINDINGS.md).
 
 **Execution model and remaining gaps:**

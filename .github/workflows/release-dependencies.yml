@@ -34,7 +34,6 @@ jobs:
     timeout-minutes: 240
     env:
       RUSTUP_TOOLCHAIN: 1.98.0
-      RELEASE_ROOT: ${{ runner.temp }}/release-dependencies
       EXPECTED_DISPATCH_COMMIT: ${{ inputs.expected_commit }}
       APPROVED_PUSH_COMMIT: ${{ vars.DEPENDENCY_RELEASE_COMMIT }}
     steps:
@@ -59,6 +58,7 @@ jobs:
           if event == 'workflow_dispatch' and expected != sha:
               raise SystemExit('Dispatch source commit differs')
           with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write('RELEASE_ROOT=' + os.path.join(os.environ['RUNNER_TEMP'], 'release-dependencies') + '\n')
               f.write('RELEASE_SOURCE_COMMIT=' + sha + '\n')
               f.write('PUBLISH_REQUESTED=' + str(publishing).lower() + '\n')
           PY

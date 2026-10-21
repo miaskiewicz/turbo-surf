@@ -380,7 +380,7 @@ tests without skips,191 Node20 tests with nine documented browser skips,
 sixteen paired controls and the focused Rust resource control. Explicit source
 bridges preserve the unchanged optimized native engine and earlier addon results.
 
-The fresh signed-out comparison reached a real HTTP200 search with nine result
+That October20 signed-out comparison reached a real HTTP200 search with nine result
 markers in one Chrome baseline. The other Chrome baseline stopped before typing
 because consent dismissal had no observable effect and the query was obscured.
 Both native baselines completed all six actions, saved consent through native
@@ -392,9 +392,14 @@ The October21 startup follow-up adds shared immutable font programs, per-read
 ancestor snapshots, selector-first CSS matching and timer task checkpoints with
 measured per-Window nesting. Its latest optimized all-feature homepage diagnostic
 completes HTTP200 hydration under the unchanged20-second budget:16.35s whole run
-and957MB peak RSS including profiling. Focused native checks pass22; current
-combined gates and a fresh Google comparison are pending. Homepage completion
-does not establish search clearance or full timing parity. The known CSSOM
+and957MB peak RSS including profiling. Current combined gates pass1,509 native
+and1,464 stock Rust tests, strict checks, formatting and rebuilt addon consumers.
+In the fresh9304df9 Google run, both native baselines finish initial hydration
+with one pump inside the unchanged budget, save consent and submit real forms,
+then end429 with zero results. The two interface-instrumented captures still
+exhaust initial hydration. Chrome consent clicks have no observed save effect
+in either baseline, so the latest SERP comparison is incomplete. Homepage
+completion does not establish search clearance or full timing parity. The known CSSOM
 color-sync and selector-admission gaps remain explicitly tracked in issue28.
 
 The current75-interface audit records142 missing own members across its expanded

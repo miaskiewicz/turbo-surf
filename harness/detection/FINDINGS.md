@@ -10,7 +10,7 @@ its retry. Chrome oracle cookies were never reused in native tests.
 
 ## Startup and scheduling investigation — 2026-10-21
 
-This follow-up is in progress in PR26. A separate homepage-only diagnostic uses
+The preserved pre-fix homepage-only diagnostic uses
 its preserved optimized native executable, all four native bridges, the original
 20-second page budget, Inspector CPU profiling and no interface wrappers. It
 performs no consent, input or search actions and is not a SERP validation.
@@ -59,22 +59,74 @@ native diagnostic also completes HTTP200 hydration with one pump and no budget
 exhaustion or host errors. Its whole run takes16.35 seconds with957MB peak RSS;
 the guest profile lasts14.70 seconds, including3.86 seconds of computed snapshots
 and3.05 seconds of private CSS lookup. These are live page diagnostics rather
-than a controlled page-content benchmark. Full native/default gates and a fresh
-Google comparison remain pending; neither homepage completion establishes
+than a controlled page-content benchmark. Full native/default gates and the fresh
+Google comparison are recorded below; neither homepage completion establishes
 timing reliability or SERP clearance.
 
 The reusable frozen-Chrome control measures same-Window nesting through direct,
 Promise and queued-microtask callbacks: the first six tasks are immediate, then
 the minimum delay is clamped. Alternating Window targets reset nesting. Native
-task checkpoints and scoped nesting cleanup pass21 native integration tests
-and an isolated seven-variant nesting/retirement/watchdog regression. The new
+task checkpoints and scoped nesting cleanup first pass21 native integration tests
+and an isolated seven-variant nesting/retirement/watchdog regression before the
+final selector-first integration. The combined native gate also passes. The new
 optimized executable has all four native bridges enabled; its first homepage
 measurement is recorded above. Interval cadence and broader deadline parity
 remain open.
 The saved Google matrix below retains its original outcome. Raw profiles and
 original failures stay private, and timing budgets remain unchanged.
 
-## Latest frozen Google and API capture — 2026-10-20 UTC
+## Latest full gates, Google and API capture — 2026-10-21 UTC
+
+The actual9304df9 full native gate passes1,509 Rust tests with eight ignores,
+strict Clippy, formatting, optimized CLI/addon verification, shim96+1 intentional
+skip, E2E20, Node22 detection204 with no skips and Python2. The full stock
+`npm run check` passes1,464 Rust tests with eleven ignores, strict/fmt, rebuilt
+addon verification, shim96+1 skip, E2E20, Node20 detection195+9 documented skips
+and Python2. The known unknown-pseudo selector-admission assertion remains one
+explicit ignore in each Rust gate; its separate expected exit101 is not passing
+conformance. Both gates protect all81 compiled literal fixtures and the same
+1,507-file source map. The optimized CLI matches the latest homepage diagnostic.
+
+The fresh matrix retains all14 completed process records: eight exit0, six Chrome
+exit1 and no timeout or abort. Native cookies are independent, all four bridges
+are enabled and no sidecar, imported jar or serialized-form fallback is used.
+Both native baselines finish homepage and post-consent hydration with one pump,
+without exhausting the original20-second budget. Consent save204 precedes real
+form submission. Each search initially returns a200 shell, then redirects to
+`/sorry/index`429 with zero markers: native baseline acceptance remains0/2.
+Both interface-instrumented native captures still exhaust early hydration with
+zero completed pumps. This is distinct from the improved uninstrumented baselines.
+
+Both Chrome baselines and both interface captures retain the consent dialog:
+click dispatch is acknowledged, but no save request occurs and input is obscured.
+The saved trace does not establish why the click has no effect. Separately, both
+standalone Chrome probes fail fixture readiness because their blank-page config
+inherits the Google query selector. The probe configuration repair preserves
+these original failures. This matrix is an incomplete paired SERP comparison;
+the earlier successful Chrome search is not relabeled as a current result.
+
+The subsequent probe-only configuration correction passes two actual-runner
+controls on each Node20/22, then the complete Node22 detection suite206/0skips
+and Python2. A genuine seven-process localhost matrix completes all four probes
+in both Chrome and native without collector errors. Search readiness, budgets
+and native engine inputs are unchanged. This does not repair the saved consent
+failure or constitute another Google run; full engine/capture receipts retain9304.
+
+The fresh API audit measures all75 interfaces with no collector errors. Counts
+remain64 original-four missing own members,142 expanded missing members and374
+difference paths. NativeV815.5.35.23-rusty/profile155.0.8059.80, Chrome155.0.8059.85
+/V815.5.35.25 and the transport154 base still differ. Residuals remain in issue28.
+Evidence checks pass10 supervisor/manifest controls,21 historical and25 current
+privacy/provenance controls, ten real-bundle tamper rejections and all eight
+historical positive diagnostic controls. Source/build acceptance does not mean
+Google acceptance. The saved raw traces and profiles remain private.
+
+Exact9304df9 CI passes Node22; Node20 exhausts runner disk during release-addon
+linking. A subsequent workflow change removes only dev/test debug symbols; test
+commands, assertions, overflow checks and release settings stay unchanged.
+Its new CI result is tracked separately from these measured source identities.
+
+## Prior frozen Google and API capture — 2026-10-20 UTC
 
 The546d511 matrix contains all14 expected process records with no timeout or
 abort. Its overall exit is1: ten child processes exit0 and four Chrome captures

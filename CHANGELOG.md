@@ -32,7 +32,8 @@ residual work beyond this PR, with audio separately deferred in
   reset nesting. Native task checkpoints, cancellation conversion and scoped
   nesting cleanup pass21 native integration tests plus an isolated native
   regression covering seven nesting variants, frame retirement, reentrant
-  legacy drains and watchdog recovery. Rebuilt homepage validation is pending.
+  legacy drains and watchdog recovery. The combined current native gate also
+  passes; broader interval cadence and task-source timing remain in issue28.
 - Add a reusable private CPU-profile summary with source locations and sampled
   self-time aggregation. It sorts out-of-order Inspector timestamps together
   with their samples; the real profile contains one negative1us delta. Node20
@@ -48,10 +49,42 @@ residual work beyond this PR, with audio separately deferred in
   profiling and snapshots. The selector-first follow-up also completes hydration:
   16.35s whole run,957MB peak RSS and14.70s guest profiling. These live homepage
   diagnostics do not establish SERP clearance, reliability or complete timing
-  parity. Full combined validation and a fresh Google comparison remain pending.
+  parity. Current full gates pass1,509 native and1,464 stock Rust tests, strict
+  Clippy, formatting, verified addons, shim96+1 intentional skip and E2E20 each.
+  Detection passes204 native controls and195 stock controls+9 documented skips;
+  both Python checks pass in each gate. The fresh75-interface inventory remains
+  142 missing own members and374 difference paths.
+- Run a fresh14-process Google comparison on the tested9304df9 source and
+  optimized artifact, with independent cookies and all native bridges. Both
+  native baselines complete initial hydration with one pump inside the unchanged
+  budget, save consent204 and submit real forms. Search200 shells then redirect
+  to429 with zero results: native acceptance remains0/2. Both interface-instrumented
+  native captures still exhaust their initial hydration budget. Four Chrome
+  flow captures fail after ineffective consent clicks, with no save request and
+  an obscured query input. Two standalone Chrome probes fail because the blank
+  fixture inherits the search readiness selector. This is an incomplete SERP
+  comparison; the probe configuration is repaired separately without relabeling
+  these failed captures. No rejection or ineffective-click cause is established.
+  Raw traces remain private.
+- Validate capture supervision and evidence publication with10 supervisor/manifest
+  controls,21 historical privacy controls,25 current privacy/provenance controls,
+  ten real-proof tamper rejections and eight matching historical diagnostic
+  controls. Bind every publication to its actual capture attempt and build.
+- Clear inherited page readiness only for the standalone blank probe fixture.
+  Two actual-runner regressions pass on both Node20 and22; the final Node22
+  detection suite passes206 tests without skips, plus Python2. A genuine local
+  seven-process matrix completes all four probes in Chrome and native. Search
+  readiness and all timing settings are preserved. The earlier Google probe
+  failures remain failed evidence; native engine inputs are unchanged.
+- Disable only dev/test debug symbols in CI to reduce accumulated build storage.
+  The previous9304df9 Node22 job passes; Node20 exhausts runner disk during addon
+  linking. Test selection, assertions, overflow checks and release settings stay
+  unchanged; the repaired workflow requires a fresh CI result.
 - Remove consumed producer debug/release caches after source, ownership,
   ignored/untracked, retained-proof and closed-consumer checks. Actual free disk
   space increases6.53GB; independent font probes and all source/SDK evidence remain.
+  After the successful combined gates, remove only their closed native/stock
+  debug caches (33.47GB and30.65GB); retain verified release artifacts and proofs.
 
 ### Runner timing follow-up — 2026-10-20
 

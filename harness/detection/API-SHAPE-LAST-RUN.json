@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "collectedAt": "2026-10-20T22:52:33.504Z",
+  "collectedAt": "2026-10-21T02:15:48.614Z",
   "note": "Uninstrumented localhost API contract queries; no site detection conclusion.",
   "build": {
     "version": "0.5.4",
@@ -21,7 +21,7 @@
     }
   },
   "chromeVersion": "Chrome/155.0.8059.85",
-  "binaryHash": "895e374ab0b0fe74446387a34fe5929063e3be1e14dfb1e00bbfbcf80f4abe32",
+  "binaryHash": "5341249bc9ed698acb83884a42580c83e48da43bedceee33a31166a9484123ab",
   "collectorHash": "21d5aafbdf94c61e6f8a7216b51d448b750ff099688e1a26ff9c3d31e1975bae",
   "collector": "harness/detection/api-shape.js",
   "collectorSnapshot": "collector.js",

@@ -1,8 +1,8 @@
 {
-  "captureBaseCommit": "546d5111c4e04ee148d37d375adc583f773ce3b9",
-  "binarySha256": "895e374ab0b0fe74446387a34fe5929063e3be1e14dfb1e00bbfbcf80f4abe32",
-  "extractorSha256": "a0fd048f564ab03670e18fc5229abcf3aa52742db831a6be711fc235e9a00606",
-  "capturedDate": "2026-10-20",
+  "captureBaseCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
+  "binarySha256": "5341249bc9ed698acb83884a42580c83e48da43bedceee33a31166a9484123ab",
+  "extractorSha256": "057efe4a3e3b5bd5f30c1a1b65ee9ec48282bb8cfad5e6f414a1579419d9525d",
+  "capturedDate": "2026-10-21",
   "scope": "Fixed structural markers from already saved final HTML only; no raw URL/query/token/text/cookie/body output. Markers do not prove visible CAPTCHA interaction.",
   "userObservationsCarriedForward": false,
   "runs": [
@@ -23,7 +23,7 @@
       "recaptchaScriptPresent": false,
       "captchaResponseFieldPresent": false,
       "knownSorryFormActionPresent": false,
-      "htmlSha256": "efddfeb767ebd844f74e85d0dc94482cf81533d8e76abfd9f20764f614eb2166"
+      "htmlSha256": "e7e6f57b00e0b6aaa4b51f14d76476a4f336bbc8c60cd397b503dfae4417737b"
     },
     {
       "repeat": 0,
@@ -42,7 +42,7 @@
       "recaptchaScriptPresent": true,
       "captchaResponseFieldPresent": false,
       "knownSorryFormActionPresent": true,
-      "htmlSha256": "73b3423cab92e8b7e9025e9889a9ed0771a86e626ec79f289f58f76146903d9f"
+      "htmlSha256": "4bb947e715127ec4e51f9db19b3e7c72ae7842a621f9578bdda324e10f98c3b4"
     },
     {
       "repeat": 0,
@@ -61,7 +61,7 @@
       "recaptchaScriptPresent": false,
       "captchaResponseFieldPresent": false,
       "knownSorryFormActionPresent": false,
-      "htmlSha256": "3b40b247b1adfde137b63f763b96f6819b560d74f926f1fadbe66aad816d8d7b"
+      "htmlSha256": "4cd9df2ff0e9d111d6677b8bca1294110de0aa1400a35293ba93dc517db038f7"
     },
     {
       "repeat": 0,
@@ -80,15 +80,15 @@
       "recaptchaScriptPresent": true,
       "captchaResponseFieldPresent": false,
       "knownSorryFormActionPresent": true,
-      "htmlSha256": "d10b93271261f5fa092dc4a139b8a3c4b00f3e091723807080ee35c77269c11f"
+      "htmlSha256": "c59c552c62f6ae2e9817bf1387ac073e6920287a1fdea0ba3df5aabf529b7251"
     },
     {
       "repeat": 1,
       "runtime": "chrome",
       "pass": "baseline",
       "final": {
-        "path": "/search",
-        "results": 9,
+        "path": "/",
+        "results": 0,
         "hydrationBudgetExceeded": null,
         "status": 200
       },
@@ -99,7 +99,7 @@
       "recaptchaScriptPresent": false,
       "captchaResponseFieldPresent": false,
       "knownSorryFormActionPresent": false,
-      "htmlSha256": "a35df8d1c4e135eaecc13d7edac990665f5365628b9028edeb282081be07f49e"
+      "htmlSha256": "f722ee73fcf959534b88671038085ea68c1eaced1656108285de46a81657b490"
     },
     {
       "repeat": 1,
@@ -118,26 +118,26 @@
       "recaptchaScriptPresent": true,
       "captchaResponseFieldPresent": false,
       "knownSorryFormActionPresent": true,
-      "htmlSha256": "9f5705dd4ee30b3001acb920ca15472877a0f55c11bacf0b72d94f593087e2f0"
+      "htmlSha256": "4f0fb7a29c4f7a799826e032802adc9d9dcd7438cf9ba0e20939905029bd5e2b"
     },
     {
       "repeat": 1,
       "runtime": "chrome",
       "pass": "interfaces",
       "final": {
-        "path": "/sorry/index",
+        "path": "/",
         "results": 0,
         "hydrationBudgetExceeded": null,
-        "status": 429
+        "status": 200
       },
-      "sorryPath": true,
+      "sorryPath": false,
       "finalHTMLAvailable": true,
-      "recaptchaElementPresent": true,
-      "recaptchaIframePresent": true,
-      "recaptchaScriptPresent": true,
-      "captchaResponseFieldPresent": true,
-      "knownSorryFormActionPresent": true,
-      "htmlSha256": "38c1b513193bdec58e958950105f4130ef1198e50e264aed9c52e9e268da043e"
+      "recaptchaElementPresent": false,
+      "recaptchaIframePresent": false,
+      "recaptchaScriptPresent": false,
+      "captchaResponseFieldPresent": false,
+      "knownSorryFormActionPresent": false,
+      "htmlSha256": "0ed9ac67879443c9d4e51863d83335966ffec62f4b506c53745381c9ae68ab2a"
     },
     {
       "repeat": 1,
@@ -156,7 +156,7 @@
       "recaptchaScriptPresent": true,
       "captchaResponseFieldPresent": false,
       "knownSorryFormActionPresent": true,
-      "htmlSha256": "5a7767b422ce291447f7ff14609ad4e27654e0793faed34143041d0ed09da421"
+      "htmlSha256": "af23bfe7c879f2383c31b38a9992eb73fb31f508885ac082ea67b1118def515e"
     }
   ]
 }

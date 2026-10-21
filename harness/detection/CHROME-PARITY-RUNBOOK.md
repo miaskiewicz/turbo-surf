@@ -1,10 +1,13 @@
 # Chrome 155 parity runbook
 
 These commands document the verified setup and every opt-in. The latest frozen
-capture uses546d511 with the unchanged optimized native engine; full stock/native
-Rust gates retain their3a77122 identities. Signed-out Chrome reaches a SERP in
-one baseline; native reaches HTTP429 with zero results in both. Another Chrome
-baseline fails effective consent dismissal. Native clearance and full Chrome
+capture and full native/default gates use9304df9:1,509/1,464 Rust tests pass,
+with strict checks, formatting and verified addon consumers. Both native Google
+baselines finish initial hydration with one pump inside the unchanged budget,
+then save consent, submit real forms and end429 with zero results. The two
+interface-instrumented native captures still exhaust initial hydration. Both
+Chrome baselines fail effective consent dismissal, so the current SERP comparison
+is incomplete. The earlier546d511 Chrome baseline reached a SERP. Native clearance and full Chrome
 parity remain unresolved. Keep historical checkpoints tied to their recorded
 source/binary. See [PARITY-GAPS.md](./PARITY-GAPS.md),
 [FINDINGS.md](./FINDINGS.md), audio [issue27](https://github.com/miaskiewicz/turbo-surf/issues/27)
@@ -394,6 +397,26 @@ Keep the original `pageBudgetMs`, identity and native feature settings. Invoke t
 with that config and a fresh output directory. This is a homepage-only diagnostic with no consent or search actions;
 it is not a successful Google flow or SERP acceptance measurement. Record the binary's actual build source and hash rather
 than attributing a preserved executable to uncompiled checkout edits.
+
+The October21 rebuilt diagnostic and subsequent full native gate select the same
+optimized executable bytes. Its two fresh Google baselines complete homepage
+hydration; the interface-instrumented passes still exhaust the original budget.
+Keep those passes separate. Four current Chrome flow captures dispatch consent
+clicks without a save request and stop before query input. A dispatch acknowledgement
+does not prove the intended element handled the click or consent succeeded.
+The two standalone Chrome probes separately fail inherited search readiness on
+a blank fixture; the probe configuration repair does not change those saved failures.
+The runner now clears `readySelector` for that probe-only fixture; interactive
+captures retain their configured selector. Two offline runner controls per
+Node20/22, full Node22 detection206+Python2 and a genuine local seven-process
+matrix pass after the correction. This local control is not a new Google run.
+
+CI disables dev/test DWARF with `CARGO_PROFILE_DEV_DEBUG=0` and
+`CARGO_PROFILE_TEST_DEBUG=0` to limit accumulated artifacts. These settings do not
+disable assertions or overflow checks and do not alter the release profile.
+Keep native and stock debug caches sequential; remove a consumed cache only
+after all of its tests, addon consumers and artifact queries have closed. Retain
+the measured executables, source/archive caches and before/after proof files.
 
 After collector/helper changes, recapture this genuine oracle **before final gates/capture**:
 

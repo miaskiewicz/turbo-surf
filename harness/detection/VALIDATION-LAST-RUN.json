@@ -1,30 +1,29 @@
 {
-  "schemaVersion": 1,
-  "measuredDate": "2026-10-20",
-  "scope": "Measured implementation gates, reviewed harness overlay, API inventory and failed live Google matrix. Does not establish complete Chrome parity or reliable native SERP. Historical receipts keep their original source identities.",
+  "schemaVersion": 2,
+  "measuredDate": "2026-10-21",
+  "scope": "Exact-current9304 native and stock gates, API inventory, reviewed safe failed Google matrix and privacy/provenance controls. Does not establish complete Chrome parity, comparable successful Chrome baselines or reliable native SERP.",
   "captureSource": {
-    "commit": "546d5111c4e04ee148d37d375adc583f773ce3b9",
-    "selectedFiles": 1499,
-    "manifestSha256": "e2cb850f7042dc203840343dd25d9924d52a92840617007ccdfee8b59fb2ae21",
-    "reviewedHarnessOverlaySha256": "40a86a9bef66bca189cee9cb6bd6930a5605bdd99ea8031cf08eb90f6501de90",
-    "reviewedChangedPaths": 8,
-    "cleanDuringCaptures": true,
-    "productionNativeInputsUnchanged": true,
+    "commit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
+    "selectedFiles": 1507,
+    "manifestSha256": "00232f5dfbab6ee8eef5c68dc4baed0f280243c3a2408a86ec405a476f30ce12",
+    "mode": "exact-current-source-full-gates",
+    "reviewedHarnessOverlay": false,
     "explicitLiteralGuardCount": 81,
-    "explicitLiteralGuardsUnchanged": true,
-    "integrationTestOracleMetadataChanged": true,
-    "resourceOracleChangedFields": ["collectorSha256", "observationSha256"],
-    "resourceOracleObservableValuesUnchanged": true,
-    "resourceOracleFormattingValuesUnchanged": true
+    "explicitLiteralGuardsUnchangedThroughClosedApi": true,
+    "cleanThroughClosedApi": true,
+    "cleanDuringGoogle": true,
+    "sourceUnchangedDuringGoogle": true,
+    "explicitLiteralGuardsUnchangedDuringGoogle": true
   },
-  "buildSourceCommit": "3a77122e27d12c253fffc09ca252b4ef5f860ed8",
-  "originalOptimizedBuildAndConsumerSourceCommit": "4a734d642de29b85df9a76f1183d5bc63e575911",
+  "buildSourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
   "artifacts": {
-    "nativeCliSha256": "895e374ab0b0fe74446387a34fe5929063e3be1e14dfb1e00bbfbcf80f4abe32",
-    "nativeCliBytes": 117165744,
-    "nativeSignedAddonSha256": "68e283258467beb860f6b8b1a93acee41795670826b957e106db0ab2a7771ae1",
-    "stockSignedAddonSha256": "b5ee0d6582ef2781eb511be527736e4a111eef550e64e4c287c0aa200e986748",
-    "stockSignedAddonBytes": 116009152,
+    "nativeCliSha256": "5341249bc9ed698acb83884a42580c83e48da43bedceee33a31166a9484123ab",
+    "nativeCliBytes": 117157968,
+    "nativeSignedAddonSha256": "130ac47e260ecf512ec49e00a5aac742d1a5adce3ae8da27e4a0b35449ebebd8",
+    "nativeDylibSha256": "13265d452c6b30d7322e13041517b2a4ef1b0a98d9ba53cc6781537eaa5240bb",
+    "stockSignedAddonSha256": "9ff347d89661641a3a31c648487d07202bc0ac00e2c6ebb8d16d8fa181ab51a7",
+    "stockSignedAddonBytes": 116064240,
+    "stockV8": "15.0.245.2-rusty",
     "nativeV8": "15.5.35.23-rusty",
     "chromeOracle": "155.0.8059.85",
     "chromeOracleV8": "15.5.35.25",
@@ -39,58 +38,121 @@
       "trustAnchors": true,
       "gpuMetal": true,
       "coretext": true
-    }
+    },
+    "nativeAndStockActualLoadersVerified": true,
+    "nativeAndStockUnsignedCodeCorrelationVerified": true
   },
   "gates": {
     "nativeWorkspace": {
-      "sourceCommit": "3a77122e27d12c253fffc09ca252b4ef5f860ed8",
-      "passed": 1496,
+      "sourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
+      "groups": 137,
+      "passed": 1509,
       "failed": 0,
-      "ignored": 7,
+      "ignored": 8,
       "strictClippyPassed": true,
       "formatPassed": true,
-      "receiptSha256": "1bf378a329c3cd7e6a2f3632440fdd1589d94ceca4584ea9d394ed5247d5db8a"
+      "ignoredCategories": {
+        "knownCssConformanceGap": 1,
+        "explicitOptInLiveTlsEcho": 1,
+        "generatedDocumentation": 6
+      },
+      "receiptSha256": "83cae596f7684657bcd6e18c7990c5e11cbf8a7f43f13bd16030dbca6ee9821a"
     },
     "stockDefault": {
-      "sourceCommit": "3a77122e27d12c253fffc09ca252b4ef5f860ed8",
+      "sourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
       "command": ["npm", "run", "check"],
-      "rustGroups": 136,
-      "passed": 1451,
+      "groups": 137,
+      "passed": 1464,
       "failed": 0,
-      "ignored": 10,
+      "ignored": 11,
       "strictClippyPassed": true,
       "formatPassed": true,
       "addonAndConsumersPassed": true,
-      "receiptSha256": "0925c47eff5972808ceb92e015a8b25998ac35c007432704e1920bc0b6f68860"
+      "ignoredCategories": {
+        "knownCssConformanceGap": 1,
+        "explicitOptInLiveTlsEcho": 1,
+        "generatedDocumentation": 6,
+        "requiresNativeV8CallbackSdk": 3
+      },
+      "receiptSha256": "0f5b8808cd84cfc292c0bb075bb4ea8e06937fe88896187640fa999e74548b5c"
     },
-    "originalNativeConsumers": {
-      "sourceCommit": "4a734d642de29b85df9a76f1183d5bc63e575911",
+    "nativeConsumers": {
+      "sourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
       "allEightStagesPassed": true,
-      "shimPassed": 96,
-      "shimIntentionalSkipped": 1,
-      "e2ePassed": 20,
-      "node22DetectionPassed": 195,
+      "shim": {
+        "tests": 97,
+        "pass": 96,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 1
+      },
+      "e2e": {
+        "tests": 20,
+        "pass": 20,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "detection": {
+        "tests": 204,
+        "pass": 204,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
       "pythonPassed": 2,
-      "receiptSha256": "f9648fb435f34f624f0c8d1ea0dc004b17a601944ce2bc1dc979ad4a3faa0334",
-      "scope": "Original measured consumers; not relabeled as execution on the later capture commit."
+      "nodeDetectionVersion": "v22.22.3",
+      "scope": "Actual native155 release/addon consumers on this source; no predecessor relabeling."
     },
-    "currentHarnessRepair": {
-      "committedCaptureSource": "546d5111c4e04ee148d37d375adc583f773ce3b9",
-      "executionBaseCommit": "3a77122e27d12c253fffc09ca252b4ef5f860ed8",
-      "node22Passed": 200,
-      "node22Skipped": 0,
-      "node20Passed": 191,
-      "node20Skipped": 9,
-      "pythonPassedPerNodeRun": 2,
-      "pairedPassed": 16,
-      "rootlessChromeBackendControlsPassed": 2,
-      "focusedStockResourceRustPassed": 1,
-      "receiptSha256": "fffc0c9e407d11ad3754853b8e671c29c9e681a4fabe5aac88813625d1788325",
-      "scope": "Source-guarded reviewed harness repair; genuine oracle metadata installation and identical-value formatting recorded separately."
+    "stockConsumers": {
+      "sourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
+      "shim": {
+        "tests": 97,
+        "pass": 96,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 1
+      },
+      "e2e": {
+        "tests": 20,
+        "pass": 20,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "detection": {
+        "tests": 204,
+        "pass": 195,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 9
+      },
+      "pythonPassed": 2,
+      "nodeVersion": "v20.20.2",
+      "detectionSkipScope": "Nine actual Node20 Chrome/CDP/backend integration skips; native Node22 ran all204.",
+      "shimSkipScope": "One intentional skipped-test-does-not-run fixture."
+    },
+    "warmArtifact": {
+      "sourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
+      "actualFreshSameUnion": true,
+      "optLevel": "3",
+      "debugAssertions": false,
+      "cliAndDylibBytesUnchanged": true,
+      "actualReceiptSha256": "41a2ebce0c56d83af7f18a6210dcab31daca1c096bc20e7c69ce6fa9025d2548",
+      "artifactCompanionSha256": "74851331834eb4bdacb120fba5e7623c7e863634b02085707d1a898a289c87d4"
     }
   },
+  "knownConformanceGap": {
+    "test": "cssom_unknown_pseudo_selector_admission_matches_chrome155",
+    "issue": 28,
+    "ignoredInEachFullRustGate": 1,
+    "explicitPriorInvocationExitCode": 101,
+    "countedAsPassingConformance": false,
+    "expectedFailureLogSha256": "9720851c8d9e486a0f964948f8ef6730b6f07814e9bdbcc668449a78a27649fc",
+    "scope": "Strong genuine Chrome unknown-pseudo admission assertion remains a declared gap; no forgiving-list whitelist workaround."
+  },
   "api": {
-    "sourceCommit": "546d5111c4e04ee148d37d375adc583f773ce3b9",
+    "sourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
     "totals": {
       "interfaceCount": 75,
       "originalFourMissing": 64,
@@ -100,20 +162,20 @@
     },
     "bothCollectorsExitZero": true,
     "collectorErrors": 0,
-    "unmeasuredInterfaces": [],
-    "receiptSha256": "7f5345d0a216f34cad8c25a27ce80b5ae36edd88366dde1aa652909ac16c2a3b",
-    "privateComparisonSha256": "7ab81cb63858ad14d1f10d76c58e9d9f1326a27bc72cde9817257d8b280c4b47",
-    "privateInventorySha256": "564a870002ffd71035df957d87c539ad64d602c0d9903f688694dc36e1306562",
-    "scope": "Fresh localhost measurements; missing members and descriptor/global differences remain."
+    "sourceAndArtifactGuardsPassed": true,
+    "receiptSha256": "d2ae758760ae90fd03e793cd5150541f18d711e5bb8b073b7ad782478c5cf1d5",
+    "privateComparisonSha256": "5ce71c444d0450e8203ad4c2998b3ac9b1d02a8f437d2354fe387d7709b7a999",
+    "privateInventorySha256": "597b1a179db46b9cc9716b2cf5f62657faf1cf51acc227d93f266f420597955e",
+    "scope": "Fresh uninstrumented localhost75-interface measurement.142 missing members/374 descriptor or behavior paths remain; no site-trust conclusion."
   },
   "google": {
-    "sourceCommit": "546d5111c4e04ee148d37d375adc583f773ce3b9",
+    "sourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
     "runnerExitCode": 1,
     "matrixProcessCount": 14,
     "processOutcomesMeasured": 14,
     "missingExpectedProcesses": 0,
     "unexpectedProcesses": 0,
-    "exitZeroCount": 10,
+    "exitZeroCount": 8,
     "failedProcesses": [
       {
         "repeat": 0,
@@ -136,6 +198,18 @@
       {
         "repeat": 1,
         "runtime": "chrome",
+        "pass": "baseline",
+        "exitCode": 1
+      },
+      {
+        "repeat": 1,
+        "runtime": "chrome",
+        "pass": "interfaces",
+        "exitCode": 1
+      },
+      {
+        "repeat": 1,
+        "runtime": "chrome",
         "pass": "probes",
         "exitCode": 1
       }
@@ -144,8 +218,10 @@
     "aborts": 0,
     "allProcessesPassed": false,
     "sourceAndArtifactGuardsPassed": true,
-    "chromeBaselinesAccepted": 1,
+    "nativeCollectorsExitZero": 6,
+    "chromeCollectorsExitOne": 6,
     "nativeBaselinesAccepted": 0,
+    "chromeBaselinesAccepted": 0,
     "baselinesPerRuntime": 2,
     "baselineOutcomes": [
       {
@@ -168,7 +244,8 @@
         "accepted": false,
         "navigationSource": null,
         "nativeFormFallbackDisabled": true,
-        "nativeFormFallbackUsed": false
+        "nativeFormFallbackUsed": false,
+        "failedPrecondition": "consent-overlay-input-obscured"
       },
       {
         "repeat": 0,
@@ -190,29 +267,62 @@
         "accepted": false,
         "navigationSource": "native-form",
         "nativeFormFallbackDisabled": true,
-        "nativeFormFallbackUsed": false
+        "nativeFormFallbackUsed": false,
+        "homeAndDismiss": [
+          {
+            "phase": "home",
+            "status": 200,
+            "results": 0,
+            "hydrationBudgetExceeded": false,
+            "hydrationProgress": {
+              "phase": "complete",
+              "completedPumps": 1
+            }
+          },
+          {
+            "phase": "dismiss",
+            "status": 200,
+            "results": 0,
+            "hydrationBudgetExceeded": false,
+            "hydrationProgress": {
+              "phase": "complete",
+              "completedPumps": 1
+            }
+          }
+        ],
+        "initialSearchDocument": [
+          {
+            "phase": "step-5",
+            "path": "/search",
+            "status": 200,
+            "results": 0,
+            "hydrationBudgetExceeded": false,
+            "pendingNavigation": true
+          }
+        ]
       },
       {
         "repeat": 1,
         "runtime": "chrome",
-        "processComplete": true,
-        "collectorComplete": true,
-        "collectorErrors": 0,
-        "actionsCompleted": 6,
-        "consentRequests": 1,
-        "consentResponseStatuses": [204],
-        "consentResponseBeforeSearch": true,
-        "observationComplete": true,
+        "processComplete": false,
+        "collectorComplete": false,
+        "collectorErrors": 1,
+        "actionsCompleted": 0,
+        "consentRequests": 0,
+        "consentResponseStatuses": [],
+        "consentResponseBeforeSearch": null,
+        "observationComplete": null,
         "final": {
-          "path": "/search",
-          "results": 9,
+          "path": "/",
+          "results": 0,
           "hydrationBudgetExceeded": null,
           "status": 200
         },
-        "accepted": true,
+        "accepted": false,
         "navigationSource": null,
         "nativeFormFallbackDisabled": true,
-        "nativeFormFallbackUsed": false
+        "nativeFormFallbackUsed": false,
+        "failedPrecondition": "consent-overlay-input-obscured"
       },
       {
         "repeat": 1,
@@ -234,15 +344,42 @@
         "accepted": false,
         "navigationSource": "native-form",
         "nativeFormFallbackDisabled": true,
-        "nativeFormFallbackUsed": false
+        "nativeFormFallbackUsed": false,
+        "homeAndDismiss": [
+          {
+            "phase": "home",
+            "status": 200,
+            "results": 0,
+            "hydrationBudgetExceeded": false,
+            "hydrationProgress": {
+              "phase": "complete",
+              "completedPumps": 1
+            }
+          },
+          {
+            "phase": "dismiss",
+            "status": 200,
+            "results": 0,
+            "hydrationBudgetExceeded": false,
+            "hydrationProgress": {
+              "phase": "complete",
+              "completedPumps": 1
+            }
+          }
+        ],
+        "initialSearchDocument": [
+          {
+            "phase": "step-5",
+            "path": "/search",
+            "status": 200,
+            "results": 0,
+            "hydrationBudgetExceeded": false,
+            "pendingNavigation": true
+          }
+        ]
       }
     ],
-    "nativeEarlyBudgetExhaustion": [
-      {
-        "repeat": 0,
-        "pass": "baseline",
-        "phases": ["home", "dismiss", "step-0", "step-1", "step-2", "step-3", "step-4"]
-      },
+    "nativeBudgetExhaustedCaptures": [
       {
         "repeat": 0,
         "pass": "interfaces",
@@ -250,40 +387,61 @@
       },
       {
         "repeat": 1,
-        "pass": "baseline",
-        "phases": ["home", "dismiss", "step-0", "step-1", "step-2", "step-3", "step-4"]
-      },
-      {
-        "repeat": 1,
         "pass": "interfaces",
         "phases": ["home", "dismiss", "step-0", "step-1", "step-2", "step-3", "step-4"]
       }
     ],
-    "nativeEarlyBudgetCompletedPumps": 0,
-    "nativeFinal429BudgetExceeded": false,
+    "nativeBaselineHomeAndDismissBudgetExhausted": false,
+    "nativeBaselineHomeAndDismissCompletedPumps": 1,
     "nativeSidecarCommandsCleared": true,
     "importedCookieConfigurationRejected": true,
     "nativeFormFallbackDisabled": true,
     "nativeObservationMode": "real-time",
     "observationMs": 2500,
-    "captureWrapperReceiptSha256": "a7bb4b568fe41f55fb676dbb2bb1daf3c7c991e5d3eaea0d7c831e2b02b8dc63",
-    "matrixStatusReceiptSha256": "3cb1ee77f5b94f7355617668b282b197e862b2f1b2281f3668d3e1ce5a2daf37",
-    "scope": "First Chrome baseline consent/input precondition failed; second reached actual SERP. Both native baselines completed six actions and consent-save204 before native form search, then ended429 with zero result markers. Cause and native SERP reliability remain unresolved."
+    "captureWrapperReceiptSha256": "1add318ed8ca1ca047a127adae6c440dbed08ae5c0f9ad4ab6c4760a9d51b7ac",
+    "matrixStatusReceiptSha256": "046899f6f56f3d1d8e1519d9a8504ad51956937bcd41e04ded594be286f3a3c7",
+    "safeReviewOutcomeSha256": "b8200bebbb23c7e3833481cd50e69017bc915a712cebd58f37a40de0040dc2a9",
+    "fairCompletedBaselineComparison": false,
+    "scope": "Both native baselines completed six actions and consent-save204 before genuine native form search, observed search200 shells then ended sorry429/zero results. Baseline home/dismiss each completed one pump without budget exhaustion. Both Chrome baselines failed the still-present consent-overlay input precondition before configured actions, with no save request. This is incomplete comparable-browser acceptance evidence, not proof of a browser-trust cause. Two instrumented native captures still exhausted hydration budgets. Four Chrome baseline/interface captures failed consent/input preconditions; two probe-only captures instead failed blank-fixture readiness because the Google selector was inherited. A bounded probe-config fix is in progress and cannot retroactively repair this9304 matrix.",
+    "chromeFailureCategories": [
+      {
+        "passKinds": ["baseline", "interfaces"],
+        "processes": 4,
+        "category": "consent-overlay-input-obscured"
+      },
+      {
+        "passKinds": ["probes"],
+        "processes": 2,
+        "category": "blank-probe-inherited-google-ready-selector"
+      }
+    ]
+  },
+  "liveValidation": {
+    "googleMatrixCompleted": true,
+    "matrixPassed": false,
+    "nativeBaselineAccepted": 0,
+    "nativeBaselineCaptured": 2,
+    "comparableChromeBaselinesCompleted": 0,
+    "reliableNativeSerpEstablished": false
   },
   "privacyAndSourceControls": {
-    "privacyControlsPassed": 21,
-    "actualOverlayTamperControlsPassed": 4,
-    "historicalJcLcControlsPassed": 8,
+    "captureSupervisionControlsPassed": 10,
+    "originalPrivacyControlsPassed": 21,
+    "currentPrivacyControlsPassed": 25,
+    "receiptSha256": "0db11075564873aeed90c3e18f5144b644e27c531ee57d9dae07d57db54d1187",
+    "actualRealBundleTamperControlsPassed": 10,
+    "historicalJcLcControlsPassedThisRun": 8,
+    "safeExtractionReceiptSha256": "8f4e67c7dc17e0c0537a6020303d37197f4322739694308982ae0310907afbb1",
+    "publicationPolicySatisfied": null,
+    "scope": "Closed10 supervision/21 original privacy/25 current privacy,10 actual full-proof rejection controls and8 historical fixed-code positives. Google remains failed evidence; publication requires separate explicit review.",
+    "actualRealBundleTamperReceiptSha256": "270a12440207c4596b2ac8b143ae49fd8b400149dbb276cfe99155588d4687ea",
+    "historicalFixedCodeReceiptSha256": "31dd85491d89e2024ca907a70de1ba49dbde812e706e50710e60595b72d3f1e8",
     "historicalCodeControlReportSha256": "5070d0bb20b2cc1ec50c30575fa7d77f356b6912efbe7451cf6a79f75fd38065",
-    "pureValidationReceiptSha256": "a0ba90cea11fec6b25a1598f24f7f7da0141c186dc4224250503c147714377f5",
-    "extractorSha256": "a0fd048f564ab03670e18fc5229abcf3aa52742db831a6be711fc235e9a00606",
-    "readOnlyInputHashesVerified": 171,
+    "extractorSha256": "057efe4a3e3b5bd5f30c1a1b65ee9ec48282bb8cfad5e6f414a1579419d9525d",
+    "readOnlyInputHashesVerified": 1607,
     "inputsUnchanged": true,
-    "safeExtractionReceiptSha256": "49ee7151a9d9d7d498f15238e56e2b80edfa9e0bf64bd10d60785909380e6d03",
     "allProcessPassPublicationPolicySatisfied": false,
-    "failedMatrixEvidencePublicationExplicitlyReviewed": true,
-    "scope": "The matrix remains failed evidence; publication does not relabel failed processes or native rejection.",
-    "publicationReadyForReview": false
+    "failedMatrixEvidencePublicationExplicitlyReviewed": null
   },
   "remaining": {
     "completeChromeParity": false,
@@ -326,20 +484,66 @@
       "scope": "Actual cold native font initialization ~18s/2.6GB; 190 sampled worker frames in font loading. Original close-test5s failure preceded cancellation phase; startup phase was separated explicitly."
     }
   ],
+  "historicalEvidence": {
+    "previousPublicValidationSha256": "daa175527f1a25d5a2a61bc8b6e277fa7fea6674d3c71c7df15b261758c3e123",
+    "previousCaptureCommit": "546d5111c4e04ee148d37d375adc583f773ce3b9",
+    "scope": "Historical3a/4a/546 records and original failures remain immutable; none are current9304 gate or Google outcomes."
+  },
   "ci": {
-    "previousBuildSourceCommit": "3a77122e27d12c253fffc09ca252b4ef5f860ed8",
-    "previousBuildSourceChecksPassed": true,
-    "reviewHeadChecks": "tracked separately on the pull request",
-    "pullRequest": "https://github.com/miaskiewicz/turbo-surf/pull/26",
-    "scope": "Immutable capture and gate evidence; later metadata-commit CI is reviewed separately and is not inferred from this report."
+    "measuredSourceCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
+    "runId": 39527792347,
+    "node22": "success",
+    "node20": "failure",
+    "node20Failure": "Runner disk exhausted during release-addon linking; no observed assertion failure.",
+    "postCaptureWorkflowChange": "Disable only dev/test debug symbols; fresh final-head CI pending."
   },
   "cleanup": {
-    "stockDebug": {
-      "actualFreedBytes": 32760385536,
-      "measuredFreeBytesAfter": 91665936384,
-      "receiptSha256": "1f333f6e27ad8e1a9d7fe8d555a3c74007199fb1b107e905a3b5178193ee2093",
+    "nativeSdkDebug": {
+      "actualFreedBytes": 33467658240,
+      "measuredFreeBytesBefore": 45562822656,
+      "measuredFreeBytesAfter": 79030480896,
+      "receiptSha256": "8546bbe090dd474f0349337f3c8bb05f85316bf832eaf8de5e32208cd19e214f",
       "protectedSourcesAndArtifactsUnchanged": true,
-      "scope": "Exact closed build cache removed after the accepted default consumer gate; disk free is the measurement at that cleanup, not a current guarantee."
+      "scope": "Exact closed consumed debug cache only; free space is the measurement then, not a current guarantee."
+    },
+    "stockDebug": {
+      "actualFreedBytes": 30645145600,
+      "measuredFreeBytesBefore": 47960297472,
+      "measuredFreeBytesAfter": 78605443072,
+      "receiptSha256": "b234a87c3bfd69dc5ad082d9a3f6ae0138b41b331af6edd31643764f5b73f81b",
+      "protectedSourcesAndArtifactsUnchanged": true,
+      "scope": "Exact closed consumed debug cache only; free space is the measurement then, not a current guarantee."
     }
+  },
+  "postCaptureHarnessValidation": {
+    "scope": "Post-capture harness-only readiness correction, CI debug-symbol storage policy and generated API inventory metadata. Full native/default engine gates and Google captures retain their actual9304 identity.",
+    "selectedInputChanges": [
+      ".github/workflows/ci.yml",
+      "harness/detection/API-INVENTORY.json",
+      "harness/detection/run.mjs",
+      "harness/detection/run.test.mjs"
+    ],
+    "allRustInputsUnchanged": true,
+    "compiledLiteralGuardsUnchanged": true,
+    "byteBridgeReceiptSha256": "fe8fe670e2469d92cc39149291dfcdfc205bfe82aa847d0cfaaf227419cfe729",
+    "node20FocusedRunnerPassed": 2,
+    "node22FocusedRunnerPassed": 2,
+    "node22DetectionPassed": 206,
+    "node22DetectionFailed": 0,
+    "node22DetectionSkipped": 0,
+    "pythonPassed": 2,
+    "detectionReceiptSha256": "ab3569937023f82bc343c1e8419e0ead5adcae0c7e1cda8ab20077a7a72e56bc",
+    "genuineLocalMatrix": {
+      "completedProcesses": 7,
+      "allExitZero": true,
+      "chromeProbeOutputs": 4,
+      "nativeProbeOutputs": 4,
+      "collectorErrors": 0,
+      "sourceAndNativeArtifactUnchanged": true,
+      "receiptSha256": "0539c55e89e326fd399ae40609376073f86e2236c3f0f4cec67bb97e00a0d941",
+      "priorInvocationRejectedBeforeCollectors": true
+    },
+    "freshGoogleAfterProbeOnlyCorrection": false,
+    "recordedGoogleFailuresRelabeled": false
   }
 }

@@ -270,6 +270,7 @@ captureMatrix: for (let repeat = 0; repeat < repeats; repeat++) {
           fixtureHtml,
           fixtureHash: sha(fixtureHtml),
           dismissSelector: "",
+          readySelector: "",
           steps: [],
           interfaces: false,
           debugger: false,

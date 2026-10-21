@@ -6,16 +6,20 @@ here so the requirements are explicit.
 The current source-pinned validation and live outcomes are recorded in
 [FINDINGS.md](../harness/detection/FINDINGS.md) and
 [VALIDATION-LAST-RUN.json](../harness/detection/VALIDATION-LAST-RUN.json).
-The latest546d511 capture reaches a SERP in one signed-out Chrome baseline;
-both native baselines end429 with zero results, and early native homepage
-hydration still exhausts its budget. Dated cycles and checkpoints below preserve
-historical evidence. A report that page JavaScript executed is not a report
-that Google accepted a native search. The October21 startup candidate adds
+The latest9304df9 capture has no accepted native SERP: both baselines finish
+initial hydration with one pump inside the unchanged budget, save consent and
+submit real forms, then end429 with zero results. Interface-instrumented initial
+hydration still exhausts its budget. Both Chrome baselines stop after ineffective
+consent clicks, so the latest SERP comparison is incomplete. The earlier546d511
+capture reaches a SERP in one signed-out Chrome baseline. Dated checkpoints below
+preserve their original evidence. Executing page JavaScript does not establish
+that Google accepted a native search. The October21 startup fix adds
 shared font programs, per-read ancestor snapshots, selector-first CSS matching
-and timer task checkpoints/nesting. Focused native checks pass22; its latest
+and timer task checkpoints/nesting. Current full gates pass1,509 native and1,464
+stock Rust tests, strict checks, formatting and rebuilt addon consumers. Its latest
 homepage-only diagnostic completes HTTP200 hydration under the unchanged20-second
-budget in16.35s whole-run with957MB peak RSS including profiling. Combined gates
-and a fresh Google comparison are pending. Broader timing and selector-admission
+budget in16.35s whole-run with957MB peak RSS including profiling. Broader timing,
+effective Chrome consent handling and selector-admission
 gaps remain in [PARITY-GAPS.md](../harness/detection/PARITY-GAPS.md).
 
 ## 1. No-JS hydration-state mining (`hydration.mjs`)

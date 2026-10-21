@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "capturedDate": "2026-10-20",
-  "captureBaseCommit": "546d5111c4e04ee148d37d375adc583f773ce3b9",
-  "binarySha256": "895e374ab0b0fe74446387a34fe5929063e3be1e14dfb1e00bbfbcf80f4abe32",
-  "extractorSha256": "a0fd048f564ab03670e18fc5229abcf3aa52742db831a6be711fc235e9a00606",
+  "capturedDate": "2026-10-21",
+  "captureBaseCommit": "9304df9d1dcaa9f0b9dbb967f3324e6895764ecd",
+  "binarySha256": "5341249bc9ed698acb83884a42580c83e48da43bedceee33a31166a9484123ab",
+  "extractorSha256": "057efe4a3e3b5bd5f30c1a1b65ee9ec48282bb8cfad5e6f414a1579419d9525d",
   "dirtyDiffHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "interfaceTracerSha256": "d7af9483749573b3ecdfc5e92ec6b79da4e370bc2add7f93d8cb56979d10a3fc",
   "scope": "Selected standalone fixed jc/lc tokens only. No raw URLs, query values, cookies, payloads or addresses. Counts are not a rejection cause or complete JS observation.",
@@ -57,7 +57,7 @@
   "runs": [
     {
       "run": "repeat-0/chrome-baseline",
-      "traceSha256": "a69be6f9d58238ba59fc6a2b8b06210990a531484ccce379dab1bb6bc555f335",
+      "traceSha256": "c7d822dc541b5ddcc8d8aba3e9ac20b563de55341e89eecbc7d21c11672db49e",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -69,7 +69,7 @@
     },
     {
       "run": "repeat-0/native-baseline",
-      "traceSha256": "c0a208837dbd6a5ab206296e972a594803126ca1bfd0c49cab475f94e2cc7efc",
+      "traceSha256": "475b83c195500379f17ab0b4863d6e0a80e1c71a26fb9127b82767da3d3e62db",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -78,11 +78,11 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "c7a0e0e7173208599a21a90aed357b7bd19254e7f34098affc11acc263a0b71e"
+      "networkSha256": "302aaaecf0f5b530eb3084c11eedf239160b51d33916d9d03e056ebe988ec1e4"
     },
     {
       "run": "repeat-0/chrome-interfaces",
-      "traceSha256": "ac0bb5f620ffc32b4e63924dacb5765aae6974d5f931c226c853ec1b9e40fc64",
+      "traceSha256": "5c257a5dc1a7e228260cc14ac51112284fddbf4f70c6c77aef835693efbdea26",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -94,7 +94,7 @@
     },
     {
       "run": "repeat-0/native-interfaces",
-      "traceSha256": "ee2d04fd0ec5a810810b6e9cdae927c91f03b8f7d9be77c07b68e44473ac6235",
+      "traceSha256": "89633e518ae6630944515342eb94a41a25fd0a41bb91359dc12f09f8946ac976",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -103,12 +103,12 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "bce2b238726857b0b153b91834eb32ad714575a5999156acbf0c60457bf493eb"
+      "networkSha256": "12031289e8c1a982d100c7f0dba5c321e63b9404813f0b8e3f86c01b5b06cd3c"
     },
     {
       "run": "repeat-1/chrome-baseline",
-      "traceSha256": "e60eab0f5316daae365f98f0622815895248433f6127cb75666756dd60321023",
-      "recordedErrorCount": 0,
+      "traceSha256": "c58ddd2865349a7a56285519dd2e4352040bbeb5b97a519f944a9ba2e8e9c06f",
+      "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
       "stylesheetTelemetry": [],
@@ -119,7 +119,7 @@
     },
     {
       "run": "repeat-1/native-baseline",
-      "traceSha256": "5c16382fbcea761dffdce305fa62fdd8cd1385887dcbfbed0cb0080c57ca4a4a",
+      "traceSha256": "d06022070d0ec65acf36faf40e687a7a5ade3269039e04fe36d2a328d1ca6685",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -128,11 +128,11 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "942c79733418a900f6a85c641c54988ea9a08b3c7f5fb2d69f15abb06b5a5260"
+      "networkSha256": "f1ea18dcce4603bf14dcb5301c0ff42b2e9da4eb52f9caac75330985fc51e7cc"
     },
     {
       "run": "repeat-1/chrome-interfaces",
-      "traceSha256": "453d70c39d7dc12870fa2070c5e4dbd5e1bf4c939f2bdf585366ffd863814df3",
+      "traceSha256": "6b6ff166d43b9815bd2c17cac9536ee70e86f3ec2af95456d078690c84152c1d",
       "recordedErrorCount": 1,
       "stdoutFailedToFetchCount": 0,
       "stderrBytes": 0,
@@ -144,7 +144,7 @@
     },
     {
       "run": "repeat-1/native-interfaces",
-      "traceSha256": "e9ef9d92f288e4f0a905b4ba8fc6fac7fc71d1da24b5be4dba82d56d0806afb1",
+      "traceSha256": "1689211020eac6064b545cf7b41cfc00d53a80d937a441e7dbf2ab9beb25545b",
       "recordedErrorCount": 0,
       "stdoutFailedToFetchCount": 1,
       "stderrBytes": 0,
@@ -153,7 +153,7 @@
         "jc": 0,
         "lc": 0
       },
-      "networkSha256": "aca79cb605865fb0b7527472a0632001e3a7d153228d2358d72743b8daa82b44"
+      "networkSha256": "48afc21be221bc986197b2c8ca43c5462bb04f1418b8c6d16bbd4bfad079e4ba"
     }
   ]
 }

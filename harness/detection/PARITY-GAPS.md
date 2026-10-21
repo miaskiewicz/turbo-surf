@@ -10,7 +10,7 @@ Do not close either issue merely because the PR merges.
 Reproduce the current configuration with the [Chrome155 parity runbook](./CHROME-PARITY-RUNBOOK.md); it separates required opt-ins and measured evidence from remaining parity gaps.
 
 The current [API-SHAPE-LAST-RUN.json](./API-SHAPE-LAST-RUN.json) and
-[API-INVENTORY.json](./API-INVENTORY.json) record the fresh546d511 audit:
+[API-INVENTORY.json](./API-INVENTORY.json) record the fresh9304df9 audit:
 all75 interfaces measured,64 missing original-four own members,142 expanded
 missing members and374 difference paths. Actual Chrome is155.0.8059.85 /
 V815.5.35.25; native uses15.5.35.23-rusty and the unchanged optimized executable.
@@ -22,32 +22,50 @@ it does not by itself prove the feature is entirely absent. Existing inherited
 methods and aliases must be tested before adding another implementation.
 A repair is closed only after behavior tests and a fresh paired audit pass.
 
-## Startup and scheduling follow-up — in progress
+## Startup and scheduling follow-up — 2026-10-21
 
-These issue28 items are now being addressed in PR26. They remain open until
-producer fixes, integration, regressions and fresh measurements pass:
+The following scoped fixes are integrated in PR26 and validated on9304df9.
+Broader behavior remains open below and in issue28:
 
-- [ ] Share immutable font collection bytes across faces while preserving indexed
+- [x] Share immutable font collection bytes across faces while preserving indexed
   font identity, shaping results and the installed font set. Measure actual cold
   initialization and peak memory independently of guest watchdogs.
-- [ ] Remove repeated ancestor computed-style work within a single calculation,
+- [x] Remove repeated ancestor computed-style work within a single calculation,
   preserving live results after CSSOM, tree and document mutations. The clean
   homepage CPU profile reproduces the cost without interface wrappers.
-- [ ] Run timer tasks with their required microtask checkpoints, preserve real
-  deadlines and implement measured nesting behavior without changing budgets.
-- [ ] Rebuild and validate the actual native engine, then remeasure homepage
-  hydration and the equivalent Google flow. The existing native429 outcome
-  remains unresolved until new evidence is recorded.
+- [x] Run individual timer tasks with their microtask checkpoints and implement
+  measured Window nesting behavior without changing budgets. Broader cadence
+  and task-source ordering remain open.
+- [x] Rebuild and validate the actual native engine, then remeasure homepage
+  hydration and the Google flow. Both native baselines complete initial hydration
+  with one pump inside the unchanged budget, save consent204 and submit real
+  forms, then end429 with zero results. Native SERP acceptance remains0/2.
+- [ ] Resolve remaining instrumented startup exhaustion, interval cadence and
+  broader deadline/task-source behavior. Both interface-instrumented native
+  captures still exhaust their initial hydration budget.
+- [ ] Establish effective fresh Chrome consent dismissal and a complete paired
+  SERP comparison. Four Chrome flow captures stop with an obscured input after
+  no-effect consent dispatch; two blank-fixture probes fail inherited readiness.
+  The subsequent standalone probe configuration repair passes two controls on
+  each Node20/22, full Node22 detection206+Python2 and a genuine seven-process
+  local matrix with all four probes per browser. It does not establish consent
+  success or change the recorded Google failures.
 
 The first rebuilt all-feature homepage diagnostic now completes HTTP200 hydration
 with one completed pump and no budget exhaustion:18.52s whole run and1.24GB peak
 RSS including profiling/snapshots. Its17.83s guest profile still spends about9.77s
 in private CSS lookup/computation. After the selector-first follow-up, a new
 diagnostic completes HTTP200 hydration in16.35s whole-run with957MB peak RSS;
-guest profiling takes14.70s. Full combined gates and fresh Google validation are
-pending. These live diagnostics do not close reliability or native search clearance.
+guest profiling takes14.70s. Full gates at9304df9 pass1,509 native and1,464 stock
+Rust tests, strict Clippy, formatting and rebuilt addon consumers. Native detection
+passes204; stock passes195+9 documented skips. The fresh14-process Google matrix
+has no timeout, eight exit0 and six Chrome exit1. All75 API interfaces are measured;
+142 missing members and374 paths remain. These results do not close reliability,
+complete timing parity or native search clearance. Known CSSOM implicit-color
+synchronization and unknown-pseudo admission remain open; the latter keeps its
+strong ignored Chrome regression and explicit expected exit101.
 
-## Active runner comparison — 2026-10-20
+## Prior runner comparison — 2026-10-20
 
 - [x] Verify a fresh signed-out traced Chrome baseline. Repeat1 uses a verified
   newly created Incognito context, saves consent and reaches a completed200

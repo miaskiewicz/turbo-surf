@@ -94,12 +94,28 @@ residual work beyond this PR, with audio separately deferred in
   and PyPI respectively; no release tag has been created yet.
 - Preserve explicit packaging gaps: clean registry consumers do not inherit the
   workspace transport, hardened WebCrypto or Rusty V8 patches. Public DOM0.5.7
-  and layout0.3.8 source candidates also need compatible registry releases.
+  and layout0.3.8 were initially unpublished; their registry releases are now
+  integrated after all open producer PRs merged. Only those two lockfile
+  source/checksum records change; all other dependencies retain their entries.
   Passing workspace CI does not establish packaged-consumer compatibility.
   The actual `cargo package -p turbo-surf-core --no-verify --locked` preflight
   fails dependency resolution: registry wreq0.16.1 lacks `chromium-roots`.
   This is a packaging failure before compilation, not a failed engine test.
+  Prepare reproducible, licensed transport and Deno dependency distributions
+  without dropping any hardening patch or benchmark/core type edge. Actual
+  package archives and staged consumers remain separate from publication proof.
   See [PUBLISHING.md](./PUBLISHING.md) for the release prerequisites.
+- Test the actual thirteen dependency archives with coherent Deno/V8/serde
+  runtime types, hardened CryptoKey snapshots, ordinary/snapshot weak-handle
+  retirement, and default/prefixed transport API and local TLS controls. Preserve
+  archive checksums, source guards and failed attempts separately. The upstream
+  V8 test harness lacks its published ICU fixture; independent teardown tests
+  retain the reviewed assertions without claiming that harness passed.
+- Support explicit Deno package names in the experimental SDK build helper using
+  private manifest aliases. Keep verified native155 sources, manifests and
+  archive intact; preserve the native backend and reject foreign alias files.
+  Add offline regression checks and document the generated metadata bridge in
+  the Chrome parity runbook. Full integration remains a separate release gate.
 
 ### Runner timing follow-up — 2026-10-20
 

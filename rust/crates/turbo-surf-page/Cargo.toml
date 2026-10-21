@@ -13,7 +13,7 @@ impersonate = ["turbo-surf-core/impersonate"]
 
 [dependencies]
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.4" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.7", git = "https://github.com/miaskiewicz/turbo-dom", rev = "d01d6a5911e3f7a47c0d91d619de01c1008dc28a" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.7" }
 async-trait = "0.1"
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false }

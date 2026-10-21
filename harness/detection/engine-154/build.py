@@ -11,6 +11,7 @@ import subprocess
 import sys
 from prepare import verify_engine, verify_engine_patch
 from surf_workspace import prepare_workspace, cargo_arguments
+from release_aliases import sdk_config
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('destination',type=Path)
@@ -141,4 +142,5 @@ if args.surf:
     source=Path(__file__).resolve().parents[3]
     workspace=prepare_workspace(source,root/'surf-workspace')
     arguments=cargo_arguments(args.surf,source,workspace)
-    sys.exit(subprocess.call(['cargo',arguments[0],'--config',str(root/'cargo-config.toml'),*arguments[1:]],env=environment))
+    config=sdk_config(source,root,workspace)
+    sys.exit(subprocess.call(['cargo',arguments[0],'--config',str(config),*arguments[1:]],env=environment))

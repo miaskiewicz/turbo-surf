@@ -74,12 +74,18 @@ strong ignored Chrome regression and explicit expected exit101.
   dated CI failures and pending checkpoints below retain their historical scope.
 - [ ] Validate clean registry consumers before publishing crates. Workspace
   transport, hardened WebCrypto and Rusty V8 patches do not propagate to them;
-  public Git-pinned DOM0.5.7/layout0.3.8 candidates also require compatible
-  registry releases. This is a release prerequisite, separate from browser parity.
+  the prepared fork distributions still need verified publication and consumers.
+  DOM0.5.7/layout0.3.8 are now published and integrated from the registry. This
+  is a release prerequisite, separate from browser parity.
   A real core package preflight fails before compilation because registry
   wreq0.16.1 lacks `chromium-roots`; the workspace Git patch supplies it.
   See [PUBLISHING.md](../../PUBLISHING.md). All broader parity items remain open
   in issue28, with audio in issue27; passing CI or merging does not close them.
+- [x] Prepare and component-test the thirteen licensed dependency distributions:
+  three Deno/runtime/crypto/teardown checks and eight default/prefixed transport
+  checks pass on actual archives. The release helper has fourteen offline
+  controls and an independent source review. Full Surf integration, publication
+  and real registry consumers remain separate unchecked prerequisites above.
 - [ ] Verify published npm platform binaries, PyPI wheels/sdist and crates.io
   libraries after the release. Version0.5.4 is prepared; release tags and
   registry verification have not been completed.
@@ -763,7 +769,7 @@ No native interface is absent in this75-interface capture. This does not enumera
 | Classic script errors | Preserve original exceptions, trusted Window reporting and fetched-script load success; mute no-CORS cross-origin reports | Current default main/iframe and CORS controls pass; fresh Chrome155 authored fixture saved. Genuine155 paired audit pending; Window onerror registry and wider error handling in progress |
 | Element event propagation | Include actual Window in native node propagation path with capture/phase/stop/composedPath semantics | Canonical bf2a0ef passes 133 Rust and 63 JS tests, including private generic/Window/Node/Signal collection regressions. Generic EventTarget and AbortSignal listener/handler records are private; direct-target registration order follows fresh Chrome155 controls. Surf integration removes duplicate manual callbacks/DCL and public abort stubs; the earlier integrated native155 gate passed; six current event contracts and final default/native workspace gates pass. Timeout/any, full composed-shadow retargeting and listener exception reporting remain open |
 | Live search | Reliable fresh consent+query+retry acceptance without imported Chrome cookies | Latest October21 measured source9304df9: native baseline0/2, genuine consent204 and native form submission followed by429 with zero result markers. Both clean baselines complete one initial pump without budget exhaustion; both instrumented native captures still exhaust startup. Four Chrome flow captures stop after ineffective consent dispatch, so the latest matrix lacks a successful Chrome SERP baseline. The blank-probe readiness fix subsequently passes local controls; no later Google run is claimed. Earlier October17/20 successes and failures remain dated evidence; rejection cause is unproven |
-| Publishing | Clean registry consumers need compatible published DOM and transport APIs; verify per-platform artifacts | Latest published DOM0.5.6 and layout0.3.7 are distinct from pinned public DOM0.5.7/layout0.3.8 candidates; registry-ready transport APIs, distributable hardened crypto and Rusty V8 dependencies, clean packaged consumers and per-platform Surf artifacts remain unresolved |
+| Publishing | Clean registry consumers need compatible published dependencies; verify per-platform artifacts | Registry DOM0.5.7 and layout0.3.8 are integrated after their producer merges/releases. Distributable transport, hardened crypto and Rusty V8 dependencies, clean published consumers and per-platform Surf artifacts remain unresolved; preparation is recorded in rust/release-deps |
 
 ## Closure record
 

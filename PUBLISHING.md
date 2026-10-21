@@ -44,11 +44,13 @@ changelog entries and unrelated dependency versions must retain their own versio
    --all-targets && cargo fmt --check`; from the root `npm run lint && npm run
    format:check` (the launcher JS).
 3. Add the new version's entry to `CHANGELOG.md`.
-4. Commit (`chore(release): vX.Y.Z`), then cut BOTH tags at the same commit:
+4. Commit the release preparation (`chore(release): vX.Y.Z`), pass the PR gates,
+   then merge with a merge commit. Verify its tree contains the tested release
+   changes and cut BOTH tags on that final merge commit:
    - `git tag -a vX.Y.Z -m vX.Y.Z` — npm + crates.
    - `git tag -a pyvX.Y.Z -m pyvX.Y.Z` — PyPI wheels.
-   Push the commit **and** both tags: `git push origin <branch> && git push origin
-   vX.Y.Z pyvX.Y.Z`. (Skip `pyvX.Y.Z` only if you deliberately aren't shipping Python.)
+   Push the annotated tags together: `git push --atomic origin vX.Y.Z pyvX.Y.Z`.
+   (Skip `pyvX.Y.Z` only if you deliberately aren't shipping Python.)
 5. The workflows build + publish. Verify after CI:
    - `npm view turbo-surf version` (and that `bin/` shipped:
      `npm pack turbo-surf --dry-run`)
@@ -131,17 +133,17 @@ hardened provider or an upstream release containing the fix before publishing
 Surf crates; silently falling back to the unpatched registry crate is unsafe.
 Check the source archive/patch with `python3 rust/vendor/update-deno-crypto.py --check`.
 
-The current DOM consumers use the immutable public turbo-dom0.5.7 candidate
-`d01d6a5911e3f7a47c0d91d619de01c1008dc28a` (PR15). All six consumers use the
-same source; registry compatibility must include that candidate's parser and
-selector changes, not merely a matching version number. Release the reviewed
-producer and switch to a compatible registry floor before publishing Surf crates.
-Render and raster use the public turbo-html2pdf-core0.3.8 candidate
-`8f0aa139490573e7ef7a27a4c392195f265f900f` (PR25, stacked on PR24), including
-composed layout and shared font programs. Release the reviewed producer, replace
-the Git source with a compatible registry dependency and regenerate/verify the
-production lockfile. Local private path patches are never committed as dependency
-metadata.
+The DOM and layout release prerequisites are now satisfied. All six DOM consumers
+resolve registry turbo-dom0.5.7, published from tagged merge
+`5ec170654313bfdc8ab59db78b6e848e85f6f265` after all open producer PRs merged.
+Render and raster resolve registry turbo-html2pdf-core0.3.8, published from
+`9591fe69e304e89ba4899fcc54c637059f2b121d`, including composed layout and shared
+font programs. The lockfile verifies checksums
+`4c759ebdc434d90ce8ba1301ff94a5b17553b61c594de60118e0af8d337f25e4`
+and `cbb57210ff0331d026dbd66a5122d778d48a034753088b50b3191e6b855a4eb9`
+respectively. Only these two source/checksum records change in the dependency
+update; other lock entries remain unchanged. The previously tested Git candidates
+remain dated provenance, not current dependency metadata.
 
 The default engine also patches Rusty V8 150.4.0 for native weak-handle teardown.
 That ownership fix is required by the retained regression; silently resolving the
@@ -154,6 +156,32 @@ The transport API requirement above still blocks clean crate consumers until
 compatible registry versions or reviewed distributable forks are available. A local
 `npm pack --dry-run` checks the launcher allowlist; it does not verify per-platform
 binaries staged by release CI.
+
+## Distributable dependency preparation
+
+[`rust/release-deps/`](./rust/release-deps/README.md) prepares five renamed
+transport packages and the eight-package Deno/V8/crypto closure, including the
+benchmark dependency needed to retain test type identity. Source and license
+checks, actual normalized archives, compilation/runtime controls and real
+published-consumer checks are distinct prerequisites. Preparing an archive with
+`--no-verify` is not a passing compile or registry verdict. None of these
+preparation tools silently publishes packages.
+
+`release-dependencies.yml` verifies all thirteen distributions before its
+separate publish step. It prepares hash-pinned sources, produces and compiles
+actual normalized archives, runs both consumers and guards staged source bytes.
+Publication keeps Cargo verification enabled, handles registry propagation and
+quota responses, and compares existing versions against the reviewed payload.
+Fresh downstream consumers use an empty Cargo home and the real registry.
+
+The workflow does not run from product tags. Its explicit release branch is
+`codex/release-dependencies-v054`; a push can publish only when repository
+variable `DEPENDENCY_RELEASE_COMMIT` equals that full reviewed commit. The
+maintainer sets that variable before pushing the exact commit to the release
+branch. Manual dispatch defaults to verification and requires an exact source
+commit; publishing additionally requires the explicit publish mode. Secrets are
+read only by the publish step. Retain uploaded receipts on success or failure;
+never treat an accepted upload alone as completed registry verification.
 
 ## Native third-party notices
 

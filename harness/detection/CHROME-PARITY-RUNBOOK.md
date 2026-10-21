@@ -176,6 +176,15 @@ options: `--archive PATH`, `--bindings PATH`, `--archive-sha256 HASH`. The helpe
 `--jobs 2` precedes `--surf`; Cargo arguments follow `--surf`. The helper owns its SDK target/private Cargo workspace and
 preserves the production lock.
 
+The shared build helper also supports the explicit `turbo-surf-deno-*` registry
+package names used by the release dependency preparation. It creates metadata
+aliases inside the private Surf workspace, preserving the verified SDK source
+files, original manifests and native archive. The facade still points to that
+SDK's `v8-exact`; it must not resolve the stock150 backend. Keep the generated
+`sdk-release-aliases/metadata-bridge.json` with the build evidence. This
+compatibility path has offline guards; a new dependency release still requires
+fresh stock and native155 integration tests before claiming build support.
+
 ## 3. Build the actual browserless engine with every required bridge
 
 ```sh

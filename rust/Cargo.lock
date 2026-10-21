@@ -5835,7 +5835,8 @@ dependencies = [
 [[package]]
 name = "turbo-dom"
 version = "0.5.7"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=d01d6a5911e3f7a47c0d91d619de01c1008dc28a#d01d6a5911e3f7a47c0d91d619de01c1008dc28a"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c759ebdc434d90ce8ba1301ff94a5b17553b61c594de60118e0af8d337f25e4"
 dependencies = [
  "html5ever",
  "log",
@@ -5848,7 +5849,8 @@ dependencies = [
 [[package]]
 name = "turbo-html2pdf-core"
 version = "0.3.8"
-source = "git+https://github.com/miaskiewicz/turbo-html2pdf?rev=8f0aa139490573e7ef7a27a4c392195f265f900f#8f0aa139490573e7ef7a27a4c392195f265f900f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbb57210ff0331d026dbd66a5122d778d48a034753088b50b3191e6b855a4eb9"
 dependencies = [
  "chrono",
  "core-foundation",

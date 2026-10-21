@@ -1,0 +1,117 @@
+name: release-dependencies
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-dependencies.yml
+      - rust/release-deps/**
+      - rust/vendor/rusty_v8/**
+      - rust/vendor/deno_crypto/**
+  push:
+    branches: [codex/release-dependencies-v054]
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [verify, publish]
+        default: verify
+        required: true
+      expected_commit:
+        description: Full reviewed source commit (mandatory for publishing)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dependencies-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  distributions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.0
+      RELEASE_ROOT: ${{ runner.temp }}/release-dependencies
+      EXPECTED_DISPATCH_COMMIT: ${{ inputs.expected_commit }}
+      APPROVED_PUSH_COMMIT: ${{ vars.DEPENDENCY_RELEASE_COMMIT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require an exact reviewed commit for a publish request
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          event, sha = os.environ['GITHUB_EVENT_NAME'], os.environ['GITHUB_SHA']
+          publishing = event == 'push' or os.environ.get('REQUESTED_MODE') == 'publish'
+          expected = os.environ.get('APPROVED_PUSH_COMMIT') if event == 'push' else os.environ.get('EXPECTED_DISPATCH_COMMIT')
+          if publishing and (not expected or not re.fullmatch('[0-9a-f]{40}', expected) or expected != sha):
+              raise SystemExit('Publishing requires the exact reviewed commit approval; no packages were published')
+          if event == 'workflow_dispatch' and expected != sha:
+              raise SystemExit('Dispatch source commit differs')
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write('RELEASE_SOURCE_COMMIT=' + sha + '\n')
+              f.write('PUBLISH_REQUESTED=' + str(publishing).lower() + '\n')
+          PY
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev cmake nasm
+      # BoringSSL's pinned build tooling may fetch its pinned Go modules;
+      # Cargo --offline below does not claim whole-build network isolation.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+          cache: false
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
+          key: dependency-distribution-1.98
+      - name: Offline preparation and publication controls
+        run: |
+          python3 -B -m unittest discover -s rust/release-deps -p 'test_*.py' -v
+          python3 -B -m unittest discover -s rust/release-deps/deno -p 'test_*.py' -v
+      - name: Prepare pinned sources outside Cargo's cache
+        run: |
+          mkdir -p "$RELEASE_ROOT"
+          python3 -B rust/release-deps/deno/prepare.py --archive-dir "$RELEASE_ROOT/upstream-archives" --download --output "$RELEASE_ROOT/deno"
+          python3 -B rust/release-deps/deno/prepare.py --archive-dir "$RELEASE_ROOT/upstream-archives" --output "$RELEASE_ROOT/deno" --check
+          python3 -B rust/release-deps/transport/prepare.py --fetch-sources "$RELEASE_ROOT/upstream-git" --output "$RELEASE_ROOT/transport"
+      - name: Verify all thirteen actual distributions and consumers
+        run: |
+          python3 -B rust/release-deps/publish.py verify --expected-commit "$RELEASE_SOURCE_COMMIT" --deno "$RELEASE_ROOT/deno" --transport "$RELEASE_ROOT/transport" --output "$RELEASE_ROOT/verification"
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          plan = Path(os.environ['RELEASE_ROOT']) / 'verification/verified-plan.json'
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write('VERIFIED_PLAN_SHA=' + hashlib.sha256(plan.read_bytes()).hexdigest() + '\n')
+          PY
+      - name: Publish verified dependencies in order and verify registry payloads
+        if: env.PUBLISH_REQUESTED == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          python3 -B rust/release-deps/publish.py publish --expected-commit "$RELEASE_SOURCE_COMMIT" --plan "$RELEASE_ROOT/verification/verified-plan.json" --expected-plan-sha "$VERIFIED_PLAN_SHA" --output "$RELEASE_ROOT/publication"
+      - name: Retain preparation, verification and publication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-distributions-${{ github.sha }}
+          path: |
+            ${{ env.RELEASE_ROOT }}/verification/*.json
+            ${{ env.RELEASE_ROOT }}/verification/*.log
+            ${{ env.RELEASE_ROOT }}/verification/archives/*.crate
+            ${{ env.RELEASE_ROOT }}/publication/*.json
+            ${{ env.RELEASE_ROOT }}/publication/*.log
+            ${{ env.RELEASE_ROOT }}/publication/*.crate
+            ${{ env.RELEASE_ROOT }}/deno/prepared-source-identity.json
+            ${{ env.RELEASE_ROOT }}/transport/prepared-source-identity.json
+          if-no-files-found: warn

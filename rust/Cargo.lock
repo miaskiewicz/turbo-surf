@@ -538,29 +538,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "btls"
-version = "0.5.6"
-source = "git+https://github.com/0x676e67/btls?rev=f5a8a483eca2e0b3f539f944604da3f8e14a910e#f5a8a483eca2e0b3f539f944604da3f8e14a910e"
-dependencies = [
- "bitflags 2.13.0",
- "btls-sys",
- "foreign-types",
- "libc",
- "openssl-macros",
-]
-
-[[package]]
-name = "btls-sys"
-version = "0.5.6"
-source = "git+https://github.com/0x676e67/btls?rev=f5a8a483eca2e0b3f539f944604da3f8e14a910e#f5a8a483eca2e0b3f539f944604da3f8e14a910e"
-dependencies = [
- "bindgen 0.73.2",
- "cmake",
- "fs_extra",
- "fslock",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1301,92 +1278,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "deno_core"
-version = "0.412.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "580cb2e0d797d75ff3dfc4a8f2b14aa7470f0fa31654a09a83d4cbb42b5eb9b4"
-dependencies = [
- "anyhow",
- "base64",
- "bit-set 0.8.0",
- "bit-vec 0.8.0",
- "boxed_error",
- "bytes",
- "cooked-waker",
- "deno_error",
- "deno_ops",
- "deno_path_util",
- "deno_unsync",
- "deno_v8",
- "futures",
- "indexmap",
- "inventory",
- "libc",
- "num-bigint",
- "parking_lot",
- "percent-encoding",
- "pin-project",
- "serde",
- "serde_json",
- "serde_v8",
- "smallvec",
- "sourcemap",
- "static_assertions",
- "sys_traits",
- "thiserror 2.0.18",
- "tokio",
- "url",
- "uuid",
- "wasm_dep_analyzer",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "deno_crypto"
-version = "0.273.0"
-dependencies = [
- "aes",
- "aes-gcm",
- "aes-kw",
- "argon2",
- "aws-lc-rs",
- "base64",
- "cbc",
- "const-oid 0.9.6",
- "ctr",
- "curve25519-dalek",
- "deno_core",
- "deno_crypto_provider",
- "deno_error",
- "ecdsa",
- "elliptic-curve 0.13.8",
- "fips203",
- "fips205",
- "hmac",
- "num-traits",
- "ocb3",
- "once_cell",
- "p256",
- "p384",
- "p521",
- "rand 0.8.5",
- "rsa",
- "serde",
- "serde_bytes",
- "sha1",
- "sha2",
- "sha3",
- "signature 2.2.0",
- "spki 0.7.3",
- "subtle",
- "thiserror 2.0.18",
- "tiny-keccak",
- "tokio",
- "uuid",
- "x25519-dalek",
-]
-
-[[package]]
 name = "deno_crypto_provider"
 version = "0.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1460,48 +1351,6 @@ dependencies = [
  "futures-util",
  "parking_lot",
  "tokio",
-]
-
-[[package]]
-name = "deno_v8"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85cdff08dedf79da6a40f97554f47d59d419ba3df8061b8b31789cd2cbe00433"
-dependencies = [
- "v8",
- "v8x",
-]
-
-[[package]]
-name = "deno_web"
-version = "0.290.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7510967ba4ec695959c1a518748c3b564fd9ca7a8f3eb13bd397707a3ca232da"
-dependencies = [
- "async-trait",
- "brotli 6.0.0",
- "bytes",
- "cssparser 0.36.0",
- "deno_core",
- "deno_error",
- "encoding_rs",
- "flate2",
- "futures",
- "serde",
- "thiserror 2.0.18",
- "tokio",
- "unicode-normalization",
- "urlpattern",
- "uuid",
-]
-
-[[package]]
-name = "deno_webidl"
-version = "0.259.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40af42313723a8d3114c4e5b007abd1cab4400a0b68929794c556b2e792409c7"
-dependencies = [
- "deno_core",
 ]
 
 [[package]]
@@ -4632,20 +4481,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_v8"
-version = "0.321.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd3b6f6140192f569b88997e2ea7afeef6aa38b64374e84784ea1d1ea35679d3"
-dependencies = [
- "deno_error",
- "deno_v8",
- "num-bigint",
- "serde",
- "smallvec",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "serdect"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5653,15 +5488,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-btls"
-version = "0.5.6"
-source = "git+https://github.com/0x676e67/btls?rev=f5a8a483eca2e0b3f539f944604da3f8e14a910e#f5a8a483eca2e0b3f539f944604da3f8e14a910e"
-dependencies = [
- "btls",
- "tokio",
-]
-
-[[package]]
 name = "tokio-macros"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5873,6 +5699,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "turbo-surf-btls"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ff6efbcc13be5c1193d853717a5caaad8563d0e6692e2294d7ee9ee4e2954d2"
+dependencies = [
+ "bitflags 2.13.0",
+ "foreign-types",
+ "libc",
+ "openssl-macros",
+ "turbo-surf-btls-sys",
+]
+
+[[package]]
+name = "turbo-surf-btls-sys"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcea54fa982faf049a147eb7cba8357595df1685aa01f4321b52ed8e6e714c54"
+dependencies = [
+ "bindgen 0.73.2",
+ "cmake",
+ "fs_extra",
+ "fslock",
+]
+
+[[package]]
 name = "turbo-surf-core"
 version = "0.5.4"
 dependencies = [
@@ -5899,13 +5750,143 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower",
+ "turbo-surf-wreq",
+ "turbo-surf-wreq-util",
  "url",
  "urlpattern",
  "webpki-roots",
- "wreq",
  "wreq-proto",
- "wreq-util",
  "zstd",
+]
+
+[[package]]
+name = "turbo-surf-deno-core"
+version = "0.412.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a935f58e14defa0a5b66a25cf3bebc735013979ca03fc7fa3db21dacb6c079f"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bit-set 0.8.0",
+ "bit-vec 0.8.0",
+ "boxed_error",
+ "bytes",
+ "cooked-waker",
+ "deno_error",
+ "deno_ops",
+ "deno_path_util",
+ "deno_unsync",
+ "futures",
+ "indexmap",
+ "inventory",
+ "libc",
+ "num-bigint",
+ "parking_lot",
+ "percent-encoding",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "sourcemap",
+ "static_assertions",
+ "sys_traits",
+ "thiserror 2.0.18",
+ "tokio",
+ "turbo-surf-deno-v8",
+ "turbo-surf-serde-v8",
+ "url",
+ "uuid",
+ "wasm_dep_analyzer",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "turbo-surf-deno-crypto"
+version = "0.273.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6b4b4b54f568b45b7ad020556cc038402d70b80bfda1c161e9f3bbc451a8cd6"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "aes-kw",
+ "argon2",
+ "aws-lc-rs",
+ "base64",
+ "cbc",
+ "const-oid 0.9.6",
+ "ctr",
+ "curve25519-dalek",
+ "deno_crypto_provider",
+ "deno_error",
+ "ecdsa",
+ "elliptic-curve 0.13.8",
+ "fips203",
+ "fips205",
+ "hmac",
+ "num-traits",
+ "ocb3",
+ "once_cell",
+ "p256",
+ "p384",
+ "p521",
+ "rand 0.8.5",
+ "rsa",
+ "serde",
+ "serde_bytes",
+ "sha1",
+ "sha2",
+ "sha3",
+ "signature 2.2.0",
+ "spki 0.7.3",
+ "subtle",
+ "thiserror 2.0.18",
+ "tiny-keccak",
+ "tokio",
+ "turbo-surf-deno-core",
+ "uuid",
+ "x25519-dalek",
+]
+
+[[package]]
+name = "turbo-surf-deno-v8"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7066b0c104fc7b3aa9f9d8b13deaabb27c372ca81b3841cbbf4a66af25c75712"
+dependencies = [
+ "turbo-surf-v8",
+ "v8x",
+]
+
+[[package]]
+name = "turbo-surf-deno-web"
+version = "0.290.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8e0b0b8555dffbb5886b1c0f5eaa9f457667e3e80c3cb08894acb216d992b31"
+dependencies = [
+ "async-trait",
+ "brotli 6.0.0",
+ "bytes",
+ "cssparser 0.36.0",
+ "deno_error",
+ "encoding_rs",
+ "flate2",
+ "futures",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "turbo-surf-deno-core",
+ "unicode-normalization",
+ "urlpattern",
+ "uuid",
+]
+
+[[package]]
+name = "turbo-surf-deno-webidl"
+version = "0.259.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a287b376e7f1f9fd2632cf6646f927c1dbe12bc8eb37a01c733204f63d729c95"
+dependencies = [
+ "turbo-surf-deno-core",
 ]
 
 [[package]]
@@ -6001,12 +5982,7 @@ dependencies = [
  "base64",
  "cc",
  "cssparser 0.37.0",
- "deno_core",
- "deno_crypto",
  "deno_error",
- "deno_v8",
- "deno_web",
- "deno_webidl",
  "encoding_rs",
  "fips203",
  "getrandom 0.4.3",
@@ -6026,9 +6002,38 @@ dependencies = [
  "turbo-dom",
  "turbo-html2pdf-core",
  "turbo-surf-core",
+ "turbo-surf-deno-core",
+ "turbo-surf-deno-crypto",
+ "turbo-surf-deno-v8",
+ "turbo-surf-deno-web",
+ "turbo-surf-deno-webidl",
  "url",
  "x25519-dalek",
  "zeroize",
+]
+
+[[package]]
+name = "turbo-surf-serde-v8"
+version = "0.321.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1e256e4e58d63cd036d507dd7aafa62629c0ec480de71fc3e746aa2821cbbf8"
+dependencies = [
+ "deno_error",
+ "num-bigint",
+ "serde",
+ "smallvec",
+ "thiserror 2.0.18",
+ "turbo-surf-deno-v8",
+]
+
+[[package]]
+name = "turbo-surf-tokio-btls"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcd48a0b26acaa765dc9e005cdf840414d245fb0384895c92718f05d3fdf2fb5"
+dependencies = [
+ "tokio",
+ "turbo-surf-btls",
 ]
 
 [[package]]
@@ -6036,6 +6041,23 @@ name = "turbo-surf-transform"
 version = "0.5.4"
 dependencies = [
  "swc_core",
+]
+
+[[package]]
+name = "turbo-surf-v8"
+version = "150.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c120db93d7df8c391e904ae6cee92aff7fe780f20e4fc68c8d5d63a6c446fb0"
+dependencies = [
+ "bindgen 0.72.1",
+ "bitflags 2.13.0",
+ "fslock",
+ "gzip-header",
+ "home",
+ "miniz_oxide",
+ "paste",
+ "temporal_capi",
+ "which",
 ]
 
 [[package]]
@@ -6049,6 +6071,53 @@ dependencies = [
  "turbo-dom",
  "turbo-surf-core",
  "url",
+]
+
+[[package]]
+name = "turbo-surf-wreq"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b0373410b0fcbe0735ee0d1bdfe0e2a8ce8822648bc70d0e2231c3ece257ca0"
+dependencies = [
+ "bytes",
+ "chromium-roots",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "http2",
+ "httparse",
+ "ipnet",
+ "libc",
+ "lru",
+ "percent-encoding",
+ "pin-project-lite",
+ "socket2",
+ "sync_wrapper",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tower-http 0.7.1",
+ "turbo-surf-btls",
+ "turbo-surf-btls-sys",
+ "turbo-surf-tokio-btls",
+ "url",
+ "wreq-proto",
+ "wreq-rt",
+]
+
+[[package]]
+name = "turbo-surf-wreq-util"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "607615e7c7322b74e71ce61504f3ab0d7ab86c03a7426df3cb13b7404d890c25"
+dependencies = [
+ "brotli 9.0.0",
+ "chromium-roots",
+ "flate2",
+ "turbo-surf-wreq",
+ "typed-builder",
+ "zstd",
 ]
 
 [[package]]
@@ -6249,21 +6318,6 @@ dependencies = [
  "js-sys",
  "serde_core",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "v8"
-version = "150.4.0"
-dependencies = [
- "bindgen 0.72.1",
- "bitflags 2.13.0",
- "fslock",
- "gzip-header",
- "home",
- "miniz_oxide",
- "paste",
- "temporal_capi",
- "which",
 ]
 
 [[package]]
@@ -6814,38 +6868,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
-name = "wreq"
-version = "0.16.1"
-source = "git+https://github.com/greg-flux/wreq?rev=4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762#4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762"
-dependencies = [
- "btls",
- "btls-sys",
- "bytes",
- "chromium-roots",
- "futures-util",
- "http",
- "http-body",
- "http-body-util",
- "http2",
- "httparse",
- "ipnet",
- "libc",
- "lru",
- "percent-encoding",
- "pin-project-lite",
- "socket2",
- "sync_wrapper",
- "tokio",
- "tokio-btls",
- "tokio-util",
- "tower",
- "tower-http 0.7.1",
- "url",
- "wreq-proto",
- "wreq-rt",
-]
-
-[[package]]
 name = "wreq-proto"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6874,19 +6896,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "wreq-proto",
-]
-
-[[package]]
-name = "wreq-util"
-version = "0.2.0"
-source = "git+https://github.com/0x676e67/wreq-util?rev=5715529002738f46eea86a7271f918f9374d3582#5715529002738f46eea86a7271f918f9374d3582"
-dependencies = [
- "brotli 9.0.0",
- "chromium-roots",
- "flate2",
- "typed-builder",
- "wreq",
- "zstd",
 ]
 
 [[package]]

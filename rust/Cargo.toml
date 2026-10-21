@@ -27,16 +27,3 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 [profile.release]
 opt-level = 3
 lto = "thin"
-
-# Chrome 154 requires APIs newer than the published 0.16.1/0.2.0 crates.
-# Pin the coherent upstream stack, including BoringSSL via btls-sys's submodule.
-# Workspace patches do not propagate to crates.io consumers: library publishing
-# requires verified dependency publication and clean registry consumers.
-[patch.crates-io]
-v8 = { path = "vendor/rusty_v8" }
-deno_crypto = { path = "vendor/deno_crypto" }
-wreq = { git = "https://github.com/greg-flux/wreq", rev = "4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762" }
-wreq-util = { git = "https://github.com/0x676e67/wreq-util", rev = "5715529002738f46eea86a7271f918f9374d3582" }
-btls = { git = "https://github.com/0x676e67/btls", rev = "f5a8a483eca2e0b3f539f944604da3f8e14a910e" }
-btls-sys = { git = "https://github.com/0x676e67/btls", rev = "f5a8a483eca2e0b3f539f944604da3f8e14a910e" }
-tokio-btls = { git = "https://github.com/0x676e67/btls", rev = "f5a8a483eca2e0b3f539f944604da3f8e14a910e" }

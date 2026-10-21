@@ -1,7 +1,9 @@
 # Native weak-handle teardown
 
-The default engine consumes a reviewed patch of Rusty V8 **150.4.0**. The published
-archive and upstream revision, retained MIT license and source hashes are pinned
+The default engine consumes the registry package `turbo-surf-v8` **150.4.0**,
+through the shared `turbo-surf-deno-v8` 0.4.0 facade. It retains the reviewed Rusty
+V8 teardown patch. The original upstream archive and revision, retained MIT
+license and source hashes are pinned
 in [RUSTY_V8_SOURCE_PINS.json](RUSTY_V8_SOURCE_PINS.json). The complete patch is
 [rusty-v8-150.patch](rusty-v8-150.patch).
 
@@ -33,7 +35,17 @@ The helper accepts `--archive PATH` and verifies the published archive hash befo
 extracting or applying anything. Full-source payloads are local build inputs;
 commit only the reviewed default subset.
 
-The workspace Cargo patch is development integration. Registry consumers do not
-inherit workspace patches: publishable Surf libraries still require a properly
-distributed dependency or an upstream release containing the teardown fix, plus
-clean consumer packaging checks.
+Surf's direct `v8` Rust alias selects `turbo-surf-deno-v8` 0.4.0; its native
+binding is `turbo-surf-v8` 150.4.0. The coherent named core/serde/extension graph
+preserves one V8 type and native-link identity without a root Cargo patch. See
+[the complete dependency table](../README.md#registry-dependency-identity).
+The same package family at 149.3.0 serves turbo-test in a separate graph; it is
+not Surf's stock binding and does not select the Chrome 155 SDK.
+
+This vendor directory remains the licensed source reproduction input. The
+[distribution generator](../release-deps/deno/README.md) also retains a separate
+test-only patch correcting the old contradictory slot-liveness assertion and
+adding ordinary/snapshot weak-slot retirement controls. It does not change runtime
+code. Original source pins and this source reproduction check remain authoritative
+for the hardening payload; actual normalized distributions, clean registry
+consumers and optional native155 builds require their own recorded validation.

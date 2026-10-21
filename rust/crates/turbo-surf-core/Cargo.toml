@@ -9,7 +9,7 @@ description = "Browserless native-speed crawler core (Rust port, tier 1)"
 
 [features]
 default = ["impersonate"]
-# BoringSSL-backed Chrome 154 transport. Requires the pinned upstream stack and
+# BoringSSL-backed Chrome 154 transport. Uses the reviewed registry stack and
 # Rust 1.98 (workspace Cargo.toml); disable with --no-default-features for rustls.
 impersonate = ["dep:wreq", "dep:wreq-util", "dep:wreq-proto", "dep:tower"]
 # Compatibility alias: the Chrome 154 profile always sends real trust-anchor IDs,
@@ -31,9 +31,9 @@ reqwest = { version = "0.12", default-features = false, features = [
 # because wreq's Chrome emulation advertises `accept-encoding: gzip, deflate, br,
 # zstd` — without them it can't decode the responses it asks for.
 #
-# These published version numbers identify the current upstream release line;
-# workspace Git patches supply the newer Chrome 154 APIs. See publishing limits.
-wreq = { version = "0.16.1", default-features = false, optional = true, features = [
+# Named registry distributions preserve the reviewed Chrome 154 transport APIs
+# and source pins. The Rust aliases remain unchanged; see PUBLISHING.md.
+wreq = { package = "turbo-surf-wreq", version = "=0.16.1", default-features = false, optional = true, features = [
     "tokio-rt",
     "chromium-roots",
     "stream",
@@ -42,7 +42,7 @@ wreq = { version = "0.16.1", default-features = false, optional = true, features
     "deflate",
     "zstd",
 ] }
-wreq-util = { version = "0.2.0", optional = true, features = ["emulation-chromium-pki"] }
+wreq-util = { package = "turbo-surf-wreq-util", version = "=0.2.0", optional = true, features = ["emulation-chromium-pki"] }
 wreq-proto = { version = "=0.2.5", optional = true }
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
 encoding_rs = "0.8"

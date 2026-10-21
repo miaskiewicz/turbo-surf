@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [features]
 # The pinned Chrome 154 transport includes real Chromium trust-anchor IDs.
-# Git patches are required until this transport API reaches the registry; see PUBLISHING.md.
+# The reviewed named registry dependencies preserve this API; see PUBLISHING.md.
 default = ["impersonate"]
 # Build the MCP binary with a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint
 # (BoringSSL, via turbo-surf-core's `impersonate`). Needs a C toolchain (cmake/nasm) at

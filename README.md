@@ -223,7 +223,7 @@ and transport validation; a reported version change does not upgrade V8.
 ### Quick start (anti-bot)
 
 ```bash
-# 1. (optional) real TLS/JA3 + HTTP-2 fingerprint — needs cmake + nasm
+# 1. (optional) real TLS/JA3 + HTTP-2 fingerprint — needs cmake + nasm + libclang
 cargo build --release -p turbo-surf-mcp --features impersonate
 
 # 2. (optional) enable a challenge solver — copy the template and fill ONE
@@ -263,12 +263,12 @@ paths. CAPTCHA tiers (AWS `captcha`, CF Turnstile-interactive) aren't self-solva
 and route straight to the sidecar.
 
 Build feature (not env): **`impersonate`** is enabled by default for the MCP binary and swaps rustls → BoringSSL
-(`wreq`) for a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint. Needs `cmake`+`nasm`.
+(`wreq`) for a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint. Needs `cmake`, `nasm` and `libclang`.
 The Chrome 154 transport sends real `trust_anchors` IDs by default, backed by the
 same Chromium root store used for certificate verification. `trust-anchors` is a
-compatibility feature alias. This development build requires pinned upstream Git
-sources and Rust 1.98; crates.io library publishing remains blocked until those
-APIs ship — see [`PUBLISHING.md`](./PUBLISHING.md).
+compatibility feature alias. The reviewed named registry distributions preserve
+the pinned transport APIs and require Rust 1.98. Actual package and registry
+consumer checks are documented in [`PUBLISHING.md`](./PUBLISHING.md).
 
 Build feature (not env): **`--features gpu-metal`** (macOS/Metal, off by default) runs the
 render tier's **WebGL on the real Apple GPU** — a live WebGL→wgpu→Metal bridge records the
@@ -417,9 +417,15 @@ stay in issue28. Full Chrome parity is not established.
 **TLS/HTTP-2 fingerprint (`impersonate`).** rustls can't forge Chrome's
 JA3/JA4 + Akamai HTTP-2 fingerprint. The default MCP build uses BoringSSL
 (`wreq`) with the [upstream Chrome 154 profile](https://github.com/0x676e67/wreq-util/blob/5715529002738f46eea86a7271f918f9374d3582/src/emulate/profile/chrome/tls.rs)
-and the measured Chrome 155 navigation identity. The workspace pins wreq
-`4ed3cf0c` in the controlled `greg-flux/wreq` fork (upstream base `c6fd8b1`), wreq-util `5715529`, and btls `f5a8a48`; btls-sys pins BoringSSL
-`f1f2556`. These APIs require Rust 1.98.0, pinned in `rust/rust-toolchain.toml`.
+and the measured Chrome 155 navigation identity. Registry packages
+`turbo-surf-wreq` 0.16.1 and `turbo-surf-wreq-util` 0.2.0 retain the Rust aliases
+`wreq` and `wreq-util`; their BoringSSL chain uses `turbo-surf-btls`,
+`turbo-surf-btls-sys` and `turbo-surf-tokio-btls` 0.5.6. The reviewed source pins
+remain wreq `4ed3cf0c` in `greg-flux/wreq` (upstream base `c6fd8b1`),
+wreq-util `5715529`, btls `f5a8a48` and BoringSSL `f1f2556`. Full revisions and the
+reproducible licensed distributions are recorded in
+[release-deps](rust/release-deps/README.md). These APIs require Rust 1.98.0,
+pinned in `rust/rust-toolchain.toml`.
 
 ```bash
 cd rust
@@ -430,9 +436,11 @@ cargo test -p turbo-surf-core --test client_hello
 The offline ClientHello regression checks the cipher sequence, signature-algorithm
 GREASE, ML-DSA44/65/87, and exact public trust-anchor IDs against a local Chrome
 154.0.8037.98 capture. The former empty trust-anchor patch is superseded by upstream
-support. Workspace patches do not propagate to library consumers, so publishing
-requires published compatible APIs or verified fork distributions and a passing
-clean registry consumer; source review alone does not satisfy that requirement.
+support. Published Surf libraries use the explicit named registry dependency
+graph, so consumers do not need the former workspace Git patches. Preparing or
+publishing those dependencies is separate from a passing
+[actual packaged-consumer check](rust/release-deps/surf-consumer/README.md);
+source review alone does not establish distribution compatibility.
 
 The development candidate also negotiates genuine compression dictionaries from
 partitioned native session state and decodes selected Brotli/Zstandard responses.
@@ -446,16 +454,20 @@ Google acceptance. See the [live header boundaries](harness/detection/COMPRESSIO
 Native WebCrypto uses a reproducibly hardened Deno provider and genuine Rust
 X-Wing keys for Chrome 155's `MLKEM768-X25519`. Key permissions and private native
 cloning have adversarial regression coverage; the covered localhost algorithm
-queries and KEM roundtrips match Chrome 155. The provider patch also needs a
-distributable dependency before a crates.io release. See the
+queries and KEM roundtrips match Chrome 155. The render crate's `deno_crypto`
+alias resolves `turbo-surf-deno-crypto` 0.273.0, preserving the reviewed hardening
+and native clone API through its matching Deno/V8 registry graph. See the
 [provider provenance](rust/vendor/DENO_CRYPTO.md) and the
 [itemized browser parity backlog](harness/detection/PARITY-GAPS.md) for remaining
 behavior and validation limits.
 
-The default render tier uses `deno_core` 0.412.0 and `deno_v8` 0.4.0 with
-[the `v8` 150.4.0 binding](https://docs.rs/crate/deno_v8/0.4.0/source/Cargo.toml)
-(native engine 15.0.245.2, corresponding to Chrome 150). The harness records the
-actual engine/template versions separately from the Chrome 155 identity. The TLS
+The default render tier's `deno_core` alias resolves
+`turbo-surf-deno-core` 0.412.0. Its `v8` alias resolves the facade
+`turbo-surf-deno-v8` 0.4.0, backed by the teardown-hardened
+`turbo-surf-v8` 150.4.0 binding (native engine 15.0.245.2, corresponding to
+Chrome 150). Numeric versions and official native archive identities retain their
+upstream meanings; package renaming does not upgrade the engine. The harness
+records actual engine/template versions separately from the Chrome 155 identity. The TLS
 upgrade does not upgrade the JavaScript engine. The reproducible
 [Chrome 155 source profile](harness/detection/engine-155/README.md) builds and
 validates actual V8 **15.5.35.23-rusty** and the corresponding SDK/context seams.

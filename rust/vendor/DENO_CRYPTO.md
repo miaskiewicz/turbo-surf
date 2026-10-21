@@ -30,7 +30,7 @@ The [Deno MIT license](deno_crypto/LICENSE.md) is retained.
   release whole iframe realms when collected, instead of creating strong Rust
   Global roots.
 - Deprecated AWS-LC ML-DSA aliases use the corresponding stable APIs; this keeps
-  the local path dependency warning-free with the locked provider version.
+  the reviewed provider warning-free with the locked upstream version.
 
 The hostile `Object.prototype.keyData` regression previously observed 16 raw
 bytes when importing a non-extractable AES key. The fixed regression observes
@@ -48,8 +48,18 @@ is elsewhere; `--write` rebuilds the vendored source from that hash-verified
 archive and the committed patch. No registry source files or SDK source files
 are modified.
 
-The workspace applies this source with a Cargo patch. A downstream registry
-consumer does not inherit workspace patches, so a Surf crate release must first
-provide a distributable hardened provider dependency or an upstream release
-containing these fixes. Packaging checks must not silently fall back to the
-unpatched registry provider.
+The render crate now consumes the named registry package
+`turbo-surf-deno-crypto` at exact upstream version 0.273.0 through its unchanged
+`deno_crypto` Rust alias. The matching Deno core, WebIDL and web extension
+packages share the named Deno/V8 family, preserving native types and op
+registration without a root Cargo
+patch. The complete thirteen-package release graph and seven direct aliases are
+listed in [the engine dependency table](../README.md#registry-dependency-identity).
+
+The files in this vendor directory remain licensed reproduction inputs, not the
+runtime dependency selected by a workspace path patch. The
+[distribution generator](../release-deps/deno/README.md) verifies those inputs
+and the original archive before preparing registry metadata. Actual packaged and
+registry consumers must retain the private-key setter and native snapshot
+controls; matching package names or a successful upload alone is not that proof.
+Do not silently fall back to unpatched upstream `deno_crypto`.

@@ -72,14 +72,16 @@ strong ignored Chrome regression and explicit expected exit101.
   Its harness-only follow-up preserves the9304df9 engine and fixture inputs;
   the final detection gate passes206 Node tests and two Python checks. Earlier
   dated CI failures and pending checkpoints below retain their historical scope.
-- [ ] Validate clean registry consumers before publishing crates. Workspace
-  transport, hardened WebCrypto and Rusty V8 patches do not propagate to them;
-  the prepared fork distributions still need verified publication and consumers.
-  DOM0.5.7/layout0.3.8 are now published and integrated from the registry. This
-  is a release prerequisite, separate from browser parity.
-  A real core package preflight fails before compilation because registry
-  wreq0.16.1 lacks `chromium-roots`; the workspace Git patch supplies it.
-  See [PUBLISHING.md](../../PUBLISHING.md). All broader parity items remain open
+- [ ] Validate actual Surf distributions and clean consumers before publishing
+  the product crates. All thirteen named dependencies are now published and
+  payload-verified; their exact reviewed run passes thirteen normal package
+  verifications and eleven fresh registry consumer tests without skips. Seven
+  direct Cargo aliases replace the former root patches; real checksums and
+  unrelated dependency versions are preserved. DOM0.5.7/layout0.3.8 are also
+  published and integrated. The old original-wreq package preflight failure
+  predates this integration. Actual six-Surf-archive, wheel/sdist and product
+  registry consumers remain separate release gates in
+  [PUBLISHING.md](../../PUBLISHING.md). All broader parity items remain open
   in issue28, with audio in issue27; passing CI or merging does not close them.
 - [x] Prepare and component-test the thirteen licensed dependency distributions:
   three Deno/runtime/crypto/teardown checks and eight default/prefixed transport
@@ -91,8 +93,8 @@ strong ignored Chrome regression and explicit expected exit101.
   addon passes shim96+1 intentional skip and E2E20 on both Node versions; its
   full detection suite passes206 on Node22 and197+9 WebSocket-capability skips
   on Node20. Exact addon/runner identities and actual V8 versions are checked.
-  Publication and real registry/package consumers remain separate unchecked
-  prerequisites above.
+  Dependency publication and its fresh registry consumers now pass; actual Surf
+  distribution consumers remain a separate unchecked prerequisite above.
 - [x] Merge all open producer PRs and verify the single patch releases:
   turbo-dom0.5.7, turbo-html2pdf0.3.8 and turbo-test0.4.7. Their registry
   payloads and final merge tags are verified. Official re-vendoring changes only

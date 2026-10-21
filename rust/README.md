@@ -54,6 +54,44 @@ private actual CSSOM state without guest getters or HTML rewriting. Supported
 contracts and remaining inline/caret/scroll/layout limits are recorded in
 [LIVE-GEOMETRY.md](../harness/detection/LIVE-GEOMETRY.md).
 
+## Registry dependency identity
+
+Published library consumers resolve the reviewed named dependency graph directly;
+no root Cargo patch is needed. The seven direct Rust dependency aliases retain
+the existing source/API names. The complete thirteen-package distribution family
+is:
+
+| Registry package | Exact initial version | Direct Surf alias or graph role |
+| --- | --- | --- |
+| `turbo-surf-wreq` | 0.16.1 | `wreq` |
+| `turbo-surf-wreq-util` | 0.2.0 | `wreq-util` |
+| `turbo-surf-btls-sys` | 0.5.6 | transport native dependency |
+| `turbo-surf-btls` | 0.5.6 | transport dependency |
+| `turbo-surf-tokio-btls` | 0.5.6 | transport runtime dependency |
+| `turbo-surf-v8` | 150.4.0 | stock native V8 binding |
+| `turbo-surf-deno-v8` | 0.4.0 | `v8` (the shared facade) |
+| `turbo-surf-serde-v8` | 0.321.0 | shared value conversion |
+| `turbo-surf-deno-core` | 0.412.0 | `deno_core` |
+| `turbo-surf-deno-bench-util` | 0.253.0 | upstream test/benchmark identity |
+| `turbo-surf-deno-crypto` | 0.273.0 | `deno_crypto` |
+| `turbo-surf-deno-webidl` | 0.259.0 | `deno_webidl` |
+| `turbo-surf-deno-web` | 0.290.0 | `deno_web` |
+
+The distribution generators retain upstream versions, native archive URLs,
+licenses and reviewed source pins while mapping every internal dependency to the
+same named family. Transport uses wreq `4ed3cf0c`, wreq-util `5715529`,
+btls `f5a8a48` and BoringSSL `f1f2556`; the V8/crypto sources retain native weak-slot
+teardown and private-key construction/clone hardening. Reproduction, source pins
+and actual-archive/registry consumer procedures are in
+[release-deps](release-deps/README.md),
+[DENO_CRYPTO.md](vendor/DENO_CRYPTO.md) and
+[RUSTY_V8.md](vendor/RUSTY_V8.md).
+
+Stock releases still embed V8 150, not Chrome 155. The experimental native155 SDK
+is an explicit, separately built and validated profile; its package aliases do
+not change the engine version by themselves. Source, distribution, registry and
+native-profile validation remain separate evidence scopes.
+
 ## Tier 1 — `turbo-surf-core`
 
 Direct ports of the JS modules, same behavior and edge cases:

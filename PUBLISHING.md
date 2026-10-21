@@ -160,16 +160,17 @@ the old local `rust/vendor/wreq` fork has been removed. `trust-anchors` is retai
 as a compatibility feature alias; impersonation already includes real anchors.
 
 Native HTTP/2 stream-upload admission additionally requires the existing
-connection metadata trait to be public. The workspace pins the minimal additive
+connection metadata trait to be public. The named `turbo-surf-wreq` 0.16.1 distribution preserves the minimal additive
 fork [`greg-flux/wreq` at `4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762`](https://github.com/greg-flux/wreq/commit/4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762),
 based exactly on upstream `c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5`, while
 [upstream PR #1327](https://github.com/0x676e67/wreq/pull/1327) proposes that API.
 Only the public re-export and its external regression differ; TLS, ALPN and HTTP
 implementation are unchanged. The unchanged upstream package version identifies
 that baseline, not a new registry release. The reviewed distributable transport packages preserve this
-source under the named `turbo-surf-*` dependency family. Integrate those published
-packages with explicit Cargo package aliases before cutting the Surf tags; root
-Git patches do not propagate to downstream library consumers.
+source under the named `turbo-surf-*` dependency family. Core and render consume
+those published packages through seven explicit Cargo aliases; there are no root
+workspace patches. The original source revisions remain provenance, rather than
+downstream dependency overrides.
 
 Build development binaries with Rust 1.98.0 and the committed workspace lockfile
 (`cargo build --locked`). Release authorization does not establish registry
@@ -202,9 +203,11 @@ Render and raster resolve registry turbo-html2pdf-core0.3.8, published from
 font programs. The lockfile verifies checksums
 `4c759ebdc434d90ce8ba1301ff94a5b17553b61c594de60118e0af8d337f25e4`
 and `cbb57210ff0331d026dbd66a5122d778d48a034753088b50b3191e6b855a4eb9`
-respectively. Only these two source/checksum records change in the dependency
-update; other lock entries remain unchanged. The previously tested Git candidates
-remain dated provenance, not current dependency metadata.
+respectively. The initial DOM/layout-only update changed these two records.
+The subsequent named dependency integration replaces twelve runtime packages at
+their existing versions and preserves all other lock records apart from the
+core/render dependency references. The previously tested Git candidates remain
+dated provenance, not current dependency metadata.
 
 The reviewed stock RustyV8150.4.0 source includes native weak-handle teardown
 hardening. That ownership fix is required by the retained regression; silently
@@ -213,6 +216,15 @@ the reviewed named V8 distribution and its matching transitive deno_v8/deno_core
 packages.
 See [rust/vendor/RUSTY_V8.md](./rust/vendor/RUSTY_V8.md). Workspace binary tests
 cannot substitute for clean downstream package tests.
+
+All thirteen named dependency distributions are now published and payload-verified
+by [the exact reviewed dependency run](https://github.com/miaskiewicz/turbo-surf/actions/runs/39590311206).
+Its thirteen normal package verifications and eleven fresh registry consumer
+tests pass without ignored tests. An independent audit compares every actual
+archive with that run's own verified plan, including runtime/license bytes and
+complete normalized manifest semantics. The integrated lockfile uses their real
+registry checksums. Actual Surf archives, wheels and source-tarball consumers
+remain separate product release gates below.
 
 Source preparation, publication and successful consumers are separate checks.
 Require the actual named dependency versions to be available and verified before

@@ -1,8 +1,13 @@
 # Chrome 155 parity runbook
 
 These commands document the verified setup and every opt-in. The latest frozen
-capture and full native/default gates use9304df9:1,509/1,464 Rust tests pass,
-with strict checks, formatting and verified addon consumers. Both native Google
+Google capture uses9304df9, whose native/default gates pass1,509/1,464 Rust
+tests with strict checks, formatting and verified addon consumers. The later
+release-dependency candidate repeats those full Rust gates against the prepared
+named dependency archives. Its rebuilt native155 addon passes shim96+1 intentional
+skip and E2E20 on Node20/22; full detection passes206 on Node22 and197+9
+WebSocket-capability skips on Node20. These staged release checks do not replace
+final registry/package consumers or a fresh Google capture. Both native Google
 baselines finish initial hydration with one pump inside the unchanged budget,
 then save consent, submit real forms and end429 with zero results. The two
 interface-instrumented native captures still exhaust initial hydration. Both
@@ -205,7 +210,10 @@ readback: inspect the shared WebGL probe pixels/metadata. Software fallback is n
 
 The target identity is155; its upstream wreq TLS/H2 recipe is154. Record `reportedChromeMajor`, `transportChromeMajor`
 and `transportBaseChromeMajor` separately. Matching pixels/headers/version strings is not complete browser parity.
-Default builds link V8150; probe the selected addon after the gate below. Node's `process.versions.v8` and npm package
+Default builds link V8150; probe the selected addon after the gate below.
+Standalone Python wheels also use reqwest/rustls resource loading and software
+rasterization by default; workspace feature unification through MCP/NAPI does
+not establish the wheel profile. Node's `process.versions.v8` and npm package
 version are different identities. Keep `PARITY_BIN` pointing to the SDK155 executable.
 
 ## 4. Local controls and final gates
@@ -225,7 +233,7 @@ parity_env python3 harness/detection/engine-155/build.py "$PARITY_SDK" --jobs 2 
 parity_env python3 harness/detection/engine-155/build.py "$PARITY_SDK" --jobs 2 \
   --surf clippy --manifest-path rust/Cargo.toml --workspace --all-targets \
   --features "$PARITY_ALL_FEATURES" -- -D warnings
-parity_env cargo fmt --manifest-path rust/Cargo.toml --check
+(cd "$PARITY_ROOT/rust" && parity_env cargo fmt --check)
 ```
 
 The public TLS echo is a separate live diagnostic. Default workspace gates

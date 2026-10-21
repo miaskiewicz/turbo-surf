@@ -92,19 +92,19 @@ residual work beyond this PR, with audio separately deferred in
 - Keep npm, Rust, NAPI and Python at the next patch version0.5.4. The release
   requires `v0.5.4` and `pyv0.5.4` on the same merge commit for npm/crates.io
   and PyPI respectively; no release tag has been created yet.
-- Preserve explicit packaging gaps: clean registry consumers do not inherit the
-  workspace transport, hardened WebCrypto or Rusty V8 patches. Public DOM0.5.7
-  and layout0.3.8 were initially unpublished; their registry releases are now
-  integrated after all open producer PRs merged. Only those two lockfile
-  source/checksum records change; all other dependencies retain their entries.
-  Passing workspace CI does not establish packaged-consumer compatibility.
-  The actual `cargo package -p turbo-surf-core --no-verify --locked` preflight
-  fails dependency resolution: registry wreq0.16.1 lacks `chromium-roots`.
-  This is a packaging failure before compilation, not a failed engine test.
-  Prepare reproducible, licensed transport and Deno dependency distributions
-  without dropping any hardening patch or benchmark/core type edge. Actual
-  package archives and staged consumers remain separate from publication proof.
-  See [PUBLISHING.md](./PUBLISHING.md) for the release prerequisites.
+- Publish and integrate thirteen reproducible, licensed transport/Deno/V8
+  distributions, preserving the hardening and benchmark/core type edges. Seven
+  explicit Cargo aliases replace the root patches. The normal resolver replaces
+  twelve runtime packages at the same versions; all unrelated lock records stay
+  unchanged. Public DOM0.5.7 and layout0.3.8 are also registry dependencies after
+  all open producer PRs merged. The earlier core package preflight failed before
+  compilation because original registry wreq0.16.1 lacked `chromium-roots`; that
+  failure predates the named dependency integration. The exact reviewed
+  dependency publication passes thirteen normal package verifications and eleven
+  fresh registry consumer tests with no skips. Independent archive audits verify
+  runtime/license bytes, complete normalized manifests and real checksums. Actual
+  Surf package, wheel/sdist and final registry consumers remain separate gates in
+  [PUBLISHING.md](./PUBLISHING.md).
 - Merge all open producer PRs before their single patch releases: turbo-dom
   0.5.7, turbo-html2pdf0.3.8 and turbo-test0.4.7. Verify their actual registry
   payloads and immutable merge tags, including HTML2PDF PyPI wheels and sdist.

@@ -244,6 +244,10 @@ Thirteen literal shipping MIT/notice paths are also byte-preserved. Root tests
   in fresh checkouts, including all nine workspace license copies. Artifact
   audits still compare exact bytes; complete license text with altered line
   endings is not accepted as an identical published payload.
+Three authored Python paths (package module, type stub and installed smoke-test
+source) use explicit `text eol=lf` rules so their artifact bytes and receipt
+hashes also match canonical source on Windows. Real Git controls verify all
+three with LF and CRLF attribute files and reproduce the missing-rule drift.
 This check proves source reproduction, not installed runtime success. Release
 artifacts must also pass actual native JavaScript smoke tests outside the build
 source tree; a successful MCP initialize response alone does not exercise V8.

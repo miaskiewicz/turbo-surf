@@ -30,5 +30,10 @@ rust/crates/turbo-surf-render/src/xpath_provider/LICENSE -text -whitespace
 /rust/crates/turbo-surf-render/THIRD_PARTY_NOTICES.md -text -whitespace
 /rust/crates/turbo-surf-py/python/turbo_surf/THIRD_PARTY_NOTICES.md -text -whitespace
 
+# Authored Python wheel payloads and smoke receipt hashes use canonical LF.
+rust/crates/turbo-surf-py/tests/test_smoke.py text eol=lf
+rust/crates/turbo-surf-py/python/turbo_surf/__init__.py text eol=lf
+rust/crates/turbo-surf-py/python/turbo_surf/__init__.pyi text eol=lf
+
 # Unified diffs require a space prefix on empty context lines.
 harness/detection/engine-154/patches/*.patch -whitespace

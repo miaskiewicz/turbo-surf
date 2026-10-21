@@ -341,5 +341,48 @@ class LicenseCheckoutTests(_GitCheckoutCase):
         self.test_missing_license_rules_reproduces_full_payload_byte_drift()
 
 
+class PythonSourceCheckoutTests(_GitCheckoutCase):
+    """Installed Python source and smoke receipts use canonical LF hashes."""
+
+    PATH_HASHES = {
+        'rust/crates/turbo-surf-py/tests/test_smoke.py': 'a2688b317b60774242bd37427349af9195797c5dd31f5dfa146d87ec6e6aeab5',
+        'rust/crates/turbo-surf-py/python/turbo_surf/__init__.py': 'f5a9ca6ea8e257b955e7f47f17806a8f77d9a6ccaf46ebc5f6582d22eb70af3b',
+        'rust/crates/turbo-surf-py/python/turbo_surf/__init__.pyi': '51d0c7d4788ac137f90dee9c1b27c48209bc598e59e65dc0a279d3b65d74a2bf',
+    }
+
+    def setUp(self):
+        super().setUp()
+        for name, expected in self.PATH_HASHES.items():
+            self.read_asset(Path(name), expected)
+        self.assertEqual(len(self.assets), 3)
+        self.rules = {(name + " text eol=lf").encode() for name in self.PATH_HASHES}
+        self.write_assets()
+
+    def test_windows_checkout_preserves_all_authored_python_bytes(self):
+        self.assertTrue(self.rules.issubset(self.attributes.splitlines()))
+        self.assertEqual(self.checkout(self.attributes), self.assets)
+        values = self.git("check-attr", "-z", "text", "eol", "--", *self.assets).decode().split("\0")
+        self.assertEqual(values[-1], "")
+        rows = [values[index:index + 3] for index in range(0, len(values) - 1, 3)]
+        self.assertEqual(len(rows), 6)
+        self.assertEqual({row[0] for row in rows}, set(self.assets))
+        self.assertTrue(all((row[1], row[2]) in (("text", "set"), ("eol", "lf")) for row in rows))
+
+    def test_missing_python_rules_reproduces_source_hash_drift(self):
+        attributes = b"".join(line for line in self.attributes.splitlines(keepends=True) if line.rstrip(b"\r\n") not in self.rules)
+        actual = self.checkout(attributes)
+        self.assertEqual({name for name in self.assets if actual[name] != self.assets[name]}, set(self.assets))
+        for name, data in self.assets.items():
+            self.assertEqual(actual[name], data.replace(b"\n", b"\r\n"), name)
+
+    def test_crlf_attributes_preserve_all_authored_python_bytes(self):
+        self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        self.test_windows_checkout_preserves_all_authored_python_bytes()
+
+    def test_crlf_attributes_without_python_rules_reproduce_drift(self):
+        self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        self.test_missing_python_rules_reproduces_source_hash_drift()
+
+
 if __name__ == "__main__":
     unittest.main()

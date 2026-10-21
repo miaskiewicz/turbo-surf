@@ -98,6 +98,11 @@ residual work beyond this PR, with audio separately deferred in
   drift; literal Git attributes and real LF/CRLF checkout controls keep payloads
   byte-identical without relaxing installed-artifact or publication audits.
 
+- Keep the authored Python package module, type stub and installed smoke-test
+  source at canonical LF on every platform. Actual Windows wheel bytes exposed
+  CRLF drift; three literal checkout rules and LF/CRLF Git controls preserve the
+  existing exact source and receipt hashes without normalizing artifact audits.
+
 ### Release readiness — 2026-10-21
 
 - Embed the exact 28 licensed Deno Web, WebIDL and Crypto extension JavaScript

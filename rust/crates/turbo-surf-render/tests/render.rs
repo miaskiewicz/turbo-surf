@@ -621,6 +621,9 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
         var d0 = Date.now(), p0 = performance.now();
         setTimeout(function(){
             var d1 = Date.now(), p1 = performance.now();
+            // Date() formats whole seconds; bound its own clock read before checking its format.
+            const callBefore = Date.now(), called = Date(), callAfter = Date.now();
+            const parsedCall = typeof called === 'string' ? Date.parse(called) : NaN;
             document.body.setAttribute('data-t', JSON.stringify({
                 dateDelta: d1 - d0,
                 perfDelta: Math.round((p1 - p0) * 10) / 10,
@@ -634,7 +637,11 @@ async fn clock_reflects_virtual_time_and_is_coherent() {
                 // coherent clock as Date.now(), and the shim keeps native shape + Date semantics.
                 plusDateVsNow: Math.abs((+new Date()) - Date.now()),
                 dateCtorNative: Function.prototype.toString.call(Date).includes('[native code]'),
-                dateCall: Date()===new Date().toString(),
+                dateCall: typeof called === 'string' && Number.isFinite(parsedCall) &&
+                    parsedCall >= Math.floor(callBefore / 1000) * 1000 &&
+                    parsedCall <= Math.floor(callAfter / 1000) * 1000 &&
+                    called === new Date(parsedCall).toString(),
+                dateCallSnapshot: {before: callBefore, called, after: callAfter, parsed: parsedCall},
                 dateUTC: Date.UTC(2000,0,1),
                 dateParse: Date.parse('2000-01-01T00:00:00Z'),
                 reflectUnmodified: (()=>{const original=Reflect.construct;Reflect.construct=()=>{throw Error('modified');};try{return new Date(42).getTime()===42;}finally{Reflect.construct=original;}})(),

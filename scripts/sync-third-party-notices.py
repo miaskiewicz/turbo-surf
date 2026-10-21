@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep package notices and the Rust workspace MIT license synchronized."""
+"""Keep package notices and Rust package MIT licenses synchronized."""
 import argparse
 from pathlib import Path
 
@@ -17,7 +17,14 @@ def main():
                 root / "rust/crates/turbo-surf-py/python/turbo_surf/THIRD_PARTY_NOTICES.md",
             ],
         ),
-        (root / "LICENSE", [root / "rust/LICENSE"]),
+        (
+            root / "LICENSE",
+            [root / "rust/LICENSE"]
+            + [
+                manifest.parent / "LICENSE"
+                for manifest in sorted((root / "rust/crates").glob("turbo-surf-*/Cargo.toml"))
+            ],
+        ),
     ]
     stale = []
     for source, destinations in copies:
@@ -30,7 +37,7 @@ def main():
                 destination.write_bytes(content)
     if stale:
         parser.exit(1, "Stale package notices or license: " + ", ".join(stale) + "\n")
-    print("Package notices and Rust workspace license match their root sources.")
+    print("Package notices and Rust package licenses match their root sources.")
 
 
 if __name__ == "__main__":

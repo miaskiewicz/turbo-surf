@@ -56,7 +56,7 @@ contracts and remaining inline/caret/scroll/layout limits are recorded in
 
 ## Registry dependency identity
 
-The0.5.4 candidate resolves the reviewed named dependency graph directly;
+The 0.5.4 candidate resolves the reviewed named dependency graph directly;
 no root Cargo patch is needed. The seven direct Rust dependency aliases retain
 the existing source/API names. The complete thirteen-package distribution family
 is:

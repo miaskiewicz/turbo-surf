@@ -154,14 +154,19 @@ residual work beyond this PR, with audio separately deferred in
   Manual npm/Python dispatches validate artifacts without publishing; Rust
   publication requires the exact release tag and keeps the verified lockfile.
   Linux binary/crate release jobs explicitly install libclang for the transport
-  binding generator alongside the BoringSSL build tools. Inherit the full root
-  MIT license file in all nine Rust packages; a focused Cargo packaging control
-  confirms SPDX metadata alone omitted it and the inherited file retains its
-  exact bytes. Actual product archive inspection remains a separate gate.
-  Keep that file inside the Rust workspace for maturin compatibility, with
-  `rust/LICENSE` synchronized byte-for-byte from the root MIT license. A genuine
-  source-distribution control rejects the old outside-workspace path and verifies
-  the full license payload after the correction.
+  binding generator alongside the BoringSSL build tools.
+- Package the full root MIT text through synchronized local `LICENSE` files in
+  all nine Rust crates, retaining SPDX `MIT` metadata. Cargo archive, maturin
+  source-tarball and wheel-metadata controls verify exact license bytes without
+  manifest warnings. Local discovery also keeps license paths inside the Rust
+  workspace. Actual product archive/wheel audits remain separate gates.
+- Bound the clock test's `Date()` read with its own before/after timestamps,
+  retaining native string round-trip checks and failure snapshots. Separate
+  clock reads may cross a second boundary; six frozen-runtime controls accept
+  that crossing and reject invalid, stale, non-string and ISO-only substitutes.
+  The earlier CI failure lacked those snapshots, so its exact cause remains
+  unconfirmed. Production clocks, timer budgets and coherence assertions stay
+  unchanged.
 - Include `<cmath>` directly in the compiled ARM NEON delay source for
   `std::isnan`. The Linux ARM release build exposed reliance on a transitive
   platform header. Preserve the audio algorithm and original upstream hashes;

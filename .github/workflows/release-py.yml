@@ -64,8 +64,8 @@ jobs:
       matrix:
         include:
           - { os: macos-14, target: aarch64 }
-          - { os: ubuntu-24.04, target: x86_64, manylinux: auto }
-          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
+          - { os: ubuntu-24.04, target: x86_64, manylinux: '2_28' }
+          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: '2_28' }
           - { os: windows-latest, target: x64 }
     steps:
       - uses: actions/checkout@v4
@@ -87,6 +87,85 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           args: --release --out dist --manifest-path ${{ env.MANIFEST }}
+
+      - name: Record actual Linux wheel ELF requirements
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import hashlib, json, os, re, shutil, stat, subprocess, zipfile
+          from pathlib import Path, PurePosixPath
+          root = Path.cwd().resolve()
+          output = root / 'dist' / 'linux-elf.json'
+          evidence = {'passed': False, 'sourceCommit': os.environ['GITHUB_SHA'], 'expectedManylinux': 'manylinux_2_28', 'libraries': []}
+          def sha(path):
+              with path.open('rb') as stream:
+                  return hashlib.file_digest(stream, 'sha256').hexdigest()
+          def inspect(tool, args):
+              try:
+                  result = subprocess.run([tool, *args], capture_output=True, text=True, timeout=30, env=dict(os.environ, LC_ALL='C'))
+                  return {'arguments': args, 'exitCode': result.returncode, 'timedOut': False, 'stdout': result.stdout, 'stderr': result.stderr}
+              except subprocess.TimeoutExpired as error:
+                  return {'arguments': args, 'exitCode': None, 'timedOut': True, 'stdout': (error.stdout or b'').decode(errors='replace'), 'stderr': (error.stderr or b'').decode(errors='replace')}
+          try:
+              wheels = sorted((root / 'dist').glob('*.whl'))
+              if len(wheels) != 1:
+                  raise RuntimeError('Expected exactly one actual Linux wheel')
+              wheel = wheels[0]
+              platform_tags = wheel.name.removesuffix('.whl').rsplit('-', 1)[-1].split('.')
+              evidence['actualPlatformTags'] = platform_tags
+              if not any(tag.startswith('manylinux_2_28_') for tag in platform_tags):
+                  raise RuntimeError('Actual Linux wheel does not carry its required manylinux_2_28 platform tag')
+              tool = shutil.which('readelf')
+              if not tool:
+                  raise RuntimeError('GNU readelf is required for Linux artifact evidence')
+              work = Path(os.environ['RUNNER_TEMP']) / 'linux-wheel-elf'
+              work.mkdir(mode=0o700)
+              evidence.update(wheel=wheel.name, wheelSha256=sha(wheel), readelf=tool, readelfSha256=sha(Path(tool).resolve()))
+              with zipfile.ZipFile(wheel) as archive:
+                  entries = archive.infolist()
+                  if len(entries) != len({entry.filename for entry in entries}) or sum(entry.file_size for entry in entries) > 2 * 1024**3:
+                      raise RuntimeError('Duplicate or oversized wheel payload')
+                  for entry in entries:
+                      name = PurePosixPath(entry.filename)
+                      if not name.parts or name.is_absolute() or '..' in name.parts or '\\' in entry.filename or stat.S_ISLNK(entry.external_attr >> 16):
+                          raise RuntimeError('Unsafe wheel path or linked entry')
+                      if entry.is_dir() or not (name.name.endswith('.so') or '.so.' in name.name):
+                          continue
+                      if entry.file_size > 1024**3:
+                          raise RuntimeError('Oversized ELF library')
+                      target = work / name
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      with archive.open(entry) as source, target.open('xb') as destination:
+                          shutil.copyfileobj(source, destination, 65536)
+                      with target.open('rb') as stream:
+                          if stream.read(4) != b'\x7fELF':
+                              raise RuntimeError('Wheel shared library is not ELF')
+                      versions = inspect(tool, ['--wide', '--version-info', str(target)])
+                      dynamic = inspect(tool, ['--wide', '-d', str(target)])
+                      required, in_needs = set(), False
+                      for line in versions['stdout'].splitlines():
+                          if line.startswith('Version needs section'):
+                              in_needs = True
+                          elif line.startswith('Version '):
+                              in_needs = False
+                          if in_needs:
+                              required.update(re.findall(r'\b(?:GLIBCXX|GLIBC|CXXABI)_[A-Za-z0-9_.]+', line))
+                      needed = re.findall(r'\(NEEDED\).*?Shared library: \[(.*?)\]', dynamic['stdout'])
+                      evidence['libraries'].append({'wheelPath': entry.filename, 'sha256': sha(target), 'bytes': target.stat().st_size, 'requiredSymbolVersions': sorted(required), 'dtNeeded': needed, 'versionInfo': versions, 'dynamicSection': dynamic})
+                      if any(record['exitCode'] != 0 or record['timedOut'] for record in (versions, dynamic)):
+                          raise RuntimeError('readelf failed or exceeded its deadline; raw output retained')
+              if not evidence['libraries']:
+                  raise RuntimeError('No actual ELF extension or bundled libraries inspected')
+              if sha(wheel) != evidence['wheelSha256']:
+                  raise RuntimeError('Wheel changed during ELF inspection')
+              evidence['passed'] = True
+          except BaseException as error:
+              evidence['error'] = {'type': type(error).__name__, 'message': str(error)}
+              raise
+          finally:
+              output.write_text(json.dumps(evidence, indent=2) + '\n')
+          PYCODE
 
       - name: Install and test the actual direct-wheel
         shell: bash
@@ -135,6 +214,7 @@ jobs:
           name: wheel-smoke-${{ matrix.os }}-${{ matrix.target }}
           path: |
             dist/installed-wheel.json
+            dist/linux-elf.json
             dist/pytest.xml
             ${{ runner.temp }}/direct-wheel-smoke/pytest.xml
           if-no-files-found: warn

@@ -103,7 +103,15 @@ changelog entries and unrelated dependency versions must retain their own versio
    source tarball with an empty Cargo home and the normal registry, then installs
    and tests that wheel before uploading the sdist. Retain artifact hashes,
    installed extension paths and the uploaded smoke receipts; a successful build
-   alone is insufficient.
+   alone is insufficient. Linux Python wheels explicitly target
+   `manylinux_2_28` on both native x86_64 and aarch64 hosts, requiring glibc 2.28
+   or later. This Linux baseline is separate from the unchanged CPython 3.8+ abi3
+   contract. Before shipping, require actual manylinux symbol-compliance checks
+   and installed-wheel tests on both Linux architectures. Retain `linux-elf.json`
+   from each wheel-smoke artifact: it records the actual wheel/ELF hashes, raw
+   bounded `readelf` output, required GLIBC/GLIBCXX/CXXABI versions and DT_NEEDED
+   entries for the extension and any bundled shared libraries. Changing the image
+   alone does not prove the prebuilt V8 archive or resulting wheel is compatible.
 6. Verify actual registry availability and payloads after CI, keeping accepted
    uploads and propagation delays separate from completed verification:
    - Fetch `turbo-surf@X.Y.Z` from npm, verify its integrity and all four platform

@@ -174,6 +174,20 @@ residual work beyond this PR, with audio separately deferred in
   infinities, NaN payloads and array/SIMD bits, plus three invalid-type failures.
   The old header fails the legacy control; both repaired paths pass on Node20/22.
   Native constexpr behavior and upstream audio algorithms remain unchanged.
+- Keep the forced legacy bit-cast fixture independent of standard `<array>`,
+  which needs internal `<bit>` helpers on GCC13. The fixture deliberately
+  shadows `<bit>` with an empty legacy header; a plain trivially copyable
+  lane array preserves the bit-pattern and SIMD controls without breaking the
+  compiler library itself. Production audio headers and algorithms are unchanged.
+- Select explicit `manylinux_2_28` for both native Linux Python wheel builds,
+  setting the supported glibc floor to 2.28 while retaining CPython 3.8+ abi3.
+  Both earlier manylinux2014 links failed when GCC10 nonshared exception
+  definitions collided with V8's bundled libc++ definitions. The newer baseline
+  may avoid that supplement through its base shared C++ runtime; this mechanism
+  remains unproved until actual link, ELF symbol-compliance and installed-wheel
+  tests pass. The pinned V8 build source targets glibc 2.26 or later, which is
+  not an audit of the actual archive. Compiler, exception and ABI flags remain
+  unchanged; no duplicate-symbol suppression is introduced.
 - Include `<cmath>` directly in the compiled ARM NEON delay source for
   `std::isnan`. The Linux ARM release build exposed reliance on a transitive
   platform header. Preserve the audio algorithm and original upstream hashes;

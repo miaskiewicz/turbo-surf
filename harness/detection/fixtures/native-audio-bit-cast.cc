@@ -8,7 +8,6 @@ constexpr const char* kBranch = "std";
 constexpr const char* kBranch = "fallback";
 #endif
 
-#include <array>
 #include <cstdio>
 #include <cstdlib>
 
@@ -17,6 +16,15 @@ constexpr const char* kBranch = "fallback";
 #elif defined(__SSE2__)
 #include <emmintrin.h>
 #endif
+
+template <typename T> struct Lanes { T values[4]; };
+
+static bool same_lanes(const Lanes<std::uint32_t>& left,
+                       const Lanes<std::uint32_t>& right) {
+  for (unsigned index = 0; index < 4; ++index)
+    if (left.values[index] != right.values[index]) return false;
+  return true;
+}
 
 static void require(bool condition) {
   if (!condition) std::abort();
@@ -39,18 +47,18 @@ int main() {
       UINT64_C(0x7fefffffffffffff), UINT64_C(0xffefffffffffffff)};
   for (auto bits : doubles)
     require(base::bit_cast<std::uint64_t>(base::bit_cast<double>(bits)) == bits);
-  const std::array<std::uint32_t, 4> lanes = {floats[0], floats[1], floats[6], floats[2]};
-  require(base::bit_cast<std::array<std::uint32_t, 4>>(
-              base::bit_cast<std::array<float, 4>>(lanes)) == lanes);
+  const Lanes<std::uint32_t> lanes = {floats[0], floats[1], floats[6], floats[2]};
+  require(same_lanes(base::bit_cast<Lanes<std::uint32_t>>(
+              base::bit_cast<Lanes<float>>(lanes)), lanes));
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
-  const auto vector = vreinterpretq_f32_u32(vld1q_u32(lanes.data()));
-  require(base::bit_cast<std::array<std::uint32_t, 4>>(
-              base::bit_cast<std::array<float, 4>>(vector)) == lanes);
+  const auto vector = vreinterpretq_f32_u32(vld1q_u32(lanes.values));
+  require(same_lanes(base::bit_cast<Lanes<std::uint32_t>>(
+              base::bit_cast<Lanes<float>>(vector)), lanes));
 #elif defined(__SSE2__)
   const auto vector = _mm_castsi128_ps(_mm_loadu_si128(
-      reinterpret_cast<const __m128i*>(lanes.data())));
-  require(base::bit_cast<std::array<std::uint32_t, 4>>(
-              base::bit_cast<std::array<float, 4>>(vector)) == lanes);
+      reinterpret_cast<const __m128i*>(lanes.values)));
+  require(same_lanes(base::bit_cast<Lanes<std::uint32_t>>(
+              base::bit_cast<Lanes<float>>(vector)), lanes));
 #endif
   std::puts(kBranch);
 }

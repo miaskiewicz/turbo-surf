@@ -11,8 +11,9 @@ napi, no Node hosting Rust — same model as turbo-test).
 | `release-py.yml` | `turbo-surf` — maturin abi3 wheels (CPython 3.8+) per platform + sdist, built from `rust/crates/turbo-surf-py/` | PyPI | `pyv*` | `PYPI_TOKEN` |
 
 The `v*` tag fires npm + crates; the **PyPI wheel ships on a SEPARATE `pyv*` tag**
-(e.g. `pyv0.4.1`) so it never fires on the npm/crates release, and it skips cleanly
-until `PYPI_TOKEN` is set. Cut BOTH tags at the same version for a full release.
+(e.g. `pyv0.5.4`) so it never fires on the npm/crates release. A tagged PyPI
+release fails if `PYPI_TOKEN` is absent; manual dispatch builds and tests without
+publishing. Cut BOTH tags at the same version for a full release.
 (The `turbo-surf-napi` cdylib + `turbo-surf-transform` crate are not published — napi
 is dev/harness-only now.)
 
@@ -23,13 +24,16 @@ or a workflow ships a mismatched version. Bump to the SAME `X.Y.Z`:
 
 - `package.json` → `"version"`
 - `rust/Cargo.toml` → `[workspace.package] version` **and** every crate's path-dep
-  `version = "X.Y.Z"` (core/view/page/render/mcp/napi Cargo.toml)
+  `version = "X.Y.Z"` across all nine member manifests
 - `rust/crates/turbo-surf-napi/package.json`
 - `rust/crates/turbo-surf-py/pyproject.toml` → `version` (**maturin builds the PyPI
   wheel from THIS, not the workspace version** — if it lags, the publish job
   `--skip-existing`s the old wheel and goes green without publishing anything)
 - `README.md` status line
 - Root npm lockfile version and its root package version
+- All nine workspace package versions in `rust/Cargo.lock`
+- The standalone `rust/release-deps/surf-consumer/Cargo.toml` package and its
+  six exact Surf dependency requirements
 
 Compiled core/MCP constants and NAPI/Python version functions use
 `env!("CARGO_PKG_VERSION")`; they follow the workspace version automatically.
@@ -40,22 +44,64 @@ changelog entries and unrelated dependency versions must retain their own versio
 ## Cut a release
 
 1. Bump all the version strings above to `X.Y.Z` (keep them identical).
-2. Green gate locally: `cd rust && cargo test --workspace && cargo clippy --workspace
-   --all-targets && cargo fmt --check`; from the root `npm run lint && npm run
-   format:check` (the launcher JS).
-3. Add the new version's entry to `CHANGELOG.md`.
+2. Add the new version's entry to `CHANGELOG.md`, then run `npm run check` from
+   the root. This includes version consistency, dependency preparation controls,
+   notices/audio source checks, workspace tests, strict Clippy, formatting, a
+   rebuilt addon, shim/E2E tests and offline detection/Python controls. Keep
+   default/stock and optional native feature gates and their artifact identities
+   separate. When reusing a prior result, retain a bridge proving its actual
+   compiled inputs and resolved feature graph still match.
+3. Complete the [actual packaged-consumer procedure](./rust/release-deps/surf-consumer/README.md).
+   Publish and verify all thirteen named dependencies first; the Surf product
+   tags do not publish those dependencies. Then verify all six Surf distributions
+   in one normal invocation, with Cargo compilation verification enabled and no
+   directory-source replacement:
+
+   ```sh
+   CARGO_HOME="$RELEASE_CARGO_HOME" CARGO_TARGET_DIR="$PACKAGE_TARGET" \
+     cargo package --locked --manifest-path rust/Cargo.toml \
+     -p turbo-surf-core -p turbo-surf-view -p turbo-surf-page \
+     -p turbo-surf-render -p turbo-surf-raster -p turbo-surf-mcp
+   ```
+
+   Use a fresh Cargo home and the integrated registry dependency graph, retaining
+   actual archive hashes. Run the actual-archive consumer and actual Python
+   wheel/sdist consumers described there. A source-tree build or
+   `cargo package --no-verify` does not substitute for these checks.
 4. Commit the release preparation (`chore(release): vX.Y.Z`), pass the PR gates,
    then merge with a merge commit. Verify its tree contains the tested release
-   changes and cut BOTH tags on that final merge commit:
-   - `git tag -a vX.Y.Z -m vX.Y.Z` — npm + crates.
-   - `git tag -a pyvX.Y.Z -m pyvX.Y.Z` — PyPI wheels.
-   Push the annotated tags together: `git push --atomic origin vX.Y.Z pyvX.Y.Z`.
-   (Skip `pyvX.Y.Z` only if you deliberately aren't shipping Python.)
-5. The workflows build + publish. Verify after CI:
-   - `npm view turbo-surf version` (and that `bin/` shipped:
-     `npm pack turbo-surf --dry-run`)
-   - the crate pages on crates.io (`turbo-surf-core`, …)
-   - `pip index versions turbo-surf` (or the PyPI project page)
+   changes. Verify its exact PR checks are green, both tag names are unused, and
+   all versions agree with `python3 scripts/check-versions.py`. Set
+   `FINAL_MERGE_SHA` to that verified full merge commit, then cut both annotated
+   tags on it:
+
+   ```sh
+   git tag -a vX.Y.Z "$FINAL_MERGE_SHA" -m vX.Y.Z
+   git tag -a pyvX.Y.Z "$FINAL_MERGE_SHA" -m pyvX.Y.Z
+   git rev-parse 'vX.Y.Z^{commit}' 'pyvX.Y.Z^{commit}'
+   git push --atomic origin vX.Y.Z pyvX.Y.Z
+   ```
+
+   The two peeled commits must equal `FINAL_MERGE_SHA`. Skip `pyvX.Y.Z` only if
+   deliberately shipping without Python; never move a published tag for recovery.
+5. The workflows build and publish. The npm and Python workflows reject tags
+   that differ from release metadata. Every Python platform job installs its
+   exact wheel outside the checkout and requires all ten existing offline smoke
+   tests to pass without skips. The sdist job builds a wheel from the actual
+   source tarball with an empty Cargo home and the normal registry, then installs
+   and tests that wheel before uploading the sdist. Retain artifact hashes,
+   installed extension paths and the uploaded smoke receipts; a successful build
+   alone is insufficient.
+6. Verify actual registry availability and payloads after CI, keeping accepted
+   uploads and propagation delays separate from completed verification:
+   - Fetch `turbo-surf@X.Y.Z` from npm, verify its integrity and all four platform
+     binaries, and smoke the installed launcher on a compatible host. A local
+     `npm pack --dry-run` or `npm view ... version` alone is insufficient.
+   - Fetch all six `X.Y.Z` crate archives and checksums and repeat the consumer
+     test using a new empty Cargo home, no root patches or source replacement.
+   - Fetch the exact PyPI wheels and sdist, verify their hashes and versions,
+     and install/test the matching-platform wheel. PyPI's `--skip-existing` is
+     retry behavior, not proof that an existing file has the reviewed payload.
 
 Publishing is **outward-facing + irreversible** (npm + crates.io + PyPI versions
 can't be reused) — only cut a tag when a release is intended.
@@ -82,15 +128,17 @@ The current npm release workflow builds the stock workspace with
 impersonation, uses the patched stock V8 150 backend and does not enable the
 experimental Chrome155 SDK, GPU bridge or CoreText feature union used in the
 native parity captures. Do not describe release CI outputs as that measured
-all-feature artifact. Python wheels use the PyO3 crate's default profile; unpack
-and build the actual sdist to verify that its sources and required workspace
-patches survive packaging.
+all-feature artifact. Python wheels use the PyO3 crate's default profile. The
+actual sdist must contain every required source/path dependency and build against
+the published registry graph; missing workspace patches must not silently select
+unhardened upstream dependencies.
 
 ## Current development transport and crate publishing
 
-The Chrome 155 target profile uses the measured headers/client hints and the
-pinned official Chrome 154 transport recipe from Git revisions of `wreq`,
-`wreq-util` and `btls` in the workspace. It supplies Chromium root certificates,
+The Chrome155 target profile uses the measured headers/client hints and the
+pinned official Chrome154 transport recipe. The reviewed source provenance is
+retained at Git revisions of `wreq`, `wreq-util` and `btls`; release consumers
+must use the corresponding named registry distributions. It supplies Chromium root certificates,
 real trust-anchor identifiers and signature-algorithm GREASE directly upstream;
 the old local `rust/vendor/wreq` fork has been removed. `trust-anchors` is retained
 as a compatibility feature alias; impersonation already includes real anchors.
@@ -101,12 +149,11 @@ fork [`greg-flux/wreq` at `4ed3cf0cd4c14c58c557fdd3f3ff6afa4ae24762`](https://gi
 based exactly on upstream `c6fd8b1acfa96bc0175e2825c88ccda28e23d9b5`, while
 [upstream PR #1327](https://github.com/0x676e67/wreq/pull/1327) proposes that API.
 Only the public re-export and its external regression differ; TLS, ALPN and HTTP
-implementation are unchanged. The unchanged package version identifies that
-upstream baseline, not a new registry release. The Git revision supports native
-workspace binaries; publishing metadata strips Git pins and registry wreq lacks
-this seam too. Do not publish Surf crates until a compatible registry dependency
-path passes clean packaged-consumer checks, and do not infer authorization to
-publish a differently named dependency crate.
+implementation are unchanged. The unchanged upstream package version identifies
+that baseline, not a new registry release. The reviewed distributable transport packages preserve this
+source under the named `turbo-surf-*` dependency family. Integrate those published
+packages with explicit Cargo package aliases before cutting the Surf tags; root
+Git patches do not propagate to downstream library consumers.
 
 Build development binaries with Rust 1.98.0 and the committed workspace lockfile
 (`cargo build --locked`). Release authorization does not establish registry
@@ -117,16 +164,14 @@ The October21 core package preflight (`cargo package -p turbo-surf-core
 provide the requested `chromium-roots` feature. `--no-verify` here only skips
 compilation for the diagnostic; it is not a passing package-consumer gate.
 
-Crates.io publishing remains blocked: workspace patches do not propagate to
-library consumers, and registry `wreq` 0.16.1 / `wreq-util` 0.2.0 do not contain the
-Chrome 154 APIs used here. Before a new crates release, require compatible
-upstream registry releases or a properly packaged dependency fork, then verify
-packaged crates from a clean consumer project without workspace patches. An npm
-binary built from this workspace and a crates.io library have different dependency
-resolution; successful binary builds do not establish registry compatibility.
+That diagnostic predates the renamed dependency integration and is not a verdict
+on the final registry graph. Registry `wreq` 0.16.1 / `wreq-util` 0.2.0 do not
+contain the APIs used here. Verify the integrated renamed packages through actual
+Surf distributions and a clean consumer without workspace patches. An npm binary
+built from a patched workspace does not establish registry compatibility.
 
-The render workspace also patches `deno_crypto` 0.273.0 with the licensed source
-and reproducible hardening patch in [`rust/vendor/DENO_CRYPTO.md`](./rust/vendor/DENO_CRYPTO.md).
+The reviewed `deno_crypto`0.273.0 source includes the licensed, reproducible
+hardening patch in [`rust/vendor/DENO_CRYPTO.md`](./rust/vendor/DENO_CRYPTO.md).
 The upstream provider's inherited object setters can expose non-extractable key
 bytes during construction. Registry consumers must resolve a distributable
 hardened provider or an upstream release containing the fix before publishing
@@ -145,17 +190,18 @@ respectively. Only these two source/checksum records change in the dependency
 update; other lock entries remain unchanged. The previously tested Git candidates
 remain dated provenance, not current dependency metadata.
 
-The default engine also patches Rusty V8 150.4.0 for native weak-handle teardown.
-That ownership fix is required by the retained regression; silently resolving the
-unpatched registry crate would lose it. A distributable dependency path or fixed
-upstream release is required, including its transitive deno_v8/deno_core users.
+The reviewed stock RustyV8150.4.0 source includes native weak-handle teardown
+hardening. That ownership fix is required by the retained regression; silently
+resolving the unpatched upstream crate would lose it. The release graph must use
+the reviewed named V8 distribution and its matching transitive deno_v8/deno_core
+packages.
 See [rust/vendor/RUSTY_V8.md](./rust/vendor/RUSTY_V8.md). Workspace binary tests
 cannot substitute for clean downstream package tests.
 
-The transport API requirement above still blocks clean crate consumers until
-compatible registry versions or reviewed distributable forks are available. A local
-`npm pack --dry-run` checks the launcher allowlist; it does not verify per-platform
-binaries staged by release CI.
+Source preparation, publication and successful consumers are separate checks.
+Require the actual named dependency versions to be available and verified before
+product publication. A local `npm pack --dry-run` checks the launcher allowlist;
+it does not verify per-platform binaries staged by release CI.
 
 ## Distributable dependency preparation
 

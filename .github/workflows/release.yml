@@ -14,7 +14,30 @@ permissions:
   id-token: write # npm provenance
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check release versions and exact tag
+        shell: bash
+        run: |
+          python3 scripts/check-versions.py
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          version = json.loads(Path('package.json').read_text())['version']
+          if os.environ['GITHUB_EVENT_NAME'] == 'push':
+              expected = 'v' + version
+              if os.environ['GITHUB_REF'] != 'refs/tags/' + expected:
+                  raise SystemExit('Release tag must exactly match ' + expected)
+          print('Release source:', os.environ['GITHUB_SHA'], 'version:', version)
+          PYCODE
+
   build:
+    needs: validate
     name: build ${{ matrix.node }}
     runs-on: ${{ matrix.host }}
     strategy:

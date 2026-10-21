@@ -1,8 +1,10 @@
 # Publish the turbo-surf Rust library crates to crates.io on a v* tag (mirrors
 # turbo-dom's publish-crate job). Requires repo secret CARGO_REGISTRY_TOKEN.
 # Published in dependency order so each dependent's version dep is already live:
-#   core → view → page → render → mcp.
-# (turbo-surf-napi is a cdylib → ships to npm via rust-napi-prebuild.yml, not here.)
+#   core → view → page → render → raster → mcp.
+# NAPI and transform remain unpublished workspace implementation crates; npm ships
+# the standalone MCP binary. Before tagging, verify all six actual distributions
+# together and run the clean consumer documented in rust/release-deps/surf-consumer.
 name: rust-crates-publish
 
 on:

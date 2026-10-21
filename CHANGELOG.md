@@ -142,6 +142,12 @@ residual work beyond this PR, with audio separately deferred in
   existing smoke test, replacing its stale0.2.5 expectation. Actual wheel and
   source-tarball consumers remain required release checks.
 
+- Require exact release tag/version agreement and real installed-wheel checks
+  in publishing CI. Each platform runs all ten existing offline Python smoke
+  tests; a separate source-tarball job rebuilds and tests its wheel against the
+  registry before uploading the sdist. Preserve artifact hashes, extension paths
+  and JUnit results. Missing PyPI credentials fail a requested tagged release.
+
 ### Runner timing follow-up — 2026-10-20
 
 - Publish the fresh546d511 API and Google measurements. All75 interfaces are

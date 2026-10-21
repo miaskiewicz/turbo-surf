@@ -167,6 +167,13 @@ residual work beyond this PR, with audio separately deferred in
   The earlier CI failure lacked those snapshots, so its exact cause remains
   unconfirmed. Production clocks, timer budgets and coherence assertions stay
   unchanged.
+- Keep native `std::bit_cast` where supported and supply checked, byte-preserving
+  runtime conversions for older manylinux C++ libraries. Actual ARM wheel
+  compilation exposed the missing library interface. Reusable native/legacy
+  compiler controls cover float32/64 finite values, signed zeros, subnormals,
+  infinities, NaN payloads and array/SIMD bits, plus three invalid-type failures.
+  The old header fails the legacy control; both repaired paths pass on Node20/22.
+  Native constexpr behavior and upstream audio algorithms remain unchanged.
 - Include `<cmath>` directly in the compiled ARM NEON delay source for
   `std::isnan`. The Linux ARM release build exposed reliance on a transitive
   platform header. Preserve the audio algorithm and original upstream hashes;

@@ -30,7 +30,7 @@
     "originalSha256": "52a5317f5074fcfa50dedb7aac8b88cdfd007c75e01f4438a27e144cd613400d",
     "adaptedSha256": "b4b5d2add81728505df2e31ef93d8375c8fddd6872b2b92a7cdca70dbf0a547b"
   },
-  "adapters": "Other native headers are bounded standalone adapters for the unchanged compressor, not Chromium source.",
+  "adapters": "Other native headers are bounded standalone adapters for the unchanged compressor, not Chromium source. The local base/bit_cast.h adapter preserves std::bit_cast when available and uses equal-size, trivially-copyable checked runtime memcpy conversions when older manylinux standard libraries omit it; no upstream audio algorithm or license is changed.",
   "portedSources": [
     {
       "path": "third_party/blink/renderer/modules/webaudio/periodic_wave.cc",

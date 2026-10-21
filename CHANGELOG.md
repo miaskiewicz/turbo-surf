@@ -179,6 +179,11 @@ residual work beyond this PR, with audio separately deferred in
   shadows `<bit>` with an empty legacy header; a plain trivially copyable
   lane array preserves the bit-pattern and SIMD controls without breaking the
   compiler library itself. Production audio headers and algorithms are unchanged.
+- Declare Python's MIT expression and `LICENSE` file explicitly under PEP 639
+  with maturin 1.9.3 or later. Actual metadata controls reproduce implicit-license
+  loss after sdist relocation and preserve the full MIT with the explicit policy.
+  Both direct and rebuilt wheel workflows compare actual MIT/notices payloads
+  with the tagged source; Cargo SPDX metadata and local license files are unchanged.
 - Select explicit `manylinux_2_28` for both native Linux Python wheel builds,
   setting the supported glibc floor to 2.28 while retaining CPython 3.8+ abi3.
   Both earlier manylinux2014 links failed when GCC10 nonshared exception

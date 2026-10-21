@@ -269,10 +269,14 @@ never treat an accepted upload alone as completed registry verification.
 
 All nine Rust packages inherit SPDX `MIT` metadata and contain local `LICENSE`
 files. `sync-third-party-notices.py` keeps those files and `rust/LICENSE`
-byte-identical to the root `LICENSE`. Cargo and maturin discover the local files
-inside the Rust workspace, preserving the full text without duplicate
-license-field warnings. Actual wheel/sdist and crate audits must verify the
-complete license bytes.
+byte-identical to the root `LICENSE`. Cargo discovers the local files inside
+its workspace without duplicate license-field warnings. Python packaging uses
+PEP 639 `license = "MIT"` and explicit `license-files = ["LICENSE"]`, with
+maturin 1.9.3 or later (the workflow pins the tested 1.15.0). The explicit file
+survives maturin moving `pyproject.toml` to an sdist workspace root; implicit
+crate-local discovery alone did not. Both direct and sdist-rebuilt wheel jobs
+verify the full MIT and third-party notice bytes against the tagged source,
+alongside installed tests. Actual wheel/sdist and crate audits remain required.
 
 The native audio kernels, XPath provider, RustFFT and hardened crypto provider
 retain their source licenses. `THIRD_PARTY_NOTICES.md` also accompanies the npm

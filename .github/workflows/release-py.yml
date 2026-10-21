@@ -84,6 +84,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: 'v1.15.0'
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           args: --release --out dist --manifest-path ${{ env.MANIFEST }}
@@ -171,7 +172,8 @@ jobs:
         shell: bash
         run: |
           python - <<'PYCODE'
-          import hashlib, json, os, shutil, subprocess, venv
+          import hashlib, json, os, shutil, subprocess, venv, zipfile
+          from email.parser import BytesParser
           import xml.etree.ElementTree as ET
           from pathlib import Path
           root = Path.cwd().resolve()
@@ -179,6 +181,30 @@ jobs:
           if len(wheels) != 1:
               raise SystemExit('Expected exactly one matching-platform wheel: ' + repr(wheels))
           wheel = wheels[0]
+          # Audit actual artifacts before installation; SPDX metadata alone is
+          # insufficient, including after pyproject relocation in an sdist.
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              if len(names) != len(set(names)):
+                  raise SystemExit('Duplicate wheel payload names')
+              metadata_names = [name for name in names if name.endswith('.dist-info/METADATA')]
+              if len(metadata_names) != 1:
+                  raise SystemExit('Expected one actual wheel metadata record')
+              metadata_name = metadata_names[0]
+              license_name = metadata_name.rsplit('/', 1)[0] + '/licenses/LICENSE'
+              notices_name = 'turbo_surf/THIRD_PARTY_NOTICES.md'
+              expected_payloads = {license_name: root / 'LICENSE', notices_name: root / 'THIRD_PARTY_NOTICES.md'}
+              payload_hashes = {}
+              for name, source in expected_payloads.items():
+                  if name not in names or archive.getinfo(name).file_size != source.stat().st_size:
+                      raise SystemExit('Actual wheel lacks the complete project MIT/license notices: ' + name)
+                  data = archive.read(name)
+                  if data != source.read_bytes():
+                      raise SystemExit('Actual wheel license/notices differ from tagged source: ' + name)
+                  payload_hashes[name] = hashlib.sha256(data).hexdigest()
+              metadata = BytesParser().parsebytes(archive.read(metadata_name))
+              if metadata.get('License-Expression') != 'MIT' or metadata.get_all('License-File') != ['LICENSE']:
+                  raise SystemExit('Expected explicit MIT expression and LICENSE metadata in actual wheel')
           smoke = Path(os.environ['RUNNER_TEMP']) / 'direct-wheel-smoke'
           smoke.mkdir()
           shutil.copy2(root / 'rust/crates/turbo-surf-py/tests/test_smoke.py', smoke / 'test_smoke.py')
@@ -196,7 +222,7 @@ jobs:
           cases = list(ET.parse(report).iter('testcase'))
           if len(cases) != 10 or any(case.find(kind) is not None for case in cases for kind in ('failure', 'error', 'skipped')):
               raise SystemExit('Expected all ten offline installed-wheel tests to pass without skips')
-          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest()}
+          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest(), 'fullProjectMitAndNoticesEqual': True, 'licensePayloadSha256': payload_hashes}
           (root / 'dist' / 'installed-wheel.json').write_text(json.dumps(receipt, indent=2) + '\n')
           shutil.copy2(report, root / 'dist' / 'pytest.xml')
           print(json.dumps(receipt, indent=2))
@@ -234,6 +260,7 @@ jobs:
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
+          maturin-version: 'v1.15.0'
           command: sdist
           args: --out dist --manifest-path rust/crates/turbo-surf-py/Cargo.toml
       - name: Install source-build prerequisites
@@ -276,7 +303,8 @@ jobs:
         shell: bash
         run: |
           python - <<'PYCODE'
-          import hashlib, json, os, shutil, subprocess, venv
+          import hashlib, json, os, shutil, subprocess, venv, zipfile
+          from email.parser import BytesParser
           import xml.etree.ElementTree as ET
           from pathlib import Path
           root = Path.cwd().resolve()
@@ -284,6 +312,30 @@ jobs:
           if len(wheels) != 1:
               raise SystemExit('Expected exactly one matching-platform wheel: ' + repr(wheels))
           wheel = wheels[0]
+          # Audit actual artifacts before installation; SPDX metadata alone is
+          # insufficient, including after pyproject relocation in an sdist.
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              if len(names) != len(set(names)):
+                  raise SystemExit('Duplicate wheel payload names')
+              metadata_names = [name for name in names if name.endswith('.dist-info/METADATA')]
+              if len(metadata_names) != 1:
+                  raise SystemExit('Expected one actual wheel metadata record')
+              metadata_name = metadata_names[0]
+              license_name = metadata_name.rsplit('/', 1)[0] + '/licenses/LICENSE'
+              notices_name = 'turbo_surf/THIRD_PARTY_NOTICES.md'
+              expected_payloads = {license_name: root / 'LICENSE', notices_name: root / 'THIRD_PARTY_NOTICES.md'}
+              payload_hashes = {}
+              for name, source in expected_payloads.items():
+                  if name not in names or archive.getinfo(name).file_size != source.stat().st_size:
+                      raise SystemExit('Actual wheel lacks the complete project MIT/license notices: ' + name)
+                  data = archive.read(name)
+                  if data != source.read_bytes():
+                      raise SystemExit('Actual wheel license/notices differ from tagged source: ' + name)
+                  payload_hashes[name] = hashlib.sha256(data).hexdigest()
+              metadata = BytesParser().parsebytes(archive.read(metadata_name))
+              if metadata.get('License-Expression') != 'MIT' or metadata.get_all('License-File') != ['LICENSE']:
+                  raise SystemExit('Expected explicit MIT expression and LICENSE metadata in actual wheel')
           smoke = Path(os.environ['RUNNER_TEMP']) / 'sdist-wheel-smoke'
           smoke.mkdir()
           shutil.copy2(root / 'rust/crates/turbo-surf-py/tests/test_smoke.py', smoke / 'test_smoke.py')
@@ -301,7 +353,7 @@ jobs:
           cases = list(ET.parse(report).iter('testcase'))
           if len(cases) != 10 or any(case.find(kind) is not None for case in cases for kind in ('failure', 'error', 'skipped')):
               raise SystemExit('Expected all ten offline installed-wheel tests to pass without skips')
-          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest()}
+          receipt = {'sourceCommit': os.environ['GITHUB_SHA'], 'wheel': str(wheel), 'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'version': version, 'passed': len(cases), 'testSha256': hashlib.sha256((smoke / 'test_smoke.py').read_bytes()).hexdigest(), 'fullProjectMitAndNoticesEqual': True, 'licensePayloadSha256': payload_hashes}
           (root / 'sdist-wheels' / 'installed-wheel.json').write_text(json.dumps(receipt, indent=2) + '\n')
           shutil.copy2(report, root / 'sdist-wheels' / 'pytest.xml')
           print(json.dumps(receipt, indent=2))
@@ -354,5 +406,6 @@ jobs:
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         with:
+          maturin-version: 'v1.15.0'
           command: upload
           args: --non-interactive --skip-existing dist/*

@@ -106,7 +106,7 @@ hash the actual artifacts from a private environment, for example:
 
 ```sh
 "$PYTHON312" -m venv "$BUILD_ENV"
-"$BUILD_ENV/bin/python" -m pip install 'maturin>=1.5,<2.0'
+"$BUILD_ENV/bin/python" -m pip install 'maturin>=1.9.3,<2.0'
 PYO3_PYTHON="$BUILD_ENV/bin/python" "$BUILD_ENV/bin/maturin" build --release \
   --interpreter "$BUILD_ENV/bin/python" \
   --manifest-path rust/crates/turbo-surf-py/Cargo.toml --out "$WHEELS"

@@ -22,29 +22,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require the exact release tag and versions
+        run: |
+          python3 ../scripts/check-versions.py
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          version = json.loads(Path('../package.json').read_text())['version']
+          if os.environ['GITHUB_REF'] != 'refs/tags/v' + version:
+              raise SystemExit('Crate publication requires the exact v' + version + ' tag')
+          print('Publishing source:', os.environ['GITHUB_SHA'], 'version:', version)
+          PYCODE
       - uses: dtolnay/rust-toolchain@1.98.0
       # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
       - name: Install BoringSSL toolchain (nasm/cmake)
         run: sudo apt-get update && sudo apt-get install -y nasm cmake
       # cargo reads CARGO_REGISTRY_TOKEN from the env natively; `cargo publish`
       # waits for each crate to index before the next dependent publishes.
-      - run: cargo publish -p turbo-surf-core
+      - run: cargo publish --locked -p turbo-surf-core
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - run: cargo publish -p turbo-surf-view
+      - run: cargo publish --locked -p turbo-surf-view
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - run: cargo publish -p turbo-surf-page
+      - run: cargo publish --locked -p turbo-surf-page
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - run: cargo publish -p turbo-surf-render
+      - run: cargo publish --locked -p turbo-surf-render
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       # turbo-surf-raster deps turbo-html2pdf-core (crates.io) + tiny-skia/ttf-parser;
       # must publish before turbo-surf-mcp, which now depends on it.
-      - run: cargo publish -p turbo-surf-raster
+      - run: cargo publish --locked -p turbo-surf-raster
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - run: cargo publish -p turbo-surf-mcp
+      - run: cargo publish --locked -p turbo-surf-mcp
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

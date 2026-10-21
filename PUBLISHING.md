@@ -85,7 +85,19 @@ changelog entries and unrelated dependency versions must retain their own versio
    The two peeled commits must equal `FINAL_MERGE_SHA`. Skip `pyvX.Y.Z` only if
    deliberately shipping without Python; never move a published tag for recovery.
 5. The workflows build and publish. The npm and Python workflows reject tags
-   that differ from release metadata. Every Python platform job installs its
+   that differ from release metadata. Each of the four npm build hosts sends an
+   offline stdio `initialize` request to its actual staged binary, with a bounded
+   timeout and private cwd without `.env`, and requires the exact release version.
+   Before publication, npm packs the assembled package, verifies its integrity,
+   all four binaries, launchers and license files, extracts that exact tarball
+   outside the checkout and repeats initialization through its packaged Node CLI.
+   Only a tag-push event passes the verified tarball to `npm publish`; receipts
+   retain hashes, actual artifact paths and subprocess results. Manual dispatch
+   runs the same four builds and assembled-tarball smoke without publishing,
+   including when dispatched against a tag. The Rust crates workflow instead
+   treats manual dispatch as publication: select the exact matching `v*` tag;
+   it checks release metadata and uses `cargo publish --locked` for all six crates.
+   Do not dispatch that workflow as a dry run. Every Python platform job installs its
    exact wheel outside the checkout and requires all ten existing offline smoke
    tests to pass without skips. The sdist job builds a wheel from the actual
    source tarball with an empty Cargo home and the normal registry, then installs

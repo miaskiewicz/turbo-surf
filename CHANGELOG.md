@@ -148,6 +148,12 @@ residual work beyond this PR, with audio separately deferred in
   registry before uploading the sdist. Preserve artifact hashes, extension paths
   and JUnit results. Missing PyPI credentials fail a requested tagged release.
 
+- Exercise each staged npm platform binary over MCP stdio before upload. Pack
+  the assembled launcher, verify all four binary payloads and licenses, then
+  initialize the extracted launcher before publishing that exact tarball.
+  Manual npm/Python dispatches validate artifacts without publishing; Rust
+  publication requires the exact release tag and keeps the verified lockfile.
+
 ### Runner timing follow-up — 2026-10-20
 
 - Publish the fresh546d511 API and Google measurements. All75 interfaces are

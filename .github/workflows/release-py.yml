@@ -248,7 +248,7 @@ jobs:
     name: publish to PyPI
     needs: [build, sdist]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/pyv')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/pyv')
     steps:
       - uses: actions/download-artifact@v4
         with:

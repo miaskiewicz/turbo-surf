@@ -103,6 +103,16 @@ def rewrite(manifest, workspace, old):
                     value.update(package='turbo-surf-' + package, version='=' + PACKAGES[package],
                                  path='../turbo-surf-' + package)
                 section[category][alias] = value
+    if old == 'wreq-util':
+        features = d['features']
+        if (features.get('default') != ['emulation'] or
+                features.get('tokio-rt') != ['wreq/tokio-rt'] or
+                features.get('compio-rt') != ['wreq/compio-rt'] or
+                d['dependencies']['wreq'].get('default-features') is not False):
+            raise ValueError('Upstream wreq-util runtime policy changed; review default forwarding')
+        # Standalone defaults need a connector runtime; embedders can still
+        # disable defaults and select the existing compio-rt feature instead.
+        features['default'].append('tokio-rt')
     for key in ['patch', 'workspace', 'profile']:
         d.pop(key, None)
     return d

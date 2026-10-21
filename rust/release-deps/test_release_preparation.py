@@ -48,6 +48,30 @@ class DistributionContracts(unittest.TestCase):
         self.assertIn('patch', original)
         self.assertEqual(tomllib.loads(transport.dump(result)), result)
 
+    def test_standalone_transport_util_defaults_select_existing_tokio_runtime(self):
+        original = {
+            'package': {'name': 'wreq-util', 'version': '0.2.0',
+                        'repository': 'https://github.com/0x676e67/wreq-util',
+                        'description': 'Utilities', 'license': 'Apache-2.0'},
+            'dependencies': {'wreq': {'version': '0.16.1', 'default-features': False}},
+            'features': {'default': ['emulation'], 'emulation': ['dep:brotli'],
+                         'tokio-rt': ['wreq/tokio-rt'], 'compio-rt': ['wreq/compio-rt']},
+        }
+        result = transport.rewrite(original, {}, 'wreq-util')
+        self.assertEqual(result['features']['default'], ['emulation', 'tokio-rt'])
+        self.assertEqual(result['features']['tokio-rt'], ['wreq/tokio-rt'])
+        self.assertEqual(result['features']['compio-rt'], ['wreq/compio-rt'])
+        self.assertEqual(result['features']['emulation'], ['dep:brotli'])
+        self.assertEqual(result['dependencies']['wreq'], {
+            'package': 'turbo-surf-wreq', 'version': '=0.16.1',
+            'path': '../turbo-surf-wreq', 'default-features': False})
+        self.assertEqual(original['features']['default'], ['emulation'])
+        self.assertEqual(result['package']['license'], 'Apache-2.0')
+        self.assertEqual(result['lib']['name'], 'wreq_util')
+        original['features']['tokio-rt'] = ['future-runtime']
+        with self.assertRaisesRegex(ValueError, 'runtime policy changed'):
+            transport.rewrite(original, {}, 'wreq-util')
+
     def test_deno_production_and_benchmark_edges_share_one_core_and_v8(self):
         self.assertIn('deno_bench_util', deno.NAMES)
         source = """[package]

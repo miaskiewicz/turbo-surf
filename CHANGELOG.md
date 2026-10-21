@@ -122,6 +122,12 @@ residual work beyond this PR, with audio separately deferred in
   resolution controls cover old defaults, repaired defaults and opt-out for all
   four; Rust/JavaScript sources and dependency feature lists remain unchanged.
 
+- Select the existing Tokio runtime by default in the standalone transport
+  utility distribution. Its enclosing Surf graph already selects Tokio, but
+  isolated package verification exposed the missing default. Preserve emulation,
+  dependency opt-outs and explicit Compio selection. Three isolated resolution
+  controls and the failing predecessor regression cover the repaired policy.
+
 ### Runner timing follow-up — 2026-10-20
 
 - Publish the fresh546d511 API and Google measurements. All75 interfaces are

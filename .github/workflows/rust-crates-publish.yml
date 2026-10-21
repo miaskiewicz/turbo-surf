@@ -37,9 +37,9 @@ jobs:
           print('Publishing source:', os.environ['GITHUB_SHA'], 'version:', version)
           PYCODE
       - uses: dtolnay/rust-toolchain@1.98.0
-      # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
-      - name: Install BoringSSL toolchain (nasm/cmake)
-        run: sudo apt-get update && sudo apt-get install -y nasm cmake
+      # BoringSSL builds with cmake/nasm; btls-sys always generates bindings with libclang.
+      - name: Install BoringSSL and binding toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev nasm cmake
       # cargo reads CARGO_REGISTRY_TOKEN from the env natively; `cargo publish`
       # waits for each crate to index before the next dependent publishes.
       - run: cargo publish --locked -p turbo-surf-core

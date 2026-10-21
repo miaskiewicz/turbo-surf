@@ -49,7 +49,7 @@ residual work beyond this PR, with audio separately deferred in
   profiling and snapshots. The selector-first follow-up also completes hydration:
   16.35s whole run,957MB peak RSS and14.70s guest profiling. These live homepage
   diagnostics do not establish SERP clearance, reliability or complete timing
-  parity. Current full gates pass1,509 native and1,464 stock Rust tests, strict
+  parity. At9304df9 the full gates pass1,509 native and1,464 stock Rust tests, strict
   Clippy, formatting, verified addons, shim96+1 intentional skip and E2E20 each.
   Detection passes204 native controls and195 stock controls+9 documented skips;
   both Python checks pass in each gate. The fresh75-interface inventory remains
@@ -153,6 +153,24 @@ residual work beyond this PR, with audio separately deferred in
   initialize the extracted launcher before publishing that exact tarball.
   Manual npm/Python dispatches validate artifacts without publishing; Rust
   publication requires the exact release tag and keeps the verified lockfile.
+  Linux binary/crate release jobs explicitly install libclang for the transport
+  binding generator alongside the BoringSSL build tools. Inherit the full root
+  MIT license file in all nine Rust packages; a focused Cargo packaging control
+  confirms SPDX metadata alone omitted it and the inherited file retains its
+  exact bytes. Actual product archive inspection remains a separate gate.
+
+- Validate the prepared thirteen-archive Surf graph in both profiles: stock
+  passes 1,464 workspace tests with 11 documented ignores; native 155 passes 1,509
+  with 8 ignores. Both pass strict Clippy and formatting with unchanged source
+  guards. The stock addon passes shim 96+1 and E2E 20 on Node 20/22; focused
+  optimized-runner checks close six artifact-dependent skips on Node22. The
+  rebuilt native155 addon passes the same shim/E2E gates on both Node versions;
+  full native detection passes206 on Node22 and197 with nine documented
+  WebSocket-capability skips on Node20. Loaded engine versions and exact artifact
+  paths are verified. These staged integration results remain separate from
+  final registry consumers.
+  Standalone PyO3 feature inspection also confirms reqwest/rustls resources;
+  whole-workspace feature unification must not be reported as wheel defaults.
 
 ### Runner timing follow-up — 2026-10-20
 

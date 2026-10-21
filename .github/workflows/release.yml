@@ -59,12 +59,12 @@ jobs:
           python-version: '3.12'
       - uses: dtolnay/rust-toolchain@1.98.0
         with: { targets: "${{ matrix.target }}" }
-      # BoringSSL (the default `impersonate` anti-bot backend) builds with cmake + nasm.
-      - name: Install BoringSSL toolchain (nasm/cmake)
+      # BoringSSL needs cmake/nasm; btls-sys also generates bindings with libclang.
+      - name: Install BoringSSL and binding toolchain
         shell: bash
         run: |
           case "${{ runner.os }}" in
-            Linux)   sudo apt-get update && sudo apt-get install -y nasm cmake ;;
+            Linux)   sudo apt-get update && sudo apt-get install -y clang libclang-dev nasm cmake ;;
             macOS)   brew install nasm cmake || true ;;
             Windows) choco install nasm --no-progress -y && echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH" ;;
           esac

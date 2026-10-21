@@ -3,6 +3,7 @@ name = "turbo-surf-napi"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+license-file.workspace = true
 repository.workspace = true
 description = "turbo-surf napi-rs addon — in-process bridge from the Rust core to Node"
 

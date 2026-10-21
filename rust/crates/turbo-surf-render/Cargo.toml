@@ -3,6 +3,7 @@ name = "turbo-surf-render"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+license-file.workspace = true
 repository.workspace = true
 description = "turbo-surf JS-execution tier (tier 3): deno_core isolate + rtdom↔V8 DOM binding"
 

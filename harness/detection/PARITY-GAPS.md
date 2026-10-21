@@ -84,8 +84,15 @@ strong ignored Chrome regression and explicit expected exit101.
 - [x] Prepare and component-test the thirteen licensed dependency distributions:
   three Deno/runtime/crypto/teardown checks and eight default/prefixed transport
   checks pass on actual archives. The release helper has fourteen offline
-  controls and an independent source review. Full Surf integration, publication
-  and real registry consumers remain separate unchecked prerequisites above.
+  controls and an independent source review. Prepared-archive Surf integration
+  passes 1,464 stock /1,509 native155 workspace tests, strict Clippy, formatting
+  and unchanged-source guards. Stock addon consumers pass on Node 20/22; the
+  actual optimized-runner follow-up passes 8/8 on Node 22. The rebuilt native155
+  addon passes shim96+1 intentional skip and E2E20 on both Node versions; its
+  full detection suite passes206 on Node22 and197+9 WebSocket-capability skips
+  on Node20. Exact addon/runner identities and actual V8 versions are checked.
+  Publication and real registry/package consumers remain separate unchecked
+  prerequisites above.
 - [x] Merge all open producer PRs and verify the single patch releases:
   turbo-dom0.5.7, turbo-html2pdf0.3.8 and turbo-test0.4.7. Their registry
   payloads and final merge tags are verified. Official re-vendoring changes only

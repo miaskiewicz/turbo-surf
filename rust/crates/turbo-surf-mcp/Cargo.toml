@@ -3,6 +3,7 @@ name = "turbo-surf-mcp"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+license-file.workspace = true
 repository.workspace = true
 description = "turbo-surf MCP server — native Rust binary, stdio JSON-RPC (no Node)"
 

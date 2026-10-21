@@ -140,8 +140,12 @@ The current npm release workflow builds the stock workspace with
 impersonation, uses the patched stock V8 150 backend and does not enable the
 experimental Chrome155 SDK, GPU bridge or CoreText feature union used in the
 native parity captures. Do not describe release CI outputs as that measured
-all-feature artifact. Python wheels use the PyO3 crate's default profile. The
-actual sdist must contain every required source/path dependency and build against
+all-feature artifact. Standalone Python wheels do not select core's
+`impersonate` feature: their resource client uses reqwest/rustls, with software
+rasterization and the stock V8 backend. A whole-workspace build can unify core
+features through MCP/NAPI, so it does not establish the standalone wheel profile.
+Verify the actual wheel graph separately. The actual sdist must contain every
+required source/path dependency and build against
 the published registry graph; missing workspace patches must not silently select
 unhardened upstream dependencies.
 

@@ -41,6 +41,22 @@
     enumerable: false,
     configurable: true,
   });
+  // MessageEvent.userActivation: a branded snapshot, and MessageEventInit's brand check.
+  const snapshot = ops.op_user_activation_snapshot;
+  __userActivationSnapshot = (active, sticky) => {
+    const value = create(prototype);
+    if (!snapshot(value, active, sticky))
+      throw new ErrorType("Native activation state initialization interrupted");
+    return value;
+  };
+  __userActivationBrand = (value) => {
+    try {
+      read(value, true);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const activation = create(prototype);
   if (!ops.op_user_activation_install(navigator, activation))
     throw new ErrorType("Native activation state initialization interrupted");

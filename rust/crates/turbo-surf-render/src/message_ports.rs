@@ -31,6 +31,8 @@ struct Endpoint {
     closed: bool,
     scheduled: bool,
     queue: VecDeque<crate::crypto_clone::CloneSnapshot>,
+    /// Each queued message's sender UserActivation snapshot bits (-1 when not included).
+    activations: VecDeque<i32>,
     reservations: usize,
 }
 struct Registry {
@@ -104,7 +106,12 @@ impl Reservation {
         self.bytes = bytes;
         Ok(())
     }
-    fn enqueue(mut self, scope: &mut v8::PinScope, snapshot: crate::crypto_clone::CloneSnapshot) {
+    fn enqueue(
+        mut self,
+        scope: &mut v8::PinScope,
+        snapshot: crate::crypto_clone::CloneSnapshot,
+        activation: i32,
+    ) {
         {
             let mut registry = self.registry.borrow_mut();
             registry.reserved_bytes -= self.bytes;
@@ -112,6 +119,7 @@ impl Reservation {
         }
         self.bytes = 0;
         self.endpoint.borrow_mut().queue.push_back(snapshot);
+        self.endpoint.borrow_mut().activations.push_back(activation);
         let id = self.endpoint.borrow().id;
         self.registry.borrow_mut().dirty.insert(id);
         refresh_dirty(scope, &self.registry);
@@ -544,6 +552,7 @@ fn op_port_new_channel<'s>(
                 closed: false,
                 scheduled: false,
                 queue: VecDeque::new(),
+                activations: VecDeque::new(),
                 reservations: 0,
             }));
             registry.endpoints.insert(token.id, endpoint.clone());
@@ -580,7 +589,13 @@ fn op_port_post_message<'s>(
     object: v8::Local<v8::Object>,
     value: v8::Local<'s, v8::Value>,
     transfer: Option<v8::Local<'s, v8::Value>>,
+    include_activation: bool,
 ) -> Result<(), JsErrorBox> {
+    let activation = if include_activation {
+        crate::runtime::activation_snapshot_bits(scope.get_entered_or_microtask_context())
+    } else {
+        -1
+    };
     let (token, source) = lookup_endpoint(scope, object)?;
     let Some(source) = source else { return Ok(()) };
     let peer = {
@@ -630,7 +645,7 @@ fn op_port_post_message<'s>(
     reservation
         .take()
         .expect("live receiver reservation")
-        .enqueue(scope, data);
+        .enqueue(scope, data, activation);
     let destination = destination.expect("live receiver");
     schedule(scope, &destination);
     Ok(())
@@ -688,7 +703,12 @@ fn op_port_deliver(
         if endpoint.closed || !endpoint.started {
             return Ok(());
         }
-        endpoint.queue.pop_front()
+        let activation = endpoint.activations.pop_front().unwrap_or(-1);
+        endpoint.queue.pop_front().map(|data| (data, activation))
+    };
+    let (data, activation) = match data {
+        Some((data, activation)) => (Some(data), activation),
+        None => (None, -1),
     };
     if let Some(data) = &data {
         data.pin_port_anchors(scope);
@@ -724,10 +744,17 @@ fn op_port_deliver(
     let dispatch = crate::context_ownership::local(scope, &adapter.dispatch);
     let receiver = v8::undefined(scope).into();
     let failed = v8::Boolean::new(scope, failed);
+    let activation = v8::Integer::new(scope, activation);
     dispatch.call(
         scope,
         receiver,
-        &[object.into(), value, ports_array.into(), failed.into()],
+        &[
+            object.into(),
+            value,
+            ports_array.into(),
+            failed.into(),
+            activation.into(),
+        ],
     );
     schedule(scope, &endpoint);
     Ok(())
@@ -743,6 +770,7 @@ fn disentangle(
         state.started = false;
         state.scheduled = false;
         state.task_pin = None;
+        state.activations.clear();
         (state.peer.take(), std::mem::take(&mut state.queue))
     };
     {

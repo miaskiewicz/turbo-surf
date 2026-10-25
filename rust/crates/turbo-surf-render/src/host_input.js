@@ -31,6 +31,10 @@
   const nodeTypeOf = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
   const shadowHost = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, "host").get;
   const activate = ops.op_host_user_activation;
+  const closeRequest = ops.op_host_close_request,
+    lightDismiss = ops.op_host_light_dismiss,
+    backdropOf = ops.op_host_modal_backdrop,
+    openDialog = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "open").get;
   const canceled = Object.getOwnPropertyDescriptor(Event.prototype, "defaultPrevented").get;
   const controlTag = Object.getOwnPropertyDescriptor(Element.prototype, "tagName").get;
   const controlValues = Object.create(null);
@@ -186,6 +190,11 @@
     movementBase = null,
     suppressed = false;
   function fire(target, name, type, init = {}) {
+    return !canceled.call(trusted(target, name, type, init));
+  }
+  // Dispatch the trusted event and return it, so the close-watcher / light-dismiss ops can
+  // inspect the actual pointer/key event.
+  function trusted(target, name, type, init = {}) {
     const event = new events[name](type, init);
     // Only this captured embedder driver can notify activation. Dispatching an
     // identically named guest event never reaches this capability.
@@ -196,7 +205,7 @@
     )
       activate();
     dispatch(event, target);
-    return !canceled.call(event);
+    return event;
   }
   function element(selector) {
     const result = query(selector);
@@ -300,7 +309,7 @@
   // One trusted mouse event at the hit element: Chrome's PointerEventManager steps for the
   // pointer event (capture processing, lock/capture retargeting, boundaries) followed by the
   // compatibility mouse event and, for a release, implicit capture release and the click.
-  function pointerAction(kind, hit) {
+  function pointerAction(kind, hit, backdrop = null) {
     const previous = position;
     targetCenter(hit);
     position = [cursorX, cursorY];
@@ -347,21 +356,27 @@
     const target = locked || captured || hit;
     pointerBoundary(target, init);
     mouseBoundary(target, mouseInit);
-    const proceed = fire(target, "PointerEvent", pointerTypes[kind], init);
+    const pointerEvent = trusted(target, "PointerEvent", pointerTypes[kind], init);
+    const proceed = !canceled.call(pointerEvent);
     if (kind === "down") {
+      // A trusted pointerdown records the light-dismiss target (dialogs and popovers).
+      lightDismiss(pointerEvent, backdrop !== null);
       suppressed = !proceed;
       downTarget = target;
     }
     const mouse = !suppressed && fire(target, "MouseEvent", mouseTypes[kind], mouseInit);
     if (kind === "down" && mouse) apply(focus, target, []);
     if (kind !== "up") return;
+    // Chrome runs light dismiss on pointerup (after the compatibility mouseup), before click.
+    lightDismiss(pointerEvent, backdrop !== null);
     suppressed = false;
     pointer("implicit");
     const released = pointer("process")[0];
     if (released) fire(released, "PointerEvent", "lostpointercapture", captureInit);
     const click = captured || locked || clickTarget(downTarget, target);
     downTarget = null;
-    if (click)
+    // A modal dialog the release light-dismissed is gone: Chrome fires no click for it.
+    if (click && (backdrop === null || apply(openDialog, backdrop, [])))
       fire(click, "PointerEvent", "click", { ...init, isPrimary: false, button: 0, detail: 1 });
     if (released && locked === null) {
       pointerBoundary(hit, init);
@@ -476,9 +491,13 @@
         continue;
       }
       if (step.click) {
-        const target = element(step.click);
-        pointerAction("down", target);
-        pointerAction("up", target);
+        const intended = element(step.click);
+        // A topmost modal dialog makes the rest of the page inert: the hit lands on its
+        // ::backdrop, so pointer input targets that dialog, outside its border box.
+        const backdrop = backdropOf(intended);
+        const target = backdrop ?? intended;
+        pointerAction("down", target, backdrop);
+        pointerAction("up", target, backdrop);
         continue;
       }
       const target = apply(activeElement, document, []);
@@ -491,6 +510,17 @@
           keyCode = key === "Enter" ? 13 : key === "Tab" ? 9 : key === "Escape" ? 27 : 0;
         const init = { key, code: key, keyCode, bubbles: true, cancelable: true, composed: true };
         const down = fire(target, "KeyboardEvent", "keydown", init);
+        // An uncanceled Esc keydown is a close request for the window's close watchers.
+        // The close watcher's cancel/close and the dialog's focus fixup run synchronously;
+        // its close event is a queued task, which (like a real keyboard's inter-event gap)
+        // drains before keyup. keyup then targets whatever now holds focus.
+        if (down && key === "Escape") {
+          closeRequest();
+          await wait(0);
+          if (run !== activeRun) return;
+          fire(apply(activeElement, document, []), "KeyboardEvent", "keyup", init);
+          continue;
+        }
         if (
           down &&
           key === "Enter" &&

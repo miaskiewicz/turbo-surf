@@ -88,8 +88,8 @@ pub(super) fn copy<'s>(
 }
 
 /// The first element in tree order of the input's tree (document, shadow root or detached
-/// subtree) whose ID is the `list` attribute, when it is an HTML datalist.
-fn datalist(tree: &Tree, node: Handle) -> Option<Handle> {
+/// subtree) whose ID is the `list` attribute.
+fn list_reference(tree: &Tree, node: Handle) -> Option<Handle> {
     let id = tree.get_attribute_utf16(node, "list")?;
     if id.is_empty() {
         return None;
@@ -103,13 +103,20 @@ fn datalist(tree: &Tree, node: Handle) -> Option<Handle> {
         if tree.node_type_id(current) == 1
             && tree.get_attribute_utf16(current, "id").as_ref() == Some(&id)
         {
-            return (tree.namespace_id(current) == 0
-                && tree.local_name(current) == Some("datalist"))
-            .then_some(current);
+            return Some(current);
         }
         pending.extend(tree.children(current).into_iter().rev());
     }
     None
+}
+/// The suggestions source: the referenced element, when it (or, for a shadow host, its
+/// reference target) is an HTML datalist. A host is exposed retargeted, as Chrome does.
+fn datalist(scope: &mut v8::PinScope, node: Handle) -> Option<Handle> {
+    let found = with_tree(|tree| list_reference(tree, node)).flatten()?;
+    let actual = reference_target::resolve(scope, found, false)?;
+    with_tree(|tree| tree.namespace_id(actual) == 0 && tree.local_name(actual) == Some("datalist"))
+        .unwrap_or(false)
+        .then_some(found)
 }
 
 pub(super) fn dispatch<'s>(
@@ -131,7 +138,7 @@ pub(super) fn dispatch<'s>(
     match operation.as_str() {
         "indeterminate" => rv.set_bool(indeterminate(node)),
         "set-indeterminate" => set_indeterminate(node, args.get(2).boolean_value(scope)),
-        "list" => match with_tree(|tree| datalist(tree, node)).flatten() {
+        "list" => match datalist(scope, node) {
             Some(list) => rv.set(wrap(scope, list).into()),
             None => rv.set(v8::null(scope).into()),
         },

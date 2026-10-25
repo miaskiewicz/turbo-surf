@@ -9,9 +9,17 @@ pub(super) struct Submission {
     pub body: Option<Vec<u8>>,
 }
 
+/// A File entry's native snapshot: its name, type and bytes, never the guest object.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct FilePart {
+    pub name: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
 /// Encoding accepts the entry list after successful-controls construction. Modern
 /// HTML form submission selects its native document encoding before normalization.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, dead_code)]
 pub(super) fn prepare(
     document_url: &str,
     resolved_action: &str,
@@ -19,6 +27,33 @@ pub(super) fn prepare(
     enctype: &str,
     target: &str,
     entries: &[(String, String)],
+    charset_entries: &[usize],
+    encoding: &'static encoding_rs::Encoding,
+) -> Result<Submission, String> {
+    prepare_with_files(
+        document_url,
+        resolved_action,
+        method,
+        enctype,
+        target,
+        entries,
+        &[],
+        charset_entries,
+        encoding,
+    )
+}
+
+/// As [`prepare`]; `files[i]` holds the File snapshot of entry `i` (whose text is
+/// then its file name), which multipart/form-data encodes as a file part.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn prepare_with_files(
+    document_url: &str,
+    resolved_action: &str,
+    method: &str,
+    enctype: &str,
+    target: &str,
+    entries: &[(String, String)],
+    files: &[Option<FilePart>],
     charset_entries: &[usize],
     encoding: &'static encoding_rs::Encoding,
 ) -> Result<Submission, String> {
@@ -61,6 +96,14 @@ pub(super) fn prepare(
     };
     match method {
         "get" => url.set_query(Some(&encoded())),
+        "post" if enctype == "multipart/form-data" => {
+            let boundary = boundary()?;
+            submission.headers.insert(
+                "content-type".into(),
+                format!("multipart/form-data; boundary={boundary}"),
+            );
+            submission.body = Some(multipart(&entries, files, encoding, &boundary));
+        }
         "post" => {
             let body = match enctype {
                 "application/x-www-form-urlencoded" => encoded(),
@@ -68,7 +111,7 @@ pub(super) fn prepare(
                     .iter()
                     .map(|(name, value)| format!("{name}={value}\r\n"))
                     .collect::<String>(),
-                _ => return Err("Native multipart form encoding is not supported".into()),
+                _ => return Err("Native form encoding is not supported".into()),
             };
             submission
                 .headers
@@ -119,4 +162,71 @@ fn encode(value: &str, encoding: &'static encoding_rs::Encoding) -> String {
         }
     }
     result
+}
+
+/// Blink's boundary: a fixed prefix and 16 characters from its 64-entry alphabet.
+fn boundary() -> Result<String, String> {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB";
+    let mut random = [0u8; 16];
+    getrandom::fill(&mut random).map_err(|_| "Native multipart boundary entropy unavailable")?;
+    let mut boundary = String::from("----WebKitFormBoundary");
+    boundary.extend(
+        random
+            .iter()
+            .map(|byte| ALPHABET[usize::from(byte & 63)] as char),
+    );
+    Ok(boundary)
+}
+
+/// A Content-Disposition quoted-string: Blink percent-escapes only `"`, CR and LF.
+fn quoted(out: &mut Vec<u8>, bytes: &[u8]) {
+    for &byte in bytes {
+        match byte {
+            b'"' => out.extend_from_slice(b"%22"),
+            b'\r' => out.extend_from_slice(b"%0D"),
+            b'\n' => out.extend_from_slice(b"%0A"),
+            byte => out.push(byte),
+        }
+    }
+}
+
+/// multipart/form-data over newline-normalized names and text values in the form's
+/// encoding (HTML character references for unmappable characters). File names keep
+/// their line breaks; their bytes are copied unchanged.
+pub(super) fn multipart(
+    entries: &[(String, String)],
+    files: &[Option<FilePart>],
+    encoding: &'static encoding_rs::Encoding,
+    boundary: &str,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (index, (name, value)) in entries.iter().enumerate() {
+        out.extend_from_slice(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"").as_bytes(),
+        );
+        quoted(&mut out, &encoding.encode(name).0);
+        out.push(b'"');
+        match files.get(index).and_then(Option::as_ref) {
+            Some(file) => {
+                out.extend_from_slice(b"; filename=\"");
+                quoted(&mut out, &encoding.encode(&file.name).0);
+                let content_type = if file.content_type.is_empty() {
+                    "application/octet-stream"
+                } else {
+                    &file.content_type
+                };
+                out.extend_from_slice(
+                    format!("\"\r\nContent-Type: {content_type}\r\n\r\n").as_bytes(),
+                );
+                out.extend_from_slice(&file.bytes);
+            }
+            None => {
+                out.extend_from_slice(b"\r\n\r\n");
+                out.extend_from_slice(&encoding.encode(value).0);
+            }
+        }
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    out
 }

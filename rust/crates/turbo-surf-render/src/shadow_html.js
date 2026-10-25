@@ -83,11 +83,13 @@
       return native("getHTML", this, serializable, roots);
     };
   const unsafe = (owner, check) =>
-    function setHTMLUnsafe(html) {
+    function setHTMLUnsafe(html, options) {
       check(this);
       if (arguments.length < 1)
         throw new TypeErrorValue(`Failed to execute 'setHTMLUnsafe' on '${owner}': 1 argument required, but only 0 present.`);
-      native("setHTMLUnsafe", this, html);
+      // (TrustedHTML or DOMString), then SetHTMLUnsafeOptions (sanitizer.js).
+      const converted = ns.sanitizerUnsafeArguments(html, options, owner, "setHTMLUnsafe");
+      native("setHTMLUnsafe", this, converted.html, converted.config);
     };
   const element = (value) => apply(elementBrand, value, []);
   method(Element.prototype, "getHTML", 0, serialize("Element", element));
@@ -114,13 +116,15 @@
       shadow(this);
     },
   );
-  // This engine has no pointer-lock or picture-in-picture entry point, so the
-  // document never has such an element and its retargeted value is null.
-  for (const name of ["pointerLockElement", "pictureInPictureElement"])
-    getter(name, function () {
-      shadow(this);
-      return null;
-    });
+  // The native pointer lock element retargeted into this shadow tree. This engine has
+  // no picture-in-picture entry point, so the document never has such an element.
+  getter("pointerLockElement", function () {
+    return native("pointerLockElement", this);
+  });
+  getter("pictureInPictureElement", function () {
+    shadow(this);
+    return null;
+  });
   const sheets = new WeakMapValue();
   getter("styleSheets", function () {
     shadow(this);

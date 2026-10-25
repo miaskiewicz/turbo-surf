@@ -1,0 +1,610 @@
+{
+ "cases": {
+  "drag-without-capture": {
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "up": "#b"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "nested-boundaries": {
+   "steps": [
+    {
+     "move": {
+      "selector": "#cs"
+     }
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "move": {
+      "selector": "#cs"
+     }
+    },
+    {
+     "move": {
+      "selector": "#a"
+     }
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "flags": {
+   "options": {
+    "flags": true
+   },
+   "setup": "$('a').addEventListener('pointerdown',()=>$('a').setPointerCapture(1));",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "up": "#b"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "capture-on-pointerdown": {
+   "setup": "$('a').addEventListener('pointerdown',e=>{$('a').setPointerCapture(e.pointerId);__log.push('set has='+$('a').hasPointerCapture(1));});",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "__log.push('between');return $('a').hasPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "up": "#c"
+    },
+    {
+     "eval": "return $('a').hasPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "capture-switch-and-release": {
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "$('a').setPointerCapture(1);__log.push('set a');$('b').setPointerCapture(1);return [$('a').hasPointerCapture(1),$('b').hasPointerCapture(1)]"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "eval": "$('b').releasePointerCapture(1);__log.push('released b');return $('b').hasPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "up": "#a"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "capture-applied-at-pointerup": {
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "$('c').setPointerCapture(1)"
+    },
+    {
+     "up": "#a"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "capture-in-pointerup-is-ignored": {
+   "setup": "$('a').addEventListener('pointerup',()=>{$('b').setPointerCapture(1);__log.push('in up has='+$('b').hasPointerCapture(1));});",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "up": "#a"
+    },
+    {
+     "eval": "return $('b').hasPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "capture-in-mousedown": {
+   "setup": "$('a').addEventListener('mousedown',()=>$('b').setPointerCapture(1));",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "up": "#c"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "capture-replaced-then-kept": {
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "$('a').setPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "eval": "__log.push('set b');$('b').setPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "eval": "$('b').setPointerCapture(1);$('a').releasePointerCapture(1);return $('b').hasPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "up": "#a"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "release-in-pointermove": {
+   "setup": "$('a').addEventListener('pointermove',e=>{if(e.buttons){$('a').releasePointerCapture(e.pointerId);__log.push('released');}});",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "$('a').setPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "up": "#c"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "capture-descendant": {
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "$('cs').setPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "up": "#b"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "capture-in-shadow-tree": {
+   "setup": "const root=$('h').attachShadow({mode:'open'});root.innerHTML='<p id=inner style=\"margin:0;width:100px;height:100px\">in</p>';globalThis.inner=root.firstChild;for(const t of ['gotpointercapture','lostpointercapture'])inner.addEventListener(t,e=>__log.push('inner '+e.type+' target='+nameOf(e.target)));",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "inner.setPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "up": "#b"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "remove-active-capture": {
+   "options": {
+    "boundary": false
+   },
+   "setup": "document.addEventListener('lostpointercapture',e=>__log.push('document listener '+nameOf(e.target)+' '+e.composed));",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "$('a').setPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "eval": "const a=$('a');a.remove();__log.push('removed has='+a.hasPointerCapture(1));"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     },
+     "quiet": true
+    },
+    {
+     "up": "#c"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "remove-pending-capture": {
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "const b=$('b');b.setPointerCapture(1);b.remove();__log.push('has '+b.hasPointerCapture(1));"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "up": "#c"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "canceled-pointerdown": {
+   "setup": "$('a').addEventListener('pointerdown',e=>e.preventDefault());",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "up": "#b"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "synthetic-events-never-press": {
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "eval": "const a=$('a');a.dispatchEvent(new PointerEvent('pointerdown',{pointerId:1,buttons:1,bubbles:true}));a.setPointerCapture(1);const r=[a.hasPointerCapture(1)];a.dispatchEvent(new PointerEvent('pointerdown',{pointerId:9,buttons:1}));try{a.setPointerCapture(9)}catch(e){r.push(e.name)}return r"
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "$('a').setPointerCapture(1);$('a').dispatchEvent(new PointerEvent('pointermove',{pointerId:1,buttons:1}));__log.push('after synthetic move')"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "up": "#b"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "movement": {
+   "options": {
+    "movement": true
+   },
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "down": "#b"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "up": "#c"
+    },
+    {
+     "move": {
+      "selector": "#a"
+     }
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "pointer-lock": {
+   "options": {
+    "movement": true
+   },
+   "setup": "$('a').addEventListener('click',()=>{if(!globalThis.requested){globalThis.requested=true;settle('lock',$('a').requestPointerLock());__log.push('pending '+nameOf(document.pointerLockElement));}});",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "click": "#a"
+    },
+    {
+     "eval": "await sleep(100);__log.push('locked '+nameOf(document.pointerLockElement)+' active '+navigator.userActivation.isActive)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "down": "#b"
+    },
+    {
+     "move": {
+      "selector": "#c"
+     }
+    },
+    {
+     "eval": "try{$('b').setPointerCapture(1)}catch(e){__log.push('capture '+e.name)}"
+    },
+    {
+     "up": "#c"
+    },
+    {
+     "eval": "document.exitPointerLock();__log.push('exit '+nameOf(document.pointerLockElement));await sleep(100)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "pointer-lock-releases-capture": {
+   "setup": "",
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "click": "#a"
+    },
+    {
+     "down": "#a"
+    },
+    {
+     "eval": "$('a').setPointerCapture(1)"
+    },
+    {
+     "move": {
+      "selector": "#b"
+     }
+    },
+    {
+     "eval": "settle('lock',$('b').requestPointerLock());await sleep(100);__log.push('has '+$('a').hasPointerCapture(1))"
+    },
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "up": "#a"
+    },
+    {
+     "eval": "document.exitPointerLock();await sleep(100)"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "pointer-lock-requests": {
+   "options": {
+    "boundary": false
+   },
+   "steps": [
+    {
+     "move": {
+      "selector": "#a"
+     }
+    },
+    {
+     "click": "#a"
+    },
+    {
+     "eval": "settle('a',$('a').requestPointerLock());await sleep(100);settle('same',$('a').requestPointerLock());await sleep(100);settle('b',$('b').requestPointerLock());await sleep(100);settle('option',$('b').requestPointerLock({unadjustedMovement:true}));await sleep(100);__log.push('held '+nameOf(document.pointerLockElement));settle('option-same',$('a').requestPointerLock({unadjustedMovement:true}));await sleep(100);__log.push('held '+nameOf(document.pointerLockElement));const a=$('a');a.remove();__log.push('removed '+nameOf(document.pointerLockElement));await sleep(100);document.body.append(a);document.exitPointerLock();__log.push('exit unlocked');await sleep(100)"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "pointer-lock-without-activation": {
+   "steps": [
+    {
+     "eval": "settle('lock',$('a').requestPointerLock());__log.push('pending '+nameOf(document.pointerLockElement));await sleep(100);__log.push('after '+nameOf(document.pointerLockElement))"
+    }
+   ],
+   "html": "<div id=a style=\"position:absolute;left:10px;top:10px;width:100px;height:100px\"></div><div id=b style=\"position:absolute;left:200px;top:10px;width:100px;height:100px\"></div><div id=c style=\"position:absolute;left:10px;top:200px;width:100px;height:100px\"><span id=cs style=\"display:block;width:50px;height:50px\">C</span></div><div id=h style=\"position:absolute;left:200px;top:200px;width:100px;height:100px\"></div>"
+  },
+  "pointer-lock-sandboxed-frames": {
+   "html": "<iframe id=f sandbox=\"allow-scripts allow-same-origin\" srcdoc=\"<div id=x>x</div>\"></iframe><iframe id=g sandbox=\"allow-scripts allow-same-origin allow-pointer-lock\" srcdoc=\"<div id=x>x</div>\"></iframe>",
+   "steps": [
+    {
+     "eval": "await sleep(200);for(const id of ['f','g']){const w=$(id).contentWindow;w.document.addEventListener('pointerlockerror',e=>__log.push(id+' pointerlockerror '+e.isTrusted));await settle(id,w.document.getElementById('x').requestPointerLock());}await sleep(100)"
+    }
+   ]
+  }
+ }
+}

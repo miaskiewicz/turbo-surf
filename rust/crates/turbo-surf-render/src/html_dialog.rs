@@ -148,7 +148,7 @@ fn hidden_visibility(
 /// enabled control or link, a valid tabindex, an editing host, an open dialog or a details
 /// summary, which is rendered and not inert. Rendering is the native cascade plus the UA
 /// rules for `[hidden]`, closed dialogs and closed details; there is no layout.
-fn focusable(
+pub(super) fn focusable(
     tree: &Tree,
     node: Handle,
     dialog: Handle,

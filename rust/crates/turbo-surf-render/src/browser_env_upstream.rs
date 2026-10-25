@@ -21,6 +21,8 @@ mod dom_isolation;
 mod dom_ownership;
 #[path = "element_internals.rs"]
 mod element_internals;
+#[path = "animations.rs"]
+mod animations;
 #[path = "element_members.rs"]
 mod element_members;
 pub use dom_isolation::{activate_isolate, reset_isolate, NativeDomScope};
@@ -67,6 +69,12 @@ pub use mutation_observers::{install_mutation_consumer, remove_mutation_consumer
 /// Guest code cannot install or replace this private lifecycle capability.
 pub fn capture_popover_scheduler(scope: &mut v8::PinScope) {
     html_popover::capture_scheduler(scope);
+}
+
+/// Capture the embedder's `File` interface once the runtime has installed it, before
+/// page script: FileList selections, file form entries and DataTransfer use it.
+pub fn capture_file_host(scope: &mut v8::PinScope) {
+    file_inputs::capture_host(scope);
 }
 
 pub fn clear_context_capabilities(scope: &mut v8::PinScope) {
@@ -123,16 +131,31 @@ pub use document_xpath::is_native_xpath_object;
 mod dom_mutations;
 #[path = "element_relations.rs"]
 mod element_relations;
+#[path = "file_inputs.rs"]
+mod file_inputs;
+#[path = "focus_group.rs"]
+mod focus_group;
 #[path = "html_dialog.rs"]
 mod html_dialog;
+#[path = "typed_om.rs"]
+mod typed_om;
 #[path = "html_invokers.rs"]
 mod html_invokers;
 #[path = "html_popover.rs"]
 mod html_popover;
+#[path = "pointer_events.rs"]
+mod pointer_events;
+pub use pointer_events::{host_pointer, PointerLockPolicy};
 #[path = "html_text.rs"]
 mod html_text;
+#[path = "hyperlink_utils.rs"]
+mod hyperlink_utils;
 #[path = "input_members.rs"]
 mod input_members;
+#[path = "interest_invokers.rs"]
+mod interest_invokers;
+#[path = "reference_target.rs"]
+mod reference_target;
 #[path = "shadow_html.rs"]
 mod shadow_html;
 #[path = "select_element.rs"]
@@ -222,6 +245,8 @@ pub fn update_node_nonce_units(
 
 #[path = "html_documents.rs"]
 mod html_documents;
+#[path = "sanitizer.rs"]
+mod sanitizer;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -442,6 +467,7 @@ struct DomState {
     css_policy: css_policy::PolicyState,
     event_handlers: event_handlers::State,
     popover: html_popover::State,
+    pointer: pointer_events::State,
     activation: user_activation_gates::State,
     input_members: input_members::State,
     browsing_context: bool,
@@ -597,8 +623,20 @@ pub fn parse_html_document_units<'s>(
 }
 fn parse_html_tree<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    mut tree: Tree,
+    tree: Tree,
     sanitize: bool,
+) -> v8::Local<'s, v8::Object> {
+    let sanitizer = sanitize.then(|| (html_documents::default_config(), true));
+    parse_html_tree_with(scope, tree, false, sanitizer)
+}
+/// Build an inert document from a parsed tree. `declarative` attaches
+/// `<template shadowrootmode>` roots (`Document.parseHTML[Unsafe]`); a sanitizer
+/// configuration (and whether it is safe) then filters the whole tree.
+fn parse_html_tree_with<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut tree: Tree,
+    declarative: bool,
+    sanitizer: Option<(&sanitizer::Config, bool)>,
 ) -> v8::Local<'s, v8::Object> {
     let id = NEXT_DOM_ID.with(|next| {
         let id = next.get();
@@ -619,9 +657,13 @@ fn parse_html_tree<'s>(
         (clone, current_node_projector(scope))
     };
     let _dom = DomScope::enter(id);
-    if sanitize {
-        html_documents::sanitize(&mut tree);
-    }
+    let root = tree.root();
+    let only = sanitizer.map(|(config, safe)| sanitizer::sanitize(&mut tree, root, config, safe));
+    let declared = if declarative {
+        shadow_html::declarative(&mut tree, root, only.as_ref())
+    } else {
+        Vec::new()
+    };
     let template = build_el_template(scope);
     let template = v8::Global::new(scope, template);
     DOM.with(|dom| {
@@ -640,6 +682,7 @@ fn parse_html_tree<'s>(
             css_policy: Default::default(),
             event_handlers: Default::default(),
             popover: Default::default(),
+            pointer: Default::default(),
             activation: Default::default(),
             input_members: Default::default(),
             browsing_context: false,
@@ -665,11 +708,16 @@ fn parse_html_tree<'s>(
         let undefined = v8::undefined(scope);
         function.call(scope, undefined.into(), &[document.into()]);
     }
+    let roots = shadow_html::register(scope, declared);
     DOM.with(|dom| {
         if let Some(dom) = dom.borrow_mut().as_mut() {
             dom.template_contents.enabled = true
         }
     });
+    // Innermost roots first: no raw parser content fragment may enter adoption.
+    for root in roots.iter().rev() {
+        template_contents::realize(scope, *root);
+    }
     template_contents::realize(scope, document);
     document
 }
@@ -3089,6 +3137,7 @@ fn selector_argument<'s>(
     }
     let transformed = html_popover::selector(scope, node, &scalar)?;
     let transformed = html_dialog::selector(scope, node, &transformed)?;
+    let transformed = interest_invokers::selector(scope, node, &transformed)?;
     let original = if transformed == scalar {
         units
     } else {
@@ -4829,6 +4878,12 @@ fn el_dispatch_event(
 
     if let (true, Some(activation)) = (not_prevented, activation_target) {
         html_invokers::activate(scope, event_obj, activation, target);
+    }
+    if args.data().is_true() {
+        interest_invokers::observe(scope, event_obj, target, &ty);
+        if not_prevented && ty == "keydown" {
+            focus_group::keydown(scope, event_obj, target);
+        }
     }
 
     // Finish the checkbox/radio activation: a canceled click reverts the pre-toggle; otherwise fire
@@ -6923,8 +6978,12 @@ pub fn install_with_html_source_positions(scope: &mut v8::PinScope, html: &str) 
 pub fn install_with_utf16_source_positions(scope: &mut v8::PinScope, units: &[u16]) {
     install_with_tree(scope, Tree::parse_utf16_with_source_positions(units));
 }
-fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
+fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     dom_isolation::install(scope);
+    // The document parser attaches declarative shadow roots (fragment parsing
+    // for innerHTML never does); their scripts are ordinary parser scripts.
+    let root = tree.root();
+    let declared = shadow_html::declarative(&mut tree, root, None);
     // A replacement document is seeded before its new bootstrap probes native
     // methods. Projecting with the previous bootstrap here would delete those
     // raw own methods before their replacement prototypes have been constructed.
@@ -6955,12 +7014,14 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
             checked_radios: Default::default(),
             dialog: Default::default(),
             el_template,
+            // Declarative roots get their modes once the binding can wrap them.
             shadow_modes: HashMap::new(),
             basics_state: None,
             control_clone: None,
             css_policy: Default::default(),
             event_handlers: Default::default(),
             popover: Default::default(),
+            pointer: Default::default(),
             activation: Default::default(),
             input_members: Default::default(),
             browsing_context: true,
@@ -6978,6 +7039,9 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     DOM_CONTEXTS.with(|d| {
         d.borrow_mut().insert(DOM_ID.with(|id| id.get()), global);
     });
+    // Parsed declarative roots exist before any binding JS mutates the tree.
+    shadow_html::ensure_keys(scope);
+    shadow_slots::ensure_keys(scope);
     if let Some(root) = with_tree(|tree| tree.root()) {
         form_checked_state::parsed(root);
     }
@@ -7054,10 +7118,16 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     document_legacy::install(scope);
     capture_node_projector(scope);
     dom_implementation::install(scope);
+    // Root flags must exist before template realization adopts nested contents.
+    let declared = shadow_html::register(scope, declared);
     template_contents::install(scope);
+    for root in declared.iter().rev() {
+        template_contents::realize(scope, *root);
+    }
     mutation_observers::install(scope);
     shadow_slots::install(scope);
     shadow_html::install(scope);
+    sanitizer::install(scope);
     script_state::install(scope);
     range_contents::install(scope);
     bind_method(scope, global, "__htmlTextNative", html_text::dispatch);
@@ -7067,13 +7137,21 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     event_listeners::install(scope);
     element_members::install(scope);
     html_dialog::install(scope);
+    pointer_events::install(scope);
     bind_method(scope, global, "__formNative", form_controls_native);
     run_js(scope, include_str!("form_outputs.js"));
     run_js(scope, include_str!("form_controls.js"));
     run_js(scope, include_str!("form_collections.js"));
+    reference_target::install(scope);
+    interest_invokers::install(scope);
     html_invokers::install(scope);
+    focus_group::install(scope);
     input_members::install(scope);
+    file_inputs::install(scope);
     select_element::install(scope);
+    animations::install(scope);
+    typed_om::install(scope);
+    hyperlink_utils::install(scope);
     user_activation_gates::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
@@ -7141,6 +7219,8 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     event_handlers::install(scope, None, "about:blank");
     custom_elements::install(scope);
     element_internals::install(scope);
+    // After custom_elements re-creates the HTML constructors, so static members stay on them.
+    run_js(scope, include_str!("interface_members.js"));
 }
 
 fn bind_document(scope: &mut v8::PinScope) {
@@ -9432,3 +9512,18 @@ mod form_outputs_tests;
 #[cfg(test)]
 #[path = "html_dialog_tests.rs"]
 mod html_dialog_tests;
+#[cfg(test)]
+#[path = "sanitizer_tests.rs"]
+mod sanitizer_tests;
+#[cfg(test)]
+#[path = "pointer_events_tests.rs"]
+mod pointer_events_tests;
+#[cfg(test)]
+#[path = "animations_tests.rs"]
+mod animations_tests;
+#[cfg(test)]
+#[path = "file_inputs_tests.rs"]
+mod file_inputs_tests;
+#[cfg(test)]
+#[path = "typed_om_tests.rs"]
+mod typed_om_tests;

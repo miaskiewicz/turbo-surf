@@ -737,6 +737,40 @@
         },
       };
     },
+    // Internal abort algorithms run in the raw signal's abort steps, before any
+    // abort event listener; the remover detaches one that is no longer wanted.
+    abortAlgorithm(signal, algorithm) {
+      const raw = unwrap(signal, "AbortSignal"),
+        add = backend.abort.add,
+        remove = backend.abort.remove;
+      raw[add](algorithm);
+      return () => raw[remove](algorithm);
+    },
+    // A dependent signal over fronts, without consulting page-mutable iteration.
+    anySignal(signals) {
+      const raws = create(null);
+      for (let index = 0; index < signals.length; index++)
+        define(raws, index, { __proto__: null, value: unwrap(signals[index], "AbortSignal") });
+      const iterable = create(null);
+      define(iterable, iteratorSymbol, {
+        __proto__: null,
+        value: () => {
+          let index = 0;
+          const cursor = create(null);
+          define(cursor, "next", {
+            __proto__: null,
+            value: () => {
+              const item = create(null);
+              item.done = index === signals.length;
+              if (!item.done) item.value = raws[index++];
+              return item;
+            },
+          });
+          return cursor;
+        },
+      });
+      return signalFront(backend.abort.createDependentAbortSignal(iterable, "Observable"));
+    },
     dependent(signal) {
       return signalFront(
         backend.abort.createDependentAbortSignal(

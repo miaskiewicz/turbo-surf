@@ -746,12 +746,28 @@
         let selected = raw.customElementRegistry;
         if (selected !== undefined && selected !== null) state(selected);
         const delegatesFocus = !!raw.delegatesFocus,
-          mode = string(raw.mode),
+          rawMode = raw.mode;
+        const reading = "Failed to execute 'attachShadow' on 'Element': Failed to read the ";
+        if (rawMode === undefined)
+          throw new TypeErrorValue(reading + "'mode' property from 'ShadowRootInit': Required member is undefined.");
+        const mode = string(rawMode);
+        // ShadowRootMode is an enum: an invalid mode throws before later members are read.
+        if (mode !== "open" && mode !== "closed")
+          throw new TypeErrorValue(
+            reading + `'mode' property from 'ShadowRootInit': The provided value '${mode}' is not a valid enum value of type ShadowRootMode.`,
+          );
+        const rawTarget = raw.referenceTarget;
+        if (typeof rawTarget === "symbol")
+          throw new TypeErrorValue(
+            reading + "'referenceTarget' property from 'ShadowRootInit': Cannot convert a Symbol value to a string",
+          );
+        const referenceTarget =
+            rawTarget === undefined || rawTarget === null ? null : StringValue(rawTarget),
           serializable = !!raw.serializable,
           rawAssignment = raw.slotAssignment,
           slotAssignment = rawAssignment === undefined ? "named" : string(rawAssignment);
         const shadow = apply(attach, this, [
-          { clonable, delegatesFocus, mode, serializable, slotAssignment },
+          { clonable, delegatesFocus, mode, referenceTarget, serializable, slotAssignment },
         ]);
         if (selected === undefined) selected = registryFor(this);
         associate(shadow, selected);

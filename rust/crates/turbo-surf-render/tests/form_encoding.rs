@@ -89,7 +89,6 @@ fn only_native_hidden_charset_indices_are_replaced() {
     );
     for (action, method, enctype, target) in [
         ("file:///tmp/a", "get", "text/plain", ""),
-        ("https://local.invalid/", "post", "multipart/form-data", ""),
         ("https://local.invalid/", "get", "text/plain", "_blank"),
     ] {
         assert!(form_navigation::prepare(

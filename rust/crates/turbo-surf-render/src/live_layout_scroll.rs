@@ -9,6 +9,8 @@ pub(crate) struct SourceStyle {
     pub(crate) style: ComputedStyle,
     pub(crate) parent: Option<SourceId>,
     pub(crate) tag: String,
+    /// Effective CSS zoom: the product of computed factors along the flat tree.
+    pub(crate) zoom: f32,
 }
 pub(crate) type SourceStyles = BTreeMap<SourceId, SourceStyle>;
 
@@ -21,7 +23,7 @@ pub(crate) fn collect_styles(input: &LiveTreeInput, styled: &[StyledNode]) -> So
     fn walk(
         nodes: &[StyledNode],
         path: &mut Vec<usize>,
-        parent: Option<SourceId>,
+        parent: (Option<SourceId>, f32),
         ids: &BTreeMap<&[usize], SourceId>,
         out: &mut SourceStyles,
     ) {
@@ -29,12 +31,14 @@ pub(crate) fn collect_styles(input: &LiveTreeInput, styled: &[StyledNode]) -> So
             path.push(i);
             let id = ids.get(path.as_slice()).copied();
             if let StyledNode::Element(element) = node {
+                let zoom = parent.1 * crate::live_layout_zoom::factor(&element.style);
                 if let Some(id) = id {
                     out.insert(
                         id,
                         SourceStyle {
                             style: element.style.clone(),
-                            parent,
+                            parent: parent.0,
+                            zoom,
                             tag: match &element.tag {
                                 turbo_html2pdf_core::Tag::Html(tag) => tag.clone(),
                                 _ => String::new(),
@@ -42,13 +46,13 @@ pub(crate) fn collect_styles(input: &LiveTreeInput, styled: &[StyledNode]) -> So
                         },
                     );
                 }
-                walk(&element.children, path, id.or(parent), ids, out);
+                walk(&element.children, path, (id.or(parent.0), zoom), ids, out);
             }
             path.pop();
         }
     }
     let mut out = BTreeMap::new();
-    walk(styled, &mut Vec::new(), None, &identities, &mut out);
+    walk(styled, &mut Vec::new(), (None, 1.0), &identities, &mut out);
     out
 }
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
@@ -198,6 +202,9 @@ pub(crate) fn scroll_metrics(
         ) {
             continue;
         }
+        if !contained(styles, fragment, id) {
+            continue;
+        }
         // A nested clipping ancestor owns its descendants' overflow. Its own
         // border still contributes to the outer scroll area's extent.
         let mut blocked_x = false;
@@ -208,7 +215,11 @@ pub(crate) fn scroll_metrics(
                 blocked_y = false;
                 continue;
             }
-            if *ancestor == fragment.source_id.unwrap_or(id) {
+            // A propagated overflow belongs to the viewport and clips nothing here.
+            if *ancestor == fragment.source_id.unwrap_or(id)
+                || is_root(styles, *ancestor)
+                || propagated_body(styles, *ancestor)
+            {
                 continue;
             }
             if let Some(ancestor) = styles.get(ancestor) {
@@ -252,6 +263,52 @@ pub(crate) fn scroll_metrics(
         max_x: f64::from((right - padding.x - padding.width).max(0.0)),
         max_y: f64::from((bottom - padding.y - padding.height).max(0.0)),
     })
+}
+
+/// Whether a fragment belongs to the element's scrollable overflow: every
+/// absolute/fixed box between them (including the fragment's own box) must find
+/// its containing block at or inside the element, never an outer block or the
+/// viewport.
+fn contained(
+    styles: &SourceStyles,
+    fragment: &turbo_html2pdf_core::layout_snapshot::SnapshotFragment,
+    id: SourceId,
+) -> bool {
+    let Some(start) = fragment
+        .source_ancestors
+        .iter()
+        .position(|ancestor| *ancestor == id)
+    else {
+        return true;
+    };
+    let own = fragment
+        .source_id
+        .filter(|own| fragment.source_ancestors.last() != Some(own));
+    let chain = fragment.source_ancestors[start..].iter().chain(own.iter());
+    let (mut absolute, mut fixed) = (false, false);
+    for (index, source) in chain.enumerate() {
+        let Some(entry) = styles
+            .get(source)
+            .filter(|entry| !has_value(&entry.style, "display", "contents"))
+        else {
+            continue;
+        };
+        if index > 0
+            && (has_value(&entry.style, "position", "absolute") && !absolute
+                || has_value(&entry.style, "position", "fixed") && !fixed)
+        {
+            return false;
+        }
+        let transformed = entry
+            .style
+            .get("transform")
+            .is_some_and(|value| !value.trim().eq_ignore_ascii_case("none"));
+        absolute |= transformed
+            || !has_value(&entry.style, "position", "static")
+                && entry.style.get("position").is_some();
+        fixed |= transformed;
+    }
+    true
 }
 
 pub(crate) fn scroll_translation(

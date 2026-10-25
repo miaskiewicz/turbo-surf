@@ -33,6 +33,10 @@ fn evaluate(condition: &SupportsCondition<'_>) -> Result<bool, String> {
             Ok(false)
         }
         SupportsCondition::Declaration { property_id, value } => {
+            // Lightning CSS has no typed `zoom`; use the canonical CSSOM grammar.
+            if property_id.name().eq_ignore_ascii_case("zoom") {
+                return Ok(zoom(value));
+            }
             if property_id.prefix().intersects(
                 lightningcss::vendor_prefix::VendorPrefix::Moz
                     | lightningcss::vendor_prefix::VendorPrefix::Ms
@@ -56,6 +60,19 @@ fn evaluate(condition: &SupportsCondition<'_>) -> Result<bool, String> {
         SupportsCondition::Unknown(_) => Ok(false),
         SupportsCondition::Selector(source) => Ok(selector(source)),
     }
+}
+
+fn zoom(value: &str) -> bool {
+    if crate::browser_env::css_zoom_value(value).is_some() || css_wide(value) {
+        return true;
+    }
+    Property::parse_string(PropertyId::from("zoom"), value, ParserOptions::default()).is_ok_and(
+        |property| match property {
+            Property::Custom(property) => deferred(&property.value),
+            Property::Unparsed(property) => deferred(&property.value),
+            _ => false,
+        },
+    )
 }
 
 #[deno_core::op2(fast)]

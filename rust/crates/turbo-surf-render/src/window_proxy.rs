@@ -786,6 +786,11 @@ pub(super) fn seed_location(scope: &mut v8::PinScope, url: &str) {
     location::seed(scope, url);
 }
 
+/// A same-document URL update (pushState, fragment navigation): no navigation, no reseed.
+pub(super) fn set_location_url(scope: &mut v8::PinScope, url: &str) {
+    location::seed(scope, url);
+}
+
 pub(super) fn location_url(context: v8::Local<v8::Context>) -> Option<String> {
     location::url(context)
 }

@@ -26,7 +26,15 @@
     ),
   );
   const dispatch = ops.op_dispatch_host_event;
+  const pointer = (command) => ops.op_host_pointer(document, command);
+  const parentOf = Object.getOwnPropertyDescriptor(Node.prototype, "parentNode").get;
+  const nodeTypeOf = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
+  const shadowHost = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, "host").get;
   const activate = ops.op_host_user_activation;
+  const closeRequest = ops.op_host_close_request,
+    lightDismiss = ops.op_host_light_dismiss,
+    backdropOf = ops.op_host_modal_backdrop,
+    openDialog = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "open").get;
   const canceled = Object.getOwnPropertyDescriptor(Event.prototype, "defaultPrevented").get;
   const controlTag = Object.getOwnPropertyDescriptor(Element.prototype, "tagName").get;
   const controlValues = Object.create(null);
@@ -43,6 +51,51 @@
       selectionEnd: Object.getOwnPropertyDescriptor(prototype, "selectionEnd").get,
       setSelectionRange: prototype.setSelectionRange,
     };
+  }
+  // A file chooser's selection: genuine Files in a new FileList, like Chrome's own.
+  const FileInterface = globalThis.File,
+    TransferInterface = globalThis.DataTransfer;
+  const own = (object, name) =>
+    object ? Object.getOwnPropertyDescriptor(object, name) : undefined;
+  const inputFiles = own(HTMLInputElement.prototype, "files");
+  const inputMultiple = own(HTMLInputElement.prototype, "multiple")?.get;
+  const inputDisabled = own(HTMLInputElement.prototype, "disabled")?.get;
+  const transferItems = own(TransferInterface?.prototype, "items")?.get;
+  const transferFiles = own(TransferInterface?.prototype, "files")?.get;
+  const addItem = globalThis.DataTransferItemList?.prototype.add;
+  const decode = globalThis.atob,
+    charCode = String.prototype.charCodeAt;
+  function bytesOf(base64) {
+    const text = decode(String(base64 ?? ""));
+    const bytes = new Uint8Array(text.length);
+    for (let index = 0; index < text.length; index++) bytes[index] = apply(charCode, text, [index]);
+    return bytes;
+  }
+  function chooseFiles(target, files) {
+    if (!inputFiles || !transferItems || !addItem || typeof FileInterface !== "function")
+      throw new Error("File selection is unavailable in this realm");
+    let list = null;
+    try {
+      list = apply(inputFiles.get, target, []);
+    } catch {}
+    if (list === null || !apply(connected, target, []) || apply(inputDisabled, target, []))
+      throw new Error("File selection requires a connected, enabled file input");
+    if (!Array.isArray(files) || !files.length)
+      throw new TypeError("File selection requires at least one file");
+    if (files.length > 1 && !apply(inputMultiple, target, []))
+      throw new Error("A file input without multiple accepts one file");
+    const data = new TransferInterface(),
+      items = apply(transferItems, data, []);
+    for (const file of files) {
+      const options = { __proto__: null, type: String(file.type ?? "") };
+      if (file.lastModified != null) options.lastModified = Number(file.lastModified);
+      apply(addItem, items, [
+        new FileInterface([bytesOf(file.base64)], String(file.name), options),
+      ]);
+    }
+    apply(inputFiles.set, target, [apply(transferFiles, data, [])]);
+    fire(target, "Event", "input", { bubbles: true, composed: true });
+    fire(target, "Event", "change", { bubbles: true });
   }
   function editingControl(target) {
     try {
@@ -122,17 +175,26 @@
     }
     waits.clear();
   };
+  // The mouse pointer: the elements under it for pointer and for compatibility mouse
+  // boundaries, its position (null before the first event), pressed buttons, the
+  // pointerdown target a click resolves against, the client position a pointer lock
+  // froze, and whether a canceled pointerdown suppresses compatibility mouse events.
   let hovered = null,
+    mouseHovered = null,
     cursorX = 0,
-    cursorY = 0;
-  const closeRequest = ops.op_host_close_request,
-    lightDismiss = ops.op_host_light_dismiss,
-    backdropOf = ops.op_host_modal_backdrop,
-    openDialog = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "open").get;
+    cursorY = 0,
+    position = null,
+    pressed = 0,
+    downTarget = null,
+    frozen = null,
+    movementBase = null,
+    suppressed = false;
   function fire(target, name, type, init = {}) {
     return !canceled.call(trusted(target, name, type, init));
   }
-  function trusted(target, name, type, init) {
+  // Dispatch the trusted event and return it, so the close-watcher / light-dismiss ops can
+  // inspect the actual pointer/key event.
+  function trusted(target, name, type, init = {}) {
     const event = new events[name](type, init);
     // Only this captured embedder driver can notify activation. Dispatching an
     // identically named guest event never reaches this capability.
@@ -169,6 +231,157 @@
     const box = elementGeometry(target).bounds;
     cursorX = box[0] + box[2] / 2;
     cursorY = box[1] + box[3] / 2;
+  }
+  // Shadow-including element ancestors, the target first. The driver's own arrays are
+  // indexed directly: guest Array.prototype replacements never reach these steps.
+  function ancestors(node) {
+    const chain = [];
+    while (node) {
+      chain[chain.length] = node;
+      const parent = apply(parentOf, node, []);
+      if (!parent) break;
+      const type = apply(nodeTypeOf, parent, []);
+      node = type === 1 ? parent : type === 11 ? shadowParent(parent) : null;
+    }
+    return chain;
+  }
+  function shadowParent(fragment) {
+    try {
+      return apply(shadowHost, fragment, []);
+    } catch {
+      return null;
+    }
+  }
+  const boundaryTypes = {
+    pointer: ["PointerEvent", "pointerout", "pointerleave", "pointerover", "pointerenter"],
+    mouse: ["MouseEvent", "mouseout", "mouseleave", "mouseover", "mouseenter"],
+  };
+  const scopedInit = { bubbles: false, cancelable: false, composed: false };
+  // Chrome's boundary order: out at the old node, leave from it up to the common ancestor,
+  // over at the new node, enter from below the common ancestor down to it. A node that
+  // left the document receives nothing.
+  function boundary(kind, from, to, init) {
+    if (from && !apply(connected, from, [])) from = null;
+    if (from === to) return to;
+    const names = boundaryTypes[kind],
+      type = names[0],
+      out = names[1],
+      leave = names[2],
+      over = names[3],
+      enter = names[4];
+    init = { ...init, detail: 0 };
+    const left = from ? ancestors(from) : [],
+      entered = to ? ancestors(to) : [];
+    let shared = 0;
+    while (
+      shared < left.length &&
+      shared < entered.length &&
+      left[left.length - 1 - shared] === entered[entered.length - 1 - shared]
+    )
+      shared++;
+    if (from) {
+      fire(from, type, out, { ...init, relatedTarget: to });
+      for (let index = 0; index < left.length - shared; index++)
+        fire(left[index], type, leave, { ...init, ...scopedInit, relatedTarget: to });
+    }
+    if (to) {
+      fire(to, type, over, { ...init, relatedTarget: from });
+      for (let index = entered.length - shared - 1; index >= 0; index--)
+        fire(entered[index], type, enter, { ...init, ...scopedInit, relatedTarget: from });
+    }
+    return to;
+  }
+  const pointerBoundary = (to, init) => (hovered = boundary("pointer", hovered, to, init));
+  const mouseBoundary = (to, init) => (mouseHovered = boundary("mouse", mouseHovered, to, init));
+  // The click target: the capture or lock target a released pointerup went to, else the
+  // nearest common inclusive ancestor of the pointerdown and pointerup targets.
+  function clickTarget(down, up) {
+    if (!down) return null;
+    const chain = ancestors(down),
+      candidates = ancestors(up);
+    for (let index = 0; index < candidates.length; index++)
+      for (let other = 0; other < chain.length; other++)
+        if (chain[other] === candidates[index]) return candidates[index];
+    return null;
+  }
+  const pointerTypes = { move: "pointermove", down: "pointerdown", up: "pointerup" },
+    mouseTypes = { move: "mousemove", down: "mousedown", up: "mouseup" };
+  // One trusted mouse event at the hit element: Chrome's PointerEventManager steps for the
+  // pointer event (capture processing, lock/capture retargeting, boundaries) followed by the
+  // compatibility mouse event and, for a release, implicit capture release and the click.
+  function pointerAction(kind, hit, backdrop = null) {
+    const previous = position;
+    targetCenter(hit);
+    position = [cursorX, cursorY];
+    const locked = pointer("locked");
+    if (locked === null) {
+      if (frozen !== null) movementBase = null;
+      frozen = null;
+    } else if (frozen === null) frozen = previous || position;
+    const base = kind === "move" ? movementBase : null;
+    movementBase = position;
+    if (kind === "down") pressed = 1;
+    if (kind === "up") pressed = 0;
+    if (kind !== "move") pointer(kind === "down" ? "press" : "release");
+    const client = frozen || position;
+    const shared = {
+      clientX: client[0],
+      clientY: client[1],
+      movementX: base ? position[0] - base[0] : 0,
+      movementY: base ? position[1] - base[1] : 0,
+      buttons: pressed,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    };
+    const init = {
+      ...shared,
+      button: kind === "move" ? -1 : 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+      pressure: pressed ? 0.5 : 0,
+    };
+    const mouseInit = { ...shared, button: 0, detail: kind === "move" ? 0 : 1 };
+    const captureInit = { ...init, cancelable: false };
+    const processed = pointer("process"),
+      lost = processed[0],
+      got = processed[1];
+    if (lost) fire(lost, "PointerEvent", "lostpointercapture", captureInit);
+    if (got) {
+      pointerBoundary(got, init);
+      fire(got, "PointerEvent", "gotpointercapture", captureInit);
+    }
+    const captured = locked === null ? pointer("capture") : null;
+    const target = locked || captured || hit;
+    pointerBoundary(target, init);
+    mouseBoundary(target, mouseInit);
+    const pointerEvent = trusted(target, "PointerEvent", pointerTypes[kind], init);
+    const proceed = !canceled.call(pointerEvent);
+    if (kind === "down") {
+      // A trusted pointerdown records the light-dismiss target (dialogs and popovers).
+      lightDismiss(pointerEvent, backdrop !== null);
+      suppressed = !proceed;
+      downTarget = target;
+    }
+    const mouse = !suppressed && fire(target, "MouseEvent", mouseTypes[kind], mouseInit);
+    if (kind === "down" && mouse) apply(focus, target, []);
+    if (kind !== "up") return;
+    // Chrome runs light dismiss on pointerup (after the compatibility mouseup), before click.
+    lightDismiss(pointerEvent, backdrop !== null);
+    suppressed = false;
+    pointer("implicit");
+    const released = pointer("process")[0];
+    if (released) fire(released, "PointerEvent", "lostpointercapture", captureInit);
+    const click = captured || locked || clickTarget(downTarget, target);
+    downTarget = null;
+    // A modal dialog the release light-dismissed is gone: Chrome fires no click for it.
+    if (click && (backdrop === null || apply(openDialog, backdrop, [])))
+      fire(click, "PointerEvent", "click", { ...init, isPrimary: false, button: 0, detail: 1 });
+    if (released && locked === null) {
+      pointerBoundary(hit, init);
+      mouseBoundary(hit, mouseInit);
+    }
   }
   async function edit(target, text, run) {
     const getters = editingControl(target);
@@ -265,77 +478,26 @@
         focus.call(element(step.focus));
         continue;
       }
+      if (step.files) {
+        chooseFiles(element(step.files.selector), step.files.files);
+        continue;
+      }
       if (step.move) {
-        const target = element(step.move.selector);
-        targetCenter(target);
-        const init = {
-          clientX: cursorX,
-          clientY: cursorY,
-          bubbles: true,
-          composed: true,
-          pointerType: "mouse",
-          isPrimary: true,
-          pointerId: 1,
-        };
-        if (hovered !== target) {
-          if (hovered) {
-            fire(hovered, "PointerEvent", "pointerout", { ...init, relatedTarget: target });
-            fire(hovered, "MouseEvent", "mouseout", { ...init, relatedTarget: target });
-          }
-          fire(target, "PointerEvent", "pointerover", { ...init, relatedTarget: hovered });
-          fire(target, "MouseEvent", "mouseover", { ...init, relatedTarget: hovered });
-          fire(target, "PointerEvent", "pointerenter", {
-            ...init,
-            bubbles: false,
-            relatedTarget: hovered,
-          });
-          fire(target, "MouseEvent", "mouseenter", {
-            ...init,
-            bubbles: false,
-            relatedTarget: hovered,
-          });
-          hovered = target;
-        }
-        fire(target, "PointerEvent", "pointermove", init);
-        fire(target, "MouseEvent", "mousemove", init);
+        pointerAction("move", element(step.move.selector));
+        continue;
+      }
+      if (step.down != null || step.up != null) {
+        pointerAction(step.down != null ? "down" : "up", element(step.down ?? step.up));
         continue;
       }
       if (step.click) {
         const intended = element(step.click);
-        targetCenter(intended);
         // A topmost modal dialog makes the rest of the page inert: the hit lands on its
         // ::backdrop, so pointer input targets that dialog, outside its border box.
         const backdrop = backdropOf(intended);
         const target = backdrop ?? intended;
-        const init = {
-          clientX: cursorX,
-          clientY: cursorY,
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          detail: 1,
-          pointerId: 1,
-          pointerType: "mouse",
-          isPrimary: true,
-        };
-        const down = trusted(target, "PointerEvent", "pointerdown", {
-          ...init,
-          buttons: 1,
-          pressure: 0.5,
-        });
-        lightDismiss(down, backdrop !== null);
-        if (
-          !canceled.call(down) &&
-          fire(target, "MouseEvent", "mousedown", { ...init, buttons: 1 })
-        )
-          focus.call(target);
-        const up = trusted(target, "PointerEvent", "pointerup", init);
-        fire(target, "MouseEvent", "mouseup", init);
-        // Chrome runs light dismiss after mouseup, before click.
-        lightDismiss(up, backdrop !== null);
-        // A backdrop the release closed is gone: Chrome fires no click for it.
-        if (backdrop === null || apply(openDialog, backdrop, []))
-          fire(target, "PointerEvent", "click", init);
+        pointerAction("down", target, backdrop);
+        pointerAction("up", target, backdrop);
         continue;
       }
       const target = apply(activeElement, document, []);

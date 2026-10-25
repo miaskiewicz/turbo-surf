@@ -162,6 +162,7 @@ pub(super) fn configure(
         declarative: false,
     };
     store(scope, root, init);
+    reference_target::configure(scope, root, options);
 }
 
 /// Attach a native root to `host` in the current document scope.
@@ -209,6 +210,7 @@ pub(super) fn clone_roots<'s>(
         };
         if let Some((root, mode, manual)) = shadow {
             let init = load(scope, root);
+            let target = reference_target::object_target(scope, root);
             if init.clonable {
                 let copy = {
                     let _clone = DomScope::for_object(scope, clone);
@@ -217,6 +219,7 @@ pub(super) fn clone_roots<'s>(
                     });
                     host.and_then(|host| {
                         let copy = attach(scope, host, &mode, manual, init)?;
+                        reference_target::declare(scope, copy, target.clone());
                         let document = wrap(scope, with_tree(Tree::root)?);
                         Some((copy, document))
                     })
@@ -245,12 +248,26 @@ pub(super) fn clone_roots<'s>(
     }
 }
 
-/// Convert parser-inserted `<template shadowrootmode>` elements of a detached
-/// fragment, in tree order, exactly where the fragment parser would attach.
-/// Top-level templates have no element parent and stay ordinary templates.
-fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<(Handle, String, Init)> {
+/// A shadow root the parser attached for a `<template shadowrootmode>`.
+pub(super) struct Declared {
+    root: Handle,
+    mode: String,
+    manual: bool,
+    init: Init,
+    target: Option<Vec<u16>>,
+}
+/// Convert parser-inserted `<template shadowrootmode>` elements below `parent`
+/// (a detached fragment or a freshly parsed document), in tree order, exactly
+/// where the parser would attach. Top-level fragment templates have no element
+/// parent and stay ordinary templates; template contents are descended into.
+/// With `only`, just those templates (the sanitizer's survivors) may attach.
+pub(super) fn declarative(
+    tree: &mut Tree,
+    parent: Handle,
+    only: Option<&std::collections::HashSet<Handle>>,
+) -> Vec<Declared> {
     let mut attached = Vec::new();
-    let mut pending = tree.children(fragment);
+    let mut pending = tree.children(parent);
     pending.reverse();
     while let Some(node) = pending.pop() {
         let mode = html(tree, node, "template")
@@ -260,7 +277,8 @@ fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<(Handle, String, Init)>
             .filter(|mode| mode == "open" || mode == "closed");
         let host = tree
             .parent(node)
-            .filter(|host| valid_host(tree, *host) && tree.shadow_root(*host).is_none());
+            .filter(|host| valid_host(tree, *host) && tree.shadow_root(*host).is_none())
+            .filter(|_| only.is_none_or(|only| only.contains(&node)));
         if let (Some(mode), Some(host)) = (mode, host) {
             let init = Init {
                 clonable: tree.get_attribute(node, "shadowrootclonable").is_some(),
@@ -270,6 +288,10 @@ fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<(Handle, String, Init)>
                     .is_some(),
                 declarative: true,
             };
+            let manual = tree
+                .get_attribute(node, "shadowrootslotassignment")
+                .is_some_and(|value| value.eq_ignore_ascii_case("manual"));
+            let target = tree.get_attribute_ns_utf16(node, None, "shadowrootreferencetarget");
             let root = tree.attach_shadow(host);
             if let Some(content) = tree.take_template_contents(node) {
                 for child in tree.children(content) {
@@ -277,7 +299,13 @@ fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<(Handle, String, Init)>
                 }
             }
             tree.remove_child(host, node);
-            attached.push((root, mode, init));
+            attached.push(Declared {
+                root,
+                mode,
+                manual,
+                init,
+                target,
+            });
             let mut nested = tree.children(root);
             nested.reverse();
             pending.extend(nested);
@@ -290,13 +318,45 @@ fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<(Handle, String, Init)>
     }
     attached
 }
+/// Give each converted root its mode, slot assignment and init flags in the
+/// current document scope, returning the root wrappers in conversion order.
+pub(super) fn register<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    declared: Vec<Declared>,
+) -> Vec<v8::Local<'s, v8::Object>> {
+    ensure_keys(scope);
+    shadow_slots::ensure_keys(scope);
+    let mut objects = Vec::with_capacity(declared.len());
+    for Declared {
+        root,
+        mode,
+        manual,
+        init,
+        target,
+    } in declared
+    {
+        DOM.with(|state| {
+            if let Some(state) = state.borrow_mut().as_mut() {
+                state.shadow_modes.insert(root, mode);
+            }
+        });
+        let object = wrap(scope, root);
+        shadow_slots::configure(scope, object, manual);
+        store(scope, object, init);
+        reference_target::declare(scope, object, target);
+        objects.push(object);
+    }
+    objects
+}
 
-/// `setHTMLUnsafe`: fragment-parse with declarative shadow roots enabled, then
+/// `setHTMLUnsafe` / `setHTML`: fragment-parse with declarative shadow roots
+/// enabled, optionally sanitize the fragment (and its declarative roots), then
 /// replace all children of the element, template contents or shadow root.
 pub(super) fn set_html_unsafe<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
     html: &[u16],
+    sanitizer: Option<(&sanitizer::Config, bool)>,
 ) {
     let (context, target) = {
         let _owner = DomScope::for_object(scope, receiver);
@@ -320,24 +380,17 @@ pub(super) fn set_html_unsafe<'s>(
         let _owner = DomScope::for_object(scope, receiver);
         let parsed = with_tree_mut(|tree| {
             let fragment = tree.create_contextual_fragment_utf16(context, html, scripting_enabled);
-            let roots = declarative(tree, fragment);
+            // The template elements (and their shadowroot* attributes) are
+            // sanitized before their declarative shadow roots attach.
+            let only =
+                sanitizer.map(|(config, safe)| sanitizer::sanitize(tree, fragment, config, safe));
+            let roots = declarative(tree, fragment, only.as_ref());
             (fragment, roots)
         });
         let Some((fragment, roots)) = parsed else {
             return;
         };
-        let mut objects = Vec::with_capacity(roots.len());
-        for (root, mode, init) in roots {
-            DOM.with(|state| {
-                if let Some(state) = state.borrow_mut().as_mut() {
-                    state.shadow_modes.insert(root, mode);
-                }
-            });
-            let object = wrap(scope, root);
-            shadow_slots::configure(scope, object, false);
-            store(scope, object, init);
-            objects.push(object);
-        }
+        let objects = register(scope, roots);
         (wrap(scope, fragment), objects)
     };
     // Innermost roots first: no raw parser content fragment may enter adoption.
@@ -403,8 +456,12 @@ pub(super) fn serialized_root<'s>(
     if init.clonable {
         tag.push_str(" shadowrootclonable=\"\"");
     }
-    tag.push('>');
-    Some((object, tag.encode_utf16().collect()))
+    let mut tag: Vec<u16> = tag.encode_utf16().collect();
+    if let Some(target) = reference_target::serialized(scope, object) {
+        tag.extend(target);
+    }
+    tag.push(u16::from(b'>'));
+    Some((object, tag))
 }
 
 /// DOM retargeting of `node` against `target` (both in the current tree).
@@ -471,6 +528,16 @@ fn native<'s>(
                 operation.as_str()
             };
             rv.set_bool(flag(scope, object, name));
+        }
+        "pointerLockElement" => {
+            if shadow_root(scope, object).is_none() {
+                illegal(scope);
+                return;
+            }
+            let lock = pointer_events::lock_element_in(scope, object);
+            let _owner = DomScope::for_object(scope, object);
+            let value = wrap_opt(scope, lock);
+            rv.set(value);
         }
         "activeElement" | "retarget" => {
             let Some(root) = shadow_root(scope, object) else {
@@ -544,12 +611,22 @@ fn native<'s>(
             ) else {
                 return;
             };
-            set_html_unsafe(scope, object, &html);
+            // SetHTMLUnsafeOptions.sanitizer, already converted and validated.
+            let config = v8::Local::<v8::Object>::try_from(args.get(3))
+                .ok()
+                .and_then(|config| sanitizer::Config::read(scope, config));
+            set_html_unsafe(
+                scope,
+                object,
+                &html,
+                config.as_ref().map(|config| (config, false)),
+            );
         }
         _ => illegal(scope),
     }
 }
-pub(super) fn install(scope: &mut v8::PinScope) {
+/// Capture the root-flag keys (idempotent); parsing may attach roots before install.
+pub(super) fn ensure_keys(scope: &mut v8::PinScope) {
     if scope.get_slot::<std::rc::Rc<Keys>>().is_none() {
         let mut keys = Vec::new();
         for name in KEY_NAMES {
@@ -561,6 +638,9 @@ pub(super) fn install(scope: &mut v8::PinScope) {
         }
         scope.set_slot(std::rc::Rc::new(Keys(keys)));
     }
+}
+pub(super) fn install(scope: &mut v8::PinScope) {
+    ensure_keys(scope);
     let global = scope.get_current_context().global(scope);
     bind_method(scope, global, "__shadowHtmlNative", native);
     run_js(scope, include_str!("shadow_html.js"));

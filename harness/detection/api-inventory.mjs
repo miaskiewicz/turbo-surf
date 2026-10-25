@@ -16,6 +16,7 @@ export function inventorySnapshot(comparison) {
     note: comparison.note,
     build: comparison.build,
     chromeVersion: comparison.chromeVersion,
+    chromeV8Version: comparison.chromeV8Version,
     binaryHash: comparison.binaryHash,
     collectorHash: comparison.collectorHash,
     totals: {

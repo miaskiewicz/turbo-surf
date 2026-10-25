@@ -1,9 +1,26 @@
 //! Generated browser binding adapter; source: scripts/browser-env-adapter.rs.in.
-//! Canonical DOM + CSS grammar + JS: turbo-test @ daa265e.
+//! Canonical DOM + CSS grammar + JS: turbo-test @ 1ceba6d.
 //! Rebuild only through scripts/vendor-browser-env.sh from committed upstream HEAD.
 #![allow(unused)]
 #![allow(clippy::all)]
 include!("browser_env_upstream.rs");
+
+/// Install an iframe srcdoc document, which the HTML parser never puts in quirks
+/// mode, as an independent native document in the current context.
+pub fn install_independent_srcdoc_units(
+    scope: &mut v8::PinScope,
+    units: &[u16],
+    source_positions: bool,
+) {
+    install_independent_tree(
+        scope,
+        if source_positions {
+            Tree::parse_srcdoc_utf16_with_source_positions(units)
+        } else {
+            Tree::parse_srcdoc_utf16(units)
+        },
+    );
+}
 
 /// Seed a fetched document using the canonical native binding.
 pub fn install_html(scope: &mut v8::PinScope, html: &str) {
@@ -30,6 +47,9 @@ pub(crate) use live_layout_dom::{
     capture_document as capture_native_document_layout,
     valid_receiver as valid_native_geometry_receiver, wrap_elements as wrap_native_layout_elements,
 };
+
+/// The canonical CSSOM `zoom` grammar, shared by native layout and CSS.supports.
+pub(crate) use cssom_parser::zoom_value as css_zoom_value;
 
 #[path = "compression_dictionary_dom.rs"]
 mod compression_dictionary_dom;

@@ -17,9 +17,10 @@ use std::collections::BTreeMap;
 
 const DEFAULT_MAX_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
 
-/// Chrome target of the measured TLS/H2/header profile. Chrome 155 uses the
-/// upstream154 TLS/H2 recipe with independently measured155 headers; the base
-/// recipe version is reported separately. Rustls has no Chrome transport profile.
+/// Chrome target of the measured TLS/H2/header profile: the default registry
+/// release, whose headers are measured independently of the upstream TLS/H2
+/// recipe it reuses (reported separately by [`transport_base_chrome_major`]).
+/// Rustls has no Chrome transport profile.
 pub fn transport_chrome_major() -> Option<u16> {
     #[cfg(feature = "impersonate")]
     return Some(crate::browser::DEFAULT_MAJOR);
@@ -30,7 +31,7 @@ pub fn transport_chrome_major() -> Option<u16> {
 /// Underlying upstream recipe, distinct from the measured target profile.
 pub fn transport_base_chrome_major() -> Option<u16> {
     #[cfg(feature = "impersonate")]
-    return Some(154);
+    return Some(crate::browser::default_release().transport_base_major);
     #[cfg(not(feature = "impersonate"))]
     None
 }
@@ -515,11 +516,20 @@ fn build_headers(url: &str, method: &str, opts: &FetchOptions) -> BTreeMap<Strin
     h.insert("accept-language".into(), profile.accept_language.into());
     h.extend(context.headers(url, method));
     let no_opt_ins = ClientHints::default();
-    h.extend(
-        opts.client_hints
-            .unwrap_or(&no_opt_ins)
-            .headers(url, context, profile),
-    );
+    // Chrome sends no client hints at all on a CORS preflight (measured by the
+    // identity battery), not even the low-entropy sec-ch-ua trio.
+    let preflight = method.eq_ignore_ascii_case("OPTIONS")
+        && opts
+            .headers
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case("access-control-request-method"));
+    if !preflight {
+        h.extend(
+            opts.client_hints
+                .unwrap_or(&no_opt_ins)
+                .headers(url, context, profile),
+        );
+    }
     for (k, v) in &opts.headers {
         h.insert(k.to_ascii_lowercase(), v.clone());
     }
@@ -579,8 +589,8 @@ fn seed_consent_cookies(h: &mut BTreeMap<String, String>, url: &str, socs: Optio
 // `impersonate` feature; a pass-through on the default (rustls) backend, which
 // can't forge a fingerprint. One seam so both client constructors stay in sync.
 //
-// The measured Chrome 155 TLS/H2 capabilities reuse upstream154; the identity
-// and navigation header order are pinned to fingerprint::default_profile(). This
+// The measured TLS/H2 capabilities reuse the registry's upstream recipe; the
+// identity and navigation header order are pinned to fingerprint::default_profile(). This
 // is an emulation, not proof of current Chrome wire parity. Validate the deployed
 // build with the fingerprint tests, especially after a Chrome/backend upgrade.
 // Per-call profile overrides are not applied on this backend.
@@ -589,11 +599,13 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
     let builder = {
         use wreq::IntoEmulation;
         let profile = crate::fingerprint::default_profile();
-        // Resolve the wreq-util Chrome 154 profile to a concrete `Emulation` so its
+        // Resolve the upstream wreq-util Chrome profile to a concrete `Emulation` so its
         // header set, header ORDER and TLS options can be tuned to match a real
         // Chrome *cold* top-level navigation before it's applied.
         let mut emulation = wreq_util::Emulation::builder()
-            .profile(wreq_util::Profile::Chrome154)
+            .profile(transport_recipe(
+                crate::browser::default_release().transport_base_major,
+            ))
             .platform(wreq_util::Platform::MacOS)
             .build()
             .into_emulation();
@@ -638,6 +650,48 @@ fn emulate(builder: http::ClientBuilder) -> http::ClientBuilder {
             .user_agent(profile.user_agent.as_str())
     };
     builder
+}
+
+// The upstream wreq-util recipe a registry release names. Only recipes whose
+// ClientHello and H2 frames were measured equal to a Chrome release are listed;
+// adding one is a transport change (see harness/detection/CHROME-REVERSION.md).
+#[cfg(feature = "impersonate")]
+fn transport_recipe(base_major: u16) -> wreq_util::Profile {
+    match base_major {
+        154 => wreq_util::Profile::Chrome154,
+        other => panic!("browser_releases.json names unsupported transport recipe Chrome{other}"),
+    }
+}
+
+// Chrome's measured wire order for this request's class (navigation, no-cors,
+// CORS, preflight, hinted …), cached per class. `None` keeps the client-level
+// navigation order, which is all releases measured before the battery recorded.
+#[cfg(feature = "impersonate")]
+fn request_order(
+    method: &str,
+    headers: &BTreeMap<String, String>,
+) -> Option<http::header::OrigHeaderMap> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, http::header::OrigHeaderMap>>> = OnceLock::new();
+    let class = crate::browser::request_class(method, |name| headers.get(name).cloned());
+    let order = crate::browser::default_release().request_order(&class)?;
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Some(
+        cache
+            .entry(class)
+            .or_insert_with(|| {
+                let mut map = http::header::OrigHeaderMap::new();
+                for name in order {
+                    map.insert(*name);
+                }
+                map
+            })
+            .clone(),
+    )
 }
 
 fn client(policy: http::redirect::Policy) -> http::Result<http::Client> {
@@ -863,6 +917,10 @@ async fn send(
 ) -> Result<http::Response, HttpError> {
     let m = http::Method::from_bytes(method.as_bytes()).map_err(|e| err(e, ErrorCode::Network))?;
     let mut req = apply_headers(cl.request(m, url), headers);
+    #[cfg(feature = "impersonate")]
+    if let Some(order) = request_order(method, headers) {
+        req = req.orig_headers(order);
+    }
     let streaming_upload = upload.is_some();
     if let Some(upload) = upload {
         #[cfg(not(feature = "impersonate"))]
@@ -1995,6 +2053,52 @@ pub async fn fetch_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cors_preflights_carry_no_client_hints() {
+        let preflight = FetchOptions {
+            headers: BTreeMap::from([("access-control-request-method".into(), "PUT".into())]),
+            ..Default::default()
+        };
+        let headers = build_headers("https://a.test/r", "OPTIONS", &preflight);
+        assert!(!headers.keys().any(|name| name.starts_with("sec-ch-")));
+        assert_eq!(headers["access-control-request-method"], "PUT");
+        let get = build_headers("https://a.test/r", "GET", &FetchOptions::default());
+        assert!(get.contains_key("sec-ch-ua"));
+    }
+
+    #[cfg(feature = "impersonate")]
+    #[test]
+    fn every_registry_release_names_a_supported_transport_recipe() {
+        for release in crate::browser::RELEASES {
+            transport_recipe(release.transport_base_major);
+        }
+    }
+
+    #[cfg(feature = "impersonate")]
+    #[test]
+    fn per_request_order_follows_the_measured_class() {
+        let headers = BTreeMap::from([
+            ("sec-fetch-mode".to_string(), "no-cors".to_string()),
+            ("sec-fetch-dest".to_string(), "image".to_string()),
+        ]);
+        let order = request_order("GET", &headers);
+        match crate::browser::default_release().request_order("no-cors") {
+            Some(expected) => {
+                let names: Vec<String> = order
+                    .unwrap()
+                    .iter()
+                    .map(|(name, _)| name.as_str().to_string())
+                    .collect();
+                let expected: Vec<String> = expected
+                    .iter()
+                    .map(|name| name.to_ascii_lowercase())
+                    .collect();
+                assert_eq!(names, expected);
+            }
+            None => assert!(order.is_none()),
+        }
+    }
 
     #[test]
     fn charset_from_header() {

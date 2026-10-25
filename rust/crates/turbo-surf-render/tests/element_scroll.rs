@@ -53,16 +53,8 @@ fn mismatches(actual: &Value, expected: &Value) -> Vec<String> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn scroll_methods_window_offsets_and_scroll_into_view_match_chrome156() {
-    let mut actual = observe(SCROLL).await;
-    let mut expected = oracle("element-scroll-probe.js", SCROLL);
-    // The cascade has no `zoom` property, so currentCSSZoom stays unimplemented.
-    assert!(actual["shape"]["element"]["currentCSSZoom"].is_null());
-    for object in [&mut actual, &mut expected] {
-        object["shape"]["element"]
-            .as_object_mut()
-            .unwrap()
-            .remove("currentCSSZoom");
-    }
+    let actual = observe(SCROLL).await;
+    let expected = oracle("element-scroll-probe.js", SCROLL);
     let differences = mismatches(&actual, &expected);
     assert!(differences.is_empty(), "{}", differences.join("\n"));
     assert_eq!(actual, expected);

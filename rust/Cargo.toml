@@ -26,3 +26,11 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# Development patch: consume the unreleased turbo-html2pdf-core
+# ComputedStyle::iter and turbo-dom iframe srcdoc parsing from the #28 upstream
+# integration branches (miaskiewicz/turbo-html2pdf#27, miaskiewicz/turbo-dom#17)
+# until they are published.
+[patch.crates-io]
+turbo-html2pdf-core = { git = "https://github.com/miaskiewicz/turbo-html2pdf", branch = "parity/issue-28-batch" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", branch = "parity/issue-28-batch" }

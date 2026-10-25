@@ -653,6 +653,17 @@ fn dispatch<'s>(
             }
             return;
         }
+        "pointerLockElement" => {
+            let lock = pointer_events::lock_element_in(scope, node);
+            let _dom = DomScope::for_object(scope, node);
+            let value = wrap_opt(scope, lock);
+            rv.set(value);
+            return;
+        }
+        "exitPointerLock" => {
+            pointer_events::exit(scope, node);
+            return;
+        }
         "lastModified" => {
             if owner(scope, node).is_some_and(|owner| owner.active) {
                 if let Some(value) = private_value(scope, node, LAST_MODIFIED) {

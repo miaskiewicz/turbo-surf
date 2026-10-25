@@ -207,6 +207,15 @@ impl Policy {
             })
         })
     }
+    pub fn blocks_pointer_lock(&self) -> bool {
+        self.policies.iter().any(|policy| {
+            policy.get("sandbox").is_some_and(|tokens| {
+                !tokens
+                    .iter()
+                    .any(|token| token.eq_ignore_ascii_case("allow-pointer-lock"))
+            })
+        })
+    }
     pub fn blocks_top_navigation_without_activation(&self) -> bool {
         self.policies.iter().any(|policy| {
             policy.get("sandbox").is_some_and(|tokens| {

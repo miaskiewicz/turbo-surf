@@ -3428,6 +3428,8 @@ struct FrameSandbox {
     storage_access_blocked: bool,
     top_navigation_without_activation_blocked: bool,
     forms_blocked: bool,
+    /// The sandboxed pointer lock browsing context flag (no `allow-pointer-lock`).
+    pointer_lock_blocked: bool,
     top_navigation_without_activation_permitted: bool,
     /// The sandboxed document.domain browsing context flag: every sandbox sets it,
     /// whatever its allow tokens.
@@ -3442,6 +3444,7 @@ impl FrameSandbox {
             self.origin_restricted |= origin;
             self.storage_access_blocked |= policy.blocks_storage_access();
             self.forms_blocked |= policy.blocks_form_submission();
+            self.pointer_lock_blocked |= policy.blocks_pointer_lock();
             self.top_navigation_without_activation_blocked |=
                 policy.blocks_top_navigation_without_activation();
             self.top_navigation_without_activation_permitted |=
@@ -3462,6 +3465,7 @@ impl FrameSandbox {
             scripts_blocked: inherited.scripts_blocked,
             storage_access_blocked: inherited.storage_access_blocked,
             forms_blocked: inherited.forms_blocked,
+            pointer_lock_blocked: inherited.pointer_lock_blocked,
             top_navigation_without_activation_blocked: inherited
                 .top_navigation_without_activation_blocked,
             top_navigation_without_activation_permitted: inherited
@@ -3476,6 +3480,7 @@ impl FrameSandbox {
             flags.origin_restricted |= !tokens.contains(&"allow-same-origin");
             flags.scripts_blocked |= !tokens.contains(&"allow-scripts");
             flags.forms_blocked |= !tokens.contains(&"allow-forms");
+            flags.pointer_lock_blocked |= !tokens.contains(&"allow-pointer-lock");
             flags.top_navigation_without_activation_blocked |=
                 !tokens.contains(&"allow-top-navigation");
             flags.top_navigation_without_activation_permitted |=
@@ -6902,6 +6907,12 @@ fn install_environment<'s>(
         {
             crate::browser_env::capture_popover_scheduler(scope);
             crate::browser_env::capture_window_event_interfaces(scope);
+            scope
+                .get_current_context()
+                .set_slot(Rc::new(crate::browser_env::PointerLockPolicy {
+                    activation: host_user_activation,
+                    sandboxed: pointer_lock_sandboxed,
+                }));
             #[cfg(turbo_surf_native_proxy)]
             install_code_generation_authorization(scope)?;
             return Ok(());
@@ -6911,6 +6922,13 @@ fn install_environment<'s>(
         .exception()
         .map(|error| error.to_rust_string_lossy(scope))
         .unwrap_or_else(|| "Native environment initialization failed".into()))
+}
+
+/// The realm's sandboxed pointer lock flag, read when a lock request runs.
+fn pointer_lock_sandboxed(context: v8::Local<v8::Context>) -> bool {
+    context
+        .get_slot::<FrameSandbox>()
+        .is_some_and(|flags| flags.pointer_lock_blocked)
 }
 
 pub(crate) fn native_pointer_media_capability(context: v8::Local<v8::Context>) -> bool {
@@ -6999,6 +7017,16 @@ fn op_set_host_input_driver(
 #[op2(nofast, reentrant)]
 fn op_event_trust(scope: &mut v8::PinScope, event: v8::Local<v8::Object>, timestamp: f64) {
     crate::browser_env::mark_event_trusted(scope, event, (timestamp >= 0.0).then_some(timestamp));
+}
+
+/// The host input driver's pointer capture / lock steps on the binding's native state.
+#[op2]
+fn op_host_pointer<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+    #[string] command: String,
+) -> v8::Local<'s, v8::Value> {
+    crate::browser_env::host_pointer(scope, document, &command)
 }
 
 #[op2(nofast, reentrant)]
@@ -7092,6 +7120,7 @@ deno_core::extension!(
         op_interface_record_set,
         op_storage_id,
         op_dispatch_host_event,
+        op_host_pointer,
         crate::stream_transfers::op_stream_transfer_install,
         crate::web_streams_backend::op_web_abort_bind,
         crate::web_streams_backend::op_web_abort_listener,

@@ -671,6 +671,7 @@ async function capture() {
     }
   };
   const observationIndex = observationTriggerIndex(config.steps || []);
+  let pressed = false;
   for (const [index, step] of (config.steps || []).entries()) {
     if (index === observationIndex)
       observationWindow = startObservation(observationMs, index, observationClock);
@@ -678,7 +679,24 @@ async function capture() {
     let inputEvidence;
     if (step.move) {
       const coordinates = await point(step.move.selector);
-      await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...coordinates });
+      await call("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        ...coordinates,
+        ...(pressed ? { button: "left", buttons: 1, force: 0.5 } : {}),
+      });
+    }
+    // A held press (down … up) mirrors the host driver's drag steps; a physical mouse
+    // reports Chrome's 0.5 pressure while pressed, which CDP needs as an explicit force.
+    if (step.down || step.up) {
+      pressed = Boolean(step.down);
+      await call("Input.dispatchMouseEvent", {
+        type: pressed ? "mousePressed" : "mouseReleased",
+        button: "left",
+        buttons: pressed ? 1 : 0,
+        force: pressed ? 0.5 : 0,
+        clickCount: 1,
+        ...(await point(step.down || step.up)),
+      });
     }
     if (step.click) {
       const coordinates = await point(step.click);

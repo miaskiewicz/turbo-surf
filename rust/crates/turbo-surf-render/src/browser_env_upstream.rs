@@ -1285,7 +1285,11 @@ fn with_tree_mut<R>(f: impl FnOnce(&mut Tree) -> R) -> Option<R> {
 /// Hosts that install their own DOMException after the binding (turbo-surf's runtime) hand
 /// it over here, so natively raised exceptions are instances of the realm's interface.
 pub fn register_dom_exception(scope: &mut v8::PinScope, constructor: v8::Local<v8::Function>) {
-    let global = scope.get_current_context().global(scope);
+    // The constructor's own realm, never the (possibly parent) current context.
+    let Some(context) = constructor.get_creation_context(scope) else {
+        return;
+    };
+    let global = context.global(scope);
     let key = dom_exception_key(scope);
     global.set_private(scope, key, constructor.into());
 }

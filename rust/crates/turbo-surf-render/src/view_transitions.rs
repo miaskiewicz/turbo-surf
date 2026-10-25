@@ -29,12 +29,12 @@ impl State {
 /// 16ms trusted tasks stamped with the realm clock, nothing suppresses rendering and the
 /// page is visible.
 pub(super) fn capture_host(scope: &mut v8::PinScope, host: v8::Local<v8::Function>) {
-    // Bootstrap runs in the realm that owns the seam; resolve its document from that
-    // realm, exactly as the popover scheduler does, so no other document retains it.
-    let owner = scope
-        .get_current_context()
-        .get_slot::<DomContextId>()
-        .map_or(0, |id| id.0);
+    // Bind to the seam's own realm: a frame bootstrap can run while its parent context is
+    // current, and a parent-held child closure would keep a retired frame realm alive.
+    let owner = host
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<DomContextId>().map(|id| id.0))
+        .unwrap_or(0);
     let _dom = DomScope::enter(owner);
     let Some(host) = dom_ownership::helper_function(scope, host) else {
         return;

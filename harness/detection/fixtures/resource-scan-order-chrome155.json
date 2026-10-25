@@ -4,7 +4,7 @@
   "scope": "Parser stylesheet order and script exclusion; SVG script execution is outside this control.",
   "fixtureSource": "rust/crates/turbo-surf-render/tests/resource_scan_order.rs",
   "fixtureSha256": "e063e83334fa5755f79cd510a3cf21bd0c8024d792189fc3c302c4116b73ffce",
-  "collectorSha256": "e940b655785f6e28bbc981b86c7c62770375c1adc12e596785f8e59ab1ef7308",
+  "collectorSha256": "440965c5c029143c92058c21f6e125a83d3d91f55331a2e4df225019fdf7a55f",
   "inputStateSha256": "b3ff2009d74d1c2b92671c398f870a0138d7a84105a0a660e8082f88062922e1",
   "observationSha256": "e352eea8fe8d7760c949b49abf54e84f9582f891e9f7ea4edd7cbf493d4f0be8",
   "navigationSha256": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",

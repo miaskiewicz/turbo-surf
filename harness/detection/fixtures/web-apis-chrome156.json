@@ -1,0 +1,3442 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-10-25T14:28:53.688Z",
+  "fixtures": {
+    "observable-shape-probe.js": "5f33b235f2290e7553623764829de1bfa1695eb889e075addc98fc446edbf260",
+    "observable-semantics-probe.js": "0332bad2b21b0ed6d5d715de0ecb7884802715a05580de06cf8114fb44740b6e",
+    "blob-text-stream-probe.js": "644c40752d097444200a9eadba5660ddaea3e77921c661405450328c35f079e8"
+  },
+  "effectiveExtensionFlags": [
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ],
+  "result": {
+    "observable-shape-probe.js": {
+      "window": [
+        [
+          "Observable",
+          false,
+          true,
+          true
+        ],
+        [
+          "Subscriber",
+          false,
+          true,
+          true
+        ]
+      ],
+      "Observable": {
+        "length": {
+          "value": 1,
+          "enumerable": false,
+          "configurable": true,
+          "writable": false
+        },
+        "name": {
+          "value": "Observable",
+          "enumerable": false,
+          "configurable": true,
+          "writable": false
+        },
+        "prototype": {
+          "value": "[object Observable]",
+          "enumerable": false,
+          "configurable": false,
+          "writable": false
+        },
+        "from": {
+          "value": [
+            "from",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        }
+      },
+      "ObservablePrototype": {
+        "catch": {
+          "value": [
+            "catch",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "drop": {
+          "value": [
+            "drop",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "every": {
+          "value": [
+            "every",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "filter": {
+          "value": [
+            "filter",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "finally": {
+          "value": [
+            "finally",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "find": {
+          "value": [
+            "find",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "first": {
+          "value": [
+            "first",
+            0,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "flatMap": {
+          "value": [
+            "flatMap",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "forEach": {
+          "value": [
+            "forEach",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "inspect": {
+          "value": [
+            "inspect",
+            0,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "last": {
+          "value": [
+            "last",
+            0,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "map": {
+          "value": [
+            "map",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "reduce": {
+          "value": [
+            "reduce",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "some": {
+          "value": [
+            "some",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "subscribe": {
+          "value": [
+            "subscribe",
+            0,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "switchMap": {
+          "value": [
+            "switchMap",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "take": {
+          "value": [
+            "take",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "takeUntil": {
+          "value": [
+            "takeUntil",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "toArray": {
+          "value": [
+            "toArray",
+            0,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "constructor": {
+          "value": [
+            "Observable",
+            1,
+            true,
+            true
+          ],
+          "enumerable": false,
+          "configurable": true,
+          "writable": true
+        },
+        "Symbol(Symbol.toStringTag)": {
+          "value": "Observable",
+          "enumerable": false,
+          "configurable": true,
+          "writable": false
+        }
+      },
+      "Subscriber": {
+        "length": {
+          "value": 0,
+          "enumerable": false,
+          "configurable": true,
+          "writable": false
+        },
+        "name": {
+          "value": "Subscriber",
+          "enumerable": false,
+          "configurable": true,
+          "writable": false
+        },
+        "prototype": {
+          "value": "[object Subscriber]",
+          "enumerable": false,
+          "configurable": false,
+          "writable": false
+        }
+      },
+      "SubscriberPrototype": {
+        "active": {
+          "get": [
+            "get active",
+            0,
+            false,
+            true
+          ],
+          "set": null,
+          "enumerable": true,
+          "configurable": true
+        },
+        "signal": {
+          "get": [
+            "get signal",
+            0,
+            false,
+            true
+          ],
+          "set": null,
+          "enumerable": true,
+          "configurable": true
+        },
+        "addTeardown": {
+          "value": [
+            "addTeardown",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "complete": {
+          "value": [
+            "complete",
+            0,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "error": {
+          "value": [
+            "error",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "next": {
+          "value": [
+            "next",
+            1,
+            false,
+            true
+          ],
+          "enumerable": true,
+          "configurable": true,
+          "writable": true
+        },
+        "constructor": {
+          "value": [
+            "Subscriber",
+            0,
+            true,
+            true
+          ],
+          "enumerable": false,
+          "configurable": true,
+          "writable": true
+        },
+        "Symbol(Symbol.toStringTag)": {
+          "value": "Subscriber",
+          "enumerable": false,
+          "configurable": true,
+          "writable": false
+        }
+      },
+      "when": [
+        "when",
+        1,
+        true,
+        true,
+        true,
+        false
+      ],
+      "ownWhen": [
+        false,
+        false,
+        false,
+        true,
+        true
+      ],
+      "protoChain": [
+        true,
+        true,
+        true
+      ],
+      "instance": [
+        "[object Observable]",
+        0,
+        true
+      ],
+      "subscriber": [
+        "[object Subscriber]",
+        0,
+        true,
+        "[object AbortSignal]",
+        true
+      ],
+      "brands": {
+        "catch": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "drop": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "every": [
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'every' on 'Observable': Illegal invocation"
+          ],
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'every' on 'Observable': Illegal invocation"
+          ]
+        ],
+        "filter": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "finally": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "find": [
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'find' on 'Observable': Illegal invocation"
+          ],
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'find' on 'Observable': Illegal invocation"
+          ]
+        ],
+        "first": [
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'first' on 'Observable': Illegal invocation"
+          ],
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'first' on 'Observable': Illegal invocation"
+          ]
+        ],
+        "flatMap": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "forEach": [
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'forEach' on 'Observable': Illegal invocation"
+          ],
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'forEach' on 'Observable': Illegal invocation"
+          ]
+        ],
+        "inspect": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "last": [
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'last' on 'Observable': Illegal invocation"
+          ],
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'last' on 'Observable': Illegal invocation"
+          ]
+        ],
+        "map": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "reduce": [
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'reduce' on 'Observable': Illegal invocation"
+          ],
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'reduce' on 'Observable': Illegal invocation"
+          ]
+        ],
+        "some": [
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'some' on 'Observable': Illegal invocation"
+          ],
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'some' on 'Observable': Illegal invocation"
+          ]
+        ],
+        "subscribe": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "switchMap": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "take": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "takeUntil": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "TypeError",
+            "Illegal invocation"
+          ]
+        ],
+        "toArray": [
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'toArray' on 'Observable': Illegal invocation"
+          ],
+          [
+            "promise",
+            "rejected",
+            "TypeError",
+            "Failed to execute 'toArray' on 'Observable': Illegal invocation"
+          ]
+        ],
+        "Subscriber.active": [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        "Subscriber.signal": [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        "Subscriber.addTeardown": [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        "Subscriber.complete": [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        "Subscriber.error": [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        "Subscriber.next": [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        "when": [
+          [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ]
+        ]
+      },
+      "subclass": [
+        true,
+        true,
+        "[object Observable]",
+        true,
+        true
+      ],
+      "construct": [
+        [
+          "TypeError",
+          "Failed to construct 'Observable': 1 argument required, but only 0 present."
+        ],
+        [
+          "TypeError",
+          "Failed to construct 'Observable': parameter 1 is not of type 'Function'."
+        ],
+        [
+          "TypeError",
+          "Failed to construct 'Observable': parameter 1 is not of type 'Function'."
+        ],
+        [
+          "TypeError",
+          "Failed to construct 'Observable': parameter 1 is not of type 'Function'."
+        ],
+        [
+          "TypeError",
+          "Failed to construct 'Observable': parameter 1 is not of type 'Function'."
+        ],
+        [
+          "TypeError",
+          "Failed to construct 'Observable': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+        ],
+        [
+          "TypeError",
+          "Failed to construct 'Observable': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+        ],
+        [
+          "TypeError",
+          "Failed to construct 'Subscriber': Illegal constructor"
+        ],
+        [
+          "TypeError",
+          "Illegal constructor"
+        ],
+        [
+          "ok",
+          "[object Object]"
+        ],
+        [
+          "ok",
+          "[object Observable]"
+        ]
+      ],
+      "conversions": {
+        "subscribeOrder": [
+          "observer:complete",
+          "observer:error",
+          "observer:next",
+          "options:signal"
+        ],
+        "inspectOrder": [
+          "inspector:abort",
+          "inspector:complete",
+          "inspector:error",
+          "inspector:next",
+          "inspector:subscribe"
+        ],
+        "whenOrder": [
+          "type",
+          "options:capture",
+          "options:passive"
+        ],
+        "takeConversion": [
+          "ok",
+          "[object Observable]"
+        ],
+        "takeCalls": [
+          "valueOf"
+        ],
+        "subscribe": [
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': The provided value is not of type '(Observer or ObserverCallback)'."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': The provided value is not of type '(Observer or ObserverCallback)'."
+          ],
+          [
+            "ok",
+            "undefined"
+          ],
+          [
+            "ok",
+            "undefined"
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': Failed to read the 'next' property from 'Observer': The given value is not a function."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': Failed to read the 'error' property from 'Observer': The given value is not a function."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': Failed to read the 'complete' property from 'Observer': The given value is not a function."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': Failed to read the 'next' property from 'Observer': The given value is not a function."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': The provided value is not of type 'SubscribeOptions'."
+          ],
+          [
+            "ok",
+            "undefined"
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': Failed to read the 'signal' property from 'SubscribeOptions': Failed to convert value to 'AbortSignal'."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': Failed to read the 'signal' property from 'SubscribeOptions': Failed to convert value to 'AbortSignal'."
+          ],
+          [
+            "ok",
+            "undefined"
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': The provided value is not of type '(Observer or ObserverCallback)'."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'subscribe' on 'Observable': Failed to read the 'next' property from 'Observer': The given value is not a function."
+          ]
+        ],
+        "operators": {
+          "takeUntil": [
+            [
+              "TypeError",
+              "Failed to execute 'takeUntil' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'takeUntil' on 'Observable': parameter 1 is not of type 'Observable'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'takeUntil' on 'Observable': parameter 1 is not of type 'Observable'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'takeUntil' on 'Observable': parameter 1 is not of type 'Observable'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'takeUntil' on 'Observable': parameter 1 is not of type 'Observable'."
+            ]
+          ],
+          "map": [
+            [
+              "TypeError",
+              "Failed to execute 'map' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'map' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'map' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "filter": [
+            [
+              "TypeError",
+              "Failed to execute 'filter' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'filter' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'filter' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "take": [
+            [
+              "TypeError",
+              "Failed to execute 'take' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "drop": [
+            [
+              "TypeError",
+              "Failed to execute 'drop' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "flatMap": [
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "switchMap": [
+            [
+              "TypeError",
+              "Failed to execute 'switchMap' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'switchMap' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'switchMap' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "inspect": [
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'inspect' on 'Observable': The provided value is not of type '(ObservableInspector or ObserverCallback)'."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "catch": [
+            [
+              "TypeError",
+              "Failed to execute 'catch' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'catch' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'catch' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "finally": [
+            [
+              "TypeError",
+              "Failed to execute 'finally' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'finally' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "TypeError",
+              "Failed to execute 'finally' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ],
+            [
+              "ok",
+              "[object Observable]"
+            ]
+          ],
+          "toArray": [
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'toArray' on 'Observable': The provided value is not of type 'SubscribeOptions'."
+            ],
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "pending"
+            ]
+          ],
+          "forEach": [
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'forEach' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'forEach' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'forEach' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'forEach' on 'Observable': The provided value is not of type 'SubscribeOptions'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'forEach' on 'Observable': Failed to read the 'signal' property from 'SubscribeOptions': Failed to convert value to 'AbortSignal'."
+            ]
+          ],
+          "first": [
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'first' on 'Observable': The provided value is not of type 'SubscribeOptions'."
+            ],
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "pending"
+            ]
+          ],
+          "last": [
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'last' on 'Observable': The provided value is not of type 'SubscribeOptions'."
+            ],
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "pending"
+            ]
+          ],
+          "some": [
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'some' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'some' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'some' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'some' on 'Observable': The provided value is not of type 'SubscribeOptions'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'some' on 'Observable': Failed to read the 'signal' property from 'SubscribeOptions': Failed to convert value to 'AbortSignal'."
+            ]
+          ],
+          "every": [
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'every' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'every' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'every' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'every' on 'Observable': The provided value is not of type 'SubscribeOptions'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'every' on 'Observable': Failed to read the 'signal' property from 'SubscribeOptions': Failed to convert value to 'AbortSignal'."
+            ]
+          ],
+          "find": [
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'find' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'find' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'find' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'find' on 'Observable': The provided value is not of type 'SubscribeOptions'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'find' on 'Observable': Failed to read the 'signal' property from 'SubscribeOptions': Failed to convert value to 'AbortSignal'."
+            ]
+          ],
+          "reduce": [
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'reduce' on 'Observable': 1 argument required, but only 0 present."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'reduce' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "rejected",
+              "TypeError",
+              "Failed to execute 'reduce' on 'Observable': parameter 1 is not of type 'Function'."
+            ],
+            [
+              "promise",
+              "pending"
+            ],
+            [
+              "promise",
+              "pending"
+            ]
+          ]
+        },
+        "numbers": [
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ]
+        ],
+        "from": [
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': 1 argument required, but only 0 present."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': @@iterator must be a callable."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': @@asyncIterator must be a callable."
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'from' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+          ],
+          [
+            "RangeError",
+            "getter"
+          ],
+          [
+            "TypeError",
+            "Failed to construct 'Observable': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+          ]
+        ],
+        "fromOrder": [
+          "from:Symbol(Symbol.asyncIterator)",
+          "from:Symbol(Symbol.iterator)"
+        ],
+        "fromPlainOrder": [
+          "from:Symbol(Symbol.asyncIterator)",
+          "from:Symbol(Symbol.iterator)"
+        ],
+        "when": [
+          [
+            "TypeError",
+            "Failed to execute 'when' on 'EventTarget': 1 argument required, but only 0 present."
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'when' on 'EventTarget': Cannot convert a Symbol value to a string"
+          ],
+          [
+            "TypeError",
+            "Failed to execute 'when' on 'EventTarget': The provided value is not of type 'ObservableEventListenerOptions'."
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ],
+          [
+            "ok",
+            "[object Observable]"
+          ]
+        ]
+      }
+    },
+    "observable-semantics-probe.js": {
+      "lifecycle": {
+        "log": [
+          [
+            "subscribe",
+            1,
+            true,
+            true
+          ],
+          [
+            "next",
+            1,
+            true,
+            1
+          ],
+          [
+            "abort-event",
+            false,
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "teardown2"
+          ],
+          [
+            "teardown1",
+            false,
+            true
+          ],
+          [
+            "complete",
+            true,
+            0,
+            false
+          ],
+          [
+            "after-complete",
+            false,
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "late-teardown"
+          ],
+          [
+            "subscribe-end"
+          ],
+          [
+            "returned"
+          ]
+        ],
+        "reported": [
+          [
+            "Uncaught Error: after close",
+            [
+              "Error",
+              "after close"
+            ]
+          ]
+        ]
+      },
+      "errorOrder": {
+        "log": [
+          [
+            "abort",
+            "boom"
+          ],
+          [
+            "teardown"
+          ],
+          [
+            "error-cb",
+            "boom"
+          ],
+          [
+            "post",
+            false
+          ]
+        ],
+        "reported": [
+          [
+            "Uncaught again",
+            "again"
+          ],
+          [
+            "Uncaught TypeError: unhandled",
+            [
+              "TypeError",
+              "unhandled"
+            ]
+          ],
+          [
+            "Uncaught RangeError: callback-only",
+            [
+              "RangeError",
+              "callback-only"
+            ]
+          ]
+        ]
+      },
+      "throwingCallbacks": {
+        "log": [
+          [
+            "error-cb",
+            [
+              "Error",
+              "thrown"
+            ]
+          ],
+          [
+            "teardown-ran"
+          ],
+          [
+            "after-late"
+          ],
+          [
+            "class-error",
+            "TypeError"
+          ],
+          [
+            "error-args",
+            1,
+            [
+              "TypeError",
+              "Failed to execute 'error' on 'Subscriber': 1 argument required, but only 0 present."
+            ]
+          ]
+        ],
+        "reported": [
+          [
+            "Uncaught Error: thrown-unhandled",
+            [
+              "Error",
+              "thrown-unhandled"
+            ]
+          ],
+          [
+            "Uncaught Error: after-complete-throw",
+            [
+              "Error",
+              "after-complete-throw"
+            ]
+          ],
+          [
+            "Uncaught Error: in-next",
+            [
+              "Error",
+              "in-next"
+            ]
+          ],
+          [
+            "Uncaught Error: in-next",
+            [
+              "Error",
+              "in-next"
+            ]
+          ],
+          [
+            "Uncaught Error: in-complete",
+            [
+              "Error",
+              "in-complete"
+            ]
+          ],
+          [
+            "Uncaught Error: in-error",
+            [
+              "Error",
+              "in-error"
+            ]
+          ],
+          [
+            "Uncaught Error: in-teardown",
+            [
+              "Error",
+              "in-teardown"
+            ]
+          ],
+          [
+            "Uncaught Error: late-teardown",
+            [
+              "Error",
+              "late-teardown"
+            ]
+          ],
+          [
+            "Uncaught TypeError: Failed to execute 'next' on 'Subscriber': 1 argument required, but only 0 present.",
+            [
+              "TypeError",
+              "Failed to execute 'next' on 'Subscriber': 1 argument required, but only 0 present."
+            ]
+          ]
+        ]
+      },
+      "refcount": {
+        "log": [
+          [
+            "producer",
+            1
+          ],
+          [
+            "a.next",
+            1
+          ],
+          [
+            "b.next",
+            1
+          ],
+          [
+            "after-first",
+            true
+          ],
+          [
+            "b.next",
+            2
+          ],
+          [
+            "abort",
+            "second-reason"
+          ],
+          [
+            "teardown",
+            1
+          ],
+          [
+            "after-second",
+            false
+          ],
+          [
+            "producer",
+            2
+          ],
+          [
+            "subscriptions",
+            2
+          ],
+          [
+            "abort",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "teardown",
+            2
+          ],
+          [
+            "c.complete"
+          ],
+          [
+            "after-complete",
+            false
+          ],
+          [
+            "late-producer",
+            false,
+            true,
+            "already"
+          ],
+          [
+            "late-teardown"
+          ],
+          [
+            "late-active",
+            false
+          ],
+          [
+            "late-producer",
+            true,
+            false,
+            "undefined"
+          ],
+          [
+            "late2.next",
+            "x"
+          ]
+        ],
+        "reported": []
+      },
+      "multicastErrors": {
+        "log": [
+          [
+            "second",
+            1
+          ],
+          [
+            "fresh-complete"
+          ]
+        ],
+        "reported": [
+          [
+            "Uncaught Error: first-observer",
+            [
+              "Error",
+              "first-observer"
+            ]
+          ],
+          [
+            "Uncaught Error: shared",
+            [
+              "Error",
+              "shared"
+            ]
+          ],
+          [
+            "Uncaught Error: shared",
+            [
+              "Error",
+              "shared"
+            ]
+          ]
+        ]
+      },
+      "abortAlgorithmOrder": {
+        "log": [
+          [
+            "teardown",
+            "why"
+          ],
+          [
+            "user-listener-before"
+          ],
+          [
+            "user-listener-after"
+          ],
+          [
+            "inner-teardown"
+          ],
+          [
+            "outer-signal-listener"
+          ],
+          [
+            "outer-teardown"
+          ],
+          [
+            "inner-active",
+            false
+          ]
+        ],
+        "reported": []
+      },
+      "operators": {
+        "log": [
+          [
+            "source-subscribe"
+          ],
+          [
+            "filter",
+            10,
+            0
+          ],
+          [
+            "mapFilter.next",
+            10
+          ],
+          [
+            "filter",
+            21,
+            1
+          ],
+          [
+            "filter",
+            32,
+            2
+          ],
+          [
+            "mapFilter.next",
+            32
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "mapFilter.complete"
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "take.next",
+            1
+          ],
+          [
+            "take.next",
+            2
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "take.complete"
+          ],
+          [
+            "take0.complete"
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "drop.next",
+            3
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "drop.complete"
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "drop5.complete"
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "takeHuge.next",
+            1
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "takeHuge.complete"
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "mapThrow.error",
+            [
+              "Error",
+              "mapper"
+            ]
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "filterThrow.error",
+            [
+              "Error",
+              "predicate"
+            ]
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "filterTruthy.next",
+            1
+          ],
+          [
+            "filterTruthy.next",
+            2
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "filterTruthy.complete"
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "mapArgs.next",
+            2
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "mapArgs.complete"
+          ],
+          [
+            "mapThis",
+            true
+          ]
+        ],
+        "reported": []
+      },
+      "takeUntil": {
+        "log": [
+          [
+            "notifier-subscribe"
+          ],
+          [
+            "src-subscribe"
+          ],
+          [
+            "tu.next",
+            1
+          ],
+          [
+            "notifier-teardown"
+          ],
+          [
+            "tu.next",
+            2
+          ],
+          [
+            "notifier2-teardown"
+          ],
+          [
+            "src2-teardown"
+          ],
+          [
+            "tu2.complete"
+          ],
+          [
+            "tuSync.complete"
+          ],
+          [
+            "tuError.complete"
+          ],
+          [
+            "tuSourceDone.next",
+            "x"
+          ],
+          [
+            "note3-teardown"
+          ],
+          [
+            "tuSourceDone.complete"
+          ],
+          [
+            "src3-teardown"
+          ]
+        ],
+        "reported": []
+      },
+      "flatMap": {
+        "log": [
+          [
+            "mapper",
+            "a",
+            1
+          ],
+          [
+            "inner-subscribe",
+            "a"
+          ],
+          [
+            "fm.next",
+            "a1"
+          ],
+          [
+            "inner-teardown",
+            "a"
+          ],
+          [
+            "mapper",
+            "b",
+            2
+          ],
+          [
+            "inner-subscribe",
+            "b"
+          ],
+          [
+            "fm.next",
+            "b1"
+          ],
+          [
+            "outer-teardown"
+          ],
+          [
+            "after-outer-complete"
+          ],
+          [
+            "inner-teardown",
+            "b"
+          ],
+          [
+            "fm.complete"
+          ],
+          [
+            "fmArrays.next",
+            1
+          ],
+          [
+            "fmArrays.next",
+            10
+          ],
+          [
+            "fmArrays.next",
+            2
+          ],
+          [
+            "fmArrays.next",
+            20
+          ],
+          [
+            "fmArrays.complete"
+          ],
+          [
+            "fmBad.error",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'next' on 'Subscriber': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "fmThrow.error",
+            [
+              "Error",
+              "fm-mapper"
+            ]
+          ],
+          [
+            "fmInnerError.error",
+            "inner-error"
+          ]
+        ],
+        "reported": []
+      },
+      "switchMap": {
+        "log": [
+          [
+            "mapper",
+            "a",
+            1
+          ],
+          [
+            "sm.next",
+            "a1"
+          ],
+          [
+            "inner-teardown",
+            "a",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "mapper",
+            "b",
+            2
+          ],
+          [
+            "sm.next",
+            "b1"
+          ],
+          [
+            "after-outer-complete"
+          ],
+          [
+            "inner-teardown",
+            "b",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "sm.complete"
+          ],
+          [
+            "smBad.error",
+            [
+              "TypeError",
+              "Failed to execute 'map' on 'Observable': Failed to execute 'next' on 'Subscriber': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "smPromise.next",
+            "p"
+          ],
+          [
+            "smPromise.complete"
+          ]
+        ],
+        "reported": []
+      },
+      "inspect": {
+        "log": [
+          [
+            "inspect-subscribe"
+          ],
+          [
+            "source-subscribe"
+          ],
+          [
+            "inspect-next",
+            1
+          ],
+          [
+            "in.next",
+            1
+          ],
+          [
+            "inspect-abort",
+            "consumer"
+          ],
+          [
+            "source-teardown"
+          ],
+          [
+            "in2.next",
+            2
+          ],
+          [
+            "inspect2-complete"
+          ],
+          [
+            "in2.complete"
+          ],
+          [
+            "in3.error",
+            [
+              "Error",
+              "inspect-subscribe-throw"
+            ]
+          ],
+          [
+            "in4.error",
+            [
+              "Error",
+              "inspect-next-throw"
+            ]
+          ],
+          [
+            "in5.error",
+            [
+              "Error",
+              "inspect-error-throw"
+            ]
+          ],
+          [
+            "in6.error",
+            [
+              "Error",
+              "inspect-complete-throw"
+            ]
+          ],
+          [
+            "inspect-callback",
+            5
+          ],
+          [
+            "in7.next",
+            5
+          ],
+          [
+            "in8.next",
+            6
+          ]
+        ],
+        "reported": [
+          [
+            "Uncaught e",
+            "e"
+          ]
+        ]
+      },
+      "catchFinally": {
+        "log": [
+          [
+            "c1.next",
+            1
+          ],
+          [
+            "catch",
+            [
+              "Error",
+              "source"
+            ]
+          ],
+          [
+            "c1.next",
+            "recovered"
+          ],
+          [
+            "c1.complete"
+          ],
+          [
+            "c2.error",
+            [
+              "Error",
+              "catch-throw"
+            ]
+          ],
+          [
+            "c3.error",
+            [
+              "TypeError",
+              "Failed to execute 'catch' on 'Observable': Failed to execute 'error' on 'Subscriber': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "c4.next",
+            "a"
+          ],
+          [
+            "c4.next",
+            "b"
+          ],
+          [
+            "c4.complete"
+          ],
+          [
+            "c5.next",
+            1
+          ],
+          [
+            "c5.complete"
+          ],
+          [
+            "f1.next",
+            1
+          ],
+          [
+            "f-source-teardown"
+          ],
+          [
+            "finally1"
+          ],
+          [
+            "f1.complete"
+          ],
+          [
+            "finally2"
+          ],
+          [
+            "f2.error",
+            "err"
+          ],
+          [
+            "f3-source-teardown"
+          ],
+          [
+            "finally3"
+          ],
+          [
+            "f4.complete"
+          ]
+        ],
+        "reported": [
+          [
+            "Uncaught Error: finally-throw",
+            [
+              "Error",
+              "finally-throw"
+            ]
+          ]
+        ]
+      },
+      "promiseOperators": {
+        "log": [
+          [
+            "ta-subscribe"
+          ],
+          [
+            "ta-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "fi-subscribe"
+          ],
+          [
+            "fi-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "fi-stopped",
+            1
+          ],
+          [
+            "la-subscribe"
+          ],
+          [
+            "la-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "fd-subscribe"
+          ],
+          [
+            "find-pred",
+            1,
+            0
+          ],
+          [
+            "find-pred",
+            2,
+            1
+          ],
+          [
+            "fd-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "fd-stopped",
+            2
+          ],
+          [
+            "fn-subscribe"
+          ],
+          [
+            "fn-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "so-subscribe"
+          ],
+          [
+            "so-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "so-stopped",
+            2
+          ],
+          [
+            "sn-subscribe"
+          ],
+          [
+            "sn-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "ev-subscribe"
+          ],
+          [
+            "ev-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "ev-stopped",
+            2
+          ],
+          [
+            "ea-subscribe"
+          ],
+          [
+            "ea-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "re-subscribe"
+          ],
+          [
+            "reduce",
+            1,
+            2,
+            1
+          ],
+          [
+            "reduce",
+            3,
+            3,
+            2
+          ],
+          [
+            "re-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "ri-subscribe"
+          ],
+          [
+            "ri-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "ru-subscribe"
+          ],
+          [
+            "ru-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "rz-subscribe"
+          ],
+          [
+            "rz-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "fe-subscribe"
+          ],
+          [
+            "forEach-visit",
+            1,
+            0
+          ],
+          [
+            "forEach-visit",
+            2,
+            1
+          ],
+          [
+            "fe-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "ft-subscribe"
+          ],
+          [
+            "ft-teardown",
+            [
+              "Error",
+              "visitor"
+            ]
+          ],
+          [
+            "ft-stopped",
+            1
+          ],
+          [
+            "fx-subscribe"
+          ],
+          [
+            "fx-teardown",
+            [
+              "Error",
+              "find-pred"
+            ]
+          ],
+          [
+            "fx-stopped",
+            1
+          ],
+          [
+            "rx-subscribe"
+          ],
+          [
+            "rx-teardown",
+            [
+              "Error",
+              "reducer"
+            ]
+          ],
+          [
+            "rx-stopped",
+            2
+          ],
+          [
+            "fz-subscribe"
+          ],
+          [
+            "fz-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "lz-subscribe"
+          ],
+          [
+            "lz-teardown",
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "sync-end"
+          ],
+          [
+            "toArray-fulfilled",
+            "[1,2]"
+          ],
+          [
+            "m1"
+          ],
+          [
+            "first-fulfilled",
+            1
+          ],
+          [
+            "last-fulfilled",
+            2
+          ],
+          [
+            "find-fulfilled",
+            2
+          ],
+          [
+            "findNone-fulfilled",
+            "undefined"
+          ],
+          [
+            "some-fulfilled",
+            true
+          ],
+          [
+            "someNone-fulfilled",
+            false
+          ],
+          [
+            "every-fulfilled",
+            false
+          ],
+          [
+            "everyAll-fulfilled",
+            true
+          ],
+          [
+            "reduce-fulfilled",
+            6
+          ],
+          [
+            "reduceInit-fulfilled",
+            104
+          ],
+          [
+            "reduceUndefined-fulfilled",
+            "12"
+          ],
+          [
+            "reduceEmpty-rejected",
+            [
+              "TypeError",
+              "Reduce of empty array with no initial value"
+            ]
+          ],
+          [
+            "forEach-fulfilled",
+            "undefined"
+          ],
+          [
+            "forEachThrow-rejected",
+            [
+              "Error",
+              "visitor"
+            ]
+          ],
+          [
+            "findThrow-rejected",
+            [
+              "Error",
+              "find-pred"
+            ]
+          ],
+          [
+            "reduceThrow-rejected",
+            [
+              "Error",
+              "reducer"
+            ]
+          ],
+          [
+            "firstEmpty-rejected",
+            [
+              "RangeError",
+              "No values in Observable"
+            ]
+          ],
+          [
+            "lastEmpty-rejected",
+            [
+              "RangeError",
+              "No values in Observable"
+            ]
+          ],
+          [
+            "errored-rejected",
+            [
+              "Error",
+              "source-error"
+            ]
+          ],
+          [
+            "preAborted-rejected",
+            "pre"
+          ],
+          [
+            "preAbortedFirst-rejected",
+            "pre-first"
+          ],
+          [
+            "m2"
+          ],
+          [
+            "m3"
+          ],
+          [
+            "mid-teardown",
+            "mid"
+          ],
+          [
+            "midAbort-rejected",
+            "mid"
+          ],
+          [
+            "visit",
+            "v"
+          ],
+          [
+            "forEachAbort-rejected",
+            [
+              "Error",
+              "stop-each"
+            ]
+          ],
+          [
+            "thenable-then"
+          ],
+          [
+            "t1"
+          ],
+          [
+            "firstThenable-fulfilled",
+            "unwrapped"
+          ],
+          [
+            "t2"
+          ],
+          [
+            "t3"
+          ]
+        ],
+        "reported": []
+      },
+      "fromConversions": {
+        "log": [
+          [
+            "iterator-called"
+          ],
+          [
+            "next",
+            0
+          ],
+          [
+            "iter.next",
+            0
+          ],
+          [
+            "next",
+            1
+          ],
+          [
+            "iter.next",
+            1
+          ],
+          [
+            "next",
+            2
+          ],
+          [
+            "iter.next",
+            2
+          ],
+          [
+            "next",
+            3
+          ],
+          [
+            "iter.complete"
+          ],
+          [
+            "iterator-called"
+          ],
+          [
+            "next",
+            0
+          ],
+          [
+            "iter2.next",
+            0
+          ],
+          [
+            "next",
+            1
+          ],
+          [
+            "iter2.next",
+            1
+          ],
+          [
+            "return",
+            1,
+            "enough"
+          ],
+          [
+            "iterator-called"
+          ],
+          [
+            "next",
+            0
+          ],
+          [
+            "iterTake.next",
+            0
+          ],
+          [
+            "return",
+            1,
+            [
+              "DOMException",
+              "AbortError",
+              "signal is aborted without reason"
+            ]
+          ],
+          [
+            "iterTake.complete"
+          ],
+          [
+            "iterThrow.error",
+            [
+              "Error",
+              "next-throws"
+            ]
+          ],
+          [
+            "iterNotObject.error",
+            [
+              "TypeError",
+              "Failed to execute 'subscribe' on 'Observable': Iterator object must be an object."
+            ]
+          ],
+          [
+            "iterResultNotObject.error",
+            [
+              "TypeError",
+              "Failed to execute 'subscribe' on 'Observable': Expected iterator.next() to return an Object."
+            ]
+          ],
+          [
+            "iterNextNotCallable.error",
+            [
+              "TypeError",
+              "Failed to execute 'subscribe' on 'Observable': Expected next() function on iterator."
+            ]
+          ],
+          [
+            "iterator-getter"
+          ],
+          [
+            "iterator-getter"
+          ],
+          [
+            "iterGone.error",
+            [
+              "TypeError",
+              "Failed to execute 'subscribe' on 'Observable': @@iterator must not be undefined or null"
+            ]
+          ],
+          [
+            "abort-threw",
+            [
+              "Error",
+              "return-throws"
+            ]
+          ],
+          [
+            "promise.next",
+            "resolved"
+          ],
+          [
+            "promise.complete"
+          ],
+          [
+            "rejectedPromise.error",
+            "rejected"
+          ],
+          [
+            "p1"
+          ],
+          [
+            "p2"
+          ],
+          [
+            "p3"
+          ],
+          [
+            "gen-start"
+          ],
+          [
+            "a1"
+          ],
+          [
+            "async.next",
+            1
+          ],
+          [
+            "a2"
+          ],
+          [
+            "a3"
+          ],
+          [
+            "async.next",
+            2
+          ],
+          [
+            "a4"
+          ],
+          [
+            "a5"
+          ],
+          [
+            "async.next",
+            3
+          ],
+          [
+            "gen-finally"
+          ],
+          [
+            "a6"
+          ],
+          [
+            "async.complete"
+          ],
+          [
+            "gen-start"
+          ],
+          [
+            "async2.next",
+            1
+          ],
+          [
+            "gen-finally"
+          ],
+          [
+            "custom-next"
+          ],
+          [
+            "custom.next",
+            "c"
+          ],
+          [
+            "asyncIteratorNotObject.error",
+            [
+              "TypeError",
+              "Failed to execute 'subscribe' on 'Observable': Iterator object must be an object."
+            ]
+          ],
+          [
+            "asyncNotObject.error",
+            [
+              "TypeError",
+              "Expected next() Promise to resolve to an Object"
+            ]
+          ],
+          [
+            "asyncReject.error",
+            "async-reject"
+          ],
+          [
+            "asyncThrow.error",
+            [
+              "Error",
+              "Failed to execute 'from' on 'Observable': async-next-throws"
+            ]
+          ]
+        ],
+        "reported": []
+      },
+      "when": {
+        "log": [
+          [
+            "when-capture",
+            1
+          ],
+          [
+            "listener-before"
+          ],
+          [
+            "when-bubble",
+            3,
+            true
+          ],
+          [
+            "listener-after"
+          ],
+          [
+            "listener-before"
+          ],
+          [
+            "listener-after"
+          ],
+          [
+            "passive",
+            false
+          ],
+          [
+            "active",
+            true
+          ],
+          [
+            "dispatch-results",
+            true,
+            false
+          ],
+          [
+            "take2.next",
+            [
+              "Event",
+              "tick"
+            ]
+          ],
+          [
+            "take2.next",
+            [
+              "Event",
+              "tick"
+            ]
+          ],
+          [
+            "take2.complete"
+          ],
+          [
+            "signal-when",
+            "abort",
+            true
+          ],
+          [
+            "shared-a"
+          ],
+          [
+            "shared-b"
+          ],
+          [
+            "window-when",
+            "windowevent"
+          ],
+          [
+            "first-dispatched"
+          ],
+          [
+            "first-resolved",
+            "first"
+          ],
+          [
+            "toArray-pending",
+            "pending"
+          ],
+          [
+            "window-touchstart",
+            false
+          ],
+          [
+            "window-touchstart",
+            false
+          ],
+          [
+            "window-touchstart-active",
+            true
+          ],
+          [
+            "coerced-type",
+            "coerced"
+          ],
+          [
+            "xhr-event",
+            "readystatechange"
+          ],
+          [
+            "unbound-window-event"
+          ]
+        ],
+        "reported": []
+      },
+      "bindingContexts": {
+        "log": [
+          [
+            "iterable-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'subscribe' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "dispatch-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'dispatchEvent' on 'EventTarget': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "click-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'click' on 'HTMLElement': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "abort-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'abort' on 'AbortController': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "map-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'next' on 'Subscriber': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "nested-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'next' on 'Subscriber': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "iterable-switchMap",
+            [
+              "TypeError",
+              "Failed to execute 'map' on 'Observable': Failed to execute 'subscribe' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "iterable-direct",
+            [
+              "TypeError",
+              "Failed to execute 'subscribe' on 'Observable': Expected iterator.next() to return an Object."
+            ]
+          ],
+          [
+            "inner-iterator",
+            [
+              "TypeError",
+              "Failed to execute 'next' on 'Subscriber': Iterator object must be an object."
+            ]
+          ],
+          [
+            "getter-flatMap",
+            [
+              "RangeError",
+              "Failed to execute 'flatMap' on 'Observable': getter"
+            ]
+          ],
+          [
+            "catch-iterator",
+            [
+              "TypeError",
+              "Failed to execute 'catch' on 'Observable': Failed to execute 'error' on 'Subscriber': @@iterator must be a callable."
+            ]
+          ],
+          [
+            "sync-value-getter",
+            [
+              "Error",
+              "value-getter"
+            ]
+          ],
+          [
+            "sync-done-getter",
+            [
+              "Error",
+              "done-getter"
+            ]
+          ],
+          [
+            "result-read-order",
+            "value,done"
+          ],
+          [
+            "promise-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "microtask-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'next' on 'Subscriber': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "toArray-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'next' on 'Subscriber': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "async-next-notobject",
+            [
+              "TypeError",
+              "Failed to execute 'from' on 'Observable': Failed to execute 'subscribe' on 'Observable': Expected iterator.next() to return an Object."
+            ]
+          ],
+          [
+            "async-next-notcallable",
+            [
+              "TypeError",
+              "Failed to execute 'from' on 'Observable': Failed to execute 'subscribe' on 'Observable': Expected next() function on iterator."
+            ]
+          ],
+          [
+            "async-throw-string",
+            "str"
+          ],
+          [
+            "async-throw-object",
+            true,
+            [
+              "TypeError",
+              "Failed to execute 'from' on 'Observable': te"
+            ],
+            true
+          ],
+          [
+            "async-throw-plain",
+            "Failed to execute 'from' on 'Observable': 7"
+          ],
+          [
+            "async-done-getter",
+            [
+              "Error",
+              "done-getter"
+            ]
+          ],
+          [
+            "async-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ],
+          [
+            "async-second-notobject",
+            [
+              "TypeError",
+              "Failed to execute 'from' on 'Observable': Expected iterator.next() to return an Object."
+            ]
+          ],
+          [
+            "timer-flatMap",
+            [
+              "TypeError",
+              "Failed to execute 'flatMap' on 'Observable': Failed to execute 'next' on 'Subscriber': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise."
+            ]
+          ]
+        ],
+        "reported": []
+      },
+      "iteratorClose": {
+        "log": [
+          [
+            "noReturn-next"
+          ],
+          [
+            "noReturn-rejections",
+            "[]"
+          ],
+          [
+            "nullReturn-next"
+          ],
+          [
+            "nullReturn-rejections",
+            "[]"
+          ],
+          [
+            "numberReturn-next"
+          ],
+          [
+            "numberReturn-rejections",
+            "[]"
+          ],
+          [
+            "rejectingReturn-next"
+          ],
+          [
+            "rejectingReturn-rejections",
+            "[\"rejected-return\"]"
+          ],
+          [
+            "primitiveResolution-next"
+          ],
+          [
+            "primitiveResolution-rejections",
+            "[[\"TypeError\",\"Failed to execute 'from' on 'Observable': Expected return() to resolve to an Object.\"]]"
+          ],
+          [
+            "throwingReturn-next"
+          ],
+          [
+            "throwingReturn-rejections",
+            "[\"thrown-return\"]"
+          ],
+          [
+            "okReturn-next"
+          ],
+          [
+            "return-args",
+            1,
+            "stop-okReturn"
+          ],
+          [
+            "okReturn-rejections",
+            "[]"
+          ],
+          [
+            "syncNull-done"
+          ],
+          [
+            "syncNumber-done"
+          ],
+          [
+            "syncPrimitive-done"
+          ]
+        ],
+        "reported": [
+          [
+            "Uncaught TypeError: Failed to execute 'abort' on 'AbortController': return() function must be callable.",
+            [
+              "TypeError",
+              "Failed to execute 'abort' on 'AbortController': return() function must be callable."
+            ]
+          ],
+          [
+            "Uncaught TypeError: Failed to execute 'abort' on 'AbortController': Expected return() to return an Object.",
+            [
+              "TypeError",
+              "Failed to execute 'abort' on 'AbortController': Expected return() to return an Object."
+            ]
+          ]
+        ]
+      }
+    },
+    "blob-text-stream-probe.js": {
+      "descriptor": [
+        "textStream",
+        0,
+        true,
+        true,
+        true,
+        false,
+        true
+      ],
+      "keys": [
+        "size",
+        "type",
+        "arrayBuffer",
+        "slice",
+        "stream",
+        "text",
+        "bytes",
+        "textStream",
+        "constructor",
+        "Symbol(Symbol.toStringTag)"
+      ],
+      "brand": [
+        [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        [
+          "TypeError",
+          "Illegal invocation"
+        ],
+        [
+          "ok",
+          "[object ReadableStream]"
+        ],
+        [
+          "ok",
+          "[object ReadableStream]"
+        ]
+      ],
+      "empty": [],
+      "ascii": [
+        "hello"
+      ],
+      "parts": [
+        "abcde"
+      ],
+      "bom": [
+        "A"
+      ],
+      "onlyBom": [],
+      "invalid": [
+        "A�",
+        "�"
+      ],
+      "splitParts": [
+        "€"
+      ],
+      "utf16Bom": [
+        "��A\u0000"
+      ],
+      "typeIgnored": [
+        "�"
+      ],
+      "slice": [
+        "world"
+      ],
+      "chunkEdge": [
+        65536,
+        233,
+        false
+      ],
+      "big": [
+        true,
+        true
+      ],
+      "stream": [
+        true,
+        true,
+        false
+      ],
+      "twice": [
+        [
+          "again"
+        ],
+        [
+          "again"
+        ]
+      ],
+      "afterMicrotasks": [
+        "m1",
+        "m2",
+        "m3",
+        [
+          "read",
+          "abc"
+        ]
+      ],
+      "patched": [
+        [
+          "patched"
+        ],
+        []
+      ],
+      "cancel": "fulfilled"
+    }
+  }
+}

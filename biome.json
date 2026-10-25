@@ -96,6 +96,8 @@
       "rust/crates/turbo-surf-render/src/select_element*.json",
       "rust/crates/turbo-surf-render/src/html_dialog*.js",
       "rust/crates/turbo-surf-render/src/html_dialog*.json",
+      "rust/crates/turbo-surf-render/src/view_transitions*.js",
+      "rust/crates/turbo-surf-render/src/view_transitions*.json",
       "harness/detection/element-scroll-probe.js",
       "harness/detection/element-scroll-events-probe.js",
       "harness/detection/element-visibility-probe.js",

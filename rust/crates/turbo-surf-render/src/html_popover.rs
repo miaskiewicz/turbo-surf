@@ -539,13 +539,23 @@ pub(super) fn hide_unrelated(scope: &mut v8::PinScope, node: Handle) {
 }
 /// Queue `callback` as a task on this document's private, host-captured scheduler.
 pub(super) fn schedule(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
+    schedule_after(scope, callback, 0);
+}
+/// Queue `callback` as a task `delay` milliseconds out on the same trusted scheduler.
+/// Returns false when the host never captured one.
+pub(super) fn schedule_after(
+    scope: &mut v8::PinScope,
+    callback: v8::Local<v8::Function>,
+    delay: u32,
+) -> bool {
     let Some(scheduler) = DOM.with(|dom| dom.borrow().as_ref()?.popover.scheduler.clone()) else {
-        return;
+        return false;
     };
     let scheduler = dom_ownership::local(scope, &scheduler);
     let receiver = v8::undefined(scope);
-    let delay = v8::Integer::new(scope, 0);
+    let delay = v8::Integer::new_from_unsigned(scope, delay);
     scheduler.call(scope, receiver.into(), &[callback.into(), delay.into()]);
+    true
 }
 pub(super) fn capture_scheduler(scope: &mut v8::PinScope) {
     // Independent-context installation restores its caller's TLS document. The

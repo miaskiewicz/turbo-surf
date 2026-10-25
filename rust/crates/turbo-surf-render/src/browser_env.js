@@ -89,6 +89,8 @@
     // background: extract the color token -> background-color (position/size/repeat are layout-y)
     if (name === 'background'){ for (var bi=0; bi<p.length; bi++){ if (/^#[0-9a-fA-F]{3,8}$/.test(p[bi]) || /^(rgb|rgba|hsl|hsla)\(/i.test(p[bi]) || p[bi]==='transparent'){ emit('background-color', p[bi]); break; } } return; }
   };
+  __ns.expandCssShorthand = expandShorthand;
+
   // Bounded stylesheet and inline computed-value resolution supports style/visibility reads.
   // Returned declarations refresh on public reads; internal ancestor values use private
   // snapshots from the current calculation.
@@ -231,6 +233,9 @@
     // A fresh internal result is already resolved. Reading its public live getter
     // would compute the same ancestors again and double recursion at every level.
     function inheritedValue(name){ return inheritParent ? computedSnapshotValue(parentStyle(inheritParent),name) : ''; }
+    // Web Animations compose over cascaded and inline values; !important declarations win.
+    var animated=el&&__ns.animatedStyle?__ns.animatedStyle(el,function(name){var value=decl[name];return value==null?'':String(value);},inheritedValue):null;
+    if(animated)for(var ai=0;ai<animated.length;ai++)if(!priorities[animated[ai][0]])setProp(animated[ai][0],animated[ai][1]);
     var color = decl.color || '';
     if (!color) { try { color = __ns.cascadeProp.call(el, 'color'); } catch(e) {} }
     var colorKeyword = String(color || '').toLowerCase();
@@ -255,7 +260,9 @@
       try { decl.visibility = inheritedValue('visibility'); } catch(e){}
     }
     if (decl.visibility == null) decl.visibility = '';
-    if (decl.opacity == null) decl.opacity = '';
+    // Initial computed values of properties Web Animations commonly animate.
+    if (decl.opacity == null) decl.opacity = connected ? '1' : '';
+    if (decl.transform == null) { decl.transform = connected ? 'none' : ''; }
     // Used-value resolution for percentage width/height. A no-layout env returns a raw "50%"
     // verbatim, but a containing-block percentage has a well-defined used value in normal flow
     // (pct * the containing block's content width/height), which a real browser reports in px.

@@ -139,6 +139,10 @@ done
 for file in form_outputs.js form_outputs_cases.json form_outputs_chrome156.json form_outputs_probe.js form_outputs_tests.rs element_members.js element_members.rs element_members_chrome156.json element_members_probe.js html_invokers.js html_invokers.rs html_invokers_chrome156.json html_invokers_dialog_chrome156.json html_invokers_dialog_probe.js html_invokers_probe.js shadow_html.js shadow_html.rs shadow_html_chrome156.json shadow_html_probe.js input_members.js input_members.rs input_members_cases.json input_members_chrome156.json input_members_probe.js css_selector_syntax.rs css_admission_tests.rs css_selector_admission_probe.js css_selector_admission_chrome156.json css_inherited_color_probe.js css_inherited_color_chrome156.json document_legacy.rs document_legacy.js document_legacy_tests.rs document_all_probe.js document_all_cases.json document_all_chrome156.json document_legacy_probe.js document_legacy_cases.json document_legacy_chrome156.json select_element.rs select_element.js select_element_tests.rs select_element_probe.js select_element_cases.json select_element_chrome156.json html_dialog.rs html_dialog.js html_dialog_tests.rs html_dialog_probe.js html_dialog_chrome156.json sanitizer.rs sanitizer.js sanitizer_safe_baseline.json sanitizer_tests.rs sanitizer_probe.js sanitizer_chrome156.json declarative_shadow_probe.js declarative_shadow_page.html declarative_shadow_chrome156.json pointer_events.rs pointer_events.js pointer_events_tests.rs pointer_events_probe.js pointer_events_chrome156.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
+# turbo-surf#28 parity batch 2: Web Animations.
+for file in animations.rs animations.js animations_tests.rs animations_probe.js animations_cases.json animations_chrome156.json animations_frames_probe.js animations_frames_cases.json animations_frames_chrome156.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
 git -C "$repo" show "${source_rev}:src/browser_sanitizer_default.json" > "$dest/browser_sanitizer_default.json"
 git -C "$repo" show "${source_rev}:src/browser_env.rs" | sed 's#^//!#//#' > "$dest/browser_env_upstream.rs"
 

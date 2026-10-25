@@ -101,6 +101,8 @@
       "harness/detection/pointer-capture-probe.js",
       "harness/detection/pointer-capture-cases.json",
       "harness/detection/fixtures/pointer-capture-chrome156.json",
+      "rust/crates/turbo-surf-render/src/animations*.js",
+      "rust/crates/turbo-surf-render/src/animations*.json",
       "harness/detection/element-scroll-probe.js",
       "harness/detection/element-scroll-events-probe.js",
       "harness/detection/element-visibility-probe.js",

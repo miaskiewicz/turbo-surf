@@ -1,0 +1,5232 @@
+{
+  "schemaVersion": 1,
+  "subject": "chrome",
+  "collectedAt": "2026-10-25T15:21:42.684Z",
+  "browser": {
+    "product": "Chrome/156.0.8078.47",
+    "v8": "15.6.75.19",
+    "revision": "@1d17a2e2ee147bb7d6ae2ab6abdb3a2510c17775",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+    "executableSha256": "2346fb044448ef1e7aef6593a19c0d258b194694e37c214f0bbd39e68e5ea881",
+    "bundleSha256": "465e3ecf48f92450f897c8665d2e7b5c1bdb24536ecfb7d74c15a5504fc5c078"
+  },
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--ignore-certificate-errors-spki-list=<ephemeral-loopback-spki>",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "about:blank"
+  ],
+  "collector": {
+    "chrome-identity-battery.mjs": "b57c026e3db4cfe5e629b814a4fa5698a2aa2eaa74320e052e23cb30c7b185d2",
+    "chrome-identity-probe.js": "fae8f16807d6ad34e79acf9843f0146854f02415be1865b81ca9683404f5f5eb",
+    "identity-server.mjs": "e1b60628f7a78249f6045418774d8ef9b3c23530fa9f5296daa9efa0fc88d8f2",
+    "identity-wire.mjs": "9539d75da4c93a4fc373438363a84bc32fcf1fec8bb59b68cdd943e5b2f82100"
+  },
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "osRelease": "27.2.0"
+  },
+  "note": "Authored loopback battery only (127.0.0.1/localhost/::1). Fresh profile, no cookies, no remote traffic. ClientHello randoms and key shares are ephemeral.",
+  "missing": [],
+  "errors": [],
+  "pageErrors": [],
+  "requests": [
+    {
+      "tier": "chrome",
+      "kind": "nav",
+      "method": "GET",
+      "path": "/t/~/k/nav",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/nav"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "style",
+      "method": "GET",
+      "path": "/t/~/k/style",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/style"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "text/css,*/*;q=0.1"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "no-cors"],
+        ["sec-fetch-dest", "style"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 1,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "script",
+      "method": "GET",
+      "path": "/t/~/k/script",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/script"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "no-cors"],
+        ["sec-fetch-dest", "script"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 3,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "module",
+      "method": "GET",
+      "path": "/t/~/k/module",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/module"],
+        ["origin", "<A>"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "script"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 5,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "img",
+      "method": "GET",
+      "path": "/t/~/k/img",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/img"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "no-cors"],
+        ["sec-fetch-dest", "image"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 147
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "iframe",
+      "method": "GET",
+      "path": "/t/~/k/iframe",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/iframe"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-dest", "iframe"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "fetch",
+      "method": "GET",
+      "path": "/t/~/k/fetch",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/fetch"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 11,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "font-style",
+      "method": "GET",
+      "path": "/t/~/k/font-style",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/font-style"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "text/css,*/*;q=0.1"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "no-cors"],
+        ["sec-fetch-dest", "style"],
+        ["referer", "<A>/t/~/k/iframe"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "fetch-post",
+      "method": "POST",
+      "path": "/t/~/k/fetch-post",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "POST"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/fetch-post"],
+        ["content-length", "3"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["content-type", "application/x-www-form-urlencoded"],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["origin", "<A>"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 3,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 15,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "font",
+      "method": "GET",
+      "path": "/t/~/k/font",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/font"],
+        ["origin", "<A>"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "font"],
+        ["referer", "<A>/t/~/k/font-style"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": null,
+      "kind": "favicon",
+      "method": "GET",
+      "path": "/favicon.ico",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/favicon.ico"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "no-cors"],
+        ["sec-fetch-dest", "image"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 19,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "fetch-cors",
+      "method": "GET",
+      "path": "/t/~/k/fetch-cors",
+      "origin": "AX",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<AX-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/fetch-cors"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["origin", "<A>"],
+        ["sec-fetch-site", "cross-site"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<A>/"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 2,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "fetch-preflight",
+      "method": "OPTIONS",
+      "path": "/t/~/k/fetch-preflight",
+      "origin": "AX",
+      "protocol": "h2",
+      "headers": [
+        [":method", "OPTIONS"],
+        [":authority", "<AX-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/fetch-preflight"],
+        ["accept", "*/*"],
+        ["access-control-request-method", "PUT"],
+        ["access-control-request-headers", "content-type,x-battery"],
+        ["origin", "<A>"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-site", "cross-site"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<A>/"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 2,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "fetch-preflight",
+      "method": "PUT",
+      "path": "/t/~/k/fetch-preflight",
+      "origin": "AX",
+      "protocol": "h2",
+      "headers": [
+        [":method", "PUT"],
+        [":authority", "<AX-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/fetch-preflight"],
+        ["content-length", "2"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["x-battery", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["content-type", "application/json"],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["origin", "<A>"],
+        ["sec-fetch-site", "cross-site"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<A>/"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 2,
+      "connection": 2,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 3,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "xhr",
+      "method": "GET",
+      "path": "/t/~/k/xhr",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/xhr"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "*/*"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "form-post",
+      "method": "POST",
+      "path": "/t/~/k/form-post",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "POST"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/form-post"],
+        ["content-length", "9"],
+        ["cache-control", "max-age=0"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        ["content-type", "application/x-www-form-urlencoded"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        ["origin", "<A>"],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-dest", "iframe"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 9,
+      "connection": 0,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "click-nav",
+      "method": "GET",
+      "path": "/t/~/k/click-nav",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/click-nav"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["referer", "<A>/t/~/k/nav"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 3,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "h1-nav",
+      "method": "GET",
+      "path": "/t/~/k/h1-nav",
+      "origin": "B",
+      "protocol": "http/1.1",
+      "headers": [
+        ["Host", "<B-host>"],
+        ["Connection", "keep-alive"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["Upgrade-Insecure-Requests", "1"],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["Sec-Fetch-Site", "none"],
+        ["Sec-Fetch-Mode", "navigate"],
+        ["Sec-Fetch-User", "?1"],
+        ["Sec-Fetch-Dest", "document"],
+        ["Accept-Encoding", "gzip, deflate, br, zstd"],
+        ["Accept-Language", "en-US,en;q=0.9"],
+        ["Cookie", "battery=1"]
+      ],
+      "bodyBytes": 0,
+      "connection": 4,
+      "streamPriority": null
+    },
+    {
+      "tier": null,
+      "kind": "favicon",
+      "method": "GET",
+      "path": "/favicon.ico",
+      "origin": "B",
+      "protocol": "http/1.1",
+      "headers": [
+        ["Host", "<B-host>"],
+        ["Connection", "keep-alive"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["Accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+        ["Sec-Fetch-Site", "same-origin"],
+        ["Sec-Fetch-Mode", "no-cors"],
+        ["Sec-Fetch-Dest", "image"],
+        ["Referer", "<B>/t/~/k/h1-nav"],
+        ["Accept-Encoding", "gzip, deflate, br, zstd"],
+        ["Accept-Language", "en-US,en;q=0.9"],
+        ["Cookie", "battery=1"]
+      ],
+      "bodyBytes": 0,
+      "connection": 4,
+      "streamPriority": null
+    },
+    {
+      "tier": "chrome",
+      "kind": "http-nav",
+      "method": "GET",
+      "path": "/t/~/k/http-nav",
+      "origin": "D",
+      "protocol": "http/1.1",
+      "headers": [
+        ["Host", "<D-host>"],
+        ["Connection", "keep-alive"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["Upgrade-Insecure-Requests", "1"],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["Sec-Fetch-Site", "none"],
+        ["Sec-Fetch-Mode", "navigate"],
+        ["Sec-Fetch-User", "?1"],
+        ["Sec-Fetch-Dest", "document"],
+        ["Accept-Encoding", "gzip, deflate, br, zstd"],
+        ["Accept-Language", "en-US,en;q=0.9"],
+        ["Cookie", "battery=1"]
+      ],
+      "bodyBytes": 0,
+      "connection": null,
+      "streamPriority": null
+    },
+    {
+      "tier": "chrome",
+      "kind": "ch-accept",
+      "method": "GET",
+      "path": "/t/~/k/ch-accept",
+      "origin": "C",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<C-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/ch-accept"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 6,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": null,
+      "kind": "favicon",
+      "method": "GET",
+      "path": "/favicon.ico",
+      "origin": "D",
+      "protocol": "http/1.1",
+      "headers": [
+        ["Host", "<D-host>"],
+        ["Connection", "keep-alive"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["Accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+        ["Sec-Fetch-Site", "same-origin"],
+        ["Sec-Fetch-Mode", "no-cors"],
+        ["Sec-Fetch-Dest", "image"],
+        ["Referer", "<D>/t/~/k/http-nav"],
+        ["Accept-Encoding", "gzip, deflate, br, zstd"],
+        ["Accept-Language", "en-US,en;q=0.9"],
+        ["Cookie", "battery=1"]
+      ],
+      "bodyBytes": 0,
+      "connection": null,
+      "streamPriority": null
+    },
+    {
+      "tier": "chrome",
+      "kind": "ch-sub",
+      "method": "GET",
+      "path": "/t/~/k/ch-sub",
+      "origin": "C",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<C-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/ch-sub"],
+        [
+          "sec-ch-ua-full-version-list",
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+        ],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["device-memory", "32"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-dpr", "2"],
+        ["sec-ch-ua-model", "\"\""],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-form-factors", "\"Desktop\""],
+        ["sec-ch-ua-bitness", "\"64\""],
+        ["sec-ch-ua-wow64", "?0"],
+        ["sec-ch-ua-arch", "\"arm\""],
+        ["sec-ch-ua-full-version", "\"156.0.8078.47\""],
+        ["sec-ch-viewport-width", "1200"],
+        ["downlink", "1.7"],
+        ["ect", "4g"],
+        ["sec-ch-device-memory", "32"],
+        ["sec-ch-prefers-reduced-motion", "no-preference"],
+        ["sec-ch-prefers-color-scheme", "light"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        ["rtt", "50"],
+        ["sec-ch-ua-platform-version", "\"27.2.0\""],
+        ["accept", "*/*"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "cors"],
+        ["sec-fetch-dest", "empty"],
+        ["referer", "<C>/t/~/k/ch-accept"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 6,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    },
+    {
+      "tier": null,
+      "kind": "favicon",
+      "method": "GET",
+      "path": "/favicon.ico",
+      "origin": "C",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<C-host>"],
+        [":scheme", "https"],
+        [":path", "/favicon.ico"],
+        [
+          "sec-ch-ua-full-version-list",
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+        ],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["device-memory", "32"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-dpr", "2"],
+        ["sec-ch-ua-model", "\"\""],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-form-factors", "\"Desktop\""],
+        ["sec-ch-ua-bitness", "\"64\""],
+        ["sec-ch-ua-wow64", "?0"],
+        ["sec-ch-ua-arch", "\"arm\""],
+        ["sec-ch-ua-full-version", "\"156.0.8078.47\""],
+        ["sec-ch-viewport-width", "1200"],
+        ["downlink", "1.7"],
+        ["ect", "4g"],
+        ["sec-ch-device-memory", "32"],
+        ["sec-ch-prefers-reduced-motion", "no-preference"],
+        ["sec-ch-prefers-color-scheme", "light"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        ["rtt", "50"],
+        ["sec-ch-ua-platform-version", "\"27.2.0\""],
+        ["accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "no-cors"],
+        ["sec-fetch-dest", "image"],
+        ["referer", "<C>/t/~/k/ch-accept"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 6,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 3,
+        "weight": 220
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "ch-next",
+      "method": "GET",
+      "path": "/t/~/k/ch-next",
+      "origin": "C",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<C-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/ch-next"],
+        ["device-memory", "32"],
+        ["sec-ch-device-memory", "32"],
+        ["sec-ch-dpr", "2"],
+        ["sec-ch-viewport-width", "1200"],
+        ["rtt", "50"],
+        ["downlink", "1.55"],
+        ["ect", "4g"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-full-version", "\"156.0.8078.47\""],
+        ["sec-ch-ua-arch", "\"arm\""],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["sec-ch-ua-platform-version", "\"27.2.0\""],
+        ["sec-ch-ua-model", "\"\""],
+        ["sec-ch-ua-bitness", "\"64\""],
+        ["sec-ch-ua-wow64", "?0"],
+        [
+          "sec-ch-ua-full-version-list",
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+        ],
+        ["sec-ch-ua-form-factors", "\"Desktop\""],
+        ["sec-ch-prefers-color-scheme", "light"],
+        ["sec-ch-prefers-reduced-motion", "no-preference"],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["cookie", "battery=1"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 6,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "critical",
+      "method": "GET",
+      "path": "/t/~/k/critical",
+      "origin": "CX",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<CX-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/critical"],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 7,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": "chrome",
+      "kind": "critical",
+      "method": "GET",
+      "path": "/t/~/k/critical",
+      "origin": "CX",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<CX-host>"],
+        [":scheme", "https"],
+        [":path", "/t/~/k/critical"],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-arch", "\"arm\""],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "sec-ch-ua-full-version-list",
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 7,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 256
+      }
+    },
+    {
+      "tier": null,
+      "kind": "favicon",
+      "method": "GET",
+      "path": "/favicon.ico",
+      "origin": "CX",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<CX-host>"],
+        [":scheme", "https"],
+        [":path", "/favicon.ico"],
+        [
+          "sec-ch-ua-full-version-list",
+          "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\""
+        ],
+        ["sec-ch-ua-arch", "\"arm\""],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["accept", "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+        ["sec-fetch-site", "same-origin"],
+        ["sec-fetch-mode", "no-cors"],
+        ["sec-fetch-dest", "image"],
+        ["referer", "<CX>/t/~/k/critical"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["priority", "u=1, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 7,
+      "streamPriority": {
+        "exclusive": true,
+        "dependency": 0,
+        "weight": 220
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": 0,
+      "origin": "A",
+      "family": "IPv4",
+      "rawSha256": "dc0d2078a9386b0924fb23218996dd786d62beccf1214ab895b3b78fdff18550",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          39578, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 27242,
+            "length": 0
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [56026, 772, 771]
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 65037,
+            "length": 186
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [10794, 4588, 29, 23, 24]
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 10794,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [47802, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 2570,
+            "length": 1
+          }
+        ],
+        "pskModes": [1],
+        "certificateCompression": [2],
+        "echOuterType": 0,
+        "pointFormats": [0],
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "extensionOrder": [
+          27242, 35, 45, 27, 23, 5, 43, 51764, 65037, 10, 11, 18, 51, 17613, 16, 13, 65281, 2570
+        ],
+        "extensionNames": [
+          "session_ticket",
+          "psk_key_exchange_modes",
+          "compress_certificate",
+          "extended_master_secret",
+          "status_request",
+          "supported_versions",
+          "trust_anchors",
+          "encrypted_client_hello",
+          "supported_groups",
+          "ec_point_formats",
+          "signed_certificate_timestamp",
+          "key_share",
+          "application_settings",
+          "alpn",
+          "signature_algorithms",
+          "renegotiation_info"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,35-45-27-23-5-43-51764-65037-10-11-18-51-17613-16-13-65281,4588-29-23-24,0",
+        "ja3Hash": "0c5d73f5568f59c6baf71c9c2d41757e",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "3a1fa25737348931cccd305b3d0dfdc6",
+        "ja4": "t13i1516h2_8daaf6152771_cb7bf5808d99",
+        "ja4Raw": "t13i1516h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "alpn": "h2",
+      "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 256
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      },
+      "h2Frames": [
+        {
+          "type": "SETTINGS",
+          "flags": 0,
+          "streamId": 0,
+          "length": 24,
+          "settings": [
+            {
+              "id": 1,
+              "value": 65536
+            },
+            {
+              "id": 2,
+              "value": 0
+            },
+            {
+              "id": 4,
+              "value": 6291456
+            },
+            {
+              "id": 6,
+              "value": 262144
+            }
+          ]
+        },
+        {
+          "type": "WINDOW_UPDATE",
+          "flags": 0,
+          "streamId": 0,
+          "length": 4,
+          "increment": 15663105
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 1,
+          "length": 476,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "SETTINGS",
+          "flags": 1,
+          "streamId": 0,
+          "length": 0,
+          "ack": true,
+          "settings": []
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 3,
+          "length": 116,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 1,
+            "weight": 256
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 5,
+          "length": 51,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 3,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 7,
+          "length": 66,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 5,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 9,
+          "length": 101,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 147
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 11,
+          "length": 44,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 13,
+          "length": 47,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 11,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 15,
+          "length": 70,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 36,
+          "streamId": 17,
+          "length": 69,
+          "endStream": false,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 15,
+            "weight": 220
+          }
+        },
+        {
+          "type": "DATA",
+          "flags": 1,
+          "streamId": 17,
+          "length": 3
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 19,
+          "length": 74,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 21,
+          "length": 32,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 19,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 23,
+          "length": 34,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 36,
+          "streamId": 25,
+          "length": 53,
+          "endStream": false,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "DATA",
+          "flags": 1,
+          "streamId": 25,
+          "length": 9
+        }
+      ],
+      "h2Error": null
+    },
+    {
+      "id": 2,
+      "origin": "A",
+      "family": "IPv6",
+      "rawSha256": "3b31b439576ad82a2c59a451b349e53340ca2bf4002af957fc6bbe5e9a7da99d",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          39578, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 2570,
+            "length": 0
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 65037,
+            "length": 250
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [35466, 4588, 29, 23, 24]
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 0,
+            "length": 14
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [43690, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 35466,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [47802, 772, 771]
+          },
+          {
+            "type": 27242,
+            "length": 1
+          }
+        ],
+        "pointFormats": [0],
+        "echOuterType": 0,
+        "serverName": "localhost",
+        "pskModes": [1],
+        "certificateCompression": [2],
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "extensionOrder": [
+          2570, 18, 16, 5, 11, 65037, 51764, 10, 65281, 0, 35, 13, 45, 27, 17613, 23, 51, 43, 27242
+        ],
+        "extensionNames": [
+          "signed_certificate_timestamp",
+          "alpn",
+          "status_request",
+          "ec_point_formats",
+          "encrypted_client_hello",
+          "trust_anchors",
+          "supported_groups",
+          "renegotiation_info",
+          "server_name",
+          "session_ticket",
+          "signature_algorithms",
+          "psk_key_exchange_modes",
+          "compress_certificate",
+          "application_settings",
+          "extended_master_secret",
+          "key_share",
+          "supported_versions"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 0,
+              "length": 14
+            },
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,18-16-5-11-65037-51764-10-65281-0-35-13-45-27-17613-23-51-43,4588-29-23-24,0",
+        "ja3Hash": "e7f0a313d7ffc7ba7e14d560a216e7a9",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "bd4930bd9b000ee684830e44bab76fdf",
+        "ja4": "t13d1517h2_8daaf6152771_cb7bf5808d99",
+        "ja4Raw": "t13d1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "FgMBB7gBAAe0AwOG5lbY2uAt6rY6frfiLipE2OjUvhFJiV0BLQhVmB/nHyD5DkZ1whhBzKvrYBqxjLCwCHot66xSYMeGe3JFAcC8lAAgmpoTARMCEwPAK8AvwCzAMMypzKjAE8AUAJwAnQAvADUBAAdLCgoAAAASAAAAEAAOAAwCaDIIaHR0cC8xLjEABQAFAQAAAAAACwACAQD+DQD6AAABAAFvACBuYOuxNAFcOzw8xPFff5f3BQxsJzr402ZuzA0SuqS6dQDQ3g5REDxWjT34NiXhnDF+NDr/EyOVHgxNDRMWpTNco7G1FaJ72J8GAuBbTO8gLL2ogDZzHpXBdBwBJ9Up7ygJeFwYOYPRGyAI+gQR/zkAq4pqpmHWxav2kZ/JSe8/pyHbZjbuc8kwuFVRoq8k4QK2TvRMaOvviqPTT/1csqhEnsW3CwaEitRqwNexEPvwb+P/uGDDYg/Q1TvtQzoZmVvwqY/rK0ZKNVe0nzryjiJ7VN6h6+64I6JqgsQzP/up8CYfwUMbb0FitMpW6wywnSmVM8o0ALoAuAWC3xMCAQWC3xMCBgWC3xMCDQWC3xMCDgWC3xMCDwWC3xMCEgWC3xMCEwWC3xMCFAiDmmSMmy0BBwiDmmSMmy0BCAiDmmSMmy0BCQiDmmSMmy0BCgiDmmSMmy0BCwiDmmSMmy0BDAiDmmSMmy0BDQiDmmSMmy0BEgiDmmSMmy0BEwTWeQkBBNZ5CQQE1nkJBQTWeQkGBNZ5CQcE1nkJCATWeQkKBNZ5CQsE1nkJDATWeQkNBNZ5CQ8ACgAMAAqKihHsAB0AFwAY/wEAAQAAAAAOAAwAAAlsb2NhbGhvc3QAIwAAAA0AGgAYqqoJBAkFCQYEAwgEBAEFAwgFBQEIBgYBAC0AAgEBABsAAwIAAkTNAAUAAwJoMgAXAAAAMwTvBO2KigABABHsBMBgMIxz8gG+MX/4GXDbEn1tBoCakThD8cYOeGoVqUJ5NB0YEUeYRjClAyslVJwMEaxIBm0ctFcaJxrMIFIyG0E3kwSxohXkVkRUIDZnmxC1EVVO6AO90VhE1W7UGRmOapHVFGgWIENr9YY3KywGKCepy69HLJV165beZKcNKUc5hTl70i9e0ImTIJMxo6zT2V/NcrLGZHwGBivP+xD3CRgtuiyfZhlpcRvu0EKINM2GIog1O3NtOnUDMU/V5qhgRSHlg4XYgDnQcpgTODpcHI2MhWij2AU1EMyLyCyTBj5q5gkI6ofcI0VTsz7utWTnS1clOUfD2BgzqzN5R42Uw4QpumFlI7aeuc3eAVVAw6yamrDv2aQqdKlEA7vFYrN70nx8JMGwmFVWmVOthRC4ELEFgc5wYpTZMVcC55vKl4uNTARJazhBMqho1AEJOwwghWBhscAXuyAzegxDyookmw9OWonB5TRH8MzV/F7NKZneU8+4YV0CcbnFAUOtq1xth34/+mvwlIZLzFv1uzeohW5bJk/LM4GD0ht9/DCPUQk9KatXCwE5QmCHXDgR15yHBmE4llS0EjRDejW7Bmth4rllLINI5cDP96rd3AaiM0CFK0y8iM5cybRmuwoM21HfhTa8RB/K073+upmeJSeRa5I88gKNbESbk6v8W46YMl6wBgWGOTRnmDcCmXQxDGCjoi36nCudJAtVE2ZfB5q1V4zEa231m4NRvDV2S7/jWqJXR3weS5K37DV9lHWi1RiX0jdu4CyIF4B2YiytAivNk5OP4LRZ21kTCC8M3Ae5RIHHB44w677BQ6TGeyf0NAOsk7e5BIBxI6PEg2WnOlO6hxlAy61xjCvtKi7wW3YhgScxdAov+8BrOhDv2ja6FKgzFsYtVcBvep6ScXTXE8JQJbF+pY284QM0WZU6wINxesPIWCub9RP5olw+SB4Y88ENFZMdx5UScz9kwl0+M1b4FqMgFCX4LI52FRcKAFxQ4jKVxxDMsQQCFJDz66XiXDGEQp9I9M8MYhvgQqt/EWL5uWaRkhvqhsYuERiF9AsvGiQ2UrGkVrIshqSIEYzpKBv1kqVtoS+SESPMiZwM5bP0G5GPtXzVEsD4wjHRBwmXYHA8VgUBMwOqk4VDRQDxw1HnOygNBQVrBsQkElF+ezr1ax8+YXHjuXOxVHZcw0xNRjL4ypTncmMNrJCJ+javbHRcIaDxWB2DA8xMIXGeUGdS6CLzrEiorIcZ9yCdVhytpEw1p20iTCa0RkON8MrJxGkJO5EFubFDhXdU6Zl/cSGjBlAdS49MYT8cCqQdCQgXKqOeNlM2oYchS7DVxwl1mKakFJjocWtiasNtSbR9028CgFe0YlaiVpN54hWOJI5REws4m29oNyKWPIaRegHBoX7LCAuHKoxXNX5ZkB1D1Uz/zED+l0zGrFxVWaMAywfQuDMsKRxX7JsOCyOYY7auJBc3RkpIsz+QoVpAK5rlgb71YA7VTErimSVESiuVA0p2h6+MucnO4h0tIT0FKGRly1VG+w5kljfLSzyzDn7sfbXo5iMA4dOB5RIt2i5gSMmIrBjaoCs9aBqnZwN+Hw/RgH6Rxm7YolMSSItQQ8MBHH/mHEx4AB0AILjVI1DeQ862B+nO6uewrlkNhtkkLVM/wB2GjAWvIk8+ACsABwa6ugMEAwNqagABAA=="
+      },
+      "alpn": "h2",
+      "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 220
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      },
+      "h2Frames": [
+        {
+          "type": "SETTINGS",
+          "flags": 0,
+          "streamId": 0,
+          "length": 24,
+          "settings": [
+            {
+              "id": 1,
+              "value": 65536
+            },
+            {
+              "id": 2,
+              "value": 0
+            },
+            {
+              "id": 4,
+              "value": 6291456
+            },
+            {
+              "id": 6,
+              "value": 262144
+            }
+          ]
+        },
+        {
+          "type": "WINDOW_UPDATE",
+          "flags": 0,
+          "streamId": 0,
+          "length": 4,
+          "increment": 15663105
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 1,
+          "length": 383,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        },
+        {
+          "type": "SETTINGS",
+          "flags": 1,
+          "streamId": 0,
+          "length": 0,
+          "ack": true,
+          "settings": []
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 3,
+          "length": 114,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 36,
+          "streamId": 5,
+          "length": 74,
+          "endStream": false,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 3,
+            "weight": 220
+          }
+        },
+        {
+          "type": "DATA",
+          "flags": 1,
+          "streamId": 5,
+          "length": 2
+        },
+        {
+          "type": "RST_STREAM",
+          "flags": 0,
+          "streamId": 3,
+          "length": 4,
+          "errorCode": 8
+        }
+      ],
+      "h2Error": null
+    },
+    {
+      "id": 3,
+      "origin": "A",
+      "family": "IPv4",
+      "rawSha256": "cd06f0df3735cc87278e5517478c9e53a6a6af6da767bb2bf5ad875ebdd0e6c9",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          60138, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 2570,
+            "length": 0
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [56026, 4588, 29, 23, 24]
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [19018, 772, 771]
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 65037,
+            "length": 250
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 56026,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [2570, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 47802,
+            "length": 1
+          },
+          {
+            "type": 41,
+            "length": 235
+          }
+        ],
+        "pskModes": [1],
+        "certificateCompression": [2],
+        "echOuterType": 0,
+        "pointFormats": [0],
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "extensionOrder": [
+          2570, 10, 18, 65281, 45, 43, 5, 16, 27, 65037, 11, 35, 51, 23, 51764, 17613, 13, 47802, 41
+        ],
+        "extensionNames": [
+          "supported_groups",
+          "signed_certificate_timestamp",
+          "renegotiation_info",
+          "psk_key_exchange_modes",
+          "supported_versions",
+          "status_request",
+          "alpn",
+          "compress_certificate",
+          "encrypted_client_hello",
+          "ec_point_formats",
+          "session_ticket",
+          "key_share",
+          "extended_master_secret",
+          "trust_anchors",
+          "application_settings",
+          "signature_algorithms",
+          "pre_shared_key"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 41,
+              "length": 235
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,10-18-65281-45-43-5-16-27-65037-11-35-51-23-51764-17613-13-41,4588-29-23-24,0",
+        "ja3Hash": "ab6ce1c57c35d285a5050ad3a7b042f0",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-41-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "019a3984e644876b935cea4d4bd210ff",
+        "ja4": "t13i1517h2_8daaf6152771_e2d80978ab2e",
+        "ja4Raw": "t13i1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,0029,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "alpn": "h2",
+      "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 256
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      },
+      "h2Frames": [
+        {
+          "type": "SETTINGS",
+          "flags": 0,
+          "streamId": 0,
+          "length": 24,
+          "settings": [
+            {
+              "id": 1,
+              "value": 65536
+            },
+            {
+              "id": 2,
+              "value": 0
+            },
+            {
+              "id": 4,
+              "value": 6291456
+            },
+            {
+              "id": 6,
+              "value": 262144
+            }
+          ]
+        },
+        {
+          "type": "WINDOW_UPDATE",
+          "flags": 0,
+          "streamId": 0,
+          "length": 4,
+          "increment": 15663105
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 1,
+          "length": 525,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "SETTINGS",
+          "flags": 1,
+          "streamId": 0,
+          "length": 0,
+          "ack": true,
+          "settings": []
+        }
+      ],
+      "h2Error": null
+    },
+    {
+      "id": 4,
+      "origin": "B",
+      "family": "IPv4",
+      "rawSha256": "38652944cbbfbcf12cfa142ad5e5302abb8ad04fd4baaa3eefbba6dc056d2cdf",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          14906, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 47802,
+            "length": 0
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 51914,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 65037,
+            "length": 250
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [51914, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [10794, 772, 771]
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [51914, 4588, 29, 23, 24]
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 60138,
+            "length": 1
+          }
+        ],
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "pointFormats": [0],
+        "pskModes": [1],
+        "echOuterType": 0,
+        "certificateCompression": [2],
+        "extensionOrder": [
+          47802, 18, 17613, 16, 11, 35, 51764, 5, 45, 51, 65037, 13, 43, 27, 10, 65281, 23, 60138
+        ],
+        "extensionNames": [
+          "signed_certificate_timestamp",
+          "application_settings",
+          "alpn",
+          "ec_point_formats",
+          "session_ticket",
+          "trust_anchors",
+          "status_request",
+          "psk_key_exchange_modes",
+          "key_share",
+          "encrypted_client_hello",
+          "signature_algorithms",
+          "supported_versions",
+          "compress_certificate",
+          "supported_groups",
+          "renegotiation_info",
+          "extended_master_secret"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,18-17613-16-11-35-51764-5-45-51-65037-13-43-27-10-65281-23,4588-29-23-24,0",
+        "ja3Hash": "5564a8fd2629606370ca4dc7497dd24a",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "3a1fa25737348931cccd305b3d0dfdc6",
+        "ja4": "t13i1516h2_8daaf6152771_cb7bf5808d99",
+        "ja4Raw": "t13i1516h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "alpn": "http/1.1",
+      "h2": null,
+      "h2Frames": null,
+      "h2Error": null
+    },
+    {
+      "id": 6,
+      "origin": "C",
+      "family": "IPv4",
+      "rawSha256": "eb04d92d37423efa6960515f7218c1a50af21de8a702e68354b1d65d97973a5d",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          19018, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 6682,
+            "length": 0
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [39578, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 65037,
+            "length": 186
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 10794,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [10794, 4588, 29, 23, 24]
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [10794, 772, 771]
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 19018,
+            "length": 1
+          }
+        ],
+        "certificateCompression": [2],
+        "echOuterType": 0,
+        "pointFormats": [0],
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "pskModes": [1],
+        "extensionOrder": [
+          6682, 27, 13, 65037, 5, 11, 23, 17613, 51, 65281, 51764, 45, 10, 16, 35, 43, 18, 19018
+        ],
+        "extensionNames": [
+          "compress_certificate",
+          "signature_algorithms",
+          "encrypted_client_hello",
+          "status_request",
+          "ec_point_formats",
+          "extended_master_secret",
+          "application_settings",
+          "key_share",
+          "renegotiation_info",
+          "trust_anchors",
+          "psk_key_exchange_modes",
+          "supported_groups",
+          "alpn",
+          "session_ticket",
+          "supported_versions",
+          "signed_certificate_timestamp"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,27-13-65037-5-11-23-17613-51-65281-51764-45-10-16-35-43-18,4588-29-23-24,0",
+        "ja3Hash": "641e5b03d2b8b6f0c62dbb81867a6e6d",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "3a1fa25737348931cccd305b3d0dfdc6",
+        "ja4": "t13i1516h2_8daaf6152771_cb7bf5808d99",
+        "ja4Raw": "t13i1516h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "alpn": "h2",
+      "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 256
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      },
+      "h2Frames": [
+        {
+          "type": "SETTINGS",
+          "flags": 0,
+          "streamId": 0,
+          "length": 24,
+          "settings": [
+            {
+              "id": 1,
+              "value": 65536
+            },
+            {
+              "id": 2,
+              "value": 0
+            },
+            {
+              "id": 4,
+              "value": 6291456
+            },
+            {
+              "id": 6,
+              "value": 262144
+            }
+          ]
+        },
+        {
+          "type": "WINDOW_UPDATE",
+          "flags": 0,
+          "streamId": 0,
+          "length": 4,
+          "increment": 15663105
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 1,
+          "length": 489,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "SETTINGS",
+          "flags": 1,
+          "streamId": 0,
+          "length": 0,
+          "ack": true,
+          "settings": []
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 3,
+          "length": 502,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 5,
+          "length": 120,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 3,
+            "weight": 220
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 7,
+          "length": 60,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        }
+      ],
+      "h2Error": null
+    },
+    {
+      "id": 7,
+      "origin": "C",
+      "family": "IPv6",
+      "rawSha256": "bd594cdc0cda6916e21011ab5c4218c626baefcd5d2e7d66a48dcb643eb93936",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          64250, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 56026,
+            "length": 0
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [19018, 772, 771]
+          },
+          {
+            "type": 0,
+            "length": 14
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [10794, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 19018,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 65037,
+            "length": 186
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [19018, 4588, 29, 23, 24]
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 47802,
+            "length": 1
+          }
+        ],
+        "certificateCompression": [2],
+        "serverName": "localhost",
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "pskModes": [1],
+        "pointFormats": [0],
+        "echOuterType": 0,
+        "extensionOrder": [
+          56026, 27, 43, 0, 35, 23, 16, 65281, 17613, 51764, 45, 13, 18, 11, 51, 65037, 10, 5, 47802
+        ],
+        "extensionNames": [
+          "compress_certificate",
+          "supported_versions",
+          "server_name",
+          "session_ticket",
+          "extended_master_secret",
+          "alpn",
+          "renegotiation_info",
+          "application_settings",
+          "trust_anchors",
+          "psk_key_exchange_modes",
+          "signature_algorithms",
+          "signed_certificate_timestamp",
+          "ec_point_formats",
+          "key_share",
+          "encrypted_client_hello",
+          "supported_groups",
+          "status_request"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 0,
+              "length": 14
+            },
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,27-43-0-35-23-16-65281-17613-51764-45-13-18-11-51-65037-10-5,4588-29-23-24,0",
+        "ja3Hash": "4cbbd5f0110622fe9852ad8e8991be91",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "bd4930bd9b000ee684830e44bab76fdf",
+        "ja4": "t13d1517h2_8daaf6152771_cb7bf5808d99",
+        "ja4Raw": "t13d1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "alpn": "h2",
+      "pseudoOrder": [":method", ":authority", ":scheme", ":path"],
+      "h2": {
+        "preamble": ["SETTINGS", "WINDOW_UPDATE"],
+        "settings": [
+          {
+            "id": 1,
+            "name": "HEADER_TABLE_SIZE",
+            "value": 65536
+          },
+          {
+            "id": 2,
+            "name": "ENABLE_PUSH",
+            "value": 0
+          },
+          {
+            "id": 4,
+            "name": "INITIAL_WINDOW_SIZE",
+            "value": 6291456
+          },
+          {
+            "id": 6,
+            "name": "MAX_HEADER_LIST_SIZE",
+            "value": 262144
+          }
+        ],
+        "connectionWindowIncrement": 15663105,
+        "priorityFrames": [],
+        "firstHeadersPriority": {
+          "exclusive": true,
+          "dependency": 0,
+          "weight": 256
+        },
+        "akamai": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+      },
+      "h2Frames": [
+        {
+          "type": "SETTINGS",
+          "flags": 0,
+          "streamId": 0,
+          "length": 24,
+          "settings": [
+            {
+              "id": 1,
+              "value": 65536
+            },
+            {
+              "id": 2,
+              "value": 0
+            },
+            {
+              "id": 4,
+              "value": 6291456
+            },
+            {
+              "id": 6,
+              "value": 262144
+            }
+          ]
+        },
+        {
+          "type": "WINDOW_UPDATE",
+          "flags": 0,
+          "streamId": 0,
+          "length": 4,
+          "increment": 15663105
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 1,
+          "length": 479,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "SETTINGS",
+          "flags": 1,
+          "streamId": 0,
+          "length": 0,
+          "ack": true,
+          "settings": []
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 3,
+          "length": 151,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 256
+          }
+        },
+        {
+          "type": "HEADERS",
+          "flags": 37,
+          "streamId": 5,
+          "length": 152,
+          "endStream": true,
+          "endHeaders": true,
+          "priority": {
+            "exclusive": true,
+            "dependency": 0,
+            "weight": 220
+          }
+        }
+      ],
+      "h2Error": null
+    }
+  ],
+  "js": {
+    "navigator": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "appVersion": "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "appName": "Netscape",
+      "appCodeName": "Mozilla",
+      "product": "Gecko",
+      "productSub": "20030107",
+      "vendor": "Google Inc.",
+      "vendorSub": "",
+      "platform": "MacIntel",
+      "language": "en-US",
+      "languages": ["en-US", "en"],
+      "hardwareConcurrency": 18,
+      "deviceMemory": 32,
+      "maxTouchPoints": 0,
+      "webdriver": true,
+      "cookieEnabled": true,
+      "doNotTrack": null,
+      "pdfViewerEnabled": true,
+      "onLine": true,
+      "plugins": [
+        "PDF Viewer",
+        "Chrome PDF Viewer",
+        "Chromium PDF Viewer",
+        "Microsoft Edge PDF Viewer",
+        "WebKit built-in PDF"
+      ],
+      "mimeTypes": ["application/pdf", "text/pdf"],
+      "connectionType": "4g",
+      "ownKeys": []
+    },
+    "userAgentData": {
+      "brands": [
+        {
+          "brand": "Not:A-Brand",
+          "version": "8"
+        },
+        {
+          "brand": "Chromium",
+          "version": "156"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "156"
+        }
+      ],
+      "mobile": false,
+      "platform": "macOS",
+      "json": {
+        "brands": [
+          {
+            "brand": "Not:A-Brand",
+            "version": "8"
+          },
+          {
+            "brand": "Chromium",
+            "version": "156"
+          },
+          {
+            "brand": "Google Chrome",
+            "version": "156"
+          }
+        ],
+        "mobile": false,
+        "platform": "macOS"
+      },
+      "high": {
+        "architecture": "arm",
+        "bitness": "64",
+        "brands": [
+          {
+            "brand": "Not:A-Brand",
+            "version": "8"
+          },
+          {
+            "brand": "Chromium",
+            "version": "156"
+          },
+          {
+            "brand": "Google Chrome",
+            "version": "156"
+          }
+        ],
+        "formFactors": ["Desktop"],
+        "fullVersionList": [
+          {
+            "brand": "Not:A-Brand",
+            "version": "8.0.0.0"
+          },
+          {
+            "brand": "Chromium",
+            "version": "156.0.8078.47"
+          },
+          {
+            "brand": "Google Chrome",
+            "version": "156.0.8078.47"
+          }
+        ],
+        "mobile": false,
+        "model": "",
+        "platform": "macOS",
+        "platformVersion": "27.2.0",
+        "uaFullVersion": "156.0.8078.47",
+        "wow64": false
+      }
+    },
+    "screen": {
+      "width": 2880,
+      "height": 1620,
+      "availWidth": 2880,
+      "availHeight": 1590,
+      "colorDepth": 30,
+      "pixelDepth": 30,
+      "devicePixelRatio": 2
+    },
+    "intl": {
+      "dateTime": {
+        "locale": "en-US",
+        "calendar": "gregory",
+        "numberingSystem": "latn",
+        "timeZone": "Europe/Lisbon"
+      },
+      "counts": {
+        "calendar": 18,
+        "collation": 10,
+        "currency": 159,
+        "numberingSystem": 78,
+        "timeZone": 418,
+        "unit": 45
+      },
+      "samples": {
+        "dateTime": "1/2/2020, 3:04:05 AM",
+        "dateLong": "Thursday, 2 January 2020",
+        "currency": "1.234,50 €",
+        "compact": "1.2M",
+        "relative": "1 day ago",
+        "list": "a, b, and c",
+        "region": "Myanmar (Burma)",
+        "plural": ["zero", "one", "two", "few", "many", "other"]
+      }
+    },
+    "engine": {
+      "stack": ["Error: probe", "    at probeFrame (<src>:<n>:<n>)"],
+      "stackTraceLimit": 10,
+      "messages": {
+        "nullProperty": "TypeError: Cannot read properties of null (reading 'value')",
+        "notFunction": "TypeError: value.missing is not a function",
+        "arrayLength": "RangeError: Invalid array length",
+        "json": "SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)",
+        "bigint": "RangeError: The number 1.5 cannot be converted to a BigInt because it is not an integer",
+        "symbol": "TypeError: Cannot convert a Symbol value to a string",
+        "constAssign": "TypeError: Assignment to constant variable."
+      },
+      "functionSource": "function sample(a, b) {\n        return a + b;\n      }",
+      "nativeSource": "function max() { [native code] }"
+    },
+    "features": {
+      "builtins": {
+        "Array.fromAsync": "function",
+        "Atomics.pause": "function",
+        "AsyncDisposableStack": "function",
+        "DisposableStack": "function",
+        "Error.captureStackTrace": "function",
+        "Error.isError": "function",
+        "Float16Array": "function",
+        "Intl.DurationFormat": "function",
+        "Iterator": "function",
+        "Iterator.concat": "function",
+        "Iterator.zip": "function",
+        "JSON.rawJSON": "function",
+        "Map.prototype.getOrInsert": "function",
+        "Map.prototype.getOrInsertComputed": "function",
+        "Math.f16round": "function",
+        "Math.sumPrecise": "function",
+        "Promise.try": "function",
+        "RegExp.escape": "function",
+        "ShadowRealm": "undefined",
+        "SuppressedError": "function",
+        "Symbol.dispose": "symbol",
+        "Temporal": "object",
+        "Uint8Array.fromBase64": "function",
+        "Uint8Array.prototype.toHex": "function",
+        "WeakRef": "function"
+      },
+      "css": {
+        "anchor-name: --a": true,
+        "position-try-fallbacks: flip-block": true,
+        "interpolate-size: allow-keywords": true,
+        "field-sizing: content": true,
+        "text-box: trim-both cap alphabetic": true,
+        "reading-flow: flex-visual": true,
+        "corner-shape: squircle": true,
+        "dynamic-range-limit: standard": true,
+        "width: calc(sibling-index() * 1px)": true,
+        "color: if(style(--x: 1): red; else: blue)": true,
+        "clip-path: shape(from 0 0, line to 1px 1px)": true,
+        "scroll-marker-group: after": true,
+        "view-transition-class: a": true,
+        "text-wrap: pretty": true,
+        "color: contrast-color(red)": true,
+        "font-size: 1rcap": true,
+        "anchor-scope: all": true,
+        "overlay: auto": true,
+        "timeline-scope: --t": true,
+        "content-visibility: auto": true
+      },
+      "chrome": ["app", "csi", "loadTimes"],
+      "prototypes": {
+        "Array": [
+          "at",
+          "concat",
+          "constructor",
+          "copyWithin",
+          "entries",
+          "every",
+          "fill",
+          "filter",
+          "find",
+          "findIndex",
+          "findLast",
+          "findLastIndex",
+          "flat",
+          "flatMap",
+          "forEach",
+          "includes",
+          "indexOf",
+          "join",
+          "keys",
+          "lastIndexOf",
+          "length",
+          "map",
+          "pop",
+          "push",
+          "reduce",
+          "reduceRight",
+          "reverse",
+          "shift",
+          "slice",
+          "some",
+          "sort",
+          "splice",
+          "toLocaleString",
+          "toReversed",
+          "toSorted",
+          "toSpliced",
+          "toString",
+          "unshift",
+          "values",
+          "with"
+        ],
+        "String": [
+          "anchor",
+          "at",
+          "big",
+          "blink",
+          "bold",
+          "charAt",
+          "charCodeAt",
+          "codePointAt",
+          "concat",
+          "constructor",
+          "endsWith",
+          "fixed",
+          "fontcolor",
+          "fontsize",
+          "includes",
+          "indexOf",
+          "isWellFormed",
+          "italics",
+          "lastIndexOf",
+          "length",
+          "link",
+          "localeCompare",
+          "match",
+          "matchAll",
+          "normalize",
+          "padEnd",
+          "padStart",
+          "repeat",
+          "replace",
+          "replaceAll",
+          "search",
+          "slice",
+          "small",
+          "split",
+          "startsWith",
+          "strike",
+          "sub",
+          "substr",
+          "substring",
+          "sup",
+          "toLocaleLowerCase",
+          "toLocaleUpperCase",
+          "toLowerCase",
+          "toString",
+          "toUpperCase",
+          "toWellFormed",
+          "trim",
+          "trimEnd",
+          "trimLeft",
+          "trimRight",
+          "trimStart",
+          "valueOf"
+        ],
+        "Object": [
+          "assign",
+          "create",
+          "defineProperties",
+          "defineProperty",
+          "entries",
+          "freeze",
+          "fromEntries",
+          "getOwnPropertyDescriptor",
+          "getOwnPropertyDescriptors",
+          "getOwnPropertyNames",
+          "getOwnPropertySymbols",
+          "getPrototypeOf",
+          "groupBy",
+          "hasOwn",
+          "is",
+          "isExtensible",
+          "isFrozen",
+          "isSealed",
+          "keys",
+          "length",
+          "name",
+          "preventExtensions",
+          "prototype",
+          "seal",
+          "setPrototypeOf",
+          "values"
+        ],
+        "Math": [
+          "E",
+          "LN10",
+          "LN2",
+          "LOG10E",
+          "LOG2E",
+          "PI",
+          "SQRT1_2",
+          "SQRT2",
+          "abs",
+          "acos",
+          "acosh",
+          "asin",
+          "asinh",
+          "atan",
+          "atan2",
+          "atanh",
+          "cbrt",
+          "ceil",
+          "clz32",
+          "cos",
+          "cosh",
+          "exp",
+          "expm1",
+          "f16round",
+          "floor",
+          "fround",
+          "hypot",
+          "imul",
+          "log",
+          "log10",
+          "log1p",
+          "log2",
+          "max",
+          "min",
+          "pow",
+          "random",
+          "round",
+          "sign",
+          "sin",
+          "sinh",
+          "sqrt",
+          "sumPrecise",
+          "tan",
+          "tanh",
+          "trunc"
+        ],
+        "Promise": [
+          "all",
+          "allSettled",
+          "any",
+          "length",
+          "name",
+          "prototype",
+          "race",
+          "reject",
+          "resolve",
+          "try",
+          "withResolvers"
+        ],
+        "Intl": [
+          "Collator",
+          "DateTimeFormat",
+          "DisplayNames",
+          "DurationFormat",
+          "ListFormat",
+          "Locale",
+          "NumberFormat",
+          "PluralRules",
+          "RelativeTimeFormat",
+          "Segmenter",
+          "getCanonicalLocales",
+          "supportedValuesOf",
+          "v8BreakIterator"
+        ],
+        "Iterator": [
+          "constructor",
+          "drop",
+          "every",
+          "filter",
+          "find",
+          "flatMap",
+          "forEach",
+          "includes",
+          "join",
+          "map",
+          "reduce",
+          "some",
+          "take",
+          "toArray"
+        ],
+        "Navigator": [
+          "adAuctionComponents",
+          "appCodeName",
+          "appName",
+          "appVersion",
+          "bluetooth",
+          "canLoadAdAuctionFencedFrame",
+          "canShare",
+          "clearAppBadge",
+          "clearOriginJoinedAdInterestGroups",
+          "clipboard",
+          "connection",
+          "constructor",
+          "cookieEnabled",
+          "cpuPerformance",
+          "createAuctionNonce",
+          "credentials",
+          "deprecatedReplaceInURN",
+          "deprecatedRunAdAuctionEnforcesKAnonymity",
+          "deprecatedURNToURL",
+          "deviceMemory",
+          "devicePosture",
+          "doNotTrack",
+          "geolocation",
+          "getBattery",
+          "getGamepads",
+          "getInstalledRelatedApps",
+          "getInterestGroupAdAuctionData",
+          "getUserMedia",
+          "gpu",
+          "hardwareConcurrency",
+          "hid",
+          "ink",
+          "javaEnabled",
+          "joinAdInterestGroup",
+          "keyboard",
+          "language",
+          "languages",
+          "leaveAdInterestGroup",
+          "locks",
+          "login",
+          "managed",
+          "maxTouchPoints",
+          "mediaCapabilities",
+          "mediaDevices",
+          "mediaSession",
+          "mimeTypes",
+          "onLine",
+          "pdfViewerEnabled",
+          "permissions",
+          "platform",
+          "plugins",
+          "presentation",
+          "product",
+          "productSub",
+          "protectedAudience",
+          "registerProtocolHandler",
+          "requestMIDIAccess",
+          "requestMediaKeySystemAccess",
+          "runAdAuction",
+          "scheduling",
+          "sendBeacon",
+          "serial",
+          "serviceWorker",
+          "setAppBadge",
+          "share",
+          "storage",
+          "storageBuckets",
+          "unregisterProtocolHandler",
+          "updateAdInterestGroups",
+          "usb",
+          "userActivation",
+          "userAgent",
+          "userAgentData",
+          "vendor",
+          "vendorSub",
+          "vibrate",
+          "virtualKeyboard",
+          "wakeLock",
+          "webdriver",
+          "webkitGetUserMedia",
+          "webkitPersistentStorage",
+          "webkitTemporaryStorage",
+          "windowControlsOverlay",
+          "xr"
+        ]
+      },
+      "globals": [
+        "0",
+        "1",
+        "AbortController",
+        "AbortSignal",
+        "AbsoluteOrientationSensor",
+        "AbstractRange",
+        "Accelerometer",
+        "AggregateError",
+        "AnalyserNode",
+        "Animation",
+        "AnimationEffect",
+        "AnimationEvent",
+        "AnimationPlaybackEvent",
+        "AnimationTimeline",
+        "AnimationTrigger",
+        "Array",
+        "ArrayBuffer",
+        "AsyncDisposableStack",
+        "Atomics",
+        "Attr",
+        "Audio",
+        "AudioBuffer",
+        "AudioBufferSourceNode",
+        "AudioContext",
+        "AudioData",
+        "AudioDecoder",
+        "AudioDestinationNode",
+        "AudioEncoder",
+        "AudioListener",
+        "AudioNode",
+        "AudioParam",
+        "AudioParamMap",
+        "AudioPlaybackStats",
+        "AudioProcessingEvent",
+        "AudioScheduledSourceNode",
+        "AudioSinkInfo",
+        "AudioWorklet",
+        "AudioWorkletNode",
+        "AuthenticatorAssertionResponse",
+        "AuthenticatorAttestationResponse",
+        "AuthenticatorResponse",
+        "BackgroundFetchManager",
+        "BackgroundFetchRecord",
+        "BackgroundFetchRegistration",
+        "BarProp",
+        "BarcodeDetector",
+        "BaseAudioContext",
+        "BatteryManager",
+        "BeforeInstallPromptEvent",
+        "BeforeUnloadEvent",
+        "BigInt",
+        "BigInt64Array",
+        "BigUint64Array",
+        "BiquadFilterNode",
+        "Blob",
+        "BlobEvent",
+        "Bluetooth",
+        "BluetoothCharacteristicProperties",
+        "BluetoothDevice",
+        "BluetoothRemoteGATTCharacteristic",
+        "BluetoothRemoteGATTDescriptor",
+        "BluetoothRemoteGATTServer",
+        "BluetoothRemoteGATTService",
+        "BluetoothUUID",
+        "Boolean",
+        "BroadcastChannel",
+        "BrowserCaptureMediaStreamTrack",
+        "ByteLengthQueuingStrategy",
+        "CDATASection",
+        "CSPViolationReportBody",
+        "CSS",
+        "CSSAnimation",
+        "CSSConditionRule",
+        "CSSContainerRule",
+        "CSSCounterStyleRule",
+        "CSSFontFaceRule",
+        "CSSFontFeatureValuesRule",
+        "CSSFontPaletteValuesRule",
+        "CSSFunctionDeclarations",
+        "CSSFunctionDescriptors",
+        "CSSFunctionRule",
+        "CSSGroupingRule",
+        "CSSImageValue",
+        "CSSImportRule",
+        "CSSKeyframeRule",
+        "CSSKeyframesRule",
+        "CSSKeywordValue",
+        "CSSLayerBlockRule",
+        "CSSLayerStatementRule",
+        "CSSMarginRule",
+        "CSSMathClamp",
+        "CSSMathInvert",
+        "CSSMathMax",
+        "CSSMathMin",
+        "CSSMathNegate",
+        "CSSMathProduct",
+        "CSSMathSum",
+        "CSSMathValue",
+        "CSSMatrixComponent",
+        "CSSMediaRule",
+        "CSSNamespaceRule",
+        "CSSNestedDeclarations",
+        "CSSNumericArray",
+        "CSSNumericValue",
+        "CSSPageRule",
+        "CSSPerspective",
+        "CSSPositionTryDescriptors",
+        "CSSPositionTryRule",
+        "CSSPositionValue",
+        "CSSPropertyRule",
+        "CSSPseudoElement",
+        "CSSRotate",
+        "CSSRule",
+        "CSSRuleList",
+        "CSSScale",
+        "CSSScopeRule",
+        "CSSSkew",
+        "CSSSkewX",
+        "CSSSkewY",
+        "CSSStartingStyleRule",
+        "CSSStyleDeclaration",
+        "CSSStyleRule",
+        "CSSStyleSheet",
+        "CSSStyleValue",
+        "CSSSupportsRule",
+        "CSSTransformComponent",
+        "CSSTransformValue",
+        "CSSTransition",
+        "CSSTranslate",
+        "CSSUnitValue",
+        "CSSUnparsedValue",
+        "CSSVariableReferenceValue",
+        "CSSViewTransitionRule",
+        "Cache",
+        "CacheStorage",
+        "CanvasCaptureMediaStreamTrack",
+        "CanvasGradient",
+        "CanvasPattern",
+        "CanvasRenderingContext2D",
+        "CaptureController",
+        "CaretPosition",
+        "ChannelMergerNode",
+        "ChannelSplitterNode",
+        "ChapterInformation",
+        "CharacterBoundsUpdateEvent",
+        "CharacterData",
+        "Clipboard",
+        "ClipboardChangeEvent",
+        "ClipboardEvent",
+        "ClipboardItem",
+        "CloseEvent",
+        "CloseWatcher",
+        "CommandEvent",
+        "Comment",
+        "CompositionEvent",
+        "CompressionStream",
+        "ConstantSourceNode",
+        "ContentVisibilityAutoStateChangeEvent",
+        "ConvolverNode",
+        "CookieChangeEvent",
+        "CookieStore",
+        "CookieStoreManager",
+        "CountQueuingStrategy",
+        "CrashReportContext",
+        "CreateMonitor",
+        "Credential",
+        "CredentialsContainer",
+        "CropTarget",
+        "Crypto",
+        "CryptoKey",
+        "CustomElementRegistry",
+        "CustomEvent",
+        "CustomStateSet",
+        "DOMError",
+        "DOMException",
+        "DOMImplementation",
+        "DOMMatrix",
+        "DOMMatrixReadOnly",
+        "DOMParser",
+        "DOMPoint",
+        "DOMPointReadOnly",
+        "DOMQuad",
+        "DOMRect",
+        "DOMRectList",
+        "DOMRectReadOnly",
+        "DOMStringList",
+        "DOMStringMap",
+        "DOMTokenList",
+        "DataTransfer",
+        "DataTransferItem",
+        "DataTransferItemList",
+        "DataView",
+        "Date",
+        "DecompressionStream",
+        "DelayNode",
+        "DelegatedInkTrailPresenter",
+        "DeviceMotionEvent",
+        "DeviceMotionEventAcceleration",
+        "DeviceMotionEventRotationRate",
+        "DeviceOrientationEvent",
+        "DevicePosture",
+        "DigitalCredential",
+        "DisposableStack",
+        "Document",
+        "DocumentFragment",
+        "DocumentPictureInPicture",
+        "DocumentPictureInPictureEvent",
+        "DocumentTimeline",
+        "DocumentType",
+        "DragEvent",
+        "DynamicsCompressorNode",
+        "EditContext",
+        "Element",
+        "ElementInternals",
+        "EncodedAudioChunk",
+        "EncodedVideoChunk",
+        "Error",
+        "ErrorEvent",
+        "EvalError",
+        "Event",
+        "EventCounts",
+        "EventSource",
+        "EventTarget",
+        "External",
+        "EyeDropper",
+        "FeaturePolicy",
+        "FederatedCredential",
+        "Fence",
+        "FencedFrameConfig",
+        "FetchLaterResult",
+        "File",
+        "FileList",
+        "FileReader",
+        "FileSystemDirectoryHandle",
+        "FileSystemFileHandle",
+        "FileSystemHandle",
+        "FileSystemObserver",
+        "FileSystemWritableFileStream",
+        "FinalizationRegistry",
+        "Float16Array",
+        "Float32Array",
+        "Float64Array",
+        "FocusEvent",
+        "FontData",
+        "FontFace",
+        "FontFaceSet",
+        "FontFaceSetLoadEvent",
+        "FormData",
+        "FormDataEvent",
+        "FragmentDirective",
+        "Function",
+        "GPU",
+        "GPUAdapter",
+        "GPUAdapterInfo",
+        "GPUBindGroup",
+        "GPUBindGroupLayout",
+        "GPUBuffer",
+        "GPUBufferUsage",
+        "GPUCanvasContext",
+        "GPUColorWrite",
+        "GPUCommandBuffer",
+        "GPUCommandEncoder",
+        "GPUCompilationInfo",
+        "GPUCompilationMessage",
+        "GPUComputePassEncoder",
+        "GPUComputePipeline",
+        "GPUDevice",
+        "GPUDeviceLostInfo",
+        "GPUError",
+        "GPUExternalTexture",
+        "GPUInternalError",
+        "GPUMapMode",
+        "GPUOutOfMemoryError",
+        "GPUPipelineError",
+        "GPUPipelineLayout",
+        "GPUQuerySet",
+        "GPUQueue",
+        "GPURenderBundle",
+        "GPURenderBundleEncoder",
+        "GPURenderPassEncoder",
+        "GPURenderPipeline",
+        "GPUSampler",
+        "GPUShaderModule",
+        "GPUShaderStage",
+        "GPUSupportedFeatures",
+        "GPUSupportedLimits",
+        "GPUTexture",
+        "GPUTextureUsage",
+        "GPUTextureView",
+        "GPUUncapturedErrorEvent",
+        "GPUValidationError",
+        "GainNode",
+        "Gamepad",
+        "GamepadButton",
+        "GamepadEvent",
+        "GamepadHapticActuator",
+        "Geolocation",
+        "GeolocationCoordinates",
+        "GeolocationPosition",
+        "GeolocationPositionError",
+        "GravitySensor",
+        "Gyroscope",
+        "HID",
+        "HIDConnectionEvent",
+        "HIDDevice",
+        "HIDInputReportEvent",
+        "HTMLAllCollection",
+        "HTMLAnchorElement",
+        "HTMLAreaElement",
+        "HTMLAudioElement",
+        "HTMLBRElement",
+        "HTMLBaseElement",
+        "HTMLBodyElement",
+        "HTMLButtonElement",
+        "HTMLCameraElement",
+        "HTMLCanvasElement",
+        "HTMLCollection",
+        "HTMLDListElement",
+        "HTMLDataElement",
+        "HTMLDataListElement",
+        "HTMLDetailsElement",
+        "HTMLDialogElement",
+        "HTMLDirectoryElement",
+        "HTMLDivElement",
+        "HTMLDocument",
+        "HTMLElement",
+        "HTMLEmbedElement",
+        "HTMLFencedFrameElement",
+        "HTMLFieldSetElement",
+        "HTMLFontElement",
+        "HTMLFormControlsCollection",
+        "HTMLFormElement",
+        "HTMLFrameElement",
+        "HTMLFrameSetElement",
+        "HTMLGeolocationElement",
+        "HTMLHRElement",
+        "HTMLHeadElement",
+        "HTMLHeadingElement",
+        "HTMLHtmlElement",
+        "HTMLIFrameElement",
+        "HTMLImageElement",
+        "HTMLInputElement",
+        "HTMLLIElement",
+        "HTMLLabelElement",
+        "HTMLLegendElement",
+        "HTMLLinkElement",
+        "HTMLMapElement",
+        "HTMLMarqueeElement",
+        "HTMLMediaElement",
+        "HTMLMenuElement",
+        "HTMLMetaElement",
+        "HTMLMeterElement",
+        "HTMLMicrophoneElement",
+        "HTMLModElement",
+        "HTMLOListElement",
+        "HTMLObjectElement",
+        "HTMLOptGroupElement",
+        "HTMLOptionElement",
+        "HTMLOptionsCollection",
+        "HTMLOutputElement",
+        "HTMLParagraphElement",
+        "HTMLParamElement",
+        "HTMLPictureElement",
+        "HTMLPreElement",
+        "HTMLProgressElement",
+        "HTMLQuoteElement",
+        "HTMLScriptElement",
+        "HTMLSelectElement",
+        "HTMLSelectedContentElement",
+        "HTMLSlotElement",
+        "HTMLSourceElement",
+        "HTMLSpanElement",
+        "HTMLStyleElement",
+        "HTMLTableCaptionElement",
+        "HTMLTableCellElement",
+        "HTMLTableColElement",
+        "HTMLTableElement",
+        "HTMLTableRowElement",
+        "HTMLTableSectionElement",
+        "HTMLTemplateElement",
+        "HTMLTextAreaElement",
+        "HTMLTimeElement",
+        "HTMLTitleElement",
+        "HTMLTrackElement",
+        "HTMLUListElement",
+        "HTMLUnknownElement",
+        "HTMLUserMediaElement",
+        "HTMLVideoElement",
+        "HashChangeEvent",
+        "Headers",
+        "Highlight",
+        "HighlightRegistry",
+        "History",
+        "IDBCursor",
+        "IDBCursorWithValue",
+        "IDBDatabase",
+        "IDBFactory",
+        "IDBIndex",
+        "IDBKeyRange",
+        "IDBObjectStore",
+        "IDBOpenDBRequest",
+        "IDBRecord",
+        "IDBRequest",
+        "IDBTransaction",
+        "IDBVersionChangeEvent",
+        "IIRFilterNode",
+        "IdentityCredential",
+        "IdentityCredentialError",
+        "IdentityProvider",
+        "IdleDeadline",
+        "IdleDetector",
+        "Image",
+        "ImageBitmap",
+        "ImageBitmapRenderingContext",
+        "ImageCapture",
+        "ImageData",
+        "ImageDecoder",
+        "ImageTrack",
+        "ImageTrackList",
+        "Infinity",
+        "Ink",
+        "InputDeviceCapabilities",
+        "InputDeviceInfo",
+        "InputEvent",
+        "Int16Array",
+        "Int32Array",
+        "Int8Array",
+        "IntegrityViolationReportBody",
+        "InteractionContentfulPaint",
+        "InterestEvent",
+        "IntersectionObserver",
+        "IntersectionObserverEntry",
+        "Intl",
+        "Iterator",
+        "JSON",
+        "Keyboard",
+        "KeyboardEvent",
+        "KeyboardLayoutMap",
+        "KeyframeEffect",
+        "LanguageDetector",
+        "LanguageModel",
+        "LargestContentfulPaint",
+        "LaunchParams",
+        "LaunchQueue",
+        "LayoutShift",
+        "LayoutShiftAttribution",
+        "LinearAccelerationSensor",
+        "Location",
+        "Lock",
+        "LockManager",
+        "MIDIAccess",
+        "MIDIConnectionEvent",
+        "MIDIInput",
+        "MIDIInputMap",
+        "MIDIMessageEvent",
+        "MIDIOutput",
+        "MIDIOutputMap",
+        "MIDIPort",
+        "Map",
+        "Math",
+        "MathMLElement",
+        "MediaCapabilities",
+        "MediaDeviceInfo",
+        "MediaDevices",
+        "MediaElementAudioSourceNode",
+        "MediaEncryptedEvent",
+        "MediaError",
+        "MediaKeyMessageEvent",
+        "MediaKeySession",
+        "MediaKeyStatusMap",
+        "MediaKeySystemAccess",
+        "MediaKeys",
+        "MediaList",
+        "MediaMetadata",
+        "MediaQueryList",
+        "MediaQueryListEvent",
+        "MediaRecorder",
+        "MediaSession",
+        "MediaSource",
+        "MediaSourceHandle",
+        "MediaStream",
+        "MediaStreamAudioDestinationNode",
+        "MediaStreamAudioSourceNode",
+        "MediaStreamEvent",
+        "MediaStreamTrack",
+        "MediaStreamTrackAudioStats",
+        "MediaStreamTrackEvent",
+        "MediaStreamTrackGenerator",
+        "MediaStreamTrackProcessor",
+        "MediaStreamTrackVideoStats",
+        "MessageChannel",
+        "MessageEvent",
+        "MessagePort",
+        "MimeType",
+        "MimeTypeArray",
+        "MouseEvent",
+        "MutationObserver",
+        "MutationRecord",
+        "NaN",
+        "NamedNodeMap",
+        "NavigateEvent",
+        "Navigation",
+        "NavigationActivation",
+        "NavigationCurrentEntryChangeEvent",
+        "NavigationDestination",
+        "NavigationHistoryEntry",
+        "NavigationPrecommitController",
+        "NavigationPreloadManager",
+        "NavigationTransition",
+        "Navigator",
+        "NavigatorLogin",
+        "NavigatorManagedData",
+        "NavigatorUAData",
+        "NetworkInformation",
+        "Node",
+        "NodeFilter",
+        "NodeIterator",
+        "NodeList",
+        "NodeRange",
+        "NotRestoredReasonDetails",
+        "NotRestoredReasons",
+        "Notification",
+        "Number",
+        "OTPCredential",
+        "Object",
+        "Observable",
+        "OfflineAudioCompletionEvent",
+        "OfflineAudioContext",
+        "OffscreenCanvas",
+        "OffscreenCanvasRenderingContext2D",
+        "OpaqueRange",
+        "Option",
+        "OrientationSensor",
+        "Origin",
+        "OscillatorNode",
+        "OverconstrainedError",
+        "PageRevealEvent",
+        "PageSwapEvent",
+        "PageTransitionEvent",
+        "PannerNode",
+        "PasswordCredential",
+        "Path2D",
+        "PaymentAddress",
+        "PaymentManager",
+        "PaymentMethodChangeEvent",
+        "PaymentRequest",
+        "PaymentRequestUpdateEvent",
+        "PaymentResponse",
+        "Performance",
+        "PerformanceElementTiming",
+        "PerformanceEntry",
+        "PerformanceEventTiming",
+        "PerformanceLongAnimationFrameTiming",
+        "PerformanceLongTaskTiming",
+        "PerformanceMark",
+        "PerformanceMeasure",
+        "PerformanceNavigation",
+        "PerformanceNavigationTiming",
+        "PerformanceObserver",
+        "PerformanceObserverEntryList",
+        "PerformancePaintTiming",
+        "PerformanceResourceTiming",
+        "PerformanceScriptTiming",
+        "PerformanceServerTiming",
+        "PerformanceSoftNavigation",
+        "PerformanceTiming",
+        "PerformanceTimingConfidence",
+        "PeriodicSyncManager",
+        "PeriodicWave",
+        "PermissionStatus",
+        "Permissions",
+        "PermissionsPolicy",
+        "PictureInPictureEvent",
+        "PictureInPictureWindow",
+        "Plugin",
+        "PluginArray",
+        "PointerEvent",
+        "PopStateEvent",
+        "Presentation",
+        "PresentationAvailability",
+        "PresentationConnection",
+        "PresentationConnectionAvailableEvent",
+        "PresentationConnectionCloseEvent",
+        "PresentationConnectionList",
+        "PresentationReceiver",
+        "PresentationRequest",
+        "PressureObserver",
+        "PressureRecord",
+        "ProcessingInstruction",
+        "Profiler",
+        "ProgressEvent",
+        "Promise",
+        "PromiseRejectionEvent",
+        "ProtectedAudience",
+        "Proxy",
+        "PublicKeyCredential",
+        "PushManager",
+        "PushSubscription",
+        "PushSubscriptionOptions",
+        "QuotaExceededError",
+        "RTCCertificate",
+        "RTCDTMFSender",
+        "RTCDTMFToneChangeEvent",
+        "RTCDataChannel",
+        "RTCDataChannelEvent",
+        "RTCDtlsTransport",
+        "RTCEncodedAudioFrame",
+        "RTCEncodedVideoFrame",
+        "RTCError",
+        "RTCErrorEvent",
+        "RTCIceCandidate",
+        "RTCIceTransport",
+        "RTCPeerConnection",
+        "RTCPeerConnectionIceErrorEvent",
+        "RTCPeerConnectionIceEvent",
+        "RTCRtpReceiver",
+        "RTCRtpScriptTransform",
+        "RTCRtpSender",
+        "RTCRtpTransceiver",
+        "RTCSctpTransport",
+        "RTCSessionDescription",
+        "RTCStatsReport",
+        "RTCTrackEvent",
+        "RadioNodeList",
+        "Range",
+        "RangeError",
+        "ReadableByteStreamController",
+        "ReadableStream",
+        "ReadableStreamBYOBReader",
+        "ReadableStreamBYOBRequest",
+        "ReadableStreamDefaultController",
+        "ReadableStreamDefaultReader",
+        "ReferenceError",
+        "Reflect",
+        "RegExp",
+        "RelativeOrientationSensor",
+        "RemotePlayback",
+        "ReportBody",
+        "ReportingObserver",
+        "Request",
+        "ResizeObserver",
+        "ResizeObserverEntry",
+        "ResizeObserverSize",
+        "Response",
+        "RestrictionTarget",
+        "SVGAElement",
+        "SVGAngle",
+        "SVGAnimateElement",
+        "SVGAnimateMotionElement",
+        "SVGAnimateTransformElement",
+        "SVGAnimatedAngle",
+        "SVGAnimatedBoolean",
+        "SVGAnimatedEnumeration",
+        "SVGAnimatedInteger",
+        "SVGAnimatedLength",
+        "SVGAnimatedLengthList",
+        "SVGAnimatedNumber",
+        "SVGAnimatedNumberList",
+        "SVGAnimatedPreserveAspectRatio",
+        "SVGAnimatedRect",
+        "SVGAnimatedString",
+        "SVGAnimatedTransformList",
+        "SVGAnimationElement",
+        "SVGCircleElement",
+        "SVGClipPathElement",
+        "SVGComponentTransferFunctionElement",
+        "SVGDefsElement",
+        "SVGDescElement",
+        "SVGElement",
+        "SVGEllipseElement",
+        "SVGFEBlendElement",
+        "SVGFEColorMatrixElement",
+        "SVGFEComponentTransferElement",
+        "SVGFECompositeElement",
+        "SVGFEConvolveMatrixElement",
+        "SVGFEDiffuseLightingElement",
+        "SVGFEDisplacementMapElement",
+        "SVGFEDistantLightElement",
+        "SVGFEDropShadowElement",
+        "SVGFEFloodElement",
+        "SVGFEFuncAElement",
+        "SVGFEFuncBElement",
+        "SVGFEFuncGElement",
+        "SVGFEFuncRElement",
+        "SVGFEGaussianBlurElement",
+        "SVGFEImageElement",
+        "SVGFEMergeElement",
+        "SVGFEMergeNodeElement",
+        "SVGFEMorphologyElement",
+        "SVGFEOffsetElement",
+        "SVGFEPointLightElement",
+        "SVGFESpecularLightingElement",
+        "SVGFESpotLightElement",
+        "SVGFETileElement",
+        "SVGFETurbulenceElement",
+        "SVGFilterElement",
+        "SVGForeignObjectElement",
+        "SVGGElement",
+        "SVGGeometryElement",
+        "SVGGradientElement",
+        "SVGGraphicsElement",
+        "SVGImageElement",
+        "SVGLength",
+        "SVGLengthList",
+        "SVGLineElement",
+        "SVGLinearGradientElement",
+        "SVGMPathElement",
+        "SVGMarkerElement",
+        "SVGMaskElement",
+        "SVGMatrix",
+        "SVGMetadataElement",
+        "SVGNumber",
+        "SVGNumberList",
+        "SVGPathElement",
+        "SVGPatternElement",
+        "SVGPoint",
+        "SVGPointList",
+        "SVGPolygonElement",
+        "SVGPolylineElement",
+        "SVGPreserveAspectRatio",
+        "SVGRadialGradientElement",
+        "SVGRect",
+        "SVGRectElement",
+        "SVGSVGElement",
+        "SVGScriptElement",
+        "SVGSetElement",
+        "SVGStopElement",
+        "SVGStringList",
+        "SVGStyleElement",
+        "SVGSwitchElement",
+        "SVGSymbolElement",
+        "SVGTSpanElement",
+        "SVGTextContentElement",
+        "SVGTextElement",
+        "SVGTextPathElement",
+        "SVGTextPositioningElement",
+        "SVGTitleElement",
+        "SVGTransform",
+        "SVGTransformList",
+        "SVGUnitTypes",
+        "SVGUseElement",
+        "SVGViewElement",
+        "Sanitizer",
+        "Scheduler",
+        "Scheduling",
+        "Screen",
+        "ScreenDetailed",
+        "ScreenDetails",
+        "ScreenOrientation",
+        "ScriptProcessorNode",
+        "ScrollTimeline",
+        "SecurityPolicyViolationEvent",
+        "Selection",
+        "Sensor",
+        "SensorErrorEvent",
+        "Serial",
+        "SerialPort",
+        "ServiceWorker",
+        "ServiceWorkerContainer",
+        "ServiceWorkerRegistration",
+        "Set",
+        "ShadowRoot",
+        "SharedWorker",
+        "SnapEvent",
+        "SourceBuffer",
+        "SourceBufferList",
+        "SpeechGrammar",
+        "SpeechGrammarList",
+        "SpeechRecognition",
+        "SpeechRecognitionErrorEvent",
+        "SpeechRecognitionEvent",
+        "SpeechRecognitionPhrase",
+        "SpeechSynthesis",
+        "SpeechSynthesisErrorEvent",
+        "SpeechSynthesisEvent",
+        "SpeechSynthesisUtterance",
+        "SpeechSynthesisVoice",
+        "StaticRange",
+        "StereoPannerNode",
+        "Storage",
+        "StorageBucket",
+        "StorageBucketManager",
+        "StorageEvent",
+        "StorageManager",
+        "String",
+        "StylePropertyMap",
+        "StylePropertyMapReadOnly",
+        "StyleSheet",
+        "StyleSheetList",
+        "SubmitEvent",
+        "Subscriber",
+        "SubtleCrypto",
+        "Summarizer",
+        "SuppressedError",
+        "Symbol",
+        "SyncManager",
+        "SyntaxError",
+        "TaskAttributionTiming",
+        "TaskController",
+        "TaskPriorityChangeEvent",
+        "TaskSignal",
+        "Temporal",
+        "Text",
+        "TextDecoder",
+        "TextDecoderStream",
+        "TextEncoder",
+        "TextEncoderStream",
+        "TextEvent",
+        "TextFormat",
+        "TextFormatUpdateEvent",
+        "TextMetrics",
+        "TextTrack",
+        "TextTrackCue",
+        "TextTrackCueList",
+        "TextTrackList",
+        "TextUpdateEvent",
+        "TimeRanges",
+        "TimelineTrigger",
+        "TimelineTriggerRange",
+        "TimelineTriggerRangeList",
+        "ToggleEvent",
+        "Touch",
+        "TouchEvent",
+        "TouchList",
+        "TrackEvent",
+        "TransformStream",
+        "TransformStreamDefaultController",
+        "TransitionEvent",
+        "Translator",
+        "TreeWalker",
+        "TrustedHTML",
+        "TrustedScript",
+        "TrustedScriptURL",
+        "TrustedTypePolicy",
+        "TrustedTypePolicyFactory",
+        "TypeError",
+        "UIEvent",
+        "URIError",
+        "URL",
+        "URLPattern",
+        "URLSearchParams",
+        "USB",
+        "USBAlternateInterface",
+        "USBConfiguration",
+        "USBConnectionEvent",
+        "USBDevice",
+        "USBEndpoint",
+        "USBInTransferResult",
+        "USBInterface",
+        "USBIsochronousInTransferPacket",
+        "USBIsochronousInTransferResult",
+        "USBIsochronousOutTransferPacket",
+        "USBIsochronousOutTransferResult",
+        "USBOutTransferResult",
+        "Uint16Array",
+        "Uint32Array",
+        "Uint8Array",
+        "Uint8ClampedArray",
+        "UserActivation",
+        "VTTCue",
+        "ValidityState",
+        "VideoColorSpace",
+        "VideoDecoder",
+        "VideoEncoder",
+        "VideoFrame",
+        "VideoPlaybackQuality",
+        "ViewTimeline",
+        "ViewTransition",
+        "ViewTransitionTypeSet",
+        "Viewport",
+        "VirtualKeyboard",
+        "VirtualKeyboardGeometryChangeEvent",
+        "VisibilityStateEntry",
+        "VisualViewport",
+        "WGSLLanguageFeatures",
+        "WakeLock",
+        "WakeLockSentinel",
+        "WaveShaperNode",
+        "WeakMap",
+        "WeakRef",
+        "WeakSet",
+        "WebAssembly",
+        "WebGL2RenderingContext",
+        "WebGLActiveInfo",
+        "WebGLBuffer",
+        "WebGLContextEvent",
+        "WebGLFramebuffer",
+        "WebGLObject",
+        "WebGLProgram",
+        "WebGLQuery",
+        "WebGLRenderbuffer",
+        "WebGLRenderingContext",
+        "WebGLSampler",
+        "WebGLShader",
+        "WebGLShaderPrecisionFormat",
+        "WebGLSync",
+        "WebGLTexture",
+        "WebGLTransformFeedback",
+        "WebGLUniformLocation",
+        "WebGLVertexArrayObject",
+        "WebKitCSSMatrix",
+        "WebKitMutationObserver",
+        "WebSocket",
+        "WebSocketError",
+        "WebSocketStream",
+        "WebTransport",
+        "WebTransportBidirectionalStream",
+        "WebTransportDatagramDuplexStream",
+        "WebTransportError",
+        "WheelEvent",
+        "Window",
+        "WindowControlsOverlay",
+        "WindowControlsOverlayGeometryChangeEvent",
+        "Worker",
+        "Worklet",
+        "WritableStream",
+        "WritableStreamDefaultController",
+        "WritableStreamDefaultWriter",
+        "XMLDocument",
+        "XMLHttpRequest",
+        "XMLHttpRequestEventTarget",
+        "XMLHttpRequestUpload",
+        "XMLSerializer",
+        "XPathEvaluator",
+        "XPathExpression",
+        "XPathResult",
+        "XRAnchor",
+        "XRAnchorSet",
+        "XRBoundedReferenceSpace",
+        "XRCPUDepthInformation",
+        "XRCamera",
+        "XRCompositionLayer",
+        "XRCubeLayer",
+        "XRCylinderLayer",
+        "XRDOMOverlayState",
+        "XRDepthInformation",
+        "XREquirectLayer",
+        "XRFrame",
+        "XRHand",
+        "XRHitTestResult",
+        "XRHitTestSource",
+        "XRInputSource",
+        "XRInputSourceArray",
+        "XRInputSourceEvent",
+        "XRInputSourcesChangeEvent",
+        "XRJointPose",
+        "XRJointSpace",
+        "XRLayer",
+        "XRLayerEvent",
+        "XRLightEstimate",
+        "XRLightProbe",
+        "XRPlane",
+        "XRPlaneSet",
+        "XRPose",
+        "XRProjectionLayer",
+        "XRQuadLayer",
+        "XRRay",
+        "XRReferenceSpace",
+        "XRReferenceSpaceEvent",
+        "XRRenderState",
+        "XRRigidTransform",
+        "XRSession",
+        "XRSessionEvent",
+        "XRSpace",
+        "XRSubImage",
+        "XRSystem",
+        "XRTransientInputHitTestResult",
+        "XRTransientInputHitTestSource",
+        "XRView",
+        "XRViewerPose",
+        "XRViewport",
+        "XRVisibilityMaskChangeEvent",
+        "XRWebGLBinding",
+        "XRWebGLDepthInformation",
+        "XRWebGLLayer",
+        "XRWebGLSubImage",
+        "XSLTProcessor",
+        "alert",
+        "atob",
+        "blur",
+        "btoa",
+        "caches",
+        "cancelAnimationFrame",
+        "cancelIdleCallback",
+        "captureEvents",
+        "chrome",
+        "clearInterval",
+        "clearTimeout",
+        "clientInformation",
+        "close",
+        "closed",
+        "confirm",
+        "console",
+        "cookieStore",
+        "crashReport",
+        "createImageBitmap",
+        "credentialless",
+        "crossOriginIsolated",
+        "crypto",
+        "customElements",
+        "decodeURI",
+        "decodeURIComponent",
+        "devicePixelRatio",
+        "document",
+        "documentPictureInPicture",
+        "encodeURI",
+        "encodeURIComponent",
+        "escape",
+        "eval",
+        "event",
+        "external",
+        "fence",
+        "fetch",
+        "fetchLater",
+        "find",
+        "focus",
+        "frameElement",
+        "frames",
+        "getComputedStyle",
+        "getScreenDetails",
+        "getSelection",
+        "globalThis",
+        "history",
+        "indexedDB",
+        "innerHeight",
+        "innerWidth",
+        "isFinite",
+        "isNaN",
+        "isSecureContext",
+        "launchQueue",
+        "length",
+        "localStorage",
+        "location",
+        "locationbar",
+        "matchMedia",
+        "menubar",
+        "moveBy",
+        "moveTo",
+        "name",
+        "navigation",
+        "navigator",
+        "offscreenBuffering",
+        "onabort",
+        "onafterprint",
+        "onanimationcancel",
+        "onanimationend",
+        "onanimationiteration",
+        "onanimationstart",
+        "onappinstalled",
+        "onauxclick",
+        "onbeforeinput",
+        "onbeforeinstallprompt",
+        "onbeforematch",
+        "onbeforeprint",
+        "onbeforetoggle",
+        "onbeforeunload",
+        "onbeforexrselect",
+        "onblur",
+        "oncancel",
+        "oncanplay",
+        "oncanplaythrough",
+        "onchange",
+        "onclick",
+        "onclose",
+        "oncommand",
+        "oncontentvisibilityautostatechange",
+        "oncontextlost",
+        "oncontextmenu",
+        "oncontextrestored",
+        "oncuechange",
+        "ondblclick",
+        "ondevicemotion",
+        "ondeviceorientation",
+        "ondeviceorientationabsolute",
+        "ondrag",
+        "ondragend",
+        "ondragenter",
+        "ondragleave",
+        "ondragover",
+        "ondragstart",
+        "ondrop",
+        "ondurationchange",
+        "onemptied",
+        "onended",
+        "onerror",
+        "onfocus",
+        "onformdata",
+        "ongamepadconnected",
+        "ongamepaddisconnected",
+        "ongotpointercapture",
+        "onhashchange",
+        "oninput",
+        "oninvalid",
+        "onkeydown",
+        "onkeypress",
+        "onkeyup",
+        "onlanguagechange",
+        "onload",
+        "onloadeddata",
+        "onloadedmetadata",
+        "onloadstart",
+        "onlostpointercapture",
+        "onmessage",
+        "onmessageerror",
+        "onmousedown",
+        "onmouseenter",
+        "onmouseleave",
+        "onmousemove",
+        "onmouseout",
+        "onmouseover",
+        "onmouseup",
+        "onmousewheel",
+        "onoffline",
+        "ononline",
+        "onpagehide",
+        "onpagereveal",
+        "onpageshow",
+        "onpageswap",
+        "onpause",
+        "onplay",
+        "onplaying",
+        "onpointercancel",
+        "onpointerdown",
+        "onpointerenter",
+        "onpointerleave",
+        "onpointermove",
+        "onpointerout",
+        "onpointerover",
+        "onpointerrawupdate",
+        "onpointerup",
+        "onpopstate",
+        "onprogress",
+        "onratechange",
+        "onrejectionhandled",
+        "onreset",
+        "onresize",
+        "onscroll",
+        "onscrollend",
+        "onscrollsnapchange",
+        "onscrollsnapchanging",
+        "onsearch",
+        "onsecuritypolicyviolation",
+        "onseeked",
+        "onseeking",
+        "onselect",
+        "onselectionchange",
+        "onselectstart",
+        "onslotchange",
+        "onstalled",
+        "onstorage",
+        "onsubmit",
+        "onsuspend",
+        "ontimeupdate",
+        "ontoggle",
+        "ontransitioncancel",
+        "ontransitionend",
+        "ontransitionrun",
+        "ontransitionstart",
+        "onunhandledrejection",
+        "onunload",
+        "onvolumechange",
+        "onwaiting",
+        "onwebkitanimationend",
+        "onwebkitanimationiteration",
+        "onwebkitanimationstart",
+        "onwebkittransitionend",
+        "onwheel",
+        "open",
+        "opener",
+        "origin",
+        "originAgentCluster",
+        "outerHeight",
+        "outerWidth",
+        "pageXOffset",
+        "pageYOffset",
+        "parent",
+        "parseFloat",
+        "parseInt",
+        "performance",
+        "personalbar",
+        "postMessage",
+        "print",
+        "prompt",
+        "queryLocalFonts",
+        "queueMicrotask",
+        "releaseEvents",
+        "reportError",
+        "requestAnimationFrame",
+        "requestIdleCallback",
+        "requestResize",
+        "resizeBy",
+        "resizeTo",
+        "scheduler",
+        "screen",
+        "screenLeft",
+        "screenTop",
+        "screenX",
+        "screenY",
+        "scroll",
+        "scrollBy",
+        "scrollTo",
+        "scrollX",
+        "scrollY",
+        "scrollbars",
+        "self",
+        "sessionStorage",
+        "setInterval",
+        "setTimeout",
+        "showDirectoryPicker",
+        "showOpenFilePicker",
+        "showSaveFilePicker",
+        "speechSynthesis",
+        "status",
+        "statusbar",
+        "stop",
+        "structuredClone",
+        "styleMedia",
+        "toolbar",
+        "top",
+        "trustedTypes",
+        "undefined",
+        "unescape",
+        "viewport",
+        "visualViewport",
+        "webkitCancelAnimationFrame",
+        "webkitMediaStream",
+        "webkitRTCPeerConnection",
+        "webkitRequestAnimationFrame",
+        "webkitRequestFileSystem",
+        "webkitResolveLocalFileSystemURL",
+        "webkitSpeechGrammar",
+        "webkitSpeechGrammarList",
+        "webkitSpeechRecognition",
+        "webkitSpeechRecognitionError",
+        "webkitSpeechRecognitionEvent",
+        "webkitURL",
+        "window"
+      ]
+    }
+  }
+}

@@ -74,3 +74,42 @@ __defineDocumentAccessor("featurePolicy", (state, doc) => {
   }
   return __policyDocumentRecords.get(doc);
 });
+// Fullscreen and picture-in-picture availability is the document's own
+// permissions policy; only the active document of a browsing context has one.
+const __policyDocument = (receiver) => {
+  let type;
+  try {
+    type = __documentApply(__documentType, receiver, []);
+  } catch {
+    type = 0;
+  }
+  if (type !== 9) throw new __policyTypeError("Illegal invocation");
+  return receiver;
+};
+for (const [name, feature, lenient] of [
+  ["fullscreenEnabled", "fullscreen", true],
+  ["webkitFullscreenEnabled", "fullscreen", false],
+  ["pictureInPictureEnabled", "picture-in-picture", false],
+]) {
+  const descriptor = {
+    enumerable: true,
+    configurable: true,
+    get: __documentFunction(
+      function () {
+        return ops.op_document_feature_enabled(__policyDocument(this), feature);
+      },
+      `get ${name}`,
+      0,
+    ),
+  };
+  // [LegacyLenientSetter]: a branded no-op, so assignment never shadows the getter.
+  if (lenient)
+    descriptor.set = __documentFunction(
+      function () {
+        __policyDocument(this);
+      },
+      `set ${name}`,
+      1,
+    );
+  __policyDefine(Document.prototype, name, descriptor);
+}

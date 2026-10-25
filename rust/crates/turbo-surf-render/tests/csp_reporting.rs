@@ -30,6 +30,21 @@ impl Drop for Server {
         self.task.abort();
     }
 }
+
+// The control measured Chrome 155's identity headers; the report wire must carry
+// the registry default release's instead, with every other header unchanged.
+fn current_release_identity((name, value): (String, String)) -> (String, String) {
+    let profile = turbo_surf_core::fingerprint::default_profile();
+    let value = match name.as_str() {
+        "user-agent" if value.contains("Chrome/155.0.0.0") => profile.user_agent.clone(),
+        "sec-ch-ua" if value == turbo_surf_core::fingerprint::brand_header(155, "155", false) => {
+            profile.sec_ch_ua.clone()
+        }
+        _ => value,
+    };
+    (name, value)
+}
+
 fn expand(text: &str, id: usize, port: u16, tls: bool) -> String {
     text.replace("{id}", &id.to_string())
         .replace("{port}", &port.to_string())
@@ -538,6 +553,7 @@ async fn source_pinned_chrome_reports_use_actual_private_transport() {
                     .filter_map(|(key, value)| {
                         value.as_str().map(|value| (key.clone(), value.to_string()))
                     })
+                    .map(current_release_identity)
                     .collect();
                 assert_eq!(
                     normalize(header_projection(&actual.headers), server.port),

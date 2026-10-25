@@ -24,11 +24,17 @@ pub(super) fn attribute_changed<'s>(
     if matches!(name, "disabled" | "form" | "id") {
         element_internals::attribute_changed(scope, element, name);
     }
+    file_inputs::attribute_changed(scope, element, name);
     if let Some(handle) = handle_of(scope, element) {
         script_state::attribute_changed(handle, name);
         form_checked_state::attribute_changed(handle, name);
+        user_activation_gates::attribute_changed(scope, handle, name);
     }
-    if !name.starts_with("aria-") {
+    if name == "interestfor" {
+        interest_invokers::attribute_changed(scope, element);
+    }
+    if !name.starts_with("aria-") && !matches!(name, "popovertarget" | "commandfor" | "interestfor")
+    {
         return;
     }
     let Some(record) = collection_records::get(scope, element)

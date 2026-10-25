@@ -400,7 +400,7 @@
   if (Object.hasOwn(document, "createRange")) delete document.createRange;
   for (const [name, value] of [["START_TO_START", 0], ["START_TO_END", 1], ["END_TO_END", 2], ["END_TO_START", 3]]) {
     for (const target of [LocalRange, LocalRange.prototype])
-      if (!Object.hasOwn(target, name)) define(target, name, {value, enumerable: true});
+      if (!Object.hasOwn(target, name)) define(target, name, {value, enumerable: true, configurable: true});
   }
   return function (constructor) { Exception = constructor; };
 });

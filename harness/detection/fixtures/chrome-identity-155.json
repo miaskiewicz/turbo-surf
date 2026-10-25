@@ -1,0 +1,363 @@
+{
+  "schemaVersion": 1,
+  "subject": "chrome",
+  "partial": true,
+  "measured": ["requests", "transport", "js"],
+  "importedFrom": {
+    "TRANSPORT-155.json": "6c4783e08ec0706e582fe3ffb93dcaa011d68a46877e57d09c8331fdb463f242",
+    "fixtures/browser-release-chrome155.json": "7e876d4da998d4ce2dbf396400d5fbec9c69d91e781529d6425f208e839e65a6",
+    "fixtures/transport-chrome155-client-hello.bin": "a19e76b65bd23e955da7556704d27f45407b07907cfde9e035f9f72e1b934380"
+  },
+  "collectedAt": "2026-10-15T23:35:49.521Z",
+  "browser": {
+    "product": "Chrome/155.0.8059.80",
+    "v8": "15.5.35.23"
+  },
+  "note": "Imported from pre-battery captures: one cold H2 navigation, one fresh ClientHello and the UA-CH probe. Everything else is unmeasured for this release.",
+  "missing": [],
+  "errors": [],
+  "pageErrors": [],
+  "requests": [
+    {
+      "tier": "chrome",
+      "kind": "nav",
+      "method": "GET",
+      "path": "/",
+      "origin": "A",
+      "protocol": "h2",
+      "headers": [
+        [":method", "GET"],
+        [":authority", "<A-host>"],
+        [":scheme", "https"],
+        [":path", "/"],
+        [
+          "sec-ch-ua",
+          "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\""
+        ],
+        ["sec-ch-ua-mobile", "?0"],
+        ["sec-ch-ua-platform", "\"macOS\""],
+        ["upgrade-insecure-requests", "1"],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        ],
+        ["sec-fetch-site", "none"],
+        ["sec-fetch-mode", "navigate"],
+        ["sec-fetch-user", "?1"],
+        ["sec-fetch-dest", "document"],
+        ["accept-encoding", "gzip, deflate, br, zstd"],
+        ["accept-language", "en-US,en;q=0.9"],
+        ["priority", "u=0, i"]
+      ],
+      "bodyBytes": 0,
+      "connection": 0,
+      "streamPriority": null
+    }
+  ],
+  "connections": [
+    {
+      "id": 0,
+      "origin": "A",
+      "alpn": "h2",
+      "hello": {
+        "recordVersion": 769,
+        "legacyVersion": 771,
+        "compressionMethods": [0],
+        "ciphers": [
+          51914, 4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157,
+          47, 53
+        ],
+        "extensions": [
+          {
+            "type": 39578,
+            "length": 0
+          },
+          {
+            "type": 65281,
+            "length": 1
+          },
+          {
+            "type": 23,
+            "length": 0
+          },
+          {
+            "type": 5,
+            "length": 5
+          },
+          {
+            "type": 27,
+            "length": 3
+          },
+          {
+            "type": 65037,
+            "length": 218
+          },
+          {
+            "type": 10,
+            "length": 12,
+            "values": [39578, 4588, 29, 23, 24]
+          },
+          {
+            "type": 43,
+            "length": 7,
+            "values": [19018, 772, 771]
+          },
+          {
+            "type": 51,
+            "length": 1263,
+            "keyShares": [
+              {
+                "group": 39578,
+                "length": 1
+              },
+              {
+                "group": 4588,
+                "length": 1216
+              },
+              {
+                "group": 29,
+                "length": 32
+              }
+            ]
+          },
+          {
+            "type": 18,
+            "length": 0
+          },
+          {
+            "type": 35,
+            "length": 0
+          },
+          {
+            "type": 17613,
+            "length": 5
+          },
+          {
+            "type": 13,
+            "length": 26,
+            "values": [56026, 2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537]
+          },
+          {
+            "type": 16,
+            "length": 14,
+            "protocols": ["h2", "http/1.1"]
+          },
+          {
+            "type": 45,
+            "length": 2
+          },
+          {
+            "type": 11,
+            "length": 2
+          },
+          {
+            "type": 51764,
+            "length": 186,
+            "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+          },
+          {
+            "type": 10794,
+            "length": 1
+          }
+        ],
+        "certificateCompression": [2],
+        "echOuterType": 0,
+        "applicationSettings": {
+          "codepoint": 17613,
+          "protocols": ["h2"]
+        },
+        "pskModes": [1],
+        "pointFormats": [0],
+        "extensionOrder": [
+          39578, 65281, 23, 5, 27, 65037, 10, 43, 51, 18, 35, 17613, 13, 16, 45, 11, 51764, 10794
+        ],
+        "extensionNames": [
+          "renegotiation_info",
+          "extended_master_secret",
+          "status_request",
+          "compress_certificate",
+          "encrypted_client_hello",
+          "supported_groups",
+          "supported_versions",
+          "key_share",
+          "signed_certificate_timestamp",
+          "session_ticket",
+          "application_settings",
+          "signature_algorithms",
+          "alpn",
+          "psk_key_exchange_modes",
+          "ec_point_formats",
+          "trust_anchors"
+        ],
+        "supportedVersions": [772, 771],
+        "groups": [4588, 29, 23, 24],
+        "groupNames": ["X25519MLKEM768", "x25519", "secp256r1", "secp384r1"],
+        "keyShareGroups": [4588, 29],
+        "signatureAlgorithms": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+        "alpn": ["h2", "http/1.1"],
+        "trustAnchors": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f",
+        "normalized": {
+          "recordVersion": 769,
+          "legacyVersion": 771,
+          "compressionMethods": [0],
+          "ciphers": [
+            4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47,
+            53
+          ],
+          "cipherGrease": true,
+          "extensions": [
+            {
+              "type": 5,
+              "length": 5
+            },
+            {
+              "type": 10,
+              "length": 12,
+              "values": [4588, 29, 23, 24],
+              "grease": true
+            },
+            {
+              "type": 11,
+              "length": 2
+            },
+            {
+              "type": 13,
+              "length": 26,
+              "values": [2308, 2309, 2310, 1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537],
+              "grease": true
+            },
+            {
+              "type": 16,
+              "length": 14,
+              "protocols": ["h2", "http/1.1"]
+            },
+            {
+              "type": 18,
+              "length": 0
+            },
+            {
+              "type": 23,
+              "length": 0
+            },
+            {
+              "type": 27,
+              "length": 3
+            },
+            {
+              "type": 35,
+              "length": 0
+            },
+            {
+              "type": 43,
+              "length": 7,
+              "values": [772, 771],
+              "grease": true
+            },
+            {
+              "type": 45,
+              "length": 2
+            },
+            {
+              "type": 51,
+              "length": 1263,
+              "keyShares": [
+                {
+                  "group": 4588,
+                  "length": 1216
+                },
+                {
+                  "group": 29,
+                  "length": 32
+                }
+              ],
+              "keyShareGreaseCount": 1
+            },
+            {
+              "type": 17613,
+              "length": 5
+            },
+            {
+              "type": 51764,
+              "length": 186,
+              "publicRootIds": "00b80582df1302010582df1302060582df13020d0582df13020e0582df13020f0582df1302120582df1302130582df13021408839a648c9b2d010708839a648c9b2d010808839a648c9b2d010908839a648c9b2d010a08839a648c9b2d010b08839a648c9b2d010c08839a648c9b2d010d08839a648c9b2d011208839a648c9b2d011304d679090104d679090404d679090504d679090604d679090704d679090804d679090a04d679090b04d679090c04d679090d04d679090f"
+            },
+            {
+              "type": 65037
+            },
+            {
+              "type": 65281,
+              "length": 1
+            }
+          ],
+          "extensionGreaseCount": 2
+        },
+        "ja3": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,65281-23-5-27-65037-10-43-51-18-35-17613-13-16-45-11-51764,4588-29-23-24,0",
+        "ja3Hash": "36af6f14c4d67fa9d638bf96bd94c84c",
+        "ja3n": "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,5-10-11-13-16-18-23-27-35-43-45-51-17613-51764-65037-65281,4588-29-23-24,0",
+        "ja3nHash": "3a1fa25737348931cccd305b3d0dfdc6",
+        "ja4": "t13i1516h2_8daaf6152771_cb7bf5808d99",
+        "ja4Raw": "t13i1516h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601",
+        "rawBase64": "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"
+      },
+      "h2": null
+    }
+  ],
+  "js": {
+    "navigator": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
+    },
+    "userAgentData": {
+      "brands": [
+        {
+          "brand": "Google Chrome",
+          "version": "155"
+        },
+        {
+          "brand": "Chromium",
+          "version": "155"
+        },
+        {
+          "brand": "Not(A:Brand",
+          "version": "24"
+        }
+      ],
+      "high": {
+        "brands": [
+          {
+            "brand": "Google Chrome",
+            "version": "155"
+          },
+          {
+            "brand": "Chromium",
+            "version": "155"
+          },
+          {
+            "brand": "Not(A:Brand",
+            "version": "24"
+          }
+        ],
+        "fullVersionList": [
+          {
+            "brand": "Google Chrome",
+            "version": "155.0.8059.80"
+          },
+          {
+            "brand": "Chromium",
+            "version": "155.0.8059.80"
+          },
+          {
+            "brand": "Not(A:Brand",
+            "version": "24.0.0.0"
+          }
+        ],
+        "mobile": false,
+        "platform": "macOS",
+        "uaFullVersion": "155.0.8059.80"
+      }
+    }
+  }
+}

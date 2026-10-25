@@ -27,16 +27,71 @@ fn op_live_geometry_brand<'s>(
 ) -> bool {
     crate::browser_env::valid_native_geometry_receiver(scope, receiver, kind)
 }
+fn frame_scheduler_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
+    let name = v8::String::new(scope, "turbo-surf.frame.scheduler")?;
+    Some(v8::Private::for_api(scope, Some(name)))
+}
+/// Trusted bootstrap hands the realm's rendering-frame scheduler to geometry
+/// through a V8 private on the global; page script can neither read nor call it.
+#[op2(fast, reentrant)]
+fn op_capture_frame_scheduler<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    scheduler: v8::Local<'s, v8::Function>,
+) -> Result<(), JsErrorBox> {
+    // Bind to the scheduler's own realm: frame bootstraps can run while the
+    // parent context is current, and a parent-held child closure would keep a
+    // retired frame realm alive.
+    let global = scheduler
+        .get_creation_context(scope)
+        .ok_or_else(|| JsErrorBox::generic("Frame scheduler realm unavailable"))?
+        .global(scope);
+    let key = frame_scheduler_key(scope)
+        .ok_or_else(|| JsErrorBox::generic("Frame scheduler key allocation interrupted"))?;
+    if global.set_private(scope, key, scheduler.into()) != Some(true) {
+        return Err(JsErrorBox::generic(
+            "Frame scheduler installation interrupted",
+        ));
+    }
+    Ok(())
+}
+/// Trusted bootstrap hands the realm's view-transition rendering seam (frame steps after
+/// animation callbacks, rendering suppression, page visibility) to the vendored binding.
+#[op2(fast, reentrant)]
+fn op_capture_view_transition_host<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    host: v8::Local<'s, v8::Function>,
+) {
+    crate::browser_env::capture_view_transition_host(scope, host);
+}
+/// The runtime replaces the binding's DOMException with its own interface; natively
+/// raised exceptions (selectors, dialogs, view transitions) must be instances of it.
+#[op2(fast, reentrant)]
+fn op_register_dom_exception<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    constructor: v8::Local<'s, v8::Function>,
+) {
+    crate::browser_env::register_dom_exception(scope, constructor);
+}
 deno_core::extension!(
     turbo_geometry,
     ops = [
         op_geometry_object,
+        op_capture_frame_scheduler,
+        op_capture_view_transition_host,
+        op_register_dom_exception,
         crate::live_layout_backend::op_live_media_match,
         crate::live_layout_backend::op_live_frame_dimension,
         crate::live_layout_supports::op_native_css_supports,
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,
         crate::live_layout_backend::op_live_element_scroll,
+        crate::live_layout_backend::op_live_element_scroll_to,
+        crate::live_layout_backend::op_live_viewport_offset,
+        crate::live_layout_backend::op_live_scroll_into_view,
+        crate::live_layout_backend::op_live_element_visibility,
+        crate::live_layout_backend::op_live_element_zoom,
+        crate::live_layout_backend::op_live_scroll_container,
+        crate::live_layout_backend::op_live_input_size,
         crate::live_layout_backend::op_live_elements_at_point,
         crate::live_layout_backend::op_live_element_offset,
         crate::live_layout_backend::op_live_range_geometry,
@@ -82,11 +137,15 @@ pub(crate) fn install<'s>(
         let context = scope.get_current_context();
         let frame_window = crate::runtime::native_frame_layout_host(scope, context).is_some();
         let frame_window = v8::Boolean::new(scope, frame_window);
+        let scheduler = frame_scheduler_key(scope)
+            .and_then(|key| global.get_private(scope, key))
+            .filter(|value| value.is_function())
+            .unwrap_or_else(|| v8::undefined(scope).into());
         if let Some(factory) = initializer
             .call(
                 scope,
                 undefined.into(),
-                &[core.into(), factory.into(), frame_window.into()],
+                &[core.into(), factory.into(), frame_window.into(), scheduler],
             )
             .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
         {

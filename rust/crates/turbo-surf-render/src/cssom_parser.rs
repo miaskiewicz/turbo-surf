@@ -17,9 +17,12 @@ use lightningcss::traits::ToCss;
 
 pub fn is_supported_property(name: &str) -> bool {
     !matches!(PropertyId::from(name), PropertyId::Custom(_))
+        || interest_delay_arity(name).is_some()
+        || name == "writing-mode"
         || matches!(
             name,
             "content"
+                | "zoom"
                 | "font-variant"
                 | "float"
                 | "clear"
@@ -42,6 +45,47 @@ pub fn is_supported_property(name: &str) -> bool {
         )
 }
 
+const WRITING_MODES: [&str; 16] = [
+    "horizontal-tb",
+    "vertical-rl",
+    "vertical-lr",
+    "sideways-rl",
+    "sideways-lr",
+    "lr",
+    "lr-tb",
+    "rl",
+    "rl-tb",
+    "tb",
+    "tb-rl",
+    "initial",
+    "inherit",
+    "unset",
+    "revert",
+    "revert-layer",
+];
+fn interest_delay_arity(name: &str) -> Option<usize> {
+    if name.eq_ignore_ascii_case("interest-delay") {
+        Some(2)
+    } else if name.eq_ignore_ascii_case("interest-delay-start")
+        || name.eq_ignore_ascii_case("interest-delay-end")
+    {
+        Some(1)
+    } else {
+        None
+    }
+}
+fn time<'i>(input: &mut Parser<'i, '_>) -> Result<(), ParseError<'i, ()>> {
+    match input.next()? {
+        cssparser::Token::Dimension { unit, value, .. }
+            if *value >= 0.0
+                && (unit.eq_ignore_ascii_case("s") || unit.eq_ignore_ascii_case("ms")) =>
+        {
+            Ok(())
+        }
+        _ => Err(input.new_custom_error(())),
+    }
+}
+
 fn deferred_value(tokens: &TokenList<'_>) -> bool {
     tokens.0.iter().any(|token| match token {
         TokenOrValue::Var(_) | TokenOrValue::Env(_) => true,
@@ -56,7 +100,7 @@ fn deferred_value(tokens: &TokenList<'_>) -> bool {
 }
 
 pub(super) fn valid_selector(source: &str) -> bool {
-    valid_rule(&format!("{source} {{ color: red }}"))
+    super::css_selector_syntax::selector_list(source).is_some()
 }
 
 fn valid_rule(source: &str) -> bool {
@@ -95,12 +139,14 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
         input: &mut Parser<'i, 't>,
     ) -> Result<String, ParseError<'i, ()>> {
         let prelude = consume(input);
-        let test = if self.keyframes {
-            format!("@keyframes test {{ {prelude} {{}} }}")
-        } else {
-            format!("{prelude} {{}}")
-        };
-        if !valid_rule(&test) {
+        if !self.keyframes {
+            // Selector admission follows Chrome's pseudo inventory and returns
+            // its serialization (forgiving drops, lowercase pseudo names).
+            return super::css_selector_syntax::selector_list(&prelude)
+                .map(|admitted| admitted.text)
+                .ok_or_else(|| input.new_custom_error(()));
+        }
+        if !valid_rule(&format!("@keyframes test {{ {prelude} {{}} }}")) {
             return Err(input.new_custom_error(()));
         }
         Ok(prelude)
@@ -187,6 +233,16 @@ impl<'i> DeclarationParser<'i> for CssParser {
             return font_descriptor(&name.to_ascii_lowercase(), &value)
                 .ok_or_else(|| input.new_custom_error(()));
         }
+        if name.eq_ignore_ascii_case("zoom") {
+            // Lightning CSS has no typed `zoom`; Chrome serializes its own grammar.
+            let value = input.parse_until_before(Delimiter::Bang, zoom_declaration)?;
+            let important = input.try_parse(parse_important).is_ok();
+            input.expect_exhausted()?;
+            return Ok(format!(
+                "zoom: {value}{};",
+                if important { " !important" } else { "" }
+            ));
+        }
         let valid = input.parse_until_before(Delimiter::Bang, |input| {
             // Lightning CSS does not model the CSS2 font-variant shorthand.
             // Admit its measured caps subset without accepting arbitrary custom tokens.
@@ -194,6 +250,28 @@ impl<'i> DeclarationParser<'i> for CssParser {
                 let value = input.expect_ident_cloned()?.to_ascii_lowercase();
                 input.expect_exhausted()?;
                 return Ok(matches!(value.as_str(), "normal" | "small-caps" | "initial" | "inherit" | "unset" | "revert" | "revert-layer"));
+            }
+            // Lightning CSS does not model `writing-mode`; admit Chrome's keywords.
+            if name.eq_ignore_ascii_case("writing-mode") {
+                let value = input.expect_ident_cloned()?.to_ascii_lowercase();
+                input.expect_exhausted()?;
+                return Ok(WRITING_MODES.contains(&value.as_str()));
+            }
+            // Lightning CSS does not model interest-invoker delays: `normal | <time>`, and the
+            // shorthand takes one or two of those.
+            if let Some(count) = interest_delay_arity(&name) {
+                let mut values = 0;
+                while !input.is_exhausted() {
+                    let valid = input
+                        .try_parse(|input| input.expect_ident_matching("normal"))
+                        .is_ok()
+                        || input.try_parse(time).is_ok();
+                    if !valid {
+                        return Ok(false);
+                    }
+                    values += 1;
+                }
+                return Ok(values >= 1 && values <= count);
             }
             let property=Property::parse(
                 PropertyId::from(lightningcss::values::string::CowArcStr::from(name.to_string())),
@@ -218,6 +296,184 @@ impl<'i> DeclarationParser<'i> for CssParser {
             "{name}: {value}{};",
             if important { " !important" } else { "" }
         ))
+    }
+}
+
+/// Chrome156 standardized `zoom`: `normal`, a non-negative `<number>` or
+/// `<percentage>`, or one calc() of either kind. Returns Chrome's specified-value
+/// serialization and the factor it computes to (zero still means "no zoom").
+pub fn zoom_value(source: &str) -> Option<(String, f32)> {
+    let mut source = ParserInput::new(source);
+    let mut input = Parser::new(&mut source);
+    let value = zoom_component(&mut input).ok()?;
+    input.expect_exhausted().ok()?;
+    Some(value)
+}
+
+fn zoom_declaration<'i>(input: &mut Parser<'i, '_>) -> Result<String, ParseError<'i, ()>> {
+    let start = input.state();
+    let begin = input.position();
+    while input.next().is_ok() {}
+    if let Some((text, _)) = zoom_value(input.slice_from(begin)) {
+        return Ok(text);
+    }
+    input.reset(&start);
+    let start = input.position();
+    let property = Property::parse(PropertyId::from("zoom"), input, &ParserOptions::default())
+        .map_err(|_| input.new_custom_error(()))?;
+    let deferred = match &property {
+        Property::Custom(property) => deferred_value(&property.value),
+        Property::Unparsed(property) => deferred_value(&property.value),
+        _ => false,
+    };
+    if !deferred {
+        return Err(input.new_custom_error(()));
+    }
+    let text = input.slice_from(start).trim();
+    let keyword = ["inherit", "initial", "unset", "revert", "revert-layer"]
+        .into_iter()
+        .find(|keyword| text.eq_ignore_ascii_case(keyword));
+    Ok(keyword.map_or_else(|| text.to_string(), str::to_string))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ZoomKind {
+    Number,
+    Percentage,
+}
+
+type ZoomResult<'i> = Result<(String, f32), ParseError<'i, ()>>;
+
+fn zoom_component<'i>(input: &mut Parser<'i, '_>) -> ZoomResult<'i> {
+    input.skip_whitespace();
+    let location = input.current_source_location();
+    let start = input.position();
+    match input.next()?.clone() {
+        cssparser::Token::Ident(name) if name.eq_ignore_ascii_case("normal") => {
+            Ok(("normal".into(), 1.0))
+        }
+        cssparser::Token::Number { value, .. } if value >= 0.0 => Ok((css_number(value), value)),
+        cssparser::Token::Percentage { unit_value, .. } if unit_value >= 0.0 => {
+            let percent = percentage(input.slice_from(start), unit_value);
+            Ok((format!("{}%", css_number(percent)), ratio(percent)))
+        }
+        cssparser::Token::Function(name) if name.eq_ignore_ascii_case("calc") => input
+            .parse_nested_block(|input| {
+                let (value, kind) = calc_sum(input)?;
+                input.expect_exhausted()?;
+                let suffix = if kind == ZoomKind::Percentage {
+                    "%"
+                } else {
+                    ""
+                };
+                let factor = if kind == ZoomKind::Percentage {
+                    ratio(value)
+                } else {
+                    value
+                };
+                Ok((
+                    format!("calc({}{suffix})", css_number(value)),
+                    factor.max(0.0),
+                ))
+            }),
+        _ => Err(location.new_custom_error(())),
+    }
+}
+
+// Blink keeps the authored percentage as a float and divides it for the factor;
+// the tokenizer's pre-divided unit value would round differently.
+fn percentage(token: &str, unit_value: f32) -> f32 {
+    token
+        .trim()
+        .trim_end_matches('%')
+        .parse()
+        .unwrap_or_else(|_| (f64::from(unit_value) * 100.0) as f32)
+}
+fn ratio(percent: f32) -> f32 {
+    (f64::from(percent) / 100.0) as f32
+}
+
+fn calc_sum<'i>(input: &mut Parser<'i, '_>) -> Result<(f32, ZoomKind), ParseError<'i, ()>> {
+    let (mut total, kind) = calc_product(input)?;
+    while let Ok(sign) = input.try_parse(|input| match input.next()?.clone() {
+        cssparser::Token::Delim(sign @ ('+' | '-')) => Ok(sign),
+        _ => Err(input.new_custom_error::<_, ()>(())),
+    }) {
+        let (value, other) = calc_product(input)?;
+        if other != kind {
+            return Err(input.new_custom_error(()));
+        }
+        total = if sign == '+' {
+            total + value
+        } else {
+            total - value
+        };
+    }
+    Ok((total, kind))
+}
+
+fn calc_product<'i>(input: &mut Parser<'i, '_>) -> Result<(f32, ZoomKind), ParseError<'i, ()>> {
+    let (mut total, mut kind) = calc_value(input)?;
+    while let Ok(operator) = input.try_parse(|input| match input.next()?.clone() {
+        cssparser::Token::Delim(operator @ ('*' | '/')) => Ok(operator),
+        _ => Err(input.new_custom_error::<_, ()>(())),
+    }) {
+        let (value, other) = calc_value(input)?;
+        match (operator, kind, other) {
+            ('*', _, ZoomKind::Number) => total *= value,
+            ('*', ZoomKind::Number, ZoomKind::Percentage) => {
+                total *= value;
+                kind = ZoomKind::Percentage;
+            }
+            ('/', _, ZoomKind::Number) if value != 0.0 => total /= value,
+            _ => return Err(input.new_custom_error(())),
+        }
+    }
+    Ok((total, kind))
+}
+
+fn calc_value<'i>(input: &mut Parser<'i, '_>) -> Result<(f32, ZoomKind), ParseError<'i, ()>> {
+    input.skip_whitespace();
+    let location = input.current_source_location();
+    let start = input.position();
+    match input.next()?.clone() {
+        cssparser::Token::Number { value, .. } => Ok((value, ZoomKind::Number)),
+        cssparser::Token::Percentage { unit_value, .. } => Ok((
+            percentage(input.slice_from(start), unit_value),
+            ZoomKind::Percentage,
+        )),
+        cssparser::Token::ParenthesisBlock => input.parse_nested_block(calc_sum),
+        cssparser::Token::Function(name) if name.eq_ignore_ascii_case("calc") => {
+            input.parse_nested_block(calc_sum)
+        }
+        _ => Err(location.new_custom_error(())),
+    }
+}
+
+/// Blink's CSS number serialization: six significant digits (printf `%g`).
+pub fn css_number(value: f32) -> String {
+    let value = f64::from(value);
+    if value == 0.0 || !value.is_finite() {
+        return "0".into();
+    }
+    let exponent = value.abs().log10().floor() as i32;
+    if !(-5..6).contains(&exponent) {
+        let text = format!("{value:.5e}");
+        let (mantissa, power) = text.split_once('e').unwrap_or((&text, "0"));
+        let mantissa = trim_fraction(mantissa);
+        let power: i32 = power.parse().unwrap_or(0);
+        let sign = if power < 0 { '-' } else { '+' };
+        return format!("{mantissa}e{sign}{:02}", power.abs());
+    }
+    let decimals = usize::try_from(5 - exponent).unwrap_or(0);
+    trim_fraction(&format!("{value:.decimals$}")).to_string()
+}
+
+fn trim_fraction(text: &str) -> &str {
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        text
     }
 }
 
@@ -398,7 +654,63 @@ pub fn parse_one(source: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_media, parse_one};
+    use super::{css_number, parse, parse_media, parse_one, zoom_value};
+
+    #[test]
+    fn zoom_uses_chrome156_grammar_serialization_and_factors() {
+        for (source, text, factor) in [
+            ("2", "2", 2.0),
+            ("200%", "200%", 2.0),
+            ("NORMAL", "normal", 1.0),
+            ("-0", "0", 0.0),
+            ("0.0", "0", 0.0),
+            (".25", "0.25", 0.25),
+            ("+2", "2", 2.0),
+            ("1E1", "10", 10.0),
+            ("0.3333333", "0.333333", 0.333_333_3),
+            ("33.33333%", "33.3333%", 0.333_333_28),
+            ("calc(1 + 1)", "calc(2)", 2.0),
+            ("calc(50% + 50%)", "calc(100%)", 1.0),
+            ("calc(2 * 1.5)", "calc(3)", 3.0),
+            ("calc((1 + 1) * 50%)", "calc(100%)", 1.0),
+        ] {
+            assert_eq!(
+                zoom_value(source),
+                Some((text.to_string(), factor)),
+                "{source}"
+            );
+        }
+        for source in [
+            "reset",
+            "document",
+            "-1",
+            "-50%",
+            "abc",
+            "2px",
+            "2 3",
+            "calc(1 + 10%)",
+            "calc(1 +1)",
+            "calc(10% * 10%)",
+            "calc(1 / 0)",
+            "",
+        ] {
+            assert_eq!(zoom_value(source), None, "{source}");
+        }
+        let parsed = parse("a { zoom: +2; } b { zoom: reset; } c { zoom: INHERIT !important; } d { zoom: var(--z); }");
+        assert!(parsed.contains("a { zoom: 2; }"), "{parsed}");
+        assert!(!parsed.contains("reset"), "{parsed}");
+        assert!(parsed.contains("zoom: inherit !important;"), "{parsed}");
+        assert!(parsed.contains("zoom: var(--z);"), "{parsed}");
+        assert!(super::is_supported_property("zoom"));
+        for (value, text) in [
+            (1e6, "1e+06"),
+            (1.5e-7, "1.5e-07"),
+            (123_456.7, "123457"),
+            (0.1, "0.1"),
+        ] {
+            assert_eq!(css_number(value), text);
+        }
+    }
 
     #[test]
     fn recovers_bad_selectors_and_declarations_without_losing_valid_neighbors() {

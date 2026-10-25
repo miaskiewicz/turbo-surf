@@ -35,12 +35,12 @@ gpu-metal = ["turbo-surf-raster/gpu-metal"]
 coretext = ["turbo-surf-raster/coretext"]
 
 [dependencies]
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.4" }
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.4" }
-turbo-surf-page = { path = "../turbo-surf-page", version = "0.5.4" }
-turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.5.4" }
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.4" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.7" }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.5" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.5" }
+turbo-surf-page = { path = "../turbo-surf-page", version = "0.5.5" }
+turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.5.5" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.5" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
 async-trait = "0.1"
 base64 = "0.22"
 futures-util = "0.3"

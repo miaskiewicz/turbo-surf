@@ -9,6 +9,12 @@ Do not close either issue merely because the PR merges.
 
 Reproduce the current configuration with the [Chrome155 parity runbook](./CHROME-PARITY-RUNBOOK.md); it separates required opt-ins and measured evidence from remaining parity gaps.
 
+Browser-identity gaps (wire headers, client hints, TLS/H2, JS identity) against the
+default Chrome release are measured by the identity battery and listed, each with
+its reason and owner, in [chrome-identity-known-gaps.json](./chrome-identity-known-gaps.json);
+the Chrome 156 run left 13 documented gap rules and no unexplained tell
+([CHROME-REVERSION.md §9](./CHROME-REVERSION.md#9-worked-example-155--156)).
+
 The current [API-SHAPE-LAST-RUN.json](./API-SHAPE-LAST-RUN.json) and
 [API-INVENTORY.json](./API-INVENTORY.json) record the fresh9304df9 audit:
 all75 interfaces measured,64 missing original-four own members,142 expanded

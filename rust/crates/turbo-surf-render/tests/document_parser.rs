@@ -79,7 +79,7 @@ fn parser_receiver_conversion_and_unsupported_modes_fail_explicitly() {
             "TypeError",
             "TypeError",
             "NotSupportedError",
-            "NotSupportedError",
+            "",
             "NotSupportedError"
         ])
     );

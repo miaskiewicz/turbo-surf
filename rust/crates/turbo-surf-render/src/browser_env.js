@@ -63,6 +63,7 @@
     if (name === 'border-radius'){ var r=val.split('/')[0].trim().split(/\s+/); var c=box4(r); emit('border-top-left-radius',c[0]); emit('border-top-right-radius',c[1]); emit('border-bottom-right-radius',c[2]); emit('border-bottom-left-radius',c[3]); return; }
     // two-axis shorthands
     if (name === 'gap'){ emit('row-gap', p[0]); emit('column-gap', p[1]||p[0]); return; }
+    if (name === 'interest-delay'){ emit('interest-delay-start', p[0]); emit('interest-delay-end', p[1]||p[0]); return; }
     if (name === 'overflow'){ emit('overflow-x', p[0]); emit('overflow-y', p[1]||p[0]); return; }
     if (name === 'place-items' || name === 'place-content' || name === 'place-self'){ var base=name.split('-')[1]; emit('align-'+base, p[0]); emit('justify-'+base, p[1]||p[0]); return; }
     // flex: grow [shrink] [basis]
@@ -89,6 +90,8 @@
     // background: extract the color token -> background-color (position/size/repeat are layout-y)
     if (name === 'background'){ for (var bi=0; bi<p.length; bi++){ if (/^#[0-9a-fA-F]{3,8}$/.test(p[bi]) || /^(rgb|rgba|hsl|hsla)\(/i.test(p[bi]) || p[bi]==='transparent'){ emit('background-color', p[bi]); break; } } return; }
   };
+  __ns.expandCssShorthand = expandShorthand;
+
   // Bounded stylesheet and inline computed-value resolution supports style/visibility reads.
   // Returned declarations refresh on public reads; internal ancestor values use private
   // snapshots from the current calculation.
@@ -155,7 +158,18 @@
   if (typeof g.getComputedStyle === 'undefined') g.getComputedStyle = function computeStyle(el){
     return computeStyleSnapshot(el,new computedSnapshotMap());
   };
-  function computeStyleSnapshot(el,snapshots){
+  // Page-replaceable numeric and string intrinsics never participate in this read.
+  var cssZoomFround=Math.fround,cssZoomExec=RegExp.prototype.exec,cssZoomTrim=String.prototype.trim;
+  function computedZoom(value, inherited){
+    var text = typeof value === 'string' ? cssApply(cssFontLower,cssApply(cssZoomTrim,value,[]),[]) : '';
+    if (text === 'inherit') return inherited() || '1';
+    var calc = cssApply(cssZoomExec,/^calc\((.*)\)$/,[text]); if (calc) text = calc[1];
+    var match = cssApply(cssZoomExec,/^([0-9.e+-]+)(%?)$/,[text]), factor = match ? cssZoomFround(cssFontNumber(match[1]) / (match[2] ? 100 : 1)) : 1;
+    return !(factor > 0) || !cssFontFinite(factor) ? '1' : cssFontString(cssFontNumber(cssApply(cssFontPrecision,factor,[6])));
+  }
+  // Typed OM computes from the same cascade, read before used-value resolution.
+  __ns.typedOmCascade={cascade:function(el){var sink={__proto__:null,values:null,order:{__proto__:null},count:0};computeStyleSnapshot(el,new computedSnapshotMap(),sink);return sink.values?{values:sink.values,order:sink.order}:null;},color:function(text){return normalizeComputedColor(text);},parent:function(el){var context=computedFontContext(el);return context?context[2]:null;}};
+  function computeStyleSnapshot(el,snapshots,sink){
     var cached=el&&computedSnapshotGet(snapshots,el);if(cached)return cached;
     // Percentage lookup may visit several ancestors before font inheritance asks
     // for the immediate parent again. Reuse each resolved ancestor only in this read.
@@ -183,7 +197,7 @@
     // Priority is private per computed snapshot; public CSSStyleDeclaration methods
     // and page overrides cannot change the importance of parsed declarations.
     var uaValues=null,priorities={__proto__:null};
-    var setProp = function(name, val, important){ name = String(name).trim(); if (!name) return; if(important!==undefined){if(priorities[name]&&!important)return;priorities[name]=important;} if(uaValues&&typeof val==='string'&&/^revert$/i.test(val.trim())&&uaValues[name]!==undefined)val=uaValues[name]; if (typeof val === 'string'){ var t = val.trim(); if (t.charAt(0) === '#') val = normColor(t); else if (t === '0' && LEN_PROP.test(name)) val = '0px'; else if (val.indexOf(',') >= 0) val = cssPrelude(val,true); } decl[name] = val; decl[camel(name)] = val;
+    var setProp = function(name, val, important){ name = String(name).trim(); if (!name) return; if(important!==undefined){if(priorities[name]&&!important)return;priorities[name]=important;} if(uaValues&&typeof val==='string'&&/^revert$/i.test(val.trim())&&uaValues[name]!==undefined)val=uaValues[name]; if (typeof val === 'string' && name.slice(0, 2) !== '--'){ var t = val.trim(); if (t.charAt(0) === '#') val = normColor(t); else if (t === '0' && LEN_PROP.test(name)) val = '0px'; else if (val.indexOf(',') >= 0) val = cssPrelude(val,true); } decl[name] = val; decl[camel(name)] = val; if (sink) sink.order[name] = ++sink.count;
       if (typeof val === 'string') expandShorthand(name, val, function(property,value){setProp(property,value,important);});
     };
     function applyDeclarations(record){for(var index=0;index<record.names.length;index++){var name=record.names[index],value=cssMapGet(record.values,name);setProp(name,value.text,value.priority==='important');}}
@@ -223,18 +237,24 @@
     // overlay inline style (own props React/components set: background, height, display, ...)
     var st = el && __ns.makeInlineStyleDeclaration(el);
     if (st) applyDeclarations(declarationRecord(st));
-    // Native cascade resolves authored inheritance; CSS-wide keywords and the
-    // CanvasText initial value still require computed-value resolution here.
+    if (sink) { var cascaded = { __proto__: null }; Object.keys(decl).forEach(function(name){ if (typeof decl[name] === 'string' && (name.slice(0, 2) === '--' || name === name.toLowerCase())) cascaded[name] = decl[name]; }); sink.values = cascaded; return null; }
+    // Inherited values come from the composed parent's snapshot in this read, so
+    // CSSOM edits to document sheets reach descendants. Native cascade only adds
+    // shadow-scoped rules (shadow <style>, :host, ::slotted) the JS cascade lacks.
+    var inheritParent = null;
+    try { var inheritContext = computedFontContext(el); inheritParent = inheritContext ? inheritContext[2] : null; } catch(e) {}
+    // A fresh internal result is already resolved. Reading its public live getter
+    // would compute the same ancestors again and double recursion at every level.
+    function inheritedValue(name){ return inheritParent ? computedSnapshotValue(parentStyle(inheritParent),name) : ''; }
+    // Web Animations compose over cascaded and inline values; !important declarations win.
+    var animated=el&&__ns.animatedStyle?__ns.animatedStyle(el,function(name){var value=decl[name];return value==null?'':String(value);},inheritedValue):null;
+    if(animated)for(var ai=0;ai<animated.length;ai++)if(!priorities[animated[ai][0]])setProp(animated[ai][0],animated[ai][1]);
     var color = decl.color || '';
     if (!color) { try { color = __ns.cascadeProp.call(el, 'color'); } catch(e) {} }
     var colorKeyword = String(color || '').toLowerCase();
     if (colorKeyword === 'initial' || colorKeyword === 'canvastext') color = 'rgb(0, 0, 0)';
     else if (!color || colorKeyword === 'inherit' || colorKeyword === 'unset' || colorKeyword === 'currentcolor') {
-      var colorParent = null;
-      try { colorParent = __ns.domAccessor('parentElement',false,'Node').call(el); } catch(e) {}
-      // A fresh internal result is already resolved. Reading its public live getter
-      // would compute the same ancestors again and double recursion at every level.
-      color = colorParent ? computedSnapshotValue(parentStyle(colorParent),'color') : 'rgb(0, 0, 0)';
+      color = inheritParent ? inheritedValue('color') : 'rgb(0, 0, 0)';
     }
     var connected = false;
     try { connected = __ns.domAccessor('isConnected',false,'Node').call(el); } catch(e) {}
@@ -249,8 +269,15 @@
     if ((decl.visibility == null || decl.visibility === '') && el && typeof __ns.cascadeProp === 'function') {
       try { decl.visibility = __ns.cascadeProp.call(el,'visibility') || ''; } catch(e){}
     }
+    if (decl.visibility == null || decl.visibility === '' || /^(inherit|unset)$/i.test(String(decl.visibility))) {
+      try { decl.visibility = inheritedValue('visibility'); } catch(e){}
+    }
     if (decl.visibility == null) decl.visibility = '';
-    if (decl.opacity == null) decl.opacity = '';
+    // Initial computed values of properties Web Animations commonly animate.
+    if (decl.opacity == null) decl.opacity = connected ? '1' : '';
+    if (decl.transform == null) { decl.transform = connected ? 'none' : ''; }
+    // `zoom` is not inherited; it computes to its factor, with normal and 0 as 1.
+    decl.zoom = connected ? computedZoom(decl.zoom, function(){ return inheritedValue('zoom'); }) : '';
     // Used-value resolution for percentage width/height. A no-layout env returns a raw "50%"
     // verbatim, but a containing-block percentage has a well-defined used value in normal flow
     // (pct * the containing block's content width/height), which a real browser reports in px.
@@ -369,12 +396,12 @@
     Object.keys(methods).forEach(function(name){eventMember(name,{value:methods[name]});});
     Object.defineProperty(Event.prototype,Symbol.toStringTag,{value:'Event',configurable:true});
     ['NONE','CAPTURING_PHASE','AT_TARGET','BUBBLING_PHASE'].forEach(function(name,value){
-      [Event,Event.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});
+      // Configurable until key_order.js has arranged and frozen the interface (all constants below).
+      [Event,Event.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true,configurable:true});});
     });
     g.Event = Event;
     function mkSub(extra){ return function(type, init = {}){ if (arguments.length === 0) throw new TypeError('Event requires a type'); init = init || {}; Event.call(this, type, init); if (extra) extra(this, init); for (var k in init){ if (!(k in this)) this[k] = init[k]; } }; }
     function sub(name, extra){ var C = mkSub(extra); Object.defineProperty(C, 'name', {value: name, configurable: true}); C.prototype = Object.create(Event.prototype); C.prototype.constructor = C; Object.defineProperty(C.prototype,Symbol.toStringTag,{value:name,configurable:true});g[name] = C; }
-    sub('CustomEvent', function(self, init){ self.detail = init.detail === undefined ? null : init.detail; });
     sub('MessageEvent',function(self,init){self.data=init.data===undefined?null:init.data;self.origin=init.origin===undefined?'':eventString(init.origin);self.lastEventId=init.lastEventId===undefined?'':eventString(init.lastEventId);self.source=init.source||null;self.ports=init.ports||[];});
     // UI input interfaces keep Web-IDL state private; arbitrary dictionary keys
     // never become instance properties and inherited getters retain their brand.
@@ -414,7 +441,7 @@
     readonly(KeyboardEvent.prototype,keyStates,['key','code','location','ctrlKey','shiftKey','altKey','metaKey','repeat','isComposing','charCode','keyCode']);
     member(KeyboardEvent.prototype,'getModifierState',{value:function getModifierState(key){if(!arguments.length)throw new TypeError('A modifier is required');return modifier(keyStates,this,key);}});
     member(KeyboardEvent.prototype,'initKeyboardEvent',{value:function initKeyboardEvent(type,bubbles=false,cancelable=false,view=null,key='',location=0,ctrlKey=false,altKey=false,shiftKey=false,metaKey=false){var state=stateOf(keyStates,this);if(!arguments.length)throw new TypeError('A type is required');if(eventRecord(this).dispatching)return;UIEvent.prototype.initUIEvent.call(this,type,bubbles,cancelable,view,0);Object.assign(state,{key:eventString(key),location:intValue(location)>>>0,ctrlKey:!!ctrlKey,altKey:!!altKey,shiftKey:!!shiftKey,metaKey:!!metaKey});}});
-    ['DOM_KEY_LOCATION_STANDARD','DOM_KEY_LOCATION_LEFT','DOM_KEY_LOCATION_RIGHT','DOM_KEY_LOCATION_NUMPAD'].forEach(function(name,value){[KeyboardEvent,KeyboardEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});});
+    ['DOM_KEY_LOCATION_STANDARD','DOM_KEY_LOCATION_LEFT','DOM_KEY_LOCATION_RIGHT','DOM_KEY_LOCATION_NUMPAD'].forEach(function(name,value){[KeyboardEvent,KeyboardEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true,configurable:true});});});
     tagEvent(KeyboardEvent,'KeyboardEvent');g.KeyboardEvent=KeyboardEvent;
     class InputEvent extends UIEvent {
       constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};inputStates.set(this,{data:init.data==null?null:eventString(init.data),isComposing:!!init.isComposing,inputType:stringValue(init.inputType),dataTransfer:init.dataTransfer||null});}
@@ -438,12 +465,42 @@
     }
     readonly(WheelEvent.prototype,wheelStates,['deltaX','deltaY','deltaZ','deltaMode','momentum']);
     ['wheelDelta','wheelDeltaX','wheelDeltaY'].forEach(function(name){member(WheelEvent.prototype,name,{get:Object.getOwnPropertyDescriptor({get [name](){var state=stateOf(wheelStates,this);return -3*(name==='wheelDeltaX'?state.deltaX:state.deltaY);}},name).get});});
-    ['DOM_DELTA_PIXEL','DOM_DELTA_LINE','DOM_DELTA_PAGE'].forEach(function(name,value){[WheelEvent,WheelEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});});
+    ['DOM_DELTA_PIXEL','DOM_DELTA_LINE','DOM_DELTA_PAGE'].forEach(function(name,value){[WheelEvent,WheelEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true,configurable:true});});});
     tagEvent(WheelEvent,'WheelEvent');g.WheelEvent=WheelEvent;
+    // Dictionary-member events (CustomEvent, PopStateEvent, HashChangeEvent): private state
+    // behind readonly getters, like the UI family above.
+    var customStates=new WeakMap(), popStates=new WeakMap(), hashStates=new WeakMap();
+    class CustomEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};customStates.set(this,{detail:init.detail===undefined?null:init.detail});}
+    }
+    readonly(CustomEvent.prototype,customStates,['detail']);
+    member(CustomEvent.prototype,'initCustomEvent',{value:function initCustomEvent(type,bubbles=false,cancelable=false,detail=null){var state=stateOf(customStates,this);if(!arguments.length)throw new TypeError('A type is required');if(eventRecord(this).dispatching)return;Event.prototype.initEvent.call(this,type,bubbles,cancelable);state.detail=detail;}});
+    tagEvent(CustomEvent,'CustomEvent');
+    class PopStateEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};popStates.set(this,{state:init.state===undefined?null:init.state,hasUAVisualTransition:!!init.hasUAVisualTransition});}
+    }
+    readonly(PopStateEvent.prototype,popStates,['state','hasUAVisualTransition']);tagEvent(PopStateEvent,'PopStateEvent');
+    class HashChangeEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};hashStates.set(this,{oldURL:stringValue(init.oldURL),newURL:stringValue(init.newURL)});}
+    }
+    readonly(HashChangeEvent.prototype,hashStates,['oldURL','newURL']);tagEvent(HashChangeEvent,'HashChangeEvent');
+    // ProgressEvent (FileReader/XHR) and CloseEvent (WebSocket).
+    var progressStates=new WeakMap(), closeStates=new WeakMap();
+    // ProgressEventInit loaded/total are restricted doubles in Chrome 156.
+    var restrictedDouble=function(value,name){value=numberValue(value);if(!isFinite(value))throw new TypeError("Failed to construct 'ProgressEvent': Failed to read the '"+name+"' property from 'ProgressEventInit': The provided double value is non-finite.");return value;};
+    class ProgressEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};progressStates.set(this,{lengthComputable:!!init.lengthComputable,loaded:restrictedDouble(init.loaded,'loaded'),total:restrictedDouble(init.total,'total')});}
+    }
+    readonly(ProgressEvent.prototype,progressStates,['lengthComputable','loaded','total']);tagEvent(ProgressEvent,'ProgressEvent');
+    class CloseEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};closeStates.set(this,{wasClean:!!init.wasClean,code:intValue(init.code)&65535,reason:stringValue(init.reason)});}
+    }
+    readonly(CloseEvent.prototype,closeStates,['wasClean','code','reason']);tagEvent(CloseEvent,'CloseEvent');
     // Use the native class bridge for actual implementations, preserving private
     // records and subclass new.target rather than replacing Function.toString.
-    [UIEvent,MouseEvent,KeyboardEvent,InputEvent,FocusEvent,PointerEvent,WheelEvent].forEach(function(implementation){var name=implementation.name,constructor=__ns.makeNativeFunction?__ns.makeNativeFunction(implementation,name,1,true,true):implementation;constructor.prototype=implementation.prototype;Object.defineProperty(constructor.prototype,'constructor',{value:constructor,writable:true,configurable:true});Object.defineProperty(constructor,'prototype',{writable:false});Object.keys(implementation).forEach(function(key){Object.defineProperty(constructor,key,Object.getOwnPropertyDescriptor(implementation,key));});g[name]=constructor;});
+    [UIEvent,MouseEvent,KeyboardEvent,InputEvent,FocusEvent,PointerEvent,WheelEvent,CustomEvent,PopStateEvent,HashChangeEvent,ProgressEvent,CloseEvent].forEach(function(implementation){var name=implementation.name,constructor=__ns.makeNativeFunction?__ns.makeNativeFunction(implementation,name,1,true,true):implementation;constructor.prototype=implementation.prototype;Object.defineProperty(constructor.prototype,'constructor',{value:constructor,writable:true,configurable:true});Object.defineProperty(constructor,'prototype',{writable:false});Object.keys(implementation).forEach(function(key){Object.defineProperty(constructor,key,Object.getOwnPropertyDescriptor(implementation,key));});Object.defineProperty(g,name,{value:constructor,writable:true,configurable:true,enumerable:false});});
     [MouseEvent,KeyboardEvent,InputEvent,FocusEvent].forEach(function(implementation){Object.setPrototypeOf(g[implementation.name],g.UIEvent);});
+    [CustomEvent,PopStateEvent,HashChangeEvent,ProgressEvent,CloseEvent].forEach(function(implementation){Object.setPrototypeOf(g[implementation.name],Event);});
     [PointerEvent,WheelEvent].forEach(function(implementation){Object.setPrototypeOf(g[implementation.name],g.MouseEvent);});
     sub('CompositionEvent'); sub('DragEvent'); sub('TouchEvent'); sub('ClipboardEvent');
     g.document.createEvent = function(){ return new Event('', {}); };
@@ -492,7 +549,7 @@ for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:
   INVALID_ACCESS_ERR:15, VALIDATION_ERR:16, TYPE_MISMATCH_ERR:17, SECURITY_ERR:18,
   NETWORK_ERR:19, ABORT_ERR:20, URL_MISMATCH_ERR:21, QUOTA_EXCEEDED_ERR:22, TIMEOUT_ERR:23,
   INVALID_NODE_TYPE_ERR:24, DATA_CLONE_ERR:25})) {
-  for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true});
+  for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true, configurable: true});
 }
 
 if(typeof __ns.makeNativeFunction==='function'){
@@ -521,7 +578,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     'CharacterData','Attr','DocumentType','CDATASection','ProcessingInstruction','NodeList','HTMLCollection',
     'DOMTokenList','NamedNodeMap','CSSStyleDeclaration','CSSRule','StyleSheet','MediaList',
     'DOMStringMap','MutationRecord','MediaQueryList','DOMRect','DOMRectReadOnly','DOMPoint'];
-  ctors.forEach(function(n){ if (typeof g[n] === "undefined") { var f = function(){}; f.prototype = {}; try { Object.defineProperty(f, "name", { value: n, configurable: true }); } catch(e){} g[n] = f; } });
+  ctors.forEach(function(n){ if (typeof g[n] === "undefined") { var f = function(){}; f.prototype = {}; try { Object.defineProperty(f, "name", { value: n, configurable: true }); } catch(e){} Object.defineProperty(g, n, { value: f, writable: true, configurable: true, enumerable: false }); } });
   // EventTarget must be a REAL subclassable base. Apps + libraries write
   // `class Foo extends EventTarget { … this.addEventListener(…) }` (event buses, modal
   // managers, state stores — Nike's global-nav modal manager does exactly this); with an
@@ -680,7 +737,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     var lengthGetter=Object.getOwnPropertyDescriptor({get length(){return cssRecord(this).items.length;}},'length').get;
     if(__ns.makeNativeFunction)lengthGetter=__ns.makeNativeFunction(lengthGetter,'get length',0);
     Object.defineProperty(ctor.prototype,'length',{configurable:true,enumerable:true,get:lengthGetter});
-    var item=({item(index){if(!arguments.length)throw new TypeError("Failed to execute 'item': 1 argument required");return cssRecord(this).items[Number(index)>>>0]||null;}}).item;
+    var item=({item(index){if(!arguments.length)throw new TypeError("Failed to execute 'item' on '"+name+"': 1 argument required, but only 0 present.");return cssRecord(this).items[Number(index)>>>0]||null;}}).item;
     if(__ns.makeNativeFunction)item=__ns.makeNativeFunction(item,'item',1);
     Object.defineProperty(ctor.prototype,'item',{configurable:true,enumerable:true,writable:true,value:item});
     Object.defineProperty(ctor.prototype,'constructor',{configurable:true,writable:true,value:ctor});
@@ -732,12 +789,12 @@ if(typeof __ns.makeNativeFunction==='function'){
   function declarationRecord(style){var record=declarationRecords.get(style);if(!record)throw new TypeError('Illegal invocation');if(record.owner){var text=appliedInlineRead.call(record.owner);if(text!==record.source){record.source=text;parseDeclaration(record,text);}}if(record.refresh){var fresh=declarationRecords.get(record.refresh());if(fresh){record.values=fresh.values;record.names=fresh.names;record.fontState=fresh.fontState;}}return record;}
   function cssString(value){if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);}
   function cssPropertyName(name){if(name==='cssFloat')return 'float';return String(name).replace(/[A-Z]/g,function(c){return '-'+c.toLowerCase();}).replace(/^webkit-/,'-webkit-');}
-  function knownProperty(name){if(!cssPropertyCache.has(name))cssPropertyCache.set(name,typeof cssNativeParse==='function'&&cssNativeParse(name,true));return cssPropertyCache.get(name);}
+  function knownProperty(name){if(cssPropertyCache.has(name))return cssPropertyCache.get(name);var known=typeof cssNativeParse==='function'&&cssNativeParse(name,true);if(!known&&__ns.typedOmProperty)known=__ns.typedOmProperty(name);if(known||__ns.typedOmProperty)cssPropertyCache.set(name,!!known);return !!known;}
   function declarationText(record){var text='';for(var index=0;index<record.names.length;index++){var name=record.names[index],value=cssMapGet(record.values,name);if(index)text+=' ';text+=name+': '+value.text+(value.priority?' !important':'')+';';}return text;}
   __ns.readDeclarationText=function(style){return declarationText(declarationRecord(style));};
   function colorText(name,text){if(!/(?:^color$|color$)/.test(name))return text;var match=/^#([\da-f]{3}|[\da-f]{6})$/i.exec(text);if(!match)return text;var hex=match[1];if(hex.length===3)hex=hex.replace(/./g,function(c){return c+c;});return 'rgb('+parseInt(hex.slice(0,2),16)+', '+parseInt(hex.slice(2,4),16)+', '+parseInt(hex.slice(4,6),16)+')';}
   function storeDeclaration(record,name,text,priority){if(!record.values.has(name))record.names.push(name);record.values.set(name,{text:colorText(name,text),priority:priority||''});}
-  function parseDeclaration(record,text){record.names=[];record.values=new Map();var selector=record.fontFace?'@font-face':'x',parsed=typeof cssNativeParse==='function'?cssNativeParse(selector+' { '+text+' }'):selector+' { '+text+' }';var body=parsed.slice(parsed.indexOf('{')+1,parsed.lastIndexOf('}'));cssParts(body,';').forEach(function(part){var index=part.indexOf(':');if(index<1)return;var name=part.slice(0,index).trim();if(!record.fontFace&&!name.startsWith('--')&&!knownProperty(name))return;var value=part.slice(index+1).trim(),important=/\s*!important\s*$/i.test(value);if(important)value=value.replace(/\s*!important\s*$/i,'').trim();var previous=record.values.get(name);if(previous&&previous.priority&&!important)return;storeDeclaration(record,name,value,important?'important':'');});}
+  function parseDeclaration(record,text){record.names=[];record.values=new Map();var selector=record.fontFace?'@font-face':'x',parsed=typeof cssNativeParse==='function'?cssNativeParse(selector+' { '+text+' }'):selector+' { '+text+' }';var body=parsed.slice(parsed.indexOf('{')+1,parsed.lastIndexOf('}'));cssParts(body,';').forEach(function(part){var index=part.indexOf(':');if(index<1)return;var name=part.slice(0,index).trim();if(!record.fontFace&&!name.startsWith('--')&&!knownProperty(name))return;var value=part.slice(index+1).trim(),important=/\s*!important\s*$/i.test(value);if(important)value=value.replace(/\s*!important\s*$/i,'').trim();if(!record.fontFace&&!name.startsWith('--')&&__ns.typedOmValid&&!__ns.typedOmValid(name,value))return;var previous=record.values.get(name);if(previous&&previous.priority&&!important)return;storeDeclaration(record,name,value,important?'important':'');});}
   function writableDeclaration(record){if(record.readOnly)throw new g.DOMException('The declaration is read-only','NoModificationAllowedError');}
   function commitDeclaration(record){if(record.owner){record.source=declarationText(record);appliedInlineWrite.call(record.owner,record.source);}}
   function removeDeclaration(record,name){var previous=record.values.get(name);if(!previous)return '';record.values.delete(name);record.names.splice(record.names.indexOf(name),1);commitDeclaration(record);return previous.text;}
@@ -772,7 +829,7 @@ if(typeof __ns.makeNativeFunction==='function'){
   cssRuleMember('CSSStyleRule','style',function(){return cssRuleRecord(this,1).style;},function(value){var record=cssRuleRecord(this,1);if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');record.style.cssText=String(value);});
   ['href','media','styleSheet'].forEach(function(name){cssRuleMember('CSSImportRule',name,function(){return cssRuleRecord(this,3)[name];});});
   var cssRuleConstants={STYLE_RULE:1,CHARSET_RULE:2,IMPORT_RULE:3,MEDIA_RULE:4,FONT_FACE_RULE:5,PAGE_RULE:6,KEYFRAMES_RULE:7,KEYFRAME_RULE:8,MARGIN_RULE:9,NAMESPACE_RULE:10,COUNTER_STYLE_RULE:11,SUPPORTS_RULE:12,FONT_FEATURE_VALUES_RULE:14};
-  Object.keys(cssRuleConstants).forEach(function(name){[g.CSSRule,g.CSSRule.prototype].forEach(function(owner){Object.defineProperty(owner,name,{value:cssRuleConstants[name],enumerable:true});});});
+  Object.keys(cssRuleConstants).forEach(function(name){[g.CSSRule,g.CSSRule.prototype].forEach(function(owner){Object.defineProperty(owner,name,{value:cssRuleConstants[name],enumerable:true,configurable:true});});});
   function finishCssRule(rule){var record={__proto__:null};['type','parentRule','parentStyleSheet','cssText','selectorText','href','media','styleSheet','prelude'].forEach(function(name){if(Object.hasOwn(rule,name)){record[name]=rule[name];delete rule[name];}});if(rule.style){record.style=rule.style;if(record.type===1)delete rule.style;}if(rule.cssRules)record.cssRules=rule.cssRules;cssRuleStates.set(rule,record);Object.setPrototypeOf(rule,record.type===1?g.CSSStyleRule.prototype:record.type===3?g.CSSImportRule.prototype:g.CSSRule.prototype);return rule;}
   var parseCssRules = function(text, sheet, parent, validated){
     text=String(text);if(!validated&&typeof cssNativeParse==='function')text=cssNativeParse(text);
@@ -958,6 +1015,9 @@ if(typeof __ns.makeNativeFunction==='function'){
     // is entered. Without it, partials commit and the controlled reset mangles the result.
     var validForType = function(el, v){
       var t = (el.getAttribute('type') || 'text').toLowerCase();
+      // Range, the date/time family and textarea newlines follow Chromium (input_members.js).
+      var sanitized = __ns.sanitizeControlValue ? __ns.sanitizeControlValue(el, t, v) : undefined;
+      if (sanitized !== undefined) return sanitized;
       if (t === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '';
       if (t === 'time') return /^\d{2}:\d{2}(:\d{2})?$/.test(v) ? v : '';
       if (t === 'month') return /^\d{4}-\d{2}$/.test(v) ? v : '';
@@ -970,17 +1030,25 @@ if(typeof __ns.makeNativeFunction==='function'){
     // Live input/textarea values have a dirty flag, separate from their defaults.
     // Hidden/button values remain reflected attributes as required by HTML.
     var controlValues = new WeakMap();
+    // The file state's filename value mode (file_inputs.js) registers once, privately.
+    var fileControls = null;
+    __ns.registerFileControls = function(hooks){ fileControls = hooks; delete __ns.registerFileControls; };
+    var fileValueDelete = WeakMap.prototype.delete, fileValueApply = Reflect.apply;
+    __ns.resetControlValue = function(element){ fileValueApply(fileValueDelete, controlValues, [element]); };
     var isTextarea = function(el){ return String(el.tagName).toUpperCase() === 'TEXTAREA'; };
     var reflectedValue = function(el){ return /^(hidden|button|submit|reset|image|checkbox|radio)$/.test(el.type || ''); };
     var defaultValueOf = function(el){ return isTextarea(el) ? el.textContent || '' : el.getAttribute('value') || ''; };
     var valDesc = { configurable: true,
       get: function(){
+        var file = fileControls ? fileControls.value(this) : undefined;
+        if (file !== undefined) return file;
         if (controlValues.has(this) && !reflectedValue(this)) return validForType(this, controlValues.get(this));
         var value = defaultValueOf(this);
         if (!isTextarea(this) && /^(checkbox|radio)$/.test(this.type || '') && !this.hasAttribute('value')) return 'on';
         return validForType(this, value);
       },
       set: function(v){
+        if (fileControls && fileControls.setValue(this, v)) return;
         var oldValue=selectionApply(valDesc.get,this,[]);
         v = v == null ? '' : String(v);
         if (reflectedValue(this)) this.setAttribute('value', v);
@@ -998,7 +1066,9 @@ if(typeof __ns.makeNativeFunction==='function'){
     __ns.formControlChecked=function(element){return checkedNative(0,element);};
     // `type` defaults to 'text' for <input> — React's isTextInputElement keys on it to pick the
     // input/change handling path; undefined would route changes to the select/checkbox path.
-    var mkTypeDesc = function(def){ return { configurable: true, get: function(){ return (this.getAttribute('type') || def).toLowerCase(); }, set: function(v){ this.setAttribute('type', v); } }; };
+    // An <input> type outside the known states (e.g. 'file ') is the Text state.
+    var inputTypeStates = /^(hidden|text|search|tel|url|email|password|date|month|week|time|datetime-local|number|range|color|checkbox|radio|file|submit|image|reset|button)$/;
+    var mkTypeDesc = function(def){ return { configurable: true, get: function(){ var t = (this.getAttribute('type') || def).toLowerCase(); return def === 'text' && !inputTypeStates.test(t) ? 'text' : t; }, set: function(v){ this.setAttribute('type', v); } }; };
     // `form` → the nearest ancestor <form> (userEvent fires submit on a submit-button's form).
     var formDesc = { configurable: true, get: function(){ return this.closest ? this.closest('form') : null; } };
     var controlSelections=new WeakMap(),selectionApply=Reflect.apply,selectionGet=WeakMap.prototype.get,selectionSet=WeakMap.prototype.set;
@@ -1127,16 +1197,19 @@ if(typeof __ns.makeNativeFunction==='function'){
     }
     var protoFor = {};
     var defType = { HTMLInputElement:'text', HTMLButtonElement:'submit' };
+    var controlStrings = { HTMLInputElement:['name','placeholder','accept','min','max','step','pattern','autocomplete'], HTMLTextAreaElement:['name','placeholder','autocomplete'], HTMLSelectElement:['name','autocomplete'], HTMLButtonElement:['name'] };
+    var controlBooleans = { HTMLInputElement:[['disabled','disabled'],['multiple','multiple'],['required','required'],['readOnly','readonly']], HTMLTextAreaElement:[['disabled','disabled'],['required','required'],['readOnly','readonly']], HTMLSelectElement:[['disabled','disabled'],['multiple','multiple'],['required','required']], HTMLButtonElement:[['disabled','disabled']], HTMLOptionElement:[['disabled','disabled']] };
     ['HTMLInputElement','HTMLTextAreaElement','HTMLSelectElement','HTMLOptionElement','HTMLButtonElement','HTMLLabelElement','HTMLCanvasElement'].forEach(function(n){ if (typeof g[n] !== 'function') g[n] = function(){}; var p = Object.create(baseProto); try {
       var defineControl=function(name,descriptor){Object.defineProperty(p,name,Object.assign({},descriptor,{enumerable:true}));};
-      defineControl('value',valDesc);if(n==='HTMLInputElement'){defineControl('checked',checkedDesc);defineControl('defaultChecked',defaultCheckedDesc);}defineControl('form',formDesc);
+      if(n!=='HTMLLabelElement')defineControl('value',valDesc);if(n==='HTMLInputElement'){defineControl('checked',checkedDesc);defineControl('defaultChecked',defaultCheckedDesc);}defineControl('form',formDesc);
       if (defType[n]) defineControl('type',mkTypeDesc(defType[n]));
       // Reflected IDL string attributes: a library setting `input.name = 'x'` (e.g. react-number-
       // format, MUI) must show up as the `name` content attribute (toHaveAttribute, [name] selectors).
-      (n==='HTMLButtonElement'?['name']:['name','placeholder','accept','min','max','step','pattern','autocomplete']).forEach(function(a){ Object.defineProperty(p, a, { configurable: true, enumerable:true, get: function(){ return this.getAttribute(a) || ''; }, set: function(v){ this.setAttribute(a, v == null ? '' : String(v)); } }); });
+      // Each interface gets only the members Chrome 156 exposes on it (control_prototypes_probe.js).
+      (controlStrings[n]||[]).forEach(function(a){ Object.defineProperty(p, a, { configurable: true, enumerable:true, get: function(){ return this.getAttribute(a) || ''; }, set: function(v){ this.setAttribute(a, v == null ? '' : String(v)); } }); });
       // Reflected BOOLEAN IDL attributes (presence): el.disabled = true -> the `disabled` content
       // attribute; reading returns hasAttribute. Tests read el.disabled / [disabled] / multiple.
-      (n==='HTMLButtonElement'?[['disabled','disabled']]:[['disabled','disabled'],['multiple','multiple'],['required','required'],['readOnly','readonly']]).forEach(function(pair){ Object.defineProperty(p, pair[0], { configurable: true, enumerable:true, get: function(){ return this.hasAttribute(pair[1]); }, set: function(v){ if (v) this.setAttribute(pair[1], ''); else this.removeAttribute(pair[1]); } }); });
+      (controlBooleans[n]||[]).forEach(function(pair){ Object.defineProperty(p, pair[0], { configurable: true, enumerable:true, get: function(){ return this.hasAttribute(pair[1]); }, set: function(v){ if (v) this.setAttribute(pair[1], ''); else this.removeAttribute(pair[1]); } }); });
       if (n === 'HTMLInputElement' || n === 'HTMLTextAreaElement') {
         defineControl('defaultValue',defaultValueDesc);
         defineControl('selectionStart',selStartDesc);defineControl('selectionEnd',selEndDesc);defineControl('selectionDirection',selDirDesc);
@@ -1145,17 +1218,22 @@ if(typeof __ns.makeNativeFunction==='function'){
         p.setRangeText=setControlRangeText;
       }
     } catch(e){} g[n].prototype = p; protoFor[n] = p; });
-    // Descendant <option>s. Prefer querySelectorAll (document order); fall back to a `children` walk
-    // when it returns empty — that happens on a DETACHED subtree (qsa matches only connected nodes),
-    // which is exactly when React-DOM's updateOptions reads select.options DURING commit (the subtree
-    // is still detached then). Without the fallback a controlled <select> never marks its option.
+    // The select's list of options (HTML's "option element nearest ancestor select", Chrome 156
+    // measured in select_element_chrome156.json): option descendants in tree order, skipping nested
+    // select/datalist/hr/option subtrees and optgroups inside an optgroup. A sibling walk also serves
+    // DETACHED subtrees, which React-DOM's updateOptions reads during commit, and stays linear for
+    // huge lists (indexing the live `children` collection recomputes it per access).
+    var optionNs = 'http://www.w3.org/1999/xhtml';
+    var optionName = function(n){ return n.namespaceURI === optionNs ? n.localName : ''; };
     var optionsOf = function(sel){
-      var a = []; var list = sel.querySelectorAll('option');
-      for (var i=0;i<list.length;i++) a.push(list[i]);
-      if (!a.length) (function walk(n){ var ch = n.children; for (var j=0;j<ch.length;j++){ var c = ch[j]; var tg = String(c.tagName).toUpperCase(); if (tg === 'OPTION') a.push(c); else if (tg === 'OPTGROUP') walk(c); } })(sel);
+      var a = [];
+      (function walk(n, grouped){ for (var c = n.firstChild; c; c = c.nextSibling){ if (c.nodeType !== 1) continue; var name = optionName(c);
+        if (name === 'option') a.push(c);
+        else if (name === 'optgroup') { if (!grouped) walk(c, true); }
+        else if (name !== 'select' && name !== 'datalist' && name !== 'hr') walk(c, grouped); } })(sel, false);
       a.item = function(i){ return this[i] || null; }; return a;
     };
-    var ownerSelect = function(n){ var p = n.parentNode; while (p && p.nodeType === 1){ if (String(p.tagName).toUpperCase() === 'SELECT') return p; p = p.parentNode; } return null; };
+    var ownerSelect = function(n){ var grouped = false, p = n.parentNode; while (p && p.nodeType === 1){ var name = optionName(p); if (name === 'select') return p; if (name === 'datalist' || name === 'hr' || name === 'option') return null; if (name === 'optgroup') { if (grouped) return null; grouped = true; } p = p.parentNode; } return null; };
     // <option>: `value` falls back to text content (HTML spec), `selected`/`defaultSelected` track
     // the live + attribute state. React-DOM's updateOptions reads option.value and writes
     // option.selected for every option of a controlled <select>.
@@ -1187,7 +1265,8 @@ if(typeof __ns.makeNativeFunction==='function'){
           if (!sel.multiple) optionsOf(sel).forEach(function(o){ if (o !== this) optionStates.set(o, false); }, this);
         }
       } });
-      selection = { selectionOf: selectionOf, optionStates: optionStates, emptySelects: emptySelects };
+      selection = { selectionOf: selectionOf, optionStates: optionStates, emptySelects: emptySelects, isSelected: isSelected, optionsOf: optionsOf, ownerSelect: ownerSelect };
+      __ns.selectSelection = selection; // captured (and deleted) by select_element.js
       Object.defineProperty(op, 'defaultSelected', { configurable: true, get: function(){ return this.hasAttribute('selected'); }, set: function(v){ if (v) this.setAttribute('selected',''); else this.removeAttribute('selected'); } });
       Object.defineProperty(op, 'disabled', { configurable: true, get: function(){ return this.hasAttribute('disabled'); }, set: function(v){ if (v) this.setAttribute('disabled',''); else this.removeAttribute('disabled'); } });
       Object.defineProperty(op, 'text', { configurable: true, get: function(){ return this.textContent || ''; }, set: function(v){ this.textContent = v; } });
@@ -1219,6 +1298,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     var formValueText=__ns.domAccessor('textContent',false,'Node');
     __ns.formControlValue=function(element){
       var tag=formValueApply(sheetTagName,element,[]),type=formValueApply(sheetGetAttribute,element,['type'])||'text';
+      var file=fileControls?fileControls.value(element):undefined;if(file!==undefined)return file;
       if(tag==='SELECT'){var chosen=selection.selectionOf(element);return chosen.length?chosen[0].value:'';}
       if(formValueApply(formValueHas,controlValues,[element])&&!/^(hidden|button|submit|reset|image|checkbox|radio)$/.test(type))return formValueApply(formValueGet,controlValues,[element]);
       return tag==='TEXTAREA'?formValueApply(formValueText,element,[]):formValueApply(sheetGetAttribute,element,['value'])||'';
@@ -1227,6 +1307,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     __ns.formSelectedOptions=function(element){return selection.selectionOf(element);};
     __ns.formResetControl=function(element){
       formValueApply(resetControlDelete,controlValues,[element]);
+      if(fileControls)fileControls.reset(element);
       if(formValueApply(sheetTagName,element,[])==='INPUT')checkedNative(2,element);
       if(formValueApply(sheetTagName,element,[])==='SELECT'){
         var options=optionsOf(element);for(var index=0;index<options.length;index++)formValueApply(resetControlDelete,selection.optionStates,[options[index]]);
@@ -1240,7 +1321,7 @@ if(typeof __ns.makeNativeFunction==='function'){
       for(var index=0;index<pending.length;index++){
         var pair=pending[index];source=pair[0];clone=pair[1];
         if (controlValues.has(source)) clone.value = controlValues.get(source);
-        if(cloneApply(cloneNodeType,source,[])===1&&formValueApply(sheetTagName,source,[])==='INPUT'){if(checkedNative(3,source))checkedNative(1,clone,checkedNative(0,source));checkedNative(4,clone);}
+        if(cloneApply(cloneNodeType,source,[])===1&&formValueApply(sheetTagName,source,[])==='INPUT'){if(checkedNative(3,source))checkedNative(1,clone,checkedNative(0,source));checkedNative(4,clone);if(fileControls)fileControls.clone(source,clone);}
         if (selection.optionStates.has(source)) selection.optionStates.set(clone, selection.optionStates.get(source));
         if (selection.emptySelects.has(source)) selection.emptySelects.add(clone);
         if(deep){
@@ -1537,7 +1618,7 @@ if(typeof __ns.makeNativeFunction==='function'){
         var seed = __cvSeed(this, activeCtx(this), 'toDataURL:'+mime);
         return 'data:' + mime + ';base64,' + __cvB64(__cvBytes(seed, 54));
       };
-      cp.toBlob = function(cb, type){
+      cp.toBlob = function(cb){ var type = arguments[1]; // toBlob(callback, optional type, optional quality).length === 1
         if (!cb) return;
         var mime = (typeof type === 'string' && type) ? type : 'image/png';
         var bytes = __cvBytes(__cvSeed(this, activeCtx(this), 'toBlob:'+mime), 64);
@@ -1564,13 +1645,14 @@ if(typeof __ns.makeNativeFunction==='function'){
     void applyControlProto;
     var documentSheets=cssList('StyleSheetList',function(){var list=[],els=d.querySelectorAll('style,link');for(var i=0;i<els.length;i++){var sheet=els[i].sheet;if(sheet)list.push(sheet);}return list;});
     documentCSSRecord.cssHost.readSheets=function(){return cssRecord(documentSheets).items;};
+    __ns.styleSheetList=function(refresh){return cssList('StyleSheetList',refresh);};
     try { Object.defineProperty(d, 'styleSheets', { configurable: true, get: function(){return documentSheets;} }); } catch(e){}
 
     // Alias the shim interface-constructor `.prototype`s onto the REAL element/document prototypes,
     // so a test patching HTMLElement.prototype.requestFullscreen / Document.prototype.exitFullscreen
     // (DataTableCore fullscreen) reaches our instances. Only affects methods that aren't own per
-    // instance (own native methods still shadow). Default fullscreen stubs so components work
-    // unmocked; document.fullscreenElement defaults null.
+    // instance (own native methods still shadow). The genuine fullscreen API is installed by
+    // user_activation_gates.js.
     try {
       if (g.HTMLElement) g.HTMLElement.prototype = baseProto;
       if (g.Element) g.Element.prototype = baseProto;
@@ -1602,8 +1684,6 @@ if(typeof __ns.makeNativeFunction==='function'){
       var docProto = Object.getPrototypeOf(d) || baseProto;
       if (g.Document) g.Document.prototype = docProto;
       if (g.HTMLDocument) g.HTMLDocument.prototype = docProto;
-      if (typeof baseProto.requestFullscreen !== 'function') baseProto.requestFullscreen = function(){ return Promise.resolve(); };
-      if (typeof docProto.exitFullscreen !== 'function') docProto.exitFullscreen = function(){ return Promise.resolve(); };
       // NB: define these directly (NOT guarded by Object.getOwnPropertyDescriptor) — the all-Rust
       // DOM's NON_MASKING name interceptor intercepts every absent property (returns undefined), so
       // getOwnPropertyDescriptor synthesizes a truthy descriptor and a `if (!descriptor)` guard would
@@ -2101,7 +2181,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     var constants={ELEMENT_NODE:1,ATTRIBUTE_NODE:2,TEXT_NODE:3,CDATA_SECTION_NODE:4,ENTITY_REFERENCE_NODE:5,ENTITY_NODE:6,PROCESSING_INSTRUCTION_NODE:7,COMMENT_NODE:8,DOCUMENT_NODE:9,DOCUMENT_TYPE_NODE:10,DOCUMENT_FRAGMENT_NODE:11,NOTATION_NODE:12,DOCUMENT_POSITION_DISCONNECTED:1,DOCUMENT_POSITION_PRECEDING:2,DOCUMENT_POSITION_FOLLOWING:4,DOCUMENT_POSITION_CONTAINS:8,DOCUMENT_POSITION_CONTAINED_BY:16,DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC:32};
     Object.keys(constants).forEach(function(name){
       nativeKeys.push(name);
-      [g.Node,nodeProto].forEach(function(owner){Object.defineProperty(owner,name,{value:constants[name],enumerable:true});});
+      [g.Node,nodeProto].forEach(function(owner){Object.defineProperty(owner,name,{value:constants[name],enumerable:true,configurable:true});});
     });
     ['addEventListener','removeEventListener','dispatchEvent'].forEach(function(name){
       var native=Object.getOwnPropertyDescriptor(probe,name).value;
@@ -2233,7 +2313,7 @@ if(typeof __ns.makeNativeFunction==='function'){
           var delegate=descriptor[kind];if(typeof delegate!=='function')return;
           descriptor[kind]=__ns.makeNativeFunction(function(){reflectedApply(check,this,[]);return reflectedApply(delegate,this,arguments);},kind==='get'?'get '+name:kind==='set'?'set '+name:name,delegate.length);
         });
-        Object.defineProperty(proto,name,descriptor);
+        descriptor.enumerable=true;Object.defineProperty(proto,name,descriptor);
       });
     });
     var reflectedOwners={src:['HTMLScriptElement','HTMLImageElement','HTMLIFrameElement','HTMLMediaElement','HTMLInputElement','HTMLEmbedElement','HTMLSourceElement','HTMLTrackElement'],href:['HTMLAnchorElement','HTMLAreaElement','HTMLBaseElement','HTMLLinkElement'],rel:['HTMLAnchorElement','HTMLAreaElement','HTMLLinkElement'],as:['HTMLLinkElement'],media:['HTMLLinkElement','HTMLStyleElement','HTMLSourceElement'],type:['HTMLInputElement','HTMLButtonElement','HTMLScriptElement','HTMLLinkElement','HTMLStyleElement','HTMLEmbedElement','HTMLObjectElement','HTMLSourceElement'],valueAsNumber:['HTMLInputElement'],sheet:['HTMLStyleElement','HTMLLinkElement']};

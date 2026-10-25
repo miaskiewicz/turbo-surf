@@ -5,7 +5,7 @@
     "window-timer-semantics-chrome.mjs": "b791e5dd27eae511ab6c54f0c9ff45954a483ff09c4abcff3e23783d26c545a9",
     "window-timer-semantics-probe.js": "1f0a569bb175d9d15958f4026aa18178fe97af849aeaf588345485beb029cbd6",
     "window-timer-semantics.html": "87fc84585c06abfb7358d6c1d26fbb3aa91863b919a9cd12233593d860092084",
-    "chrome-cdp-trace.mjs": "e940b655785f6e28bbc981b86c7c62770375c1adc12e596785f8e59ab1ef7308",
+    "chrome-cdp-trace.mjs": "440965c5c029143c92058c21f6e125a83d3d91f55331a2e4df225019fdf7a55f",
     "observation-window.mjs": "e352eea8fe8d7760c949b49abf54e84f9582f891e9f7ea4edd7cbf493d4f0be8",
     "main-navigation.mjs": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",
     "collector-lifecycle.mjs": "2bdf67c2680b1b7b7fad2c5cbe818995312d3108043b6485e7f334f8372ecd8f"

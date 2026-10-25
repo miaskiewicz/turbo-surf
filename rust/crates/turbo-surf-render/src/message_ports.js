@@ -66,8 +66,11 @@ let __portTransferSequence, __hostPortMessage;
   };
   // Host arrays contain already-validated native ports. Avoid guest iteration,
   // species constructors and indexed setters while building the frozen view.
-  __hostPortMessage = (type, data, ports, source = null, origin = "") => {
-    const event = new Message(type, { data, source, origin });
+  // `activation` is the sender's UserActivation snapshot bits, or -1 without one.
+  __hostPortMessage = (type, data, ports, source = null, origin = "", activation = -1) => {
+    const userActivation =
+      activation >= 0 ? __userActivationSnapshot(!!(activation & 1), !!(activation & 2)) : null;
+    const event = new Message(type, { data, source, origin, userActivation });
     const list = [];
     for (let index = 0; index < ports.length; index++) ownIndex(list, index, ports[index]);
     __messageEventState.get(event).ports = freeze(list);
@@ -140,7 +143,8 @@ let __portTransferSequence, __hostPortMessage;
     function (value, options) {
       record(this);
       if (!arguments.length) throw new PortTypeError("A message is required");
-      let transfer;
+      let transfer,
+        includeActivation = false;
       if (options !== undefined) {
         if (options !== null && !objectLike(options))
           throw new PortTypeError("Options must be a dictionary or sequence");
@@ -150,12 +154,13 @@ let __portTransferSequence, __hostPortMessage;
           typeof options[iteratorSymbol] === "function"
         )
           transfer = __portTransferSequence(options);
-        else {
-          const list = options?.transfer;
+        else if (options !== null) {
+          includeActivation = !!options.includeUserActivation;
+          const list = options.transfer;
           if (list !== undefined) transfer = __portTransferSequence(list);
         }
       }
-      ops.op_port_post_message(this, value, transfer);
+      ops.op_port_post_message(this, value, transfer, includeActivation);
     },
     1,
   );
@@ -213,9 +218,9 @@ let __portTransferSequence, __hostPortMessage;
   define(globalThis, "MessageChannel", { value: Channel, writable: true, configurable: true });
   ops.op_port_install_adapter(
     create,
-    (port, data, ports, failed) =>
+    (port, data, ports, failed, activation) =>
       ops.op_dispatch_host_event(
-        __hostPortMessage(failed ? "messageerror" : "message", data, ports),
+        __hostPortMessage(failed ? "messageerror" : "message", data, ports, null, "", activation),
         port,
       ),
     (port) => schedule(() => ops.op_port_deliver(port), 0),

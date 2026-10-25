@@ -85,8 +85,46 @@ pub(super) fn initial(tree: &Tree) -> HashMap<Handle, ScriptState> {
                 .rev()
                 .map(|child| (child, template)),
         );
+        // Declarative shadow roots of the parsed document hold parser scripts.
+        if let Some(shadow) = tree.shadow_root(node) {
+            pending.push((shadow, template));
+        }
     }
     states
+}
+
+/// Script elements (as `querySelectorAll("script")` selects them) of a freshly
+/// parsed tree in parse order, taken before declarative shadow roots attach:
+/// a root's scripts keep the position of the template that declared them.
+pub(super) fn parse_order(tree: &Tree) -> Vec<Handle> {
+    let mut order = Vec::new();
+    let mut pending = vec![tree.root()];
+    while let Some(node) = pending.pop() {
+        if tree.node_type_id(node) == 1 && tree.local_name(node) == Some("script") {
+            order.push(node);
+        }
+        pending.extend(tree.children(node).into_iter().rev());
+    }
+    order
+}
+
+/// The document's parser scripts in parse order, including those inside
+/// declarative shadow roots, that are still shadow-including connected to it.
+pub fn parser_scripts<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> Vec<v8::Local<'s, v8::Object>> {
+    let _owner = DomScope::for_object(scope, document);
+    let handles = DOM.with(|dom| {
+        dom.borrow().as_ref().map_or_else(Vec::new, |dom| {
+            dom.parser_scripts
+                .iter()
+                .copied()
+                .filter(|node| dom.tree.is_live(*node) && is_connected(&dom.tree, *node))
+                .collect::<Vec<_>>()
+        })
+    });
+    handles.into_iter().map(|node| wrap(scope, node)).collect()
 }
 
 pub(super) fn initialize_inert() {

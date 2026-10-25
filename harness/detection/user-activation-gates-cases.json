@@ -1,0 +1,641 @@
+{
+  "prelude": "window.L=[];window.run=f=>{try{const v=f();return v===undefined?'undefined':v}catch(e){return [e.name,e.message]}};window.settle=async f=>{let p;try{p=f()}catch(e){return ['throw',e.name,e.message]}try{const v=await p;return ['ok',v===undefined?'undefined':v]}catch(e){return ['reject',e.name,e.message]}};window.act=()=>[navigator.userActivation.isActive,navigator.userActivation.hasBeenActive];window.wait=ms=>new Promise(r=>setTimeout(r,ms));window.tag=n=>n==null?null:n===document?'document':n===window?'window':n.id||n.nodeName;window.watch=(target,types)=>{for(const t of types)target.addEventListener(t,e=>{L.push([t,tag(e.target),e.isTrusted,e.cancelable,e.defaultPrevented,e.bubbles,e.composed])},true)};window.take=()=>L.splice(0);window.$=id=>document.getElementById(id);addEventListener('DOMContentLoaded',()=>{for(const el of document.querySelectorAll('[id]'))if(!(el.id in window))window[el.id]=el});",
+  "cases": [
+    {
+      "id": "shape",
+      "html": "<body><div id=box></div>",
+      "steps": [
+        {
+          "eval": "(()=>{const d=(o,k)=>{const x=Object.getOwnPropertyDescriptor(o,k);if(!x)return null;return {kind:'value' in x?typeof x.value:'accessor',get:x.get?[x.get.name,x.get.length]:null,set:x.set?[x.set.name,x.set.length]:null,name:x.value&&x.value.name,length:x.value&&x.value.length,e:x.enumerable,c:x.configurable,w:x.writable===undefined?null:x.writable}};return {inputPicker:d(HTMLInputElement.prototype,'showPicker'),selectPicker:d(HTMLSelectElement.prototype,'showPicker'),textareaPicker:d(HTMLTextAreaElement.prototype,'showPicker'),messageActivation:d(MessageEvent.prototype,'userActivation'),requestFullscreen:d(Element.prototype,'requestFullscreen'),htmlRequestFullscreen:d(HTMLElement.prototype,'requestFullscreen'),webkitRequestFullscreen:d(Element.prototype,'webkitRequestFullscreen'),webkitRequestFullScreen:d(Element.prototype,'webkitRequestFullScreen'),onfullscreenchange:d(Element.prototype,'onfullscreenchange'),onfullscreenerror:d(Element.prototype,'onfullscreenerror'),onwebkitfullscreenchange:d(Element.prototype,'onwebkitfullscreenchange'),onwebkitfullscreenerror:d(Element.prototype,'onwebkitfullscreenerror'),documentOnfullscreenchange:d(Document.prototype,'onfullscreenchange'),documentOnfullscreenerror:d(Document.prototype,'onfullscreenerror'),exitFullscreen:d(Document.prototype,'exitFullscreen'),fullscreenElement:d(Document.prototype,'fullscreenElement'),shadowFullscreenElement:d(ShadowRoot.prototype,'fullscreenElement')}})()"
+        },
+        {
+          "eval": "(async()=>({inputBrand:run(()=>HTMLInputElement.prototype.showPicker.call(document.createElement('select'))),selectBrand:run(()=>HTMLSelectElement.prototype.showPicker.call({})),requestBrand:await settle(()=>Element.prototype.requestFullscreen.call({})),requestText:await settle(()=>Element.prototype.requestFullscreen.call(document.createTextNode('x'))),navigationUI:await settle(()=>box.requestFullscreen({navigationUI:'bogus'})),primitiveOptions:await settle(()=>box.requestFullscreen(5)),screenOption:await settle(()=>box.requestFullscreen({screen:1})),plain:await settle(()=>box.requestFullscreen()),constructed:new MessageEvent('message').userActivation===undefined?'absent':new MessageEvent('message').userActivation,constructedInit:(()=>{const v=new MessageEvent('message',{userActivation:navigator.userActivation}).userActivation;return v===undefined?'absent':v===navigator.userActivation})(),log:take()}))()"
+        }
+      ]
+    },
+    {
+      "id": "picker-no-activation",
+      "html": "<input id=text><input id=date type=date><input id=color type=color><input id=file type=file><input id=checkbox type=checkbox><input id=hidden type=hidden><input id=range type=range><input id=button type=button><input id=dtext disabled><input id=rtext readonly><input id=rcheckbox type=checkbox readonly><input id=rdate type=date readonly><input id=rcolor type=color readonly><input id=rfile type=file readonly><input id=dfile type=file disabled><input id=dcolor type=color disabled><input id=dhidden type=hidden disabled><fieldset disabled><input id=ftext><select id=fselect><option>a</select></fieldset><select id=select><option>a</select><select id=dselect disabled><option>a</select><select id=multi multiple><option>a</select><datalist id=dl><option value=x></datalist><input id=listed list=dl><input id=nonetext style=display:none><select id=noneselect style=display:none><option>a</select>",
+      "steps": [
+        {
+          "eval": "(()=>{const out={};for(const el of document.querySelectorAll('input,select'))out[el.id]=run(()=>el.showPicker());out.detachedInput=run(()=>document.createElement('input').showPicker());out.detachedSelect=run(()=>document.createElement('select').showPicker());out.detachedDisabled=run(()=>{const i=document.createElement('input');i.disabled=true;return i.showPicker()});out.act=act();return out})()"
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-date",
+      "html": "<button id=go>go</button><input id=target type=date><input id=after type=date>",
+      "steps": [
+        {
+          "eval": "watch(document,['focus','blur','change','input','cancel']);act()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const before=act();const first=run(()=>target.showPicker());const middle=act();const second=run(()=>after.showPicker());const r={before,first,middle,second,after:act(),active:tag(document.activeElement),open:run(()=>target.matches(':open'))};await wait(100);r.later=act();r.openLater=run(()=>target.matches(':open'));r.log=take();return r})()"
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-color",
+      "html": "<button id=go>go</button><input id=target type=color><input id=after type=color>",
+      "steps": [
+        {
+          "eval": "watch(document,['focus','blur','change','input','cancel']);act()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const before=act();const first=run(()=>target.showPicker());const middle=act();const second=run(()=>after.showPicker());const r={before,first,middle,second,after:act(),active:tag(document.activeElement),open:run(()=>target.matches(':open'))};await wait(100);r.later=act();r.openLater=run(()=>target.matches(':open'));r.log=take();return r})()"
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-file",
+      "html": "<button id=go>go</button><input id=target type=file><input id=after type=file>",
+      "steps": [
+        {
+          "eval": "watch(document,['focus','blur','change','input','cancel']);act()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const before=act();const first=run(()=>target.showPicker());const middle=act();const second=run(()=>after.showPicker());const r={before,first,middle,second,after:act(),active:tag(document.activeElement),open:run(()=>target.matches(':open'))};await wait(100);r.later=act();r.openLater=run(()=>target.matches(':open'));r.log=take();return r})()"
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-text",
+      "html": "<button id=go>go</button><input id=target type=text><input id=after type=text>",
+      "steps": [
+        {
+          "eval": "watch(document,['focus','blur','change','input','cancel']);act()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const before=act();const first=run(()=>target.showPicker());const middle=act();const second=run(()=>after.showPicker());const r={before,first,middle,second,after:act(),active:tag(document.activeElement),open:run(()=>target.matches(':open'))};await wait(100);r.later=act();r.openLater=run(()=>target.matches(':open'));r.log=take();return r})()"
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-checkbox",
+      "html": "<button id=go>go</button><input id=target type=checkbox><input id=after type=checkbox>",
+      "steps": [
+        {
+          "eval": "watch(document,['focus','blur','change','input','cancel']);act()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const before=act();const first=run(()=>target.showPicker());const middle=act();const second=run(()=>after.showPicker());const r={before,first,middle,second,after:act(),active:tag(document.activeElement),open:run(()=>target.matches(':open'))};await wait(100);r.later=act();r.openLater=run(()=>target.matches(':open'));r.log=take();return r})()"
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-select",
+      "html": "<button id=go>go</button><select id=target><option>a<option>b</select><input id=after type=text>",
+      "steps": [
+        {
+          "eval": "watch(document,['focus','blur','change','input','cancel']);act()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const before=act();const first=run(()=>target.showPicker());const middle=act();const second=run(()=>after.showPicker());const r={before,first,middle,second,after:act(),active:tag(document.activeElement),open:run(()=>target.matches(':open'))};await wait(100);r.later=act();r.openLater=run(()=>target.matches(':open'));r.log=take();return r})()"
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-hidden",
+      "html": "<button id=go>go</button><select id=noneselect style=display:none><option>a</select><input id=nonedate type=date style=display:none><input id=disabled disabled>",
+      "steps": [
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "({disabled:run(()=>disabled.showPicker()),afterDisabled:act(),select:run(()=>noneselect.showPicker()),afterSelect:act(),date:run(()=>nonedate.showPicker()),afterDate:act()})"
+        }
+      ]
+    },
+    {
+      "id": "picker-frames",
+      "html": "<button id=go>go</button><iframe id=same srcdoc=\"<input id=t><input id=c type=color>\"></iframe><iframe id=cross sandbox=allow-scripts srcdoc=\"<input id=t><input id=d type=date><input id=c type=color><input id=f type=file><input id=x disabled><select id=s><option>a</select><select id=y disabled><option>a</select><script>const run=f=>{try{f();return 'ok'}catch(e){return [e.name,e.message]}};onmessage=async()=>{const out={};for(const el of document.querySelectorAll('input,select'))out[el.id]=run(()=>el.showPicker());out.act=[navigator.userActivation.isActive,navigator.userActivation.hasBeenActive];out.enabled=document.fullscreenEnabled;out.fullscreen=await document.body.requestFullscreen().then(()=>'ok',e=>[e.name,e.message]);parent.postMessage(out,'*')}</script>\"></iframe>",
+      "steps": [
+        {
+          "eval": "new Promise(r=>{addEventListener('message',e=>r(e.data),{once:true});$('cross').contentWindow.postMessage('go','*')})"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const doc=$('same').contentDocument;const r={top:act(),same:[$('same').contentWindow.navigator.userActivation.isActive,$('same').contentWindow.navigator.userActivation.hasBeenActive],sameText:run(()=>doc.getElementById('t').showPicker()),sameColor:run(()=>doc.getElementById('c').showPicker()),sameAfter:[$('same').contentWindow.navigator.userActivation.isActive,$('same').contentWindow.navigator.userActivation.hasBeenActive],topAfter:act()};r.cross=await new Promise(res=>{addEventListener('message',e=>res(e.data),{once:true});$('cross').contentWindow.postMessage('go','*')});return r})()"
+        }
+      ]
+    },
+    {
+      "id": "fullscreen-no-activation",
+      "html": "<div id=box>box<span id=inner>inner</span></div>",
+      "steps": [
+        {
+          "eval": "watch(document,['fullscreenchange','fullscreenerror','resize']);act()"
+        },
+        {
+          "eval": "(async()=>{const p=box.requestFullscreen();L.push(['returned',p instanceof Promise]);const s=settle(()=>p);L.push('sync');const settled=await s;L.push('settled');await wait(200);return {settled,state:({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()})}})()"
+        },
+        {
+          "eval": "(async()=>{const r={};r.detached=await settle(()=>document.createElement('div').requestFullscreen());r.dialog=await settle(()=>document.body.appendChild(document.createElement('dialog')).requestFullscreen());r.rect=await settle(()=>document.body.appendChild(document.createElementNS('http://www.w3.org/2000/svg','rect')).requestFullscreen());r.math=await settle(()=>document.body.appendChild(document.createElementNS('http://www.w3.org/1998/Math/MathML','math')).requestFullscreen());r.detachedBadUI=await settle(()=>document.createElement('div').requestFullscreen({navigationUI:'x'}));r.hide=await settle(()=>box.requestFullscreen({navigationUI:'hide'}));await wait(200);r.log=take();return r})()"
+        },
+        {
+          "eval": "(async()=>({exit:await settle(()=>document.exitFullscreen()),webkitExit:run(()=>document.webkitExitFullscreen()),webkitRequest:run(()=>box.webkitRequestFullscreen()),log:(await wait(200),take()),act:act()}))()"
+        }
+      ]
+    },
+    {
+      "id": "fullscreen-activation",
+      "html": "<button id=go>go</button><div id=box>box<div id=child>child</div></div><div id=other>other</div>",
+      "steps": [
+        {
+          "eval": "watch(document,['fullscreenchange','fullscreenerror']);window.size=[innerWidth,innerHeight,screen.width,screen.height,outerWidth,outerHeight];act()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const p=box.requestFullscreen();L.push('requested');const settled=await settle(()=>p);L.push('resolved');const r={settled,state:({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()}),sizeChanged:innerWidth!==size[0]||innerHeight!==size[1],matchesScreen:innerWidth===screen.width&&innerHeight===screen.height,displayMode:matchMedia('(display-mode: fullscreen)').matches,boxMatches:box.matches(':fullscreen'),childMatches:child.matches(':fullscreen')};await wait(300);r.sizeLater=innerWidth!==size[0]||innerHeight!==size[1];r.matchesScreenLater=innerWidth===screen.width&&innerHeight===screen.height;return r})()"
+        },
+        {
+          "eval": "(async()=>{const settled=await settle(()=>child.requestFullscreen());await wait(200);return {settled,state:({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()}),stack:[box.matches(':fullscreen'),child.matches(':fullscreen')]}})()"
+        },
+        {
+          "eval": "(async()=>{const settled=await settle(()=>other.requestFullscreen());await wait(200);return {settled,state:({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()})}})()"
+        },
+        {
+          "eval": "(async()=>{const settled=await settle(()=>document.exitFullscreen());await wait(200);const r={settled,state:({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()})};const again=await settle(()=>document.exitFullscreen());await wait(300);r.again=again;r.final=({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()});r.sizeRestored=innerWidth===size[0]&&innerHeight===size[1];return r})()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const b=box;const settled=await settle(()=>b.requestFullscreen());await wait(200);b.remove();L.push('removed');const r={settled,removed:({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()})};await wait(300);r.later=({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()});document.body.append(b);return r})()"
+        },
+        {
+          "wait": 600
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const settled=await settle(()=>box.requestFullscreen());await wait(200);return {settled,state:({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()})}})()"
+        },
+        {
+          "eval": "watch(document,['keydown','keyup']);true"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 600
+        },
+        {
+          "eval": "({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "fullscreen-errors",
+      "html": "<button id=go>go</button><div id=box>box</div><dialog id=dialog>d</dialog><div id=pop popover>p</div>",
+      "steps": [
+        {
+          "eval": "watch(document,['fullscreenchange','fullscreenerror']);pop.showPopover();act()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const r={};const detached=document.createElement('div');r.detached=await settle(()=>detached.requestFullscreen());r.afterDetached=act();r.dialog=await settle(()=>dialog.requestFullscreen());r.afterDialog=act();r.popover=await settle(()=>pop.requestFullscreen());r.afterPopover=act();r.popoverOpen=pop.matches(':popover-open');const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),rect=svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg','rect'));rect.id='rect';document.body.append(svg);r.rect=await settle(()=>rect.requestFullscreen());r.afterRect=act();await wait(100);svg.remove();r.log=take();return r})()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const r={};const svg=document.body.appendChild(document.createElementNS('http://www.w3.org/2000/svg','svg'));svg.id='svg';r.svg=await settle(()=>svg.requestFullscreen());await wait(100);r.svgState=({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()});r.exit=await settle(()=>document.exitFullscreen());await wait(300);svg.remove();return r})()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const r={};const math=document.body.appendChild(document.createElementNS('http://www.w3.org/1998/Math/MathML','math'));math.id='math';r.math=await settle(()=>math.requestFullscreen());await wait(100);math.remove();r.mathState=({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()});r.exit=await settle(()=>document.exitFullscreen());await wait(300);return r})()"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const r={};const a=settle(()=>box.requestFullscreen()),b=settle(()=>box.requestFullscreen());r.twice=[await a,await b];await wait(100);r.state=({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()});r.exit=await settle(()=>document.exitFullscreen());await wait(300);r.final=({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()});return r})()"
+        }
+      ]
+    },
+    {
+      "id": "fullscreen-frames",
+      "html": "<button id=go>go</button><iframe id=denied allow=\"fullscreen 'none'\" srcdoc=\"<div id=x>x</div>\"></iframe><iframe id=allowed srcdoc=\"<div id=y>y</div>\"></iframe>",
+      "steps": [
+        {
+          "eval": "watch(document,['fullscreenchange','fullscreenerror']);[$('denied').contentDocument.fullscreenEnabled,$('allowed').contentDocument.fullscreenEnabled]"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{const dw=$('denied').contentWindow,aw=$('allowed').contentWindow;const r={activation:[act(),[dw.navigator.userActivation.isActive,dw.navigator.userActivation.hasBeenActive],[aw.navigator.userActivation.isActive,aw.navigator.userActivation.hasBeenActive]]};r.deniedDetached=await settle(()=>$('denied').contentDocument.createElement('div').requestFullscreen());r.denied=await settle(()=>$('denied').contentDocument.getElementById('x').requestFullscreen());r.afterDenied=[act(),dw.navigator.userActivation.isActive];r.allowed=await settle(()=>$('allowed').contentDocument.getElementById('y').requestFullscreen());await wait(200);r.top=({element:tag(document.fullscreenElement),fullscreen:document.fullscreen,webkit:tag(document.webkitFullscreenElement),webkitIs:document.webkitIsFullScreen,matches:document.querySelectorAll(':fullscreen').length,act:act(),log:take()});r.child=tag($('allowed').contentDocument.fullscreenElement);r.exit=await settle(()=>document.exitFullscreen());await wait(300);r.final=[tag(document.fullscreenElement),tag($('allowed').contentDocument.fullscreenElement)];r.log=take();return r})()"
+        }
+      ]
+    },
+    {
+      "id": "escape-modal-no-activation",
+      "html": "<dialog id=d><button id=inner>in</button></dialog>",
+      "steps": [
+        {
+          "eval": "watch(document,['keydown','keyup','cancel','close']);d.showModal();[d.open,act()]"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,returnValue:d.returnValue,act:act(),log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "escape-modal-prevent-no-activation",
+      "html": "<dialog id=d><button id=inner>in</button></dialog>",
+      "steps": [
+        {
+          "eval": "d.addEventListener('cancel',e=>e.preventDefault());watch(document,['keydown','cancel','close']);d.showModal();d.open"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,act:act(),log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "escape-modal-prevent-with-activation",
+      "html": "<dialog id=d><button id=inner>in</button></dialog>",
+      "steps": [
+        {
+          "eval": "d.addEventListener('cancel',e=>e.preventDefault());watch(document,['keydown','cancel','close']);d.showModal();d.open"
+        },
+        {
+          "click": "#inner"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,act:act(),log:take()})"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,act:act(),log:take()})"
+        },
+        {
+          "click": "#inner"
+        },
+        {
+          "eval": "d.open"
+        }
+      ]
+    },
+    {
+      "id": "escape-modal-opened-after-activation",
+      "html": "<button id=go>go</button><dialog id=d><button id=inner>in</button></dialog>",
+      "steps": [
+        {
+          "eval": "d.addEventListener('cancel',e=>e.preventDefault());watch(document,['keydown','cancel','close']);true"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "d.showModal();[d.open,act()]"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,act:act(),log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "escape-keydown-prevented",
+      "html": "<dialog id=d><button id=inner>in</button></dialog><div id=p popover>p</div>",
+      "steps": [
+        {
+          "eval": "document.addEventListener('keydown',e=>e.preventDefault());watch(document,['keydown','cancel','close','beforetoggle','toggle']);d.showModal();d.open"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "escape-two-modals",
+      "html": "<dialog id=a>a<dialog id=b>b</dialog></dialog><dialog id=c>c</dialog>",
+      "steps": [
+        {
+          "eval": "watch(document,['cancel','close']);a.showModal();c.showModal();[a.open,c.open]"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({a:a.open,c:c.open,log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "escape-closedby",
+      "html": "<dialog id=none closedby=none>n</dialog><dialog id=nonmodal>m</dialog><dialog id=request closedby=closerequest>r</dialog><dialog id=any closedby=any>y</dialog>",
+      "steps": [
+        {
+          "eval": "watch(document,['cancel','close']);none.showModal();[none.open,none.closedBy]"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "(()=>{const r={none:none.open,log:take()};none.close();nonmodal.show();r.nonmodalClosedBy=nonmodal.closedBy;return r})()"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "(()=>{const r={nonmodal:nonmodal.open,log:take()};nonmodal.close();request.show();return r})()"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "(()=>{const r={request:request.open,log:take()};any.show();return r})()"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({any:any.open,log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "escape-popovers",
+      "html": "<div id=auto popover>a<div id=nested popover>n</div></div><div id=manual popover=manual>m</div><div id=hint popover=hint>h</div>",
+      "steps": [
+        {
+          "eval": "watch(document,['beforetoggle','toggle']);manual.showPopover();auto.showPopover();[auto.matches(':popover-open'),manual.matches(':popover-open'),take().length]"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "(()=>{const r={auto:auto.matches(':popover-open'),manual:manual.matches(':popover-open'),log:take()};auto.showPopover();nested.showPopover();take();return r})()"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({auto:auto.matches(':popover-open'),nested:nested.matches(':popover-open'),manual:manual.matches(':popover-open'),log:take()})"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "(()=>{const r={auto:auto.matches(':popover-open'),manual:manual.matches(':popover-open'),log:take()};hint.showPopover();take();return r})()"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({hint:hint.matches(':popover-open'),manual:manual.matches(':popover-open'),log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "escape-dialog-and-popover",
+      "html": "<dialog id=d>d<div id=p popover>p</div></dialog>",
+      "steps": [
+        {
+          "eval": "watch(document,['cancel','close','beforetoggle','toggle']);d.showModal();p.showPopover();take();[d.open,p.matches(':popover-open')]"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({dialog:d.open,popover:p.matches(':popover-open'),log:take()})"
+        },
+        {
+          "press": "Escape"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({dialog:d.open,popover:p.matches(':popover-open'),log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "light-dismiss-dialog",
+      "html": "<style>dialog{position:fixed;inset:auto 0 0 auto;margin:0}</style><button id=outside>out</button><dialog id=d closedby=any><button id=inner>in</button></dialog><dialog id=r>r</dialog>",
+      "steps": [
+        {
+          "eval": "watch(document,['pointerdown','mousedown','pointerup','mouseup','click','cancel','close']);d.show();[d.open,d.closedBy]"
+        },
+        {
+          "click": "#inner"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,log:take()})"
+        },
+        {
+          "click": "#outside"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "(()=>{const r={open:d.open,log:take()};d.showModal();return r})()"
+        },
+        {
+          "click": "#outside"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "(()=>{const r={open:d.open,log:take()};d.close();take();document.getElementById('r').showModal();return r})()"
+        },
+        {
+          "click": "#outside"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:document.getElementById('r').open,closedBy:document.getElementById('r').closedBy,log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "light-dismiss-dialog-prevented",
+      "html": "<style>dialog{position:fixed;inset:auto 0 0 auto;margin:0}</style><button id=outside>out</button><dialog id=d closedby=any><button id=inner>in</button></dialog>",
+      "steps": [
+        {
+          "eval": "d.addEventListener('cancel',e=>e.preventDefault());watch(document,['cancel','close']);d.show();d.open"
+        },
+        {
+          "click": "#outside"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,log:take()})"
+        },
+        {
+          "click": "#outside"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({open:d.open,log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "light-dismiss-popover",
+      "html": "<style>[popover]{inset:auto 0 0 auto;margin:0}</style><button id=outside>out</button><div id=p popover><button id=pin>in</button></div><div id=m popover=manual>m</div><button id=toggler popovertarget=p>t</button>",
+      "steps": [
+        {
+          "eval": "watch(document,['beforetoggle','toggle']);m.showPopover();p.showPopover();take();[p.matches(':popover-open'),m.matches(':popover-open')]"
+        },
+        {
+          "click": "#pin"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({p:p.matches(':popover-open'),m:m.matches(':popover-open'),log:take()})"
+        },
+        {
+          "click": "#outside"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({p:p.matches(':popover-open'),m:m.matches(':popover-open'),log:take()})"
+        },
+        {
+          "click": "#toggler"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({p:p.matches(':popover-open'),log:take()})"
+        },
+        {
+          "click": "#toggler"
+        },
+        {
+          "wait": 100
+        },
+        {
+          "eval": "({p:p.matches(':popover-open'),log:take()})"
+        }
+      ]
+    },
+    {
+      "id": "message-activation",
+      "html": "<button id=go>go</button><input id=consume><iframe id=f srcdoc=\"<script>onmessage=e=>parent.postMessage({ua:e.userActivation===undefined?'absent':e.userActivation&&[e.userActivation.isActive,e.userActivation.hasBeenActive]},'*')</script>\"></iframe>",
+      "steps": [
+        {
+          "eval": "window.M=[];addEventListener('message',e=>{const u=e.userActivation;M.push(u===undefined?'absent':u===null?null:[u.isActive,u.hasBeenActive,u===navigator.userActivation,Object.prototype.toString.call(u)])});postMessage('a',{targetOrigin:'*',includeUserActivation:true});postMessage('b','*');wait(50).then(()=>M.splice(0))"
+        },
+        {
+          "click": "#go"
+        },
+        {
+          "eval": "(async()=>{postMessage('c',{targetOrigin:'*',includeUserActivation:true});postMessage('d',{targetOrigin:'*'});postMessage('e',{includeUserActivation:false});postMessage('f','*',[]);postMessage('g',{targetOrigin:'*',includeUserActivation:true});consume.showPicker();await wait(50);const r={own:M.splice(0)};const ch=new MessageChannel();const got=new Promise(res=>{ch.port2.onmessage=e=>res(e.userActivation===undefined?'absent':e.userActivation&&[e.userActivation.isActive])});ch.port1.postMessage('p',{includeUserActivation:true});r.port=await got;r.badInit=run(()=>new MessageEvent('message',{userActivation:{}}));r.nullInit=new MessageEvent('message',{userActivation:null}).userActivation;r.getterOnSnapshot=await new Promise(res=>{addEventListener('message',function h(e){removeEventListener('message',h);const g=Object.getOwnPropertyDescriptor(UserActivation.prototype,'isActive').get;res([g.call(e.userActivation),Object.getPrototypeOf(e.userActivation)===UserActivation.prototype,Object.isFrozen(e.userActivation),e.userActivation===e.userActivation])});postMessage('h',{targetOrigin:'*',includeUserActivation:true})});r.frame=await new Promise(res=>{addEventListener('message',function h(e){if(e.source===$('f').contentWindow){removeEventListener('message',h);res(e.data)}});$('f').contentWindow.postMessage('x',{targetOrigin:'*',includeUserActivation:true})});return r})()"
+        }
+      ]
+    }
+  ]
+}

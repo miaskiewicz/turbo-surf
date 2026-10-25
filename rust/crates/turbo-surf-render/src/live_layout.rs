@@ -21,6 +21,10 @@ pub(crate) struct LiveTreeInput {
     pub(crate) svg_viewports: Vec<SourceId>,
     pub(crate) original_text: HashMap<SourceId, Vec<u16>>,
     pub(crate) composition: Option<crate::live_layout_composed::Composition>,
+    /// BackCompat documents address viewport metrics through their body.
+    pub(crate) quirks: bool,
+    /// The document's body element (`document.body`), when it is an HTML body.
+    pub(crate) body: Option<SourceId>,
 }
 
 pub(crate) fn source_id(document_id: u32, handle: Handle) -> SourceId {
@@ -56,7 +60,30 @@ pub(crate) fn capture_composed_tree(
         svg_viewports: copy.svg_viewports,
         original_text: copy.original_text,
         composition,
+        quirks: tree.compat_mode() == "BackCompat",
+        body: document_body(tree).map(|handle| source_id(document_id, handle)),
     })
+}
+
+/// `document.body`: the first body or frameset child of the HTML root element.
+fn document_body(tree: &Tree) -> Option<Handle> {
+    const HTML: Option<&str> = Some("http://www.w3.org/1999/xhtml");
+    let html = NodeRef::new(tree, tree.root())
+        .children()
+        .into_iter()
+        .find(|node| node.node_type() == NodeType::Element)
+        .filter(|node| {
+            node.local_name() == Some("html") && tree.namespace_uri(node.handle()) == HTML
+        })?;
+    html.children()
+        .into_iter()
+        .find(|node| {
+            node.node_type() == NodeType::Element
+                && matches!(node.local_name(), Some("body" | "frameset"))
+                && tree.namespace_uri(node.handle()) == HTML
+        })
+        .filter(|node| node.local_name() == Some("body"))
+        .map(|node| node.handle())
 }
 
 struct Copier<'a> {
@@ -286,11 +313,12 @@ pub(crate) fn layout_active_rules_resolved(
             });
         }
     }
-    let styled = if input.composition.is_some() {
+    let mut styled = if input.composition.is_some() {
         crate::live_layout_scoped::style_composed_tree(input, &qualified)?
     } else {
         turbo_html2pdf_core::style_tree(&input.nodes, &cascade)
     };
+    crate::live_layout_zoom::apply(&mut styled);
     crate::live_layout_resources::validate(&styled, rules)?;
     let styles = crate::live_layout_scroll::collect_styles(input, &styled);
     let original: Vec<_> = input

@@ -51,7 +51,9 @@ pub(super) fn changed(scope: &mut v8::PinScope, node: Handle, name: &str) {
     refresh(scope, node, name);
 }
 pub(super) fn refresh(scope: &mut v8::PinScope, node: Handle, name: &str) {
-    if with_tree(|tree| tree.node_type_id(node)) != Some(1) {
+    if with_tree(|tree| tree.node_type_id(node)) != Some(1)
+        || !element_members::compiles_content_attribute(node, name)
+    {
         return;
     }
     let source = source(node, name);
@@ -131,7 +133,7 @@ pub(super) fn refresh(scope: &mut v8::PinScope, node: Handle, name: &str) {
             None,
         );
         let mut source = v8::script_compiler::Source::new(code, Some(&origin));
-        let event = v8::String::new(scope, "event").unwrap();
+        let event = v8::String::new(scope, element_members::handler_parameter(node)).unwrap();
         let mut extensions = vec![document];
         let form = with_tree(|tree| {
             let mut parent = tree.parent(node);

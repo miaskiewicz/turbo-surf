@@ -540,7 +540,6 @@ fn computed_selector_lists_preserve_quoted_delimiters_and_live_invalid_assignmen
 }
 
 #[test]
-#[ignore = "Known Chrome155 unknown-pseudo CSSOM admission gap: https://github.com/miaskiewicz/turbo-surf/issues/28"]
 fn cssom_unknown_pseudo_selector_admission_matches_chrome155() {
     let value=run(
         "<!doctype html><head><style id=s>.target{width:7px}[data-token='{,}'] {width:13px} .target, [data-other='a,b'] {height:19px}</style></head><body><div id=t class=target data-token='{,}'></div><div id=other data-other='a,b'></div>",

@@ -38,3 +38,4 @@ rust/crates/turbo-surf-py/python/turbo_surf/__init__.pyi text eol=lf
 
 # Unified diffs require a space prefix on empty context lines.
 harness/detection/engine-154/patches/*.patch -whitespace
+rust/crates/turbo-surf-render/src/*.html text eol=lf

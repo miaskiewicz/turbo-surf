@@ -54,6 +54,33 @@ struct LayoutView {
     snapshot: turbo_html2pdf_core::layout_snapshot::LayoutSnapshot,
     styles: crate::live_layout_scroll::SourceStyles,
     omitted: std::collections::HashSet<turbo_html2pdf_core::layout_snapshot::SourceId>,
+    quirks: bool,
+    body: Option<turbo_html2pdf_core::layout_snapshot::SourceId>,
+}
+impl LayoutView {
+    fn zoom(&self, id: turbo_html2pdf_core::layout_snapshot::SourceId) -> f32 {
+        self.styles.get(&id).map_or(1.0, |entry| entry.zoom)
+    }
+    /// CSSOM View: the standards root and the quirks-mode body report the
+    /// viewport's client size (excluding scrollbars), never their own box.
+    fn viewport_client(&self, id: turbo_html2pdf_core::layout_snapshot::SourceId) -> bool {
+        if self.quirks {
+            self.body == Some(id)
+        } else {
+            crate::live_layout_scroll::is_root(&self.styles, id)
+        }
+    }
+    /// Whether an element's scroll APIs address the viewport (the scrolling
+    /// element): the standards root, or a quirks body that is not itself a
+    /// scroll container.
+    fn addresses_viewport(&self, id: turbo_html2pdf_core::layout_snapshot::SourceId) -> bool {
+        use crate::live_layout_scroll as scrolling;
+        if self.quirks {
+            self.body == Some(id) && !scrolling::element_scroller(&self.styles, id)
+        } else {
+            scrolling::is_root(&self.styles, id)
+        }
+    }
 }
 struct CacheEntry {
     key: CacheKey,
@@ -84,6 +111,8 @@ impl crate::live_stylesheets::Conditions for Viewport {
     }
 }
 
+const VIEWPORT_PENDING: &str = "native layout viewport was not captured";
+
 fn viewport<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     context: v8::Local<'s, v8::Context>,
@@ -99,9 +128,7 @@ fn viewport_at_depth<'s>(
     if depth > 12 {
         return Err("native frame viewport hierarchy exceeds its depth limit".into());
     }
-    let current = context
-        .get_slot::<Viewport>()
-        .ok_or("native layout viewport was not captured")?;
+    let current = context.get_slot::<Viewport>().ok_or(VIEWPORT_PENDING)?;
     let [width, height] = if crate::runtime::native_frame_is_retired(context) {
         [0.0; 2]
     } else if let Some(host) = crate::runtime::native_frame_layout_host(scope, context) {
@@ -191,10 +218,13 @@ fn measure<'s>(
             .ok_or("native layout owner realm unavailable")?;
         let viewport = viewport(scope, context)?;
         let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
-        let mut geometry = element_geometry(
-            &snapshot,
-            crate::live_layout::source_id(input.tree.document_id, input.handle),
-        )?;
+        let id = crate::live_layout::source_id(input.tree.document_id, input.handle);
+        let mut geometry = element_geometry(&snapshot, id)?;
+        unzoom_metrics(&mut geometry, snapshot.zoom(id));
+        if snapshot.viewport_client(id) {
+            geometry.client.width = viewport.width.floor() as i32;
+            geometry.client.height = viewport.height.floor() as i32;
+        }
         if !geometry.rects.is_empty() {
             let state = scroll_state(context);
             let translation = crate::live_layout_scroll::scroll_translation(
@@ -219,6 +249,40 @@ fn measure<'s>(
         client: geometry.client,
         offset: geometry.offset,
     })
+}
+/// Offset and client metrics report an element's own unzoomed CSS pixels: the
+/// pixel-snapped layout value divided by its effective zoom, then rounded.
+fn unzoom_metrics(geometry: &mut crate::live_layout_metrics::ElementGeometry, zoom: f32) {
+    if zoom == 1.0 {
+        return;
+    }
+    let client = &mut geometry.client;
+    for value in [
+        &mut client.left,
+        &mut client.top,
+        &mut client.width,
+        &mut client.height,
+        &mut geometry.offset.width,
+        &mut geometry.offset.height,
+    ] {
+        *value = unzoom(*value, zoom);
+    }
+}
+fn unzoom(value: i32, zoom: f32) -> i32 {
+    (f64::from(value) / f64::from(zoom)).round() as i32
+}
+/// Blink's AdjustForAbsoluteZoom::AdjustInt for integral content sizes: zooming
+/// in compensates for truncation before dividing.
+fn adjust_int(value: i32, zoom: f32) -> i32 {
+    if zoom == 1.0 {
+        return value;
+    }
+    let value = match (zoom > 1.0, value < 0) {
+        (false, _) => value,
+        (true, true) => value - 1,
+        (true, false) => value + 1,
+    };
+    (f64::from(value) / f64::from(zoom)) as i32
 }
 fn element_geometry(
     view: &LayoutView,
@@ -327,6 +391,8 @@ fn resolve(
             snapshot,
             styles,
             omitted,
+            quirks: tree.quirks,
+            body: tree.body,
         });
         LAYOUT_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
@@ -365,6 +431,8 @@ pub(crate) struct ScrollResult {
     height: i32,
     left: f64,
     top: f64,
+    /// 0: unchanged, 1: the element's own box, 2: the viewport.
+    changed: u32,
 }
 #[op2(reentrant)]
 #[serde]
@@ -374,82 +442,614 @@ pub(crate) fn op_live_element_scroll<'s>(
     axis: u32,
     value: f64,
 ) -> Result<ScrollResult, JsErrorBox> {
-    scroll(scope, receiver, axis, value).map_err(|error| {
-        if error == "Illegal invocation" {
-            JsErrorBox::type_error(error)
-        } else {
-            JsErrorBox::generic(error)
-        }
-    })
+    // Bit 4 addresses the viewport through the root (the Window scroll members).
+    let target = match axis & 3 {
+        1 => [Some(value), None],
+        2 => [None, Some(value)],
+        _ => [None; 2],
+    };
+    scroll(scope, receiver, target, false, axis & 4 != 0).map_err(geometry_error)
 }
-fn scroll<'s>(
+/// Scroll an element (or, for the root, the viewport) to absolute or relative
+/// offsets. NaN keeps the current axis; other values are already finite.
+#[op2(reentrant)]
+#[serde]
+pub(crate) fn op_live_element_scroll_to<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
-    axis: u32,
-    value: f64,
-) -> Result<ScrollResult, String> {
+    x: f64,
+    y: f64,
+    relative: bool,
+    viewport: bool,
+) -> Result<ScrollResult, JsErrorBox> {
+    let axis = |value: f64| (!value.is_nan()).then_some(value);
+    scroll(scope, receiver, [axis(x), axis(y)], relative, viewport).map_err(geometry_error)
+}
+struct ScrollView<'s> {
+    context: v8::Local<'s, v8::Context>,
+    viewport: std::rc::Rc<Viewport>,
+    view: std::rc::Rc<LayoutView>,
+    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+}
+fn scroll_view<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<ScrollView<'s>>, String> {
+    // A realm still running trusted bootstrap (for example a new frame probing
+    // window members) has no layout viewport yet: it observes the initial origin
+    // and must not capture another document's layout mid-initialization.
+    if scope
+        .get_entered_or_microtask_context()
+        .get_slot::<Viewport>()
+        .is_none()
+    {
+        return Ok(None);
+    }
     let input = crate::browser_env::capture_native_layout(scope, receiver)?;
     if !input.connected || !input.browsing_context {
-        return Ok(ScrollResult {
-            width: 0,
-            height: 0,
-            left: 0.0,
-            top: 0.0,
-        });
+        return Ok(None);
     }
     let context = input
         .owner_context
         .ok_or("native layout owner realm unavailable")?;
-    let viewport = viewport(scope, context)?;
-    let snapshot = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
+    // An ancestor frame realm can also still be bootstrapping its viewport.
+    let viewport = match viewport(scope, context) {
+        Err(error) if error == VIEWPORT_PENDING => return Ok(None),
+        result => result?,
+    };
+    let view = resolve(scope, &input.tree, &input.sheets, viewport.as_ref())?;
     let id = crate::live_layout::source_id(input.tree.document_id, input.handle);
-    if snapshot.omitted.contains(&id) {
+    Ok((!view.omitted.contains(&id)).then_some(ScrollView {
+        context,
+        viewport,
+        view,
+        id,
+    }))
+}
+/// The scrolling box an element's scroll APIs address, with its current extent.
+fn scroller(
+    view: &LayoutView,
+    viewport: &Viewport,
+    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+) -> Result<
+    (
+        turbo_html2pdf_core::layout_snapshot::SourceId,
+        crate::live_layout_scroll::ScrollMetrics,
+    ),
+    String,
+> {
+    use crate::live_layout_scroll as scrolling;
+    if view.addresses_viewport(id) {
+        return viewport_scroller(view, viewport);
+    }
+    let mut metrics = scrolling::scroll_metrics(&view.snapshot, &view.styles, id)?;
+    // A propagated overflow belongs to the viewport, never the element's own box;
+    // a quirks root always propagates its overflow and is reached only as itself.
+    if scrolling::propagated_body(&view.styles, id)
+        || view.quirks && scrolling::is_root(&view.styles, id)
+    {
+        metrics.scroll_x = false;
+        metrics.scroll_y = false;
+    }
+    Ok((id, metrics))
+}
+/// The viewport scrolling box, whose extent is the initial containing block plus
+/// the root's non-fixed scrollable overflow.
+fn viewport_scroller(
+    view: &LayoutView,
+    viewport: &Viewport,
+) -> Result<
+    (
+        turbo_html2pdf_core::layout_snapshot::SourceId,
+        crate::live_layout_scroll::ScrollMetrics,
+    ),
+    String,
+> {
+    use crate::live_layout_scroll as scrolling;
+    let root = scroll_root(view).ok_or("native viewport root unavailable")?;
+    let size = [viewport.width, viewport.height];
+    let metrics = scrolling::viewport_metrics(&view.snapshot, &view.styles, root, size)?;
+    Ok((scrolling::VIEWPORT, metrics))
+}
+fn snap(viewport: &Viewport, value: f64) -> f64 {
+    (value * viewport.device_scale + 0.5).floor() / viewport.device_scale
+}
+/// Clamp retained state to the current extent, then apply requested positions.
+fn apply_scroll(
+    values: &mut std::collections::BTreeMap<
+        turbo_html2pdf_core::layout_snapshot::SourceId,
+        [f64; 2],
+    >,
+    key: turbo_html2pdf_core::layout_snapshot::SourceId,
+    metrics: &crate::live_layout_scroll::ScrollMetrics,
+    viewport: &Viewport,
+    target: [Option<f64>; 2],
+    relative: bool,
+) -> ([f64; 2], bool) {
+    let offset = values.entry(key).or_insert([0.0; 2]);
+    let maximum = [snap(viewport, metrics.max_x), snap(viewport, metrics.max_y)];
+    let enabled = [metrics.scroll_x, metrics.scroll_y];
+    let mut changed = false;
+    for i in 0..2 {
+        offset[i] = if enabled[i] {
+            offset[i].clamp(0.0, maximum[i])
+        } else {
+            0.0
+        };
+        let Some(value) = target[i].filter(|_| enabled[i]) else {
+            continue;
+        };
+        let value = if relative { offset[i] + value } else { value };
+        let next = if value.is_finite() {
+            snap(viewport, value.clamp(0.0, maximum[i])).clamp(0.0, maximum[i])
+        } else {
+            0.0
+        };
+        changed |= next != offset[i];
+        offset[i] = next;
+    }
+    (*offset, changed)
+}
+fn scroll<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    target: [Option<f64>; 2],
+    relative: bool,
+    viewport: bool,
+) -> Result<ScrollResult, String> {
+    let Some(current) = scroll_view(scope, receiver)? else {
         return Ok(ScrollResult {
             width: 0,
             height: 0,
             left: 0.0,
             top: 0.0,
+            changed: 0,
         });
-    }
-    let metrics =
-        crate::live_layout_scroll::scroll_metrics(&snapshot.snapshot, &snapshot.styles, id)?;
-    let state = scroll_state(context);
+    };
+    let (key, metrics) = if viewport {
+        viewport_scroller(&current.view, &current.viewport)?
+    } else {
+        scroller(&current.view, &current.viewport, current.id)?
+    };
+    // Element scroll offsets and extents are in the scroller's own unzoomed CSS
+    // pixels; the viewport uses the (unit) page zoom.
+    let zoom = if key == crate::live_layout_scroll::VIEWPORT {
+        1.0
+    } else {
+        current.view.zoom(key)
+    };
+    let target = target.map(|value| value.map(|value| value * f64::from(zoom)));
+    let state = scroll_state(current.context);
     let mut values = state.values.borrow_mut();
-    values.retain(|source, _| snapshot.styles.contains_key(source));
-    let offset = values.entry(id).or_insert([0.0; 2]);
-    let snap = |value: f64| (value * viewport.device_scale + 0.5).floor() / viewport.device_scale;
-    let maximum = [snap(metrics.max_x), snap(metrics.max_y)];
-    for i in 0..2 {
-        if !(if i == 0 {
-            metrics.scroll_x
-        } else {
-            metrics.scroll_y
-        }) {
-            offset[i] = 0.0;
-        } else {
-            offset[i] = offset[i].clamp(0.0, maximum[i]);
-        }
-    }
-    if axis == 1 || axis == 2 {
-        let index = (axis - 1) as usize;
-        if if index == 0 {
-            metrics.scroll_x
-        } else {
-            metrics.scroll_y
-        } {
-            offset[index] = if value.is_finite() {
-                snap(value.clamp(0.0, maximum[index])).clamp(0.0, maximum[index])
-            } else {
-                0.0
-            };
-        }
-    }
+    values.retain(|source, _| {
+        *source == crate::live_layout_scroll::VIEWPORT || current.view.styles.contains_key(source)
+    });
+    let (offset, changed) = apply_scroll(
+        &mut values,
+        key,
+        &metrics,
+        &current.viewport,
+        target,
+        relative,
+    );
     Ok(ScrollResult {
-        width: metrics.width,
-        height: metrics.height,
-        left: offset[0],
-        top: offset[1],
+        width: unzoom(metrics.width, zoom),
+        height: unzoom(metrics.height, zoom),
+        left: offset[0] / f64::from(zoom),
+        top: offset[1] / f64::from(zoom),
+        changed: match (changed, key == crate::live_layout_scroll::VIEWPORT) {
+            (false, _) => 0,
+            (true, false) => 1,
+            (true, true) => 2,
+        },
     })
+}
+
+/// The window's retained viewport offset, for reads where the current document
+/// cannot be laid out natively. It was clamped and snapped when it was set.
+#[op2]
+#[serde]
+pub(crate) fn op_live_viewport_offset<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    window: v8::Local<'s, v8::Object>,
+) -> Result<Vec<f64>, JsErrorBox> {
+    let context = window
+        .get_creation_context(scope)
+        .filter(|context| window.strict_equals(context.global(scope).into()))
+        .ok_or_else(|| JsErrorBox::type_error("Illegal invocation"))?;
+    let state = scroll_state(context);
+    let offset = state
+        .values
+        .borrow()
+        .get(&crate::live_layout_scroll::VIEWPORT)
+        .copied()
+        .unwrap_or([0.0; 2]);
+    Ok(offset.to_vec())
+}
+
+/// Scroll every ancestor scrolling box, innermost first, to expose an element.
+/// Returns the changed element scrollers and whether the viewport moved.
+#[op2(reentrant)]
+pub(crate) fn op_live_scroll_into_view<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    block: u32,
+    inline: u32,
+    mode: u32,
+    nearest: bool,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    scroll_into_view(scope, receiver, [inline, block], mode, nearest).map_err(geometry_error)
+}
+fn scroll_into_view<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    alignments: [u32; 2],
+    mode: u32,
+    nearest: bool,
+) -> Result<v8::Local<'s, v8::Value>, String> {
+    use crate::live_layout_scroll as scrolling;
+    let behaviors = [
+        scrolling::alignment(alignments[0], mode)?,
+        scrolling::alignment(alignments[1], mode)?,
+    ];
+    let mut changed = Vec::new();
+    let mut viewport_changed = false;
+    if let Some(current) = scroll_view(scope, receiver)? {
+        let view = &current.view;
+        let boxed = element_geometry(view, current.id)?;
+        if !boxed.rects.is_empty() {
+            let state = scroll_state(current.context);
+            for scroller_id in into_view_scrollers(view, current.id, nearest)? {
+                let mut values = state.values.borrow_mut();
+                let translation = scrolling::scroll_translation(
+                    &view.snapshot,
+                    &view.styles,
+                    current.id,
+                    &values,
+                )?;
+                let bounds = boxed.bounds;
+                let world = [
+                    f64::from(bounds.x - translation[0]),
+                    f64::from(bounds.y - translation[1]),
+                    f64::from(bounds.width),
+                    f64::from(bounds.height),
+                ];
+                let (key, metrics, port, local) = if scroller_id == scrolling::VIEWPORT {
+                    let (key, metrics) = viewport_scroller(view, &current.viewport)?;
+                    let size = [
+                        f64::from(current.viewport.width),
+                        f64::from(current.viewport.height),
+                    ];
+                    (key, metrics, [0.0, 0.0, size[0], size[1]], world)
+                } else {
+                    let (key, metrics) = scroller(view, &current.viewport, scroller_id)?;
+                    let (port, local) = scroller_space(view, scroller_id, world, &values)?;
+                    (key, metrics, port, local)
+                };
+                let offset = values.get(&key).copied().unwrap_or([0.0; 2]);
+                let mut target = [None; 2];
+                for axis in 0..2 {
+                    let start = local[axis] - port[axis] + offset[axis];
+                    target[axis] = Some(scrolling::expose(
+                        start,
+                        local[axis + 2],
+                        offset[axis],
+                        port[axis + 2],
+                        behaviors[axis],
+                    ));
+                }
+                let (_, moved) =
+                    apply_scroll(&mut values, key, &metrics, &current.viewport, target, false);
+                if moved && key == scrolling::VIEWPORT {
+                    viewport_changed = true;
+                } else if moved {
+                    changed.push(key);
+                }
+            }
+        }
+    }
+    let elements = crate::browser_env::wrap_native_layout_elements(scope, receiver, &changed, 1)?;
+    let result = v8::Object::new(scope);
+    let null = v8::null(scope);
+    if result.set_prototype(scope, null.into()) != Some(true) {
+        return Err("native scroll record interrupted".into());
+    }
+    let viewport = v8::Boolean::new(scope, viewport_changed);
+    for (name, value) in [("elements", elements.into()), ("viewport", viewport.into())] {
+        let name = v8::String::new(scope, name).ok_or("native scroll record key interrupted")?;
+        if result.create_data_property(scope, name.into(), value) != Some(true) {
+            return Err("native scroll record interrupted".into());
+        }
+    }
+    Ok(result.into())
+}
+fn scroll_root(view: &LayoutView) -> Option<turbo_html2pdf_core::layout_snapshot::SourceId> {
+    view.styles
+        .iter()
+        .find(|(_, entry)| entry.parent.is_none())
+        .map(|(id, _)| *id)
+}
+/// Ancestor scrolling boxes along the containing-block chain, then the viewport.
+fn into_view_scrollers(
+    view: &LayoutView,
+    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+    nearest: bool,
+) -> Result<Vec<turbo_html2pdf_core::layout_snapshot::SourceId>, String> {
+    use crate::live_layout_scroll as scrolling;
+    use turbo_html2pdf_core::layout::value::Position;
+    let source = view
+        .snapshot
+        .source(id)
+        .ok_or("native scroll source missing")?;
+    let fragment = source
+        .fragment_indices
+        .iter()
+        .map(|&i| &view.snapshot.fragments()[i])
+        .find(|fragment| {
+            fragment.kind == turbo_html2pdf_core::layout_snapshot::GeometryKind::BorderBox
+        })
+        .or_else(|| {
+            view.snapshot
+                .text_runs()
+                .iter()
+                .find(|run| run.source_id == Some(id) || run.source_ancestors.contains(&id))
+                .map(|run| &view.snapshot.fragments()[run.fragment_index])
+        })
+        .ok_or("native scroll requires placed source provenance")?;
+    let position = fragment.used_box.map(|used| used.position);
+    let ancestors = &fragment.source_ancestors;
+    let positioned = |ancestor: &turbo_html2pdf_core::layout_snapshot::SourceId, fixed: bool| {
+        view.styles.get(ancestor).is_some_and(|entry| {
+            entry.style.get("display") != Some("contents")
+                && entry.style.get("position").is_some_and(|value| {
+                    if fixed {
+                        value.trim() == "fixed"
+                    } else {
+                        value.trim() != "static"
+                    }
+                })
+        })
+    };
+    let mut result = Vec::new();
+    if position != Some(Position::Fixed) {
+        let containing = if position == Some(Position::Absolute) {
+            ancestors
+                .iter()
+                .rposition(|ancestor| *ancestor != id && positioned(ancestor, false))
+        } else {
+            Some(ancestors.len())
+        };
+        for (i, ancestor) in ancestors.iter().enumerate().rev() {
+            if *ancestor == id || containing.is_none_or(|index| i > index) {
+                continue;
+            }
+            if scrolling::element_scroller(&view.styles, *ancestor) {
+                result.push(*ancestor);
+            }
+        }
+        if !ancestors
+            .iter()
+            .any(|ancestor| *ancestor != id && positioned(ancestor, true))
+        {
+            result.push(scrolling::VIEWPORT);
+        }
+    }
+    if nearest {
+        result.truncate(1);
+    }
+    Ok(result)
+}
+/// Map an actual world rectangle into a scroller's local layout space, returning
+/// its scrollport (padding box) and the rectangle's local bounding box.
+fn scroller_space(
+    view: &LayoutView,
+    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+    world: [f64; 4],
+    offsets: &std::collections::BTreeMap<turbo_html2pdf_core::layout_snapshot::SourceId, [f64; 2]>,
+) -> Result<([f64; 4], [f64; 4]), String> {
+    let source = view
+        .snapshot
+        .source(id)
+        .ok_or("native scroll source missing")?;
+    let fragment = source
+        .fragment_indices
+        .iter()
+        .map(|&i| &view.snapshot.fragments()[i])
+        .find(|fragment| {
+            fragment.kind == turbo_html2pdf_core::layout_snapshot::GeometryKind::BorderBox
+        })
+        .ok_or("native scroll requires inline border provenance")?;
+    let used = fragment.used_box.ok_or("native scroll used box missing")?;
+    let padding = used.padding_rect(fragment.rect);
+    let matrix = view
+        .snapshot
+        .native_world_transform(fragment.index)
+        .ok_or("native scroll transform unavailable")?;
+    let determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+    if determinant == 0.0 || !determinant.is_finite() {
+        return Err(
+            "native scroll degenerate-container relative transform provenance pending".into(),
+        );
+    }
+    // The scroller itself moves with its ancestors' offsets; undo that first.
+    let shift =
+        crate::live_layout_scroll::scroll_translation(&view.snapshot, &view.styles, id, offsets)?;
+    let mut bounds = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for (x, y) in [
+        (world[0], world[1]),
+        (world[0] + world[2], world[1]),
+        (world[0], world[1] + world[3]),
+        (world[0] + world[2], world[1] + world[3]),
+    ] {
+        let x = x + f64::from(shift[0]) - matrix[4];
+        let y = y + f64::from(shift[1]) - matrix[5];
+        let local = [
+            (matrix[3] * x - matrix[2] * y) / determinant,
+            (-matrix[1] * x + matrix[0] * y) / determinant,
+        ];
+        bounds = [
+            bounds[0].min(local[0]),
+            bounds[1].min(local[1]),
+            bounds[2].max(local[0]),
+            bounds[3].max(local[1]),
+        ];
+    }
+    Ok((
+        [
+            f64::from(padding.x),
+            f64::from(padding.y),
+            f64::from(padding.width),
+            f64::from(padding.height),
+        ],
+        [
+            bounds[0],
+            bounds[1],
+            bounds[2] - bounds[0],
+            bounds[3] - bounds[1],
+        ],
+    ))
+}
+
+/// Whether an element has a layout box (Blink's layout object): display:none
+/// subtrees, display:contents and unassigned slottables have none.
+fn has_box(view: &LayoutView, id: turbo_html2pdf_core::layout_snapshot::SourceId) -> bool {
+    view.snapshot
+        .source(id)
+        .is_some_and(|source| !source.excluded_from_layout)
+        && view
+            .styles
+            .get(&id)
+            .is_some_and(|entry| entry.style.get("display") != Some("contents"))
+}
+/// Whether an element's own box is a scroll container (overflow not propagated
+/// to the viewport); a quirks document then has no scrolling element.
+#[op2(fast, reentrant)]
+pub(crate) fn op_live_scroll_container<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<bool, JsErrorBox> {
+    let Some(current) = scroll_view(scope, receiver).map_err(geometry_error)? else {
+        return Ok(false);
+    };
+    Ok(has_box(&current.view, current.id)
+        && crate::live_layout_scroll::element_scroller(&current.view.styles, current.id))
+}
+/// `Element.currentCSSZoom`: the effective zoom of an element with a layout box,
+/// otherwise 1.
+#[op2(fast, reentrant)]
+pub(crate) fn op_live_element_zoom<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<f64, JsErrorBox> {
+    let Some(current) = scroll_view(scope, receiver).map_err(geometry_error)? else {
+        return Ok(1.0);
+    };
+    Ok(if has_box(&current.view, current.id) {
+        f64::from(current.view.zoom(current.id))
+    } else {
+        1.0
+    })
+}
+/// A rendered input's content-box width or height in its own unzoomed CSS
+/// pixels (Blink's ImageInputType::Width/Height layout path), or null when the
+/// element has no layout box.
+#[op2(reentrant)]
+pub(crate) fn op_live_input_size<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    height: bool,
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    Ok(
+        match input_size(scope, receiver, height).map_err(geometry_error)? {
+            Some(value) => v8::Integer::new(scope, value).into(),
+            None => v8::null(scope).into(),
+        },
+    )
+}
+fn input_size<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    height: bool,
+) -> Result<Option<i32>, String> {
+    let Some(current) = scroll_view(scope, receiver)? else {
+        return Ok(None);
+    };
+    let view = &current.view;
+    if !has_box(view, current.id) {
+        return Ok(None);
+    }
+    let source = view
+        .snapshot
+        .source(current.id)
+        .ok_or("native input layout source missing")?;
+    let used = source
+        .fragment_indices
+        .iter()
+        .find_map(|&index| {
+            let fragment = &view.snapshot.fragments()[index];
+            (fragment.kind == turbo_html2pdf_core::layout_snapshot::GeometryKind::BorderBox)
+                .then_some(fragment.used_box)
+                .flatten()
+        })
+        .ok_or("native input content box unavailable")?;
+    let content = if height {
+        used.content_height
+    } else {
+        used.content_width
+    };
+    // LayoutUnit::ToInt truncates before the zoom adjustment.
+    Ok(Some(adjust_int(content as i32, view.zoom(current.id))))
+}
+/// CSSOM View checkVisibility over the actual box tree and computed styles.
+#[op2(fast, reentrant)]
+pub(crate) fn op_live_element_visibility<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    flags: u32,
+) -> Result<bool, JsErrorBox> {
+    visibility(scope, receiver, flags).map_err(geometry_error)
+}
+fn visibility<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    flags: u32,
+) -> Result<bool, String> {
+    let Some(current) = scroll_view(scope, receiver)? else {
+        return Ok(false);
+    };
+    let view = &current.view;
+    let has_box = view
+        .snapshot
+        .source(current.id)
+        .is_some_and(|source| !source.excluded_from_layout)
+        && view
+            .styles
+            .get(&current.id)
+            .is_some_and(|entry| entry.style.get("display") != Some("contents"));
+    if !has_box {
+        return Ok(false);
+    }
+    let relevant = |ancestor| -> Result<bool, String> {
+        let state = scroll_state(current.context);
+        let geometry = element_geometry(view, ancestor)?;
+        let translation = crate::live_layout_scroll::scroll_translation(
+            &view.snapshot,
+            &view.styles,
+            ancestor,
+            &state.values.borrow(),
+        )?;
+        Ok(crate::live_layout_visibility::near_viewport(
+            geometry.bounds,
+            translation,
+            [current.viewport.width, current.viewport.height],
+        ))
+    };
+    crate::live_layout_visibility::check(&view.styles, current.id, flags, relevant)
 }
 /// Capture trusted bootstrap values once, before authored page code can replace
 /// the Window dimensions. This is not a second arbitrary default viewport.
@@ -638,7 +1238,16 @@ fn offset<'s>(
                 parent: None,
             }
         } else {
-            crate::live_layout_metrics::offset_position(&snapshot.snapshot, &snapshot.styles, id)?
+            let mut position = crate::live_layout_metrics::offset_position(
+                &snapshot.snapshot,
+                &snapshot.styles,
+                id,
+            )?;
+            let zoom = f64::from(snapshot.zoom(id));
+            for value in [&mut position.left, &mut position.top] {
+                *value = (f64::from(*value) / zoom).round() as i32;
+            }
+            position
         }
     };
     let parent = if let Some(parent) = position.parent {

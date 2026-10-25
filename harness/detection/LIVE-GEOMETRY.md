@@ -56,6 +56,46 @@ visibility, pointer-events and paint order. Inert documents, retired frames and 
 return empty regions before requiring active layout capabilities. Unsupported
 active layout paths reject rather than return invented dimensions.
 
+Element and Window scrolling now drives the same native scroll state. Chrome156
+returns a promise from `scroll`, `scrollTo`, `scrollBy` and `scrollIntoView` on
+Element and Window, resolved in a posted task with a fresh `{interrupted}` result;
+brand and conversion failures reject with the binding-prefixed message, while
+author-thrown conversion errors propagate unchanged. The root element addresses the
+viewport (`scrollX`/`scrollY`/`pageXOffset`/`pageYOffset` are real [Replaceable]
+accessors), whose extent is the initial containing block plus non-fixed descendant
+overflow. `scrollIntoView` and WebKit `scrollIntoViewIfNeeded` follow Chromium's
+per-axis visible/hidden/partial alignment over the containing-block chain of element
+scrollers, then the viewport (fixed boxes scroll nothing; `container:"nearest"`
+stops at the first box). `scroll` and `scrollend` are coalesced per scrolling box
+in first-scroll order and delivered before the next frame's animation callbacks;
+the viewport's events target the document and bubble to the window.
+`checkVisibility` uses the actual box (display:none, display:contents, unassigned
+slots and detached nodes are false), flat-tree content-visibility, opacity and
+visibility, and content-visibility:auto relevance with Chromium's 50% viewport
+margin. The authored control is `element-scroll-chrome-control.mjs` (three probes,
+Chrome156.0.8078.47, per-probe SHA-256 in
+`fixtures/element-scroll-chrome156.json`); `tests/element_scroll.rs` compares it.
+
+Standardized CSS `zoom` follows Chrome156: the CSSOM grammar and serialization
+(`normal`, non-negative numbers/percentages, single-kind `calc()`), computed
+factors, and native layout of every absolute and viewport-relative length at the
+element's effective zoom (the flat-tree product, through `display:contents`).
+Rectangles and hit testing use zoomed layout pixels; offset/client/scroll metrics
+and scroll offsets use the element's own unzoomed pixels, and `offsetParent` also
+stops at a zoom change. `Element.currentCSSZoom` reports the effective zoom of an
+element with a box, else 1. The standards root and quirks-mode body report the
+viewport client size; the quirks body addresses the viewport unless it is a scroll
+container (`scrollingElement` is then null), the quirks root is an ordinary box,
+and an iframe srcdoc document is never in quirks mode. Image-button
+`HTMLInputElement.width/height` report the rendered content box, else the
+dimension attribute. `zoom-layout-chrome-control.mjs` records four Chrome156
+captures (`fixtures/zoom-layout-chrome156.json`); `tests/zoom_layout.rs` compares
+them and pins three gaps: factors beyond six significant digits (CSSOM text
+reaches layout at Chrome's serialization), image buttons loading no image (no
+natural size), and Chrome's attribute answer before the first style update after
+insertion. Unsized form-control and replaced defaults (for example a 300x150
+iframe) are not yet zoomed.
+
 [Host media](./HOST-MEDIA.md) supplies real platform preferences and installed
 input-driver capabilities to both live CSS and relevant media queries; cache keys
 include that captured environment. [Modern at-rule admission](./NEUTRAL-AT-RULES.md)
@@ -163,8 +203,12 @@ Remaining bounds:
   absolute/fixed/sticky positioning. RTL/vertical writing and positioned/floating
   block-in-inline contexts remain unsupported; ordinary static splitting has
   the bounded controls described above.
-- Complete stacking contexts, scroll methods/events, RTL/vertical overflow and
-  scrollbars; existing metrics/clamping and ancestor projection are tested subsets.
+- Complete stacking contexts, RTL/vertical overflow and scrollbars; existing
+  metrics/clamping, ancestor projection and the scroll-method/event control are
+  tested subsets. Smooth scrolls (including CSS `scroll-behavior`, which is not
+  consulted) complete at the next frame without intermediate animation positions;
+  `scroll-margin`/`scroll-padding` and re-clamping scroll events after layout
+  changes remain open (issue28).
 - Downloaded fonts, image source-density/intrinsic loading and animation/pseudo epochs.
 - Broader iframe viewport/layout migrations beyond the tested content-box resize,
   nested frame, cross-document adoption and retirement controls.

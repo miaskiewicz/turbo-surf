@@ -2,16 +2,16 @@
 
 [package]
 name = "turbo-surf-packaged-consumer"
-version = "0.5.4"
+version = "0.5.5"
 edition = "2021"
 publish = false
 
 [dependencies]
-turbo-surf-core = "=0.5.4"
-turbo-surf-view = "=0.5.4"
-turbo-surf-page = "=0.5.4"
-turbo-surf-render = "=0.5.4"
-turbo-surf-raster = "=0.5.4"
-turbo-surf-mcp = "=0.5.4"
+turbo-surf-core = "=0.5.5"
+turbo-surf-view = "=0.5.5"
+turbo-surf-page = "=0.5.5"
+turbo-surf-render = "=0.5.5"
+turbo-surf-raster = "=0.5.5"
+turbo-surf-mcp = "=0.5.5"
 turbo-dom-parser = { package = "turbo-dom", version = "=0.5.7" }
 serde_json = "1"

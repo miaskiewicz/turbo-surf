@@ -1,0 +1,15 @@
+[
+  { "name": "domparser", "probe": "sanitizer-domparser-probe.js" },
+  {
+    "name": "declarative-scripts",
+    "probe": "sanitizer-declarative-scripts-probe.js",
+    "page": "sanitizer-declarative-scripts.html"
+  },
+  {
+    "name": "trusted-types",
+    "probe": "sanitizer-trusted-types-probe.js",
+    "headers": {
+      "Content-Security-Policy": "require-trusted-types-for 'script'; trusted-types policy default"
+    }
+  }
+]

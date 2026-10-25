@@ -181,6 +181,21 @@ test("Locator actions: fill/clear/type/pressSequentially/check/uncheck/setChecke
   assert.equal(await p.locator("#agree").isChecked(), false);
 });
 
+test("Locator.setInputFiles selects genuine Files through the input's FileList", async () => {
+  const p = newPage();
+  await p.setContent(
+    "<input type=file id=f multiple><p id=log></p><script>document.querySelector('#f').addEventListener('change',(e)=>{const f=e.target.files;document.querySelector('#log').textContent=[f instanceof FileList,f.length,f[0] instanceof File,f[0].name,f[0].type,f[0].size,f[1].size,e.target.value].join('|');});</script>",
+  );
+  await p.locator("#f").setInputFiles([
+    { name: "a.bin", mimeType: "application/x-test", buffer: Buffer.from([0, 255, 128]) },
+    { name: "b.txt", mimeType: "text/plain", buffer: Buffer.from("hi") },
+  ]);
+  assert.equal(
+    await p.locator("#log").textContent(),
+    "true|2|true|a.bin|application/x-test|3|2|C:\\fakepath\\a.bin",
+  );
+});
+
 test("Locator no-op actions resolve quietly (focus/blur/scroll/dispatch/waitFor/highlight)", async () => {
   const p = await fresh();
   await p.locator("#go").focus();

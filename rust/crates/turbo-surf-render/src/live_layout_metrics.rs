@@ -227,7 +227,7 @@ pub(crate) fn offset_position(
     };
     if source.excluded_from_layout
         || style.style.get("display") == Some("contents")
-        || matches!(style.tag.as_str(), "html" | "body")
+        || style.tag == "body"
     {
         return Ok(zero);
     }
@@ -267,7 +267,9 @@ pub(crate) fn offset_position(
             && !is_inline_fragment(snapshot, parent);
         let table = used.position == turbo_html2pdf_core::layout::value::Position::Static
             && matches!(parent_style.tag.as_str(), "table" | "td" | "th");
-        if positioned || transformed || table || parent_style.tag == "body" {
+        // Blink's WebKit extension: offsetParent also stops at a zoom change.
+        let zoomed = parent_style.zoom != style.zoom;
+        if positioned || transformed || table || zoomed || parent_style.tag == "body" {
             let (x, y) = if parent_style.tag == "body" && !positioned && !transformed {
                 (0.0, 0.0)
             } else {

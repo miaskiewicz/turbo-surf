@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.5.4 — Rust engine** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.5.5 — Rust engine** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -204,7 +204,7 @@ platform there's no prebuilt binary (build from a checkout as above).
 
 ## Looking like a real browser (fingerprint + anti-bot)
 
-The default profile reports **Chrome 155** through its UA and client hints
+The default profile reports **Chrome 156** through its UA and client hints
 (`sec-ch-ua`, `sec-fetch-*`, …), with a configured per-version header order
 and a corresponding `navigator` (`platform`, `vendor`,
 `webdriver: false`, plugins, `window.chrome`, native-`toString`, coherent
@@ -213,12 +213,16 @@ emulated browser surface; successful identity probes do not establish complete
 Chrome parity or acceptance by a site's anti-bot system.
 
 Version-specific fingerprint data (reported major, full build for high-entropy
-UA-CH, and the navigation **header order** — which Chrome reorders across releases)
-lives in a declarative per-version registry (`turbo-surf-core`'s `browser` module):
-one coherent config per supported Chrome version, defaulting to Chrome
-155.0.8059.80. Wire headers and the render-tier navigator read from it. Each new
-profile needs a measured header/client-hint configuration and separate engine
-and transport validation; a reported version change does not upgrade V8.
+UA-CH, the navigation **header order** and the measured per-request-class orders,
+`Accept`/`Priority` per destination — all of which Chrome changes across releases)
+lives in a data registry (`turbo-surf-core/src/browser_releases.json`, compiled into
+the `browser` module): one coherent, measured config per supported Chrome version,
+defaulting to Chrome 156.0.8078.47. Wire headers and the render-tier navigator read
+from it. A new release is measured and written by one command —
+[`harness/detection/reversion-chrome.mjs`](harness/detection/CHROME-REVERSION.md)
+runs the Chrome identity battery (TLS/H2/headers/client hints/JS identity) and
+diffs Chrome against turbo-surf; a reported version change does not upgrade V8
+(the JS-engine gap stays recorded).
 
 ### Quick start (anti-bot)
 
@@ -554,7 +558,7 @@ Set `TURBO_SURF_PROXY` so the token's IP/JA3 matches your egress (and build with
 `--features impersonate` so the replay JA3 matches the Chrome that minted it).
 
 **Controllable render fingerprint.** Every render-tier `navigator` field has a
-Chrome 155 default and is overridable at runtime via the MCP `set_fingerprint`
+default from the registry's default release and is overridable at runtime via the MCP `set_fingerprint`
 tool (or `turbo_surf_render::set_fingerprint(json)`):
 
 ```jsonc
@@ -566,7 +570,7 @@ tool (or `turbo_surf_render::set_fingerprint(json)`):
     "devicePixelRatio": 2,
     "connection": { "effectiveType": "4g", "rtt": 50, "downlink": 10 },
     "userAgentData": { "platform": "Windows", "brands": [ /* … */ ] }
-} }   // {} resets to Chrome 155 macOS defaults
+} }   // {} resets to the default release's macOS defaults
 ```
 
 `stealth_status` reports the active profile, the wired solver, the pool size, and

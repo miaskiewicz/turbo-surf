@@ -25,7 +25,7 @@
   }
   const Expression=iface('XPathExpression'),Result=iface('XPathResult');
   const types=['ANY_TYPE','NUMBER_TYPE','STRING_TYPE','BOOLEAN_TYPE','UNORDERED_NODE_ITERATOR_TYPE','ORDERED_NODE_ITERATOR_TYPE','UNORDERED_NODE_SNAPSHOT_TYPE','ORDERED_NODE_SNAPSHOT_TYPE','ANY_UNORDERED_NODE_TYPE','FIRST_ORDERED_NODE_TYPE'];
-  types.forEach((name,index)=>{for(const target of [Result,Result.prototype])define(target,name,{value:index,enumerable:true});});
+  types.forEach((name,index)=>{for(const target of [Result,Result.prototype])define(target,name,{value:index,enumerable:true,configurable:true});});
   const functions=new Set('last position count local-name namespace-uri name string concat starts-with contains substring-before substring-after substring string-length normalize-space translate boolean not true false lang number sum floor ceiling round id node text comment processing-instruction'.split(' '));
   function compile(source,resolver,interfaces){
     source=text(source);

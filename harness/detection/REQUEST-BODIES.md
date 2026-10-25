@@ -37,5 +37,9 @@ The HTTP/1 rejection fixes the measured cleartext protocol case. HTTPS/HTTP2
 transport still buffers readable uploads and transferable readable/writable/
 transform streams remain unsupported. Those are separate implementation tasks;
 passing these controls does not establish complete Fetch, browser or Google SERP
-parity. Multipart FormData extraction and broader WebIDL getter-order behavior
-also need independent controls and implementation.
+parity. Broader WebIDL getter-order behavior also needs independent controls.
+
+Multipart FormData BodyInit and native multipart form submission are compared
+byte for byte (with the random `----WebKitFormBoundary` token normalized) with
+the Chrome 156 control from `form-multipart-chrome.mjs`, for a UTF-8 and a
+windows-1252 document; `cargo test -p turbo-surf-render --test form_multipart`.

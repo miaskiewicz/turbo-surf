@@ -703,3 +703,66 @@ async fn input_budget_cancellation_releases_guard_and_prevents_delayed_type_or_e
         "[0,\"\",[[\"Escape\",true]]]"
     );
 }
+
+/// A host file selection matches Chrome 156's DOM.setFileInputFiles: a new FileList of
+/// genuine Files, then trusted input (bubbling, composed) and change (bubbling) events.
+#[tokio::test(flavor = "current_thread")]
+async fn host_file_selection_installs_genuine_files_with_trusted_events() {
+    let mut page = PageSession::open(
+        "<body><form><input type=file id=f name=f multiple><input type=file id=one></form></body>",
+        "https://example.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval(
+        r#"
+      globalThis.observed=[];const f=document.querySelector('#f');globalThis.before=f.files;
+      for(const name of ['input','change'])document.addEventListener(name,event=>observed.push([event.type,event.isTrusted,event.bubbles,event.composed,event.cancelable,event.target.id]),true);
+    "#,
+    )
+    .await
+    .unwrap();
+    page.input(&json!([{"files":{"selector":"#f","files":[
+        {"name":"a.txt","type":"text/plain","lastModified":5,"base64":"aGVsbG8="},
+        {"name":"b.bin","base64":"AP8K"}
+    ]}}]))
+    .await
+    .unwrap();
+    let state: serde_json::Value = serde_json::from_str(
+        &page
+            .eval_json_expression(
+                "(async()=>{const f=document.querySelector('#f');const files=[...f.files];return {observed,fresh:f.files!==before,list:f.files instanceof FileList,value:f.value,files:await Promise.all(files.map(async file=>[file instanceof File,file.name,file.type,file.size,file.lastModified,[...new Uint8Array(await file.arrayBuffer())]])),entries:[...new FormData(f.form)].map(([name,value])=>[name,value.name])}})()",
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        state["observed"],
+        json!([
+            ["input", true, true, true, false, "f"],
+            ["change", true, true, false, false, "f"]
+        ])
+    );
+    assert_eq!(state["fresh"], true);
+    assert_eq!(state["list"], true);
+    assert_eq!(state["value"], "C:\\fakepath\\a.txt");
+    assert_eq!(
+        state["files"],
+        json!([
+            [true, "a.txt", "text/plain", 5, 5, [104, 101, 108, 108, 111]],
+            [true, "b.bin", "", 3, state["files"][1][4], [0, 255, 10]]
+        ])
+    );
+    assert_eq!(state["entries"], json!([["f", "a.txt"], ["f", "b.bin"]]));
+    for steps in [
+        json!([{"files":{"selector":"#one","files":[{"name":"a"},{"name":"b"}]}}]),
+        json!([{"files":{"selector":"#one","files":[]}}]),
+        json!([{"files":{"selector":"form","files":[{"name":"a"}]}}]),
+    ] {
+        assert!(page.input(&steps).await.is_err(), "{steps}");
+    }
+}

@@ -29,3 +29,19 @@ test("extension isolation refuses remote, lookalike and file controls", () => {
       /authored localhost/,
     );
 });
+
+test("frame-timing controls opt into foreground scheduling only on loopback", () => {
+  assert.deepEqual(chromeExtensionArgs({ url: "http://127.0.0.1:1/", foregroundFrames: true }), [
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
+  ]);
+  assert.deepEqual(
+    chromeExtensionArgs({ url: "https://www.google.com/", foregroundFrames: "true" }),
+    [],
+  );
+  assert.throws(
+    () => chromeExtensionArgs({ url: "https://www.google.com/", foregroundFrames: true }),
+    /foregroundFrames is restricted to authored localhost/,
+  );
+});

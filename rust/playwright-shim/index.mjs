@@ -574,7 +574,8 @@ function normalizeInputFiles(files) {
   const list = Array.isArray(files) ? files : [files];
   return list.map((f) => {
     if (typeof f === "string") {
-      return { name: path.basename(f), type: "", data: fs.readFileSync(f).toString("latin1") };
+      const data = fs.readFileSync(f).toString("latin1");
+      return { name: path.basename(f), type: "", lastModified: fs.statSync(f).mtimeMs, data };
     }
     let data = "";
     if (f.buffer != null) data = Buffer.from(f.buffer).toString("latin1");
@@ -628,16 +629,20 @@ function interactionScript(selector, index, kind, value) {
     } })();`;
   }
   if (kind === "setfiles") {
-    // value is an array of { name, type, data(latin1) }. Build File objects, install
-    // a FileList-like on the input (its `files` is read-only → defineProperty), and
-    // fire input/change so the app's upload handler runs.
+    // value is an array of { name, type, data(latin1) }. Build genuine File objects from
+    // the exact bytes, select them through the input's own FileList (the prototype files
+    // setter, as Chrome's DOM.setFileInputFiles does), then fire input/change.
     return `(() => { ${pick} else {
-      const arr = (${val}).map((f) => new globalThis.File([f.data], f.name, { type: f.type }));
-      arr.item = (i) => arr[i] || null;
-      try { Object.defineProperty(el, "files", { configurable: true, value: arr }); }
-      catch (e) { try { el.files = arr; } catch (_e) {} }
-      if (typeof el.focus === "function") el.focus();
-      el.dispatchEvent(new Event("input", { bubbles: true }));
+      const data = new globalThis.DataTransfer();
+      for (const f of ${val}) {
+        const bytes = new Uint8Array(f.data.length);
+        for (let i = 0; i < bytes.length; i++) bytes[i] = f.data.charCodeAt(i) & 255;
+        const options = { type: f.type };
+        if (f.lastModified != null) options.lastModified = f.lastModified;
+        data.items.add(new globalThis.File([bytes], f.name, options));
+      }
+      Object.getOwnPropertyDescriptor(globalThis.HTMLInputElement.prototype, "files").set.call(el, data.files);
+      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
       globalThis.__RESULT = "OK";
     } })();`;

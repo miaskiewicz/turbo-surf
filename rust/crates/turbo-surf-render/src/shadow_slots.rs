@@ -53,7 +53,7 @@ fn attribute(tree: &Tree, node: Handle, name: &str) -> Vec<u16> {
         .encode_utf16()
         .collect()
 }
-fn manual(scope: &mut v8::PinScope, root: Handle) -> bool {
+pub(super) fn manual(scope: &mut v8::PinScope, root: Handle) -> bool {
     let object = wrap(scope, root);
     let private = key(scope, "manual");
     object
@@ -613,7 +613,8 @@ pub(super) fn fire(scope: &mut v8::PinScope, slot: v8::Local<v8::Object>) {
         dispatch_host_event(scope, event, slot);
     }
 }
-pub(super) fn install(scope: &mut v8::PinScope) {
+/// Capture the slot keys (idempotent); parsing may attach roots before install.
+pub(super) fn ensure_keys(scope: &mut v8::PinScope) {
     if scope.get_slot::<std::rc::Rc<Keys>>().is_none() {
         let mut keys = Vec::new();
         for name in KEY_NAMES {
@@ -625,6 +626,9 @@ pub(super) fn install(scope: &mut v8::PinScope) {
         }
         scope.set_slot(std::rc::Rc::new(Keys(keys)));
     }
+}
+pub(super) fn install(scope: &mut v8::PinScope) {
+    ensure_keys(scope);
     let global = scope.get_current_context().global(scope);
     let Some(name) = v8::String::new(scope, "Event") else {
         return;

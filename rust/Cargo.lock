@@ -5660,9 +5660,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-dom"
-version = "0.5.7"
+version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c759ebdc434d90ce8ba1301ff94a5b17553b61c594de60118e0af8d337f25e4"
+checksum = "b5adc7f11b1ce74d816e23d713bb824fa2375188e31b90fd0f37d88aa4e22502"
 dependencies = [
  "html5ever",
  "log",
@@ -5674,9 +5674,9 @@ dependencies = [
 
 [[package]]
 name = "turbo-html2pdf-core"
-version = "0.3.8"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbb57210ff0331d026dbd66a5122d778d48a034753088b50b3191e6b855a4eb9"
+checksum = "0db52ecadeaae775bb7b2c6f5e15d048a2ffb4d409b3ac84e2fb2a32916d0756"
 dependencies = [
  "chrono",
  "core-foundation",
@@ -5725,7 +5725,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-core"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "async-trait",
  "base64",
@@ -5891,7 +5891,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-mcp"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "async-trait",
  "base64",
@@ -5910,7 +5910,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-napi"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "napi",
  "napi-build",
@@ -5929,7 +5929,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-page"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -5941,7 +5941,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-py"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "pyo3",
  "serde",
@@ -5956,7 +5956,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-raster"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "base64",
  "core-foundation",
@@ -5976,7 +5976,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-render"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "async-trait",
  "base64",
@@ -6038,7 +6038,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-transform"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "swc_core",
 ]
@@ -6062,7 +6062,7 @@ dependencies = [
 
 [[package]]
 name = "turbo-surf-view"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "criterion",
  "regex",

@@ -6,7 +6,9 @@
   const readValue = ns.formControlValue;
   delete ns.formControlValue;
   const checkedValue=ns.formControlChecked;delete ns.formControlChecked;
+  const dialogSubmission=ns.dialogFormSubmission;delete ns.dialogFormSubmission;
   const selectedOptions=ns.formSelectedOptions,resetControl=ns.formResetControl;delete ns.formSelectedOptions;delete ns.formResetControl;
+  let fileEntries=null;ns.registerFileEntries=entries=>{fileEntries=entries;delete ns.registerFileEntries;};
   const apply = Reflect.apply, define = Object.defineProperty, create = Object.create;
   const string = String, number = Number;
   const ErrorType = TypeError, Exception = DOMException, Regex = RegExp;
@@ -18,7 +20,9 @@
   const getRoot = Node.prototype.getRootNode, query = Element.prototype.querySelectorAll, documentQuery = Document.prototype.querySelectorAll;
   const nodeTypeGetter = ns.domAccessor('nodeType', false, 'Node');
   const collectionRecord=ns.formCollectionFactory.getRecord;
-  const queryAll = (root, selector) => {const result=apply(apply(nodeTypeGetter,root,[])===9?documentQuery:query,root,[selector]);const record=collectionRecord(result);return record?record.read():result;};
+  const fragmentQuery = DocumentFragment.prototype.querySelectorAll;
+  // Owner trees may be documents, shadow roots or detached element subtrees.
+  const queryAll = (root, selector) => {const kind=apply(nodeTypeGetter,root,[]);const result=apply(kind===9?documentQuery:kind===11?fragmentQuery:query,root,[selector]);const record=collectionRecord(result);return record?record.read():result;};
   const attribute = Element.prototype.getAttribute, contains = Node.prototype.contains;
   const lower = Function.prototype.call.bind(String.prototype.toLowerCase);
   const regexTest = Function.prototype.call.bind(RegExp.prototype.test);
@@ -29,6 +33,8 @@
   const stateGet=element=>privateGet(element,'validityObject'),stateSet=(element,value)=>privateSet(element,'validityObject',value);
   const submitterGet=event=>privateGet(event,'submitter'),submitterSet=(event,value)=>privateSet(event,'submitter',value),submitterHas=event=>submitterGet(event)!==undefined;
   const EventClass = Event;
+  // Shared with later private modules (input_members adds rangeState; element_internals takes it).
+  const internals = create(null);
   const tag = element => lower(apply(tagGetter, element, []));
   const attr = (element, name) => apply(attribute, element, [name]);
   const parent = element => apply(parentGetter, element, []);
@@ -40,10 +46,30 @@
       return owner(this);
     },'get form',0)});
   }
+  // label.form is its labeled control's form owner; option.form is its select's (directly or
+  // through one optgroup). Neither element is itself form-associated.
+  const formAssociated = ['button','fieldset','input','object','output','select','textarea'];
+  // form_collections.js adds the native label-control bridge to this shared capture record.
+  const selectOf = option => {
+    let container = parent(option);
+    if (container && bridge('html-element', container) && apply(localNameGetter, container, []) === 'optgroup') container = parent(container);
+    return container && bridge('html-element', container) && apply(localNameGetter, container, []) === 'select' ? container : null;
+  };
+  for (const [interfaceName, localName, read] of [
+    ['HTMLLabelElement', 'label', label => { const control = internals.labelControl(label); if (!control) return null; const kind = apply(localNameGetter, control, []); return bridge('html-element', control) && apply(controlIndexOf, formAssociated, [kind]) >= 0 || associatedGet(control) ? owner(control) : null; }],
+    ['HTMLOptionElement', 'option', option => { const select = selectOf(option); return select ? owner(select) : null; }],
+  ]) {
+    define(g[interfaceName].prototype, 'form', {configurable:true, enumerable:true, get:native(function(){
+      if(!bridge('html-element',this)||apply(localNameGetter,this,[])!==localName)throw new ErrorType('Illegal invocation');
+      return read(this);
+    },'get form',0)});
+  }
   const present = (element, name) => attr(element, name) !== null;
   const type = element => {
-    const value=lower(attr(element,'type')||(tag(element)==='button'?'submit':'text'));
-    return tag(element)==='button'&&value!=='button'&&value!=='reset'?'submit':value;
+    if(tag(element)!=='button')return lower(attr(element,'type')||'text');
+    const value=lower(attr(element,'type')||'');
+    // Auto state: a missing/invalid type is submit unless the button is a command invoker.
+    return value==='submit'||value==='button'||value==='reset'?value:present(element,'command')||present(element,'commandfor')?'button':'submit';
   };
   const controlIndexOf=Array.prototype.indexOf;
   const controlTags = ['input','textarea','select','button','fieldset','object','output'];
@@ -75,7 +101,7 @@
     const kind = checkControl(element), inputType = type(element);
     if(kind==="custom")return !disabled(element)&&!present(element,"readonly");
     if (kind === 'fieldset' || kind === 'object' || kind === 'output' || disabled(element)) return false;
-    if (kind === 'input' && (inputType === 'hidden' || inputType === 'reset' || inputType === 'button')) return false;
+    if (kind === 'input' && (inputType === 'hidden' || inputType === 'reset' || inputType === 'button' || inputType === 'image')) return false;
     if (kind === 'button' && inputType !== 'submit') return false;
     if (present(element, 'readonly') && (kind === 'textarea' || kind === 'input' && regexTest(/^(text|search|url|tel|email|password|date|month|week|time|datetime-local|number)$/, inputType))) return false;
     let ancestor = parent(element);
@@ -90,18 +116,32 @@
   }
   function flags(element) {
     const associatedRecord=associatedGet(element);if(associatedRecord)return associatedRecord.flags;
-    const kind = checkControl(element), inputType = type(element), admitted = candidate(element);
+    const kind = checkControl(element), inputType = type(element);
     const value = readValue(element), required = present(element, 'required');
+    // Like Blink, the flags describe the value whether or not the control is barred from
+    // validation; only valueMissing needs a mutable (enabled, not read-only) control.
+    const readOnly = present(element, 'readonly') && (kind === 'textarea' || kind === 'input' && regexTest(/^(text|search|url|tel|email|password|date|month|week|time|datetime-local|number)$/, inputType));
+    const mutable = !disabled(element) && !readOnly;
     const state = {valueMissing:false,typeMismatch:false,patternMismatch:false,tooLong:false,tooShort:false,rangeUnderflow:false,rangeOverflow:false,stepMismatch:false,badInput:false,customError:!!customGet(element)};
-    if (admitted) {
-      if (required && (kind === 'textarea' || kind === 'select' || kind === 'input' && !regexTest(/^(range|color|hidden|button|submit|reset|image)$/,inputType))) {
-        if (inputType === 'checkbox') state.valueMissing = !checkedValue(element);
-        else if (inputType === 'radio') {
+    {
+      if (kind === 'input' && inputType === 'radio') {
+        // A radio group is required, and missing a value, as a whole: any member's required
+        // attribute applies to all of them. An unnamed radio is its own group.
+        const name = attr(element,'name');
+        let groupRequired = required, checked = checkedValue(element);
+        if (name) {
           const root = apply(getRoot, element, []), radios = queryAll(root,'input');
-          let checked = false;
-          for (let index = 0; index < radios.length; index++) if (type(radios[index]) === 'radio' && attr(radios[index],'name') === attr(element,'name') && owner(radios[index]) === owner(element) && checkedValue(radios[index])) checked=true;
-          state.valueMissing = !checked;
-        } else state.valueMissing = value === '';
+          for (let index = 0; index < radios.length; index++) {
+            const radio = radios[index];
+            if (type(radio) !== 'radio' || attr(radio,'name') !== name || owner(radio) !== owner(element)) continue;
+            if (present(radio,'required')) groupRequired = true;
+            if (checkedValue(radio)) checked = true;
+          }
+        }
+        state.valueMissing = mutable && groupRequired && !checked;
+      } else if (mutable && required && (kind === 'textarea' || kind === 'select' || kind === 'input' && !regexTest(/^(range|color|hidden|button|submit|reset|image)$/,inputType))) {
+        if (inputType === 'checkbox') state.valueMissing = !checkedValue(element);
+        else state.valueMissing = value === '';
       }
       if (kind === 'input' && value) {
         if (inputType === 'email') state.typeMismatch = !regexTest(/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/,value);
@@ -114,7 +154,7 @@
         if (pattern !== null && regexTest(/^(text|search|url|tel|email|password)$/,inputType)) {
           try {state.patternMismatch=!regexTest(new Regex('^(?:'+pattern+')$','v'),value);} catch (_) {}
         }
-        if (inputType === 'number' || inputType === 'range') {
+        if (inputType === 'number') {
           const numeric = number(value), minimum = attr(element,'min'), maximum=attr(element,'max'), step=attr(element,'step');
           if (minimum !== null && minimum !== '' && !isNaNValue(number(minimum))) state.rangeUnderflow=numeric<number(minimum);
           if (maximum !== null && maximum !== '' && !isNaNValue(number(maximum))) state.rangeOverflow=numeric>number(maximum);
@@ -124,6 +164,10 @@
             const difference=(numeric-basis)/interval;
             state.stepMismatch=absolute(difference-round(difference))>1e-7;
           }
+        } else if (internals.rangeState && regexTest(/^(range|date|month|week|time|datetime-local)$/,inputType)) {
+          // Blink's StepRange over the sanitized value (a range value is clamped into range).
+          const range=internals.rangeState(element);
+          if (range) {state.rangeUnderflow=range.underflow;state.rangeOverflow=range.overflow;state.stepMismatch=range.mismatch;}
         }
       }
     }
@@ -139,6 +183,7 @@
     if(state.valueMissing) {
       if(inputType==='checkbox')return 'Please check this box if you want to proceed.';
       if(inputType==='radio')return 'Please select one of these options.';
+      if(inputType==='file')return 'Please select a file.';
       return tag(element)==='select'?'Please select an item in the list.':'Please fill out this field.';
     }
     if(state.typeMismatch) {
@@ -239,7 +284,7 @@
         if(inputType==='image'){append(name+'.x','0');append(name+'.y','0');continue;}
       }
       if(kind==='input'&&regexTest(/^(checkbox|radio)$/,inputType)&&!checkedValue(control))continue;
-      if(kind==='input'&&inputType==='file')throw new Exception('Native FileList submission is not available.','NotSupportedError');
+      if(kind==='input'&&inputType==='file'){const files=fileEntries&&fileEntries(control);if(!files)throw new Exception('Native FileList submission is not available.','NotSupportedError');for(let at=0;at<files.length;at++)append(name,files[at]);continue;}
       if(kind==='select') {
         const options=selectedOptions(control);
         for(let j=0;j<options.length;j++) {
@@ -259,6 +304,9 @@
   }
   function queue(form,submitter) {
     if(!apply(connectedGetter,form,[])||privateGet(form,'constructing-entries'))return;
+    // method=dialog closes the nearest ancestor dialog before any entry list exists.
+    const method=lower(submitter&&present(submitter,'formmethod')?attr(submitter,'formmethod'):attr(form,'method')||'');
+    if(method==='dialog'){if(dialogSubmission)dialogSubmission(form,submitter);return;}
     privateSet(form,'constructing-entries',true);
     try {if(bridge('submit',form,submitter,submission(form,submitter))===true)return;throw new Exception('Form navigation requires a configured native submission transport.','NotSupportedError');}
     finally {privateSet(form,'constructing-entries',false);}
@@ -276,6 +324,9 @@
     if(!apply(connectedGetter,form,[])||!bridge('allowed',form)||!bridge('active',form)||privateGet(form,'firing-submit'))return;
     privateSet(form,'firing-submit',true);
     try {
+      // A submission attempt sets every listed input, select and textarea's user validity.
+      const controls=formControls(form);
+      for(let i=0;i<controls.length;i++){const kind=tag(controls[i]);if(kind==='input'||kind==='select'||kind==='textarea')privateSet(controls[i],'userValidity',true);}
       if(!present(form,'novalidate')&&!(submitter&&present(submitter,'formnovalidate'))&&!validate(form))return;
       const event=new SubmitEventClass('submit',{bubbles:true,cancelable:true,composed:submitter!==null,submitter});
       if(!bridge('emit',form,event))return;
@@ -323,7 +374,7 @@
   }
 
   for(const methodName of ['checkValidity','reportValidity'])method(formPrototype,methodName,function(){checkForm(this);return validate(this);},0);
-  method(formPrototype,'reset',function(){checkForm(this);const event=new EventClass('reset',{bubbles:true,cancelable:true});if(!bridge('emit',this,event))return;const controls=formControls(this);for(let i=0;i<controls.length;i++){const record=associatedGet(controls[i]);if(record){if(record.reset)record.reset();}else resetControl(controls[i]);}},0);
+  method(formPrototype,'reset',function(){checkForm(this);const event=new EventClass('reset',{bubbles:true,cancelable:true});if(!bridge('emit',this,event))return;const controls=formControls(this);for(let i=0;i<controls.length;i++){privateSet(controls[i],'userValidity',false);const record=associatedGet(controls[i]);if(record){if(record.reset)record.reset();}else resetControl(controls[i]);}},0);
   method(formPrototype,'requestSubmit',function(submitter){return request(this,submitter);},0);
   method(formPrototype,'submit',function(){checkForm(this);if(!bridge('allowed',this)||!bridge('active',this))return;return queue(this,null);},0);
   for(const [proto,property,attributeName] of [[formPrototype,'noValidate','novalidate'],[HTMLButtonElement.prototype,'formNoValidate','formnovalidate'],[HTMLInputElement.prototype,'formNoValidate','formnovalidate']]) {
@@ -343,9 +394,10 @@
     } finally {if(!hold||!complete)privateSet(form,'constructing-entries',false);}
   };
   g.__captureFormCollections={bridge,privateGet,privateSet,formControls,checkForm,attr,tag,type,readValue,checkedValue,queryAll,getRoot,owner,associatedGet,localNameGetter};
-  g.__captureFormInternals = {
+  g.__captureFormInternals = Object.assign(internals, {
     register:(host,record)=>associatedSet(host,record),owner,disabled,candidate,validity,message,validateControl,
     attribute:attr,parent,tag,queryAll,getRoot,apply,emit:(host,event)=>bridge('emit',host,event),
-  };
+    flags,type,formControls,readValue,checkedValue,associatedGet,userValidity:(element)=>privateGet(element,'userValidity')===true,
+  });
   g.__captureFormSubmission=request;
 })();

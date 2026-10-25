@@ -1,0 +1,401 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "recordedAt": "2026-10-25T14:58:13.164Z",
+  "flags": [
+    "--headless=new",
+    "--disable-extensions"
+  ],
+  "fixtures": {
+    "sanitizer-declarative-scripts-probe.js": "0827b136b022197368ff21b77c8b90093d7fc92a069d2b0b7535c3b865c06d54",
+    "sanitizer-declarative-scripts.html": "9ef447fda55d5b9f953bacc351c1e3186a207838a5033740c7a1450096586a28",
+    "sanitizer-domparser-probe.js": "7f6b44faea18253971dbfba04b53538a1a09c8cb0eebba8a22d448c34ce8adfd",
+    "sanitizer-trusted-types-probe.js": "7b318bf0b80fda3eb3b8f3281e39dd69d63f87512281f54f261ec3ead7f60f66"
+  },
+  "result": {
+    "domparser": {
+      "surface": {
+        "global": {
+          "enumerable": false,
+          "configurable": true,
+          "writable": true,
+          "value": [
+            "DOMParser",
+            0
+          ]
+        },
+        "length": 0,
+        "keys": [
+          "parseFromString",
+          "constructor",
+          "Symbol(Symbol.toStringTag)"
+        ],
+        "parseFromString": {
+          "enumerable": true,
+          "configurable": true,
+          "writable": true,
+          "value": [
+            "parseFromString",
+            2
+          ]
+        },
+        "tag": {
+          "enumerable": false,
+          "configurable": true,
+          "writable": false,
+          "value": "DOMParser"
+        },
+        "constructor": {
+          "enumerable": false,
+          "configurable": true,
+          "writable": true,
+          "value": [
+            "DOMParser",
+            0
+          ]
+        },
+        "prototype": {
+          "enumerable": false,
+          "configurable": false,
+          "writable": false,
+          "value": "[object DOMParser]"
+        },
+        "source": [
+          "function DOMParser() { [native code] }",
+          "function parseFromString() { [native code] }"
+        ],
+        "statics": [
+          "length",
+          "name",
+          "prototype"
+        ],
+        "chain": [
+          true,
+          true
+        ],
+        "instance": {
+          "value": [
+            "[object DOMParser]",
+            0
+          ]
+        },
+        "subclass": {
+          "value": [
+            true,
+            "<p>s</p>"
+          ]
+        }
+      },
+      "errors": {
+        "call": {
+          "error": "TypeError",
+          "message": "Failed to construct 'DOMParser': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+        },
+        "brand": {
+          "error": "TypeError",
+          "message": "Illegal invocation"
+        },
+        "brandUndefined": {
+          "error": "TypeError",
+          "message": "Illegal invocation"
+        },
+        "brandProto": {
+          "error": "TypeError",
+          "message": "Illegal invocation"
+        },
+        "zero": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseFromString' on 'DOMParser': 2 arguments required, but only 0 present."
+        },
+        "one": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseFromString' on 'DOMParser': 2 arguments required, but only 1 present."
+        },
+        "upper": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseFromString' on 'DOMParser': The provided value 'TEXT/HTML' is not a valid enum value of type SupportedType."
+        },
+        "plain": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseFromString' on 'DOMParser': The provided value 'text/plain' is not a valid enum value of type SupportedType."
+        },
+        "symbolString": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseFromString' on 'DOMParser': Cannot convert a Symbol value to a string"
+        },
+        "symbolType": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseFromString' on 'DOMParser': Cannot convert a Symbol value to a string"
+        },
+        "order": {
+          "value": [
+            "string",
+            "type",
+            "TypeError"
+          ]
+        }
+      },
+      "html": {
+        "standards": {
+          "value": [
+            "[object HTMLDocument]",
+            "text/html",
+            true,
+            true,
+            true,
+            "CSS1Compat",
+            "UTF-8",
+            "complete",
+            null,
+            null,
+            "html",
+            "<title>t</title>",
+            "<p id=\"x\">y</p><script>window.__domParserRan=1</script><div><template shadowrootmode=\"open\"><b>x</b></template></div>",
+            "t",
+            true,
+            "hidden",
+            "",
+            "",
+            false
+          ]
+        },
+        "quirks": {
+          "value": [
+            "[object HTMLDocument]",
+            "text/html",
+            true,
+            true,
+            true,
+            "BackCompat",
+            "UTF-8",
+            "complete",
+            null,
+            null,
+            null,
+            "",
+            "<p>q</p>",
+            "",
+            true,
+            "hidden",
+            "",
+            "",
+            false
+          ]
+        },
+        "nullInput": {
+          "value": "null"
+        },
+        "numberInput": {
+          "value": "5"
+        },
+        "noscript": {
+          "value": [
+            1,
+            "<noscript><b>n</b></noscript>"
+          ]
+        },
+        "declarative": {
+          "value": [
+            null,
+            "<div id=\"h\"><template shadowrootmode=\"open\"><b>x</b></template></div>"
+          ]
+        },
+        "scriptsInert": {
+          "value": [
+            null,
+            null
+          ]
+        },
+        "independent": {
+          "value": [
+            true,
+            true,
+            true
+          ]
+        }
+      },
+      "xml": {
+        "applicationXml": {
+          "value": [
+            "[object XMLDocument]",
+            "application/xml",
+            "<a><b/></a>"
+          ]
+        },
+        "svg": {
+          "value": "[object XMLDocument]"
+        },
+        "xhtml": {
+          "value": "[object XMLDocument]"
+        },
+        "textXml": {
+          "value": "[object XMLDocument]"
+        }
+      }
+    },
+    "declarative-scripts": {
+      "log": [
+        [
+          "head",
+          "head"
+        ],
+        [
+          "s1",
+          "s1"
+        ],
+        [
+          "s2",
+          "s2"
+        ],
+        [
+          "s3",
+          null,
+          true
+        ],
+        [
+          "s4",
+          null
+        ],
+        [
+          "s5",
+          "s5"
+        ],
+        [
+          "s6",
+          null
+        ],
+        [
+          "s7",
+          "s7"
+        ],
+        [
+          "m2",
+          null
+        ],
+        [
+          "m1",
+          null
+        ]
+      ],
+      "states": [
+        6,
+        true,
+        true,
+        1
+      ],
+      "rerun": 0
+    },
+    "trusted-types": {
+      "strings": {
+        "parseHTMLUnsafe": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseHTMLUnsafe' on 'Document': This document requires 'TrustedHTML' assignment."
+        },
+        "parseHTMLUnsafeOptions": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseHTMLUnsafe' on 'Document': This document requires 'TrustedHTML' assignment."
+        },
+        "parseHTMLUnsafeBadOptions": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseHTMLUnsafe' on 'Document': Overload resolution failed."
+        },
+        "parseHTML": {
+          "value": "<b>x</b>"
+        },
+        "setHTML": {
+          "value": "<b>x</b>"
+        },
+        "setHTMLUnsafe": {
+          "error": "TypeError",
+          "message": "Failed to execute 'setHTMLUnsafe' on 'Element': This document requires 'TrustedHTML' assignment."
+        },
+        "shadowSetHTMLUnsafe": {
+          "error": "TypeError",
+          "message": "Failed to execute 'setHTMLUnsafe' on 'ShadowRoot': This document requires 'TrustedHTML' assignment."
+        },
+        "domParser": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseFromString' on 'DOMParser': This document requires 'TrustedHTML' assignment."
+        }
+      },
+      "trusted": {
+        "parseHTMLUnsafe": {
+          "value": "<b>x</b><i>p</i>"
+        },
+        "parseHTMLUnsafeSanitized": {
+          "value": "<b onclick=\"1\">x</b>"
+        },
+        "parseHTML": {
+          "value": "<b>x</b><i>p</i>"
+        },
+        "setHTMLUnsafe": {
+          "value": "<b>x</b><i>p</i>"
+        },
+        "setHTML": {
+          "value": "<b>x</b><i>p</i>"
+        },
+        "domParser": {
+          "value": "<b>x</b><i>p</i>"
+        }
+      },
+      "defaultPolicy": {
+        "parseHTMLUnsafe": {
+          "value": "<b>X</b>"
+        },
+        "parseHTMLUnsafeConversionOrder": {
+          "value": [
+            [
+              "html",
+              "sanitizer",
+              "TypeError"
+            ],
+            1
+          ]
+        },
+        "parseHTMLUnsafeInvalidConfig": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseHTMLUnsafe' on 'Document': Invalid Sanitizer configuration."
+        },
+        "callsAfterInvalid": 2,
+        "parseHTML": {
+          "value": "<b>x</b>"
+        },
+        "setHTML": {
+          "value": "<b>x</b>"
+        },
+        "setHTMLUnsafe": {
+          "value": "<b>X</b>"
+        },
+        "domParser": {
+          "value": "<b>X</b>"
+        },
+        "domParserBadType": {
+          "error": "TypeError",
+          "message": "Failed to execute 'parseFromString' on 'DOMParser': The provided value 'bogus' is not a valid enum value of type SupportedType."
+        },
+        "calls": [
+          [
+            "<b>x</b>",
+            "TrustedHTML",
+            "Document parseHTMLUnsafe"
+          ],
+          [
+            "<b>x</b>",
+            "TrustedHTML",
+            "Document parseHTMLUnsafe"
+          ],
+          [
+            "<b>x</b>",
+            "TrustedHTML",
+            "Element setHTMLUnsafe"
+          ],
+          [
+            "<b>x</b>",
+            "TrustedHTML",
+            "DOMParser parseFromString"
+          ]
+        ]
+      }
+    }
+  }
+}

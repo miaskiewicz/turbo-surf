@@ -1,0 +1,139 @@
+[
+  {
+    "id": "shape",
+    "headers": [],
+    "html": "<!doctype html><html data-shape><head></head><body></body></html>"
+  },
+  {
+    "id": "last-modified-header",
+    "headers": [["Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT"]],
+    "html": "<!doctype html><html data-lm='Wed, 21 Oct 2015 07:28:00 GMT'><body><iframe name=srcdoc srcdoc='<!doctype html><p>x'></iframe><iframe name=blank src='about:blank'></iframe><iframe name=initial></iframe><iframe name=dated src='dated'></iframe><iframe name=undated src='plain'></iframe></body></html>",
+    "resources": {
+      "dated": {
+        "headers": [["Last-Modified", "Thu, 29 Feb 2024 23:59:59 GMT"]],
+        "html": "<!doctype html><html data-lm='Thu, 29 Feb 2024 23:59:59 GMT'><p>dated</p></html>"
+      },
+      "plain": { "headers": [], "html": "<!doctype html><p>plain</p>" }
+    }
+  },
+  {
+    "id": "last-modified-absent",
+    "headers": [],
+    "html": "<!doctype html><html><body></body></html>"
+  },
+  {
+    "id": "last-modified-invalid",
+    "headers": [["Last-Modified", "yesterday"]],
+    "html": "<!doctype html><html data-lm='yesterday'><body></body></html>"
+  },
+  {
+    "id": "domain-site-keyed",
+    "host": "a.b.localhost",
+    "headers": [["Origin-Agent-Cluster", "?0"]],
+    "html": "<!doctype html><html data-domain='b.localhost'><body><iframe name=srcdoc data-domain='b.localhost' srcdoc='<!doctype html><p>x'></iframe><iframe name=initial data-domain='b.localhost'></iframe></body></html>"
+  },
+  {
+    "id": "domain-keyed-default",
+    "host": "a.b.localhost",
+    "headers": [],
+    "html": "<!doctype html><html data-domain='b.localhost'><body><iframe name=srcdoc data-domain='b.localhost' srcdoc='<!doctype html><p>x'></iframe><iframe name=initial data-domain='b.localhost'></iframe></body></html>"
+  },
+  {
+    "id": "domain-keyed-explicit",
+    "host": "a.b.localhost",
+    "headers": [["Origin-Agent-Cluster", "?1"]],
+    "html": "<!doctype html><html data-domain='b.localhost'><body><iframe name=srcdoc data-domain='b.localhost' srcdoc='<!doctype html><p>x'></iframe></body></html>"
+  },
+  {
+    "id": "domain-site-keyed-not-suffix",
+    "host": "a.b.localhost",
+    "headers": [["Origin-Agent-Cluster", "?0"]],
+    "html": "<!doctype html><html data-domain='c.localhost'><body></body></html>"
+  },
+  {
+    "id": "csp-sandbox-same-origin",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts allow-same-origin"]],
+    "html": "<!doctype html><html data-domain='127.0.0.1'><body><iframe name=srcdoc data-domain='127.0.0.1' srcdoc='<!doctype html><p>x'></iframe><iframe name=plain data-domain='127.0.0.1' src='plain'></iframe></body></html>",
+    "resources": { "plain": { "headers": [], "html": "<!doctype html><p>plain</p>" } }
+  },
+  {
+    "id": "csp-sandbox-opaque",
+    "headers": [["Content-Security-Policy", "sandbox allow-scripts"]],
+    "html": "<!doctype html><html data-domain='127.0.0.1'><body></body></html>"
+  },
+  {
+    "id": "iframe-sandbox",
+    "headers": [],
+    "messages": 1,
+    "html": "<!doctype html><html><head><script>window.__messages=[];addEventListener('message',e=>__messages.push(e.data))</script></head><body><iframe name=srcdoc sandbox='allow-same-origin' data-domain='127.0.0.1' srcdoc='<!doctype html><p>x'></iframe><iframe name=plain sandbox='allow-same-origin allow-scripts' data-domain='127.0.0.1' src='plain'></iframe><iframe name=unsandboxed data-domain='127.0.0.1' src='plain'></iframe><iframe name=opaque sandbox='allow-scripts' src='report?name=opaque'></iframe></body></html>",
+    "resources": {
+      "plain": { "headers": [], "html": "<!doctype html><p>plain</p>" },
+      "report": { "headers": [], "html": "<!doctype html><script src='/report.js'></script>" }
+    }
+  },
+  {
+    "id": "agent-cluster-site-keyed-children",
+    "headers": [["Origin-Agent-Cluster", "?0"]],
+    "messages": 2,
+    "html": "<!doctype html><html><head><script>window.__messages=[];addEventListener('message',e=>__messages.push(e.data))</script></head><body><iframe name=srcdoc srcdoc='<!doctype html><p>x'></iframe><iframe name=plain src='plain'></iframe><iframe name=keyed src='keyed'></iframe><iframe name=cross src='{{cross}}report?name=cross'></iframe><iframe name=crossoff src='{{cross}}reportoff?name=crossoff'></iframe></body></html>",
+    "resources": {
+      "plain": { "headers": [], "html": "<!doctype html><p>plain</p>" },
+      "keyed": { "headers": [["Origin-Agent-Cluster", "?1"]], "html": "<!doctype html><p>keyed</p>" },
+      "report": { "headers": [], "html": "<!doctype html><script src='/report.js'></script>" },
+      "reportoff": {
+        "headers": [["Origin-Agent-Cluster", "?0"]],
+        "html": "<!doctype html><script src='/report.js'></script>"
+      }
+    }
+  },
+  {
+    "id": "agent-cluster-keyed-children",
+    "headers": [],
+    "messages": 1,
+    "html": "<!doctype html><html><head><script>window.__messages=[];addEventListener('message',e=>__messages.push(e.data))</script></head><body><iframe name=srcdoc srcdoc='<!doctype html><p>x'></iframe><iframe name=off src='off'></iframe><iframe name=crossoff src='{{cross}}reportoff?name=crossoff'></iframe></body></html>",
+    "resources": {
+      "off": { "headers": [["Origin-Agent-Cluster", "?0"]], "html": "<!doctype html><p>off</p>" },
+      "reportoff": {
+        "headers": [["Origin-Agent-Cluster", "?0"]],
+        "html": "<!doctype html><script src='/report.js'></script>"
+      }
+    }
+  },
+  {
+    "id": "fullscreen-frames",
+    "headers": [],
+    "messages": 3,
+    "html": "<!doctype html><html><head><script>window.__messages=[];addEventListener('message',e=>__messages.push(e.data))</script></head><body><iframe name=srcdoc srcdoc='<!doctype html><p>x'></iframe><iframe name=plain src='plain'></iframe><iframe name=allow allow='fullscreen' src='plain'></iframe><iframe name=allowfullscreen allowfullscreen src='plain'></iframe><iframe name=allownone allow=\"fullscreen 'none'; picture-in-picture 'none'\" allowfullscreen src='plain'></iframe><iframe name=sandboxed sandbox='allow-same-origin' src='plain'></iframe><iframe name=cross src='{{cross}}report?name=cross'></iframe><iframe name=crossallow allow='fullscreen' src='{{cross}}report?name=crossallow'></iframe><iframe name=crossallowfullscreen allowfullscreen src='{{cross}}report?name=crossallowfullscreen'></iframe></body></html>",
+    "resources": {
+      "plain": { "headers": [], "html": "<!doctype html><p>plain</p>" },
+      "report": { "headers": [], "html": "<!doctype html><script src='/report.js'></script>" }
+    }
+  },
+  {
+    "id": "fullscreen-header-disabled",
+    "headers": [["Permissions-Policy", "fullscreen=(), picture-in-picture=()"]],
+    "html": "<!doctype html><html><body><iframe name=srcdoc allow='fullscreen; picture-in-picture' srcdoc='<!doctype html><p>x'></iframe><iframe name=allowfullscreen allowfullscreen src='plain'></iframe></body></html>",
+    "resources": { "plain": { "headers": [], "html": "<!doctype html><p>plain</p>" } }
+  },
+  {
+    "id": "fullscreen-header-self",
+    "headers": [["Permissions-Policy", "fullscreen=(self)"]],
+    "messages": 1,
+    "html": "<!doctype html><html><head><script>window.__messages=[];addEventListener('message',e=>__messages.push(e.data))</script></head><body><iframe name=allowfullscreen allowfullscreen src='plain'></iframe><iframe name=crossallow allow='fullscreen' src='{{cross}}report?name=crossallow'></iframe></body></html>",
+    "resources": {
+      "plain": { "headers": [], "html": "<!doctype html><p>plain</p>" },
+      "report": { "headers": [], "html": "<!doctype html><script src='/report.js'></script>" }
+    }
+  },
+  {
+    "id": "child-header-disabled",
+    "headers": [],
+    "html": "<!doctype html><html><body><iframe name=disabled allow='fullscreen' src='disabled'></iframe></body></html>",
+    "resources": {
+      "disabled": {
+        "headers": [["Permissions-Policy", "fullscreen=(), picture-in-picture=()"]],
+        "html": "<!doctype html><p>disabled</p>"
+      }
+    }
+  }
+]

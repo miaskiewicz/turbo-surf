@@ -1,0 +1,936 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "casesSha256": "3eb73b29a109fa9a6952c179cc5765ff4427dde33c5cef5fcbd69c63b6cf6ce9",
+  "probeSha256": "1ed65281d8cb9f6ad225e4739af10d0bee48c074a6238278cdb97864bfb91cd4",
+  "reportSha256": "b5d3ef720413db3d468a859e0014c53bf133ec28722914c49a74768f211fbb36",
+  "headless": true,
+  "collectorSha256": "6ee6593f8a34c4825eb329286765db57ae5cc222b500c29fb8eb2f671c7d24d0",
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--host-resolver-rules=MAP *.localhost 127.0.0.1",
+    "--headless=new",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "shape",
+      "result": {
+        "shape": {
+          "fullscreenEnabled": {
+            "descriptor": {
+              "get": {
+                "name": "get fullscreenEnabled",
+                "length": 0,
+                "source": "function get fullscreenEnabled() { [native code] }"
+              },
+              "set": {
+                "name": "set fullscreenEnabled",
+                "length": 1,
+                "source": "function set fullscreenEnabled() { [native code] }"
+              },
+              "value": "absent",
+              "writable": "absent",
+              "enumerable": true,
+              "configurable": true
+            },
+            "own": false,
+            "foreignGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "nullGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "elementGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "foreignSet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "selfSet": {
+              "value": [
+                true,
+                false
+              ]
+            },
+            "sloppyAssign": {
+              "value": [
+                true,
+                false
+              ]
+            },
+            "strictAssign": {
+              "value": [
+                true,
+                false
+              ]
+            },
+            "createHTMLDocument": {
+              "value": false
+            },
+            "newDocument": {
+              "value": false
+            },
+            "domParser": {
+              "value": false
+            },
+            "detached": {
+              "value": false
+            }
+          },
+          "webkitFullscreenEnabled": {
+            "descriptor": {
+              "get": {
+                "name": "get webkitFullscreenEnabled",
+                "length": 0,
+                "source": "function get webkitFullscreenEnabled() { [native code] }"
+              },
+              "set": "undefined",
+              "value": "absent",
+              "writable": "absent",
+              "enumerable": true,
+              "configurable": true
+            },
+            "own": false,
+            "foreignGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "nullGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "elementGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "foreignSet": "absent",
+            "selfSet": "absent",
+            "sloppyAssign": {
+              "value": [
+                true,
+                false
+              ]
+            },
+            "strictAssign": {
+              "error": "TypeError: Cannot set property webkitFullscreenEnabled of #<Document> which has only a getter"
+            },
+            "createHTMLDocument": {
+              "value": false
+            },
+            "newDocument": {
+              "value": false
+            },
+            "domParser": {
+              "value": false
+            },
+            "detached": {
+              "value": false
+            }
+          },
+          "pictureInPictureEnabled": {
+            "descriptor": {
+              "get": {
+                "name": "get pictureInPictureEnabled",
+                "length": 0,
+                "source": "function get pictureInPictureEnabled() { [native code] }"
+              },
+              "set": "undefined",
+              "value": "absent",
+              "writable": "absent",
+              "enumerable": true,
+              "configurable": true
+            },
+            "own": false,
+            "foreignGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "nullGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "elementGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "foreignSet": "absent",
+            "selfSet": "absent",
+            "sloppyAssign": {
+              "value": [
+                true,
+                false
+              ]
+            },
+            "strictAssign": {
+              "error": "TypeError: Cannot set property pictureInPictureEnabled of #<Document> which has only a getter"
+            },
+            "createHTMLDocument": {
+              "value": false
+            },
+            "newDocument": {
+              "value": false
+            },
+            "domParser": {
+              "value": false
+            },
+            "detached": {
+              "value": false
+            }
+          },
+          "originAgentCluster": {
+            "window": {
+              "get": {
+                "name": "get originAgentCluster",
+                "length": 0,
+                "source": "function get originAgentCluster() { [native code] }"
+              },
+              "set": "undefined",
+              "value": "absent",
+              "writable": "absent",
+              "enumerable": true,
+              "configurable": true
+            },
+            "prototype": null,
+            "foreignGet": {
+              "error": "TypeError: Illegal invocation"
+            },
+            "sloppyAssign": {
+              "value": [
+                true,
+                "function"
+              ]
+            }
+          }
+        },
+        "frames": {},
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "last-modified-header",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "blank": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "initial": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "dated": {
+            "value": {
+              "lastModified": "header",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "undated": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          }
+        },
+        "messages": [],
+        "top": {
+          "lastModified": "header",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "last-modified-absent",
+      "result": {
+        "frames": {},
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "last-modified-invalid",
+      "result": {
+        "frames": {},
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "domain-site-keyed",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "a.b.localhost",
+              "originAgentCluster": false,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "value": "ok"
+              },
+              "after": "b.localhost"
+            }
+          },
+          "initial": {
+            "value": {
+              "lastModified": "now",
+              "domain": "b.localhost",
+              "originAgentCluster": false,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "value": "ok"
+              },
+              "after": "b.localhost"
+            }
+          }
+        },
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "b.localhost",
+          "originAgentCluster": false,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true,
+          "set": {
+            "value": "ok"
+          },
+          "after": "b.localhost"
+        }
+      }
+    },
+    {
+      "id": "domain-keyed-default",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "a.b.localhost",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "value": "ok"
+              },
+              "after": "a.b.localhost"
+            }
+          },
+          "initial": {
+            "value": {
+              "lastModified": "now",
+              "domain": "a.b.localhost",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "value": "ok"
+              },
+              "after": "a.b.localhost"
+            }
+          }
+        },
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "a.b.localhost",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true,
+          "set": {
+            "value": "ok"
+          },
+          "after": "a.b.localhost"
+        }
+      }
+    },
+    {
+      "id": "domain-keyed-explicit",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "a.b.localhost",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "value": "ok"
+              },
+              "after": "a.b.localhost"
+            }
+          }
+        },
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "a.b.localhost",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true,
+          "set": {
+            "value": "ok"
+          },
+          "after": "a.b.localhost"
+        }
+      }
+    },
+    {
+      "id": "domain-site-keyed-not-suffix",
+      "result": {
+        "frames": {},
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "a.b.localhost",
+          "originAgentCluster": false,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true,
+          "set": {
+            "error": "SecurityError: Failed to set the 'domain' property on 'Document': 'c.localhost' is not a suffix of 'a.b.localhost'."
+          },
+          "after": "a.b.localhost"
+        }
+      }
+    },
+    {
+      "id": "csp-sandbox-same-origin",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "error": "SecurityError: Failed to set the 'domain' property on 'Document': Assignment is forbidden for sandboxed iframes."
+              },
+              "after": "127.0.0.1"
+            }
+          },
+          "plain": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "error": "SecurityError: Failed to set the 'domain' property on 'Document': Assignment is forbidden for sandboxed iframes."
+              },
+              "after": "127.0.0.1"
+            }
+          }
+        },
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true,
+          "set": {
+            "error": "SecurityError: Failed to set the 'domain' property on 'Document': Assignment is forbidden for sandboxed iframes."
+          },
+          "after": "127.0.0.1"
+        }
+      }
+    },
+    {
+      "id": "csp-sandbox-opaque",
+      "result": {
+        "frames": {},
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true,
+          "set": {
+            "error": "SecurityError: Failed to set the 'domain' property on 'Document': Assignment is forbidden for sandboxed iframes."
+          },
+          "after": ""
+        }
+      }
+    },
+    {
+      "id": "iframe-sandbox",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "error": "SecurityError: Failed to set the 'domain' property on 'Document': Assignment is forbidden for sandboxed iframes."
+              },
+              "after": "127.0.0.1"
+            }
+          },
+          "plain": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "error": "SecurityError: Failed to set the 'domain' property on 'Document': Assignment is forbidden for sandboxed iframes."
+              },
+              "after": "127.0.0.1"
+            }
+          },
+          "unsandboxed": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true,
+              "set": {
+                "value": "ok"
+              },
+              "after": "127.0.0.1"
+            }
+          },
+          "opaque": {
+            "error": "SecurityError"
+          }
+        },
+        "messages": [
+          {
+            "name": "opaque",
+            "domain": "",
+            "set": "SecurityError: Failed to set the 'domain' property on 'Document': Assignment is forbidden for sandboxed iframes.",
+            "originAgentCluster": true,
+            "fullscreenEnabled": false,
+            "webkitFullscreenEnabled": false,
+            "pictureInPictureEnabled": true
+          }
+        ],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "agent-cluster-site-keyed-children",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": false,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "plain": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": false,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "keyed": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": false,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "cross": {
+            "error": "SecurityError"
+          },
+          "crossoff": {
+            "error": "SecurityError"
+          }
+        },
+        "messages": [
+          {
+            "name": "cross",
+            "domain": "localhost",
+            "set": "ok",
+            "originAgentCluster": true,
+            "fullscreenEnabled": false,
+            "webkitFullscreenEnabled": false,
+            "pictureInPictureEnabled": true
+          },
+          {
+            "name": "crossoff",
+            "domain": "localhost",
+            "set": "ok",
+            "originAgentCluster": true,
+            "fullscreenEnabled": false,
+            "webkitFullscreenEnabled": false,
+            "pictureInPictureEnabled": true
+          }
+        ],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": false,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "agent-cluster-keyed-children",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "off": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "crossoff": {
+            "error": "SecurityError"
+          }
+        },
+        "messages": [
+          {
+            "name": "crossoff",
+            "domain": "localhost",
+            "set": "ok",
+            "originAgentCluster": false,
+            "fullscreenEnabled": false,
+            "webkitFullscreenEnabled": false,
+            "pictureInPictureEnabled": true
+          }
+        ],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "fullscreen-frames",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "plain": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "allow": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "allowfullscreen": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "allownone": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": false,
+              "webkitFullscreenEnabled": false,
+              "pictureInPictureEnabled": false
+            }
+          },
+          "sandboxed": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "cross": {
+            "error": "SecurityError"
+          },
+          "crossallow": {
+            "error": "SecurityError"
+          },
+          "crossallowfullscreen": {
+            "error": "SecurityError"
+          }
+        },
+        "messages": [
+          {
+            "name": "cross",
+            "domain": "localhost",
+            "set": "ok",
+            "originAgentCluster": true,
+            "fullscreenEnabled": false,
+            "webkitFullscreenEnabled": false,
+            "pictureInPictureEnabled": true
+          },
+          {
+            "name": "crossallow",
+            "domain": "localhost",
+            "set": "ok",
+            "originAgentCluster": true,
+            "fullscreenEnabled": true,
+            "webkitFullscreenEnabled": true,
+            "pictureInPictureEnabled": true
+          },
+          {
+            "name": "crossallowfullscreen",
+            "domain": "localhost",
+            "set": "ok",
+            "originAgentCluster": true,
+            "fullscreenEnabled": true,
+            "webkitFullscreenEnabled": true,
+            "pictureInPictureEnabled": true
+          }
+        ],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "fullscreen-header-disabled",
+      "result": {
+        "frames": {
+          "srcdoc": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": false,
+              "webkitFullscreenEnabled": false,
+              "pictureInPictureEnabled": false
+            }
+          },
+          "allowfullscreen": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": false,
+              "webkitFullscreenEnabled": false,
+              "pictureInPictureEnabled": false
+            }
+          }
+        },
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": false,
+          "webkitFullscreenEnabled": false,
+          "pictureInPictureEnabled": false
+        }
+      }
+    },
+    {
+      "id": "fullscreen-header-self",
+      "result": {
+        "frames": {
+          "allowfullscreen": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": true,
+              "webkitFullscreenEnabled": true,
+              "pictureInPictureEnabled": true
+            }
+          },
+          "crossallow": {
+            "error": "SecurityError"
+          }
+        },
+        "messages": [
+          {
+            "name": "crossallow",
+            "domain": "localhost",
+            "set": "ok",
+            "originAgentCluster": true,
+            "fullscreenEnabled": false,
+            "webkitFullscreenEnabled": false,
+            "pictureInPictureEnabled": true
+          }
+        ],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    },
+    {
+      "id": "child-header-disabled",
+      "result": {
+        "frames": {
+          "disabled": {
+            "value": {
+              "lastModified": "now",
+              "domain": "127.0.0.1",
+              "originAgentCluster": true,
+              "fullscreenEnabled": false,
+              "webkitFullscreenEnabled": false,
+              "pictureInPictureEnabled": false
+            }
+          }
+        },
+        "messages": [],
+        "top": {
+          "lastModified": "now",
+          "domain": "127.0.0.1",
+          "originAgentCluster": true,
+          "fullscreenEnabled": true,
+          "webkitFullscreenEnabled": true,
+          "pictureInPictureEnabled": true
+        }
+      }
+    }
+  ]
+}

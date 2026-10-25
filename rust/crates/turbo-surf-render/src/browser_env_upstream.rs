@@ -11,6 +11,8 @@
 // removeChild, get/setAttribute, id/className/tagName/textContent, querySelector(All)/getElementById.
 // Events, cssom/style, classList, forms etc. grow in P3.3. Gated by `TURBO_RUST_DOM`.
 
+#[path = "css_selector_syntax.rs"]
+mod css_selector_syntax;
 #[path = "cssom_parser.rs"]
 mod cssom_parser;
 #[path = "dom_isolation.rs"]
@@ -19,6 +21,10 @@ mod dom_isolation;
 mod dom_ownership;
 #[path = "element_internals.rs"]
 mod element_internals;
+#[path = "animations.rs"]
+mod animations;
+#[path = "element_members.rs"]
+mod element_members;
 pub use dom_isolation::{activate_isolate, reset_isolate, NativeDomScope};
 #[path = "storage_ownership.rs"]
 mod storage_ownership;
@@ -45,8 +51,8 @@ mod script_state;
 #[path = "trusted_types.rs"]
 mod trusted_types;
 pub use script_state::{
-    prepare_script, script_document, script_state, set_document_resource_active, PreparedScript,
-    ScriptState,
+    parser_scripts, prepare_script, script_document, script_state, set_document_resource_active,
+    PreparedScript, ScriptState,
 };
 
 #[path = "mutation_observers.rs"]
@@ -63,6 +69,18 @@ pub use mutation_observers::{install_mutation_consumer, remove_mutation_consumer
 /// Guest code cannot install or replace this private lifecycle capability.
 pub fn capture_popover_scheduler(scope: &mut v8::PinScope) {
     html_popover::capture_scheduler(scope);
+}
+/// Capture the host's rendering seam for view transitions: `host("frame", step)` runs
+/// `step(timestamp)` after the next frame's animation frame callbacks, `host("suppress",
+/// flag)` pauses or resumes rendering updates, and `host("hidden")` reports page visibility.
+pub fn capture_view_transition_host(scope: &mut v8::PinScope, host: v8::Local<v8::Function>) {
+    view_transitions::capture_host(scope, host);
+}
+
+/// Capture the embedder's `File` interface once the runtime has installed it, before
+/// page script: FileList selections, file form entries and DataTransfer use it.
+pub fn capture_file_host(scope: &mut v8::PinScope) {
+    file_inputs::capture_host(scope);
 }
 
 pub fn clear_context_capabilities(scope: &mut v8::PinScope) {
@@ -104,6 +122,13 @@ pub fn set_interface_record<'s>(
 
 #[path = "document_basics.rs"]
 mod document_basics;
+#[path = "document_legacy.rs"]
+mod document_legacy;
+#[path = "interceptor_mode.rs"]
+mod interceptor_mode;
+pub use document_legacy::{
+    set_document_domain_sandboxed, set_document_last_modified, set_document_origin_keyed,
+};
 #[path = "dom_implementation.rs"]
 mod dom_implementation;
 pub use dom_implementation::set_initializer as set_inert_document_initializer;
@@ -114,12 +139,50 @@ pub use document_xpath::is_native_xpath_object;
 mod dom_mutations;
 #[path = "element_relations.rs"]
 mod element_relations;
+#[path = "file_inputs.rs"]
+mod file_inputs;
+#[path = "focus_group.rs"]
+mod focus_group;
+#[path = "html_dialog.rs"]
+mod html_dialog;
+#[path = "typed_om.rs"]
+mod typed_om;
+#[path = "html_invokers.rs"]
+mod html_invokers;
 #[path = "html_popover.rs"]
 mod html_popover;
+#[path = "pointer_events.rs"]
+mod pointer_events;
+pub use pointer_events::{host_pointer, PointerLockPolicy};
 #[path = "html_text.rs"]
 mod html_text;
+#[path = "hyperlink_utils.rs"]
+mod hyperlink_utils;
+#[path = "input_members.rs"]
+mod input_members;
+#[path = "interest_invokers.rs"]
+mod interest_invokers;
+#[path = "reference_target.rs"]
+mod reference_target;
+#[path = "shadow_html.rs"]
+mod shadow_html;
+#[path = "select_element.rs"]
+mod select_element;
+#[path = "form_pseudo.rs"]
+mod form_pseudo;
+#[path = "key_order.rs"]
+mod key_order;
+pub use key_order::{defer as defer_key_order, finish as finish_key_order};
 #[path = "shadow_slots.rs"]
 mod shadow_slots;
+#[path = "user_activation_gates.rs"]
+mod user_activation_gates;
+pub use user_activation_gates::{
+    light_dismiss, modal_backdrop, notify_user_activation, process_close_watchers,
+    set_activation_host, ActivationHost, ActivationQuery,
+};
+#[path = "view_transitions.rs"]
+mod view_transitions;
 
 /// Host-only composed identities for native layout. This seam does not expose
 /// closed roots or private assignment records to guest JavaScript.
@@ -197,6 +260,8 @@ pub fn update_node_nonce_units(
 
 #[path = "html_documents.rs"]
 mod html_documents;
+#[path = "sanitizer.rs"]
+mod sanitizer;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -405,17 +470,24 @@ struct DomState {
     /// handle → JS node object, for identity (`el === el`).
     cache: HashMap<Handle, v8::Weak<v8::Object>>,
     checked_radios: HashMap<Handle, Option<Handle>>,
+    dialog: html_dialog::State,
     /// shared element object template (internal_field_count = 2).
     el_template: v8::Global<v8::ObjectTemplate>,
     shadow_modes: HashMap<Handle, String>,
     nonces: HashMap<Handle, Vec<u16>>,
     scripts: HashMap<Handle, ScriptState>,
+    /// Main-document parser scripts in parse order (see script_state::parse_order).
+    parser_scripts: Vec<Handle>,
     resource_active: bool,
     basics_state: Option<v8::Weak<v8::Object>>,
     control_clone: Option<v8::Weak<v8::Function>>,
     css_policy: css_policy::PolicyState,
     event_handlers: event_handlers::State,
     popover: html_popover::State,
+    pointer: pointer_events::State,
+    activation: user_activation_gates::State,
+    view_transitions: view_transitions::State,
+    input_members: input_members::State,
     browsing_context: bool,
     ownership: Option<dom_ownership::Graph>,
     ownership_dirty: bool,
@@ -569,8 +641,20 @@ pub fn parse_html_document_units<'s>(
 }
 fn parse_html_tree<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    mut tree: Tree,
+    tree: Tree,
     sanitize: bool,
+) -> v8::Local<'s, v8::Object> {
+    let sanitizer = sanitize.then(|| (html_documents::default_config(), true));
+    parse_html_tree_with(scope, tree, false, sanitizer)
+}
+/// Build an inert document from a parsed tree. `declarative` attaches
+/// `<template shadowrootmode>` roots (`Document.parseHTML[Unsafe]`); a sanitizer
+/// configuration (and whether it is safe) then filters the whole tree.
+fn parse_html_tree_with<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut tree: Tree,
+    declarative: bool,
+    sanitizer: Option<(&sanitizer::Config, bool)>,
 ) -> v8::Local<'s, v8::Object> {
     let id = NEXT_DOM_ID.with(|next| {
         let id = next.get();
@@ -591,19 +675,25 @@ fn parse_html_tree<'s>(
         (clone, current_node_projector(scope))
     };
     let _dom = DomScope::enter(id);
-    if sanitize {
-        html_documents::sanitize(&mut tree);
-    }
+    let root = tree.root();
+    let only = sanitizer.map(|(config, safe)| sanitizer::sanitize(&mut tree, root, config, safe));
+    let declared = if declarative {
+        shadow_html::declarative(&mut tree, root, only.as_ref())
+    } else {
+        Vec::new()
+    };
     let template = build_el_template(scope);
     let template = v8::Global::new(scope, template);
     DOM.with(|dom| {
         *dom.borrow_mut() = Some(DomState {
             scripts: script_state::initial(&tree),
+            parser_scripts: Vec::new(),
             resource_active: false,
             nonces: initial_nonces(&tree),
             tree,
             cache: HashMap::new(),
             checked_radios: Default::default(),
+            dialog: Default::default(),
             el_template: template,
             shadow_modes: HashMap::new(),
             basics_state: None,
@@ -611,6 +701,10 @@ fn parse_html_tree<'s>(
             css_policy: Default::default(),
             event_handlers: Default::default(),
             popover: Default::default(),
+            pointer: Default::default(),
+            activation: Default::default(),
+            view_transitions: Default::default(),
+            input_members: Default::default(),
             browsing_context: false,
             ownership: None,
             ownership_dirty: true,
@@ -634,11 +728,16 @@ fn parse_html_tree<'s>(
         let undefined = v8::undefined(scope);
         function.call(scope, undefined.into(), &[document.into()]);
     }
+    let roots = shadow_html::register(scope, declared);
     DOM.with(|dom| {
         if let Some(dom) = dom.borrow_mut().as_mut() {
             dom.template_contents.enabled = true
         }
     });
+    // Innermost roots first: no raw parser content fragment may enter adoption.
+    for root in roots.iter().rev() {
+        template_contents::realize(scope, *root);
+    }
     template_contents::realize(scope, document);
     document
 }
@@ -777,6 +876,7 @@ pub fn import_document_node<'s>(
     script_state::copy(scope, source_node, clone, deep);
     template_contents::copy_contents(scope, source_node, clone, deep);
     custom_elements::cloned(scope, source_node, clone, deep);
+    shadow_html::clone_roots(scope, source_node, clone, deep);
     Ok(clone)
 }
 
@@ -786,6 +886,7 @@ fn copy_control_state<'s>(
     clone: v8::Local<'s, v8::Object>,
     deep: bool,
 ) {
+    input_members::copy(scope, source, clone, deep);
     let function = {
         let _source = DomScope::for_object(scope, source);
         DOM.with(|dom| {
@@ -1068,6 +1169,7 @@ fn wrap_inner<'s>(scope: &mut v8::PinScope<'s, '_>, handle: Handle) -> v8::Local
     }) {
         return object;
     }
+    user_activation_gates::observe(handle);
     let owner = DOM_CONTEXTS.with(|d| d.borrow().get(&DOM_ID.with(|id| id.get())).cloned());
     let context = owner
         .as_ref()
@@ -1247,6 +1349,32 @@ fn with_tree_mut<R>(f: impl FnOnce(&mut Tree) -> R) -> Option<R> {
 
 // ---- element methods -------------------------------------------------------------------------
 
+/// Hosts that install their own DOMException after the binding (turbo-surf's runtime) hand
+/// it over here, so natively raised exceptions are instances of the realm's interface.
+pub fn register_dom_exception(scope: &mut v8::PinScope, constructor: v8::Local<v8::Function>) {
+    // The constructor's own realm, never the (possibly parent) current context.
+    let Some(context) = constructor.get_creation_context(scope) else {
+        return;
+    };
+    let global = context.global(scope);
+    let key = dom_exception_key(scope);
+    global.set_private(scope, key, constructor.into());
+}
+/// A DOMException of the current realm's registered interface.
+fn new_dom_exception<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    name: &str,
+    message: &str,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let text = v8::String::new(scope, message)?;
+    let name = v8::String::new(scope, name)?;
+    let global = scope.get_current_context().global(scope);
+    let key = dom_exception_key(scope);
+    let constructor = global
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())?;
+    constructor.new_instance(scope, &[text.into(), name.into()])
+}
 fn dom_exception_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Private> {
     let name = v8::String::new(scope, "turbo.native.DOMException").unwrap();
     v8::Private::for_api(scope, Some(name))
@@ -1318,40 +1446,18 @@ fn el_attach_shadow(
         scope.throw_exception(error);
         return;
     }
-    let allowed = with_tree(|tree| {
-        let tag = tree.local_name(host).unwrap_or("");
-        tree.namespace_id(host) == 0
-            && (tag.contains('-')
-                || matches!(
-                    tag,
-                    "article"
-                        | "aside"
-                        | "blockquote"
-                        | "body"
-                        | "div"
-                        | "footer"
-                        | "h1"
-                        | "h2"
-                        | "h3"
-                        | "h4"
-                        | "h5"
-                        | "h6"
-                        | "header"
-                        | "main"
-                        | "nav"
-                        | "p"
-                        | "section"
-                        | "span"
-                ))
-            && tree.shadow_root(host).is_none()
-    })
-    .unwrap_or(false);
-    if !allowed {
+    if !with_tree(|tree| shadow_html::valid_host(tree, host)).unwrap_or(false) {
         throw_dom_error(
             scope,
             "NotSupportedError",
             "This element cannot attach another shadow root",
         );
+        return;
+    }
+    if let Some(existing) = with_tree(|tree| tree.shadow_root(host)).flatten() {
+        if let Some(root) = shadow_html::reattach(scope, existing, &mode) {
+            rv.set(root.into());
+        }
         return;
     }
     let root = with_tree_mut(|tree| tree.attach_shadow(host)).unwrap();
@@ -1365,6 +1471,7 @@ fn el_attach_shadow(
     });
     let node = wrap(scope, root);
     shadow_slots::configure(scope, node, assignment == "manual");
+    shadow_html::configure(scope, node, options);
     rv.set(node.into());
 }
 
@@ -1961,7 +2068,13 @@ fn el_cascade_prop(
         return;
     };
     let name = arg_str(scope, &args, 0);
-    let policy = css_policy::cascade_policy(scope);
+    // JS inherits document-sheet values from fresh composed-parent snapshots;
+    // native text only supplies shadow-scoped rules the JS cascade lacks.
+    if !with_tree(|t| css_policy::shadow_scoped(t, h)).unwrap_or(false) {
+        rv.set(v8::String::empty(scope).into());
+        return;
+    }
+    let policy = css_policy::shadow_cascade_policy(scope);
     let val = with_tree(|t| {
         let computed = turbo_dom_parser::rtdom::cascade::computed_style_with_policy(t, h, &policy);
         Some(turbo_dom_parser::rtdom::cascade::get_property_value(
@@ -3059,7 +3172,20 @@ fn selector_argument<'s>(
 ) -> Option<(String, Vec<u16>, bool)> {
     let units = dom_units(scope, args.get(0))?;
     let scalar = String::from_utf16_lossy(&units);
+    // The matcher is lenient; admission uses the same grammar as stylesheets.
+    if css_selector_syntax::selector_list(&scalar).is_none() {
+        throw_dom_error(
+            scope,
+            "SyntaxError",
+            &format!("'{scalar}' is not a valid selector."),
+        );
+        return None;
+    }
     let transformed = html_popover::selector(scope, node, &scalar)?;
+    let transformed = html_dialog::selector(scope, node, &transformed)?;
+    let transformed = interest_invokers::selector(scope, node, &transformed)?;
+    let transformed = form_pseudo::selector(scope, node, &transformed)?;
+    let transformed = view_transitions::selector(scope, node, &transformed)?;
     let original = if transformed == scalar {
         units
     } else {
@@ -3341,6 +3467,9 @@ fn el_focus(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
+    if html_dialog::blocks_focus(h) {
+        return;
+    }
     let prev = ACTIVE.with(|a| *a.borrow());
     if prev == Some(h) {
         return;
@@ -3385,6 +3514,8 @@ fn get_active_element(
     if active.is_none() {
         ACTIVE.with(|a| *a.borrow_mut() = None);
     }
+    // Focus inside shadow trees is retargeted to the document-level host.
+    let active = active.and_then(|h| with_tree(|t| shadow_html::retarget(t, h, t.root())));
     let h = active.or_else(|| with_tree(|t| t.query_selector("body")).flatten());
     if let Some(h) = h {
         let node = wrap(scope, h);
@@ -3398,9 +3529,22 @@ fn el_click(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
+    synthetic_click(scope, args.this(), h, false);
+}
+
+/// Fire a synthetic pointer `click` (click() and label activation); a disabled control or
+/// one already running its click-in-progress steps ignores it.
+fn synthetic_click(
+    scope: &mut v8::PinScope,
+    receiver: v8::Local<v8::Object>,
+    h: Handle,
+    trusted: bool,
+) {
+    if html_invokers::disabled_control(h) {
+        return;
+    }
     let name = v8::String::new(scope, "turbo-dom.click.active").unwrap();
     let key = v8::Private::for_api(scope, Some(name));
-    let receiver = args.this();
     if receiver
         .get_private(scope, key)
         .is_some_and(|value| value.is_true())
@@ -3411,7 +3555,7 @@ fn el_click(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     receiver.set_private(scope, key, active.into());
     if let Some(context) = receiver.get_creation_context(scope) {
         let context_scope = &mut v8::ContextScope::new(scope, context);
-        dispatch_synthetic_with_trust(context_scope, h, "click", true, true, false);
+        dispatch_synthetic_with_trust(context_scope, h, "click", true, true, trusted);
     }
     let inactive = v8::Boolean::new(scope, false);
     receiver.set_private(scope, key, inactive.into());
@@ -3722,6 +3866,7 @@ fn el_clone_node<'s>(
         }
         copy_control_state(scope, args.this(), node, deep);
         custom_elements::cloned(scope, source, node, deep);
+        shadow_html::clone_roots(scope, source, node, deep);
         rv.set(node.into());
     }
 }
@@ -4576,16 +4721,21 @@ fn el_dispatch_event(
     // the activation-behavior spec), so React's ChangeEventPlugin — which detects checkbox change on
     // the `click` event by reading node.checked — sees the new value. Reverted below if the click is
     // canceled. `change`/`input` DOM events fire afterward (also below).
-    let click_check = if ty == "click" {
-        checkable_kind(target)
+    // Only a MouseEvent click has an activation target (the target or a bubbling ancestor).
+    let activation_target = if ty == "click" {
+        html_invokers::activation_target(scope, event_obj, target)
     } else {
         None
     };
-    let check_snapshot = click_check.map(|_| form_checked_state::snapshot(target));
-    let check_was = click_check.map(|_| form_checked_state::checked(target));
+    let checked_target = activation_target.unwrap_or(target);
+    let click_check = activation_target.and_then(checkable_kind);
+    let check_snapshot = click_check.map(|_| form_checked_state::snapshot(checked_target));
+    let check_was = click_check.map(|_| form_checked_state::checked(checked_target));
+    let indeterminate_was = (click_check == Some(CheckKind::Checkbox))
+        .then(|| input_members::pre_activation(checked_target));
     if let (Some(kind), Some(was)) = (click_check, check_was) {
         let next = if kind == CheckKind::Radio { true } else { !was };
-        form_checked_state::set(target, next);
+        form_checked_state::set(checked_target, next);
     }
 
     // propagation path: ancestors (root … parent), then the target. Bubbling reverses it.
@@ -4747,10 +4897,12 @@ fn el_dispatch_event(
             .as_ref()
             .is_some_and(|dom| dom.form_submission_blocked)
     });
-    if not_prevented && ty == "click" && is_submit_control(target) && !submission_blocked {
-        if let Some(form) = closest_form(target) {
+    let submitter = activation_target
+        .filter(|&node| is_submit_control(node) && !html_invokers::disabled_control(node));
+    if let (true, Some(submitter), false) = (not_prevented, submitter, submission_blocked) {
+        if let Some(form) = closest_form(submitter) {
             let form = wrap(scope, form);
-            let submitter = wrap(scope, target);
+            let submitter = wrap(scope, submitter);
             if let Some(context) = form.get_creation_context(scope) {
                 if let Some(dispatcher) = context.get_slot::<FormSubmissionDispatcher>() {
                     let dispatcher = dom_ownership::local(scope, &dispatcher.0);
@@ -4772,14 +4924,27 @@ fn el_dispatch_event(
         }
     }
 
+    if let (true, Some(activation)) = (not_prevented, activation_target) {
+        html_invokers::activate(scope, event_obj, activation, target);
+    }
+    if args.data().is_true() {
+        interest_invokers::observe(scope, event_obj, target, &ty);
+        if not_prevented && ty == "keydown" {
+            focus_group::keydown(scope, event_obj, target);
+        }
+    }
+
     // Finish the checkbox/radio activation: a canceled click reverts the pre-toggle; otherwise fire
     // the DOM `input` + `change` events (jsdom does this; some libs listen for them directly).
     if let (Some(_kind), Some(_was)) = (click_check, check_was) {
         if not_prevented {
-            dispatch_synthetic(scope, target, "input", true, false);
-            dispatch_synthetic(scope, target, "change", true, false);
+            dispatch_synthetic(scope, checked_target, "input", true, false);
+            dispatch_synthetic(scope, checked_target, "change", true, false);
         } else if let Some(snapshot) = check_snapshot {
             form_checked_state::restore(snapshot);
+            if let Some(previous) = indeterminate_was {
+                input_members::cancel_activation(checked_target, previous);
+            }
         }
     }
 
@@ -4825,7 +4990,12 @@ fn is_submit_control(h: Handle) -> bool {
         let tag = t.tag_name(h).unwrap_or_default().to_ascii_uppercase();
         let ty = t.get_attribute(h, "type").map(|s| s.to_ascii_lowercase());
         match tag.as_str() {
-            "BUTTON" => !matches!(ty.as_deref(), Some("button" | "reset")),
+            "BUTTON" => match ty.as_deref() {
+                Some("submit") => true,
+                Some("button" | "reset") => false,
+                // Auto state: an invoker button with a missing/invalid type never submits.
+                _ => !t.has_attribute(h, "command") && !t.has_attribute(h, "commandfor"),
+            },
             "INPUT" => matches!(ty.as_deref(), Some("submit" | "image")),
             _ => false,
         }
@@ -6120,6 +6290,7 @@ fn build_el_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::
                 | v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS,
         );
     tmpl.set_named_property_handler(handler);
+    select_element::indexed_handler(tmpl);
 
     tmpl
 }
@@ -6855,8 +7026,13 @@ pub fn install_with_html_source_positions(scope: &mut v8::PinScope, html: &str) 
 pub fn install_with_utf16_source_positions(scope: &mut v8::PinScope, units: &[u16]) {
     install_with_tree(scope, Tree::parse_utf16_with_source_positions(units));
 }
-fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
+fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     dom_isolation::install(scope);
+    // The document parser attaches declarative shadow roots (fragment parsing
+    // for innerHTML never does); their scripts are ordinary parser scripts.
+    let root = tree.root();
+    let parser_scripts = script_state::parse_order(&tree);
+    let declared = shadow_html::declarative(&mut tree, root, None);
     // A replacement document is seeded before its new bootstrap probes native
     // methods. Projecting with the previous bootstrap here would delete those
     // raw own methods before their replacement prototypes have been constructed.
@@ -6880,18 +7056,25 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     DOM.with(|d| {
         *d.borrow_mut() = Some(DomState {
             scripts: script_state::initial(&tree),
+            parser_scripts,
             resource_active: true,
             nonces: initial_nonces(&tree),
             tree,
             cache: HashMap::new(),
             checked_radios: Default::default(),
+            dialog: Default::default(),
             el_template,
+            // Declarative roots get their modes once the binding can wrap them.
             shadow_modes: HashMap::new(),
             basics_state: None,
             control_clone: None,
             css_policy: Default::default(),
             event_handlers: Default::default(),
             popover: Default::default(),
+            pointer: Default::default(),
+            activation: Default::default(),
+            view_transitions: Default::default(),
+            input_members: Default::default(),
             browsing_context: true,
             ownership: None,
             ownership_dirty: true,
@@ -6907,6 +7090,9 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     DOM_CONTEXTS.with(|d| {
         d.borrow_mut().insert(DOM_ID.with(|id| id.get()), global);
     });
+    // Parsed declarative roots exist before any binding JS mutates the tree.
+    shadow_html::ensure_keys(scope);
+    shadow_slots::ensure_keys(scope);
     if let Some(root) = with_tree(|tree| tree.root()) {
         form_checked_state::parsed(root);
     }
@@ -6980,11 +7166,19 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     run_js(scope, include_str!("element_tokens.js"));
     run_js(scope, include_str!("element_relations.js"));
     run_js(scope, include_str!("document_basics.js"));
+    document_legacy::install(scope);
     capture_node_projector(scope);
     dom_implementation::install(scope);
+    // Root flags must exist before template realization adopts nested contents.
+    let declared = shadow_html::register(scope, declared);
     template_contents::install(scope);
+    for root in declared.iter().rev() {
+        template_contents::realize(scope, *root);
+    }
     mutation_observers::install(scope);
     shadow_slots::install(scope);
+    shadow_html::install(scope);
+    sanitizer::install(scope);
     script_state::install(scope);
     range_contents::install(scope);
     bind_method(scope, global, "__htmlTextNative", html_text::dispatch);
@@ -6992,9 +7186,26 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     html_popover::install(scope);
     document_xpath::install(scope);
     event_listeners::install(scope);
+    element_members::install(scope);
+    html_dialog::install(scope);
+    pointer_events::install(scope);
     bind_method(scope, global, "__formNative", form_controls_native);
+    run_js(scope, include_str!("form_outputs.js"));
     run_js(scope, include_str!("form_controls.js"));
     run_js(scope, include_str!("form_collections.js"));
+    reference_target::install(scope);
+    interest_invokers::install(scope);
+    html_invokers::install(scope);
+    focus_group::install(scope);
+    input_members::install(scope);
+    file_inputs::install(scope);
+    select_element::install(scope);
+    animations::install(scope);
+    typed_om::install(scope);
+    hyperlink_utils::install(scope);
+    form_pseudo::install(scope);
+    user_activation_gates::install(scope);
+    view_transitions::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())
@@ -7061,6 +7272,10 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     event_handlers::install(scope, None, "about:blank");
     custom_elements::install(scope);
     element_internals::install(scope);
+    // After custom_elements re-creates the HTML constructors, so static members stay on them.
+    run_js(scope, include_str!("interface_members.js"));
+    // Last: reorder every interface's own keys to Chrome's order.
+    key_order::installed(scope);
 }
 
 fn bind_document(scope: &mut v8::PinScope) {
@@ -8880,7 +9095,7 @@ mod tests {
             const initial=early.sheet!==null && late.sheet===null && document.styleSheets.length===1 && a.getAttribute('style')==='color:blue' && a.style.color==='';
             early.remove();a.style.color='green';const cssom=a.style.color==='green' && a.getAttribute('style')==='color: green;';
             a.setAttribute('style','color:red');const blocked=a.style.color==='green' && a.getAttribute('style')==='color:red' && getComputedStyle(a).color==='rgb(0, 128, 0)';
-            const inherited=globalThis[Symbol.for('ts')].cascadeProp.call(document.getElementById('child'),'color')==='rgb(0, 128, 0)';
+            const inherited=getComputedStyle(document.getElementById('child')).color==='rgb(0, 128, 0)';
             a.removeAttribute('style');const removed=a.style.color==='';
             const privateHooks=typeof globalThis.__writeAppliedInlineStyle==='undefined' && !globalThis[Symbol.for('ts')].attachLinkedStyleSheet && !globalThis[Symbol.for('ts')].readStyleSheetRules;
             return JSON.stringify({initial,cssom,blocked,inherited,removed,privateHooks});})()"#).unwrap();
@@ -9323,6 +9538,10 @@ mod dom_projection_tests;
 mod css_adoption_tests;
 
 #[cfg(test)]
+#[path = "css_admission_tests.rs"]
+mod css_admission_tests;
+
+#[cfg(test)]
 #[path = "dom_implementation_tests.rs"]
 mod dom_implementation_tests;
 #[cfg(test)]
@@ -9340,3 +9559,37 @@ mod iframe_credentialless_tests;
 #[cfg(test)]
 #[path = "utf16_contract_tests.rs"]
 mod utf16_contract_tests;
+
+#[cfg(test)]
+#[path = "form_outputs_tests.rs"]
+mod form_outputs_tests;
+
+#[cfg(test)]
+#[path = "html_dialog_tests.rs"]
+mod html_dialog_tests;
+#[cfg(test)]
+#[cfg(test)]
+#[path = "sanitizer_tests.rs"]
+mod sanitizer_tests;
+#[cfg(test)]
+#[path = "pointer_events_tests.rs"]
+mod pointer_events_tests;
+#[cfg(test)]
+#[path = "animations_tests.rs"]
+mod animations_tests;
+#[cfg(test)]
+#[path = "file_inputs_tests.rs"]
+mod file_inputs_tests;
+#[cfg(test)]
+#[path = "typed_om_tests.rs"]
+mod typed_om_tests;
+#[cfg(test)]
+#[path = "form_pseudo_tests.rs"]
+mod form_pseudo_tests;
+#[cfg(test)]
+#[path = "key_order_tests.rs"]
+mod key_order_tests;
+
+#[cfg(test)]
+#[path = "view_transitions_tests.rs"]
+mod view_transitions_tests;

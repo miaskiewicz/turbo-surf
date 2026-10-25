@@ -158,6 +158,8 @@ fn capture_kind<'s>(
                 svg_viewports: Vec::new(),
                 original_text: std::collections::HashMap::new(),
                 composition: None,
+                quirks: false,
+                body: None,
             })
         }
     })
@@ -404,6 +406,11 @@ pub(crate) fn valid_receiver<'s>(
         2 => {
             tree.node_type_id(handle) == 1
                 && tree.namespace_uri(handle) == Some("http://www.w3.org/1999/xhtml")
+        }
+        3 => {
+            tree.node_type_id(handle) == 1
+                && tree.namespace_uri(handle) == Some("http://www.w3.org/1999/xhtml")
+                && tree.local_name(handle) == Some("input")
         }
         9 => tree.node_type_id(handle) == 9,
         11 => tree.is_shadow_root(handle),

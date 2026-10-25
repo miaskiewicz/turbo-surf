@@ -2,6 +2,11 @@
 
 Start with the [Chrome155 parity runbook](./CHROME-PARITY-RUNBOOK.md) for exact SDK/build commands, every comparison flag, opt-in timing and bridge settings, artifact checks and test order.
 
+To move the emulated browser identity to a new Chrome release, follow
+[CHROME-REVERSION.md](./CHROME-REVERSION.md): `node harness/detection/reversion-chrome.mjs --chrome <Chrome.app>`
+measures the Chrome identity battery, diffs it against the current identity and
+turbo-surf, and rewrites the registry (`--check` for CI).
+
 This diagnostic compares real Chrome with the native V8/rtdom engine using fresh,
 independent cookies. Chrome is an oracle; its cookie values are never imported by
 the native run. The native example does not invoke a solver or sidecar, or read an
@@ -980,6 +985,11 @@ ownership, callable descriptors and raw property order:
 ```bash
 node harness/detection/api-inventory.mjs /tmp/turbo-api-shape/comparison.json harness/detection/API-INVENTORY.json
 ```
+
+[REMEASURE-156.md](./REMEASURE-156.md) gives the complete Chrome 156 re-measurement:
+oracle freeze, stock or native155 build, same-scope and expanded collectors
+(`api-shape-interfaces.js`), and the same-scope `api-inventory-diff.mjs` comparison.
+It also states the labeling rules for an oracle or engine change.
 
 The expanded audit also measures forms, collections, Blob/File, FormData,
 CustomStateSet and ValidityState. Absent interfaces remain separate from missing

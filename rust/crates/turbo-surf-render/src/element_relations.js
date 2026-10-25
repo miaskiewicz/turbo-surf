@@ -23,10 +23,13 @@
   // also clear this private assignment, including writes of the same empty value.
   for(const [name,attribute] of Object.entries(properties)){
     const many=name.endsWith('Elements');
-    Object.defineProperty(g.Element.prototype,name,{get:make(function(){return read(this,attribute,many);},'get '+name,0),set:make(function(value){element(this);if(value==null){removeAttribute.call(this,attribute);delete state(this)[attribute];return;}let references;
-      if(many){references=[];for(const target of value){element(target);if(!references.includes(target))references.push(target);}}
-      else references=[element(value)];
-      setAttribute.call(this,attribute,'');const entry=create(null);entry.references=references;state(this)[attribute]=entry;
-    },'set '+name,1),enumerable:true,configurable:true});
+    Object.defineProperty(g.Element.prototype,name,{get:make(function(){return read(this,attribute,many);},'get '+name,0),set:make(function(value){assign(this,attribute,many,value);},'set '+name,1),enumerable:true,configurable:true});
   }
+  function assign(owner,attribute,many,value){element(owner);if(value==null){removeAttribute.call(owner,attribute);delete state(owner)[attribute];return;}let references;
+    if(many){references=[];for(const target of value){element(target);if(!references.includes(target))references.push(target);}}
+    else references=[element(value)];
+    setAttribute.call(owner,attribute,'');const entry=create(null);entry.references=references;state(owner)[attribute]=entry;
+  }
+  // Single-element HTML reflection (popovertarget, commandfor) shares the scoped explicit state.
+  ns.elementReference={read:(owner,attribute)=>read(owner,attribute,false),assign:(owner,attribute,value)=>assign(owner,attribute,false,value)};
 })();

@@ -16,7 +16,7 @@
 //! only to rustls headers: wreq emulation pins default_profile(). Pin that same
 //! identity in the render tier on the wreq path to avoid a cross-layer mismatch.
 
-/// Navigation Accept for the current configured Chrome release.
+/// Navigation Accept for the newest configured Chrome release.
 pub const ACCEPT: &str = crate::browser::RELEASES[0].navigation_accept;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -100,7 +100,7 @@ pub struct Profile {
     pub accept_language: &'static str,
     pub languages: &'static [&'static str],
     pub hardware_concurrency: u8,
-    /// `navigator.deviceMemory` in GiB. Chrome 155 desktop rounds within 2..32;
+    /// `navigator.deviceMemory` in GiB. Chrome desktop rounds within 2..32;
     /// the local default and the selected pool machine can have different memory.
     pub device_memory: u8,
     pub max_touch_points: u8,
@@ -223,10 +223,10 @@ const OSES: &[Os] = &[
     },
 ];
 
-// Configured release majors only: older unlisted versions cannot borrow a newer
-// full version while still advertising their original major. Transport emulation
-// remains pinned to the current default identity.
-const MAJORS: &[u16] = &[155, 154, 153];
+// Configured release majors only (every `browser::RELEASES` entry): older unlisted
+// versions cannot borrow a newer full version while still advertising their
+// original major. Transport emulation remains pinned to the current default identity.
+const MAJORS: usize = crate::browser::RELEASES.len();
 
 // Plausible logical-core counts for desktops.
 const CORES: &[u8] = &[4, 8, 12, 16];
@@ -256,7 +256,7 @@ const LANGS: &[(&str, &[&str])] = &[
 
 /// Total number of distinct coherent profiles (the product of every axis).
 pub fn pool_size() -> usize {
-    OSES.len() * MAJORS.len() * CORES.len() * DEVICE_MEMORY.len() * SCREENS.len() * LANGS.len()
+    OSES.len() * MAJORS * CORES.len() * DEVICE_MEMORY.len() * SCREENS.len() * LANGS.len()
 }
 
 // FNV-1a (64-bit). A fixed, process-independent hash so a given key maps to the
@@ -283,8 +283,8 @@ pub fn profile_at(index: usize) -> Profile {
     let mut i = index % pool_size();
     let os = &OSES[i % OSES.len()];
     i /= OSES.len();
-    let major = MAJORS[i % MAJORS.len()];
-    i /= MAJORS.len();
+    let major = crate::browser::RELEASES[i % MAJORS].major;
+    i /= MAJORS;
     let cores = CORES[i % CORES.len()];
     i /= CORES.len();
     let device_memory = DEVICE_MEMORY[i % DEVICE_MEMORY.len()];
@@ -351,7 +351,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chrome155_brand_headers_match_the_captured_low_and_full_versions() {
+    fn brand_headers_match_the_captured_low_and_full_versions() {
         assert_eq!(
             brand_header(155, "155", false),
             "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\""
@@ -361,6 +361,12 @@ mod tests {
             brand_header(154, "154", false),
             "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\""
         );
+        // Measured Chrome 156.0.8078.47 (harness/detection/fixtures/chrome-identity-156.json).
+        assert_eq!(
+            brand_header(156, "156", false),
+            "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\""
+        );
+        assert_eq!(brand_header(156, "156.0.8078.47", true), "\"Not:A-Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"156.0.8078.47\", \"Google Chrome\";v=\"156.0.8078.47\"");
     }
 
     #[test]
@@ -426,8 +432,9 @@ mod tests {
         assert!(p.sec_ch_ua.contains(&format!("\"{major}\"")));
         assert_eq!(p.sec_ch_ua_platform, "\"macOS\"");
         assert_eq!(
-            p.device_memory, 16,
-            "Measured local Chrome 155 desktop memory"
+            p.device_memory,
+            crate::browser::default_release().default_device_memory,
+            "measured local desktop memory of the default release"
         );
         // Version-specific data comes from the browser registry.
         assert_eq!(

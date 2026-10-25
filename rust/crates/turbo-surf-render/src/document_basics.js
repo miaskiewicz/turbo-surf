@@ -119,7 +119,7 @@
     Object.defineProperty(proto, Symbol.toStringTag, { value: name, configurable: true });
     Object.defineProperty(ctor, 'prototype', { writable: false });
     Object.defineProperty(g, name, { value: ctor, writable: true, configurable: true });
-    const record = receiver => { const value = getRecord(receiver); if (!value || !(value.kind===name || name==='HTMLCollection'&&value.kind==='HTMLFormControlsCollection' || name==='NodeList'&&value.kind==='RadioNodeList')) throw new TypeError('Illegal invocation'); return value.read; };
+    const record = receiver => { const value = getRecord(receiver); if (!value || !(value.kind===name || name==='HTMLCollection'&&(value.kind==='HTMLFormControlsCollection'||value.kind==='HTMLOptionsCollection') || name==='NodeList'&&value.kind==='RadioNodeList')) throw new TypeError('Illegal invocation'); return value.read; };
     property(proto, 'length', function () { return record(this)().length; });
     method(proto, 'item', function (index) { if (!arguments.length) throw new TypeError('item requires 1 argument'); return record(this)()[(+index) >>> 0] || null; }, 1);
     Object.defineProperty(proto, Symbol.iterator, { value: make(function () { if(name==='HTMLCollection'&&formIteratorRead){const target=formIteratorRead(this);if(target)return collectionApply(collectionValues,target,[]);}record(this); return collectionApply(collectionValues,this,[]); }, 'values', 0), writable: true, configurable: true });
@@ -127,17 +127,20 @@
   }
   const collection = collectionInterface('HTMLCollection');
   const nodeList = collectionInterface('NodeList');
-  const named = (list,name)=>{if(name==='')return null;for(let index=0;index<list.length;index++){const node=list[index];if(getAttribute.call(node,'id')===name||namespace.call(node)===html&&getAttribute.call(node,'name')===name)return node;}return null;};
+  // An id match anywhere in the collection wins over an earlier name match.
+  const named = (list,name)=>{if(name==='')return null;for(let index=0;index<list.length;index++){const node=list[index];if(getAttribute.call(node,'id')===name)return node;}for(let index=0;index<list.length;index++){const node=list[index];if(namespace.call(node)===html&&getAttribute.call(node,'name')===name)return node;}return null;};
   method(collection.proto, 'namedItem', function (name) { if (!arguments.length) throw new TypeError('namedItem requires 1 argument'); return named(collection.record(this)(), string(name)); }, 1);
   for (const [name,implementation] of [['entries',collectionEntries],['keys',collectionKeys],['values',collectionValues]]) method(nodeList.proto,name,function(){nodeList.record(this);return collectionApply(implementation,this,[]);},0);
   Object.defineProperty(nodeList.proto, Symbol.iterator, {value: nodeList.proto.values, writable: true, configurable: true});
   method(nodeList.proto, 'forEach', function (callback, thisArg) { nodeList.record(this); if (typeof callback !== 'function') throw new TypeError('callback must be a function'); collectionApply(collectionForEach,this,[callback,thisArg]); }, 1);
   function live(list, namedProperties, options) {
     const proto = options ? options.prototype : namedProperties ? collection.proto : nodeList.proto;
-    const namedLookup = options ? options.named : named;
-    const object = ns.makeNamedObject(proto, function (operation, key) {
-      const rows = list();
+    const namedLookup = options && options.named || named;
+    const object = ns.makeNamedObject(proto, function (operation, key, value) {
       const indexed = /^(0|[1-9][0-9]*)$/.test(key) && Number(key) < 4294967295;
+      // An indexed setter (HTMLOptionsCollection) owns every index, supported or not.
+      if(indexed&&options&&options.setIndex&&(operation==='set'||operation==='define'))return options.setIndex(Number(key),value,operation==='define');
+      const rows = list();
       if(indexed&&options&&options.readonlyIndices&&(operation==='set'||operation==='define'))return true;
       const hiddenNames=!!(options&&options.hiddenNames);
       const supported = indexed ? Number(key) < rows.length || hiddenNames&&operation==='descriptor'&&namedLookup(rows,key)!==null : namedProperties && (hiddenNames||!(key in proto)) && namedLookup(rows, key) !== null;
@@ -155,10 +158,10 @@
         return names;
       }
       if (!supported) return undefined;
-      const value = indexed && Number(key)<rows.length ? rows[Number(key)] : namedLookup(rows, key);
-      if (operation === 'get') return value;
+      const found = indexed && Number(key)<rows.length ? rows[Number(key)] : namedLookup(rows, key);
+      if (operation === 'get') return found;
       if (operation === 'has') return true;
-      if (operation === 'descriptor') return { value, writable: false, enumerable: indexed || !!(options&&options.namedEnumerable), configurable: true };
+      if (operation === 'descriptor') return { value: found, writable: indexed && !!(options&&options.setIndex), enumerable: indexed || !!(options&&options.namedEnumerable), configurable: true };
       if (operation === 'delete') return false;
       if (operation === 'set' || operation === 'define') return true;
       return undefined;
@@ -218,7 +221,11 @@
     check(this, [9]); const receiver = this;
     return cached(receiver, name, () => descendants(receiver, match));
   });
-  Object.defineProperty(g.Document.prototype, 'plugins', Object.getOwnPropertyDescriptor(g.Document.prototype, 'embeds'));
+  // plugins is its own accessor returning the very collection embeds returns, as in Chrome.
+  property(g.Document.prototype, 'plugins', function () {
+    check(this, [9]); const receiver = this;
+    return cached(receiver, 'embeds', () => descendants(receiver, selectors.embeds));
+  });
   for (const owner of ['Document', 'Element']) {
     const valid = owner === 'Document' ? [9] : [1];
     method(g[owner].prototype, 'getElementsByTagName', function (name) {

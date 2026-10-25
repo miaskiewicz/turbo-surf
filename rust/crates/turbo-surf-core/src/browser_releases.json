@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "note": "Measured Chrome release identities, newest first. build.rs compiles this into browser::RELEASES. Edit through harness/detection/reversion-chrome.mjs; see harness/detection/CHROME-REVERSION.md.",
+  "defaultMajor": 155,
+  "releases": [
+    {
+      "major": 155,
+      "fullVersion": "155.0.8059.80",
+      "headerOrder": [
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "upgrade-insecure-requests",
+        "user-agent",
+        "accept",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-user",
+        "sec-fetch-dest",
+        "accept-encoding",
+        "accept-language",
+        "cookie",
+        "priority"
+      ],
+      "navigationAccept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "defaultDeviceMemory": 16,
+      "transportBaseMajor": 154,
+      "requestOrders": {},
+      "accept": {},
+      "priority": {},
+      "evidence": {
+        "fixture": "harness/detection/fixtures/chrome-identity-155.json",
+        "note": "Real localhost H2 capture on 2026-10-13 restored the classic navigation order; subresource orders were not measured for 155."
+      }
+    },
+    {
+      "major": 154,
+      "fullVersion": "154.0.8037.98",
+      "headerOrder": [
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "upgrade-insecure-requests",
+        "user-agent",
+        "accept-language",
+        "accept",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-user",
+        "sec-fetch-dest",
+        "accept-encoding",
+        "cookie",
+        "priority"
+      ],
+      "navigationAccept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "defaultDeviceMemory": 8,
+      "transportBaseMajor": 154,
+      "requestOrders": {},
+      "accept": {},
+      "priority": {},
+      "evidence": {
+        "note": "Installed Chrome oracle captured 2026-10-09: accept-language hoisted after user-agent, accept-encoding late. Verified against a live Chrome 154 h2 capture."
+      }
+    },
+    {
+      "major": 153,
+      "fullVersion": "153.0.7938.132",
+      "headerOrder": [
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "upgrade-insecure-requests",
+        "user-agent",
+        "accept",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-user",
+        "sec-fetch-dest",
+        "accept-encoding",
+        "accept-language",
+        "cookie",
+        "priority"
+      ],
+      "navigationAccept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "defaultDeviceMemory": 8,
+      "transportBaseMajor": 154,
+      "requestOrders": {},
+      "accept": {},
+      "priority": {},
+      "evidence": {
+        "note": "Classic order Chrome held for many releases; kept so a 153 identity stays coherent. Full version is realistic-shaped, not an oracle capture."
+      }
+    }
+  ]
+}

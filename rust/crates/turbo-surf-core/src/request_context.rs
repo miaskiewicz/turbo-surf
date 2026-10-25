@@ -5,7 +5,7 @@
 //! session. This does not implement Permissions-Policy delegation or Critical-CH
 //! retries; cross-origin subresources therefore receive no high-entropy hints.
 
-use crate::fingerprint::{Profile, ACCEPT};
+use crate::fingerprint::Profile;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use url::Url;
@@ -20,6 +20,21 @@ pub enum Destination {
     Image,
     Empty,
     Report,
+}
+
+impl Destination {
+    /// The `Sec-Fetch-Dest` token, also the key of the registry's per-destination values.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Destination::Document => "document",
+            Destination::Iframe => "iframe",
+            Destination::Script => "script",
+            Destination::Style => "style",
+            Destination::Image => "image",
+            Destination::Empty => "empty",
+            Destination::Report => "report",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -209,24 +224,35 @@ impl RequestContext {
 
     pub fn headers(&self, target: &str, method: &str) -> BTreeMap<String, String> {
         let mut h = BTreeMap::new();
+        // Values the default release measured per destination win; the tables
+        // below are the long-standing defaults for releases measured before the
+        // identity battery recorded subresources.
+        let release = crate::browser::default_release();
+        let destination = self.destination.as_str();
         let accept = match self.destination {
-            Destination::Document | Destination::Iframe => ACCEPT,
-            Destination::Style => "text/css,*/*;q=0.1",
-            Destination::Image => {
-                "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
-            }
-            _ => "*/*",
+            Destination::Document | Destination::Iframe => release.navigation_accept,
+            _ => release
+                .accept_for(destination)
+                .unwrap_or(match self.destination {
+                    Destination::Style => "text/css,*/*;q=0.1",
+                    Destination::Image => {
+                        "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+                    }
+                    _ => "*/*",
+                }),
         };
         h.insert("accept".into(), accept.into());
         // Incremental delivery helps document/fetch/image streams; blocking
         // scripts and styles prefer a complete response at their urgency.
-        let priority = match self.destination {
-            Destination::Document | Destination::Iframe => "u=0, i",
-            Destination::Style => "u=0",
-            Destination::Script => "u=1",
-            Destination::Image => "u=2, i",
-            Destination::Empty | Destination::Report => "u=1, i",
-        };
+        let priority = release
+            .priority_for(destination)
+            .unwrap_or(match self.destination {
+                Destination::Document | Destination::Iframe => "u=0, i",
+                Destination::Style => "u=0",
+                Destination::Script => "u=1",
+                Destination::Image => "u=2, i",
+                Destination::Empty | Destination::Report => "u=1, i",
+            });
         h.insert("priority".into(), priority.into());
         if trustworthy(target) {
             let site = match self.source.as_deref() {
@@ -250,19 +276,7 @@ impl RequestContext {
                 }
                 .into(),
             );
-            h.insert(
-                "sec-fetch-dest".into(),
-                match self.destination {
-                    Destination::Document => "document",
-                    Destination::Iframe => "iframe",
-                    Destination::Script => "script",
-                    Destination::Style => "style",
-                    Destination::Image => "image",
-                    Destination::Empty => "empty",
-                    Destination::Report => "report",
-                }
-                .into(),
-            );
+            h.insert("sec-fetch-dest".into(), destination.into());
             if self.mode == RequestMode::Navigate && self.user_activation {
                 h.insert("sec-fetch-user".into(), "?1".into());
             }
@@ -501,6 +515,7 @@ fn hint_value(name: &str, profile: &Profile) -> Option<String> {
         // Match the render tier's estimated NetworkInformation defaults.
         "downlink" => "10".into(),
         "rtt" => "50".into(),
+        "ect" => "4g".into(),
         "sec-ch-prefers-color-scheme" => "light".into(),
         "sec-ch-prefers-reduced-motion" => "no-preference".into(),
         _ => return None,

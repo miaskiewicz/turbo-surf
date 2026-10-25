@@ -1,0 +1,96 @@
+[
+  {
+    "id": "h1-connection-header",
+    "match": { "area": "request", "type": "header-missing", "header": "connection" },
+    "reason": "Chrome always sends `Connection: keep-alive` on HTTP/1.1; hyper's H1 client does not emit it and H2 forbids it. Only HTTP/1.1 origins can observe this.",
+    "owner": "transport"
+  },
+  {
+    "id": "h1-priority-header",
+    "match": {
+      "area": "request",
+      "type": "header-extra",
+      "header": "priority",
+      "kind": "/^(h1-nav|http-nav)$/"
+    },
+    "reason": "Chrome sends the RFC 9218 Priority header only on HTTP/2 and HTTP/3. turbo-surf builds request headers before ALPN chooses the protocol, so HTTP/1.1 requests carry it too.",
+    "owner": "transport"
+  },
+  {
+    "id": "h2-stream-priority",
+    "match": { "area": "request", "type": "stream-priority" },
+    "reason": "Chrome derives each stream's HEADERS-frame priority (weight 256/220/183/147 and a dependency chain) from the request priority. The wreq transport applies one connection-level stream priority (exclusive, dependency 0, weight 256) to every request; the connection preamble (SETTINGS, WINDOW_UPDATE, pseudo-header order) matches.",
+    "owner": "transport"
+  },
+  {
+    "id": "author-header-position",
+    "match": { "area": "request", "type": "header-order", "kind": "fetch-preflight" },
+    "reason": "Chrome interleaves page-set (author) headers such as x-battery inside its own order. Author header names are unknowable ahead of time, so wreq appends them after the measured browser order; every browser-owned header keeps Chrome's order.",
+    "owner": "transport"
+  },
+  {
+    "id": "dpr-hint",
+    "match": { "area": "request", "type": "header-missing", "header": "sec-ch-dpr" },
+    "reason": "Sec-CH-DPR needs the document's devicePixelRatio when the request is built; ClientHints has no render geometry, so the hint is not offered (the same holds for Sec-CH-Viewport-Width, classed as environment).",
+    "owner": "core/request_context"
+  },
+  {
+    "id": "critical-ch-retry",
+    "match": { "area": "request", "type": "request-missing", "kind": "critical" },
+    "reason": "Critical-CH restarts are not implemented (request_context.rs module docs); the first request is compared and matches.",
+    "owner": "core/request_context"
+  },
+  {
+    "id": "web-font-loading",
+    "match": { "area": "request", "type": "request-missing", "kind": "font" },
+    "reason": "Native live layout does not load @font-face resources (it reports them unsupported), so no font request is made.",
+    "owner": "render/layout"
+  },
+  {
+    "id": "favicon",
+    "match": { "area": "request", "type": "request-missing", "kind": "favicon" },
+    "reason": "Chrome's browser UI requests /favicon.ico for every committed document. A browserless engine has no tab strip; emitting the request would need a real UI-driven reason.",
+    "owner": "render"
+  },
+  {
+    "id": "form-submission-to-frame",
+    "match": { "area": "request", "type": "request-missing", "kind": "form-post" },
+    "reason": "Native form submission into another browsing context (target=<iframe name>) throws `Native form submission to another browsing context is not supported`.",
+    "owner": "render/forms"
+  },
+  {
+    "id": "user-agent-data-interface",
+    "match": { "area": "js", "path": "/^userAgentData\\.json/" },
+    "reason": "navigator.userAgentData is a plain object rather than a NavigatorUAData instance, so toJSON() and the prototype getters are missing. Values (brands, mobile, platform, every high-entropy hint) match.",
+    "owner": "render/navigator"
+  },
+  {
+    "id": "js-engine-version",
+    "match": {
+      "area": "js",
+      "path": "/^(engine\\.|features\\.builtins\\.|features\\.prototypes\\.(Array|String|Object|Math|Promise|Intl|Iterator)$|intl\\.)/"
+    },
+    "reason": "Chrome 156 ships V8 15.6.75.19; turbo-surf's stock engine is V8 15.0.245.2 (native155 SDK: 15.5). Engine builtins (Iterator.zip, Iterator.prototype.includes/join), error messages and ICU data follow the embedded V8 and are never spoofed. Closed by the harness/detection/engine re-version step.",
+    "owner": "engine"
+  },
+  {
+    "id": "css-feature-support",
+    "match": { "area": "js", "path": "/^features\\.css\\./" },
+    "reason": "CSS.supports answers from turbo-dom's real parser, which does not accept these Chrome 156 properties/functions yet. Faking `true` would contradict the computed style the same page can read.",
+    "owner": "turbo-dom"
+  },
+  {
+    "id": "window-global-inventory",
+    "match": { "area": "js", "path": "features.globals" },
+    "allowAdded": [
+      "PaintWorkletGlobalScope",
+      "StorageAccessHandle",
+      "webkitAudioContext",
+      "__name",
+      "__pendingFetches"
+    ],
+    "allowRemoved": [],
+    "reason": "Window own-property names native exposes and Chrome 156 does not: three absent-interface stub names from runtime.rs's stub list (PaintWorkletGlobalScope is worklet-only, webkitAudioContext was removed, StorageAccessHandle is not a Window global) and two internal globals (`__name`, the esbuild keepNames passthrough, and `__pendingFetches`, the hydration fetch drain counter, both in runtime.rs). Pinned by name so any new extra global is a tell. Interface owners: API-INVENTORY.json / issue #28.",
+    "owner": "render/interfaces"
+  }
+]

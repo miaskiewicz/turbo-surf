@@ -212,7 +212,12 @@ async fn binary_resource_redirects_use_origin_aware_request_context() {
     assert_eq!(final_url, format!("{base}/after"));
     let requests = requests.lock().unwrap();
     assert_eq!(requests[0]["sec-fetch-dest"], "image");
-    assert_eq!(requests[0]["priority"], "u=2, i");
+    assert_eq!(
+        requests[0]["priority"],
+        turbo_surf_core::browser::default_release()
+            .priority_for("image")
+            .unwrap_or("u=2, i")
+    );
     assert!(!requests[0].contains_key("sec-ch-ua-arch"));
     assert_eq!(requests[1]["sec-ch-ua-arch"], "\"arm\"");
     assert!(!requests[1].contains_key("sec-fetch-user"));

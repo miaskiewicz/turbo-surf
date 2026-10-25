@@ -54,11 +54,31 @@ fn op_capture_frame_scheduler<'s>(
     }
     Ok(())
 }
+/// Trusted bootstrap hands the realm's view-transition rendering seam (frame steps after
+/// animation callbacks, rendering suppression, page visibility) to the vendored binding.
+#[op2(fast, reentrant)]
+fn op_capture_view_transition_host<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    host: v8::Local<'s, v8::Function>,
+) {
+    crate::browser_env::capture_view_transition_host(scope, host);
+}
+/// The runtime replaces the binding's DOMException with its own interface; natively
+/// raised exceptions (selectors, dialogs, view transitions) must be instances of it.
+#[op2(fast, reentrant)]
+fn op_register_dom_exception<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    constructor: v8::Local<'s, v8::Function>,
+) {
+    crate::browser_env::register_dom_exception(scope, constructor);
+}
 deno_core::extension!(
     turbo_geometry,
     ops = [
         op_geometry_object,
         op_capture_frame_scheduler,
+        op_capture_view_transition_host,
+        op_register_dom_exception,
         crate::live_layout_backend::op_live_media_match,
         crate::live_layout_backend::op_live_frame_dimension,
         crate::live_layout_supports::op_native_css_supports,

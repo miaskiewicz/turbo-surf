@@ -7342,6 +7342,7 @@ for (const name of ["name", "message", "code"]) {
   Object.defineProperty(DOMException.prototype, name, {...descriptor, enumerable: true});
 }
 Object.defineProperty(DOMException.prototype, Symbol.toStringTag, {value: "DOMException", configurable: true});
+ops.op_register_dom_exception(DOMException);
 for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:2,
   HIERARCHY_REQUEST_ERR:3, WRONG_DOCUMENT_ERR:4, INVALID_CHARACTER_ERR:5, NO_DATA_ALLOWED_ERR:6,
   NO_MODIFICATION_ALLOWED_ERR:7, NOT_FOUND_ERR:8, NOT_SUPPORTED_ERR:9, INUSE_ATTRIBUTE_ERR:10,
@@ -7959,8 +7960,9 @@ try {
 // removes only that pending callback (not clearTimeout — rAF ids are their own namespace).
 let __rafClock = null, __rafId = 0, __rafScheduled = false;
 let __rafQueue = [], __frameSteps = [];
-// Post-animation-frame rendering steps (resize then intersection observations, observers.js).
-const __renderingSteps = [];
+// Post-animation-frame rendering steps (resize/intersection observers.js, view transitions);
+// a step may queue more, so snapshot-and-clear each frame.
+let __renderingSteps = [], __renderingSuppressed = false;
 // Rendering frames are engine tasks; page replacement of setTimeout cannot stall them.
 const __frameTimer = globalThis.setTimeout;
 // Web Animations frame host: the binding's handler for the next frame, the running frame's
@@ -7980,9 +7982,10 @@ const __frameTask = (fn) => {
 // separate them), then the frame's animation callbacks, which callbacks requested by those
 // steps join; pending animations commit in a following task, after the callbacks' microtasks.
 const __scheduleFrame = () => {
-  if (__rafScheduled) return;
+  if (__rafScheduled || __renderingSuppressed) return;
   __rafScheduled = true;
   __frameTimer(() => {
+    if (__renderingSuppressed) { __rafScheduled = false; return; }
     const floor = __perfNow();
     __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
     if (__rafClock < floor) __rafClock = floor;
@@ -8002,11 +8005,16 @@ const __scheduleFrame = () => {
       const batch = __rafQueue;
       __rafQueue = [];
       for (let i = 0; i < batch.length; i++) { try { batch[i].fn(ts); } catch (e) {} }
-      // Observer delivery (Intersection/Resize/Performance) runs after rAF callbacks.
-      for (let i = 0; i < __renderingSteps.length; i++) { try { __renderingSteps[i](ts); } catch (e) {} }
+      // Observer delivery (Intersection/Resize/Performance) and view-transition steps run after
+      // rAF callbacks; a step may queue more, so snapshot and clear first.
+      if (!__renderingSuppressed) {
+        const after = __renderingSteps;
+        __renderingSteps = [];
+        for (let i = 0; i < after.length; i++) { try { after[i](ts); } catch (e) {} }
+      }
       __frameNow = null;
       if (animation) __frameTask(() => { __frameStage(ts); try { animation.commit(); } catch (e) {} __frameNow = null; });
-      if (__frameSteps.length || __animationFrame) __scheduleFrame();
+      if (__frameSteps.length || __animationFrame || __renderingSteps.length) __scheduleFrame();
     };
     // Animation events dispatch in their own task so their microtasks settle first.
     if (animation) __frameTask(() => { __frameStage(ts); try { animation.dispatch(); } catch (e) {} __frameNow = null; __frameTask(callbacks); });
@@ -8037,6 +8045,15 @@ globalThis.requestAnimationFrame = (fn) => {
   return id;
 };
 ops.op_capture_frame_scheduler((step) => { __frameSteps[__frameSteps.length] = step; __scheduleFrame(); });
+// The vendored binding's view-transition rendering seam. A page here is never hidden: the
+// engine has no tab or occlusion model and reports document.visibilityState "visible".
+ops.op_capture_view_transition_host((command, argument) => {
+  if (command === "frame") { __renderingSteps[__renderingSteps.length] = argument; __scheduleFrame(); }
+  else if (command === "suppress") {
+    __renderingSuppressed = argument === true;
+    if (!__renderingSuppressed && (__rafQueue.length || __frameSteps.length || __renderingSteps.length)) __scheduleFrame();
+  } else if (command === "hidden") return false;
+});
 globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };
 // Native V8 jobs share the real Promise/observer microtask checkpoint and the
 // host watchdog. Their callbacks retain private realm ownership until delivery.
@@ -12072,7 +12089,7 @@ __G.domSig = (() => {
       for (let i = 0; i < segs.length - 1; i++) { const s = segs[i]; if (o[s] == null) o[s] = (s === "prototype") ? {} : function () {}; o = o[s]; }
       const last = segs[segs.length - 1]; if (!(last in o)) o[last] = function () {}; };
     ["Object.groupBy", "Promise.withResolvers", "Array.fromAsync", "Uint8Array.fromBase64",
-     "IDBObjectStore.prototype.getAllRecords", "Document.prototype.activeViewTransition",
+     "IDBObjectStore.prototype.getAllRecords",
      "PerformanceResourceTiming.prototype.contentEncoding", "Map.prototype.getOrInsert"].forEach(ns);
     if (!("Temporal" in G)) G.Temporal = {};
     if (typeof Math.sumPrecise !== "function") Math.sumPrecise = function sumPrecise() { return 0; };
@@ -12227,8 +12244,8 @@ __G.domSig = (() => {
       "URLPattern USB USBAlternateInterface USBConfiguration USBConnectionEvent USBDevice USBEndpoint " +
       "USBInTransferResult USBInterface USBIsochronousInTransferPacket USBIsochronousInTransferResult " +
       "USBIsochronousOutTransferPacket USBIsochronousOutTransferResult USBOutTransferResult " +
-      "VideoColorSpace VideoDecoder VideoEncoder VideoPlaybackQuality ViewTimeline ViewTransition " +
-      "ViewTransitionTypeSet Viewport VirtualKeyboard VirtualKeyboardGeometryChangeEvent " +
+      "VideoColorSpace VideoDecoder VideoEncoder VideoPlaybackQuality ViewTimeline " +
+      "Viewport VirtualKeyboard VirtualKeyboardGeometryChangeEvent " +
       "VisibilityStateEntry WGSLLanguageFeatures WebGLObject WebGLQuery WebGLSampler " +
       "WebGLShaderPrecisionFormat WebGLSync WebGLTransformFeedback WebKitMutationObserver WebSocketError " +
       "WebSocketStream WebTransport WebTransportBidirectionalStream WebTransportDatagramDuplexStream " +

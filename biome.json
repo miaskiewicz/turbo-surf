@@ -139,6 +139,8 @@
       "rust/crates/turbo-surf-render/src/declarative_shadow*.js",
       "rust/crates/turbo-surf-render/src/declarative_shadow*.json",
       "rust/crates/turbo-surf-render/src/declarative_shadow*.html",
+      "rust/crates/turbo-surf-render/src/view_transitions*.js",
+      "rust/crates/turbo-surf-render/src/view_transitions*.json",
       "harness/detection/element-scroll-probe.js",
       "harness/detection/element-scroll-events-probe.js",
       "harness/detection/element-visibility-probe.js",

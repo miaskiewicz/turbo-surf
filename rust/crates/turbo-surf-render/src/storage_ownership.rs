@@ -222,6 +222,7 @@ fn sweep_scalars(state: &mut DomState) {
     state.event_handlers.sweep_storage(&state.tree);
     state.popover.sweep_storage(&state.tree);
     state.dialog.sweep_storage(&state.tree);
+    state.view_transitions.sweep_storage(&state.tree);
     STYLE.with(|styles| {
         styles
             .borrow_mut()

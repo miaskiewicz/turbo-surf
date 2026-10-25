@@ -26,6 +26,10 @@
     ),
   );
   const dispatch = ops.op_dispatch_host_event;
+  const pointer = (command) => ops.op_host_pointer(document, command);
+  const parentOf = Object.getOwnPropertyDescriptor(Node.prototype, "parentNode").get;
+  const nodeTypeOf = Object.getOwnPropertyDescriptor(Node.prototype, "nodeType").get;
+  const shadowHost = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, "host").get;
   const activate = ops.op_host_user_activation;
   const canceled = Object.getOwnPropertyDescriptor(Event.prototype, "defaultPrevented").get;
   const controlTag = Object.getOwnPropertyDescriptor(Element.prototype, "tagName").get;
@@ -122,9 +126,20 @@
     }
     waits.clear();
   };
+  // The mouse pointer: the elements under it for pointer and for compatibility mouse
+  // boundaries, its position (null before the first event), pressed buttons, the
+  // pointerdown target a click resolves against, the client position a pointer lock
+  // froze, and whether a canceled pointerdown suppresses compatibility mouse events.
   let hovered = null,
+    mouseHovered = null,
     cursorX = 0,
-    cursorY = 0;
+    cursorY = 0,
+    position = null,
+    pressed = 0,
+    downTarget = null,
+    frozen = null,
+    movementBase = null,
+    suppressed = false;
   function fire(target, name, type, init = {}) {
     const event = new events[name](type, init);
     // Only this captured embedder driver can notify activation. Dispatching an
@@ -162,6 +177,151 @@
     const box = elementGeometry(target).bounds;
     cursorX = box[0] + box[2] / 2;
     cursorY = box[1] + box[3] / 2;
+  }
+  // Shadow-including element ancestors, the target first. The driver's own arrays are
+  // indexed directly: guest Array.prototype replacements never reach these steps.
+  function ancestors(node) {
+    const chain = [];
+    while (node) {
+      chain[chain.length] = node;
+      const parent = apply(parentOf, node, []);
+      if (!parent) break;
+      const type = apply(nodeTypeOf, parent, []);
+      node = type === 1 ? parent : type === 11 ? shadowParent(parent) : null;
+    }
+    return chain;
+  }
+  function shadowParent(fragment) {
+    try {
+      return apply(shadowHost, fragment, []);
+    } catch {
+      return null;
+    }
+  }
+  const boundaryTypes = {
+    pointer: ["PointerEvent", "pointerout", "pointerleave", "pointerover", "pointerenter"],
+    mouse: ["MouseEvent", "mouseout", "mouseleave", "mouseover", "mouseenter"],
+  };
+  const scopedInit = { bubbles: false, cancelable: false, composed: false };
+  // Chrome's boundary order: out at the old node, leave from it up to the common ancestor,
+  // over at the new node, enter from below the common ancestor down to it. A node that
+  // left the document receives nothing.
+  function boundary(kind, from, to, init) {
+    if (from && !apply(connected, from, [])) from = null;
+    if (from === to) return to;
+    const names = boundaryTypes[kind],
+      type = names[0],
+      out = names[1],
+      leave = names[2],
+      over = names[3],
+      enter = names[4];
+    init = { ...init, detail: 0 };
+    const left = from ? ancestors(from) : [],
+      entered = to ? ancestors(to) : [];
+    let shared = 0;
+    while (
+      shared < left.length &&
+      shared < entered.length &&
+      left[left.length - 1 - shared] === entered[entered.length - 1 - shared]
+    )
+      shared++;
+    if (from) {
+      fire(from, type, out, { ...init, relatedTarget: to });
+      for (let index = 0; index < left.length - shared; index++)
+        fire(left[index], type, leave, { ...init, ...scopedInit, relatedTarget: to });
+    }
+    if (to) {
+      fire(to, type, over, { ...init, relatedTarget: from });
+      for (let index = entered.length - shared - 1; index >= 0; index--)
+        fire(entered[index], type, enter, { ...init, ...scopedInit, relatedTarget: from });
+    }
+    return to;
+  }
+  const pointerBoundary = (to, init) => (hovered = boundary("pointer", hovered, to, init));
+  const mouseBoundary = (to, init) => (mouseHovered = boundary("mouse", mouseHovered, to, init));
+  // The click target: the capture or lock target a released pointerup went to, else the
+  // nearest common inclusive ancestor of the pointerdown and pointerup targets.
+  function clickTarget(down, up) {
+    if (!down) return null;
+    const chain = ancestors(down),
+      candidates = ancestors(up);
+    for (let index = 0; index < candidates.length; index++)
+      for (let other = 0; other < chain.length; other++)
+        if (chain[other] === candidates[index]) return candidates[index];
+    return null;
+  }
+  const pointerTypes = { move: "pointermove", down: "pointerdown", up: "pointerup" },
+    mouseTypes = { move: "mousemove", down: "mousedown", up: "mouseup" };
+  // One trusted mouse event at the hit element: Chrome's PointerEventManager steps for the
+  // pointer event (capture processing, lock/capture retargeting, boundaries) followed by the
+  // compatibility mouse event and, for a release, implicit capture release and the click.
+  function pointerAction(kind, hit) {
+    const previous = position;
+    targetCenter(hit);
+    position = [cursorX, cursorY];
+    const locked = pointer("locked");
+    if (locked === null) {
+      if (frozen !== null) movementBase = null;
+      frozen = null;
+    } else if (frozen === null) frozen = previous || position;
+    const base = kind === "move" ? movementBase : null;
+    movementBase = position;
+    if (kind === "down") pressed = 1;
+    if (kind === "up") pressed = 0;
+    if (kind !== "move") pointer(kind === "down" ? "press" : "release");
+    const client = frozen || position;
+    const shared = {
+      clientX: client[0],
+      clientY: client[1],
+      movementX: base ? position[0] - base[0] : 0,
+      movementY: base ? position[1] - base[1] : 0,
+      buttons: pressed,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    };
+    const init = {
+      ...shared,
+      button: kind === "move" ? -1 : 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+      pressure: pressed ? 0.5 : 0,
+    };
+    const mouseInit = { ...shared, button: 0, detail: kind === "move" ? 0 : 1 };
+    const captureInit = { ...init, cancelable: false };
+    const processed = pointer("process"),
+      lost = processed[0],
+      got = processed[1];
+    if (lost) fire(lost, "PointerEvent", "lostpointercapture", captureInit);
+    if (got) {
+      pointerBoundary(got, init);
+      fire(got, "PointerEvent", "gotpointercapture", captureInit);
+    }
+    const captured = locked === null ? pointer("capture") : null;
+    const target = locked || captured || hit;
+    pointerBoundary(target, init);
+    mouseBoundary(target, mouseInit);
+    const proceed = fire(target, "PointerEvent", pointerTypes[kind], init);
+    if (kind === "down") {
+      suppressed = !proceed;
+      downTarget = target;
+    }
+    const mouse = !suppressed && fire(target, "MouseEvent", mouseTypes[kind], mouseInit);
+    if (kind === "down" && mouse) apply(focus, target, []);
+    if (kind !== "up") return;
+    suppressed = false;
+    pointer("implicit");
+    const released = pointer("process")[0];
+    if (released) fire(released, "PointerEvent", "lostpointercapture", captureInit);
+    const click = captured || locked || clickTarget(downTarget, target);
+    downTarget = null;
+    if (click)
+      fire(click, "PointerEvent", "click", { ...init, isPrimary: false, button: 0, detail: 1 });
+    if (released && locked === null) {
+      pointerBoundary(hit, init);
+      mouseBoundary(hit, mouseInit);
+    }
   }
   async function edit(target, text, run) {
     const getters = editingControl(target);
@@ -259,62 +419,17 @@
         continue;
       }
       if (step.move) {
-        const target = element(step.move.selector);
-        targetCenter(target);
-        const init = {
-          clientX: cursorX,
-          clientY: cursorY,
-          bubbles: true,
-          composed: true,
-          pointerType: "mouse",
-          isPrimary: true,
-          pointerId: 1,
-        };
-        if (hovered !== target) {
-          if (hovered) {
-            fire(hovered, "PointerEvent", "pointerout", { ...init, relatedTarget: target });
-            fire(hovered, "MouseEvent", "mouseout", { ...init, relatedTarget: target });
-          }
-          fire(target, "PointerEvent", "pointerover", { ...init, relatedTarget: hovered });
-          fire(target, "MouseEvent", "mouseover", { ...init, relatedTarget: hovered });
-          fire(target, "PointerEvent", "pointerenter", {
-            ...init,
-            bubbles: false,
-            relatedTarget: hovered,
-          });
-          fire(target, "MouseEvent", "mouseenter", {
-            ...init,
-            bubbles: false,
-            relatedTarget: hovered,
-          });
-          hovered = target;
-        }
-        fire(target, "PointerEvent", "pointermove", init);
-        fire(target, "MouseEvent", "mousemove", init);
+        pointerAction("move", element(step.move.selector));
+        continue;
+      }
+      if (step.down != null || step.up != null) {
+        pointerAction(step.down != null ? "down" : "up", element(step.down ?? step.up));
         continue;
       }
       if (step.click) {
         const target = element(step.click);
-        targetCenter(target);
-        const init = {
-          clientX: cursorX,
-          clientY: cursorY,
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          detail: 1,
-          pointerId: 1,
-          pointerType: "mouse",
-          isPrimary: true,
-        };
-        if (
-          fire(target, "PointerEvent", "pointerdown", { ...init, buttons: 1, pressure: 0.5 }) &&
-          fire(target, "MouseEvent", "mousedown", { ...init, buttons: 1 })
-        )
-          focus.call(target);
-        fire(target, "PointerEvent", "pointerup", init);
-        fire(target, "MouseEvent", "mouseup", init);
-        fire(target, "PointerEvent", "click", init);
+        pointerAction("down", target);
+        pointerAction("up", target);
         continue;
       }
       const target = apply(activeElement, document, []);

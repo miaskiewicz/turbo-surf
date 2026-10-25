@@ -8,6 +8,7 @@
   const checkedValue=ns.formControlChecked;delete ns.formControlChecked;
   const dialogSubmission=ns.dialogFormSubmission;delete ns.dialogFormSubmission;
   const selectedOptions=ns.formSelectedOptions,resetControl=ns.formResetControl;delete ns.formSelectedOptions;delete ns.formResetControl;
+  let fileEntries=null;ns.registerFileEntries=entries=>{fileEntries=entries;delete ns.registerFileEntries;};
   const apply = Reflect.apply, define = Object.defineProperty, create = Object.create;
   const string = String, number = Number;
   const ErrorType = TypeError, Exception = DOMException, Regex = RegExp;
@@ -142,6 +143,7 @@
     if(state.valueMissing) {
       if(inputType==='checkbox')return 'Please check this box if you want to proceed.';
       if(inputType==='radio')return 'Please select one of these options.';
+      if(inputType==='file')return 'Please select a file.';
       return tag(element)==='select'?'Please select an item in the list.':'Please fill out this field.';
     }
     if(state.typeMismatch) {
@@ -242,7 +244,7 @@
         if(inputType==='image'){append(name+'.x','0');append(name+'.y','0');continue;}
       }
       if(kind==='input'&&regexTest(/^(checkbox|radio)$/,inputType)&&!checkedValue(control))continue;
-      if(kind==='input'&&inputType==='file')throw new Exception('Native FileList submission is not available.','NotSupportedError');
+      if(kind==='input'&&inputType==='file'){const files=fileEntries&&fileEntries(control);if(!files)throw new Exception('Native FileList submission is not available.','NotSupportedError');for(let at=0;at<files.length;at++)append(name,files[at]);continue;}
       if(kind==='select') {
         const options=selectedOptions(control);
         for(let j=0;j<options.length;j++) {

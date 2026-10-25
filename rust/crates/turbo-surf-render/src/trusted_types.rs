@@ -73,6 +73,19 @@ fn private_record<'s>(
         .get_private(scope, key)
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
 }
+/// Whether `value` is a Trusted Types value of `kind` (e.g. "TrustedHTML").
+pub(super) fn is_trusted<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: v8::Local<'s, v8::Value>,
+    kind: &str,
+) -> bool {
+    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+        return false;
+    };
+    private_record(scope, object)
+        .and_then(|record| field(scope, record, "kind"))
+        .is_some_and(|actual| actual.to_rust_string_lossy(scope) == kind)
+}
 fn field<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,

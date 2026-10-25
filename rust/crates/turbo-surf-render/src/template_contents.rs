@@ -481,6 +481,9 @@ pub(super) fn serialize_with<'s>(
     }
     let mut out = Vec::new();
     let mut pending = Vec::new();
+    // noscript text is literal when scripting is enabled for the node.
+    let scripting = node_has_window_owner(scope, root);
+    let raw = |tag: &str| raw(tag) || scripting && tag == "noscript";
     if outer {
         pending.push(Task::Node(root, false))
     } else {

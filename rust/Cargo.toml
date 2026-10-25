@@ -26,3 +26,10 @@ repository = "https://github.com/miaskiewicz/turbo-surf"
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# Development patch: consume the unreleased turbo-html2pdf-core
+# ComputedStyle::iter and turbo-dom iframe srcdoc parsing (parity2/zoom-layout)
+# until they are published.
+[patch.crates-io]
+turbo-html2pdf-core = { path = "/Users/grzegorz/github-flux/turbo-html2pdf-zoom-layout/crates/turbo-html2pdf-core" }
+turbo-dom = { path = "/Users/grzegorz/github-flux/turbo-dom-zoom-layout/crates/turbo-dom" }

@@ -59,6 +59,9 @@ def main():
         isolate = source / "src/isolate.rs"
         if hashlib.sha256(isolate.read_bytes()).hexdigest() != PINS["original_isolate_sha256"]:
             parser.error("upstream isolate source SHA-256 does not match")
+        function = source / "src/function.rs"
+        if hashlib.sha256(function.read_bytes()).hexdigest() != PINS["original_function_sha256"]:
+            parser.error("upstream callback source SHA-256 does not match")
         subprocess.run(
             ["patch", "--batch", "-p1", "-i", str(patch)],
             cwd=source,
@@ -67,6 +70,8 @@ def main():
         )
         if hashlib.sha256(isolate.read_bytes()).hexdigest() != PINS["patched_isolate_sha256"]:
             parser.error("patched isolate source SHA-256 does not match")
+        if hashlib.sha256(function.read_bytes()).hexdigest() != PINS["patched_function_sha256"]:
+            parser.error("patched callback source SHA-256 does not match")
         if hashlib.sha256((source / "LICENSE").read_bytes()).hexdigest() != PINS["license_sha256"]:
             parser.error("retained license SHA-256 does not match")
         expected = files(source)
@@ -91,7 +96,7 @@ def main():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
                 path.chmod((source / relative).stat().st_mode & 0o777)
-    print("Verified Rusty V8 " + PINS["version"] + " archive, license and weak teardown patch")
+    print("Verified Rusty V8 " + PINS["version"] + " archive, license, weak teardown and interceptor mode patches")
 
 
 if __name__ == "__main__":

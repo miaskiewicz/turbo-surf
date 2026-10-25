@@ -438,9 +438,7 @@
   // Scrolling methods follow Chrome156: Element/Window scroll operations return a
   // promise resolved with a fresh ScrollResult after an instant scroll's task.
   const LocalPromise = Promise;
-  const promiseResolve = Promise.resolve;
   const promiseReject = Promise.reject;
-  const localSymbol = Symbol;
   const toPrimitiveKey = Symbol.toPrimitive;
   const LocalString = String;
   const includes = Array.prototype.includes;

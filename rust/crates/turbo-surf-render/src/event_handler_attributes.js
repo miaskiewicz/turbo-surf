@@ -99,12 +99,15 @@ const __defineInterface = (name, length, parent, construct) => {
 };
 const __defineConstants = (constructor, constants) => {
   for (const [name, value] of constants)
+    // Configurable so the binding's key-order step can move these Web IDL constants
+    // after the interface's attributes (Blink's order) and re-add them non-configurable,
+    // as it does for the binding's own constants. They are frozen before any guest runs.
     for (const object of [constructor, constructor.prototype])
       Object.defineProperty(object, name, {
         __proto__: null,
         value,
         writable: false,
         enumerable: true,
-        configurable: false,
+        configurable: true,
       });
 };

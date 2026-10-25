@@ -127,7 +127,8 @@
   }
   const collection = collectionInterface('HTMLCollection');
   const nodeList = collectionInterface('NodeList');
-  const named = (list,name)=>{if(name==='')return null;for(let index=0;index<list.length;index++){const node=list[index];if(getAttribute.call(node,'id')===name||namespace.call(node)===html&&getAttribute.call(node,'name')===name)return node;}return null;};
+  // An id match anywhere in the collection wins over an earlier name match.
+  const named = (list,name)=>{if(name==='')return null;for(let index=0;index<list.length;index++){const node=list[index];if(getAttribute.call(node,'id')===name)return node;}for(let index=0;index<list.length;index++){const node=list[index];if(namespace.call(node)===html&&getAttribute.call(node,'name')===name)return node;}return null;};
   method(collection.proto, 'namedItem', function (name) { if (!arguments.length) throw new TypeError('namedItem requires 1 argument'); return named(collection.record(this)(), string(name)); }, 1);
   for (const [name,implementation] of [['entries',collectionEntries],['keys',collectionKeys],['values',collectionValues]]) method(nodeList.proto,name,function(){nodeList.record(this);return collectionApply(implementation,this,[]);},0);
   Object.defineProperty(nodeList.proto, Symbol.iterator, {value: nodeList.proto.values, writable: true, configurable: true});

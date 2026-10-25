@@ -197,25 +197,17 @@ mod tests {
         assert_control(&actual, &control["result"]);
     }
 
-    /// Dialog targets receive Chrome's CommandEvent; the dialog command steps themselves need
-    /// HTMLDialogElement support, so only cases where Chrome's steps are no-ops compare fully.
+    /// Dialog targets receive Chrome's CommandEvent and then run the dialog command steps:
+    /// show-modal/close/request-close events, invoker sources, open state and returnValue.
     #[test]
-    fn dialog_invokers_dispatch_chrome_command_events() {
+    fn dialog_invokers_run_chrome_dialog_command_steps() {
         let control: serde_json::Value =
             serde_json::from_str(include_str!("html_invokers_dialog_chrome156.json")).unwrap();
         let actual = run_probe(include_str!("html_invokers_dialog_probe.js"));
-        let mut inert = 0;
-        for (label, expected) in control["result"].as_object().unwrap() {
-            assert_eq!(
-                actual[label]["commandRows"], expected["commandRows"],
-                "{label}"
-            );
-            if expected["steps"].as_array().map(Vec::len) == Some(1) {
-                inert += 1;
-                assert_eq!(actual[label]["steps"], expected["steps"], "{label}");
-                assert_eq!(actual[label]["open"], expected["open"], "{label}");
-            }
+        let expected = &control["result"];
+        for (label, value) in expected.as_object().unwrap() {
+            assert_eq!(&actual[label], value, "{label}");
         }
-        assert_eq!(inert, 3);
+        assert_eq!(&actual, expected);
     }
 }

@@ -1153,17 +1153,22 @@ if(typeof __ns.makeNativeFunction==='function'){
         p.setRangeText=setControlRangeText;
       }
     } catch(e){} g[n].prototype = p; protoFor[n] = p; });
-    // Descendant <option>s. Prefer querySelectorAll (document order); fall back to a `children` walk
-    // when it returns empty — that happens on a DETACHED subtree (qsa matches only connected nodes),
-    // which is exactly when React-DOM's updateOptions reads select.options DURING commit (the subtree
-    // is still detached then). Without the fallback a controlled <select> never marks its option.
+    // The select's list of options (HTML's "option element nearest ancestor select", Chrome 156
+    // measured in select_element_chrome156.json): option descendants in tree order, skipping nested
+    // select/datalist/hr/option subtrees and optgroups inside an optgroup. A sibling walk also serves
+    // DETACHED subtrees, which React-DOM's updateOptions reads during commit, and stays linear for
+    // huge lists (indexing the live `children` collection recomputes it per access).
+    var optionNs = 'http://www.w3.org/1999/xhtml';
+    var optionName = function(n){ return n.namespaceURI === optionNs ? n.localName : ''; };
     var optionsOf = function(sel){
-      var a = []; var list = sel.querySelectorAll('option');
-      for (var i=0;i<list.length;i++) a.push(list[i]);
-      if (!a.length) (function walk(n){ var ch = n.children; for (var j=0;j<ch.length;j++){ var c = ch[j]; var tg = String(c.tagName).toUpperCase(); if (tg === 'OPTION') a.push(c); else if (tg === 'OPTGROUP') walk(c); } })(sel);
+      var a = [];
+      (function walk(n, grouped){ for (var c = n.firstChild; c; c = c.nextSibling){ if (c.nodeType !== 1) continue; var name = optionName(c);
+        if (name === 'option') a.push(c);
+        else if (name === 'optgroup') { if (!grouped) walk(c, true); }
+        else if (name !== 'select' && name !== 'datalist' && name !== 'hr') walk(c, grouped); } })(sel, false);
       a.item = function(i){ return this[i] || null; }; return a;
     };
-    var ownerSelect = function(n){ var p = n.parentNode; while (p && p.nodeType === 1){ if (String(p.tagName).toUpperCase() === 'SELECT') return p; p = p.parentNode; } return null; };
+    var ownerSelect = function(n){ var grouped = false, p = n.parentNode; while (p && p.nodeType === 1){ var name = optionName(p); if (name === 'select') return p; if (name === 'datalist' || name === 'hr' || name === 'option') return null; if (name === 'optgroup') { if (grouped) return null; grouped = true; } p = p.parentNode; } return null; };
     // <option>: `value` falls back to text content (HTML spec), `selected`/`defaultSelected` track
     // the live + attribute state. React-DOM's updateOptions reads option.value and writes
     // option.selected for every option of a controlled <select>.
@@ -1195,7 +1200,8 @@ if(typeof __ns.makeNativeFunction==='function'){
           if (!sel.multiple) optionsOf(sel).forEach(function(o){ if (o !== this) optionStates.set(o, false); }, this);
         }
       } });
-      selection = { selectionOf: selectionOf, optionStates: optionStates, emptySelects: emptySelects };
+      selection = { selectionOf: selectionOf, optionStates: optionStates, emptySelects: emptySelects, isSelected: isSelected, optionsOf: optionsOf, ownerSelect: ownerSelect };
+      __ns.selectSelection = selection; // captured (and deleted) by select_element.js
       Object.defineProperty(op, 'defaultSelected', { configurable: true, get: function(){ return this.hasAttribute('selected'); }, set: function(v){ if (v) this.setAttribute('selected',''); else this.removeAttribute('selected'); } });
       Object.defineProperty(op, 'disabled', { configurable: true, get: function(){ return this.hasAttribute('disabled'); }, set: function(v){ if (v) this.setAttribute('disabled',''); else this.removeAttribute('disabled'); } });
       Object.defineProperty(op, 'text', { configurable: true, get: function(){ return this.textContent || ''; }, set: function(v){ this.textContent = v; } });

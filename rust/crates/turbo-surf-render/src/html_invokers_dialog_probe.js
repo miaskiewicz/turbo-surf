@@ -1,6 +1,6 @@
 (async () => {
-  // Dialog invokers: `commandRows` is the CommandEvent dispatch the binding implements;
-  // `steps` records Chrome's dialog command steps, which need HTMLDialogElement support.
+  // Dialog invokers: `commandRows` is the CommandEvent dispatch; `steps` the events the
+  // show-modal/close/request-close dialog command steps then fire, with their sources.
   const out = {}, body = document.body, q = selector => body.querySelector(selector);
   const tick = () => new Promise(resolve => setTimeout(resolve, 0));
   const name = node => node === null ? null : node.id || node.localName;

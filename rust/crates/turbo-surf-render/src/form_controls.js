@@ -6,6 +6,7 @@
   const readValue = ns.formControlValue;
   delete ns.formControlValue;
   const checkedValue=ns.formControlChecked;delete ns.formControlChecked;
+  const dialogSubmission=ns.dialogFormSubmission;delete ns.dialogFormSubmission;
   const selectedOptions=ns.formSelectedOptions,resetControl=ns.formResetControl;delete ns.formSelectedOptions;delete ns.formResetControl;
   const apply = Reflect.apply, define = Object.defineProperty, create = Object.create;
   const string = String, number = Number;
@@ -261,6 +262,9 @@
   }
   function queue(form,submitter) {
     if(!apply(connectedGetter,form,[])||privateGet(form,'constructing-entries'))return;
+    // method=dialog closes the nearest ancestor dialog before any entry list exists.
+    const method=lower(submitter&&present(submitter,'formmethod')?attr(submitter,'formmethod'):attr(form,'method')||'');
+    if(method==='dialog'){if(dialogSubmission)dialogSubmission(form,submitter);return;}
     privateSet(form,'constructing-entries',true);
     try {if(bridge('submit',form,submitter,submission(form,submitter))===true)return;throw new Exception('Form navigation requires a configured native submission transport.','NotSupportedError');}
     finally {privateSet(form,'constructing-entries',false);}

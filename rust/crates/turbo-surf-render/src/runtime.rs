@@ -11842,12 +11842,20 @@ __G.domSig = (() => {
         : name==="adoptedStyleSheets" && descriptor.writable ? (state, _receiver, value) => {state.members.get(name).value=value;} : undefined);
     }
   }
+  // A member the binding already defines on Document.prototype (fullscreenElement)
+  // is not an own document property; capture its native getter before guest code runs.
+  const __aliasPrototypeGetters = new Map();
+  for (const name of ["hidden", "visibilityState", "fullscreenElement"]) {
+    const getter = Object.getOwnPropertyDescriptor(Document.prototype, name)?.get;
+    if (getter) __aliasPrototypeGetters.set(name, getter);
+  }
   for (const [alias, name] of Object.entries({webkitHidden:"hidden", webkitVisibilityState:"visibilityState",
     webkitFullscreenElement:"fullscreenElement", webkitCurrentFullScreenElement:"fullscreenElement",
     webkitIsFullScreen:"fullscreenElement"})) {
     __defineDocumentAccessor(alias, (state, receiver) => {
       const member=state.members.get(name);
-      const value=member.get ? member.get.call(receiver) : member.value;
+      const value=member ? (member.get ? member.get.call(receiver) : member.value)
+        : __aliasPrototypeGetters.get(name).call(receiver);
       return alias==="webkitIsFullScreen" ? value!=null : value;
     });
   }

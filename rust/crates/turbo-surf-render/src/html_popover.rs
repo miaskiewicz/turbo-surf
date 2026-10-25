@@ -384,6 +384,7 @@ pub(super) fn invoke<'s>(
     });
 }
 pub(super) fn disconnect(scope: &mut v8::PinScope, root: Handle, include_root: bool) {
+    html_dialog::disconnect(root, include_root);
     let nodes = DOM.with(|dom| {
         let dom = dom.borrow();
         let Some(dom) = dom.as_ref() else {
@@ -518,6 +519,34 @@ pub(super) fn install(scope: &mut v8::PinScope) {
     }
     capture_scheduler(scope);
 }
+/// Dialog show steps: hide every open auto/hint popover that is not a flat-tree
+/// ancestor of `node`, topmost first, firing events.
+pub(super) fn hide_unrelated(scope: &mut v8::PinScope, node: Handle) {
+    let closing = DOM.with(|dom| {
+        let dom = dom.borrow();
+        let dom = dom.as_ref().unwrap();
+        dom.popover
+            .open
+            .iter()
+            .rev()
+            .filter(|entry| entry.mode != "manual" && !descendant(&dom.tree, node, entry.node))
+            .map(|entry| entry.node)
+            .collect::<Vec<_>>()
+    });
+    for entry in closing {
+        hide(scope, entry, true);
+    }
+}
+/// Queue `callback` as a task on this document's private, host-captured scheduler.
+pub(super) fn schedule(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
+    let Some(scheduler) = DOM.with(|dom| dom.borrow().as_ref()?.popover.scheduler.clone()) else {
+        return;
+    };
+    let scheduler = dom_ownership::local(scope, &scheduler);
+    let receiver = v8::undefined(scope);
+    let delay = v8::Integer::new(scope, 0);
+    scheduler.call(scope, receiver.into(), &[callback.into(), delay.into()]);
+}
 pub(super) fn capture_scheduler(scope: &mut v8::PinScope) {
     // Independent-context installation restores its caller's TLS document. The
     // host installs timers afterwards, so resolve ownership from the realm here.
@@ -539,13 +568,13 @@ pub(super) fn capture_scheduler(scope: &mut v8::PinScope) {
     }
 }
 
-fn selector_root(tree: &Tree, mut node: Handle) -> Handle {
+pub(super) fn selector_root(tree: &Tree, mut node: Handle) -> Handle {
     while let Some(parent) = tree.parent(node) {
         node = parent;
     }
     node
 }
-fn selector_path(tree: &Tree, mut node: Handle) -> String {
+pub(super) fn selector_path(tree: &Tree, mut node: Handle) -> String {
     let mut path = Vec::new();
     loop {
         let parent = tree.parent(node);

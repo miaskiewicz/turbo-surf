@@ -1,12 +1,12 @@
 // Invoker reflection (command/commandfor, popovertarget/popovertargetaction), a genuine
 // CommandEvent, and the private button/input activation the native click dispatch calls.
-// Dialog command steps are not run: this binding has no HTMLDialogElement behavior yet.
 (function () {
   'use strict';
   const Native = globalThis.__invokerNative; delete globalThis.__invokerNative;
   const g = globalThis, ns = g[Symbol.for('ts')], make = ns.makeNativeFunction, StringValue = String;
   const reference = ns.elementReference, retarget = ns.retargetEventSource;
-  delete ns.elementReference; delete ns.retargetEventSource;
+  const dialogSteps = ns.dialogCommandSteps;
+  delete ns.elementReference; delete ns.retargetEventSource; delete ns.dialogCommandSteps;
   const accessor = (proto, name) => Object.getOwnPropertyDescriptor(proto, name).get;
   const nodeType = accessor(g.Node.prototype, 'nodeType'), namespace = accessor(g.Element.prototype, 'namespaceURI');
   const localName = accessor(g.Element.prototype, 'localName'), parentNode = accessor(g.Node.prototype, 'parentNode');
@@ -102,7 +102,7 @@
       if (!Native('dispatch', target, event) || !connected.call(target) || command.slice(0, 2) === '--') return;
       if (command === 'toggle-popover' || command === 'show-popover' || command === 'hide-popover') {
         if (namespace.call(target) === HTML && popoverOf.call(target) !== null) Native('popover', target, command.slice(0, -8), node);
-      }
+      } else if (html(target, 'dialog')) dialogSteps(target, command, node);
       return;
     }
     popoverTargetActivation(node, eventTarget);

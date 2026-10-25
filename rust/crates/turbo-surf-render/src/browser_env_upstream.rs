@@ -108,6 +108,11 @@ pub fn set_interface_record<'s>(
 
 #[path = "document_basics.rs"]
 mod document_basics;
+#[path = "document_legacy.rs"]
+mod document_legacy;
+pub use document_legacy::{
+    set_document_domain_sandboxed, set_document_last_modified, set_document_origin_keyed,
+};
 #[path = "dom_implementation.rs"]
 mod dom_implementation;
 pub use dom_implementation::set_initializer as set_inert_document_initializer;
@@ -118,6 +123,8 @@ pub use document_xpath::is_native_xpath_object;
 mod dom_mutations;
 #[path = "element_relations.rs"]
 mod element_relations;
+#[path = "html_dialog.rs"]
+mod html_dialog;
 #[path = "html_invokers.rs"]
 mod html_invokers;
 #[path = "html_popover.rs"]
@@ -128,6 +135,8 @@ mod html_text;
 mod input_members;
 #[path = "shadow_html.rs"]
 mod shadow_html;
+#[path = "select_element.rs"]
+mod select_element;
 #[path = "shadow_slots.rs"]
 mod shadow_slots;
 
@@ -415,6 +424,7 @@ struct DomState {
     /// handle → JS node object, for identity (`el === el`).
     cache: HashMap<Handle, v8::Weak<v8::Object>>,
     checked_radios: HashMap<Handle, Option<Handle>>,
+    dialog: html_dialog::State,
     /// shared element object template (internal_field_count = 2).
     el_template: v8::Global<v8::ObjectTemplate>,
     shadow_modes: HashMap<Handle, String>,
@@ -615,6 +625,7 @@ fn parse_html_tree<'s>(
             tree,
             cache: HashMap::new(),
             checked_radios: Default::default(),
+            dialog: Default::default(),
             el_template: template,
             shadow_modes: HashMap::new(),
             basics_state: None,
@@ -3068,6 +3079,7 @@ fn selector_argument<'s>(
         return None;
     }
     let transformed = html_popover::selector(scope, node, &scalar)?;
+    let transformed = html_dialog::selector(scope, node, &transformed)?;
     let original = if transformed == scalar {
         units
     } else {
@@ -3349,6 +3361,9 @@ fn el_focus(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
+    if html_dialog::blocks_focus(h) {
+        return;
+    }
     let prev = ACTIVE.with(|a| *a.borrow());
     if prev == Some(h) {
         return;
@@ -6148,6 +6163,7 @@ fn build_el_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::
                 | v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS,
         );
     tmpl.set_named_property_handler(handler);
+    select_element::indexed_handler(tmpl);
 
     tmpl
 }
@@ -6913,6 +6929,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
             tree,
             cache: HashMap::new(),
             checked_radios: Default::default(),
+            dialog: Default::default(),
             el_template,
             shadow_modes: HashMap::new(),
             basics_state: None,
@@ -7009,6 +7026,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     run_js(scope, include_str!("element_tokens.js"));
     run_js(scope, include_str!("element_relations.js"));
     run_js(scope, include_str!("document_basics.js"));
+    document_legacy::install(scope);
     capture_node_projector(scope);
     dom_implementation::install(scope);
     template_contents::install(scope);
@@ -7023,12 +7041,14 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     document_xpath::install(scope);
     event_listeners::install(scope);
     element_members::install(scope);
+    html_dialog::install(scope);
     bind_method(scope, global, "__formNative", form_controls_native);
     run_js(scope, include_str!("form_outputs.js"));
     run_js(scope, include_str!("form_controls.js"));
     run_js(scope, include_str!("form_collections.js"));
     html_invokers::install(scope);
     input_members::install(scope);
+    select_element::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())
@@ -9382,3 +9402,7 @@ mod utf16_contract_tests;
 #[cfg(test)]
 #[path = "form_outputs_tests.rs"]
 mod form_outputs_tests;
+
+#[cfg(test)]
+#[path = "html_dialog_tests.rs"]
+mod html_dialog_tests;

@@ -383,6 +383,62 @@ fn op_permissions_policy(
     permissions_policy_result(&policy, &origin, name, target, action)
 }
 
+/// The iframe's container policy: its `allow` attribute, then the legacy
+/// `allowfullscreen` attribute, which grants fullscreen to every origin unless
+/// `allow` already declares the feature (the first declaration wins).
+fn frame_container_allow(scope: &mut v8::PinScope, host: v8::Local<v8::Object>) -> String {
+    let allow = crate::browser_env::node_attribute(scope, host, "allow").unwrap_or_default();
+    if crate::browser_env::node_attribute(scope, host, "allowfullscreen").is_some() {
+        format!("{allow};fullscreen *")
+    } else {
+        allow
+    }
+}
+
+/// `fullscreenEnabled`/`pictureInPictureEnabled`: the feature is enabled in the
+/// document's own permissions policy, and the document is the active document of
+/// a live browsing context (inert and detached documents report false).
+#[op2(fast)]
+fn op_document_feature_enabled(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    #[string] feature: &str,
+) -> bool {
+    let Some(context) = document.get_creation_context(scope) else {
+        return false;
+    };
+    let active = context
+        .get_slot::<ActiveDocument>()
+        .and_then(|active| active.0.to_local(scope))
+        .is_some_and(|active| active.strict_equals(document.into()));
+    if !active || context.get_slot::<FrameRetired>().is_some() {
+        return false;
+    }
+    let origin = window_origin(scope, context);
+    context.get_slot::<CspHandle>().is_some_and(|handle| {
+        handle
+            .policy
+            .borrow()
+            .permissions_policy
+            .allows_self(feature, &origin)
+    })
+}
+
+#[op2(fast)]
+fn op_document_origin_opaque(scope: &mut v8::PinScope, document: v8::Local<v8::Object>) -> bool {
+    document
+        .get_creation_context(scope)
+        .is_some_and(|context| window_is_opaque(scope, context))
+}
+
+#[op2(fast)]
+fn op_origin_agent_cluster(scope: &mut v8::PinScope, window: v8::Local<v8::Object>) -> bool {
+    window
+        .get_creation_context(scope)
+        .and_then(|context| context.get_slot::<AgentClusterKeyed>())
+        .is_none_or(|keyed| keyed.0)
+}
+
 fn permissions_policy_result(
     policy: &crate::permissions_policy::PermissionsPolicy,
     origin: &str,
@@ -438,7 +494,7 @@ fn op_iframe_permissions_policy(
         .get_slot::<CspHandle>()
         .map(|handle| handle.policy.borrow().permissions_policy.clone())
         .unwrap_or_default();
-    let allow = crate::browser_env::node_attribute(scope, host, "allow").unwrap_or_default();
+    let allow = frame_container_allow(scope, host);
     let mut policy = crate::permissions_policy::PermissionsPolicy::default();
     policy.inherit(
         &parent_policy,
@@ -3373,11 +3429,15 @@ struct FrameSandbox {
     top_navigation_without_activation_blocked: bool,
     forms_blocked: bool,
     top_navigation_without_activation_permitted: bool,
+    /// The sandboxed document.domain browsing context flag: every sandbox sets it,
+    /// whatever its allow tokens.
+    document_domain_blocked: bool,
 }
 impl FrameSandbox {
     fn apply_csp(&mut self, policy: &crate::csp::Policy) {
         if let Some((scripts, origin)) = policy.sandbox_restrictions() {
             self.scripts_blocked |= scripts;
+            self.document_domain_blocked = true;
             self.opaque |= origin;
             self.origin_restricted |= origin;
             self.storage_access_blocked |= policy.blocks_storage_access();
@@ -3406,8 +3466,10 @@ impl FrameSandbox {
                 .top_navigation_without_activation_blocked,
             top_navigation_without_activation_permitted: inherited
                 .top_navigation_without_activation_permitted,
+            document_domain_blocked: inherited.document_domain_blocked,
         };
         if let Some(attribute) = crate::browser_env::node_attribute(scope, host, "sandbox") {
+            flags.document_domain_blocked = true;
             let tokens = attribute.to_ascii_lowercase();
             let tokens = tokens.split_ascii_whitespace().collect::<Vec<_>>();
             flags.opaque |= !tokens.contains(&"allow-same-origin");
@@ -3425,6 +3487,78 @@ impl FrameSandbox {
     }
 }
 struct FrameEnvironment(v8::Weak<v8::Object>);
+/// Whether this realm's agent cluster is origin-keyed (`window.originAgentCluster`).
+struct AgentClusterKeyed(bool);
+/// The document a navigation installed as this realm's browsing-context document;
+/// inert documents created in the realm never carry its policy-derived state.
+struct ActiveDocument(v8::Weak<v8::Object>);
+
+/// What the binding's Document reads from the response that created it.
+struct DocumentFacts {
+    last_modified: Option<f64>,
+    keyed: bool,
+    domain_sandboxed: bool,
+}
+impl DocumentFacts {
+    /// A navigation response: its own headers, and this browsing context group's
+    /// historical agent cluster keying for the response origin.
+    fn response(
+        scope: &mut v8::PinScope,
+        context: v8::Local<v8::Context>,
+        url: &str,
+        headers: &[(String, String)],
+    ) -> Self {
+        let opaque = window_is_opaque(scope, context);
+        let keyed = JsRuntime::op_state_from(scope)
+            .borrow_mut()
+            .borrow_mut::<crate::document_facts::AgentClusters>()
+            .keyed(url, opaque, headers, trustworthy_url(url));
+        Self {
+            last_modified: crate::document_facts::last_modified(headers),
+            keyed,
+            domain_sandboxed: sandboxed_document_domain(context),
+        }
+    }
+    /// srcdoc and about:blank documents have no response; they join their
+    /// creator's agent cluster (an opaque sandboxed one is always origin-keyed).
+    fn inherited(
+        scope: &mut v8::PinScope,
+        context: v8::Local<v8::Context>,
+        parent: v8::Local<v8::Context>,
+    ) -> Self {
+        let keyed = window_is_opaque(scope, context)
+            || parent
+                .get_slot::<AgentClusterKeyed>()
+                .is_none_or(|keyed| keyed.0);
+        Self {
+            last_modified: None,
+            keyed,
+            domain_sandboxed: sandboxed_document_domain(context),
+        }
+    }
+}
+fn sandboxed_document_domain(context: v8::Local<v8::Context>) -> bool {
+    context
+        .get_slot::<FrameSandbox>()
+        .is_some_and(|flags| flags.document_domain_blocked)
+}
+/// Record `facts` on the realm's freshly installed document, before guest code runs.
+fn install_document_facts(scope: &mut v8::PinScope, facts: DocumentFacts) {
+    let context = scope.get_current_context();
+    let global = context.global(scope);
+    let key = v8::String::new(scope, "document").unwrap();
+    let Some(document) = global
+        .get(scope, key.into())
+        .and_then(|value| value.to_object(scope))
+    else {
+        return;
+    };
+    crate::browser_env::set_document_last_modified(scope, document, facts.last_modified);
+    crate::browser_env::set_document_origin_keyed(scope, document, facts.keyed);
+    crate::browser_env::set_document_domain_sandboxed(scope, document, facts.domain_sandboxed);
+    context.set_slot(Rc::new(AgentClusterKeyed(facts.keyed)));
+    context.set_slot(Rc::new(ActiveDocument(v8::Weak::new(scope, document))));
+}
 #[derive(Default)]
 struct HostCapabilities(
     std::cell::RefCell<std::collections::HashMap<String, v8::Weak<v8::Function>>>,
@@ -4877,8 +5011,7 @@ fn op_frame_set_document<'s>(
                         &document.headers,
                     );
             }
-            let allow =
-                crate::browser_env::node_attribute(scope, host, "allow").unwrap_or_default();
+            let allow = frame_container_allow(scope, host);
             csp.policy.borrow_mut().permissions_policy.inherit(
                 &parent_policy.policy.borrow().permissions_policy,
                 &parent_origin,
@@ -4952,6 +5085,14 @@ fn op_frame_set_document<'s>(
             crate::browser_env::install_independent_html_units(scope, &html_units);
         }
         install_css_authorization(scope)?;
+        // Before the environment bootstrap, which already creates the parsed iframes.
+        let facts = match &document {
+            Some(document) => {
+                DocumentFacts::response(scope, context, &document.url, &document.headers)
+            }
+            None => DocumentFacts::inherited(scope, context, parent),
+        };
+        install_document_facts(scope, facts);
         #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_document(scope);
         let global = context.global(scope);
@@ -5475,6 +5616,8 @@ fn allocate_frame<'s>(
             "<!DOCTYPE html><html><head></head><body></body></html>",
         );
         install_css_authorization(scope)?;
+        let facts = DocumentFacts::inherited(scope, context, parent);
+        install_document_facts(scope, facts);
         #[cfg(turbo_surf_native_proxy)]
         window_proxy::install_document(scope);
 
@@ -7012,6 +7155,9 @@ deno_core::extension!(
         op_csp_context,
         op_csp_base_url,
         op_permissions_policy,
+        op_document_feature_enabled,
+        op_origin_agent_cluster,
+        op_document_origin_opaque,
         op_iframe_permissions_policy,
         op_csp_meta,
         op_referrer_meta,
@@ -7834,6 +7980,18 @@ const __defineDocumentAccessor = (name, read, write) => {
   Object.defineProperty(Document.prototype, name, descriptor);
   if (Object.hasOwn(__document, name)) delete __document[name];
 };
+// An opaque origin has no host, so its document.domain is empty. The binding
+// derives the domain from the document URL, which a sandbox leaves intact; its
+// getter still performs the brand check and the browsing-context resolution.
+{
+  const domain = Object.getOwnPropertyDescriptor(Document.prototype, "domain");
+  const read = domain.get;
+  domain.get = __documentFunction(function () {
+    const value = __documentApply(read, this, []);
+    return ops.op_document_origin_opaque(this) ? "" : value;
+  }, "get domain", 0);
+  Object.defineProperty(Document.prototype, "domain", domain);
+}
 const __legacyDocumentCreateEvent=__document.createEvent,__storageEventLower=String.prototype.toLowerCase;
 __document.createEvent=({createEvent(type){
  __documentState(this);if(!arguments.length)throw new __exceptionTypeError('An event interface is required');
@@ -12162,7 +12320,7 @@ __G.domSig = (() => {
     const bar = () => ({ visible: true });
     const misc = {
       closed: false, length: 0, name: "", opener: null, status: "", crossOriginIsolated: ops.op_shared_memory_allowed(),
-      isSecureContext: ops.op_is_secure_context(), originAgentCluster: true, offscreenBuffering: true, credentialless: false,
+      isSecureContext: ops.op_is_secure_context(), offscreenBuffering: true, credentialless: false,
       origin: (G.location && G.location.origin) || "https://www.google.com", clientInformation: G.navigator,
       locationbar: bar(), menubar: bar(), personalbar: bar(), scrollbars: bar(), statusbar: bar(), toolbar: bar(),
       // These real Web APIs are FEATURE-DETECTED by page code (`if (window.X)`) which then calls
@@ -12178,6 +12336,12 @@ __G.domSig = (() => {
       webkitURL: G.URL, webkitMediaStream: G.MediaStream, webkitRTCPeerConnection: G.RTCPeerConnection,
     };
     for (const k in misc) { if (!(k in G)) { try { G[k] = misc[k]; } catch (e) {} } }
+    // The realm's actual agent cluster keying, from the response that created it.
+    const originAgentCluster = __documentFunction(function(){
+      if(!ops.op_surf_is_window(this))throw new TypeError("Illegal invocation");
+      return ops.op_origin_agent_cluster(this);
+    }, "get originAgentCluster", 0);
+    Object.defineProperty(G,"originAgentCluster",{__proto__:null,get:originAgentCluster,configurable:true,enumerable:true});
     if (!ops.op_native_window_proxy()) {
       const closed = __documentFunction(function(){
         if(!ops.op_surf_is_window(this))throw new TypeError("Illegal invocation");
@@ -12517,6 +12681,7 @@ fn make_runtime_with_storage_and_options(
     state.put(module_stages);
     state.put(ClassicScripts::default());
     state.put(FrameContexts::default());
+    state.put(crate::document_facts::AgentClusters::default());
     state.put(TimerClock {
         mode: options.window_timer_mode,
         ..TimerClock::default()
@@ -12552,6 +12717,8 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
             init_script,
             ..Default::default()
         };
+        // A new top-level document starts a new browsing context group.
+        state.put(crate::document_facts::AgentClusters::default());
         let queue = state.borrow_mut::<ClassicScripts>();
         queue.html = html.to_string();
         queue.used_inline_offsets.clear();
@@ -12625,6 +12792,14 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
             crate::browser_env::install_html(&mut scope, html);
         }
         install_css_authorization(&mut scope).map_err(|error| error.to_string())?;
+        // Before the environment bootstrap, which already creates the parsed iframes.
+        let headers = JsRuntime::op_state_from(&scope)
+            .borrow()
+            .borrow::<ResponseHeaders>()
+            .0
+            .clone();
+        let facts = DocumentFacts::response(&mut scope, context, base, &headers);
+        install_document_facts(&mut scope, facts);
     }
     let origin = ModuleSpecifier::parse(base)
         .map(|url| url.origin().ascii_serialization())

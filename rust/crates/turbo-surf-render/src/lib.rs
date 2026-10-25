@@ -18,6 +18,7 @@ mod crypto_clone;
 mod crypto_hybrid;
 mod csp;
 mod csp_reporting;
+mod document_facts;
 mod document_response;
 mod fetch_cors;
 mod geometry_backend;

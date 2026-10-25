@@ -385,6 +385,7 @@ pub(super) fn invoke<'s>(
 }
 pub(super) fn disconnect(scope: &mut v8::PinScope, root: Handle, include_root: bool) {
     html_dialog::disconnect(root, include_root);
+    pointer_events::disconnect(scope, root, include_root);
     let nodes = DOM.with(|dom| {
         let dom = dom.borrow();
         let Some(dom) = dom.as_ref() else {

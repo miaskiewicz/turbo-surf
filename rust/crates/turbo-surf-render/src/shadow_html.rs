@@ -472,6 +472,16 @@ fn native<'s>(
             };
             rv.set_bool(flag(scope, object, name));
         }
+        "pointerLockElement" => {
+            if shadow_root(scope, object).is_none() {
+                illegal(scope);
+                return;
+            }
+            let lock = pointer_events::lock_element_in(scope, object);
+            let _owner = DomScope::for_object(scope, object);
+            let value = wrap_opt(scope, lock);
+            rv.set(value);
+        }
         "activeElement" | "retarget" => {
             let Some(root) = shadow_root(scope, object) else {
                 illegal(scope);

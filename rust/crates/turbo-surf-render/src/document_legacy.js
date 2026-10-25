@@ -130,12 +130,14 @@
     const [month, day, year, hours, minutes, seconds] = dateParts.map(part => apply(part, date, []));
     return pad(month + 1, 2) + '/' + pad(day, 2) + '/' + pad(year, 4) + ' ' + pad(hours, 2) + ':' + pad(minutes, 2) + ':' + pad(seconds, 2);
   });
-  // No element of this engine ever becomes fullscreen, pointer-locked or
-  // picture-in-picture, and its documents are never prerendered or discarded.
+  // No element of this engine ever becomes fullscreen or picture-in-picture, and its
+  // documents are never prerendered or discarded. The pointer lock is native state
+  // (pointer_events.rs), retargeted into the document's tree.
   lenient('fullscreen', () => false);
   lenient('fullscreenElement', () => null);
   if (Object.getOwnPropertyDescriptor(g.document, 'fullscreenElement')) delete g.document.fullscreenElement;
-  for (const name of ['pointerLockElement', 'pictureInPictureElement']) getter(proto, name, function () { check(this); return null; });
+  getter(proto, 'pointerLockElement', function () { check(this); return native('pointerLockElement', this); });
+  getter(proto, 'pictureInPictureElement', function () { check(this); return null; });
   for (const name of ['prerendering', 'wasDiscarded']) getter(proto, name, function () { check(this); return false; });
   const reject = Promise.reject.bind(Promise);
   const rejecting = (name, refusal) => method(proto, name, function () {
@@ -145,5 +147,6 @@
   rejecting('exitFullscreen', prefix => new ErrorType(prefix + 'Document not active'));
   rejecting('exitPictureInPicture', prefix => new DOMExceptionType(prefix + 'There is no Picture-in-Picture element in this document.', 'InvalidStateError'));
   // The prefixed forms run the same exit and swallow its refusal.
-  for (const name of ['webkitExitFullscreen', 'webkitCancelFullScreen', 'exitPointerLock']) method(proto, name, function () { check(this); }, 0);
+  for (const name of ['webkitExitFullscreen', 'webkitCancelFullScreen']) method(proto, name, function () { check(this); }, 0);
+  method(proto, 'exitPointerLock', function () { check(this); native('exitPointerLock', this); }, 0);
 })();

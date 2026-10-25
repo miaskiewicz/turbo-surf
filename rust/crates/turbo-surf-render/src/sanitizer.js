@@ -197,21 +197,35 @@
     }
     return result;
   }
-  const defaultConfig = (() => {
-    const data = parse(defaultData).configuration,
-      config = create(null);
-    config.attributes = copyList(data.attributes);
-    config.comments = data.comments;
-    config.dataAttributes = data.dataAttributes;
-    config.elements = [];
-    for (let index = 0; index < data.elements.length; index++) push(config.elements, copyElement(data.elements[index]));
-    config.processingInstructions = copyList(data.processingInstructions);
-    return config;
-  })();
-  const baseline = (() => {
-    const data = parse(baselineData);
-    return { elements: copyList(data.removeElements), attributes: copyList(data.removeAttributes) };
-  })();
+  // The built-in default configuration and the remove-unsafe baseline are a
+  // constant 121-element / 139-attribute graph. Building them eagerly in every
+  // realm (each iframe included) is wasteful when a frame never touches the API,
+  // so parse the embedded JSON and build the graph only on first use. The
+  // observable surface is unchanged — only a sanitizer that needs the default
+  // (`new Sanitizer()`, a preset, or a safe default) pays for it, once per realm.
+  let defaultConfigValue;
+  const defaultConfig = () => {
+    if (defaultConfigValue === undefined) {
+      const data = parse(defaultData).configuration,
+        config = create(null);
+      config.attributes = copyList(data.attributes);
+      config.comments = data.comments;
+      config.dataAttributes = data.dataAttributes;
+      config.elements = [];
+      for (let index = 0; index < data.elements.length; index++) push(config.elements, copyElement(data.elements[index]));
+      config.processingInstructions = copyList(data.processingInstructions);
+      defaultConfigValue = config;
+    }
+    return defaultConfigValue;
+  };
+  let baselineValue;
+  const baseline = () => {
+    if (baselineValue === undefined) {
+      const data = parse(baselineData);
+      baselineValue = { elements: copyList(data.removeElements), attributes: copyList(data.removeAttributes) };
+    }
+    return baselineValue;
+  };
 
   // "Canonicalize the configuration" (members were canonicalized on conversion).
   function canonicalize(config, allowCommentsAndDataAttributes) {
@@ -363,9 +377,10 @@
     return true;
   }
   function removeUnsafe(config) {
-    for (let index = 0; index < baseline.elements.length; index++) removeElement(config, copyName(baseline.elements[index]));
-    for (let index = 0; index < baseline.attributes.length; index++)
-      removeAttribute(config, copyName(baseline.attributes[index]));
+    const unsafe = baseline();
+    for (let index = 0; index < unsafe.elements.length; index++) removeElement(config, copyName(unsafe.elements[index]));
+    for (let index = 0; index < unsafe.attributes.length; index++)
+      removeAttribute(config, copyName(unsafe.attributes[index]));
   }
   function allowInstruction(config, item) {
     if (config.processingInstructions !== undefined) {
@@ -442,13 +457,13 @@
     if (new.target === undefined)
       fail(constructPrefix, "Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
     let config;
-    if (configuration === undefined) config = copyConfig(defaultConfig);
+    if (configuration === undefined) config = copyConfig(defaultConfig());
     else if (object(configuration) || configuration === null) {
       config = canonicalize(configDictionary(configuration, constructPrefix), true);
       if (!valid(config)) fail(constructPrefix, "Invalid Sanitizer configuration.");
     } else {
       preset(configuration, constructPrefix);
-      config = copyConfig(defaultConfig);
+      config = copyConfig(defaultConfig());
     }
     native("record", this, config);
   }
@@ -522,9 +537,9 @@
     let config;
     if (spec === undefined) {
       if (!safe) return undefined;
-      config = copyConfig(defaultConfig);
+      config = copyConfig(defaultConfig());
     } else if (spec.config !== undefined) config = copyConfig(spec.config);
-    else if (spec.preset !== undefined) config = copyConfig(defaultConfig);
+    else if (spec.preset !== undefined) config = copyConfig(defaultConfig());
     else {
       config = canonicalize(copyConfig(spec.dictionary), !safe);
       if (!valid(config)) fail(prefix, "Invalid Sanitizer configuration.");

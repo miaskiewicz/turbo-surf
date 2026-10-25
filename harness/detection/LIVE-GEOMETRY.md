@@ -76,6 +76,26 @@ margin. The authored control is `element-scroll-chrome-control.mjs` (three probe
 Chrome156.0.8078.47, per-probe SHA-256 in
 `fixtures/element-scroll-chrome156.json`); `tests/element_scroll.rs` compares it.
 
+Standardized CSS `zoom` follows Chrome156: the CSSOM grammar and serialization
+(`normal`, non-negative numbers/percentages, single-kind `calc()`), computed
+factors, and native layout of every absolute and viewport-relative length at the
+element's effective zoom (the flat-tree product, through `display:contents`).
+Rectangles and hit testing use zoomed layout pixels; offset/client/scroll metrics
+and scroll offsets use the element's own unzoomed pixels, and `offsetParent` also
+stops at a zoom change. `Element.currentCSSZoom` reports the effective zoom of an
+element with a box, else 1. The standards root and quirks-mode body report the
+viewport client size; the quirks body addresses the viewport unless it is a scroll
+container (`scrollingElement` is then null), the quirks root is an ordinary box,
+and an iframe srcdoc document is never in quirks mode. Image-button
+`HTMLInputElement.width/height` report the rendered content box, else the
+dimension attribute. `zoom-layout-chrome-control.mjs` records four Chrome156
+captures (`fixtures/zoom-layout-chrome156.json`); `tests/zoom_layout.rs` compares
+them and pins three gaps: factors beyond six significant digits (CSSOM text
+reaches layout at Chrome's serialization), image buttons loading no image (no
+natural size), and Chrome's attribute answer before the first style update after
+insertion. Unsized form-control and replaced defaults (for example a 300x150
+iframe) are not yet zoomed.
+
 [Host media](./HOST-MEDIA.md) supplies real platform preferences and installed
 input-driver capabilities to both live CSS and relevant media queries; cache keys
 include that captured environment. [Modern at-rule admission](./NEUTRAL-AT-RULES.md)
@@ -187,10 +207,8 @@ Remaining bounds:
   metrics/clamping, ancestor projection and the scroll-method/event control are
   tested subsets. Smooth scrolls (including CSS `scroll-behavior`, which is not
   consulted) complete at the next frame without intermediate animation positions;
-  `scroll-margin`/`scroll-padding`, quirks-mode body scrolling, root
-  `clientWidth`/`clientHeight` and re-clamping scroll events after layout changes
-  remain open. `currentCSSZoom` stays unimplemented because the native cascade has
-  no `zoom` property (issue28).
+  `scroll-margin`/`scroll-padding` and re-clamping scroll events after layout
+  changes remain open (issue28).
 - Downloaded fonts, image source-density/intrinsic loading and animation/pseudo epochs.
 - Broader iframe viewport/layout migrations beyond the tested content-box resize,
   nested frame, cross-document adoption and retirement controls.

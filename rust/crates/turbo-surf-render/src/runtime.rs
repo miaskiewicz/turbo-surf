@@ -60,6 +60,9 @@ use runtime_activation::ActivationKey;
 
 #[path = "form_navigation.rs"]
 mod form_navigation;
+#[path = "privacy_sandbox.rs"]
+mod privacy_sandbox;
+use privacy_sandbox::{op_private_token_issuer, op_private_token_query};
 #[path = "form_submission.rs"]
 mod form_submission;
 #[path = "script_navigation.rs"]
@@ -6218,6 +6221,8 @@ struct StorageAreas {
     by_origin: std::collections::BTreeMap<StorageKey, u32>,
     values: std::collections::BTreeMap<u32, StorageEntries>,
     subscribers: Vec<std::sync::Weak<std::sync::Mutex<storage_events::Inbox>>>,
+    /// Private State Token issuers each top-frame origin has queried.
+    private_token_issuers: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// Native storage backing for one browsing tab across document navigations.
@@ -7157,6 +7162,8 @@ deno_core::extension!(
         op_csp_base_url,
         op_permissions_policy,
         op_document_feature_enabled,
+        op_private_token_issuer,
+        op_private_token_query,
         op_origin_agent_cluster,
         op_document_origin_opaque,
         op_iframe_permissions_policy,
@@ -8083,6 +8090,7 @@ __defineDocumentAccessor("currentScript", state => state.currentScript);
 "##,
     include_str!("permissions_policy.js"),
     include_str!("permission_status.js"),
+    include_str!("privacy_sandbox.js"),
     r##"
 
 // Parsed HTML documents share the caller's interfaces but own an independent

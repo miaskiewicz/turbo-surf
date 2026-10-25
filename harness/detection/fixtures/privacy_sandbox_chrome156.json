@@ -1,0 +1,1637 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "probeSha256": "76dbebd5189ac515f85fb05a55ed409a5af8404da310ac8d62fd85fd91e74b9e",
+  "collectorSha256": "59ce19b92438c3626315f579d9ca28d727c9477820768abe940efdfd7ef882f3",
+  "tlsTrust": "Only the checked fixture certificate SPKI is trusted for the localhost HTTPS case",
+  "flags": [
+    "--headless=new",
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--ignore-certificate-errors-spki-list=tgZhMuDR4ffcvwcdvk0UExoYIcSg3V4sRX6nubjtqQc=",
+    "--host-resolver-rules=MAP insecure.test 127.0.0.1",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "loopback-http",
+      "result": {
+        "secure": true,
+        "present": [
+          [
+            true,
+            true
+          ],
+          [
+            true,
+            true
+          ],
+          [
+            true,
+            true
+          ]
+        ],
+        "descriptors": [
+          [
+            true,
+            true,
+            true,
+            "browsingTopics",
+            0,
+            false,
+            "function browsingTopics() { [native code] }"
+          ],
+          [
+            true,
+            true,
+            true,
+            "hasPrivateToken",
+            1,
+            false,
+            "function hasPrivateToken() { [native code] }"
+          ],
+          [
+            true,
+            true,
+            true,
+            "hasRedemptionRecord",
+            1,
+            false,
+            "function hasRedemptionRecord() { [native code] }"
+          ]
+        ],
+        "topics": [
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "RangeError",
+            "boom",
+            false
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': The provided value is not of type 'BrowsingTopicsOptions'.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': The provided value is not of type 'BrowsingTopicsOptions'.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            "skipObservation"
+          ]
+        ],
+        "redemption": [
+          [
+            "undefined",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': 1 argument required, but only 0 present.",
+              true
+            ]
+          ],
+          [
+            "",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "notaurl",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "relative/path",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "http://issuer.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://issuer.example:99999",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "wss://x.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "blob:https://x.example/u",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "file:///x",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "data:,x",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            " https://issuer.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://issuer.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "HTTPS://ISSUER.EXAMPLE/path?q",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            " https://issuer.example ",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://u:p@issuer.example\u0000",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://%41.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://127.0.0.1",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://127.0.0.1:5",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://localhost:1",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://foo.localhost",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://[::1]",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "Symbol(Symbol.iterator)",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': Cannot convert a Symbol value to a string",
+              true
+            ]
+          ],
+          [
+            "https://object.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ]
+        ],
+        "invalidTokens": [
+          [
+            "undefined",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': 1 argument required, but only 0 present.",
+              true
+            ]
+          ],
+          [
+            "",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "notaurl",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "relative/path",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "http://issuer.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://issuer.example:99999",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "wss://x.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "blob:https://x.example/u",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "file:///x",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "data:,x",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            " https://issuer.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "symbol",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': Cannot convert a Symbol value to a string",
+              true
+            ]
+          ]
+        ],
+        "brands": [
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasRedemptionRecord' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasRedemptionRecord' on 'Document': Illegal invocation",
+            true
+          ]
+        ],
+        "tokens": [
+          [
+            "https://one.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://ONE.example:443/x",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://two.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://one.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://three.example",
+            [
+              true,
+              true,
+              "rejected",
+              "OperationError",
+              "Failed to retrieve hasPrivateToken response.",
+              true
+            ]
+          ],
+          [
+            "https://two.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://localhost:1",
+            [
+              true,
+              true,
+              "rejected",
+              "OperationError",
+              "Failed to retrieve hasPrivateToken response.",
+              true
+            ]
+          ],
+          [
+            "redemption",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ]
+        ],
+        "detached": [
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "InvalidStateError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Cannot execute in documents lacking top-frame origins.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "InvalidStateError",
+            "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Cannot execute in documents lacking top-frame origins.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': The provided value is not of type 'BrowsingTopicsOptions'.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ]
+        ],
+        "frame": [
+          [
+            false,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            false,
+            true,
+            "fulfilled",
+            false
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "OperationError",
+            "Failed to retrieve hasPrivateToken response.",
+            true
+          ],
+          [
+            true,
+            false,
+            "fulfilled",
+            false
+          ],
+          [
+            false,
+            true,
+            "fulfilled",
+            false
+          ]
+        ],
+        "denied": [
+          false,
+          false,
+          [
+            false,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            false,
+            true,
+            "fulfilled",
+            false
+          ],
+          [
+            false,
+            true,
+            "fulfilled",
+            false
+          ]
+        ],
+        "removed": [
+          [
+            false,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "InvalidStateError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Cannot execute in documents lacking top-frame origins.",
+            true
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "InvalidStateError",
+            "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Cannot execute in documents lacking top-frame origins.",
+            true
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+            true
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+            true
+          ]
+        ]
+      }
+    },
+    {
+      "id": "localhost-https",
+      "result": {
+        "secure": true,
+        "present": [
+          [
+            true,
+            true
+          ],
+          [
+            true,
+            true
+          ],
+          [
+            true,
+            true
+          ]
+        ],
+        "descriptors": [
+          [
+            true,
+            true,
+            true,
+            "browsingTopics",
+            0,
+            false,
+            "function browsingTopics() { [native code] }"
+          ],
+          [
+            true,
+            true,
+            true,
+            "hasPrivateToken",
+            1,
+            false,
+            "function hasPrivateToken() { [native code] }"
+          ],
+          [
+            true,
+            true,
+            true,
+            "hasRedemptionRecord",
+            1,
+            false,
+            "function hasRedemptionRecord() { [native code] }"
+          ]
+        ],
+        "topics": [
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "RangeError",
+            "boom",
+            false
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': The provided value is not of type 'BrowsingTopicsOptions'.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': The provided value is not of type 'BrowsingTopicsOptions'.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            "skipObservation"
+          ]
+        ],
+        "redemption": [
+          [
+            "undefined",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': 1 argument required, but only 0 present.",
+              true
+            ]
+          ],
+          [
+            "",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "notaurl",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "relative/path",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "http://issuer.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://issuer.example:99999",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "wss://x.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "blob:https://x.example/u",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "file:///x",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "data:,x",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            " https://issuer.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://issuer.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "HTTPS://ISSUER.EXAMPLE/path?q",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            " https://issuer.example ",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://u:p@issuer.example\u0000",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://%41.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://127.0.0.1",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://127.0.0.1:5",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://localhost:1",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://foo.localhost",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://[::1]",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "Symbol(Symbol.iterator)",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasRedemptionRecord' on 'Document': Cannot convert a Symbol value to a string",
+              true
+            ]
+          ],
+          [
+            "https://object.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ]
+        ],
+        "invalidTokens": [
+          [
+            "undefined",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': 1 argument required, but only 0 present.",
+              true
+            ]
+          ],
+          [
+            "",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "notaurl",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "relative/path",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "http://issuer.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://issuer.example:99999",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "https://",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "wss://x.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "blob:https://x.example/u",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "file:///x",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "data:,x",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            " https://issuer.example",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+              true
+            ]
+          ],
+          [
+            "symbol",
+            [
+              true,
+              true,
+              "rejected",
+              "TypeError",
+              "Failed to execute 'hasPrivateToken' on 'Document': Cannot convert a Symbol value to a string",
+              true
+            ]
+          ]
+        ],
+        "brands": [
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasRedemptionRecord' on 'Document': Illegal invocation",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasRedemptionRecord' on 'Document': Illegal invocation",
+            true
+          ]
+        ],
+        "tokens": [
+          [
+            "https://one.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://ONE.example:443/x",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://two.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://one.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "https://three.example",
+            [
+              true,
+              true,
+              "rejected",
+              "OperationError",
+              "Failed to retrieve hasPrivateToken response.",
+              true
+            ]
+          ],
+          [
+            "https://two.example",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ],
+          [
+            "http://localhost:1",
+            [
+              true,
+              true,
+              "rejected",
+              "OperationError",
+              "Failed to retrieve hasPrivateToken response.",
+              true
+            ]
+          ],
+          [
+            "redemption",
+            [
+              true,
+              true,
+              "fulfilled",
+              false
+            ]
+          ]
+        ],
+        "detached": [
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "InvalidStateError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Cannot execute in documents lacking top-frame origins.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "InvalidStateError",
+            "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Cannot execute in documents lacking top-frame origins.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'browsingTopics' on 'Document': The provided value is not of type 'BrowsingTopicsOptions'.",
+            true
+          ],
+          [
+            true,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ]
+        ],
+        "frame": [
+          [
+            false,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            false,
+            true,
+            "fulfilled",
+            false
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "OperationError",
+            "Failed to retrieve hasPrivateToken response.",
+            true
+          ],
+          [
+            true,
+            false,
+            "fulfilled",
+            false
+          ],
+          [
+            false,
+            true,
+            "fulfilled",
+            false
+          ]
+        ],
+        "denied": [
+          false,
+          false,
+          [
+            false,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            false,
+            true,
+            "fulfilled",
+            false
+          ],
+          [
+            false,
+            true,
+            "fulfilled",
+            false
+          ]
+        ],
+        "removed": [
+          [
+            false,
+            true,
+            "rejected",
+            "NotSupportedError",
+            "Failed to execute 'browsingTopics' on 'Document': document.browsingTopics() is deprecated and has been removed.",
+            true
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "InvalidStateError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Cannot execute in documents lacking top-frame origins.",
+            true
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "InvalidStateError",
+            "Failed to execute 'hasRedemptionRecord' on 'Document': hasRedemptionRecord: Cannot execute in documents lacking top-frame origins.",
+            true
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+            true
+          ],
+          [
+            false,
+            true,
+            "rejected",
+            "TypeError",
+            "Failed to execute 'hasPrivateToken' on 'Document': hasPrivateToken: Private Token issuer origins must be both HTTP(S) and secure (\"potentially trustworthy\").",
+            true
+          ]
+        ]
+      }
+    },
+    {
+      "id": "insecure-http",
+      "result": {
+        "secure": false,
+        "present": [
+          [
+            false,
+            false
+          ],
+          [
+            false,
+            false
+          ],
+          [
+            false,
+            false
+          ]
+        ],
+        "descriptors": [
+          null,
+          null,
+          null
+        ]
+      }
+    }
+  ]
+}

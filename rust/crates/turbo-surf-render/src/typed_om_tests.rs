@@ -7,6 +7,7 @@ fn run_probe(html: &str, probe: &str) -> serde_json::Value {
     v8::scope!(let scope,isolate);
     let context = v8::Context::new(scope, Default::default());
     let scope = &mut v8::ContextScope::new(scope, context);
+    assert!(set_computed_font_defaults(context, "Times", 16.0));
     install_independent_html(scope, html);
     v8::tc_scope!(let scope,scope);
     let source = v8::String::new(scope, probe).unwrap();

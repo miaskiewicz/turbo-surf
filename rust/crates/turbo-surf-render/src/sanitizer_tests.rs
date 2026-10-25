@@ -114,13 +114,13 @@ fn recorded_sanitizer_policies_match_chrome_156_get() {
 #[test]
 fn declarative_shadow_roots_in_document_parsing_match_chrome_156() {
     let probe = include_str!("declarative_shadow_probe.js");
-    let page = include_str!("declarative_shadow_page.html");
+    let page = include_str!("declarative_shadow_page.html").replace("\r\n", "\n");
     let control = control(include_str!("declarative_shadow_chrome156.json"), probe);
     assert_eq!(
         control["pageSha256"],
         format!("{:x}", Sha256::digest(page.as_bytes()))
     );
-    let actual = run_probe(page, probe);
+    let actual = run_probe(&page, probe);
     assert_matches_control(&actual, &control);
 }
 

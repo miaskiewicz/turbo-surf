@@ -5990,6 +5990,19 @@ fn op_set_inert_document_initializer(
     }
 }
 
+/// The document's parser scripts in parse order (declarative shadow roots included).
+#[op2(reentrant)]
+fn op_parser_scripts<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'s, v8::Object>,
+) -> v8::Local<'s, v8::Array> {
+    let scripts = crate::browser_env::parser_scripts(scope, document)
+        .into_iter()
+        .map(Into::into)
+        .collect::<Vec<v8::Local<v8::Value>>>();
+    v8::Array::new_with_elements(scope, &scripts)
+}
+
 #[op2(reentrant)]
 fn op_parse_html_document<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -7113,6 +7126,7 @@ deno_core::extension!(
         op_document_has_active_window,
         op_document_cookie_allowed,
         op_parse_html_document,
+        op_parser_scripts,
         op_trusted_type_string,
         op_timer_code_allowed,
         op_run_timer_code,
@@ -8086,15 +8100,8 @@ __defineDocumentAccessor("currentScript", state => state.currentScript);
 
 // Parsed HTML documents share the caller's interfaces but own an independent
 // native Tree. No bootstrap, script execution, or resource loader is installed.
-const __parseDocument = (input, sanitize, options = undefined, documentURL = "about:blank") => {
-  if (typeof input === "symbol") throw new TypeError("Cannot convert a Symbol value to a string");
-  if (options != null && typeof options !== "object" && typeof options !== "function") throw new TypeError("Parse options must be a dictionary");
-  if (options?.sanitizer !== undefined && options.sanitizer !== "default")
-    throw new DOMException("Custom sanitizers for parsed documents are unsupported", "NotSupportedError");
-  if (options?.sanitizer === "default") sanitize=true;
-  const doc=ops.op_parse_html_document(String(input),sanitize);
-  return __registerInertDocument(doc,documentURL,"text/html");
-};
+// Document.parseHTML/parseHTMLUnsafe are the binding's (sanitizer.js); every
+// native inert document reaches this initializer for its document state.
 const __registerInertDocument = (doc,documentURL,contentType) => {
   const state={__proto__:null,document:doc,window:null,frame:null,url:documentURL,inactive:true,referrer:"",readyState:"complete",currentScript:null,
     fonts:__documentRuntimeState.fonts,handlers:__newDocumentMembers(),members:__newDocumentMembers(__documentRuntimeState.members),
@@ -8107,27 +8114,39 @@ const __registerInertDocument = (doc,documentURL,contentType) => {
 };
 ops.op_set_inert_document_initializer(__registerInertDocument);
 
+// DOMParser (Chrome 156): (TrustedHTML or DOMString) then the SupportedType
+// enum are converted before the Trusted Types check. Only "text/html" can be
+// parsed by the HTML Tree engine; the XML types fail explicitly.
 const __domParserInstances=new WeakSet();
-class DOMParser {
-  constructor(){__domParserInstances.add(this);}
-  parseFromString(input,type){
-    if(!__domParserInstances.has(this))throw new TypeError("Illegal invocation");
-    if(arguments.length<2)throw new TypeError("parseFromString requires two arguments");
-    input=ops.op_trusted_type_string(__document,input,"TrustedHTML","DOMParser parseFromString", "Failed to execute 'parseFromString' on 'DOMParser': ");
-    if(typeof type==="symbol")throw new TypeError("Cannot convert a Symbol value to a string");
-    type=String(type);
-    if(!["text/html","text/xml","application/xml","application/xhtml+xml","image/svg+xml"].includes(type))throw new TypeError("Unsupported MIME type");
-    if(type!=="text/html")throw new DOMException("XML document parsing is unsupported by the HTML Tree engine", "NotSupportedError");
-    return __parseDocument(input,false,undefined,__document.URL);
-  }
+const __domParserTypes=["text/html","text/xml","application/xml","application/xhtml+xml","image/svg+xml"];
+const __domParserIsHTML=Function.prototype.call.bind(TrustedTypePolicyFactory.prototype.isHTML),__domParserFactory=globalThis.trustedTypes;
+const __domParserString=(value,prefix)=>{
+  if(typeof value==="symbol")throw new TypeError(prefix+"Cannot convert a Symbol value to a string");
+  return String(value);
+};
+function __DOMParserImplementation(){
+  if(new.target===undefined)throw new TypeError("Failed to construct 'DOMParser': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+  __domParserInstances.add(this);
 }
-Object.defineProperty(DOMParser.prototype,Symbol.toStringTag,{value:"DOMParser",configurable:true});
-Object.defineProperty(DOMParser.prototype,"parseFromString",{enumerable:true});
-globalThis.DOMParser=DOMParser;
-for(const [name,sanitize]of [["parseHTMLUnsafe",false],["parseHTML",true]]) {
-  const method=({[name](input,options=undefined){if(!arguments.length)throw new TypeError(name+" requires an argument");return __parseDocument(input,sanitize,options);}})[name];
-  Object.defineProperty(Document,name,{value:__documentFunction(method,name,1),writable:true,configurable:true,enumerable:true});
-}
+const DOMParser=__G.makeNativeFunction(__DOMParserImplementation,"DOMParser",0,true,true,false);
+const __domParserPrototype=__DOMParserImplementation.prototype;
+delete __domParserPrototype.constructor;
+DOMParser.prototype=__domParserPrototype;
+Object.defineProperty(DOMParser,"prototype",{writable:false,enumerable:false,configurable:false});
+Object.defineProperty(__domParserPrototype,"parseFromString",{value:__documentFunction(function parseFromString(input,type){
+  if(!__domParserInstances.has(this))throw new TypeError("Illegal invocation");
+  const prefix="Failed to execute 'parseFromString' on 'DOMParser': ";
+  if(arguments.length<2)throw new TypeError(prefix+`2 arguments required, but only ${arguments.length} present.`);
+  if(!__domParserIsHTML(__domParserFactory,input))input=__domParserString(input,prefix);
+  type=__domParserString(type,prefix);
+  if(!__domParserTypes.includes(type))throw new TypeError(prefix+`The provided value '${type}' is not a valid enum value of type SupportedType.`);
+  input=ops.op_trusted_type_string(__document,input,"TrustedHTML","DOMParser parseFromString",prefix);
+  if(type!=="text/html")throw new DOMException("XML document parsing is unsupported by the HTML Tree engine", "NotSupportedError");
+  return __registerInertDocument(ops.op_parse_html_document(input,false),__document.URL,"text/html");
+},"parseFromString",2),writable:true,enumerable:true,configurable:true});
+Object.defineProperty(__domParserPrototype,"constructor",{value:DOMParser,writable:true,enumerable:false,configurable:true});
+Object.defineProperty(__domParserPrototype,Symbol.toStringTag,{value:"DOMParser",configurable:true});
+Object.defineProperty(globalThis,"DOMParser",{value:DOMParser,writable:true,enumerable:false,configurable:true});
 const __importDocumentNode=({importNode(node,deep=false){
   __documentState(this);
   if(!arguments.length)throw new TypeError("importNode requires a node");
@@ -9844,7 +9863,8 @@ if (typeof globalThis.__name === "undefined") {
 // load/error so the loader resolves. `__G.hydrate()` drives this to quiescence.
 const __resourceJSONParse = JSON.parse;
 const __resourceThen = Function.prototype.call.bind(Promise.prototype.then);
-const __initialResourceScripts = Array.from(document.querySelectorAll("script"));
+// Parse order, including parser scripts inside declarative shadow roots.
+const __initialResourceScripts = ops.op_parser_scripts(__document);
 let __orderedDynamicScripts = Promise.resolve();
 const __resources = new WeakMap();
 const __resourcePromises = new Set();
@@ -12131,7 +12151,6 @@ __G.domSig = (() => {
      "PerformanceResourceTiming.prototype.contentEncoding", "Map.prototype.getOrInsert",
      "HTMLMediaElement.prototype.loading"].forEach(ns);
     if (!("Temporal" in G)) G.Temporal = {};
-    if (!("Sanitizer" in G)) G.Sanitizer = function Sanitizer() {};
     if (typeof Math.sumPrecise !== "function") Math.sumPrecise = function sumPrecise() { return 0; };
   });
 

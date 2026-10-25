@@ -1,0 +1,9 @@
+<!doctype html><html><head><title>declarative scripts</title><script id="head">window.__log = [["head", document.currentScript && document.currentScript.id]];</script></head><body>
+<script id="s1">__log.push(["s1", document.currentScript && document.currentScript.id]);</script>
+<div id="h1"><script id="s2">__log.push(["s2", document.currentScript && document.currentScript.id]);</script><template shadowrootmode="open"><script id="s3">__log.push(["s3", document.currentScript, this === window]);</script><p><template shadowrootmode="closed"><script id="s4">__log.push(["s4", document.currentScript]);</script></template></p><script type="module" id="m2">__log.push(["m2", document.currentScript]);</script></template><script id="s5">__log.push(["s5", document.currentScript && document.currentScript.id]);</script></div>
+<template id="inert"><script>__log.push(["inert"]);</script><div><template shadowrootmode="open"><script>__log.push(["inert-shadow"]);</script></template></div></template>
+<a id="badhost"><template shadowrootmode="open"><script>__log.push(["badhost"]);</script></template></a>
+<script type="module" id="m1">__log.push(["m1", document.currentScript]);</script>
+<span id="h2"><template shadowrootmode="open"><script id="s6">__log.push(["s6", document.currentScript]);</script></template></span>
+<script id="s7">__log.push(["s7", document.currentScript && document.currentScript.id]);</script>
+</body></html>

@@ -133,28 +133,29 @@ fn document_all_matches_chrome156_control() {
         .as_str()
         .unwrap()
         .to_owned();
-    let mut actual = run_probe(&html, probe, |_, _| {});
-    let mut expected = control["result"][0]["result"].clone();
-    // Blink tells Reflect.set/defineProperty from ordinary writes through
-    // PropertyCallbackInfo::ShouldThrowOnError, which Rusty V8 always reports as
-    // false. The binding keeps the throwing contract of the ordinary forms and
-    // pins these four residual Reflect results rather than masking them.
-    let rejected = |message: &str| serde_json::json!({"name": "TypeError", "message": message, "sameRealm": true});
-    for (key, binding) in [
-        ("reflectSetIndex", serde_json::json!({"value": false})),
-        ("reflectSetNamed", serde_json::json!({"value": false})),
-        ("reflectDefineIndex", rejected("Failed to set an indexed property [0] on 'HTMLAllCollection': Index property setter is not supported.")),
-        ("reflectDefineNamed", rejected("Failed to set a named property 'first' on 'HTMLAllCollection': Named property setter is not supported.")),
-    ] {
-        let mutation = actual["mutation"].as_object_mut().unwrap();
-        assert_eq!(mutation.remove(key).unwrap(), binding, "{key}");
-        let chrome = expected["mutation"].as_object_mut().unwrap();
-        assert_eq!(
-            chrome.remove(key).unwrap(),
-            serde_json::json!({"value": true})
-        );
-    }
-    assert_eq!(actual, expected);
+    let actual = run_probe(&html, probe, |_, _| {});
+    let expected = &control["result"][0]["result"];
+    assert_eq!(&actual, expected);
+}
+
+/// Sloppy/strict assignment and deletion, Object.defineProperty/assign and the
+/// Reflect forms reach document.all's and select's interceptors with V8's
+/// should-throw mode; each answers exactly as Blink's interceptors do.
+#[test]
+fn interceptor_modes_match_chrome156_control() {
+    let probe = include_str!("interceptor_mode_probe.js");
+    let cases = include_bytes!("interceptor_mode_cases.json");
+    let control = control(
+        include_str!("interceptor_mode_chrome156.json"),
+        probe,
+        cases,
+    );
+    let html = serde_json::from_slice::<serde_json::Value>(cases).unwrap()[0]["html"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let actual = run_probe(&html, probe, |_, _| {});
+    assert_eq!(&actual, &control["result"][0]["result"]);
 }
 
 /// The navigation facts an embedder supplies for one control case: the

@@ -110,6 +110,8 @@ pub fn set_interface_record<'s>(
 mod document_basics;
 #[path = "document_legacy.rs"]
 mod document_legacy;
+#[path = "interceptor_mode.rs"]
+mod interceptor_mode;
 pub use document_legacy::{
     set_document_domain_sandboxed, set_document_last_modified, set_document_origin_keyed,
 };
@@ -137,6 +139,11 @@ mod input_members;
 mod shadow_html;
 #[path = "select_element.rs"]
 mod select_element;
+#[path = "form_pseudo.rs"]
+mod form_pseudo;
+#[path = "key_order.rs"]
+mod key_order;
+pub use key_order::{defer as defer_key_order, finish as finish_key_order};
 #[path = "shadow_slots.rs"]
 mod shadow_slots;
 
@@ -3080,6 +3087,7 @@ fn selector_argument<'s>(
     }
     let transformed = html_popover::selector(scope, node, &scalar)?;
     let transformed = html_dialog::selector(scope, node, &transformed)?;
+    let transformed = form_pseudo::selector(scope, node, &transformed)?;
     let original = if transformed == scalar {
         units
     } else {
@@ -7049,6 +7057,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     html_invokers::install(scope);
     input_members::install(scope);
     select_element::install(scope);
+    form_pseudo::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())
@@ -7115,6 +7124,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     event_handlers::install(scope, None, "about:blank");
     custom_elements::install(scope);
     element_internals::install(scope);
+    key_order::installed(scope);
 }
 
 fn bind_document(scope: &mut v8::PinScope) {
@@ -9406,3 +9416,9 @@ mod form_outputs_tests;
 #[cfg(test)]
 #[path = "html_dialog_tests.rs"]
 mod html_dialog_tests;
+#[cfg(test)]
+#[path = "form_pseudo_tests.rs"]
+mod form_pseudo_tests;
+#[cfg(test)]
+#[path = "key_order_tests.rs"]
+mod key_order_tests;

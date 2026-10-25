@@ -610,4 +610,25 @@
     if (!spec || !spec.date) throw new Exception(describeFailure('This input element does not support Date values.'), 'InvalidStateError');
     assignValue(this, time === null || isNaNValue(time) ? '' : serializeComponents(this, type, spec.fromMs(time)));
   });
+
+  // Blink's StepRange facts for the private form-state modules: temporal validity flags and
+  // :in-range/:out-of-range. null for a type that is not steppable. Range limitations are the
+  // range type's defaults or a parseable min/max; only time supports a reversed range.
+  const internals = g.__captureFormInternals;
+  if (internals) {
+    internals.indeterminate = (element) => Native('indeterminate', element);
+    internals.rangeState = (element) => {
+      const type = typeOf(element);
+      if (type !== 'number' && type !== 'range' && !TEMPORAL[type]) return null;
+      const range = stepRange(element, type), value = parseFor(type, valueOf(element));
+      const hasMinimum = finite(parseFor(type, attr(element, 'min'))), hasMaximum = finite(parseFor(type, attr(element, 'max')));
+      const reversed = type === 'time' && hasMinimum && hasMaximum && less(range.maximum, range.minimum);
+      const below = finite(value) && less(value, range.minimum), above = finite(value) && greater(value, range.maximum);
+      return {
+        empty: valueOf(element) === '', finite: finite(value), limited: type === 'range' || hasMinimum || hasMaximum,
+        underflow: reversed ? below && above : below, overflow: reversed ? below && above : above,
+        mismatch: mismatch(range, value),
+      };
+    };
+  }
 })();

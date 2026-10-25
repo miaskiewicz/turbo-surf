@@ -30,6 +30,8 @@
   const stateGet=element=>privateGet(element,'validityObject'),stateSet=(element,value)=>privateSet(element,'validityObject',value);
   const submitterGet=event=>privateGet(event,'submitter'),submitterSet=(event,value)=>privateSet(event,'submitter',value),submitterHas=event=>submitterGet(event)!==undefined;
   const EventClass = Event;
+  // Shared with later private modules (input_members adds rangeState; element_internals takes it).
+  const internals = create(null);
   const tag = element => lower(apply(tagGetter, element, []));
   const attr = (element, name) => apply(attribute, element, [name]);
   const parent = element => apply(parentGetter, element, []);
@@ -78,7 +80,7 @@
     const kind = checkControl(element), inputType = type(element);
     if(kind==="custom")return !disabled(element)&&!present(element,"readonly");
     if (kind === 'fieldset' || kind === 'object' || kind === 'output' || disabled(element)) return false;
-    if (kind === 'input' && (inputType === 'hidden' || inputType === 'reset' || inputType === 'button')) return false;
+    if (kind === 'input' && (inputType === 'hidden' || inputType === 'reset' || inputType === 'button' || inputType === 'image')) return false;
     if (kind === 'button' && inputType !== 'submit') return false;
     if (present(element, 'readonly') && (kind === 'textarea' || kind === 'input' && regexTest(/^(text|search|url|tel|email|password|date|month|week|time|datetime-local|number)$/, inputType))) return false;
     let ancestor = parent(element);
@@ -93,18 +95,32 @@
   }
   function flags(element) {
     const associatedRecord=associatedGet(element);if(associatedRecord)return associatedRecord.flags;
-    const kind = checkControl(element), inputType = type(element), admitted = candidate(element);
+    const kind = checkControl(element), inputType = type(element);
     const value = readValue(element), required = present(element, 'required');
+    // Like Blink, the flags describe the value whether or not the control is barred from
+    // validation; only valueMissing needs a mutable (enabled, not read-only) control.
+    const readOnly = present(element, 'readonly') && (kind === 'textarea' || kind === 'input' && regexTest(/^(text|search|url|tel|email|password|date|month|week|time|datetime-local|number)$/, inputType));
+    const mutable = !disabled(element) && !readOnly;
     const state = {valueMissing:false,typeMismatch:false,patternMismatch:false,tooLong:false,tooShort:false,rangeUnderflow:false,rangeOverflow:false,stepMismatch:false,badInput:false,customError:!!customGet(element)};
-    if (admitted) {
-      if (required && (kind === 'textarea' || kind === 'select' || kind === 'input' && !regexTest(/^(range|color|hidden|button|submit|reset|image)$/,inputType))) {
-        if (inputType === 'checkbox') state.valueMissing = !checkedValue(element);
-        else if (inputType === 'radio') {
+    {
+      if (kind === 'input' && inputType === 'radio') {
+        // A radio group is required, and missing a value, as a whole: any member's required
+        // attribute applies to all of them. An unnamed radio is its own group.
+        const name = attr(element,'name');
+        let groupRequired = required, checked = checkedValue(element);
+        if (name) {
           const root = apply(getRoot, element, []), radios = queryAll(root,'input');
-          let checked = false;
-          for (let index = 0; index < radios.length; index++) if (type(radios[index]) === 'radio' && attr(radios[index],'name') === attr(element,'name') && owner(radios[index]) === owner(element) && checkedValue(radios[index])) checked=true;
-          state.valueMissing = !checked;
-        } else state.valueMissing = value === '';
+          for (let index = 0; index < radios.length; index++) {
+            const radio = radios[index];
+            if (type(radio) !== 'radio' || attr(radio,'name') !== name || owner(radio) !== owner(element)) continue;
+            if (present(radio,'required')) groupRequired = true;
+            if (checkedValue(radio)) checked = true;
+          }
+        }
+        state.valueMissing = mutable && groupRequired && !checked;
+      } else if (mutable && required && (kind === 'textarea' || kind === 'select' || kind === 'input' && !regexTest(/^(range|color|hidden|button|submit|reset|image)$/,inputType))) {
+        if (inputType === 'checkbox') state.valueMissing = !checkedValue(element);
+        else state.valueMissing = value === '';
       }
       if (kind === 'input' && value) {
         if (inputType === 'email') state.typeMismatch = !regexTest(/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/,value);
@@ -117,7 +133,7 @@
         if (pattern !== null && regexTest(/^(text|search|url|tel|email|password)$/,inputType)) {
           try {state.patternMismatch=!regexTest(new Regex('^(?:'+pattern+')$','v'),value);} catch (_) {}
         }
-        if (inputType === 'number' || inputType === 'range') {
+        if (inputType === 'number') {
           const numeric = number(value), minimum = attr(element,'min'), maximum=attr(element,'max'), step=attr(element,'step');
           if (minimum !== null && minimum !== '' && !isNaNValue(number(minimum))) state.rangeUnderflow=numeric<number(minimum);
           if (maximum !== null && maximum !== '' && !isNaNValue(number(maximum))) state.rangeOverflow=numeric>number(maximum);
@@ -127,6 +143,10 @@
             const difference=(numeric-basis)/interval;
             state.stepMismatch=absolute(difference-round(difference))>1e-7;
           }
+        } else if (internals.rangeState && regexTest(/^(range|date|month|week|time|datetime-local)$/,inputType)) {
+          // Blink's StepRange over the sanitized value (a range value is clamped into range).
+          const range=internals.rangeState(element);
+          if (range) {state.rangeUnderflow=range.underflow;state.rangeOverflow=range.overflow;state.stepMismatch=range.mismatch;}
         }
       }
     }
@@ -282,6 +302,9 @@
     if(!apply(connectedGetter,form,[])||!bridge('allowed',form)||!bridge('active',form)||privateGet(form,'firing-submit'))return;
     privateSet(form,'firing-submit',true);
     try {
+      // A submission attempt sets every listed input, select and textarea's user validity.
+      const controls=formControls(form);
+      for(let i=0;i<controls.length;i++){const kind=tag(controls[i]);if(kind==='input'||kind==='select'||kind==='textarea')privateSet(controls[i],'userValidity',true);}
       if(!present(form,'novalidate')&&!(submitter&&present(submitter,'formnovalidate'))&&!validate(form))return;
       const event=new SubmitEventClass('submit',{bubbles:true,cancelable:true,composed:submitter!==null,submitter});
       if(!bridge('emit',form,event))return;
@@ -329,7 +352,7 @@
   }
 
   for(const methodName of ['checkValidity','reportValidity'])method(formPrototype,methodName,function(){checkForm(this);return validate(this);},0);
-  method(formPrototype,'reset',function(){checkForm(this);const event=new EventClass('reset',{bubbles:true,cancelable:true});if(!bridge('emit',this,event))return;const controls=formControls(this);for(let i=0;i<controls.length;i++){const record=associatedGet(controls[i]);if(record){if(record.reset)record.reset();}else resetControl(controls[i]);}},0);
+  method(formPrototype,'reset',function(){checkForm(this);const event=new EventClass('reset',{bubbles:true,cancelable:true});if(!bridge('emit',this,event))return;const controls=formControls(this);for(let i=0;i<controls.length;i++){privateSet(controls[i],'userValidity',false);const record=associatedGet(controls[i]);if(record){if(record.reset)record.reset();}else resetControl(controls[i]);}},0);
   method(formPrototype,'requestSubmit',function(submitter){return request(this,submitter);},0);
   method(formPrototype,'submit',function(){checkForm(this);if(!bridge('allowed',this)||!bridge('active',this))return;return queue(this,null);},0);
   for(const [proto,property,attributeName] of [[formPrototype,'noValidate','novalidate'],[HTMLButtonElement.prototype,'formNoValidate','formnovalidate'],[HTMLInputElement.prototype,'formNoValidate','formnovalidate']]) {
@@ -349,9 +372,11 @@
     } finally {if(!hold||!complete)privateSet(form,'constructing-entries',false);}
   };
   g.__captureFormCollections={bridge,privateGet,privateSet,formControls,checkForm,attr,tag,type,readValue,checkedValue,queryAll,getRoot,owner,associatedGet,localNameGetter};
-  g.__captureFormInternals = {
+  Object.assign(internals, {
     register:(host,record)=>associatedSet(host,record),owner,disabled,candidate,validity,message,validateControl,
     attribute:attr,parent,tag,queryAll,getRoot,apply,emit:(host,event)=>bridge('emit',host,event),
-  };
+    flags,type,formControls,readValue,checkedValue,associatedGet,userValidity:(element)=>privateGet(element,'userValidity')===true,
+  });
+  g.__captureFormInternals = internals;
   g.__captureFormSubmission=request;
 })();

@@ -285,6 +285,11 @@ pub(crate) fn scroll_translation(
     if position == Position::Fixed {
         return Ok([0.0; 2]);
     }
+    let viewport = if fixed_ancestor(styles, &fragment.source_ancestors, id) {
+        [0.0; 2]
+    } else {
+        offsets.get(&VIEWPORT).copied().unwrap_or([0.0; 2])
+    };
     let containing = if position == Position::Absolute {
         fragment.source_ancestors.iter().rposition(|ancestor| {
             styles.get(ancestor).is_some_and(|style| {
@@ -322,7 +327,213 @@ pub(crate) fn scroll_translation(
         translation[0] += matrix[0] * offset[0] as f32 + matrix[2] * offset[1] as f32;
         translation[1] += matrix[1] * offset[0] as f32 + matrix[3] * offset[1] as f32;
     }
+    // The initial containing block scrolls with the identity viewport matrix.
+    translation[0] += viewport[0] as f32;
+    translation[1] += viewport[1] as f32;
     Ok(translation)
+}
+
+/// Scroll state key for the document viewport; real sources use document-qualified
+/// handles and can never reach the all-ones identity.
+pub(crate) const VIEWPORT: SourceId = SourceId(u64::MAX);
+
+/// The root element has no flat-tree parent; its scrolling box is the viewport.
+pub(crate) fn is_root(styles: &SourceStyles, id: SourceId) -> bool {
+    styles.get(&id).is_some_and(|entry| entry.parent.is_none())
+}
+
+fn has_value(style: &ComputedStyle, property: &str, value: &str) -> bool {
+    style
+        .get(property)
+        .is_some_and(|actual| actual.trim().eq_ignore_ascii_case(value))
+}
+
+// A fixed box (and everything it contains) stays attached to the viewport.
+fn fixed_ancestor(styles: &SourceStyles, ancestors: &[SourceId], own: SourceId) -> bool {
+    ancestors.iter().any(|ancestor| {
+        *ancestor != own
+            && styles.get(ancestor).is_some_and(|entry| {
+                !has_value(&entry.style, "display", "contents")
+                    && has_value(&entry.style, "position", "fixed")
+            })
+    })
+}
+
+/// A body whose overflow propagated to the viewport is not its own scroll container.
+pub(crate) fn propagated_body(styles: &SourceStyles, id: SourceId) -> bool {
+    let Some(entry) = styles.get(&id) else {
+        return false;
+    };
+    let Some(parent) = entry.parent.and_then(|parent| styles.get(&parent)) else {
+        return false;
+    };
+    entry.tag.eq_ignore_ascii_case("body")
+        && parent.parent.is_none()
+        && overflow(&parent.style, "overflow-x") == "visible"
+        && overflow(&parent.style, "overflow-y") == "visible"
+        && (overflow(&entry.style, "overflow-x") != "visible"
+            || overflow(&entry.style, "overflow-y") != "visible")
+}
+
+/// Whether an element establishes an element scrolling box (not the viewport).
+pub(crate) fn element_scroller(styles: &SourceStyles, id: SourceId) -> bool {
+    let Some(entry) = styles.get(&id) else {
+        return false;
+    };
+    !is_root(styles, id)
+        && !propagated_body(styles, id)
+        && !has_value(&entry.style, "display", "contents")
+        && (permits_scroll(overflow(&entry.style, "overflow-x"))
+            || permits_scroll(overflow(&entry.style, "overflow-y")))
+}
+
+/// Viewport scrollable overflow: the initial containing block plus every
+/// in-flow or absolute descendant edge not owned by a nested clipping box.
+pub(crate) fn viewport_metrics(
+    snapshot: &LayoutSnapshot,
+    styles: &SourceStyles,
+    root: SourceId,
+    size: [f32; 2],
+) -> Result<ScrollMetrics, String> {
+    let source = snapshot
+        .source(root)
+        .ok_or("native scroll source missing")?;
+    let mut right = size[0];
+    let mut bottom = size[1];
+    for &index in source
+        .fragment_indices
+        .iter()
+        .chain(&source.descendant_fragment_indices)
+    {
+        let fragment = &snapshot.fragments()[index];
+        if !matches!(
+            fragment.kind,
+            GeometryKind::BorderBox | GeometryKind::TextLineContainer
+        ) {
+            continue;
+        }
+        let own = fragment.source_id.unwrap_or(root);
+        use turbo_html2pdf_core::layout::value::Position;
+        let position = fragment.used_box.map(|used| used.position);
+        if position == Some(Position::Fixed)
+            || fixed_ancestor(styles, &fragment.source_ancestors, own)
+        {
+            continue;
+        }
+        let mut blocked = [false; 2];
+        for ancestor in &fragment.source_ancestors {
+            if *ancestor == own || is_root(styles, *ancestor) || propagated_body(styles, *ancestor)
+            {
+                continue;
+            }
+            if let Some(entry) = styles.get(ancestor) {
+                if has_value(&entry.style, "display", "contents") {
+                    continue;
+                }
+                blocked[0] |= clips(overflow(&entry.style, "overflow-x"));
+                blocked[1] |= clips(overflow(&entry.style, "overflow-y"));
+            }
+        }
+        let rect = fragment.rect;
+        let quad = |axis: usize| {
+            fragment
+                .quad
+                .iter()
+                .map(|point| if axis == 0 { point.x } else { point.y })
+                .fold(f32::NEG_INFINITY, f32::max)
+        };
+        let flow = fragment
+            .used_box
+            .filter(|_| position != Some(Position::Absolute))
+            .map_or([0.0; 2], |used| [used.margin.right, used.margin.bottom]);
+        if !blocked[0] {
+            right = right.max(quad(0)).max(rect.x + rect.width + flow[0]);
+        }
+        if !blocked[1] {
+            bottom = bottom.max(quad(1)).max(rect.y + rect.height + flow[1]);
+        }
+    }
+    Ok(ScrollMetrics {
+        width: rounded(right)?,
+        height: rounded(bottom)?,
+        scroll_x: true,
+        scroll_y: true,
+        max_x: f64::from((right - size[0]).max(0.0)),
+        max_y: f64::from((bottom - size[1]).max(0.0)),
+    })
+}
+
+/// Chromium ScrollAlignment behaviors for one axis: fully visible, hidden and
+/// partially visible exposure.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Align {
+    None,
+    Start,
+    Center,
+    End,
+    Closest,
+}
+
+pub(crate) fn alignment(block: u32, mode: u32) -> Result<[Align; 3], String> {
+    Ok(match (mode, block) {
+        (0, 0) => [Align::Start; 3],
+        (0, 1) => [Align::Center; 3],
+        (0, 2) => [Align::End; 3],
+        (0, 3) | (2, _) => [Align::None, Align::Closest, Align::Closest],
+        (1, _) => [Align::None, Align::Center, Align::Closest],
+        _ => return Err("native scroll alignment is invalid".into()),
+    })
+}
+
+// LayoutUnit precision (1/64 px) decides visibility exactly like layout does.
+fn layout_unit(value: f64) -> f64 {
+    (value * 64.0).round() / 64.0
+}
+
+/// Scroll position exposing `[start, start + length)` in one scroller axis whose
+/// visible content range is `[current, current + visible)`.
+pub(crate) fn expose(
+    start: f64,
+    length: f64,
+    current: f64,
+    visible: f64,
+    behaviors: [Align; 3],
+) -> f64 {
+    let (start, length, current, visible) = (
+        layout_unit(start),
+        layout_unit(length),
+        layout_unit(current),
+        layout_unit(visible),
+    );
+    let end = start + length;
+    let intersection = (end.min(current + visible) - start.max(current)).max(0.0);
+    let mut behavior = if intersection == length {
+        behaviors[0]
+    } else if intersection == visible {
+        match behaviors[0] {
+            Align::Center => Align::None,
+            other => other,
+        }
+    } else if intersection > 0.0 {
+        behaviors[2]
+    } else {
+        behaviors[1]
+    };
+    if behavior == Align::Closest {
+        let visible_end = current + visible;
+        behavior =
+            if (end > visible_end && length < visible) || (end < visible_end && length > visible) {
+                Align::End
+            } else {
+                Align::Start
+            };
+    }
+    match behavior {
+        Align::None | Align::Closest => current,
+        Align::Start => start,
+        Align::Center => (start + end - visible) / 2.0,
+        Align::End => end - visible,
+    }
 }
 
 #[cfg(test)]

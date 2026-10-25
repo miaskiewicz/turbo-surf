@@ -85,6 +85,10 @@ pub(super) fn initial(tree: &Tree) -> HashMap<Handle, ScriptState> {
                 .rev()
                 .map(|child| (child, template)),
         );
+        // Declarative shadow roots of the parsed document hold parser scripts.
+        if let Some(shadow) = tree.shadow_root(node) {
+            pending.push((shadow, template));
+        }
     }
     states
 }

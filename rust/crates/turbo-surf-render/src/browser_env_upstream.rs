@@ -219,6 +219,8 @@ pub fn update_node_nonce_units(
 
 #[path = "html_documents.rs"]
 mod html_documents;
+#[path = "sanitizer.rs"]
+mod sanitizer;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -594,8 +596,20 @@ pub fn parse_html_document_units<'s>(
 }
 fn parse_html_tree<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    mut tree: Tree,
+    tree: Tree,
     sanitize: bool,
+) -> v8::Local<'s, v8::Object> {
+    let sanitizer = sanitize.then(|| (html_documents::default_config(), true));
+    parse_html_tree_with(scope, tree, false, sanitizer)
+}
+/// Build an inert document from a parsed tree. `declarative` attaches
+/// `<template shadowrootmode>` roots (`Document.parseHTML[Unsafe]`); a sanitizer
+/// configuration (and whether it is safe) then filters the whole tree.
+fn parse_html_tree_with<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    mut tree: Tree,
+    declarative: bool,
+    sanitizer: Option<(&sanitizer::Config, bool)>,
 ) -> v8::Local<'s, v8::Object> {
     let id = NEXT_DOM_ID.with(|next| {
         let id = next.get();
@@ -616,9 +630,13 @@ fn parse_html_tree<'s>(
         (clone, current_node_projector(scope))
     };
     let _dom = DomScope::enter(id);
-    if sanitize {
-        html_documents::sanitize(&mut tree);
-    }
+    let root = tree.root();
+    let only = sanitizer.map(|(config, safe)| sanitizer::sanitize(&mut tree, root, config, safe));
+    let declared = if declarative {
+        shadow_html::declarative(&mut tree, root, only.as_ref())
+    } else {
+        Vec::new()
+    };
     let template = build_el_template(scope);
     let template = v8::Global::new(scope, template);
     DOM.with(|dom| {
@@ -662,11 +680,16 @@ fn parse_html_tree<'s>(
         let undefined = v8::undefined(scope);
         function.call(scope, undefined.into(), &[document.into()]);
     }
+    let roots = shadow_html::register(scope, declared);
     DOM.with(|dom| {
         if let Some(dom) = dom.borrow_mut().as_mut() {
             dom.template_contents.enabled = true
         }
     });
+    // Innermost roots first: no raw parser content fragment may enter adoption.
+    for root in roots.iter().rev() {
+        template_contents::realize(scope, *root);
+    }
     template_contents::realize(scope, document);
     document
 }
@@ -6904,8 +6927,12 @@ pub fn install_with_html_source_positions(scope: &mut v8::PinScope, html: &str) 
 pub fn install_with_utf16_source_positions(scope: &mut v8::PinScope, units: &[u16]) {
     install_with_tree(scope, Tree::parse_utf16_with_source_positions(units));
 }
-fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
+fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     dom_isolation::install(scope);
+    // The document parser attaches declarative shadow roots (fragment parsing
+    // for innerHTML never does); their scripts are ordinary parser scripts.
+    let root = tree.root();
+    let declared = shadow_html::declarative(&mut tree, root, None);
     // A replacement document is seeded before its new bootstrap probes native
     // methods. Projecting with the previous bootstrap here would delete those
     // raw own methods before their replacement prototypes have been constructed.
@@ -6936,6 +6963,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
             checked_radios: Default::default(),
             dialog: Default::default(),
             el_template,
+            // Declarative roots get their modes once the binding can wrap them.
             shadow_modes: HashMap::new(),
             basics_state: None,
             control_clone: None,
@@ -6959,6 +6987,9 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     DOM_CONTEXTS.with(|d| {
         d.borrow_mut().insert(DOM_ID.with(|id| id.get()), global);
     });
+    // Parsed declarative roots exist before any binding JS mutates the tree.
+    shadow_html::ensure_keys(scope);
+    shadow_slots::ensure_keys(scope);
     if let Some(root) = with_tree(|tree| tree.root()) {
         form_checked_state::parsed(root);
     }
@@ -7035,10 +7066,16 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     document_legacy::install(scope);
     capture_node_projector(scope);
     dom_implementation::install(scope);
+    // Root flags must exist before template realization adopts nested contents.
+    let declared = shadow_html::register(scope, declared);
     template_contents::install(scope);
+    for root in declared.iter().rev() {
+        template_contents::realize(scope, *root);
+    }
     mutation_observers::install(scope);
     shadow_slots::install(scope);
     shadow_html::install(scope);
+    sanitizer::install(scope);
     script_state::install(scope);
     range_contents::install(scope);
     bind_method(scope, global, "__htmlTextNative", html_text::dispatch);
@@ -9413,6 +9450,9 @@ mod form_outputs_tests;
 #[cfg(test)]
 #[path = "html_dialog_tests.rs"]
 mod html_dialog_tests;
+#[cfg(test)]
+#[path = "sanitizer_tests.rs"]
+mod sanitizer_tests;
 #[cfg(test)]
 #[path = "pointer_events_tests.rs"]
 mod pointer_events_tests;

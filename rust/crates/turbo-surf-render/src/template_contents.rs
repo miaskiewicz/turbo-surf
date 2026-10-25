@@ -465,6 +465,16 @@ pub(super) fn serialize<'s>(
     root: v8::Local<'s, v8::Object>,
     outer: bool,
 ) -> Vec<u16> {
+    serialize_with(scope, root, outer, None)
+}
+/// Serialize with `getHTML` shadow options; hosts whose root is selected emit a
+/// declarative `<template>` before their light children.
+pub(super) fn serialize_with<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    root: v8::Local<'s, v8::Object>,
+    outer: bool,
+    shadows: Option<&shadow_html::Serialization<'s>>,
+) -> Vec<u16> {
     enum Task<'s> {
         Node(v8::Local<'s, v8::Object>, bool),
         Close(Vec<u16>),
@@ -484,6 +494,24 @@ pub(super) fn serialize<'s>(
         };
         for child in children(scope, source).into_iter().rev() {
             pending.push(Task::Node(child, raw));
+        }
+        if let Some(options) = shadows {
+            shadow(scope, root, options, &mut pending, &mut out);
+        }
+    }
+    fn shadow<'s>(
+        scope: &mut v8::PinScope<'s, '_>,
+        host: v8::Local<'s, v8::Object>,
+        options: &shadow_html::Serialization<'s>,
+        pending: &mut Vec<Task<'s>>,
+        out: &mut Vec<u16>,
+    ) {
+        if let Some((root, tag)) = shadow_html::serialized_root(scope, host, options) {
+            pending.push(Task::Close("template".encode_utf16().collect()));
+            for child in children(scope, root).into_iter().rev() {
+                pending.push(Task::Node(child, false));
+            }
+            out.extend(tag);
         }
     }
     while let Some(task) = pending.pop() {
@@ -546,6 +574,9 @@ pub(super) fn serialize<'s>(
                 for child in children(scope, source).into_iter().rev() {
                     pending.push(Task::Node(child, html && raw(&local)));
                 }
+                if let Some(options) = shadows {
+                    shadow(scope, node, options, &mut pending, &mut out);
+                }
             }
             3 => {
                 let value = with_tree(|tree| tree.node_value_utf16(handle))
@@ -606,7 +637,7 @@ fn raw(tag: &str) -> bool {
         "style" | "script" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext"
     )
 }
-fn void(tag: &str) -> bool {
+pub(super) fn void(tag: &str) -> bool {
     matches!(
         tag,
         "area"

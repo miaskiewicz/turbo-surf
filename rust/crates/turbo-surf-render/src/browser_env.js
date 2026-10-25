@@ -223,18 +223,20 @@
     // overlay inline style (own props React/components set: background, height, display, ...)
     var st = el && __ns.makeInlineStyleDeclaration(el);
     if (st) applyDeclarations(declarationRecord(st));
-    // Native cascade resolves authored inheritance; CSS-wide keywords and the
-    // CanvasText initial value still require computed-value resolution here.
+    // Inherited values come from the composed parent's snapshot in this read, so
+    // CSSOM edits to document sheets reach descendants. Native cascade only adds
+    // shadow-scoped rules (shadow <style>, :host, ::slotted) the JS cascade lacks.
+    var inheritParent = null;
+    try { var inheritContext = computedFontContext(el); inheritParent = inheritContext ? inheritContext[2] : null; } catch(e) {}
+    // A fresh internal result is already resolved. Reading its public live getter
+    // would compute the same ancestors again and double recursion at every level.
+    function inheritedValue(name){ return inheritParent ? computedSnapshotValue(parentStyle(inheritParent),name) : ''; }
     var color = decl.color || '';
     if (!color) { try { color = __ns.cascadeProp.call(el, 'color'); } catch(e) {} }
     var colorKeyword = String(color || '').toLowerCase();
     if (colorKeyword === 'initial' || colorKeyword === 'canvastext') color = 'rgb(0, 0, 0)';
     else if (!color || colorKeyword === 'inherit' || colorKeyword === 'unset' || colorKeyword === 'currentcolor') {
-      var colorParent = null;
-      try { colorParent = __ns.domAccessor('parentElement',false,'Node').call(el); } catch(e) {}
-      // A fresh internal result is already resolved. Reading its public live getter
-      // would compute the same ancestors again and double recursion at every level.
-      color = colorParent ? computedSnapshotValue(parentStyle(colorParent),'color') : 'rgb(0, 0, 0)';
+      color = inheritParent ? inheritedValue('color') : 'rgb(0, 0, 0)';
     }
     var connected = false;
     try { connected = __ns.domAccessor('isConnected',false,'Node').call(el); } catch(e) {}
@@ -248,6 +250,9 @@
     // inherited, so it is left as the element's own value.
     if ((decl.visibility == null || decl.visibility === '') && el && typeof __ns.cascadeProp === 'function') {
       try { decl.visibility = __ns.cascadeProp.call(el,'visibility') || ''; } catch(e){}
+    }
+    if (decl.visibility == null || decl.visibility === '' || /^(inherit|unset)$/i.test(String(decl.visibility))) {
+      try { decl.visibility = inheritedValue('visibility'); } catch(e){}
     }
     if (decl.visibility == null) decl.visibility = '';
     if (decl.opacity == null) decl.opacity = '';
@@ -680,7 +685,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     var lengthGetter=Object.getOwnPropertyDescriptor({get length(){return cssRecord(this).items.length;}},'length').get;
     if(__ns.makeNativeFunction)lengthGetter=__ns.makeNativeFunction(lengthGetter,'get length',0);
     Object.defineProperty(ctor.prototype,'length',{configurable:true,enumerable:true,get:lengthGetter});
-    var item=({item(index){if(!arguments.length)throw new TypeError("Failed to execute 'item': 1 argument required");return cssRecord(this).items[Number(index)>>>0]||null;}}).item;
+    var item=({item(index){if(!arguments.length)throw new TypeError("Failed to execute 'item' on '"+name+"': 1 argument required, but only 0 present.");return cssRecord(this).items[Number(index)>>>0]||null;}}).item;
     if(__ns.makeNativeFunction)item=__ns.makeNativeFunction(item,'item',1);
     Object.defineProperty(ctor.prototype,'item',{configurable:true,enumerable:true,writable:true,value:item});
     Object.defineProperty(ctor.prototype,'constructor',{configurable:true,writable:true,value:ctor});
@@ -958,6 +963,9 @@ if(typeof __ns.makeNativeFunction==='function'){
     // is entered. Without it, partials commit and the controlled reset mangles the result.
     var validForType = function(el, v){
       var t = (el.getAttribute('type') || 'text').toLowerCase();
+      // Range, the date/time family and textarea newlines follow Chromium (input_members.js).
+      var sanitized = __ns.sanitizeControlValue ? __ns.sanitizeControlValue(el, t, v) : undefined;
+      if (sanitized !== undefined) return sanitized;
       if (t === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '';
       if (t === 'time') return /^\d{2}:\d{2}(:\d{2})?$/.test(v) ? v : '';
       if (t === 'month') return /^\d{4}-\d{2}$/.test(v) ? v : '';
@@ -1564,6 +1572,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     void applyControlProto;
     var documentSheets=cssList('StyleSheetList',function(){var list=[],els=d.querySelectorAll('style,link');for(var i=0;i<els.length;i++){var sheet=els[i].sheet;if(sheet)list.push(sheet);}return list;});
     documentCSSRecord.cssHost.readSheets=function(){return cssRecord(documentSheets).items;};
+    __ns.styleSheetList=function(refresh){return cssList('StyleSheetList',refresh);};
     try { Object.defineProperty(d, 'styleSheets', { configurable: true, get: function(){return documentSheets;} }); } catch(e){}
 
     // Alias the shim interface-constructor `.prototype`s onto the REAL element/document prototypes,

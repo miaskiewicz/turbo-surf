@@ -42,8 +42,10 @@
   }
   const present = (element, name) => attr(element, name) !== null;
   const type = element => {
-    const value=lower(attr(element,'type')||(tag(element)==='button'?'submit':'text'));
-    return tag(element)==='button'&&value!=='button'&&value!=='reset'?'submit':value;
+    if(tag(element)!=='button')return lower(attr(element,'type')||'text');
+    const value=lower(attr(element,'type')||'');
+    // Auto state: a missing/invalid type is submit unless the button is a command invoker.
+    return value==='submit'||value==='button'||value==='reset'?value:present(element,'command')||present(element,'commandfor')?'button':'submit';
   };
   const controlIndexOf=Array.prototype.indexOf;
   const controlTags = ['input','textarea','select','button','fieldset','object','output'];

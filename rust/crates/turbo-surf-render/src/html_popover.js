@@ -16,6 +16,21 @@
     }, 'get popover', 0),
     set: make(function (value) { html(this); if (value === null) remove.call(this, null, 'popover'); else set.call(this, null, 'popover', string(value)); }, 'set popover', 1),
   });
+  // Event `source` getters retarget against the current target, or out of every shadow tree
+  // when there is none, so closed shadow internals never leak through the event.
+  const rootOf = g.Node.prototype.getRootNode, hostOf = Object.getOwnPropertyDescriptor(g.ShadowRoot.prototype, 'host').get;
+  const currentTargetOf = Object.getOwnPropertyDescriptor(g.Event.prototype, 'currentTarget').get;
+  const shadowHost = root => { try { return hostOf.call(root); } catch (_) { return null; } };
+  const isNode = value => { try { check.call(value); return true; } catch (_) { return false; } };
+  const retarget = (source, event) => {
+    if (source === null) return null;
+    const current = currentTargetOf.call(event), roots = [];
+    if (current !== null && isNode(current)) for (let root = rootOf.call(current), host; root; root = host ? rootOf.call(host) : null) { roots[roots.length] = root; host = shadowHost(root); }
+    const reached = root => { for (let index = 0; index < roots.length; index++) if (roots[index] === root) return true; return false; };
+    for (let root = rootOf.call(source), host; (host = shadowHost(root)) && !reached(root); root = rootOf.call(source)) source = host;
+    return source;
+  };
+  ns.retargetEventSource = retarget;
   if (typeof g.ToggleEvent === 'undefined') {
     const Event = g.Event, construct = Reflect.construct;
     const records = new WeakMap(), read = records.get.bind(records), store = records.set.bind(records);
@@ -39,7 +54,7 @@
     Object.defineProperty(Delegate.prototype, Symbol.toStringTag, { value: 'ToggleEvent', configurable: true });
     for (const name of ['oldState', 'newState', 'source']) Object.defineProperty(Delegate.prototype, name, {
       enumerable: true, configurable: true,
-      get: make(function () { const record = read(this); if (!record) throw new TypeError('Illegal invocation'); return record[name]; }, 'get ' + name, 0),
+      get: make(function () { const record = read(this); if (!record) throw new TypeError('Illegal invocation'); return name === 'source' ? retarget(record.source, this) : record[name]; }, 'get ' + name, 0),
     });
     const constructor = make(Delegate, 'ToggleEvent', 1, true, true);
     constructor.prototype = Delegate.prototype;

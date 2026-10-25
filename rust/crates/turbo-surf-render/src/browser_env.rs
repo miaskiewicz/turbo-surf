@@ -1,5 +1,5 @@
 //! Generated browser binding adapter; source: scripts/browser-env-adapter.rs.in.
-//! Canonical DOM + CSS grammar + JS: turbo-test @ e178d4b.
+//! Canonical DOM + CSS grammar + JS: turbo-test @ 0dc4166.
 //! Rebuild only through scripts/vendor-browser-env.sh from committed upstream HEAD.
 #![allow(unused)]
 #![allow(clippy::all)]

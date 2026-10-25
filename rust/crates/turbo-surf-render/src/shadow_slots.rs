@@ -53,7 +53,7 @@ fn attribute(tree: &Tree, node: Handle, name: &str) -> Vec<u16> {
         .encode_utf16()
         .collect()
 }
-fn manual(scope: &mut v8::PinScope, root: Handle) -> bool {
+pub(super) fn manual(scope: &mut v8::PinScope, root: Handle) -> bool {
     let object = wrap(scope, root);
     let private = key(scope, "manual");
     object

@@ -8,6 +8,7 @@ pub(super) struct PolicyState {
     sheets: HashMap<Handle, (String, bool)>,
     inline: HashMap<Handle, Inline>,
     cascade: Option<(u64, StylePolicy)>,
+    shadow_cascade: Option<(u64, StylePolicy)>,
 }
 #[derive(Clone)]
 struct Inline {
@@ -315,6 +316,47 @@ pub(super) fn cascade_policy(scope: &mut v8::PinScope) -> StylePolicy {
     });
     policy
 }
+/// Whether native shadow-scoped rules (shadow `<style>`, `:host`, `::slotted`)
+/// can reach `node` or a flattened ancestor. Only those rules are missing from
+/// the JS CSSOM cascade.
+pub(super) fn shadow_scoped(tree: &Tree, node: Handle) -> bool {
+    let mut current = Some(node);
+    while let Some(node) = current {
+        if tree.shadow_root(node).is_some() || tree.is_shadow_root(node) {
+            return true;
+        }
+        current = tree.parent(node);
+    }
+    false
+}
+/// The native cascade restricted to shadow-scoped rules. Document `<style>`
+/// sheets belong to the JS CSSOM, whose fresh per-read snapshots resolve their
+/// inheritance; native text would keep serving rules CSSOM already edited.
+pub(super) fn shadow_cascade_policy(scope: &mut v8::PinScope) -> StylePolicy {
+    let version = with_tree(|tree| tree.version).unwrap_or_default();
+    if let Some(policy) = DOM.with(|dom| {
+        let dom = dom.borrow();
+        let state = &dom.as_ref().unwrap().css_policy;
+        state
+            .shadow_cascade
+            .as_ref()
+            .filter(|(cached, _)| *cached == version)
+            .map(|(_, policy)| policy.clone())
+    }) {
+        return policy;
+    }
+    let mut policy = cascade_policy(scope);
+    with_tree(|tree| {
+        policy
+            .blocked_stylesheets
+            .extend(tree.get_elements_by_tag_name("style"))
+    });
+    DOM.with(|dom| {
+        dom.borrow_mut().as_mut().unwrap().css_policy.shadow_cascade =
+            Some((version, policy.clone()))
+    });
+    policy
+}
 fn read_inline(
     scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
@@ -370,6 +412,7 @@ impl PolicyState {
         self.sheets.retain(|node, _| tree.is_live(*node));
         self.inline.retain(|node, _| tree.is_live(*node));
         self.cascade = None;
+        self.shadow_cascade = None;
     }
 }
 

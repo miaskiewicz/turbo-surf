@@ -40,12 +40,11 @@ async fn query_diagnostics_skip_hidden_fields_before_and_after_real_controls() {
                 state["controlTag"],
                 if index < 2 { "INPUT" } else { "TEXTAREA" }
             );
-            if index < 2 {
-                assert_eq!(state["controlType"], "text");
-            } else {
-                // Keep the existing missing textarea.type IDL surface observable.
-                assert!(state["controlType"].is_null());
-            }
+            // textarea.type is the Chrome-parity "textarea" getter (input_members).
+            assert_eq!(
+                state["controlType"],
+                if index < 2 { "text" } else { "textarea" }
+            );
         } else {
             assert!(state["value"].is_null());
             assert!(state["controlTag"].is_null());

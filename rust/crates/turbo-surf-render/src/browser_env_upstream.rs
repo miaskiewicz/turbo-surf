@@ -11,6 +11,8 @@
 // removeChild, get/setAttribute, id/className/tagName/textContent, querySelector(All)/getElementById.
 // Events, cssom/style, classList, forms etc. grow in P3.3. Gated by `TURBO_RUST_DOM`.
 
+#[path = "css_selector_syntax.rs"]
+mod css_selector_syntax;
 #[path = "cssom_parser.rs"]
 mod cssom_parser;
 #[path = "dom_isolation.rs"]
@@ -19,6 +21,8 @@ mod dom_isolation;
 mod dom_ownership;
 #[path = "element_internals.rs"]
 mod element_internals;
+#[path = "element_members.rs"]
+mod element_members;
 pub use dom_isolation::{activate_isolate, reset_isolate, NativeDomScope};
 #[path = "storage_ownership.rs"]
 mod storage_ownership;
@@ -114,10 +118,16 @@ pub use document_xpath::is_native_xpath_object;
 mod dom_mutations;
 #[path = "element_relations.rs"]
 mod element_relations;
+#[path = "html_invokers.rs"]
+mod html_invokers;
 #[path = "html_popover.rs"]
 mod html_popover;
 #[path = "html_text.rs"]
 mod html_text;
+#[path = "input_members.rs"]
+mod input_members;
+#[path = "shadow_html.rs"]
+mod shadow_html;
 #[path = "shadow_slots.rs"]
 mod shadow_slots;
 
@@ -416,6 +426,7 @@ struct DomState {
     css_policy: css_policy::PolicyState,
     event_handlers: event_handlers::State,
     popover: html_popover::State,
+    input_members: input_members::State,
     browsing_context: bool,
     ownership: Option<dom_ownership::Graph>,
     ownership_dirty: bool,
@@ -611,6 +622,7 @@ fn parse_html_tree<'s>(
             css_policy: Default::default(),
             event_handlers: Default::default(),
             popover: Default::default(),
+            input_members: Default::default(),
             browsing_context: false,
             ownership: None,
             ownership_dirty: true,
@@ -777,6 +789,7 @@ pub fn import_document_node<'s>(
     script_state::copy(scope, source_node, clone, deep);
     template_contents::copy_contents(scope, source_node, clone, deep);
     custom_elements::cloned(scope, source_node, clone, deep);
+    shadow_html::clone_roots(scope, source_node, clone, deep);
     Ok(clone)
 }
 
@@ -786,6 +799,7 @@ fn copy_control_state<'s>(
     clone: v8::Local<'s, v8::Object>,
     deep: bool,
 ) {
+    input_members::copy(scope, source, clone, deep);
     let function = {
         let _source = DomScope::for_object(scope, source);
         DOM.with(|dom| {
@@ -1318,40 +1332,18 @@ fn el_attach_shadow(
         scope.throw_exception(error);
         return;
     }
-    let allowed = with_tree(|tree| {
-        let tag = tree.local_name(host).unwrap_or("");
-        tree.namespace_id(host) == 0
-            && (tag.contains('-')
-                || matches!(
-                    tag,
-                    "article"
-                        | "aside"
-                        | "blockquote"
-                        | "body"
-                        | "div"
-                        | "footer"
-                        | "h1"
-                        | "h2"
-                        | "h3"
-                        | "h4"
-                        | "h5"
-                        | "h6"
-                        | "header"
-                        | "main"
-                        | "nav"
-                        | "p"
-                        | "section"
-                        | "span"
-                ))
-            && tree.shadow_root(host).is_none()
-    })
-    .unwrap_or(false);
-    if !allowed {
+    if !with_tree(|tree| shadow_html::valid_host(tree, host)).unwrap_or(false) {
         throw_dom_error(
             scope,
             "NotSupportedError",
             "This element cannot attach another shadow root",
         );
+        return;
+    }
+    if let Some(existing) = with_tree(|tree| tree.shadow_root(host)).flatten() {
+        if let Some(root) = shadow_html::reattach(scope, existing, &mode) {
+            rv.set(root.into());
+        }
         return;
     }
     let root = with_tree_mut(|tree| tree.attach_shadow(host)).unwrap();
@@ -1365,6 +1357,7 @@ fn el_attach_shadow(
     });
     let node = wrap(scope, root);
     shadow_slots::configure(scope, node, assignment == "manual");
+    shadow_html::configure(scope, node, options);
     rv.set(node.into());
 }
 
@@ -1961,7 +1954,13 @@ fn el_cascade_prop(
         return;
     };
     let name = arg_str(scope, &args, 0);
-    let policy = css_policy::cascade_policy(scope);
+    // JS inherits document-sheet values from fresh composed-parent snapshots;
+    // native text only supplies shadow-scoped rules the JS cascade lacks.
+    if !with_tree(|t| css_policy::shadow_scoped(t, h)).unwrap_or(false) {
+        rv.set(v8::String::empty(scope).into());
+        return;
+    }
+    let policy = css_policy::shadow_cascade_policy(scope);
     let val = with_tree(|t| {
         let computed = turbo_dom_parser::rtdom::cascade::computed_style_with_policy(t, h, &policy);
         Some(turbo_dom_parser::rtdom::cascade::get_property_value(
@@ -3059,6 +3058,15 @@ fn selector_argument<'s>(
 ) -> Option<(String, Vec<u16>, bool)> {
     let units = dom_units(scope, args.get(0))?;
     let scalar = String::from_utf16_lossy(&units);
+    // The matcher is lenient; admission uses the same grammar as stylesheets.
+    if css_selector_syntax::selector_list(&scalar).is_none() {
+        throw_dom_error(
+            scope,
+            "SyntaxError",
+            &format!("'{scalar}' is not a valid selector."),
+        );
+        return None;
+    }
     let transformed = html_popover::selector(scope, node, &scalar)?;
     let original = if transformed == scalar {
         units
@@ -3385,6 +3393,8 @@ fn get_active_element(
     if active.is_none() {
         ACTIVE.with(|a| *a.borrow_mut() = None);
     }
+    // Focus inside shadow trees is retargeted to the document-level host.
+    let active = active.and_then(|h| with_tree(|t| shadow_html::retarget(t, h, t.root())));
     let h = active.or_else(|| with_tree(|t| t.query_selector("body")).flatten());
     if let Some(h) = h {
         let node = wrap(scope, h);
@@ -3398,6 +3408,9 @@ fn el_click(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
+    if html_invokers::disabled_control(h) {
+        return;
+    }
     let name = v8::String::new(scope, "turbo-dom.click.active").unwrap();
     let key = v8::Private::for_api(scope, Some(name));
     let receiver = args.this();
@@ -3722,6 +3735,7 @@ fn el_clone_node<'s>(
         }
         copy_control_state(scope, args.this(), node, deep);
         custom_elements::cloned(scope, source, node, deep);
+        shadow_html::clone_roots(scope, source, node, deep);
         rv.set(node.into());
     }
 }
@@ -4583,6 +4597,8 @@ fn el_dispatch_event(
     };
     let check_snapshot = click_check.map(|_| form_checked_state::snapshot(target));
     let check_was = click_check.map(|_| form_checked_state::checked(target));
+    let indeterminate_was =
+        (click_check == Some(CheckKind::Checkbox)).then(|| input_members::pre_activation(target));
     if let (Some(kind), Some(was)) = (click_check, check_was) {
         let next = if kind == CheckKind::Radio { true } else { !was };
         form_checked_state::set(target, next);
@@ -4772,6 +4788,10 @@ fn el_dispatch_event(
         }
     }
 
+    if not_prevented && ty == "click" {
+        html_invokers::activate(scope, event_obj, target);
+    }
+
     // Finish the checkbox/radio activation: a canceled click reverts the pre-toggle; otherwise fire
     // the DOM `input` + `change` events (jsdom does this; some libs listen for them directly).
     if let (Some(_kind), Some(_was)) = (click_check, check_was) {
@@ -4780,6 +4800,9 @@ fn el_dispatch_event(
             dispatch_synthetic(scope, target, "change", true, false);
         } else if let Some(snapshot) = check_snapshot {
             form_checked_state::restore(snapshot);
+            if let Some(previous) = indeterminate_was {
+                input_members::cancel_activation(target, previous);
+            }
         }
     }
 
@@ -4825,7 +4848,12 @@ fn is_submit_control(h: Handle) -> bool {
         let tag = t.tag_name(h).unwrap_or_default().to_ascii_uppercase();
         let ty = t.get_attribute(h, "type").map(|s| s.to_ascii_lowercase());
         match tag.as_str() {
-            "BUTTON" => !matches!(ty.as_deref(), Some("button" | "reset")),
+            "BUTTON" => match ty.as_deref() {
+                Some("submit") => true,
+                Some("button" | "reset") => false,
+                // Auto state: an invoker button with a missing/invalid type never submits.
+                _ => !t.has_attribute(h, "command") && !t.has_attribute(h, "commandfor"),
+            },
             "INPUT" => matches!(ty.as_deref(), Some("submit" | "image")),
             _ => false,
         }
@@ -6892,6 +6920,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
             css_policy: Default::default(),
             event_handlers: Default::default(),
             popover: Default::default(),
+            input_members: Default::default(),
             browsing_context: true,
             ownership: None,
             ownership_dirty: true,
@@ -6985,6 +7014,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     template_contents::install(scope);
     mutation_observers::install(scope);
     shadow_slots::install(scope);
+    shadow_html::install(scope);
     script_state::install(scope);
     range_contents::install(scope);
     bind_method(scope, global, "__htmlTextNative", html_text::dispatch);
@@ -6992,9 +7022,13 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     html_popover::install(scope);
     document_xpath::install(scope);
     event_listeners::install(scope);
+    element_members::install(scope);
     bind_method(scope, global, "__formNative", form_controls_native);
+    run_js(scope, include_str!("form_outputs.js"));
     run_js(scope, include_str!("form_controls.js"));
     run_js(scope, include_str!("form_collections.js"));
+    html_invokers::install(scope);
+    input_members::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())
@@ -8880,7 +8914,7 @@ mod tests {
             const initial=early.sheet!==null && late.sheet===null && document.styleSheets.length===1 && a.getAttribute('style')==='color:blue' && a.style.color==='';
             early.remove();a.style.color='green';const cssom=a.style.color==='green' && a.getAttribute('style')==='color: green;';
             a.setAttribute('style','color:red');const blocked=a.style.color==='green' && a.getAttribute('style')==='color:red' && getComputedStyle(a).color==='rgb(0, 128, 0)';
-            const inherited=globalThis[Symbol.for('ts')].cascadeProp.call(document.getElementById('child'),'color')==='rgb(0, 128, 0)';
+            const inherited=getComputedStyle(document.getElementById('child')).color==='rgb(0, 128, 0)';
             a.removeAttribute('style');const removed=a.style.color==='';
             const privateHooks=typeof globalThis.__writeAppliedInlineStyle==='undefined' && !globalThis[Symbol.for('ts')].attachLinkedStyleSheet && !globalThis[Symbol.for('ts')].readStyleSheetRules;
             return JSON.stringify({initial,cssom,blocked,inherited,removed,privateHooks});})()"#).unwrap();
@@ -9323,6 +9357,10 @@ mod dom_projection_tests;
 mod css_adoption_tests;
 
 #[cfg(test)]
+#[path = "css_admission_tests.rs"]
+mod css_admission_tests;
+
+#[cfg(test)]
 #[path = "dom_implementation_tests.rs"]
 mod dom_implementation_tests;
 #[cfg(test)]
@@ -9340,3 +9378,7 @@ mod iframe_credentialless_tests;
 #[cfg(test)]
 #[path = "utf16_contract_tests.rs"]
 mod utf16_contract_tests;
+
+#[cfg(test)]
+#[path = "form_outputs_tests.rs"]
+mod form_outputs_tests;

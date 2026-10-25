@@ -56,7 +56,7 @@ fn deferred_value(tokens: &TokenList<'_>) -> bool {
 }
 
 pub(super) fn valid_selector(source: &str) -> bool {
-    valid_rule(&format!("{source} {{ color: red }}"))
+    super::css_selector_syntax::selector_list(source).is_some()
 }
 
 fn valid_rule(source: &str) -> bool {
@@ -95,12 +95,14 @@ impl<'i> QualifiedRuleParser<'i> for CssParser {
         input: &mut Parser<'i, 't>,
     ) -> Result<String, ParseError<'i, ()>> {
         let prelude = consume(input);
-        let test = if self.keyframes {
-            format!("@keyframes test {{ {prelude} {{}} }}")
-        } else {
-            format!("{prelude} {{}}")
-        };
-        if !valid_rule(&test) {
+        if !self.keyframes {
+            // Selector admission follows Chrome's pseudo inventory and returns
+            // its serialization (forgiving drops, lowercase pseudo names).
+            return super::css_selector_syntax::selector_list(&prelude)
+                .map(|admitted| admitted.text)
+                .ok_or_else(|| input.new_custom_error(()));
+        }
+        if !valid_rule(&format!("@keyframes test {{ {prelude} {{}} }}")) {
             return Err(input.new_custom_error(()));
         }
         Ok(prelude)

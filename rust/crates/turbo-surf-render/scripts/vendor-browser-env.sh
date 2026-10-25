@@ -132,6 +132,11 @@ done
 for file in dom_ownership.rs realm_ownership.rs storage_ownership.rs dom_isolation.rs ownership_guard_tests.rs mutation_observers.rs mutation_observers.js mutation_observers_tests.rs mutation_observers_probe.js mutation_observers_chrome155.json; do
   git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
 done
+# turbo-surf#28 parity batch: meter/progress/output, Element members, invokers,
+# declarative shadow HTML, input/textarea members and strict selector admission.
+for file in form_outputs.js form_outputs_cases.json form_outputs_chrome156.json form_outputs_probe.js form_outputs_tests.rs element_members.js element_members.rs element_members_chrome156.json element_members_probe.js html_invokers.js html_invokers.rs html_invokers_chrome156.json html_invokers_dialog_chrome156.json html_invokers_dialog_probe.js html_invokers_probe.js shadow_html.js shadow_html.rs shadow_html_chrome156.json shadow_html_probe.js input_members.js input_members.rs input_members_cases.json input_members_chrome156.json input_members_probe.js css_selector_syntax.rs css_admission_tests.rs css_selector_admission_probe.js css_selector_admission_chrome156.json css_inherited_color_probe.js css_inherited_color_chrome156.json; do
+  git -C "$repo" show "${source_rev}:src/$file" > "$dest/$file"
+done
 git -C "$repo" show "${source_rev}:src/browser_sanitizer_default.json" > "$dest/browser_sanitizer_default.json"
 git -C "$repo" show "${source_rev}:src/browser_env.rs" | sed 's#^//!#//#' > "$dest/browser_env_upstream.rs"
 

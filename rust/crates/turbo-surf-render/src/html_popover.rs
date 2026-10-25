@@ -94,6 +94,9 @@ fn event_target<'s>(
     set_prop(scope, init, "oldState", old_value.into());
     set_prop(scope, init, "newState", new_value.into());
     set_prop(scope, init, "cancelable", cancelable.into());
+    // Chrome composes toggle events exactly when they carry a source.
+    let composed = v8::Boolean::new(scope, source.is_some());
+    set_prop(scope, init, "composed", composed.into());
     if let Some(source) = source {
         set_prop(scope, init, "source", source.into());
     }
@@ -235,11 +238,19 @@ fn check(scope: &mut v8::PinScope, node: Handle, showing: bool) -> Option<String
     Some(mode)
 }
 fn hide(scope: &mut v8::PinScope, node: Handle, events: bool) {
+    hide_from(scope, node, events, None);
+}
+fn hide_from<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    node: Handle,
+    events: bool,
+    source: Option<v8::Local<'s, v8::Object>>,
+) {
     if !opened(node) {
         return;
     }
     let busy = DOM.with(|dom| dom.borrow_mut().as_mut().unwrap().popover.busy.insert(node));
-    if events && event(scope, node, "beforetoggle", true, false, None).is_none() {
+    if events && event(scope, node, "beforetoggle", true, false, source).is_none() {
         if busy {
             DOM.with(|dom| {
                 dom.borrow_mut()
@@ -261,7 +272,7 @@ fn hide(scope: &mut v8::PinScope, node: Handle, events: bool) {
             .retain(|entry| entry.node != node)
     });
     if events {
-        queue(scope, node, true, false, None);
+        queue(scope, node, true, false, source);
     }
     if busy {
         DOM.with(|dom| {
@@ -335,6 +346,42 @@ fn show<'s>(
             .push(Entry { node, mode })
     });
     queue(scope, node, false, true, source);
+}
+/// Invoker activation: the popover algorithms with an invoker source and exceptions
+/// suppressed. `action` is the canonical toggle/show/hide keyword.
+pub(super) fn invoke<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    node: Handle,
+    action: &str,
+    source: v8::Local<'s, v8::Object>,
+) {
+    if with_tree(|tree| mode(tree, node)).flatten().is_none() {
+        return;
+    }
+    let open = opened(node);
+    if (action == "show" && open) || (action == "hide" && !open) {
+        return;
+    }
+    let busy = DOM.with(|dom| dom.borrow_mut().as_mut().unwrap().popover.busy.insert(node));
+    if !busy {
+        return;
+    }
+    {
+        v8::tc_scope!(let scope, scope);
+        if open {
+            hide_from(scope, node, true, Some(source));
+        } else {
+            show(scope, node, Some(source));
+        }
+        if scope.has_caught() && !scope.has_terminated() {
+            scope.reset();
+        }
+    }
+    DOM.with(|dom| {
+        if let Some(dom) = dom.borrow_mut().as_mut() {
+            dom.popover.busy.remove(&node);
+        }
+    });
 }
 pub(super) fn disconnect(scope: &mut v8::PinScope, root: Handle, include_root: bool) {
     let nodes = DOM.with(|dom| {

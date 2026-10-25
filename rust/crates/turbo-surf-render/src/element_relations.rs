@@ -28,7 +28,7 @@ pub(super) fn attribute_changed<'s>(
         script_state::attribute_changed(handle, name);
         form_checked_state::attribute_changed(handle, name);
     }
-    if !name.starts_with("aria-") {
+    if !name.starts_with("aria-") && !matches!(name, "popovertarget" | "commandfor") {
         return;
     }
     let Some(record) = collection_records::get(scope, element)

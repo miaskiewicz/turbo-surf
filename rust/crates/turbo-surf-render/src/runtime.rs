@@ -7962,7 +7962,7 @@ let __rafClock = null, __rafId = 0, __rafScheduled = false;
 let __rafQueue = [], __frameSteps = [];
 // Post-animation-frame rendering steps (resize/intersection observers.js, view transitions);
 // a step may queue more, so snapshot-and-clear each frame.
-let __renderingSteps = [], __renderingSuppressed = false;
+let __renderingSteps = [], __viewTransitionSteps = [], __renderingSuppressed = false;
 // Rendering frames are engine tasks; page replacement of setTimeout cannot stall them.
 const __frameTimer = globalThis.setTimeout;
 // Web Animations frame host: the binding's handler for the next frame, the running frame's
@@ -8008,13 +8008,16 @@ const __scheduleFrame = () => {
       // Observer delivery (Intersection/Resize/Performance) and view-transition steps run after
       // rAF callbacks; a step may queue more, so snapshot and clear first.
       if (!__renderingSuppressed) {
-        const after = __renderingSteps;
-        __renderingSteps = [];
-        for (let i = 0; i < after.length; i++) { try { after[i](ts); } catch (e) {} }
+        // Persistent observer delivery (resize/intersection/performance) runs every frame.
+        for (let i = 0; i < __renderingSteps.length; i++) { try { __renderingSteps[i](ts); } catch (e) {} }
+        // One-shot view-transition steps: snapshot and clear; a step may queue the next.
+        const vt = __viewTransitionSteps;
+        __viewTransitionSteps = [];
+        for (let i = 0; i < vt.length; i++) { try { vt[i](ts); } catch (e) {} }
       }
       __frameNow = null;
       if (animation) __frameTask(() => { __frameStage(ts); try { animation.commit(); } catch (e) {} __frameNow = null; });
-      if (__frameSteps.length || __animationFrame || __renderingSteps.length) __scheduleFrame();
+      if (__frameSteps.length || __animationFrame || __viewTransitionSteps.length) __scheduleFrame();
     };
     // Animation events dispatch in their own task so their microtasks settle first.
     if (animation) __frameTask(() => { __frameStage(ts); try { animation.dispatch(); } catch (e) {} __frameNow = null; __frameTask(callbacks); });
@@ -8048,10 +8051,10 @@ ops.op_capture_frame_scheduler((step) => { __frameSteps[__frameSteps.length] = s
 // The vendored binding's view-transition rendering seam. A page here is never hidden: the
 // engine has no tab or occlusion model and reports document.visibilityState "visible".
 ops.op_capture_view_transition_host((command, argument) => {
-  if (command === "frame") { __renderingSteps[__renderingSteps.length] = argument; __scheduleFrame(); }
+  if (command === "frame") { __viewTransitionSteps[__viewTransitionSteps.length] = argument; __scheduleFrame(); }
   else if (command === "suppress") {
     __renderingSuppressed = argument === true;
-    if (!__renderingSuppressed && (__rafQueue.length || __frameSteps.length || __renderingSteps.length)) __scheduleFrame();
+    if (!__renderingSuppressed && (__rafQueue.length || __frameSteps.length || __renderingSteps.length || __viewTransitionSteps.length)) __scheduleFrame();
   } else if (command === "hidden") return false;
 });
 globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };

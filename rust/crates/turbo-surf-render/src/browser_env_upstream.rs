@@ -51,8 +51,8 @@ mod script_state;
 #[path = "trusted_types.rs"]
 mod trusted_types;
 pub use script_state::{
-    prepare_script, script_document, script_state, set_document_resource_active, PreparedScript,
-    ScriptState,
+    parser_scripts, prepare_script, script_document, script_state, set_document_resource_active,
+    PreparedScript, ScriptState,
 };
 
 #[path = "mutation_observers.rs"]
@@ -69,6 +69,12 @@ pub use mutation_observers::{install_mutation_consumer, remove_mutation_consumer
 /// Guest code cannot install or replace this private lifecycle capability.
 pub fn capture_popover_scheduler(scope: &mut v8::PinScope) {
     html_popover::capture_scheduler(scope);
+}
+/// Capture the host's rendering seam for view transitions: `host("frame", step)` runs
+/// `step(timestamp)` after the next frame's animation frame callbacks, `host("suppress",
+/// flag)` pauses or resumes rendering updates, and `host("hidden")` reports page visibility.
+pub fn capture_view_transition_host(scope: &mut v8::PinScope, host: v8::Local<v8::Function>) {
+    view_transitions::capture_host(scope, host);
 }
 
 /// Capture the embedder's `File` interface once the runtime has installed it, before
@@ -118,6 +124,8 @@ pub fn set_interface_record<'s>(
 mod document_basics;
 #[path = "document_legacy.rs"]
 mod document_legacy;
+#[path = "interceptor_mode.rs"]
+mod interceptor_mode;
 pub use document_legacy::{
     set_document_domain_sandboxed, set_document_last_modified, set_document_origin_keyed,
 };
@@ -160,8 +168,21 @@ mod reference_target;
 mod shadow_html;
 #[path = "select_element.rs"]
 mod select_element;
+#[path = "form_pseudo.rs"]
+mod form_pseudo;
+#[path = "key_order.rs"]
+mod key_order;
+pub use key_order::{defer as defer_key_order, finish as finish_key_order};
 #[path = "shadow_slots.rs"]
 mod shadow_slots;
+#[path = "user_activation_gates.rs"]
+mod user_activation_gates;
+pub use user_activation_gates::{
+    light_dismiss, modal_backdrop, notify_user_activation, process_close_watchers,
+    set_activation_host, ActivationHost, ActivationQuery,
+};
+#[path = "view_transitions.rs"]
+mod view_transitions;
 
 /// Host-only composed identities for native layout. This seam does not expose
 /// closed roots or private assignment records to guest JavaScript.
@@ -455,6 +476,8 @@ struct DomState {
     shadow_modes: HashMap<Handle, String>,
     nonces: HashMap<Handle, Vec<u16>>,
     scripts: HashMap<Handle, ScriptState>,
+    /// Main-document parser scripts in parse order (see script_state::parse_order).
+    parser_scripts: Vec<Handle>,
     resource_active: bool,
     basics_state: Option<v8::Weak<v8::Object>>,
     control_clone: Option<v8::Weak<v8::Function>>,
@@ -462,6 +485,8 @@ struct DomState {
     event_handlers: event_handlers::State,
     popover: html_popover::State,
     pointer: pointer_events::State,
+    activation: user_activation_gates::State,
+    view_transitions: view_transitions::State,
     input_members: input_members::State,
     browsing_context: bool,
     ownership: Option<dom_ownership::Graph>,
@@ -662,6 +687,7 @@ fn parse_html_tree_with<'s>(
     DOM.with(|dom| {
         *dom.borrow_mut() = Some(DomState {
             scripts: script_state::initial(&tree),
+            parser_scripts: Vec::new(),
             resource_active: false,
             nonces: initial_nonces(&tree),
             tree,
@@ -676,6 +702,8 @@ fn parse_html_tree_with<'s>(
             event_handlers: Default::default(),
             popover: Default::default(),
             pointer: Default::default(),
+            activation: Default::default(),
+            view_transitions: Default::default(),
             input_members: Default::default(),
             browsing_context: false,
             ownership: None,
@@ -1141,6 +1169,7 @@ fn wrap_inner<'s>(scope: &mut v8::PinScope<'s, '_>, handle: Handle) -> v8::Local
     }) {
         return object;
     }
+    user_activation_gates::observe(handle);
     let owner = DOM_CONTEXTS.with(|d| d.borrow().get(&DOM_ID.with(|id| id.get())).cloned());
     let context = owner
         .as_ref()
@@ -1320,6 +1349,32 @@ fn with_tree_mut<R>(f: impl FnOnce(&mut Tree) -> R) -> Option<R> {
 
 // ---- element methods -------------------------------------------------------------------------
 
+/// Hosts that install their own DOMException after the binding (turbo-surf's runtime) hand
+/// it over here, so natively raised exceptions are instances of the realm's interface.
+pub fn register_dom_exception(scope: &mut v8::PinScope, constructor: v8::Local<v8::Function>) {
+    // The constructor's own realm, never the (possibly parent) current context.
+    let Some(context) = constructor.get_creation_context(scope) else {
+        return;
+    };
+    let global = context.global(scope);
+    let key = dom_exception_key(scope);
+    global.set_private(scope, key, constructor.into());
+}
+/// A DOMException of the current realm's registered interface.
+fn new_dom_exception<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    name: &str,
+    message: &str,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let text = v8::String::new(scope, message)?;
+    let name = v8::String::new(scope, name)?;
+    let global = scope.get_current_context().global(scope);
+    let key = dom_exception_key(scope);
+    let constructor = global
+        .get_private(scope, key)
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())?;
+    constructor.new_instance(scope, &[text.into(), name.into()])
+}
 fn dom_exception_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Private> {
     let name = v8::String::new(scope, "turbo.native.DOMException").unwrap();
     v8::Private::for_api(scope, Some(name))
@@ -3129,6 +3184,8 @@ fn selector_argument<'s>(
     let transformed = html_popover::selector(scope, node, &scalar)?;
     let transformed = html_dialog::selector(scope, node, &transformed)?;
     let transformed = interest_invokers::selector(scope, node, &transformed)?;
+    let transformed = form_pseudo::selector(scope, node, &transformed)?;
+    let transformed = view_transitions::selector(scope, node, &transformed)?;
     let original = if transformed == scalar {
         units
     } else {
@@ -3472,12 +3529,22 @@ fn el_click(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     let Some(h) = receiver_handle(scope, &args, &[1]) else {
         return;
     };
+    synthetic_click(scope, args.this(), h, false);
+}
+
+/// Fire a synthetic pointer `click` (click() and label activation); a disabled control or
+/// one already running its click-in-progress steps ignores it.
+fn synthetic_click(
+    scope: &mut v8::PinScope,
+    receiver: v8::Local<v8::Object>,
+    h: Handle,
+    trusted: bool,
+) {
     if html_invokers::disabled_control(h) {
         return;
     }
     let name = v8::String::new(scope, "turbo-dom.click.active").unwrap();
     let key = v8::Private::for_api(scope, Some(name));
-    let receiver = args.this();
     if receiver
         .get_private(scope, key)
         .is_some_and(|value| value.is_true())
@@ -3488,7 +3555,7 @@ fn el_click(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     receiver.set_private(scope, key, active.into());
     if let Some(context) = receiver.get_creation_context(scope) {
         let context_scope = &mut v8::ContextScope::new(scope, context);
-        dispatch_synthetic_with_trust(context_scope, h, "click", true, true, false);
+        dispatch_synthetic_with_trust(context_scope, h, "click", true, true, trusted);
     }
     let inactive = v8::Boolean::new(scope, false);
     receiver.set_private(scope, key, inactive.into());
@@ -4654,18 +4721,21 @@ fn el_dispatch_event(
     // the activation-behavior spec), so React's ChangeEventPlugin — which detects checkbox change on
     // the `click` event by reading node.checked — sees the new value. Reverted below if the click is
     // canceled. `change`/`input` DOM events fire afterward (also below).
-    let click_check = if ty == "click" {
-        checkable_kind(target)
+    // Only a MouseEvent click has an activation target (the target or a bubbling ancestor).
+    let activation_target = if ty == "click" {
+        html_invokers::activation_target(scope, event_obj, target)
     } else {
         None
     };
-    let check_snapshot = click_check.map(|_| form_checked_state::snapshot(target));
-    let check_was = click_check.map(|_| form_checked_state::checked(target));
-    let indeterminate_was =
-        (click_check == Some(CheckKind::Checkbox)).then(|| input_members::pre_activation(target));
+    let checked_target = activation_target.unwrap_or(target);
+    let click_check = activation_target.and_then(checkable_kind);
+    let check_snapshot = click_check.map(|_| form_checked_state::snapshot(checked_target));
+    let check_was = click_check.map(|_| form_checked_state::checked(checked_target));
+    let indeterminate_was = (click_check == Some(CheckKind::Checkbox))
+        .then(|| input_members::pre_activation(checked_target));
     if let (Some(kind), Some(was)) = (click_check, check_was) {
         let next = if kind == CheckKind::Radio { true } else { !was };
-        form_checked_state::set(target, next);
+        form_checked_state::set(checked_target, next);
     }
 
     // propagation path: ancestors (root … parent), then the target. Bubbling reverses it.
@@ -4827,10 +4897,12 @@ fn el_dispatch_event(
             .as_ref()
             .is_some_and(|dom| dom.form_submission_blocked)
     });
-    if not_prevented && ty == "click" && is_submit_control(target) && !submission_blocked {
-        if let Some(form) = closest_form(target) {
+    let submitter = activation_target
+        .filter(|&node| is_submit_control(node) && !html_invokers::disabled_control(node));
+    if let (true, Some(submitter), false) = (not_prevented, submitter, submission_blocked) {
+        if let Some(form) = closest_form(submitter) {
             let form = wrap(scope, form);
-            let submitter = wrap(scope, target);
+            let submitter = wrap(scope, submitter);
             if let Some(context) = form.get_creation_context(scope) {
                 if let Some(dispatcher) = context.get_slot::<FormSubmissionDispatcher>() {
                     let dispatcher = dom_ownership::local(scope, &dispatcher.0);
@@ -4852,8 +4924,8 @@ fn el_dispatch_event(
         }
     }
 
-    if not_prevented && ty == "click" {
-        html_invokers::activate(scope, event_obj, target);
+    if let (true, Some(activation)) = (not_prevented, activation_target) {
+        html_invokers::activate(scope, event_obj, activation, target);
     }
     if args.data().is_true() {
         interest_invokers::observe(scope, event_obj, target, &ty);
@@ -4866,12 +4938,12 @@ fn el_dispatch_event(
     // the DOM `input` + `change` events (jsdom does this; some libs listen for them directly).
     if let (Some(_kind), Some(_was)) = (click_check, check_was) {
         if not_prevented {
-            dispatch_synthetic(scope, target, "input", true, false);
-            dispatch_synthetic(scope, target, "change", true, false);
+            dispatch_synthetic(scope, checked_target, "input", true, false);
+            dispatch_synthetic(scope, checked_target, "change", true, false);
         } else if let Some(snapshot) = check_snapshot {
             form_checked_state::restore(snapshot);
             if let Some(previous) = indeterminate_was {
-                input_members::cancel_activation(target, previous);
+                input_members::cancel_activation(checked_target, previous);
             }
         }
     }
@@ -6959,6 +7031,7 @@ fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     // The document parser attaches declarative shadow roots (fragment parsing
     // for innerHTML never does); their scripts are ordinary parser scripts.
     let root = tree.root();
+    let parser_scripts = script_state::parse_order(&tree);
     let declared = shadow_html::declarative(&mut tree, root, None);
     // A replacement document is seeded before its new bootstrap probes native
     // methods. Projecting with the previous bootstrap here would delete those
@@ -6983,6 +7056,7 @@ fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     DOM.with(|d| {
         *d.borrow_mut() = Some(DomState {
             scripts: script_state::initial(&tree),
+            parser_scripts,
             resource_active: true,
             nonces: initial_nonces(&tree),
             tree,
@@ -6998,6 +7072,8 @@ fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
             event_handlers: Default::default(),
             popover: Default::default(),
             pointer: Default::default(),
+            activation: Default::default(),
+            view_transitions: Default::default(),
             input_members: Default::default(),
             browsing_context: true,
             ownership: None,
@@ -7127,6 +7203,9 @@ fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     animations::install(scope);
     typed_om::install(scope);
     hyperlink_utils::install(scope);
+    form_pseudo::install(scope);
+    user_activation_gates::install(scope);
+    view_transitions::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())
@@ -7195,6 +7274,8 @@ fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     element_internals::install(scope);
     // After custom_elements re-creates the HTML constructors, so static members stay on them.
     run_js(scope, include_str!("interface_members.js"));
+    // Last: reorder every interface's own keys to Chrome's order.
+    key_order::installed(scope);
 }
 
 fn bind_document(scope: &mut v8::PinScope) {
@@ -9487,6 +9568,7 @@ mod form_outputs_tests;
 #[path = "html_dialog_tests.rs"]
 mod html_dialog_tests;
 #[cfg(test)]
+#[cfg(test)]
 #[path = "sanitizer_tests.rs"]
 mod sanitizer_tests;
 #[cfg(test)]
@@ -9501,3 +9583,13 @@ mod file_inputs_tests;
 #[cfg(test)]
 #[path = "typed_om_tests.rs"]
 mod typed_om_tests;
+#[cfg(test)]
+#[path = "form_pseudo_tests.rs"]
+mod form_pseudo_tests;
+#[cfg(test)]
+#[path = "key_order_tests.rs"]
+mod key_order_tests;
+
+#[cfg(test)]
+#[path = "view_transitions_tests.rs"]
+mod view_transitions_tests;

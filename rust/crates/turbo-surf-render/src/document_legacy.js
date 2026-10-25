@@ -109,8 +109,6 @@
   getter(g.Document.prototype, 'all', function () { check(this); return native('all', this); });
 
   const proto = g.Document.prototype, DOMExceptionType = g.DOMException;
-  // [LegacyLenientSetter]: a branded no-op, so assignment never shadows the getter.
-  const lenient = (name, read) => define(proto, name, { get: make(function () { check(this); return read(this); }, 'get ' + name, 0), set: make(function () { check(this); }, 'set ' + name, 1), enumerable: true, configurable: true });
   const domainError = message => new DOMExceptionType("Failed to set the 'domain' property on 'Document': " + message, 'SecurityError');
   define(proto, 'domain', {
     get: make(function () { check(this); return native('domain', this); }, 'get domain', 0),
@@ -130,11 +128,9 @@
     const [month, day, year, hours, minutes, seconds] = dateParts.map(part => apply(part, date, []));
     return pad(month + 1, 2) + '/' + pad(day, 2) + '/' + pad(year, 4) + ' ' + pad(hours, 2) + ':' + pad(minutes, 2) + ':' + pad(seconds, 2);
   });
-  // No element of this engine ever becomes fullscreen or picture-in-picture, and its
-  // documents are never prerendered or discarded. The pointer lock is native state
-  // (pointer_events.rs), retargeted into the document's tree.
-  lenient('fullscreen', () => false);
-  lenient('fullscreenElement', () => null);
+  // Fullscreen state (fullscreen/fullscreenElement/webkit exits) is user_activation_gates.js.
+  // No element of this engine is ever picture-in-picture, and its documents are never
+  // prerendered or discarded. Pointer lock is native state (pointer_events.rs).
   if (Object.getOwnPropertyDescriptor(g.document, 'fullscreenElement')) delete g.document.fullscreenElement;
   getter(proto, 'pointerLockElement', function () { check(this); return native('pointerLockElement', this); });
   getter(proto, 'pictureInPictureElement', function () { check(this); return null; });
@@ -144,9 +140,6 @@
     if (!isDocument(this)) return reject(new ErrorType("Failed to execute '" + name + "' on 'Document': Illegal invocation"));
     return reject(refusal("Failed to execute '" + name + "' on 'Document': "));
   }, 0);
-  rejecting('exitFullscreen', prefix => new ErrorType(prefix + 'Document not active'));
   rejecting('exitPictureInPicture', prefix => new DOMExceptionType(prefix + 'There is no Picture-in-Picture element in this document.', 'InvalidStateError'));
-  // The prefixed forms run the same exit and swallow its refusal.
-  for (const name of ['webkitExitFullscreen', 'webkitCancelFullScreen']) method(proto, name, function () { check(this); }, 0);
   method(proto, 'exitPointerLock', function () { check(this); native('exitPointerLock', this); }, 0);
 })();

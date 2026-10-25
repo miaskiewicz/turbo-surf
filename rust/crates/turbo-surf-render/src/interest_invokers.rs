@@ -220,7 +220,7 @@ fn native<'s>(
         "schedule" => {
             if let Ok(callback) = v8::Local::<v8::Function>::try_from(args.get(1)) {
                 let delay = args.get(2).number_value(scope).unwrap_or(0.0);
-                html_popover::schedule_after(scope, callback, delay);
+                html_popover::schedule_after(scope, callback, delay.max(0.0) as u32);
             }
             return;
         }

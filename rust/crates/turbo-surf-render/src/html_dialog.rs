@@ -72,6 +72,26 @@ pub(super) fn disconnect(root: Handle, include_root: bool) {
     });
 }
 
+pub(super) fn is_modal(node: Handle) -> bool {
+    modal(node)
+}
+
+/// The topmost connected modal dialog when `node` lies outside it (and so is inert).
+pub(super) fn blocking_dialog(node: Handle) -> Option<Handle> {
+    DOM.with(|dom| {
+        let dom = dom.borrow();
+        let dom = dom.as_ref()?;
+        let top = dom
+            .dialog
+            .modal
+            .iter()
+            .rev()
+            .find(|&&entry| is_connected(&dom.tree, entry))
+            .copied()?;
+        (!within(&dom.tree, node, top)).then_some(top)
+    })
+}
+
 /// Modal dialogs make everything outside the topmost one inert, so focus() is a no-op there.
 pub(super) fn blocks_focus(node: Handle) -> bool {
     DOM.with(|dom| {
@@ -303,6 +323,8 @@ fn dispatch(
                 .is_some_and(|dom| dom.browsing_context)
         })),
         "hide-popovers" => html_popover::hide_unrelated(scope, node),
+        "opened" => user_activation_gates::dialog_opened(node),
+        "closed" => user_activation_gates::dialog_closed(node),
         "schedule" => {
             if let Ok(callback) = v8::Local::<v8::Function>::try_from(args.get(2)) {
                 html_popover::schedule(scope, callback);
@@ -336,6 +358,8 @@ pub(super) fn install(scope: &mut v8::PinScope) {
 enum Pseudo {
     Modal,
     Open,
+    /// Every element in the document's fullscreen stack.
+    Fullscreen,
     /// A complex selector a forgiving `:is()`/`:where()` list drops for an invalid
     /// `:modal()`/`:open()`: it can never match.
     Never,
@@ -346,6 +370,8 @@ fn pseudo_kind(name: &str) -> Option<Pseudo> {
         Some(Pseudo::Modal)
     } else if name.eq_ignore_ascii_case("open") {
         Some(Pseudo::Open)
+    } else if name.eq_ignore_ascii_case("fullscreen") {
+        Some(Pseudo::Fullscreen)
     } else {
         None
     }
@@ -468,7 +494,8 @@ pub(super) fn selector(scope: &mut v8::PinScope, anchor: Handle, source: &str) -
     if ranges.is_empty() {
         return Some(source.to_owned());
     }
-    let (modal, open) = DOM.with(|dom| {
+    let fullscreen_stack = user_activation_gates::fullscreen_elements();
+    let (modal, open, fullscreen) = DOM.with(|dom| {
         let dom = dom.borrow();
         let dom = dom.as_ref().unwrap();
         let tree = &dom.tree;
@@ -497,7 +524,16 @@ pub(super) fn selector(scope: &mut v8::PinScope, anchor: Handle, source: &str) -
             }
             stack.extend(tree.children(node));
         }
-        (replacement(modal), replacement(open))
+        let fullscreen = fullscreen_stack
+            .iter()
+            .filter(|&&entry| html_popover::selector_root(tree, entry) == root)
+            .map(|&entry| html_popover::selector_path(tree, entry))
+            .collect::<Vec<_>>();
+        (
+            replacement(modal),
+            replacement(open),
+            replacement(fullscreen),
+        )
     });
     let mut result = String::new();
     let mut start = 0;
@@ -506,6 +542,7 @@ pub(super) fn selector(scope: &mut v8::PinScope, anchor: Handle, source: &str) -
         result.push_str(match pseudo {
             Pseudo::Modal => &modal,
             Pseudo::Open => &open,
+            Pseudo::Fullscreen => &fullscreen,
             Pseudo::Never => ":not(*)",
         });
         start = to;

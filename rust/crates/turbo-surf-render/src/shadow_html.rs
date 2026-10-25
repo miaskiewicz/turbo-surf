@@ -595,20 +595,12 @@ fn native<'s>(
             rv.set(unit_string(scope, &html).into());
         }
         "setHTMLUnsafe" => {
-            let interface = if shadow_root(scope, object).is_some() {
-                "ShadowRoot"
-            } else {
-                "Element"
-            };
-            let Some(html) = trusted_types::units(
-                scope,
-                object,
-                args.get(2),
-                "TrustedHTML",
-                &format!("{interface} setHTMLUnsafe"),
-                &format!("Failed to execute 'setHTMLUnsafe' on '{interface}': "),
-                false,
-            ) else {
+            // The markup already passed its Trusted Types check (sanitizer.js).
+            let Some(html) = v8::Local::<v8::String>::try_from(args.get(2))
+                .ok()
+                .map(|html| string_code_units(scope, html))
+            else {
+                illegal(scope);
                 return;
             };
             // SetHTMLUnsafeOptions.sanitizer, already converted and validated.

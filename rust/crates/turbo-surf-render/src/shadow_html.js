@@ -87,8 +87,9 @@
       check(this);
       if (arguments.length < 1)
         throw new TypeErrorValue(`Failed to execute 'setHTMLUnsafe' on '${owner}': 1 argument required, but only 0 present.`);
-      // (TrustedHTML or DOMString), then SetHTMLUnsafeOptions (sanitizer.js).
-      const converted = ns.sanitizerUnsafeArguments(html, options, owner, "setHTMLUnsafe");
+      // (TrustedHTML or DOMString), SetHTMLUnsafeOptions and the Trusted Types
+      // check (sanitizer.js); the native step receives converted markup.
+      const converted = ns.sanitizerUnsafeArguments(this, html, options, owner, "setHTMLUnsafe");
       native("setHTMLUnsafe", this, converted.html, converted.config);
     };
   const element = (value) => apply(elementBrand, value, []);
@@ -109,7 +110,7 @@
     function () {
       shadow(this);
       const document = apply(ownerDocument, this, []);
-      const current = document ? document.fullscreenElement : null;
+      const current = document && ns.fullscreenElementOf ? ns.fullscreenElementOf(document) : null;
       return object(current) ? native("retarget", this, current) : null;
     },
     function () {

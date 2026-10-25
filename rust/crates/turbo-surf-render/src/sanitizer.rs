@@ -523,7 +523,7 @@ fn native<'s>(
                 rv.set(value);
             }
         }
-        "trustedHTML" => {
+        "trustedHTML.is" => {
             let trusted = trusted_types::is_trusted(scope, args.get(1), "TrustedHTML");
             rv.set_bool(trusted);
         }
@@ -554,25 +554,39 @@ fn native<'s>(
             };
             shadow_html::set_html_unsafe(scope, receiver, &html, Some((&config, true)));
         }
+        // (TrustedHTML or DOMString) through the Trusted Types check of `sink`,
+        // run by the receiver's (or this realm's) document after option
+        // conversion and before the sanitizer configuration is validated.
+        "trustedHTML.convert" => {
+            let node = match v8::Local::<v8::Object>::try_from(args.get(1)) {
+                Ok(node) => node,
+                Err(_) => {
+                    let Some(document) = realm_document(scope) else {
+                        return;
+                    };
+                    document
+                }
+            };
+            let sink = args.get(3).to_rust_string_lossy(scope);
+            let prefix = args.get(4).to_rust_string_lossy(scope);
+            if let Some(html) = trusted_types::units(
+                scope,
+                node,
+                args.get(2),
+                "TrustedHTML",
+                &sink,
+                &prefix,
+                false,
+            ) {
+                let html = unit_string(scope, &html);
+                rv.set(html.into());
+            }
+        }
+        // Both markups arrive converted (parseHTMLUnsafe's already passed its
+        // Trusted Types check).
         "parse" => {
             let safe = args.get(1).is_true();
-            let html = if safe {
-                units(scope, args.get(2))
-            } else {
-                let Some(document) = realm_document(scope) else {
-                    return;
-                };
-                trusted_types::units(
-                    scope,
-                    document,
-                    args.get(2),
-                    "TrustedHTML",
-                    "Document parseHTMLUnsafe",
-                    "Failed to execute 'parseHTMLUnsafe' on 'Document': ",
-                    false,
-                )
-            };
-            let Some(html) = html else {
+            let Some(html) = units(scope, args.get(2)) else {
                 return;
             };
             let config = v8::Local::<v8::Object>::try_from(args.get(3))

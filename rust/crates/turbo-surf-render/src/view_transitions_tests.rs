@@ -166,11 +166,10 @@ fn view_transitions_match_chrome_156() {
     // KNOWN_GAP: a bare V8 isolate has no host promise-rejection tracker, so this binding
     // harness never fires unhandledrejection (nor, today, does the turbo-surf render tier).
     assert_eq!(actual["unhandled"], serde_json::json!([]));
-    // KNOWN_GAP: DOMParser and Document.parseHTMLUnsafe are provided by the turbo-surf
-    // runtime, not this binding; the render tier runs those two cases against Chrome.
-    for case in ["domParser", "parseHTMLUnsafe"] {
-        assert_eq!(actual["documents"][case][0], "unavailable", "{case}");
-    }
+    // KNOWN_GAP: DOMParser is provided by the turbo-surf runtime, not this binding; the
+    // render tier runs it against Chrome. parseHTMLUnsafe is now in the vendored binding
+    // (Sanitizer batch) and is compared against the Chrome fixture below.
+    assert_eq!(actual["documents"]["domParser"][0], "unavailable", "domParser");
     // KNOWN_GAP: the binding's selector-method SyntaxError (shared by matches, closest and
     // querySelector*) omits Chrome's "Failed to execute 'matches' on 'Element': " prefix;
     // the rejected selectors and the exception names agree.
@@ -193,7 +192,6 @@ fn view_transitions_match_chrome_156() {
         &[
             ("unhandled", ""),
             ("documents", "domParser"),
-            ("documents", "parseHTMLUnsafe"),
             ("selectors", "syntax"),
         ],
     );

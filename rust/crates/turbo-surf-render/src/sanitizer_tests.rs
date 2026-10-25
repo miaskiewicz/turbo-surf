@@ -123,3 +123,41 @@ fn declarative_shadow_roots_in_document_parsing_match_chrome_156() {
     let actual = run_probe(page, probe);
     assert_matches_control(&actual, &control);
 }
+
+/// Scripts in declarative shadow roots stay parser scripts at their template's
+/// parse position; scripts of ordinary template contents are not listed.
+#[test]
+fn parser_scripts_follow_parse_order_through_declarative_roots() {
+    super::tests::init_v8();
+    let isolate = &mut v8::Isolate::new(Default::default());
+    v8::scope!(let scope, isolate);
+    let context = v8::Context::new(scope, Default::default());
+    let scope = &mut v8::ContextScope::new(scope, context);
+    install_with_html(
+        scope,
+        "<!doctype html><head><script id=a></script></head><body><div><script id=b></script><template shadowrootmode=open><script id=c></script><p><template shadowrootmode=closed><script id=d></script></template></p></template><script id=e></script></div><template><script id=inert></script></template><svg><script id=f></script></svg><script id=g></script>",
+    );
+    let document = {
+        let code = v8::String::new(scope, "document").unwrap();
+        let value = v8::Script::compile(scope, code, None)
+            .unwrap()
+            .run(scope)
+            .unwrap();
+        v8::Local::<v8::Object>::try_from(value).unwrap()
+    };
+    let scripts = parser_scripts(scope, document);
+    let ids = scripts
+        .iter()
+        .map(|script| {
+            let key = v8::String::new(scope, "id").unwrap();
+            script
+                .get(scope, key.into())
+                .unwrap()
+                .to_rust_string_lossy(scope)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["a", "b", "c", "d", "e", "f", "g"]);
+    let state = script_state(scope, scripts[3]).unwrap();
+    assert!(state.parser_inserted && !state.already_started);
+    reset();
+}

@@ -123,6 +123,8 @@ pub use document_xpath::is_native_xpath_object;
 mod dom_mutations;
 #[path = "element_relations.rs"]
 mod element_relations;
+#[path = "focus_group.rs"]
+mod focus_group;
 #[path = "html_dialog.rs"]
 mod html_dialog;
 #[path = "html_invokers.rs"]
@@ -133,6 +135,10 @@ mod html_popover;
 mod html_text;
 #[path = "input_members.rs"]
 mod input_members;
+#[path = "interest_invokers.rs"]
+mod interest_invokers;
+#[path = "reference_target.rs"]
+mod reference_target;
 #[path = "shadow_html.rs"]
 mod shadow_html;
 #[path = "select_element.rs"]
@@ -3080,6 +3086,7 @@ fn selector_argument<'s>(
     }
     let transformed = html_popover::selector(scope, node, &scalar)?;
     let transformed = html_dialog::selector(scope, node, &transformed)?;
+    let transformed = interest_invokers::selector(scope, node, &transformed)?;
     let original = if transformed == scalar {
         units
     } else {
@@ -4805,6 +4812,12 @@ fn el_dispatch_event(
 
     if not_prevented && ty == "click" {
         html_invokers::activate(scope, event_obj, target);
+    }
+    if args.data().is_true() {
+        interest_invokers::observe(scope, event_obj, target, &ty);
+        if not_prevented && ty == "keydown" {
+            focus_group::keydown(scope, event_obj, target);
+        }
     }
 
     // Finish the checkbox/radio activation: a canceled click reverts the pre-toggle; otherwise fire
@@ -7046,7 +7059,10 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     run_js(scope, include_str!("form_outputs.js"));
     run_js(scope, include_str!("form_controls.js"));
     run_js(scope, include_str!("form_collections.js"));
+    reference_target::install(scope);
+    interest_invokers::install(scope);
     html_invokers::install(scope);
+    focus_group::install(scope);
     input_members::install(scope);
     select_element::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();

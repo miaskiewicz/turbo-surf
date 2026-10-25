@@ -162,6 +162,7 @@ pub(super) fn configure(
         declarative: false,
     };
     store(scope, root, init);
+    reference_target::configure(scope, root, options);
 }
 
 /// Attach a native root to `host` in the current document scope.
@@ -209,6 +210,7 @@ pub(super) fn clone_roots<'s>(
         };
         if let Some((root, mode, manual)) = shadow {
             let init = load(scope, root);
+            let target = reference_target::object_target(scope, root);
             if init.clonable {
                 let copy = {
                     let _clone = DomScope::for_object(scope, clone);
@@ -217,6 +219,7 @@ pub(super) fn clone_roots<'s>(
                     });
                     host.and_then(|host| {
                         let copy = attach(scope, host, &mode, manual, init)?;
+                        reference_target::declare(scope, copy, target.clone());
                         let document = wrap(scope, with_tree(Tree::root)?);
                         Some((copy, document))
                     })
@@ -248,7 +251,8 @@ pub(super) fn clone_roots<'s>(
 /// Convert parser-inserted `<template shadowrootmode>` elements of a detached
 /// fragment, in tree order, exactly where the fragment parser would attach.
 /// Top-level templates have no element parent and stay ordinary templates.
-fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<(Handle, String, Init)> {
+type Declared = (Handle, String, Init, Option<Vec<u16>>);
+fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<Declared> {
     let mut attached = Vec::new();
     let mut pending = tree.children(fragment);
     pending.reverse();
@@ -270,6 +274,7 @@ fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<(Handle, String, Init)>
                     .is_some(),
                 declarative: true,
             };
+            let target = tree.get_attribute_ns_utf16(node, None, "shadowrootreferencetarget");
             let root = tree.attach_shadow(host);
             if let Some(content) = tree.take_template_contents(node) {
                 for child in tree.children(content) {
@@ -277,7 +282,7 @@ fn declarative(tree: &mut Tree, fragment: Handle) -> Vec<(Handle, String, Init)>
                 }
             }
             tree.remove_child(host, node);
-            attached.push((root, mode, init));
+            attached.push((root, mode, init, target));
             let mut nested = tree.children(root);
             nested.reverse();
             pending.extend(nested);
@@ -327,7 +332,7 @@ pub(super) fn set_html_unsafe<'s>(
             return;
         };
         let mut objects = Vec::with_capacity(roots.len());
-        for (root, mode, init) in roots {
+        for (root, mode, init, target) in roots {
             DOM.with(|state| {
                 if let Some(state) = state.borrow_mut().as_mut() {
                     state.shadow_modes.insert(root, mode);
@@ -336,6 +341,7 @@ pub(super) fn set_html_unsafe<'s>(
             let object = wrap(scope, root);
             shadow_slots::configure(scope, object, false);
             store(scope, object, init);
+            reference_target::declare(scope, object, target);
             objects.push(object);
         }
         (wrap(scope, fragment), objects)
@@ -403,8 +409,12 @@ pub(super) fn serialized_root<'s>(
     if init.clonable {
         tag.push_str(" shadowrootclonable=\"\"");
     }
-    tag.push('>');
-    Some((object, tag.encode_utf16().collect()))
+    let mut tag: Vec<u16> = tag.encode_utf16().collect();
+    if let Some(target) = reference_target::serialized(scope, object) {
+        tag.extend(target);
+    }
+    tag.push(u16::from(b'>'));
+    Some((object, tag))
 }
 
 /// DOM retargeting of `node` against `target` (both in the current tree).

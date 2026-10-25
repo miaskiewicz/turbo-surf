@@ -19,7 +19,9 @@
   const getRoot = Node.prototype.getRootNode, query = Element.prototype.querySelectorAll, documentQuery = Document.prototype.querySelectorAll;
   const nodeTypeGetter = ns.domAccessor('nodeType', false, 'Node');
   const collectionRecord=ns.formCollectionFactory.getRecord;
-  const queryAll = (root, selector) => {const result=apply(apply(nodeTypeGetter,root,[])===9?documentQuery:query,root,[selector]);const record=collectionRecord(result);return record?record.read():result;};
+  const fragmentQuery = DocumentFragment.prototype.querySelectorAll;
+  // Owner trees may be documents, shadow roots or detached element subtrees.
+  const queryAll = (root, selector) => {const kind=apply(nodeTypeGetter,root,[]);const result=apply(kind===9?documentQuery:kind===11?fragmentQuery:query,root,[selector]);const record=collectionRecord(result);return record?record.read():result;};
   const attribute = Element.prototype.getAttribute, contains = Node.prototype.contains;
   const lower = Function.prototype.call.bind(String.prototype.toLowerCase);
   const regexTest = Function.prototype.call.bind(RegExp.prototype.test);

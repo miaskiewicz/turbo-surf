@@ -71,7 +71,9 @@ fn labelable(scope: &mut v8::PinScope, node: Handle) -> bool {
         _ => false,
     }
 }
-pub(super) fn control(scope: &mut v8::PinScope, label: Handle) -> Option<Handle> {
+/// The label's labeled control as exposed (retargeted into the label's tree) and the actual
+/// element it labels: a `for` reference to a shadow host continues through reference targets.
+fn association(scope: &mut v8::PinScope, label: Handle) -> Option<(Handle, Handle)> {
     if !with_tree(|tree| tree.namespace_id(label) == 0 && tree.local_name(label) == Some("label"))
         .unwrap_or(false)
     {
@@ -87,20 +89,49 @@ pub(super) fn control(scope: &mut v8::PinScope, label: Handle) -> Option<Handle>
             })
             .unwrap_or(false)
         })?;
-        return labelable(scope, target).then_some(target);
+        let actual = reference_target::resolve(scope, target, false)?;
+        return labelable(scope, actual).then_some((target, actual));
     }
-    rows(label)
-        .into_iter()
-        .skip(1)
-        .find(|node| labelable(scope, *node))
+    // A wrapped shadow host labels its reference target.
+    rows(label).into_iter().skip(1).find_map(|node| {
+        let actual = reference_target::resolve(scope, node, false)?;
+        labelable(scope, actual).then_some((node, actual))
+    })
+}
+pub(super) fn control(scope: &mut v8::PinScope, label: Handle) -> Option<Handle> {
+    association(scope, label).map(|(shown, _)| shown)
 }
 pub(super) fn labels(scope: &mut v8::PinScope, host: Handle) -> Vec<Handle> {
     if !labelable(scope, host) {
         return Vec::new();
     }
-    rows(root(host))
+    // Labels in shadow-including ancestor trees reach `host` only through reference targets,
+    // so only the roots of `host`'s host chain are entered, in shadow-including tree order.
+    let mut chain = Vec::new();
+    let mut outer = root(host);
+    while let Some(next) = with_tree(|tree| tree.shadow_host(outer)).flatten() {
+        chain.push(next);
+        outer = root(next);
+    }
+    let order = with_tree(|tree| {
+        let mut order = Vec::new();
+        let mut pending = vec![outer];
+        while let Some(node) = pending.pop() {
+            order.push(node);
+            pending.extend(tree.children(node).into_iter().rev());
+            if chain.contains(&node) {
+                if let Some(shadow) = tree.shadow_root(node) {
+                    pending.extend(tree.children(shadow).into_iter().rev());
+                }
+            }
+        }
+        order
+    })
+    .unwrap_or_default();
+    // Like Chrome, the root of a detached tree is never one of its own labels.
+    order
         .into_iter()
         .skip(1)
-        .filter(|label| control(scope, *label) == Some(host))
+        .filter(|label| association(scope, *label).map(|(_, actual)| actual) == Some(host))
         .collect()
 }

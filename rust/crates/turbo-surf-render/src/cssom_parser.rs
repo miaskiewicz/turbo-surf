@@ -17,6 +17,8 @@ use lightningcss::traits::ToCss;
 
 pub fn is_supported_property(name: &str) -> bool {
     !matches!(PropertyId::from(name), PropertyId::Custom(_))
+        || interest_delay_arity(name).is_some()
+        || name == "writing-mode"
         || matches!(
             name,
             "content"
@@ -40,6 +42,47 @@ pub fn is_supported_property(name: &str) -> bool {
                 | "appearance"
                 | "-webkit-appearance"
         )
+}
+
+const WRITING_MODES: [&str; 16] = [
+    "horizontal-tb",
+    "vertical-rl",
+    "vertical-lr",
+    "sideways-rl",
+    "sideways-lr",
+    "lr",
+    "lr-tb",
+    "rl",
+    "rl-tb",
+    "tb",
+    "tb-rl",
+    "initial",
+    "inherit",
+    "unset",
+    "revert",
+    "revert-layer",
+];
+fn interest_delay_arity(name: &str) -> Option<usize> {
+    if name.eq_ignore_ascii_case("interest-delay") {
+        Some(2)
+    } else if name.eq_ignore_ascii_case("interest-delay-start")
+        || name.eq_ignore_ascii_case("interest-delay-end")
+    {
+        Some(1)
+    } else {
+        None
+    }
+}
+fn time<'i>(input: &mut Parser<'i, '_>) -> Result<(), ParseError<'i, ()>> {
+    match input.next()? {
+        cssparser::Token::Dimension { unit, value, .. }
+            if *value >= 0.0
+                && (unit.eq_ignore_ascii_case("s") || unit.eq_ignore_ascii_case("ms")) =>
+        {
+            Ok(())
+        }
+        _ => Err(input.new_custom_error(())),
+    }
 }
 
 fn deferred_value(tokens: &TokenList<'_>) -> bool {
@@ -196,6 +239,28 @@ impl<'i> DeclarationParser<'i> for CssParser {
                 let value = input.expect_ident_cloned()?.to_ascii_lowercase();
                 input.expect_exhausted()?;
                 return Ok(matches!(value.as_str(), "normal" | "small-caps" | "initial" | "inherit" | "unset" | "revert" | "revert-layer"));
+            }
+            // Lightning CSS does not model `writing-mode`; admit Chrome's keywords.
+            if name.eq_ignore_ascii_case("writing-mode") {
+                let value = input.expect_ident_cloned()?.to_ascii_lowercase();
+                input.expect_exhausted()?;
+                return Ok(WRITING_MODES.contains(&value.as_str()));
+            }
+            // Lightning CSS does not model interest-invoker delays: `normal | <time>`, and the
+            // shorthand takes one or two of those.
+            if let Some(count) = interest_delay_arity(&name) {
+                let mut values = 0;
+                while !input.is_exhausted() {
+                    let valid = input
+                        .try_parse(|input| input.expect_ident_matching("normal"))
+                        .is_ok()
+                        || input.try_parse(time).is_ok();
+                    if !valid {
+                        return Ok(false);
+                    }
+                    values += 1;
+                }
+                return Ok(values >= 1 && values <= count);
             }
             let property=Property::parse(
                 PropertyId::from(lightningcss::values::string::CowArcStr::from(name.to_string())),

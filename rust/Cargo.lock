@@ -5661,6 +5661,7 @@ dependencies = [
 [[package]]
 name = "turbo-dom"
 version = "0.5.7"
+source = "git+https://github.com/miaskiewicz/turbo-dom?branch=parity%2Fissue-28-batch#9e964e0651c9668c41af0e0d85ac4a2bd157f3f5"
 dependencies = [
  "html5ever",
  "log",
@@ -5673,6 +5674,7 @@ dependencies = [
 [[package]]
 name = "turbo-html2pdf-core"
 version = "0.3.8"
+source = "git+https://github.com/miaskiewicz/turbo-html2pdf?branch=parity%2Fissue-28-batch#ff3a4fe7ff166fc08629538bd40217a2bd76ff6a"
 dependencies = [
  "chrono",
  "core-foundation",

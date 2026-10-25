@@ -162,6 +162,7 @@ pub(super) fn configure(
         declarative: false,
     };
     store(scope, root, init);
+    reference_target::configure(scope, root, options);
 }
 
 /// Attach a native root to `host` in the current document scope.
@@ -209,6 +210,7 @@ pub(super) fn clone_roots<'s>(
         };
         if let Some((root, mode, manual)) = shadow {
             let init = load(scope, root);
+            let target = reference_target::object_target(scope, root);
             if init.clonable {
                 let copy = {
                     let _clone = DomScope::for_object(scope, clone);
@@ -217,6 +219,7 @@ pub(super) fn clone_roots<'s>(
                     });
                     host.and_then(|host| {
                         let copy = attach(scope, host, &mode, manual, init)?;
+                        reference_target::declare(scope, copy, target.clone());
                         let document = wrap(scope, with_tree(Tree::root)?);
                         Some((copy, document))
                     })
@@ -251,6 +254,7 @@ pub(super) struct Declared {
     mode: String,
     manual: bool,
     init: Init,
+    target: Option<Vec<u16>>,
 }
 /// Convert parser-inserted `<template shadowrootmode>` elements below `parent`
 /// (a detached fragment or a freshly parsed document), in tree order, exactly
@@ -287,6 +291,7 @@ pub(super) fn declarative(
             let manual = tree
                 .get_attribute(node, "shadowrootslotassignment")
                 .is_some_and(|value| value.eq_ignore_ascii_case("manual"));
+            let target = tree.get_attribute_ns_utf16(node, None, "shadowrootreferencetarget");
             let root = tree.attach_shadow(host);
             if let Some(content) = tree.take_template_contents(node) {
                 for child in tree.children(content) {
@@ -299,6 +304,7 @@ pub(super) fn declarative(
                 mode,
                 manual,
                 init,
+                target,
             });
             let mut nested = tree.children(root);
             nested.reverse();
@@ -326,6 +332,7 @@ pub(super) fn register<'s>(
         mode,
         manual,
         init,
+        target,
     } in declared
     {
         DOM.with(|state| {
@@ -336,6 +343,7 @@ pub(super) fn register<'s>(
         let object = wrap(scope, root);
         shadow_slots::configure(scope, object, manual);
         store(scope, object, init);
+        reference_target::declare(scope, object, target);
         objects.push(object);
     }
     objects
@@ -448,8 +456,12 @@ pub(super) fn serialized_root<'s>(
     if init.clonable {
         tag.push_str(" shadowrootclonable=\"\"");
     }
-    tag.push('>');
-    Some((object, tag.encode_utf16().collect()))
+    let mut tag: Vec<u16> = tag.encode_utf16().collect();
+    if let Some(target) = reference_target::serialized(scope, object) {
+        tag.extend(target);
+    }
+    tag.push(u16::from(b'>'));
+    Some((object, tag))
 }
 
 /// DOM retargeting of `node` against `target` (both in the current tree).

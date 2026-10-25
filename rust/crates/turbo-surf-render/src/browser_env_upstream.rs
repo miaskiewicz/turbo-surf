@@ -21,6 +21,8 @@ mod dom_isolation;
 mod dom_ownership;
 #[path = "element_internals.rs"]
 mod element_internals;
+#[path = "animations.rs"]
+mod animations;
 #[path = "element_members.rs"]
 mod element_members;
 pub use dom_isolation::{activate_isolate, reset_isolate, NativeDomScope};
@@ -67,6 +69,12 @@ pub use mutation_observers::{install_mutation_consumer, remove_mutation_consumer
 /// Guest code cannot install or replace this private lifecycle capability.
 pub fn capture_popover_scheduler(scope: &mut v8::PinScope) {
     html_popover::capture_scheduler(scope);
+}
+
+/// Capture the embedder's `File` interface once the runtime has installed it, before
+/// page script: FileList selections, file form entries and DataTransfer use it.
+pub fn capture_file_host(scope: &mut v8::PinScope) {
+    file_inputs::capture_host(scope);
 }
 
 pub fn clear_context_capabilities(scope: &mut v8::PinScope) {
@@ -123,10 +131,14 @@ pub use document_xpath::is_native_xpath_object;
 mod dom_mutations;
 #[path = "element_relations.rs"]
 mod element_relations;
+#[path = "file_inputs.rs"]
+mod file_inputs;
 #[path = "focus_group.rs"]
 mod focus_group;
 #[path = "html_dialog.rs"]
 mod html_dialog;
+#[path = "typed_om.rs"]
+mod typed_om;
 #[path = "html_invokers.rs"]
 mod html_invokers;
 #[path = "html_popover.rs"]
@@ -7108,7 +7120,10 @@ fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     html_invokers::install(scope);
     focus_group::install(scope);
     input_members::install(scope);
+    file_inputs::install(scope);
     select_element::install(scope);
+    animations::install(scope);
+    typed_om::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())
@@ -9472,3 +9487,12 @@ mod sanitizer_tests;
 #[cfg(test)]
 #[path = "pointer_events_tests.rs"]
 mod pointer_events_tests;
+#[cfg(test)]
+#[path = "animations_tests.rs"]
+mod animations_tests;
+#[cfg(test)]
+#[path = "file_inputs_tests.rs"]
+mod file_inputs_tests;
+#[cfg(test)]
+#[path = "typed_om_tests.rs"]
+mod typed_om_tests;

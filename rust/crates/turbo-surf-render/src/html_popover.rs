@@ -386,6 +386,7 @@ pub(super) fn invoke<'s>(
 pub(super) fn disconnect(scope: &mut v8::PinScope, root: Handle, include_root: bool) {
     html_dialog::disconnect(root, include_root);
     pointer_events::disconnect(scope, root, include_root);
+    interest_invokers::disconnect(scope, root, include_root);
     let nodes = DOM.with(|dom| {
         let dom = dom.borrow();
         let Some(dom) = dom.as_ref() else {
@@ -540,12 +541,20 @@ pub(super) fn hide_unrelated(scope: &mut v8::PinScope, node: Handle) {
 }
 /// Queue `callback` as a task on this document's private, host-captured scheduler.
 pub(super) fn schedule(scope: &mut v8::PinScope, callback: v8::Local<v8::Function>) {
+    schedule_after(scope, callback, 0.0);
+}
+/// Queue `callback` after `delay` milliseconds on the host-captured (virtual) timers.
+pub(super) fn schedule_after(
+    scope: &mut v8::PinScope,
+    callback: v8::Local<v8::Function>,
+    delay: f64,
+) {
     let Some(scheduler) = DOM.with(|dom| dom.borrow().as_ref()?.popover.scheduler.clone()) else {
         return;
     };
     let scheduler = dom_ownership::local(scope, &scheduler);
     let receiver = v8::undefined(scope);
-    let delay = v8::Integer::new(scope, 0);
+    let delay = v8::Number::new(scope, delay);
     scheduler.call(scope, receiver.into(), &[callback.into(), delay.into()]);
 }
 pub(super) fn capture_scheduler(scope: &mut v8::PinScope) {

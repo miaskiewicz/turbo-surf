@@ -981,6 +981,11 @@ ownership, callable descriptors and raw property order:
 node harness/detection/api-inventory.mjs /tmp/turbo-api-shape/comparison.json harness/detection/API-INVENTORY.json
 ```
 
+[REMEASURE-156.md](./REMEASURE-156.md) gives the complete Chrome 156 re-measurement:
+oracle freeze, stock or native155 build, same-scope and expanded collectors
+(`api-shape-interfaces.js`), and the same-scope `api-inventory-diff.mjs` comparison.
+It also states the labeling rules for an oracle or engine change.
+
 The expanded audit also measures forms, collections, Blob/File, FormData,
 CustomStateSet and ValidityState. Absent interfaces remain separate from missing
 members on measured interfaces. [HOST-MEDIA.md](./HOST-MEDIA.md) describes the

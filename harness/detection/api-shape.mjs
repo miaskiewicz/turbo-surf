@@ -214,6 +214,8 @@ export async function captureApiShape({
       note: "Uninstrumented localhost API contract queries; no site detection conclusion.",
       build,
       chromeVersion: traces[0].browserVersion,
+      // The product version alone does not identify the linked engine patch.
+      chromeV8Version: traces[0].browserV8Version,
       binaryHash: hash(readFileSync(frozen)),
       collectorHash: hash(collectorSource),
       collector,

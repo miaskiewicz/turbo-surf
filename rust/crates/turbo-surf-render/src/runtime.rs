@@ -2217,6 +2217,7 @@ fn op_fingerprint() -> String {
     let profile = turbo_surf_core::fingerprint::default_profile();
     let mut defaults = serde_json::json!({
         "fullVersion": profile.full_version,
+        "defaultMajor": profile.chrome_major,
         "defaultUserAgent": profile.user_agent,
         "architecture": profile.architecture(),
         "platformVersion": profile.platform_version(),
@@ -7364,19 +7365,18 @@ if (!__G.isFrame) {
 const __fp = (() => { try { return JSON.parse(ops.op_fingerprint()); } catch (e) { return {}; } })();
 const __pick = (k, d) => (__fp[k] !== undefined ? __fp[k] : d);
 const __ua = __pick("userAgent",
-  (ops.op_user_agent && ops.op_user_agent()) || __fp.defaultUserAgent ||
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36");
+  (ops.op_user_agent && ops.op_user_agent()) || __fp.defaultUserAgent || "");
 // Derive the major from the ACTUAL UA string so navigator.userAgentData.brands always
 // agree with navigator.userAgent (a UA-string `Chrome/153` with `brands` v154 is a hard
 // tell). An explicit chromeMajor override still wins; else parse `Chrome/<major>` from
-// __ua, falling back to the current-stable default.
-const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || [])[1]) || 155));
+// __ua, falling back to the registry default major from op_fingerprint.
+const __major = String(__pick("chromeMajor", ((__ua.match(/Chrome\/(\d+)/) || [])[1]) || __fp.defaultMajor));
 // Full build for high-entropy UA-CH (fullVersionList / uaFullVersion) — real Chrome
 // reports the FULL version here (e.g. 154.0.8037.98), NOT the reduced <major>.0.0.0
-// the UA string carries. Default matches turbo-surf-core's browser registry default
-// release; a caller rotating to a non-default major should pass fullVersion too (the
+// the UA string carries. op_fingerprint always supplies the registry default release's
+// full version (the fallback is unreachable); a caller rotating to a non-default major should pass fullVersion too (the
 // session pushes it from the wire profile so both layers stay coherent).
-const __fullVersion = String(__pick("fullVersion", "155.0.8059.80"));
+const __fullVersion = String(__pick("fullVersion", `${__major}.0.0.0`));
 const __brands=JSON.parse(ops.op_browser_brands(Number(__major), __major, false));
 const __fullBrands=JSON.parse(ops.op_browser_brands(Number(__major), __fullVersion, true));
 // Chrome ships exactly these five PDF-viewer plugins, all aliased to the internal

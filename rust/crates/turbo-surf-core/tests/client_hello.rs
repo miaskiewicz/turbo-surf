@@ -1,4 +1,4 @@
-//! Offline wire regression against a Chrome 154 localhost ClientHello capture.
+//! Offline wire regression against the Chrome 154-recipe localhost ClientHello.
 //! The listener closes before certificate exchange or HTTP; no remote traffic.
 #![cfg(feature = "impersonate")]
 
@@ -28,7 +28,10 @@ fn grease(value: u16) -> bool {
 
 #[tokio::test]
 async fn chrome154_client_hello_has_real_anchors_and_signature_grease() {
-    assert_eq!(transport_chrome_major(), Some(155));
+    assert_eq!(
+        transport_chrome_major(),
+        Some(turbo_surf_core::browser::DEFAULT_MAJOR)
+    );
     let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = server.local_addr().unwrap();
     let capture = tokio::spawn(async move {

@@ -1,5 +1,9 @@
 # Re-measuring API-INVENTORY.json against Chrome 156
 
+The browser identity (UA, client hints, header orders, TLS/H2, JS identity) is
+re-versioned separately by [CHROME-REVERSION.md](./CHROME-REVERSION.md); its step 1
+uses the same `freeze-chrome.mjs` oracle convention as below.
+
 This is how to regenerate [API-INVENTORY.json](./API-INVENTORY.json) once a batch of #28
 parity work has merged. Run it from the repository root, on macOS arm64 with Node 22+.
 It covers the same 75 interfaces as the tracked snapshot, plus an optional expanded scope.

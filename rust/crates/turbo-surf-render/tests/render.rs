@@ -1666,9 +1666,19 @@ fn chrome_fingerprint_identity_is_coherent() {
         v["getContextNative"], true,
         "getContext.toString must be native"
     );
-    // Measured Chrome 155 brand order and major-seeded GREASE match the wire header.
-    assert_eq!(v["brands"], "Google Chrome 155,Chromium 155,Not(A:Brand 24");
-    assert_eq!(v["deviceMemory"], 16);
+    // The default release's major-seeded GREASE brand order matches the wire header.
+    let release = turbo_surf_core::browser::default_release();
+    let brands = turbo_surf_core::fingerprint::brand_versions(
+        release.major,
+        &release.major.to_string(),
+        false,
+    )
+    .iter()
+    .map(|item| format!("{} {}", item.brand, item.version))
+    .collect::<Vec<_>>()
+    .join(",");
+    assert_eq!(v["brands"], brands);
+    assert_eq!(v["deviceMemory"], release.default_device_memory);
     assert_eq!(v["pdf"], true);
     assert_eq!(v["mimeLen"], 2);
     assert_eq!(v["notif"], "default");
@@ -1700,13 +1710,15 @@ fn fingerprint_override_applies_and_resets() {
         "override not applied: {out}"
     );
 
-    // Reset restores the current Chrome 155 macOS defaults.
+    // Reset restores the registry default release's macOS defaults.
     turbo_surf_render::set_fingerprint("{}");
     let out = turbo_surf_render::render_html("<body></body>", probe).unwrap();
-    assert!(
-        out.contains("data-fp=\"MacIntel|8|en-US,en|1920|155|16\""),
-        "reset to defaults failed: {out}"
+    let release = turbo_surf_core::browser::default_release();
+    let expected = format!(
+        "data-fp=\"MacIntel|8|en-US,en|1920|{}|{}\"",
+        release.major, release.default_device_memory
     );
+    assert!(out.contains(&expected), "reset to defaults failed: {out}");
 }
 
 // Native-function fidelity: page JS that does `fetch.toString()` (a common

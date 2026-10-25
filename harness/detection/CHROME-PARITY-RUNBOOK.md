@@ -208,7 +208,8 @@ Expect actual native `15.5.35.23-rusty` and `stableWindowProxy: true`. The MCP s
 GPU/text/measurement hooks; there is no additional `--gpu` switch. Compiled GPU support does not establish successful GPU
 readback: inspect the shared WebGL probe pixels/metadata. Software fallback is not GPU parity proof.
 
-The target identity is155; its upstream wreq TLS/H2 recipe is154. Record `reportedChromeMajor`, `transportChromeMajor`
+The target identity is the registry default (`browser_releases.json`, now 156; see
+[CHROME-REVERSION.md](./CHROME-REVERSION.md)); its upstream wreq TLS/H2 recipe is154. Record `reportedChromeMajor`, `transportChromeMajor`
 and `transportBaseChromeMajor` separately. Matching pixels/headers/version strings is not complete browser parity.
 Default builds link V8150; probe the selected addon after the gate below.
 Standalone Python wheels also use reqwest/rustls resource loading and software

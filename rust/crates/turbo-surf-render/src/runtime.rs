@@ -5091,7 +5091,13 @@ fn op_frame_set_document<'s>(
             let policy = handle.policy.borrow();
             policy.initial_base.has_policy() || policy.report_only.has_policy()
         });
-        if source_positions {
+        if metadata["location"] == "about:srcdoc" {
+            crate::browser_env::install_independent_srcdoc_units(
+                scope,
+                &html_units,
+                source_positions,
+            );
+        } else if source_positions {
             crate::browser_env::install_independent_utf16_source_positions(scope, &html_units);
         } else {
             crate::browser_env::install_independent_html_units(scope, &html_units);
@@ -9269,8 +9275,20 @@ let __resourceTimingBufferSize=250,__resourceBufferFullHandler=null;
     const entry=Object.create(PerformanceEntry.prototype);__performanceEntries.set(entry,{name:String(name),navigationId:__navigationId,entryType:'resource',startTime,duration:Math.max(0,endTime-startTime)});Object.defineProperties(entry,{initiatorType:{value:String(initiatorType),enumerable:true},encodedBodySize:{value:encodedSize,enumerable:true},decodedBodySize:{value:encodedSize,enumerable:true}});__performanceTimeline.push(entry);
   };
 }
-__defineDocumentAccessor("scrollingElement", state => state.document.compatMode === "BackCompat"
-  ? state.document.body : state.document.documentElement);
+// A quirks document scrolls through its body unless that body is itself a
+// scroll container (CSSOM View), decided by the native layout. Like the Window
+// offsets, this getter never throws: a document native layout rejects keeps the
+// body, whose overflow then remains unproven.
+__defineDocumentAccessor("scrollingElement", state => {
+  const document = state.document;
+  if (document.compatMode !== "BackCompat") return document.documentElement;
+  const body = document.body;
+  try {
+    return body !== null && ops.op_live_scroll_container(body) ? null : body;
+  } catch {
+    return body;
+  }
+});
 // window.scheduler — the Prioritized Task Scheduling API (Chrome). google's homepage reads
 // window.scheduler; deno_core doesn't ship it. postTask runs the callback through the virtual
 // timer queue (honoring `delay`) and resolves with its result; yield() defers to a macrotask.

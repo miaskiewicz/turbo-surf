@@ -39,6 +39,7 @@ mod live_layout_scroll;
 mod live_layout_supports;
 mod live_layout_text;
 mod live_layout_visibility;
+mod live_layout_zoom;
 mod live_stylesheets;
 mod message_ports;
 mod permissions_policy;

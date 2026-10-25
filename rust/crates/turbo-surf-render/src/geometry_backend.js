@@ -633,22 +633,23 @@
     });
     return promise;
   }
-  function scrollElement(element, request, relative) {
+  // Window members address the viewport through the root in either document mode.
+  function scrollElement(element, request, relative, viewport = false) {
     interrupt(element);
     let { x, y } = request;
     if (request.behavior === "smooth") {
       if (relative) {
-        const current = ops.op_live_element_scroll(element, 0, 0);
+        const current = ops.op_live_element_scroll(element, viewport ? 4 : 0, 0);
         x = x !== x ? x : current.left + x;
         y = y !== y ? y : current.top + y;
       }
       return deferred(
         element,
-        () => scrolled(element, ops.op_live_element_scroll_to(element, x, y, false)),
+        () => scrolled(element, ops.op_live_element_scroll_to(element, x, y, false, viewport)),
         boxKey(element),
       );
     }
-    scrolled(element, ops.op_live_element_scroll_to(element, x, y, relative));
+    scrolled(element, ops.op_live_element_scroll_to(element, x, y, relative, viewport));
     return settled();
   }
   function rejectWith(error) {
@@ -689,7 +690,7 @@
               throw new LocalTypeError(prefix + "Illegal invocation");
             const request = scrollArguments(arguments, prefix);
             const root = apply(documentElement, currentDocument(), []);
-            return root === null ? settled() : scrollElement(root, request, relative);
+            return root === null ? settled() : scrollElement(root, request, relative, true);
           } catch (error) {
             return rejectWith(error);
           }
@@ -717,7 +718,7 @@
           const root = apply(documentElement, currentDocument(), []);
           if (root === null) return 0;
           try {
-            return ops.op_live_element_scroll(root, 0, 0)[field];
+            return ops.op_live_element_scroll(root, 4, 0)[field];
           } catch {
             // Window offsets never throw: unsupported layout keeps the last
             // clamped position instead of re-clamping against current content.
@@ -1037,6 +1038,88 @@
         name === "caretRangeFromPoint" ? 0 : 2,
       ),
       writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  // Standardized zoom: the effective zoom of an element with a layout box.
+  define(Element.prototype, "currentCSSZoom", {
+    __proto__: null,
+    get: make(
+      function () {
+        brand(this, 1);
+        return ops.op_live_element_zoom(this);
+      },
+      "get currentCSSZoom",
+      0,
+    ),
+    enumerable: true,
+    configurable: true,
+  });
+  // HTMLInputElement width/height: a rendered image button reports its content
+  // box; without a layout box the dimension attribute, else 0. Other types are 0.
+  const getAttribute = Element.prototype.getAttribute;
+  const setAttribute = Element.prototype.setAttribute;
+  const charCode = String.prototype.charCodeAt;
+  const truncate = Math.trunc;
+  function imageType(element) {
+    const type = apply(getAttribute, element, ["type"]);
+    if (type === null || type.length !== 5) return false;
+    for (let i = 0; i < 5; i++) {
+      const code = apply(charCode, type, [i]);
+      if ((code >= 65 && code <= 90 ? code + 32 : code) !== apply(charCode, "image", [i]))
+        return false;
+    }
+    return true;
+  }
+  // HTML's rules for parsing non-negative integers.
+  function nonNegativeInteger(text) {
+    if (text === null) return null;
+    let index = 0;
+    const length = text.length;
+    const at = (position) => apply(charCode, text, [position]);
+    const space = (code) => code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
+    while (index < length && space(at(index))) index++;
+    let negative = false;
+    if (index < length && at(index) === 45) {
+      negative = true;
+      index++;
+    } else if (index < length && at(index) === 43) index++;
+    let value = 0,
+      digits = 0;
+    for (; index < length && at(index) >= 48 && at(index) <= 57; index++, digits++)
+      value = value * 10 + (at(index) - 48);
+    if (digits === 0 || (negative && value !== 0) || value > 4294967295) return null;
+    return value;
+  }
+  for (const [name, height] of [
+    ["width", false],
+    ["height", true],
+  ])
+    define(HTMLInputElement.prototype, name, {
+      __proto__: null,
+      get: make(
+        function () {
+          brand(this, 3);
+          if (!imageType(this)) return 0;
+          const rendered = ops.op_live_input_size(this, height);
+          if (rendered !== null) return rendered;
+          return nonNegativeInteger(apply(getAttribute, this, [name])) ?? 0;
+        },
+        `get ${name}`,
+        0,
+      ),
+      set: make(
+        function (value) {
+          brand(this, 3);
+          // [CEReactions] unsigned long reflection: out-of-range values reflect 0.
+          let result = number(value);
+          result = finite(result) ? truncate(result) % 4294967296 : 0;
+          if (result < 0) result += 4294967296;
+          apply(setAttribute, this, [name, LocalString(result > 2147483647 ? 0 : result)]);
+        },
+        `set ${name}`,
+        1,
+      ),
       enumerable: true,
       configurable: true,
     });

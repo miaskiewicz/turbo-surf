@@ -207,3 +207,7 @@ pub(super) fn install(scope: &mut v8::PinScope) {
 #[cfg(test)]
 #[path = "select_element_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "control_interfaces_tests.rs"]
+pub(crate) mod control_tests;

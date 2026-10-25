@@ -131,6 +131,8 @@ mod html_invokers;
 mod html_popover;
 #[path = "html_text.rs"]
 mod html_text;
+#[path = "hyperlink_utils.rs"]
+mod hyperlink_utils;
 #[path = "input_members.rs"]
 mod input_members;
 #[path = "shadow_html.rs"]
@@ -7049,6 +7051,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     html_invokers::install(scope);
     input_members::install(scope);
     select_element::install(scope);
+    hyperlink_utils::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())
@@ -7115,6 +7118,8 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     event_handlers::install(scope, None, "about:blank");
     custom_elements::install(scope);
     element_internals::install(scope);
+    // After custom_elements re-creates the HTML constructors, so static members stay on them.
+    run_js(scope, include_str!("interface_members.js"));
 }
 
 fn bind_document(scope: &mut v8::PinScope) {

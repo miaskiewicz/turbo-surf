@@ -41,6 +41,25 @@
       return owner(this);
     },'get form',0)});
   }
+  // label.form is its labeled control's form owner; option.form is its select's (directly or
+  // through one optgroup). Neither element is itself form-associated.
+  const formAssociated = ['button','fieldset','input','object','output','select','textarea'];
+  // form_collections.js adds the native label-control bridge to this shared capture record.
+  const internals = {};
+  const selectOf = option => {
+    let container = parent(option);
+    if (container && bridge('html-element', container) && apply(localNameGetter, container, []) === 'optgroup') container = parent(container);
+    return container && bridge('html-element', container) && apply(localNameGetter, container, []) === 'select' ? container : null;
+  };
+  for (const [interfaceName, localName, read] of [
+    ['HTMLLabelElement', 'label', label => { const control = internals.labelControl(label); if (!control) return null; const kind = apply(localNameGetter, control, []); return bridge('html-element', control) && apply(controlIndexOf, formAssociated, [kind]) >= 0 || associatedGet(control) ? owner(control) : null; }],
+    ['HTMLOptionElement', 'option', option => { const select = selectOf(option); return select ? owner(select) : null; }],
+  ]) {
+    define(g[interfaceName].prototype, 'form', {configurable:true, enumerable:true, get:native(function(){
+      if(!bridge('html-element',this)||apply(localNameGetter,this,[])!==localName)throw new ErrorType('Illegal invocation');
+      return read(this);
+    },'get form',0)});
+  }
   const present = (element, name) => attr(element, name) !== null;
   const type = element => {
     if(tag(element)!=='button')return lower(attr(element,'type')||'text');
@@ -349,9 +368,9 @@
     } finally {if(!hold||!complete)privateSet(form,'constructing-entries',false);}
   };
   g.__captureFormCollections={bridge,privateGet,privateSet,formControls,checkForm,attr,tag,type,readValue,checkedValue,queryAll,getRoot,owner,associatedGet,localNameGetter};
-  g.__captureFormInternals = {
+  g.__captureFormInternals = Object.assign(internals, {
     register:(host,record)=>associatedSet(host,record),owner,disabled,candidate,validity,message,validateControl,
     attribute:attr,parent,tag,queryAll,getRoot,apply,emit:(host,event)=>bridge('emit',host,event),
-  };
+  });
   g.__captureFormSubmission=request;
 })();

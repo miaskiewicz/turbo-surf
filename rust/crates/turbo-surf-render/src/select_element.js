@@ -9,6 +9,7 @@
     accessor = ns.domAccessor;
   const selection = ns.selectSelection;
   delete ns.selectSelection;
+  const liveCollection = ns.internalsLiveCollection;
   const selectionOf = selection.selectionOf,
     optionStates = selection.optionStates,
     emptySelects = selection.emptySelects,
@@ -18,6 +19,7 @@
   const P = g.HTMLSelectElement.prototype;
   const apply = Reflect.apply,
     define = Object.defineProperty,
+    setPrototypeOf = Object.setPrototypeOf,
     ErrorType = TypeError,
     StringValue = String,
     exec = RegExp.prototype.exec,
@@ -235,6 +237,174 @@
     writable: true,
     enumerable: false,
     configurable: true,
+  });
+  // <option> text/label/value/index. text strips and collapses ASCII whitespace over the option's
+  // Text descendants, skipping script subtrees (HTML and SVG).
+  const OP = g.HTMLOptionElement.prototype,
+    textContent = Object.getOwnPropertyDescriptor(g.Node.prototype, "textContent"),
+    nodeType = accessor("nodeType", false, "Node"),
+    nodeData = accessor("nodeValue", false, "Node"),
+    localNameOf = accessor("localName", false, "Element"),
+    namespaceOf = accessor("namespaceURI", false, "Element"),
+    firstChildOf = accessor("firstChild", false, "Node"),
+    nextSiblingOf = accessor("nextSibling", false, "Node"),
+    replace = String.prototype.replace;
+  const checkOption = (receiver) => apply(optionBrand, receiver, []);
+  function optionText(option) {
+    let text = "";
+    (function walk(node) {
+      for (let child = apply(firstChildOf, node, []); child; child = apply(nextSiblingOf, child, [])) {
+        const kind = apply(nodeType, child, []);
+        if (kind === 3 || kind === 4) text += apply(nodeData, child, []);
+        else if (kind === 1) {
+          const namespace = apply(namespaceOf, child, []);
+          if (apply(localNameOf, child, []) === "script" && (namespace === html || namespace === "http://www.w3.org/2000/svg")) continue;
+          walk(child);
+        }
+      }
+    })(option);
+    return apply(replace, apply(replace, text, [/[\t\n\f\r ]+/g, " "]), [/^ | $/g, ""]);
+  }
+  const optionAccessor = (name, read, write) => {
+    const descriptor = { get: make(function () { checkOption(this); return read(this); }, "get " + name, 0), enumerable: true, configurable: true };
+    if (write) descriptor.set = make(function (value) { checkOption(this); write(this, value); }, "set " + name, 1);
+    define(OP, name, descriptor);
+  };
+  optionAccessor("label", (option) => apply(getAttribute, option, ["label"]) ?? optionText(option), (option, value) => apply(setAttribute, option, ["label", string(value)]));
+  optionAccessor("value", (option) => apply(getAttribute, option, ["value"]) ?? optionText(option), (option, value) => apply(setAttribute, option, ["value", string(value)]));
+  optionAccessor("text", optionText, (option, value) => apply(textContent.set, option, [string(value)]));
+  optionAccessor("index", (option) => {
+    const select = ownerSelect(option);
+    const index = select ? apply(indexOf, optionsOf(select), [option]) : -1;
+    return index < 0 ? 0 : index;
+  });
+  // HTMLOptionsCollection: select.options, a live HTMLCollection over the select's list of
+  // options whose mutators are the select's own algorithms above ([SameObject] per select).
+  const collectionCtor = make(
+    function () {
+      throw new ErrorType("Illegal constructor");
+    },
+    "HTMLOptionsCollection",
+    0,
+    true,
+  );
+  const CP = collectionCtor.prototype;
+  setPrototypeOf(CP, g.HTMLCollection.prototype);
+  setPrototypeOf(collectionCtor, g.HTMLCollection);
+  define(collectionCtor, "prototype", { writable: false });
+  define(g, "HTMLOptionsCollection", { value: collectionCtor, writable: true, configurable: true, enumerable: false });
+  const collectionSelects = new WeakMap(),
+    selectCollections = new WeakMap(),
+    weakGet = WeakMap.prototype.get,
+    weakSet = WeakMap.prototype.set;
+  const owning = (receiver) => {
+    const select = receiver !== null && typeof receiver === "object" ? apply(weakGet, collectionSelects, [receiver]) : undefined;
+    if (!select) throw new ErrorType("Illegal invocation");
+    return select;
+  };
+  const selectedIndex = Object.getOwnPropertyDescriptor(P, "selectedIndex");
+  const collectionProperty = (name, read, write) => {
+    const descriptor = { get: make(read, "get " + name, 0), enumerable: true, configurable: true };
+    if (write) descriptor.set = make(write, "set " + name, 1);
+    define(CP, name, descriptor);
+  };
+  collectionProperty(
+    "length",
+    function () {
+      return optionsOf(owning(this)).length;
+    },
+    function (value) {
+      setLength(owning(this), unsigned(value));
+    },
+  );
+  collectionProperty(
+    "selectedIndex",
+    function () {
+      return apply(selectedIndex.get, owning(this), []);
+    },
+    function (value) {
+      apply(selectedIndex.set, owning(this), [long(value)]);
+    },
+  );
+  define(CP, "add", {
+    value: make(
+      function (element, before) {
+        const select = owning(this);
+        required(arguments.length, "add");
+        if (!branded(insertableBrand, element))
+          throw new ErrorType("The provided value is not of type '(HTMLOptGroupElement or HTMLOptionElement)'.");
+        if (before === undefined || before === null) before = null;
+        else if (!branded(htmlBrand, before)) before = long(before);
+        add(select, element, before);
+      },
+      "add",
+      1,
+    ),
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+  define(CP, "remove", {
+    value: make(
+      function (index) {
+        const select = owning(this);
+        required(arguments.length, "remove");
+        index = long(index);
+        const options = optionsOf(select);
+        if (index >= 0 && index < options.length) remove(select, options[index]);
+      },
+      "remove",
+      1,
+    ),
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+  define(CP, "constructor", { value: collectionCtor, writable: true, enumerable: false, configurable: true });
+  define(CP, Symbol.toStringTag, { value: "HTMLOptionsCollection", configurable: true });
+  define(CP, Symbol.iterator, { value: Array.prototype.values, writable: true, enumerable: false, configurable: true });
+  const indexedSet = (select, index, value) => {
+    if (value !== null && value !== undefined && !branded(optionBrand, value))
+      throw new ErrorType(
+        "Failed to set an indexed property [" + index + "] on 'HTMLOptionsCollection': parameter 2 is not of type 'HTMLOptionElement'.",
+      );
+    setOption(select, index, value ?? null);
+    return true;
+  };
+  function optionsCollection(select) {
+    let collection = apply(weakGet, selectCollections, [select]);
+    if (collection) return collection;
+    collection = liveCollection(() => optionsOf(select), true, {
+      prototype: CP,
+      kind: "HTMLOptionsCollection",
+      // Unlike HTMLCollection, the options collection's named properties are enumerable.
+      namedEnumerable: true,
+      setIndex(index, value, defining) {
+        if (defining) {
+          if ("get" in value || "set" in value) throw new ErrorType("Accessor properties are not allowed.");
+          value = value.value;
+        }
+        return indexedSet(select, index, value);
+      },
+    });
+    apply(weakSet, selectCollections, [select, collection]);
+    apply(weakSet, collectionSelects, [collection, select]);
+    return collection;
+  }
+  property("options", function () {
+    check(this);
+    return optionsCollection(this);
+  });
+  const selectedCollections = new WeakMap();
+  property("selectedOptions", function () {
+    check(this);
+    let collection = apply(weakGet, selectedCollections, [this]);
+    if (!collection) {
+      const select = this;
+      collection = liveCollection(() => selectionOf(select), true);
+      apply(weakSet, selectedCollections, [select, collection]);
+    }
+    return collection;
   });
   // Indexed exotic behaviour on the select itself, dispatched by the native element interceptor
   // (select_element.rs). undefined means "not intercepted", so ordinary lookup continues.

@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.5.5] — 2026-10-25 — Chrome-156 parity batch + re-version
+
+Lands the Chrome-156 parity batch tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28):
+re-vendors the turbo-test DOM binding with the closed missing-member work and
+adds turbo-surf-side geometry/runtime support. Every closed surface has an
+independently captured Chrome 156.0.8078.47 control and an offline regression;
+no presence-only stubs. Depends on the released turbo-dom 0.5.8 and
+turbo-html2pdf-core 0.3.9.
+
+### Added / changed
+- Re-vendored binding: meter/progress/output, select collection API, input/
+  textarea reflection, invoker commands + CommandEvent, getHTML/setHTMLUnsafe and
+  ShadowRoot state, declarative shadow DOM in parsing + Sanitizer API, document.all
+  and legacy Document members, pointer capture/lock, Web Animations, CSS Typed OM,
+  View Transitions, editing (execCommand/EditContext), Selection + Range.expand,
+  reference targets / interest / focusgroup, FileList/DataTransfer, HTMLOptionsCollection/
+  History/Location/VisualViewport/ScreenOrientation, strict CSSOM selector admission,
+  interface key order, and the privacy-sandbox member stubs that reproduce Chrome's
+  fresh-profile rejections.
+- turbo-surf geometry/runtime: real scroll + smooth scrolling + scroll-snap,
+  checkVisibility, CSS zoom / currentCSSZoom, root/viewport client sizes, observers
+  (Intersection/Resize/Performance), the view-transition/animation frame loop,
+  document response hooks (lastModified/domain/agent-cluster) and fullscreen/PiP
+  permissions-policy accessors.
+- Emulated identity re-versioned to Chrome 156.0.8078.47, with a reusable
+  measured identity battery and a data-driven re-version helper
+  (harness/detection/CHROME-REVERSION.md).
+
+### Known gaps / deferred
+- JS engine stays stock V8 15.0 vs Chrome 156's 15.6 (native 15.6 is an opt-in
+  from-source profile; see harness/detection/engine/README.md).
+- The cross-repo dependency consolidation (moving the DOM binding + render engine +
+  V8 fork into turbo-dom) is deferred to follow-up PRs.
+- PARITY-GAPS.md records the remaining open categories; issue #28 stays open.
+
+
 ## [0.5.4] — 2026-10-21 — browser parity and reusable detection differential
 
 This release collects the work in PR26. The entries describe the implemented

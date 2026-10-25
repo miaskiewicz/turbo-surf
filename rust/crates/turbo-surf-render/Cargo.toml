@@ -26,10 +26,10 @@ deno_error = "=0.7.1"
 # V8 backend uses official rusty_v8 150.4; mixing in a second native V8 library
 # would make the DOM handles incompatible with the runtime's context.
 v8 = { package = "turbo-surf-deno-v8", version = "=0.4.0" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.7" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
 # Public live-tree snapshots preserve source provenance without HTML serialization.
 # Published0.3.8 includes the composed-layout and shared-font producer fixes.
-turbo-html2pdf-core = { version = "0.3.8" }
+turbo-html2pdf-core = { version = "0.3.9" }
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
 # fetch backend, so downstream non-binary consumers (the PyO3 wheel) avoid its
 # extra transport build. V8, native crypto and audio still require native toolchains.

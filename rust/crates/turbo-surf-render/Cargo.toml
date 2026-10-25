@@ -35,7 +35,7 @@ turbo-html2pdf-core = { version = "0.3.9" }
 # extra transport build. V8, native crypto and audio still require native toolchains.
 # The shipped mcp binary gets impersonate — it requests
 # `turbo-surf-core/impersonate` explicitly (its own default).
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.4", default-features = false }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.5", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"

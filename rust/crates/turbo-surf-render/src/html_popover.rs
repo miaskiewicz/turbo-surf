@@ -271,6 +271,7 @@ fn hide_from<'s>(
             .open
             .retain(|entry| entry.node != node)
     });
+    user_activation_gates::popover_hidden(node);
     if events {
         queue(scope, node, true, false, source);
     }
@@ -338,13 +339,14 @@ fn show<'s>(
         return;
     }
     DOM.with(|dom| {
-        dom.borrow_mut()
-            .as_mut()
-            .unwrap()
-            .popover
-            .open
-            .push(Entry { node, mode })
+        dom.borrow_mut().as_mut().unwrap().popover.open.push(Entry {
+            node,
+            mode: mode.clone(),
+        })
     });
+    if mode != "manual" {
+        user_activation_gates::popover_shown(node);
+    }
     queue(scope, node, false, true, source);
 }
 /// Invoker activation: the popover algorithms with an invoker source and exceptions
@@ -385,6 +387,7 @@ pub(super) fn invoke<'s>(
 }
 pub(super) fn disconnect(scope: &mut v8::PinScope, root: Handle, include_root: bool) {
     html_dialog::disconnect(root, include_root);
+    user_activation_gates::disconnect(scope, root, include_root);
     let nodes = DOM.with(|dom| {
         let dom = dom.borrow();
         let Some(dom) = dom.as_ref() else {
@@ -535,6 +538,66 @@ pub(super) fn hide_unrelated(scope: &mut v8::PinScope, node: Handle) {
     });
     for entry in closing {
         hide(scope, entry, true);
+    }
+}
+/// A close watcher's close action: hide the popover, firing events.
+pub(super) fn hide_popover(scope: &mut v8::PinScope, node: Handle) {
+    hide(scope, node, true);
+}
+/// Whether `node` is a showing auto or hint popover (light dismiss considers no others).
+pub(super) fn auto_showing(node: Handle) -> bool {
+    DOM.with(|dom| {
+        dom.borrow().as_ref().is_some_and(|dom| {
+            dom.popover
+                .open
+                .iter()
+                .any(|entry| entry.node == node && entry.mode != "manual")
+        })
+    })
+}
+pub(super) fn any_auto_showing() -> bool {
+    DOM.with(|dom| {
+        dom.borrow()
+            .as_ref()
+            .is_some_and(|dom| dom.popover.open.iter().any(|entry| entry.mode != "manual"))
+    })
+}
+/// The later-shown (higher in the popover stack) of two showing popovers.
+pub(super) fn topmost_of(first: Handle, second: Handle) -> Handle {
+    DOM.with(|dom| {
+        let dom = dom.borrow();
+        let position = |node: Handle| {
+            dom.as_ref()
+                .and_then(|dom| dom.popover.open.iter().position(|entry| entry.node == node))
+        };
+        if position(first) >= position(second) {
+            first
+        } else {
+            second
+        }
+    })
+}
+/// https://html.spec.whatwg.org/#hide-all-popovers-until: every auto/hint popover above
+/// `endpoint` (all of them for the document), topmost first, firing events.
+pub(super) fn hide_until(scope: &mut v8::PinScope, endpoint: Option<Handle>) {
+    let closing = DOM.with(|dom| {
+        let dom = dom.borrow();
+        let Some(dom) = dom.as_ref() else {
+            return Vec::new();
+        };
+        let open = &dom.popover.open;
+        let start = endpoint
+            .and_then(|endpoint| open.iter().position(|entry| entry.node == endpoint))
+            .map_or(0, |index| index + 1);
+        open[start..]
+            .iter()
+            .rev()
+            .filter(|entry| entry.mode != "manual")
+            .map(|entry| entry.node)
+            .collect::<Vec<_>>()
+    });
+    for node in closing {
+        hide(scope, node, true);
     }
 }
 /// Queue `callback` as a task on this document's private, host-captured scheduler.

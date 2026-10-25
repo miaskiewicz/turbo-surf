@@ -15,7 +15,7 @@
   const mouseButton = accessor(g.MouseEvent.prototype, 'button'), popoverOf = accessor(g.HTMLElement.prototype, 'popover');
   const formOf = accessor(g.HTMLButtonElement.prototype, 'form'), inputFormOf = accessor(g.HTMLInputElement.prototype, 'form');
   const reset = g.HTMLFormElement.prototype.reset, contains = g.Node.prototype.contains;
-  const getAttribute = g.Element.prototype.getAttribute, hasAttribute = g.Element.prototype.hasAttribute, setAttribute = g.Element.prototype.setAttribute;
+  const getAttribute = g.Element.prototype.getAttribute, hasAttribute = g.Element.prototype.hasAttribute, setAttribute = g.Element.prototype.setAttribute, removeAttribute = g.Element.prototype.removeAttribute;
   const construct = Reflect.construct, Event = g.Event;
   const HTML = 'http://www.w3.org/1999/xhtml';
   const string = value => { if (typeof value === 'symbol') throw new TypeError('Cannot convert a Symbol to a string'); return StringValue(value); };
@@ -115,18 +115,70 @@
     if (form !== null && type !== 'button') { if (type === 'reset') reset.call(form); return; }
     popoverTargetActivation(node, eventTarget);
   }
-  const activates = node => element(node) && namespace.call(node) === HTML && (localName.call(node) === 'button' || localName.call(node) === 'input' || ((localName.call(node) === 'a' || localName.call(node) === 'area') && hasAttribute.call(node, 'href')));
-  // Called after an uncanceled `click` dispatch. Only MouseEvent clicks activate; ancestors
-  // are considered only for bubbling events, crossing shadow roots only when composed.
-  g.__captureInvokerActivation = function (event, target) {
-    try { mouseButton.call(event); } catch (_) { return; }
+  // https://dom.spec.whatwg.org/#eventtarget-activation-behavior: elements with activation behavior.
+  const activates = node => {
+    if (!element(node) || namespace.call(node) !== HTML) return false;
+    const name = localName.call(node);
+    return name === 'button' || name === 'input' || name === 'label' || name === 'summary' || ((name === 'a' || name === 'area') && hasAttribute.call(node, 'href'));
+  };
+  // Only a MouseEvent `click` has an activation target (isTrusted is irrelevant): the target
+  // itself, or for bubbling events its nearest ancestor with activation behavior, crossing
+  // shadow roots only when the event is composed.
+  g.__captureActivationTarget = function (event, target) {
+    try { mouseButton.call(event); } catch (_) { return null; }
     let node = target;
-    if (!activates(node)) {
-      if (!bubblesOf.call(event)) return;
-      do { const parent = parentNode.call(node); node = parent && nodeType.call(parent) === 11 ? (composedOf.call(event) ? shadowHost(parent) : null) : parent; } while (node && !activates(node));
-      if (!node) return;
-    }
-    if (localName.call(node) === 'button') buttonActivation(node, target);
-    else if (localName.call(node) === 'input') inputActivation(node, target);
+    if (activates(node)) return node;
+    if (!bubblesOf.call(event)) return null;
+    do { const parent = parentNode.call(node); node = parent && nodeType.call(parent) === 11 ? (composedOf.call(event) ? shadowHost(parent) : null) : parent; } while (node && !activates(node));
+    return node || null;
+  };
+  const labelPrototype = g.HTMLLabelElement.prototype, focus = g.HTMLElement.prototype.focus;
+  let labelControl = null;
+  const firstChild = accessor(g.Node.prototype, 'firstChild'), nextSibling = accessor(g.Node.prototype, 'nextSibling');
+  // https://html.spec.whatwg.org/#interactive-content between the event target and its label.
+  const interactive = node => {
+    if (!element(node) || namespace.call(node) !== HTML) return false;
+    const name = localName.call(node);
+    if (name === 'button' || name === 'details' || name === 'embed' || name === 'iframe' || name === 'label' || name === 'select' || name === 'textarea') return true;
+    if (name === 'a') return hasAttribute.call(node, 'href');
+    if (name === 'input') return lower(attr(node, 'type') || '') !== 'hidden';
+    if (name === 'audio' || name === 'video') return hasAttribute.call(node, 'controls');
+    if (name === 'img') return hasAttribute.call(node, 'usemap');
+    return false;
+  };
+  // Chrome's label activation: focus the labeled control and fire a synthetic click at it,
+  // trusted exactly when the activating click was.
+  function labelActivation(label, eventTarget, event) {
+    if (labelControl === null) labelControl = accessor(labelPrototype, 'control');
+    const control = labelControl.call(label);
+    if (control === null || shadowIncludingDescendant(eventTarget, control)) return;
+    for (let node = eventTarget; node && node !== label; node = parentNode.call(node) || shadowHost(node)) if (interactive(node)) return;
+    if (disabled(control)) return;
+    focus.call(control);
+    Native('click', control, event);
+  }
+  // https://html.spec.whatwg.org/#the-summary-element activation behavior.
+  function summaryActivation(summary) {
+    const details = parentNode.call(summary);
+    if (!html(details, 'details')) return;
+    let first = firstChild.call(details);
+    while (first !== null && !html(first, 'summary')) first = nextSibling.call(first);
+    if (first !== summary) return;
+    if (hasAttribute.call(details, 'open')) removeAttribute.call(details, 'open'); else setAttribute.call(details, 'open', '');
+  }
+  // Runs after an uncanceled `click` whose activation target is `node`. Hyperlink following
+  // for a/area is not implemented: this engine has no navigation from activation.
+  g.__captureInvokerActivation = function (event, node, target) {
+    const name = localName.call(node);
+    if (name === 'button') buttonActivation(node, target);
+    else if (name === 'input') inputActivation(node, target);
+    else if (name === 'label') labelActivation(node, target, event);
+    else if (name === 'summary') summaryActivation(node);
+  };
+  // Light dismiss treats an invoker of a showing popover as inside that popover.
+  ns.invokerPopoverTarget = node => {
+    if (!html(node, 'button') && !html(node, 'input')) return null;
+    const popover = reference.read(node, 'popovertarget');
+    return popover !== null && namespace.call(popover) === HTML && popoverOf.call(popover) !== null ? popover : null;
   };
 })();

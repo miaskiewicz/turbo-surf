@@ -3,6 +3,7 @@
 use super::*;
 
 struct InvokerActivation(v8::Weak<v8::Function>);
+struct ActivationTarget(v8::Weak<v8::Function>);
 
 fn dispatch<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -27,6 +28,13 @@ fn dispatch<'s>(
             rv.set_bool(continued);
         }
         "disabled" => rv.set_bool(disabled_control(node)),
+        "click" => {
+            let trusted = v8::Local::<v8::Object>::try_from(args.get(2))
+                .ok()
+                .and_then(|event| event_record(scope, event))
+                .is_some_and(|record| get_bool_prop(scope, record, "trusted"));
+            synthetic_click(scope, target, node, trusted);
+        }
         "popover" => {
             let action = args.get(2).to_rust_string_lossy(scope);
             if let Ok(source) = v8::Local::<v8::Object>::try_from(args.get(3)) {
@@ -77,9 +85,32 @@ fn fieldset_disabled(tree: &Tree, h: Handle) -> bool {
     false
 }
 
-/// Run activation behavior after an uncanceled `click` reached `target`.
-pub(super) fn activate(scope: &mut v8::PinScope, event: v8::Local<v8::Object>, target: Handle) {
+/// The click's activation target: only MouseEvent clicks have one (the guest-invisible
+/// brand decides, never isTrusted).
+pub(super) fn activation_target(
+    scope: &mut v8::PinScope,
+    event: v8::Local<v8::Object>,
+    target: Handle,
+) -> Option<Handle> {
     let node = wrap(scope, target);
+    let context = node.get_creation_context(scope)?;
+    let finder = context.get_slot::<ActivationTarget>()?;
+    let function = dom_ownership::local(scope, &finder.0);
+    let receiver = v8::undefined(scope);
+    let found = function.call(scope, receiver.into(), &[event.into(), node.into()])?;
+    let found = v8::Local::<v8::Object>::try_from(found).ok()?;
+    handle_of(scope, found)
+}
+
+/// Run `activation`'s activation behavior after an uncanceled `click` reached `target`.
+pub(super) fn activate(
+    scope: &mut v8::PinScope,
+    event: v8::Local<v8::Object>,
+    activation: Handle,
+    target: Handle,
+) {
+    let node = wrap(scope, activation);
+    let target = wrap(scope, target);
     let Some(context) = node.get_creation_context(scope) else {
         return;
     };
@@ -89,7 +120,11 @@ pub(super) fn activate(scope: &mut v8::PinScope, event: v8::Local<v8::Object>, t
     let function = dom_ownership::local(scope, &activation.0);
     let receiver = v8::undefined(scope);
     v8::tc_scope!(let scope, scope);
-    function.call(scope, receiver.into(), &[event.into(), node.into()]);
+    function.call(
+        scope,
+        receiver.into(),
+        &[event.into(), node.into(), target.into()],
+    );
     if !scope.has_terminated() {
         if let Some(error) = scope.exception() {
             scope.reset();
@@ -102,18 +137,23 @@ pub(super) fn install(scope: &mut v8::PinScope) {
     let global = scope.get_current_context().global(scope);
     bind_method(scope, global, "__invokerNative", dispatch);
     run_js(scope, include_str!("html_invokers.js"));
-    let key = v8::String::new(scope, "__captureInvokerActivation").unwrap();
-    if let Some(function) = global
-        .get(scope, key.into())
-        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
-    {
-        if let Some(function) = dom_ownership::helper_function(scope, function) {
-            scope
-                .get_current_context()
-                .set_slot(std::rc::Rc::new(InvokerActivation(function)));
+    for name in ["__captureInvokerActivation", "__captureActivationTarget"] {
+        let key = v8::String::new(scope, name).unwrap();
+        if let Some(function) = global
+            .get(scope, key.into())
+            .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+        {
+            if let Some(function) = dom_ownership::helper_function(scope, function) {
+                let context = scope.get_current_context();
+                if name == "__captureInvokerActivation" {
+                    context.set_slot(std::rc::Rc::new(InvokerActivation(function)));
+                } else {
+                    context.set_slot(std::rc::Rc::new(ActivationTarget(function)));
+                }
+            }
         }
+        global.delete(scope, key.into());
     }
-    global.delete(scope, key.into());
 }
 
 #[cfg(test)]

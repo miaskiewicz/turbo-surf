@@ -1584,8 +1584,8 @@ if(typeof __ns.makeNativeFunction==='function'){
     // Alias the shim interface-constructor `.prototype`s onto the REAL element/document prototypes,
     // so a test patching HTMLElement.prototype.requestFullscreen / Document.prototype.exitFullscreen
     // (DataTableCore fullscreen) reaches our instances. Only affects methods that aren't own per
-    // instance (own native methods still shadow). Default fullscreen stubs so components work
-    // unmocked; document.fullscreenElement defaults null.
+    // instance (own native methods still shadow). The genuine fullscreen API is installed by
+    // user_activation_gates.js.
     try {
       if (g.HTMLElement) g.HTMLElement.prototype = baseProto;
       if (g.Element) g.Element.prototype = baseProto;
@@ -1617,8 +1617,6 @@ if(typeof __ns.makeNativeFunction==='function'){
       var docProto = Object.getPrototypeOf(d) || baseProto;
       if (g.Document) g.Document.prototype = docProto;
       if (g.HTMLDocument) g.HTMLDocument.prototype = docProto;
-      if (typeof baseProto.requestFullscreen !== 'function') baseProto.requestFullscreen = function(){ return Promise.resolve(); };
-      if (typeof docProto.exitFullscreen !== 'function') docProto.exitFullscreen = function(){ return Promise.resolve(); };
       // NB: define these directly (NOT guarded by Object.getOwnPropertyDescriptor) — the all-Rust
       // DOM's NON_MASKING name interceptor intercepts every absent property (returns undefined), so
       // getOwnPropertyDescriptor synthesizes a truthy descriptor and a `if (!descriptor)` guard would

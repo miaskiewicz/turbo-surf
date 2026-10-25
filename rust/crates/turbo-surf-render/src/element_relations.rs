@@ -27,6 +27,7 @@ pub(super) fn attribute_changed<'s>(
     if let Some(handle) = handle_of(scope, element) {
         script_state::attribute_changed(handle, name);
         form_checked_state::attribute_changed(handle, name);
+        user_activation_gates::attribute_changed(scope, handle, name);
     }
     if !name.starts_with("aria-") && !matches!(name, "popovertarget" | "commandfor") {
         return;

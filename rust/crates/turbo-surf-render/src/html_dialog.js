@@ -1,8 +1,8 @@
 // HTMLDialogElement: open/returnValue/closedBy reflection and show/showModal/close/requestClose
 // with Chrome's trusted beforetoggle/toggle/cancel/close events and dialog focusing steps,
 // plus the private dialog steps invoker commands and method=dialog form submission run.
-// Close requests come only from requestClose() and invokers: browserless there is no Esc key
-// or pointer input for close watchers or closedby=any light dismiss.
+// Open dialogs establish a native close watcher (user_activation_gates.rs), which runs Esc
+// close requests from embedder input and closedby=any light dismiss through the steps below.
 (function () {
   'use strict';
   const Native = globalThis.__dialogNative; delete globalThis.__dialogNative;
@@ -64,6 +64,7 @@
     queueToggle(node, 'closed', 'open', source);
     apply(setAttribute, node, [null, 'open', '']);
     if (isModal) Native('set-modal', node, true);
+    Native('opened', node);
     record(node).previous = Native('focused', node);
     Native('hide-popovers', node);
     focusingSteps(node);
@@ -80,6 +81,7 @@
       apply(removeAttribute, node, [null, 'open']);
       const wasModal = modal(node);
       Native('set-modal', node, false);
+      Native('closed', node);
       if (result !== null) state.returnValue = result;
       state.requestValue = null; state.requestSource = null;
       const previous = state.previous;
@@ -125,6 +127,14 @@
   // Chrome lists the interface members before constructor and @@toStringTag.
   for (const key of ['constructor', Symbol.toStringTag]) { const descriptor = Object.getOwnPropertyDescriptor(proto, key); if (descriptor) { delete proto[key]; define(proto, key, descriptor); } }
 
+  // The close watcher's cancel action fires `cancel`, cancelable only when the watcher may
+  // prevent closing; its close action closes with the pending request-close result.
+  ns.dialogCloseWatcher = (node, action, cancelable) => {
+    const state = record(node);
+    if (action === 'close') { close(node, state.requestValue, state.requestSource); return true; }
+    state.canceling = true;
+    try { return dispatch(node, new EventType('cancel', { __proto__: null, cancelable: !!cancelable })); } finally { state.canceling = false; }
+  };
   // https://html.spec.whatwg.org/#the-dialog-element command steps; exceptions are suppressed.
   ns.dialogCommandSteps = (node, command, source) => {
     const value = apply(getAttribute, source, [null, 'value']);

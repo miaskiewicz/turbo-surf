@@ -107,7 +107,7 @@
     function () {
       shadow(this);
       const document = apply(ownerDocument, this, []);
-      const current = document ? document.fullscreenElement : null;
+      const current = document && ns.fullscreenElementOf ? ns.fullscreenElementOf(document) : null;
       return object(current) ? native("retarget", this, current) : null;
     },
     function () {

@@ -153,3 +153,26 @@ fn plan_moves_only_the_out_of_order_suffix() {
         vec![2, 3]
     );
 }
+
+/// A termination requested while the step runs reaches the guest code that follows.
+#[test]
+fn termination_during_key_order_is_not_lost() {
+    super::tests::init_v8();
+    let isolate = &mut v8::Isolate::new(Default::default());
+    v8::scope!(let scope, isolate);
+    let context = v8::Context::new(scope, Default::default());
+    let scope = &mut v8::ContextScope::new(scope, context);
+    key_order::defer(scope);
+    install_independent_html(
+        scope,
+        "<!doctype html><html><head></head><body></body></html>",
+    );
+    scope.terminate_execution();
+    key_order::finish(scope);
+    v8::tc_scope!(let scope, scope);
+    let code = v8::String::new(scope, "'guest ran'").unwrap();
+    let ran = v8::Script::compile(scope, code, None).and_then(|script| script.run(scope));
+    assert!(ran.is_none() && scope.has_terminated());
+    scope.cancel_terminate_execution();
+    reset();
+}

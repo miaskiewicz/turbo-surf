@@ -3,7 +3,6 @@
 //! key_order_probe.js collector run (key_order_chrome156.json); key_order.js moves keys
 //! without changing their descriptors. An embedder that defines further interfaces after the
 //! binding (turbo-surf) defers the step and finishes it after its own installs.
-use super::*;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -148,8 +147,28 @@ fn job<'s>(
     Some(v8::Array::new_with_elements(scope, &[object.into(), moved.into(), fixed.into()]).into())
 }
 
+/// A budget watchdog may terminate execution while the step runs. The termination ends here,
+/// where V8 would discard it with the last JS frame, so it is raised again for the guest code
+/// that follows instead of being lost.
 fn arrange(scope: &mut v8::PinScope) {
-    run_js(scope, include_str!("key_order.js"));
+    let terminated = {
+        v8::tc_scope!(let scope, scope);
+        arrange_in(scope);
+        scope.has_terminated()
+    };
+    if terminated {
+        scope.terminate_execution();
+    }
+}
+
+fn arrange_in(scope: &mut v8::PinScope) {
+    let source = v8::String::new(scope, include_str!("key_order.js")).unwrap();
+    if v8::Script::compile(scope, source, None)
+        .and_then(|script| script.run(scope))
+        .is_none()
+    {
+        return;
+    }
     let global = scope.get_current_context().global(scope);
     let key = v8::String::new(scope, "__captureKeyOrder").unwrap();
     let mover = global

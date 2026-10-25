@@ -1255,7 +1255,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "cb", true, "Event"], ["change", "cb", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "cb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "cb",
+            true,
+            "Event"
+          ]
+        ]
       },
       "mouse:dcb": {
         "returned": true,
@@ -1272,7 +1285,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "dcb", true, "Event"], ["change", "dcb", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "dcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "dcb",
+            true,
+            "Event"
+          ]
+        ]
       },
       "mouse:radio": {
         "returned": true,
@@ -1289,7 +1315,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "radio", true, "Event"], ["change", "radio", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "radio",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "radio",
+            true,
+            "Event"
+          ]
+        ]
       },
       "mouse:submit": {
         "returned": true,
@@ -1306,7 +1345,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["submit:submit"]
+        "log": [
+          "submit:submit"
+        ]
       },
       "mouse:dsubmit": {
         "returned": true,
@@ -1340,7 +1381,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["reset"]
+        "log": [
+          "reset"
+        ]
       },
       "mouse:isubmit": {
         "returned": true,
@@ -1357,7 +1400,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["submit:isubmit"]
+        "log": [
+          "submit:isubmit"
+        ]
       },
       "mouse:ireset": {
         "returned": true,
@@ -1374,7 +1419,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["reset"]
+        "log": [
+          "reset"
+        ]
       },
       "mouse:ibutton": {
         "returned": true,
@@ -1409,9 +1456,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "lcb", false, "PointerEvent"],
-          ["input", "lcb", true, "Event"],
-          ["change", "lcb", true, "Event"]
+          [
+            "click",
+            "lcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "lcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "lcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "mouse:lspan": {
@@ -1430,9 +1492,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "lcb", false, "PointerEvent"],
-          ["input", "lcb", true, "Event"],
-          ["change", "lcb", true, "Event"]
+          [
+            "click",
+            "lcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "lcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "lcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "mouse:wrap": {
@@ -1451,9 +1528,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "wcb", false, "PointerEvent"],
-          ["input", "wcb", true, "Event"],
-          ["change", "wcb", true, "Event"]
+          [
+            "click",
+            "wcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "wcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "wcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "mouse:wspan": {
@@ -1472,9 +1564,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "wcb", false, "PointerEvent"],
-          ["input", "wcb", true, "Event"],
-          ["change", "wcb", true, "Event"]
+          [
+            "click",
+            "wcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "wcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "wcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "mouse:wa": {
@@ -1594,7 +1701,14 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["toggle", "details", true, "ToggleEvent"]]
+        "log": [
+          [
+            "toggle",
+            "details",
+            true,
+            "ToggleEvent"
+          ]
+        ]
       },
       "mouse:sspan": {
         "returned": true,
@@ -1611,7 +1725,14 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["toggle", "details", true, "ToggleEvent"]]
+        "log": [
+          [
+            "toggle",
+            "details",
+            true,
+            "ToggleEvent"
+          ]
+        ]
       },
       "mouse:sbutton": {
         "returned": true,
@@ -1679,7 +1800,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "cb", true, "Event"], ["change", "cb", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "cb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "cb",
+            true,
+            "Event"
+          ]
+        ]
       },
       "mouseNoBubble:dcb": {
         "returned": true,
@@ -1696,7 +1830,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "dcb", true, "Event"], ["change", "dcb", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "dcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "dcb",
+            true,
+            "Event"
+          ]
+        ]
       },
       "mouseNoBubble:radio": {
         "returned": true,
@@ -1713,7 +1860,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "radio", true, "Event"], ["change", "radio", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "radio",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "radio",
+            true,
+            "Event"
+          ]
+        ]
       },
       "mouseNoBubble:submit": {
         "returned": true,
@@ -1730,7 +1890,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["submit:submit"]
+        "log": [
+          "submit:submit"
+        ]
       },
       "mouseNoBubble:dsubmit": {
         "returned": true,
@@ -1764,7 +1926,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["reset"]
+        "log": [
+          "reset"
+        ]
       },
       "mouseNoBubble:isubmit": {
         "returned": true,
@@ -1781,7 +1945,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["submit:isubmit"]
+        "log": [
+          "submit:isubmit"
+        ]
       },
       "mouseNoBubble:ireset": {
         "returned": true,
@@ -1798,7 +1964,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["reset"]
+        "log": [
+          "reset"
+        ]
       },
       "mouseNoBubble:ibutton": {
         "returned": true,
@@ -1833,9 +2001,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "lcb", false, "PointerEvent"],
-          ["input", "lcb", true, "Event"],
-          ["change", "lcb", true, "Event"]
+          [
+            "click",
+            "lcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "lcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "lcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "mouseNoBubble:lspan": {
@@ -1871,9 +2054,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "wcb", false, "PointerEvent"],
-          ["input", "wcb", true, "Event"],
-          ["change", "wcb", true, "Event"]
+          [
+            "click",
+            "wcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "wcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "wcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "mouseNoBubble:wspan": {
@@ -2010,7 +2208,14 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["toggle", "details", true, "ToggleEvent"]]
+        "log": [
+          [
+            "toggle",
+            "details",
+            true,
+            "ToggleEvent"
+          ]
+        ]
       },
       "mouseNoBubble:sspan": {
         "returned": true,
@@ -2095,7 +2300,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "cb", true, "Event"], ["change", "cb", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "cb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "cb",
+            true,
+            "Event"
+          ]
+        ]
       },
       "pointer:dcb": {
         "returned": true,
@@ -2112,7 +2330,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "dcb", true, "Event"], ["change", "dcb", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "dcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "dcb",
+            true,
+            "Event"
+          ]
+        ]
       },
       "pointer:radio": {
         "returned": true,
@@ -2129,7 +2360,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "radio", true, "Event"], ["change", "radio", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "radio",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "radio",
+            true,
+            "Event"
+          ]
+        ]
       },
       "pointer:submit": {
         "returned": true,
@@ -2146,7 +2390,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["submit:submit"]
+        "log": [
+          "submit:submit"
+        ]
       },
       "pointer:dsubmit": {
         "returned": true,
@@ -2180,7 +2426,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["reset"]
+        "log": [
+          "reset"
+        ]
       },
       "pointer:isubmit": {
         "returned": true,
@@ -2197,7 +2445,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["submit:isubmit"]
+        "log": [
+          "submit:isubmit"
+        ]
       },
       "pointer:ireset": {
         "returned": true,
@@ -2214,7 +2464,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["reset"]
+        "log": [
+          "reset"
+        ]
       },
       "pointer:ibutton": {
         "returned": true,
@@ -2249,9 +2501,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "lcb", false, "PointerEvent"],
-          ["input", "lcb", true, "Event"],
-          ["change", "lcb", true, "Event"]
+          [
+            "click",
+            "lcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "lcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "lcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "pointer:lspan": {
@@ -2270,9 +2537,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "lcb", false, "PointerEvent"],
-          ["input", "lcb", true, "Event"],
-          ["change", "lcb", true, "Event"]
+          [
+            "click",
+            "lcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "lcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "lcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "pointer:wrap": {
@@ -2291,9 +2573,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "wcb", false, "PointerEvent"],
-          ["input", "wcb", true, "Event"],
-          ["change", "wcb", true, "Event"]
+          [
+            "click",
+            "wcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "wcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "wcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "pointer:wspan": {
@@ -2312,9 +2609,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "wcb", false, "PointerEvent"],
-          ["input", "wcb", true, "Event"],
-          ["change", "wcb", true, "Event"]
+          [
+            "click",
+            "wcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "wcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "wcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "pointer:wa": {
@@ -2434,7 +2746,14 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["toggle", "details", true, "ToggleEvent"]]
+        "log": [
+          [
+            "toggle",
+            "details",
+            true,
+            "ToggleEvent"
+          ]
+        ]
       },
       "pointer:sspan": {
         "returned": true,
@@ -2451,7 +2770,14 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["toggle", "details", true, "ToggleEvent"]]
+        "log": [
+          [
+            "toggle",
+            "details",
+            true,
+            "ToggleEvent"
+          ]
+        ]
       },
       "pointer:sbutton": {
         "returned": true,
@@ -2518,7 +2844,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "cb", true, "Event"], ["change", "cb", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "cb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "cb",
+            true,
+            "Event"
+          ]
+        ]
       },
       "method:dcb": {
         "sync": {
@@ -2550,7 +2889,20 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["input", "radio", true, "Event"], ["change", "radio", true, "Event"]]
+        "log": [
+          [
+            "input",
+            "radio",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "radio",
+            true,
+            "Event"
+          ]
+        ]
       },
       "method:submit": {
         "sync": {
@@ -2566,7 +2918,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["submit:submit"]
+        "log": [
+          "submit:submit"
+        ]
       },
       "method:dsubmit": {
         "sync": {
@@ -2598,7 +2952,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["reset"]
+        "log": [
+          "reset"
+        ]
       },
       "method:isubmit": {
         "sync": {
@@ -2614,7 +2970,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["submit:isubmit"]
+        "log": [
+          "submit:isubmit"
+        ]
       },
       "method:ireset": {
         "sync": {
@@ -2630,7 +2988,9 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": ["reset"]
+        "log": [
+          "reset"
+        ]
       },
       "method:ibutton": {
         "sync": {
@@ -2663,9 +3023,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "lcb", false, "PointerEvent"],
-          ["input", "lcb", true, "Event"],
-          ["change", "lcb", true, "Event"]
+          [
+            "click",
+            "lcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "lcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "lcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "method:lspan": {
@@ -2683,9 +3058,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "lcb", false, "PointerEvent"],
-          ["input", "lcb", true, "Event"],
-          ["change", "lcb", true, "Event"]
+          [
+            "click",
+            "lcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "lcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "lcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "method:wrap": {
@@ -2703,9 +3093,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "wcb", false, "PointerEvent"],
-          ["input", "wcb", true, "Event"],
-          ["change", "wcb", true, "Event"]
+          [
+            "click",
+            "wcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "wcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "wcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "method:wspan": {
@@ -2723,9 +3128,24 @@
         },
         "hashLater": "",
         "log": [
-          ["click", "wcb", false, "PointerEvent"],
-          ["input", "wcb", true, "Event"],
-          ["change", "wcb", true, "Event"]
+          [
+            "click",
+            "wcb",
+            false,
+            "PointerEvent"
+          ],
+          [
+            "input",
+            "wcb",
+            true,
+            "Event"
+          ],
+          [
+            "change",
+            "wcb",
+            true,
+            "Event"
+          ]
         ]
       },
       "method:wa": {
@@ -2838,7 +3258,14 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["toggle", "details", true, "ToggleEvent"]]
+        "log": [
+          [
+            "toggle",
+            "details",
+            true,
+            "ToggleEvent"
+          ]
+        ]
       },
       "method:sspan": {
         "sync": {
@@ -2854,7 +3281,14 @@
           "active": "BODY"
         },
         "hashLater": "",
-        "log": [["toggle", "details", true, "ToggleEvent"]]
+        "log": [
+          [
+            "toggle",
+            "details",
+            true,
+            "ToggleEvent"
+          ]
+        ]
       },
       "method:sbutton": {
         "sync": {
@@ -3366,56 +3800,98 @@
       },
       "onfullscreenchange": {
         "kind": "accessor",
-        "get": ["get onfullscreenchange", 0],
-        "set": ["set onfullscreenchange", 1],
+        "get": [
+          "get onfullscreenchange",
+          0
+        ],
+        "set": [
+          "set onfullscreenchange",
+          1
+        ],
         "e": true,
         "c": true,
         "w": null
       },
       "onfullscreenerror": {
         "kind": "accessor",
-        "get": ["get onfullscreenerror", 0],
-        "set": ["set onfullscreenerror", 1],
+        "get": [
+          "get onfullscreenerror",
+          0
+        ],
+        "set": [
+          "set onfullscreenerror",
+          1
+        ],
         "e": true,
         "c": true,
         "w": null
       },
       "onwebkitfullscreenchange": {
         "kind": "accessor",
-        "get": ["get onwebkitfullscreenchange", 0],
-        "set": ["set onwebkitfullscreenchange", 1],
+        "get": [
+          "get onwebkitfullscreenchange",
+          0
+        ],
+        "set": [
+          "set onwebkitfullscreenchange",
+          1
+        ],
         "e": true,
         "c": true,
         "w": null
       },
       "onwebkitfullscreenerror": {
         "kind": "accessor",
-        "get": ["get onwebkitfullscreenerror", 0],
-        "set": ["set onwebkitfullscreenerror", 1],
+        "get": [
+          "get onwebkitfullscreenerror",
+          0
+        ],
+        "set": [
+          "set onwebkitfullscreenerror",
+          1
+        ],
         "e": true,
         "c": true,
         "w": null
       },
       "documentOnfullscreenchange": {
         "kind": "accessor",
-        "get": ["get onfullscreenchange", 0],
-        "set": ["set onfullscreenchange", 1],
+        "get": [
+          "get onfullscreenchange",
+          0
+        ],
+        "set": [
+          "set onfullscreenchange",
+          1
+        ],
         "e": true,
         "c": true,
         "w": null
       },
       "documentOnfullscreenerror": {
         "kind": "accessor",
-        "get": ["get onfullscreenerror", 0],
-        "set": ["set onfullscreenerror", 1],
+        "get": [
+          "get onfullscreenerror",
+          0
+        ],
+        "set": [
+          "set onfullscreenerror",
+          1
+        ],
         "e": true,
         "c": true,
         "w": null
       },
       "documentOnwebkitfullscreenchange": {
         "kind": "accessor",
-        "get": ["get onwebkitfullscreenchange", 0],
-        "set": ["set onwebkitfullscreenchange", 1],
+        "get": [
+          "get onwebkitfullscreenchange",
+          0
+        ],
+        "set": [
+          "set onwebkitfullscreenchange",
+          1
+        ],
         "e": true,
         "c": true,
         "w": null
@@ -3432,8 +3908,14 @@
       },
       "fullscreenElement": {
         "kind": "accessor",
-        "get": ["get fullscreenElement", 0],
-        "set": ["set fullscreenElement", 1],
+        "get": [
+          "get fullscreenElement",
+          0
+        ],
+        "set": [
+          "set fullscreenElement",
+          1
+        ],
         "e": true,
         "c": true,
         "w": null
@@ -3544,15 +4026,25 @@
         "NotAllowedError",
         "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() requires user activation."
       ],
-      "inputBrand": ["TypeError", "Illegal invocation"],
-      "selectBrand": ["TypeError", "Illegal invocation"],
+      "inputBrand": [
+        "TypeError",
+        "Illegal invocation"
+      ],
+      "selectBrand": [
+        "TypeError",
+        "Illegal invocation"
+      ],
       "extraArgument": [
         "InvalidStateError",
         "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
       ]
     },
     "fullscreen": {
-      "plain": ["reject", "TypeError", "Permissions check failed"],
+      "plain": [
+        "reject",
+        "TypeError",
+        "Permissions check failed"
+      ],
       "brand": [
         "reject",
         "TypeError",
@@ -3578,18 +4070,46 @@
         "TypeError",
         "Failed to execute 'requestFullscreen' on 'Element': Failed to read the 'screen' property from 'FullscreenOptions': Failed to convert value to 'Screen'."
       ],
-      "hide": ["reject", "TypeError", "Permissions check failed"],
-      "nullOptions": ["reject", "TypeError", "Permissions check failed"],
-      "detached": ["reject", "TypeError", "Element is not connected"],
+      "hide": [
+        "reject",
+        "TypeError",
+        "Permissions check failed"
+      ],
+      "nullOptions": [
+        "reject",
+        "TypeError",
+        "Permissions check failed"
+      ],
+      "detached": [
+        "reject",
+        "TypeError",
+        "Element is not connected"
+      ],
       "detachedBadUI": [
         "reject",
         "TypeError",
         "Failed to execute 'requestFullscreen' on 'Element': Failed to read the 'navigationUI' property from 'FullscreenOptions': The provided value 'x' is not a valid enum value of type FullscreenNavigationUI."
       ],
-      "dialog": ["reject", "TypeError", "Dialog elements are invalid"],
-      "rect": ["reject", "TypeError", "Element is not an HTML or SVG element"],
-      "svg": ["reject", "TypeError", "Permissions check failed"],
-      "math": ["reject", "TypeError", "Element is not an HTML or SVG element"],
+      "dialog": [
+        "reject",
+        "TypeError",
+        "Dialog elements are invalid"
+      ],
+      "rect": [
+        "reject",
+        "TypeError",
+        "Element is not an HTML or SVG element"
+      ],
+      "svg": [
+        "reject",
+        "TypeError",
+        "Permissions check failed"
+      ],
+      "math": [
+        "reject",
+        "TypeError",
+        "Element is not an HTML or SVG element"
+      ],
       "inert": [
         "reject",
         "TypeError",
@@ -3604,21 +4124,104 @@
       ],
       "webkitExit": "undefined",
       "element": null,
-      "order": [true, "sync", "settled"],
+      "order": [
+        true,
+        "sync",
+        "settled"
+      ],
       "events": [
-        ["fullscreenerror", "box", true, false, true, true],
-        ["handler", "box"],
-        ["fullscreenerror", "box", true, false, true, true],
-        ["handler", "box"],
-        ["fullscreenerror", "box", true, false, true, true],
-        ["handler", "box"],
-        ["fullscreenerror", "document", true, false, true, true],
-        ["fullscreenerror", "DIALOG", true, false, true, true],
-        ["fullscreenerror", "rect", true, false, true, true],
-        ["fullscreenerror", "svg", true, false, true, true],
-        ["fullscreenerror", "math", true, false, true, true],
-        ["webkitfullscreenerror", "box", true, false, true, true],
-        ["webkitfullscreenerror", "box", true, false, true, true]
+        [
+          "fullscreenerror",
+          "box",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "handler",
+          "box"
+        ],
+        [
+          "fullscreenerror",
+          "box",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "handler",
+          "box"
+        ],
+        [
+          "fullscreenerror",
+          "box",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "handler",
+          "box"
+        ],
+        [
+          "fullscreenerror",
+          "document",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "fullscreenerror",
+          "DIALOG",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "fullscreenerror",
+          "rect",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "fullscreenerror",
+          "svg",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "fullscreenerror",
+          "math",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "webkitfullscreenerror",
+          "box",
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          "webkitfullscreenerror",
+          "box",
+          true,
+          false,
+          true,
+          true
+        ]
       ]
     }
   }

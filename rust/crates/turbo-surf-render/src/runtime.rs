@@ -7769,6 +7769,8 @@ const __timerFindIndex = Array.prototype.findIndex.bind(__timers);
 const __timerApply = Reflect.apply;
 const __timerMax = Math.max;
 let __tid = 1;
+// Counts timer tasks, so per-task clocks (the document timeline) hold within one task.
+let __taskEpoch = 0;
 // One native clock is shared by the agent's Window realms. A timer's deadline is
 // its actual scheduling time plus delay; the drain advances the shared virtual
 // offset to each fired deadline. This makes the env behave like
@@ -7874,8 +7876,22 @@ let __rafClock = null, __rafId = 0, __rafScheduled = false;
 let __rafQueue = [], __frameSteps = [];
 // Rendering frames are engine tasks; page replacement of setTimeout cannot stall them.
 const __frameTimer = globalThis.setTimeout;
-// Update-the-rendering order: queued engine steps (scroll events) run before
-// the frame's animation callbacks, and callbacks they request join this frame.
+// Web Animations frame host: the binding's handler for the next frame, the running frame's
+// time and the last frame time the between-frames document timeline advances from.
+let __animationFrame = null, __frameNow = null, __frameLast = null, __clockEpoch = -1, __clockTime = 0;
+// A frame stage's time also stands for the rest of its task, its microtasks included.
+const __frameStage = (ts) => { __frameNow = ts; __clockEpoch = __taskEpoch; __clockTime = ts; };
+// A task that runs before any other due task, so a frame's stages stay contiguous while
+// each still ends with its own microtask checkpoint.
+const __frameTask = (fn) => {
+  const id = __tid++;
+  const timer = {__proto__:null,id,fn,source:null,due:__timerNow(),delay:0,nesting:1,repeat:false,args:[]};
+  __timerSet(id,timer);__timerSplice(0,0,timer);
+};
+// Update-the-rendering order: queued engine steps (scroll events), then "update animations
+// and send events" (update, then event dispatch, each its own task so microtask checkpoints
+// separate them), then the frame's animation callbacks, which callbacks requested by those
+// steps join; pending animations commit in a following task, after the callbacks' microtasks.
 const __scheduleFrame = () => {
   if (__rafScheduled) return;
   __rafScheduled = true;
@@ -7884,16 +7900,47 @@ const __scheduleFrame = () => {
     __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
     if (__rafClock < floor) __rafClock = floor;
     const ts = Math.round(__rafClock * 10) / 10; // one timestamp for the whole frame
+    __frameLast = ts;
+    __frameStage(ts);
     const steps = __frameSteps;
     __frameSteps = [];
     for (let i = 0; i < steps.length; i++) { try { steps[i](); } catch (e) {} }
-    const batch = __rafQueue;
-    __rafQueue = [];
-    __rafScheduled = false;
-    for (let i = 0; i < batch.length; i++) { try { batch[i].fn(ts); } catch (e) {} }
-    if (__frameSteps.length) __scheduleFrame();
+    const animation = __animationFrame;
+    __animationFrame = null;
+    if (animation) { try { animation.update(); } catch (e) {} }
+    __frameNow = null;
+    const callbacks = () => {
+      __frameStage(ts);
+      __rafScheduled = false;
+      const batch = __rafQueue;
+      __rafQueue = [];
+      for (let i = 0; i < batch.length; i++) { try { batch[i].fn(ts); } catch (e) {} }
+      __frameNow = null;
+      if (animation) __frameTask(() => { __frameStage(ts); try { animation.commit(); } catch (e) {} __frameNow = null; });
+      if (__frameSteps.length || __animationFrame) __scheduleFrame();
+    };
+    // Animation events dispatch in their own task so their microtasks settle first.
+    if (animation) __frameTask(() => { __frameStage(ts); try { animation.dispatch(); } catch (e) {} __frameNow = null; __frameTask(callbacks); });
+    else callbacks();
   }, 16);
 };
+// The document timeline holds one time per task (Blink's AnimationClock): a frame stage's
+// time, else the last frame time advanced in whole frame intervals, so it never runs ahead
+// of the next frame's time.
+const __animationNow = () => {
+  if (__frameNow !== null) { __clockEpoch = __taskEpoch; __clockTime = __frameNow; return __frameNow; }
+  if (__clockEpoch === __taskEpoch) return __clockTime;
+  const now = __perfNow();
+  let time = now;
+  if (__frameLast !== null) { const frames = Math.floor((now - __frameLast) / 16.666); time = frames > 0 ? __frameLast + frames * 16.666 : __frameLast; }
+  __clockEpoch = __taskEpoch; __clockTime = time;
+  return time;
+};
+if (typeof __G.installAnimationHost === "function") __G.installAnimationHost({
+  now: __animationNow,
+  frame(handler) { __animationFrame = handler; __scheduleFrame(); },
+  task(callback) { __frameTimer(callback, 0); },
+});
 globalThis.requestAnimationFrame = (fn) => {
   const id = ++__rafId;
   __rafQueue[__rafQueue.length] = { id, fn };
@@ -7919,7 +7966,7 @@ const __runLocalTimers = (max=100000,keepTask=false) => {
     const timer=__timers[index];
     // Every caller, including hydration and child-frame drains, obeys this policy.
     if(__realWindowTimers && timer.due>__timerNow())break;
-    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;
+    __timerSplice(index,1);ops.op_timer_advance(timer.due);fired++;__taskEpoch++;
     if(!timer.repeat)__timerDelete(timer.id);
     const previous=ops.op_timer_nesting(__timerDocument);
     ops.op_timer_set_nesting(__timerDocument,timer.nesting);
@@ -12177,7 +12224,6 @@ __G.domSig = (() => {
       "CSSNumericValue CSSUnitValue CSSKeywordValue CSSMathSum CSSTransformValue CSSUnparsedValue CSSVariableReferenceValue " +
       "DOMRectList DOMQuad DOMStringList DOMStringMap DOMException DOMImplementation DOMParser Range StaticRange " +
       "AbstractRange Selection Comment Text CDATASection DocumentType DocumentFragment ShadowRoot Element " +
-      "AnimationEffect KeyframeEffect Animation AnimationTimeline DocumentTimeline AnimationPlaybackEvent " +
       "IntersectionObserver ResizeObserver ReportingObserver PerformanceObserver MutationObserver " +
       "Worklet PaintWorkletGlobalScope AudioWorklet AudioWorkletNode Blob FileSystemHandle FileSystemFileHandle " +
       "FileSystemDirectoryHandle FileSystemWritableFileStream StorageManager NavigatorUAData Sanitizer TrustedHTML " +

@@ -2,7 +2,10 @@
 export function chromeExtensionArgs(config) {
   const flags = [];
   for (const [option, values] of [
-    ["disableExtensions", ["--disable-extensions", "--disable-component-extensions-with-background-pages"]],
+    [
+      "disableExtensions",
+      ["--disable-extensions", "--disable-component-extensions-with-background-pages"],
+    ],
     // Frame-timing controls must not be throttled when the headed window is occluded.
     [
       "foregroundFrames",

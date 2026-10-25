@@ -450,7 +450,10 @@
   const HostEvent = Event;
   const hostTimeout = setTimeout;
   const ownerDocument = Object.getOwnPropertyDescriptor(Node.prototype, "ownerDocument").get;
-  const documentElement = Object.getOwnPropertyDescriptor(Document.prototype, "documentElement").get;
+  const documentElement = Object.getOwnPropertyDescriptor(
+    Document.prototype,
+    "documentElement",
+  ).get;
   const windowDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
   const realmWindow = globalThis;
   function currentDocument() {
@@ -549,7 +552,10 @@
       const value = options[name];
       return value === undefined
         ? NaN
-        : normalized(value, `${prefix}Failed to read the '${name}' property from 'ScrollToOptions': `);
+        : normalized(
+            value,
+            `${prefix}Failed to read the '${name}' property from 'ScrollToOptions': `,
+          );
     };
     const x = member("left");
     return { behavior, x, y: member("top") };

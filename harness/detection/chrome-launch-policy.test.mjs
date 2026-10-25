@@ -36,7 +36,10 @@ test("frame-timing controls opt into foreground scheduling only on loopback", ()
     "--disable-renderer-backgrounding",
     "--disable-background-timer-throttling",
   ]);
-  assert.deepEqual(chromeExtensionArgs({ url: "https://www.google.com/", foregroundFrames: "true" }), []);
+  assert.deepEqual(
+    chromeExtensionArgs({ url: "https://www.google.com/", foregroundFrames: "true" }),
+    [],
+  );
   assert.throws(
     () => chromeExtensionArgs({ url: "https://www.google.com/", foregroundFrames: true }),
     /foregroundFrames is restricted to authored localhost/,

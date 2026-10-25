@@ -396,7 +396,8 @@
     Object.keys(methods).forEach(function(name){eventMember(name,{value:methods[name]});});
     Object.defineProperty(Event.prototype,Symbol.toStringTag,{value:'Event',configurable:true});
     ['NONE','CAPTURING_PHASE','AT_TARGET','BUBBLING_PHASE'].forEach(function(name,value){
-      [Event,Event.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});
+      // Configurable until key_order.js has arranged and frozen the interface (all constants below).
+      [Event,Event.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true,configurable:true});});
     });
     g.Event = Event;
     function mkSub(extra){ return function(type, init = {}){ if (arguments.length === 0) throw new TypeError('Event requires a type'); init = init || {}; Event.call(this, type, init); if (extra) extra(this, init); for (var k in init){ if (!(k in this)) this[k] = init[k]; } }; }
@@ -440,7 +441,7 @@
     readonly(KeyboardEvent.prototype,keyStates,['key','code','location','ctrlKey','shiftKey','altKey','metaKey','repeat','isComposing','charCode','keyCode']);
     member(KeyboardEvent.prototype,'getModifierState',{value:function getModifierState(key){if(!arguments.length)throw new TypeError('A modifier is required');return modifier(keyStates,this,key);}});
     member(KeyboardEvent.prototype,'initKeyboardEvent',{value:function initKeyboardEvent(type,bubbles=false,cancelable=false,view=null,key='',location=0,ctrlKey=false,altKey=false,shiftKey=false,metaKey=false){var state=stateOf(keyStates,this);if(!arguments.length)throw new TypeError('A type is required');if(eventRecord(this).dispatching)return;UIEvent.prototype.initUIEvent.call(this,type,bubbles,cancelable,view,0);Object.assign(state,{key:eventString(key),location:intValue(location)>>>0,ctrlKey:!!ctrlKey,altKey:!!altKey,shiftKey:!!shiftKey,metaKey:!!metaKey});}});
-    ['DOM_KEY_LOCATION_STANDARD','DOM_KEY_LOCATION_LEFT','DOM_KEY_LOCATION_RIGHT','DOM_KEY_LOCATION_NUMPAD'].forEach(function(name,value){[KeyboardEvent,KeyboardEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});});
+    ['DOM_KEY_LOCATION_STANDARD','DOM_KEY_LOCATION_LEFT','DOM_KEY_LOCATION_RIGHT','DOM_KEY_LOCATION_NUMPAD'].forEach(function(name,value){[KeyboardEvent,KeyboardEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true,configurable:true});});});
     tagEvent(KeyboardEvent,'KeyboardEvent');g.KeyboardEvent=KeyboardEvent;
     class InputEvent extends UIEvent {
       constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};inputStates.set(this,{data:init.data==null?null:eventString(init.data),isComposing:!!init.isComposing,inputType:stringValue(init.inputType),dataTransfer:init.dataTransfer||null});}
@@ -464,7 +465,7 @@
     }
     readonly(WheelEvent.prototype,wheelStates,['deltaX','deltaY','deltaZ','deltaMode','momentum']);
     ['wheelDelta','wheelDeltaX','wheelDeltaY'].forEach(function(name){member(WheelEvent.prototype,name,{get:Object.getOwnPropertyDescriptor({get [name](){var state=stateOf(wheelStates,this);return -3*(name==='wheelDeltaX'?state.deltaX:state.deltaY);}},name).get});});
-    ['DOM_DELTA_PIXEL','DOM_DELTA_LINE','DOM_DELTA_PAGE'].forEach(function(name,value){[WheelEvent,WheelEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});});
+    ['DOM_DELTA_PIXEL','DOM_DELTA_LINE','DOM_DELTA_PAGE'].forEach(function(name,value){[WheelEvent,WheelEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true,configurable:true});});});
     tagEvent(WheelEvent,'WheelEvent');g.WheelEvent=WheelEvent;
     // Dictionary-member events (CustomEvent, PopStateEvent, HashChangeEvent): private state
     // behind readonly getters, like the UI family above.
@@ -548,7 +549,7 @@ for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:
   INVALID_ACCESS_ERR:15, VALIDATION_ERR:16, TYPE_MISMATCH_ERR:17, SECURITY_ERR:18,
   NETWORK_ERR:19, ABORT_ERR:20, URL_MISMATCH_ERR:21, QUOTA_EXCEEDED_ERR:22, TIMEOUT_ERR:23,
   INVALID_NODE_TYPE_ERR:24, DATA_CLONE_ERR:25})) {
-  for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true});
+  for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true, configurable: true});
 }
 
 if(typeof __ns.makeNativeFunction==='function'){
@@ -828,7 +829,7 @@ if(typeof __ns.makeNativeFunction==='function'){
   cssRuleMember('CSSStyleRule','style',function(){return cssRuleRecord(this,1).style;},function(value){var record=cssRuleRecord(this,1);if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');record.style.cssText=String(value);});
   ['href','media','styleSheet'].forEach(function(name){cssRuleMember('CSSImportRule',name,function(){return cssRuleRecord(this,3)[name];});});
   var cssRuleConstants={STYLE_RULE:1,CHARSET_RULE:2,IMPORT_RULE:3,MEDIA_RULE:4,FONT_FACE_RULE:5,PAGE_RULE:6,KEYFRAMES_RULE:7,KEYFRAME_RULE:8,MARGIN_RULE:9,NAMESPACE_RULE:10,COUNTER_STYLE_RULE:11,SUPPORTS_RULE:12,FONT_FEATURE_VALUES_RULE:14};
-  Object.keys(cssRuleConstants).forEach(function(name){[g.CSSRule,g.CSSRule.prototype].forEach(function(owner){Object.defineProperty(owner,name,{value:cssRuleConstants[name],enumerable:true});});});
+  Object.keys(cssRuleConstants).forEach(function(name){[g.CSSRule,g.CSSRule.prototype].forEach(function(owner){Object.defineProperty(owner,name,{value:cssRuleConstants[name],enumerable:true,configurable:true});});});
   function finishCssRule(rule){var record={__proto__:null};['type','parentRule','parentStyleSheet','cssText','selectorText','href','media','styleSheet','prelude'].forEach(function(name){if(Object.hasOwn(rule,name)){record[name]=rule[name];delete rule[name];}});if(rule.style){record.style=rule.style;if(record.type===1)delete rule.style;}if(rule.cssRules)record.cssRules=rule.cssRules;cssRuleStates.set(rule,record);Object.setPrototypeOf(rule,record.type===1?g.CSSStyleRule.prototype:record.type===3?g.CSSImportRule.prototype:g.CSSRule.prototype);return rule;}
   var parseCssRules = function(text, sheet, parent, validated){
     text=String(text);if(!validated&&typeof cssNativeParse==='function')text=cssNativeParse(text);
@@ -2182,7 +2183,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     var constants={ELEMENT_NODE:1,ATTRIBUTE_NODE:2,TEXT_NODE:3,CDATA_SECTION_NODE:4,ENTITY_REFERENCE_NODE:5,ENTITY_NODE:6,PROCESSING_INSTRUCTION_NODE:7,COMMENT_NODE:8,DOCUMENT_NODE:9,DOCUMENT_TYPE_NODE:10,DOCUMENT_FRAGMENT_NODE:11,NOTATION_NODE:12,DOCUMENT_POSITION_DISCONNECTED:1,DOCUMENT_POSITION_PRECEDING:2,DOCUMENT_POSITION_FOLLOWING:4,DOCUMENT_POSITION_CONTAINS:8,DOCUMENT_POSITION_CONTAINED_BY:16,DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC:32};
     Object.keys(constants).forEach(function(name){
       nativeKeys.push(name);
-      [g.Node,nodeProto].forEach(function(owner){Object.defineProperty(owner,name,{value:constants[name],enumerable:true});});
+      [g.Node,nodeProto].forEach(function(owner){Object.defineProperty(owner,name,{value:constants[name],enumerable:true,configurable:true});});
     });
     ['addEventListener','removeEventListener','dispatchEvent'].forEach(function(name){
       var native=Object.getOwnPropertyDescriptor(probe,name).value;

@@ -94,7 +94,7 @@
         "src/external_references.rs": "a2533fa12556731b358cf40be726c8ea219e6d3b217903a5c73ade0b1523d5bb",
         "src/fast_api.rs": "cdfe4aeba1e464a162aae8d55f5725512616694387a89cf47f25af9fc48e6962",
         "src/fixed_array.rs": "bf198552233442622b41f934f122e43eeda9ecb1963784100e4cd627cd8607e0",
-        "src/function.rs": "8e2a6d1a5649cd955002ae6f483532a6659cd8803d68d2081a04f252b5e05b4f",
+        "src/function.rs": "b12f0237fcb8622171a5d8ffd23407b04c860fa188ef96f26e53fcf6a79de05f",
         "src/gc.rs": "051fae332ef035a66aa2837445d7f04b253080494e2a2a632ac53d37a5652259",
         "src/get_property_names_args_builder.rs": "1751d30c7ec62bf8c1b657ce2473d73ae952c6836b5354ff55f8890ef08bd27d",
         "src/handle.rs": "d61f4266308823c13bcdd0ae6bb55680b3c0f07ad6125dde01b51e8edc0518b9",

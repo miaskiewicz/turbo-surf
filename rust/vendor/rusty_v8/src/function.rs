@@ -109,9 +109,20 @@ unsafe extern "C" {
   fn v8__PropertyCallbackInfo__GetReturnValue(
     this: *const RawPropertyCallbackInfo,
   ) -> usize;
-  fn v8__PropertyCallbackInfo__ShouldThrowOnError(
-    this: *const RawPropertyCallbackInfo,
-  ) -> bool;
+  // V8's inline PropertyCallbackInfo<T>::ShouldThrowOnError() is constant
+  // false unless T is void or Boolean, so the prebuilt binding.cc wrapper
+  // (instantiated for Value) can never report the caller's mode. The mode is
+  // read from the callback frame instead and V8's exported helper resolves
+  // the inferred case.
+  #[cfg_attr(
+    not(target_env = "msvc"),
+    link_name = "_ZN2v88internal18ShouldThrowOnErrorEPNS0_7IsolateE"
+  )]
+  #[cfg_attr(
+    target_env = "msvc",
+    link_name = "?ShouldThrowOnError@internal@v8@@YA_NPEAVIsolate@12@@Z"
+  )]
+  fn v8__internal__ShouldThrowOnError(isolate: *mut RealIsolate) -> bool;
 
   fn v8__ReturnValue__Value__Set(
     this: *mut RawReturnValue,
@@ -460,15 +471,46 @@ impl<'s> FunctionCallbackArguments<'s> {
   }
 }
 
+/// Mirrors V8's `PropertyCallbackInfo<T>::HasShouldThrowOnError()`: only
+/// setter/definer/deleter callbacks (`void` or `Boolean` results) carry the
+/// optional should-throw slot after the holder.
+pub(crate) trait PropertyCallbackResult {
+  const HAS_SHOULD_THROW_ON_ERROR: bool;
+}
+impl PropertyCallbackResult for () {
+  const HAS_SHOULD_THROW_ON_ERROR: bool = true;
+}
+impl PropertyCallbackResult for Boolean {
+  const HAS_SHOULD_THROW_ON_ERROR: bool = true;
+}
+impl PropertyCallbackResult for Value {
+  const HAS_SHOULD_THROW_ON_ERROR: bool = false;
+}
+impl PropertyCallbackResult for Integer {
+  const HAS_SHOULD_THROW_ON_ERROR: bool = false;
+}
+impl PropertyCallbackResult for Array {
+  const HAS_SHOULD_THROW_ON_ERROR: bool = false;
+}
+
+// v8::internal::Internals::{kDontThrow, kInferShouldThrowMode} as Smis.
+const SMI_SHIFT: u32 = if cfg!(feature = "v8_enable_pointer_compression") {
+  1
+} else {
+  32
+};
+const DONT_THROW_SMI: usize = 0;
+const INFER_SHOULD_THROW_MODE_SMI: usize = 2 << SMI_SHIFT;
+
 #[derive(Debug)]
-pub struct PropertyCallbackArguments<'s>(&'s RawPropertyCallbackInfo);
+pub struct PropertyCallbackArguments<'s>(&'s RawPropertyCallbackInfo, bool);
 
 impl<'s> PropertyCallbackArguments<'s> {
   #[inline(always)]
-  pub(crate) fn from_property_callback_info<T>(
+  pub(crate) fn from_property_callback_info<T: PropertyCallbackResult>(
     info: &'s PropertyCallbackInfo<T>,
   ) -> Self {
-    Self(&info.0)
+    Self(&info.0, T::HAS_SHOULD_THROW_ON_ERROR)
   }
 
   /// Returns the object in the prototype chain of the receiver that has the
@@ -498,10 +540,26 @@ impl<'s> PropertyCallbackArguments<'s> {
   /// occurs. Usually, `true` corresponds to `'use strict'`.
   ///
   /// Always `false` when intercepting `Reflect.set()` independent of the
-  /// language mode.
+  /// language mode, and for callbacks other than setters, definers and
+  /// deleters.
   #[inline(always)]
   pub fn should_throw_on_error(&self) -> bool {
-    unsafe { v8__PropertyCallbackInfo__ShouldThrowOnError(self.0) }
+    if !self.1 {
+      return false;
+    }
+    // SAFETY: setter/definer/deleter frames store the should-throw Smi in the
+    // slot immediately after the holder (kShouldThrowOnErrorIndex ==
+    // kHolderIndex + 1), and the holder accessor returns that holder slot.
+    unsafe {
+      let holder = v8__PropertyCallbackInfo__Holder(self.0) as *const usize;
+      match *holder.add(1) {
+        DONT_THROW_SMI => false,
+        INFER_SHOULD_THROW_MODE_SMI => v8__internal__ShouldThrowOnError(
+          v8__PropertyCallbackInfo__GetIsolate(self.0),
+        ),
+        _ => true,
+      }
+    }
   }
 }
 

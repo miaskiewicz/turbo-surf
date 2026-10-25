@@ -5095,6 +5095,7 @@ fn op_frame_set_document<'s>(
             let policy = handle.policy.borrow();
             policy.initial_base.has_policy() || policy.report_only.has_policy()
         });
+        crate::browser_env::defer_key_order(scope);
         if metadata["location"] == "about:srcdoc" {
             crate::browser_env::install_independent_srcdoc_units(
                 scope,
@@ -5198,6 +5199,7 @@ fn op_frame_set_document<'s>(
         window_proxy::install_location(scope, &metadata_location);
         #[cfg(not(turbo_surf_native_proxy))]
         let _ = metadata_location;
+        crate::browser_env::finish_key_order(scope);
         run_frame_init_script(scope)?;
         Ok(global)
     })();
@@ -5633,6 +5635,7 @@ fn allocate_frame<'s>(
                 .0
                 .insert(csp.id, csp);
         }
+        crate::browser_env::defer_key_order(scope);
         crate::browser_env::install_independent_html(
             scope,
             "<!DOCTYPE html><html><head></head><body></body></html>",
@@ -5674,6 +5677,7 @@ fn allocate_frame<'s>(
         crate::geometry_backend::install(scope, crypto_core).map_err(JsErrorBox::generic)?;
         #[cfg(turbo_surf_native_proxy)]
         window_proxy::capture_exception(scope);
+        crate::browser_env::finish_key_order(scope);
         run_frame_init_script(scope)?;
         // Host capabilities are passed privately and never installed on the global.
     }
@@ -7331,7 +7335,8 @@ for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:
   INVALID_ACCESS_ERR:15, VALIDATION_ERR:16, TYPE_MISMATCH_ERR:17, SECURITY_ERR:18,
   NETWORK_ERR:19, ABORT_ERR:20, URL_MISMATCH_ERR:21, QUOTA_EXCEEDED_ERR:22, TIMEOUT_ERR:23,
   INVALID_NODE_TYPE_ERR:24, DATA_CLONE_ERR:25})) {
-  for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true});
+  // Configurable until the binding's key-order step moves and freezes them.
+  for (const object of [DOMException, DOMException.prototype]) Object.defineProperty(object, name, {value: code, enumerable: true, configurable: true});
 }
 
 // Deno's error builders live for the whole isolate. Register them in the main
@@ -12708,6 +12713,8 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
             let policy = handle.policy.borrow();
             policy.initial_base.has_policy() || policy.report_only.has_policy()
         });
+        // Chrome's interface key order is applied once Surf's own interfaces exist too.
+        crate::browser_env::defer_key_order(&mut scope);
         if source_positions {
             crate::browser_env::install_with_html_source_positions(&mut scope, html);
         } else {
@@ -12755,6 +12762,10 @@ fn install_dom(rt: &mut JsRuntime, html: &str, base: &str) -> Result<(), String>
         let scope = &mut v8::ContextScope::new(&mut scope, context);
         window_proxy::capture_exception(scope);
         window_proxy::install_location(scope, base);
+    }
+    {
+        deno_core::scope!(scope, rt);
+        crate::browser_env::finish_key_order(scope);
     }
     Ok(())
 }

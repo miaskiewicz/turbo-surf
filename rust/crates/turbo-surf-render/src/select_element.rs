@@ -118,9 +118,19 @@ fn deleter<'s, 'i>(
     args: v8::PropertyCallbackArguments<'s>,
     mut rv: v8::ReturnValue<v8::Boolean>,
 ) -> v8::Intercepted {
-    claim(dispatch(scope, &args, "delete", index, None), |result| {
-        rv.set_bool(result.is_true())
-    })
+    // A supported index cannot be deleted. Like Blink, say so in a TypeError where V8 requires the
+    // deletion to throw (strict mode); otherwise report the refusal quietly.
+    let outcome = dispatch(scope, &args, "delete", index, None);
+    if matches!(outcome, Outcome::Value(_)) && interceptor_mode::should_throw(scope, &args) {
+        let message = format!(
+            "Failed to delete an indexed property [{index}] from 'HTMLSelectElement': Index property deleter is not supported."
+        );
+        let message = v8::String::new(scope, &message).unwrap();
+        let error = v8::Exception::type_error(scope, message);
+        scope.throw_exception(error);
+        return v8::Intercepted::kYes;
+    }
+    claim(outcome, |result| rv.set_bool(result.is_true()))
 }
 
 fn definer<'s, 'i, T: 'static>(
@@ -136,17 +146,16 @@ where
     if !is_select(scope, args.holder()) {
         return v8::Intercepted::kNo;
     }
-    // Accessor descriptors are rejected. Chrome 156 throws from Object.defineProperty yet reports
-    // true from Reflect.defineProperty (Blink keys that on ShouldThrowOnError); this V8 passes
-    // false for both, so both report failure here: Object.defineProperty still throws TypeError
-    // and Reflect.defineProperty returns false (the one asserted divergence in the tests).
+    // Accessor descriptors are rejected. Like Blink, throw only where V8 says the definition must
+    // (Object.defineProperty); Reflect.defineProperty is quietly reported as done (true).
     if descriptor.has_get() || descriptor.has_set() {
-        if args.should_throw_on_error() {
-            let message = v8::String::new(scope, "Accessor properties are not allowed.").unwrap();
+        if interceptor_mode::should_throw(scope, &args) {
+            let message = format!(
+                "Failed to set an indexed property [{index}] on 'HTMLSelectElement': Accessor properties are not allowed."
+            );
+            let message = v8::String::new(scope, &message).unwrap();
             let error = v8::Exception::type_error(scope, message);
             scope.throw_exception(error);
-        } else {
-            rv.set_success(false);
         }
         return v8::Intercepted::kYes;
     }

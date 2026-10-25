@@ -38,24 +38,6 @@ fn select_element_members_match_chrome156_control() {
         format!("{:x}", Sha256::digest(cases_bytes))
     );
     let expected = &control["result"][0]["result"];
-    // Known divergence: Chrome's Reflect.defineProperty(select, i, accessor) reports true (Blink
-    // reads ShouldThrowOnError, which this V8 leaves false for definers too), so the binding
-    // returns false there. Assert exactly that delta, then compare everything else verbatim.
-    let mut actual = actual;
-    let step = actual["indexedSet"]
-        .as_array_mut()
-        .unwrap()
-        .iter_mut()
-        .find(|row| row[0] == "reflect-define-accessor")
-        .unwrap();
-    let chrome_step = expected["indexedSet"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row[0] == "reflect-define-accessor")
-        .unwrap();
-    assert_eq!((&step[1], &chrome_step[1]), (&"ok".into(), &"Error".into()));
-    step[1] = chrome_step[1].clone();
     let mismatches: Vec<String> = expected
         .as_object()
         .unwrap()

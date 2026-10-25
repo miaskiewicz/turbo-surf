@@ -51,17 +51,16 @@ fn legacy_call(
 
 /// HTMLAllCollection has neither setters nor deleters. Blink's interceptors
 /// reject a write to any index, or to a visible named property, with these
-/// messages: definitions always throw; assignment and deletion throw only where
-/// the caller's language mode requires it. Rusty V8 reads ShouldThrowOnError
-/// through the wrong callback type (always false), so for those two V8 itself
-/// raises the strict-mode TypeError from the `false` result, in its own words.
+/// messages only where V8 says the operation must throw (strict assignment and
+/// deletion, Object.defineProperty). Otherwise assignment and definition are
+/// quietly reported as done (Reflect.set/defineProperty return true) and
+/// deletion as refused.
 fn reject<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::PropertyCallbackArguments<'s>,
-    always: bool,
     message: &str,
 ) -> bool {
-    if !always && !args.should_throw_on_error() {
+    if !interceptor_mode::should_throw(scope, args) {
         return false;
     }
     let message = v8::String::new(scope, message).unwrap();
@@ -74,6 +73,7 @@ fn index_message(index: u32, operation: &str) -> String {
     match operation {
         "set" => format!("{prefix} [{index}] on 'HTMLAllCollection': Indexed property setter is not supported."),
         "define" => format!("{prefix} [{index}] on 'HTMLAllCollection': Index property setter is not supported."),
+        "define-accessor" => format!("{prefix} [{index}] on 'HTMLAllCollection': Accessor properties are not allowed."),
         _ => format!("Failed to delete an indexed property [{index}] from 'HTMLAllCollection': Index property deleter is not supported."),
     }
 }
@@ -104,21 +104,25 @@ fn all_index_setter<'s, 'i>(
     index: u32,
     _value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<()>,
+    _rv: v8::ReturnValue<()>,
 ) -> v8::Intercepted {
-    if !reject(scope, &args, false, &index_message(index, "set")) {
-        rv.set_bool(false);
-    }
+    reject(scope, &args, &index_message(index, "set"));
     v8::Intercepted::kYes
 }
 fn all_index_definer<'s, 'i>(
     scope: &mut v8::PinScope<'s, 'i>,
     index: u32,
-    _descriptor: &v8::PropertyDescriptor,
+    descriptor: &v8::PropertyDescriptor,
     args: v8::PropertyCallbackArguments<'s>,
     _rv: v8::ReturnValue<()>,
 ) -> v8::Intercepted {
-    reject(scope, &args, true, &index_message(index, "define"));
+    // Blink refuses an indexed accessor definition before consulting setter support.
+    let operation = if descriptor.has_get() || descriptor.has_set() {
+        "define-accessor"
+    } else {
+        "define"
+    };
+    reject(scope, &args, &index_message(index, operation));
     v8::Intercepted::kYes
 }
 fn all_index_deleter<'s, 'i>(
@@ -131,7 +135,7 @@ fn all_index_deleter<'s, 'i>(
     if supported(scope, &args, name.into()) != Some(true) {
         return v8::Intercepted::kNo;
     }
-    if !reject(scope, &args, false, &index_message(index, "delete")) {
+    if !reject(scope, &args, &index_message(index, "delete")) {
         rv.set_bool(false);
     }
     v8::Intercepted::kYes
@@ -148,27 +152,19 @@ fn all_named_mutation<'s>(
         return None;
     }
     let text = name.to_rust_string_lossy(scope);
-    Some(reject(
-        scope,
-        args,
-        operation == "define",
-        &named_message(&text, operation),
-    ))
+    Some(reject(scope, args, &named_message(&text, operation)))
 }
 fn all_named_setter<'s, 'i>(
     scope: &mut v8::PinScope<'s, 'i>,
     name: v8::Local<'s, v8::Name>,
     _value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<()>,
+    _rv: v8::ReturnValue<()>,
 ) -> v8::Intercepted {
-    let Some(thrown) = all_named_mutation(scope, name, &args, "set") else {
-        return v8::Intercepted::kNo;
-    };
-    if !thrown {
-        rv.set_bool(false);
+    match all_named_mutation(scope, name, &args, "set") {
+        None => v8::Intercepted::kNo,
+        Some(_) => v8::Intercepted::kYes,
     }
-    v8::Intercepted::kYes
 }
 fn all_named_definer<'s, 'i>(
     scope: &mut v8::PinScope<'s, 'i>,

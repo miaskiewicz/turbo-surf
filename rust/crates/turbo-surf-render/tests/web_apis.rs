@@ -17,14 +17,16 @@ const CONTROL: &str =
 ///   the Observable layer can see, so the inner context differs.
 /// - The render tier dispatches no `unhandledrejection` events, so the promises
 ///   AsyncIteratorClose leaves rejected are never reported.
-/// - `XMLHttpRequest` is not an `EventTarget` in the render tier, so it has no `when`.
+///
+/// `xhr.when(...)` used to be a gap here (XMLHttpRequest was not an EventTarget),
+/// but the merged real `XMLHttpRequestEventTarget -> EventTarget` now inherits
+/// `when` and delivers events, matching Chrome 156 (which genuinely exposes
+/// `EventTarget.prototype.when` in a fresh stable profile), so it is resolved.
 const KNOWN_GAPS: &[&str] = &[
     "observable-semantics-probe.js/bindingContexts/log/2/1/1 = \"Failed to execute 'flatMap' on 'Observable': Failed to execute 'dispatchEvent' on 'EventTarget': Cannot convert value to an Observable. Input value must be an Observable, async iterable, iterable, or Promise.\"",
     "observable-semantics-probe.js/iteratorClose/log/7/1 = \"[]\"",
     "observable-semantics-probe.js/iteratorClose/log/9/1 = \"[]\"",
     "observable-semantics-probe.js/iteratorClose/log/11/1 = \"[]\"",
-    "observable-semantics-probe.js/when/log/23/0 = \"xhr-when-threw\"",
-    "observable-semantics-probe.js/when/log/23/1 = [\"TypeError\",\"xhr.when is not a function\"]",
 ];
 
 fn control() -> Value {

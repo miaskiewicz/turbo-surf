@@ -121,17 +121,29 @@ fn submit<'s>(
     };
     // Charset replacement already preceded the mutable formdata event.
     payload.charset_entries.clear();
+    let files = if payload.method == "post" && payload.enctype == "multipart/form-data" {
+        match file_parts(scope, context, snapshot) {
+            Ok(files) => files,
+            Err(error) => {
+                fail(scope, &error);
+                return;
+            }
+        }
+    } else {
+        Vec::new()
+    };
     if !csp_request_for_context(scope, context, form, &action, "form-action", "") {
         result.set_bool(true);
         return;
     }
-    let plan = match form_navigation::prepare(
+    let plan = match form_navigation::prepare_with_files(
         &source,
         &action,
         &payload.method,
         &payload.enctype,
         &target,
         &payload.entries,
+        &files,
         &payload.charset_entries,
         encoding,
     ) {
@@ -369,6 +381,59 @@ fn entries<'s>(
             file_name(scope, context, value)?
         };
         result.push((name, text));
+    }
+    Ok(result)
+}
+
+/// Native snapshots of each File entry's name, type and bytes, for multipart bodies.
+fn file_parts<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    context: v8::Local<'s, v8::Context>,
+    payload: v8::Local<'s, v8::Value>,
+) -> Result<Vec<Option<form_navigation::FilePart>>, String> {
+    let payload = payload
+        .to_object(scope)
+        .ok_or("Native form snapshot is not an object")?;
+    let key = v8::String::new(scope, "entries").unwrap();
+    let rows = payload
+        .get(scope, key.into())
+        .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+        .ok_or("Native form entry list is not an array")?;
+    let mut result = Vec::with_capacity(rows.length() as usize);
+    for i in 0..rows.length() {
+        let value = rows
+            .get_index(scope, i)
+            .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
+            .and_then(|pair| pair.get_index(scope, 1))
+            .ok_or("Native form value is missing")?;
+        if value.is_string() {
+            result.push(None);
+            continue;
+        }
+        let snapshot = call_capability(scope, context, "snapshotFormFile", &[value])
+            .and_then(|snapshot| snapshot.to_object(scope))
+            .ok_or("Native form value is not a private File")?;
+        let text = |name: &str| {
+            let key = v8::String::new(scope, name).unwrap();
+            snapshot
+                .get(scope, key.into())
+                .filter(|value| value.is_string())
+                .map(|value| value.to_rust_string_lossy(scope))
+                .ok_or("Native File snapshot is incomplete")
+        };
+        let (name, content_type) = (text("name")?, text("type")?);
+        let key = v8::String::new(scope, "bytes").unwrap();
+        let bytes = snapshot
+            .get(scope, key.into())
+            .and_then(|value| v8::Local::<v8::Uint8Array>::try_from(value).ok())
+            .ok_or("Native File snapshot has no bytes")?;
+        let mut data = vec![0; bytes.byte_length()];
+        bytes.copy_contents(&mut data);
+        result.push(Some(form_navigation::FilePart {
+            name,
+            content_type,
+            bytes: data,
+        }));
     }
     Ok(result)
 }

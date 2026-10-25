@@ -8211,6 +8211,35 @@ let __setHeadersGuard;
 let __responseFromNetwork, __requestInit, __resourceResponse, __BodyParamsString;
 const __blobStates = __interfaceMap("Blob");
 const __formDataStates = __interfaceMap("FormData");
+// multipart/form-data BodyInit: UTF-8, newline-normalized names and text values,
+// Blink's quoted-string escapes and its random WebKitFormBoundary.
+const __multipartReplace = String.prototype.replace;
+const __multipartBody = entries => {
+  const random = new Uint8Array(16), table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB";
+  ops.op_random_fill(random);
+  let boundary = "----WebKitFormBoundary";
+  for (let index = 0; index < random.length; index++) boundary += table[random[index] & 63];
+  const chunks = [];
+  let size = 0;
+  const push = bytes => {chunks[chunks.length] = bytes; size += bytes.length;};
+  const text = value => push(ops.op_text_encode(value));
+  const lines = value => __baseApply(__multipartReplace, value, [/\r\n|\r|\n/g, "\r\n"]);
+  const quote = value => __baseApply(__multipartReplace, value, [/["\r\n]/g, character => character === "\"" ? "%22" : character === "\r" ? "%0D" : "%0A"]);
+  for (let index = 0; index < entries.length; index++) {
+    const name = entries[index][0], value = entries[index][1];
+    text("--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + quote(lines(name)) + "\"");
+    if (typeof value === "string") { text("\r\n\r\n" + lines(value) + "\r\n"); continue; }
+    const file = __fileStates.get(value), blob = __blobStates.get(value);
+    text("; filename=\"" + quote(file.name) + "\"\r\nContent-Type: " + (blob.type || "application/octet-stream") + "\r\n\r\n");
+    push(blob.bytes);
+    text("\r\n");
+  }
+  text("--" + boundary + "--\r\n");
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (let index = 0; index < chunks.length; index++) {bytes.set(chunks[index], at); at += chunks[index].length;}
+  return {bytes, type: "multipart/form-data; boundary=" + boundary};
+};
 const __bodyByteTag=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype),Symbol.toStringTag).get;
 const __bodyByteChunk=value=>__baseApply(__bodyByteTag,value,[])==="Uint8Array";
 const __fetchFailures=__interfaceMap("Fetch.failure");
@@ -8229,7 +8258,7 @@ const __resourceFailure=error=>__fetchFailures.get(error);
       if(__web.disturbed(raw)||applyBody(__ReadableLocked,raw,[]))throw new TypeError("Body stream is locked or disturbed");
       return {raw,type:null,sourceStream:true};
     }
-    if(__formDataStates.has(raw))throw new TypeError("Native multipart FormData BodyInit is not supported");
+    if(__formDataStates.has(raw)){const body=__multipartBody(__formDataStates.get(raw).entries);return {raw:body.bytes,type:body.type,sourceStream:false};}
     const blob=__blobStates.get(raw);
     if(blob)return {raw:new Bytes(blob.bytes),type:blob.type||null,sourceStream:false};
     if(bufferView(raw)){

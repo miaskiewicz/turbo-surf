@@ -7268,6 +7268,7 @@ for (const name of ["name", "message", "code"]) {
   Object.defineProperty(DOMException.prototype, name, {...descriptor, enumerable: true});
 }
 Object.defineProperty(DOMException.prototype, Symbol.toStringTag, {value: "DOMException", configurable: true});
+ops.op_register_dom_exception(DOMException);
 for (const [name, code] of Object.entries({INDEX_SIZE_ERR:1, DOMSTRING_SIZE_ERR:2,
   HIERARCHY_REQUEST_ERR:3, WRONG_DOCUMENT_ERR:4, INVALID_CHARACTER_ERR:5, NO_DATA_ALLOWED_ERR:6,
   NO_MODIFICATION_ALLOWED_ERR:7, NOT_FOUND_ERR:8, NOT_SUPPORTED_ERR:9, INUSE_ATTRIBUTE_ERR:10,
@@ -7871,15 +7872,18 @@ try {
 // frame an identical timestamp. requestAnimationFrame returns an integer id; cancelAnimationFrame
 // removes only that pending callback (not clearTimeout — rAF ids are their own namespace).
 let __rafClock = null, __rafId = 0, __rafScheduled = false;
-let __rafQueue = [], __frameSteps = [];
+let __rafQueue = [], __frameSteps = [], __renderingSteps = [], __renderingSuppressed = false;
 // Rendering frames are engine tasks; page replacement of setTimeout cannot stall them.
 const __frameTimer = globalThis.setTimeout;
 // Update-the-rendering order: queued engine steps (scroll events) run before
 // the frame's animation callbacks, and callbacks they request join this frame.
+// View-transition steps run after the callbacks. While a view transition suppresses
+// rendering no frame runs; queued work waits for the frame after suppression lifts.
 const __scheduleFrame = () => {
-  if (__rafScheduled) return;
+  if (__rafScheduled || __renderingSuppressed) return;
   __rafScheduled = true;
   __frameTimer(() => {
+    if (__renderingSuppressed) { __rafScheduled = false; return; }
     const floor = __perfNow();
     __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
     if (__rafClock < floor) __rafClock = floor;
@@ -7891,7 +7895,10 @@ const __scheduleFrame = () => {
     __rafQueue = [];
     __rafScheduled = false;
     for (let i = 0; i < batch.length; i++) { try { batch[i].fn(ts); } catch (e) {} }
-    if (__frameSteps.length) __scheduleFrame();
+    const after = __renderingSteps;
+    __renderingSteps = [];
+    for (let i = 0; i < after.length; i++) { try { after[i](ts); } catch (e) {} }
+    if (__frameSteps.length || __renderingSteps.length) __scheduleFrame();
   }, 16);
 };
 globalThis.requestAnimationFrame = (fn) => {
@@ -7901,6 +7908,15 @@ globalThis.requestAnimationFrame = (fn) => {
   return id;
 };
 ops.op_capture_frame_scheduler((step) => { __frameSteps[__frameSteps.length] = step; __scheduleFrame(); });
+// The vendored binding's view-transition rendering seam. A page here is never hidden: the
+// engine has no tab or occlusion model and reports document.visibilityState "visible".
+ops.op_capture_view_transition_host((command, argument) => {
+  if (command === "frame") { __renderingSteps[__renderingSteps.length] = argument; __scheduleFrame(); }
+  else if (command === "suppress") {
+    __renderingSuppressed = argument === true;
+    if (!__renderingSuppressed && (__rafQueue.length || __frameSteps.length || __renderingSteps.length)) __scheduleFrame();
+  } else if (command === "hidden") return false;
+});
 globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };
 // Native V8 jobs share the real Promise/observer microtask checkpoint and the
 // host watchdog. Their callbacks retain private realm ownership until delivery.
@@ -12127,7 +12143,7 @@ __G.domSig = (() => {
       for (let i = 0; i < segs.length - 1; i++) { const s = segs[i]; if (o[s] == null) o[s] = (s === "prototype") ? {} : function () {}; o = o[s]; }
       const last = segs[segs.length - 1]; if (!(last in o)) o[last] = function () {}; };
     ["Object.groupBy", "Promise.withResolvers", "Array.fromAsync", "Uint8Array.fromBase64",
-     "IDBObjectStore.prototype.getAllRecords", "Document.prototype.activeViewTransition",
+     "IDBObjectStore.prototype.getAllRecords",
      "PerformanceResourceTiming.prototype.contentEncoding", "Map.prototype.getOrInsert",
      "HTMLMediaElement.prototype.loading"].forEach(ns);
     if (!("Temporal" in G)) G.Temporal = {};
@@ -12285,8 +12301,8 @@ __G.domSig = (() => {
       "URLPattern USB USBAlternateInterface USBConfiguration USBConnectionEvent USBDevice USBEndpoint " +
       "USBInTransferResult USBInterface USBIsochronousInTransferPacket USBIsochronousInTransferResult " +
       "USBIsochronousOutTransferPacket USBIsochronousOutTransferResult USBOutTransferResult " +
-      "VideoColorSpace VideoDecoder VideoEncoder VideoPlaybackQuality ViewTimeline ViewTransition " +
-      "ViewTransitionTypeSet Viewport VirtualKeyboard VirtualKeyboardGeometryChangeEvent " +
+      "VideoColorSpace VideoDecoder VideoEncoder VideoPlaybackQuality ViewTimeline " +
+      "Viewport VirtualKeyboard VirtualKeyboardGeometryChangeEvent " +
       "VisibilityStateEntry WGSLLanguageFeatures WebGLObject WebGLQuery WebGLSampler " +
       "WebGLShaderPrecisionFormat WebGLSync WebGLTransformFeedback WebKitMutationObserver WebSocketError " +
       "WebSocketStream WebTransport WebTransportBidirectionalStream WebTransportDatagramDuplexStream " +

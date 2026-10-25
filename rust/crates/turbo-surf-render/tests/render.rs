@@ -532,9 +532,11 @@ async fn observers_are_distinct_and_intersection_fires_an_entry() {
         !out.contains("data-obs=\"true|IntersectionObserver,ResizeObserver,MutationObserver|0\""),
         "PerformanceObserver.supportedEntryTypes must be non-empty: {out}"
     );
+    // The empty div is a zero-height box at the top of the viewport: like Chrome, the initial
+    // entry reports it as (edge-adjacent) intersecting.
     assert!(
-        out.contains("data-io=\"1:false:number:rect\""),
-        "IntersectionObserver must fire one initial entry (isIntersecting:false, ratio number, rect): {out}"
+        out.contains("data-io=\"1:true:number:rect\""),
+        "IntersectionObserver must fire one initial entry (isIntersecting:true, ratio number, rect): {out}"
     );
 }
 

@@ -160,6 +160,7 @@
       __proto__: null,
       value: constructor,
       writable: true,
+      enumerable: false,
       configurable: true,
     });
   }
@@ -348,15 +349,24 @@
     writable: true,
     configurable: true,
   });
+  define(DOMRectList, "prototype", { __proto__: null, writable: false });
   define(globalThis, "DOMRectList", {
     __proto__: null,
     value: DOMRectList,
     writable: true,
+    enumerable: false,
     configurable: true,
   });
   function rectangle(values) {
     return object("DOMRect", prototypes.DOMRect, values[0], values[1], values[2], values[3]);
   }
+  // Observer entries (observers.js) report DOMRectReadOnly values built here.
+  define(globalThis[Symbol.for("ts")], "readOnlyRect", {
+    __proto__: null,
+    value: (x, y, width, height) =>
+      object("DOMRectReadOnly", prototypes.DOMRectReadOnly, x, y, width, height),
+    configurable: true,
+  });
   function rectList(rects) {
     const result = ops.op_geometry_object(rectListPrototype),
       items = [];
@@ -983,10 +993,12 @@
     enumerable: true,
     configurable: true,
   });
+  define(CaretPosition, "prototype", { __proto__: null, writable: false });
   define(globalThis, "CaretPosition", {
     __proto__: null,
     value: CaretPosition,
     writable: true,
+    enumerable: false,
     configurable: true,
   });
   for (const name of ["caretRangeFromPoint", "caretPositionFromPoint"])

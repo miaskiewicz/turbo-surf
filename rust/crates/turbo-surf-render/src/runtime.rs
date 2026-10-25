@@ -67,10 +67,13 @@ mod script_navigation;
 use form_submission::{op_form_data_entries, op_form_data_event, op_form_data_finish};
 #[path = "user_activation.rs"]
 mod user_activation;
+#[path = "window_interfaces.rs"]
+mod window_interfaces;
 pub use user_activation::NavigationActivationSnapshot;
 use user_activation::{
     op_user_activation_install, op_user_activation_navigator, op_user_activation_read,
 };
+use window_interfaces::{op_location_ancestor_origins, op_location_object, op_location_seed};
 
 struct OwnedRuntime(JsRuntime, bool, ActivationKey);
 
@@ -7043,6 +7046,9 @@ deno_core::extension!(
         op_window_message_pending,
         op_native_window_proxy,
         op_native_location_installed,
+        op_location_object,
+        op_location_seed,
+        op_location_ancestor_origins,
         op_window_opaque,
         op_document_scripts_allowed,
         op_set_frame_navigator,
@@ -7553,11 +7559,22 @@ const __navData = {
     setAppBadge: P, clearAppBadge: P,
     registerProtocolHandler: () => {}, unregisterProtocolHandler: () => {},
   };
+  const FN_LENGTH = { adAuctionComponents: 1, clearOriginJoinedAdInterestGroups: 1, deprecatedReplaceInURN: 2,
+    deprecatedURNToURL: 1, getInterestGroupAdAuctionData: 1, getUserMedia: 3, joinAdInterestGroup: 1,
+    registerProtocolHandler: 2, requestMediaKeySystemAccess: 2, runAdAuction: 1, sendBeacon: 1,
+    unregisterProtocolHandler: 2, vibrate: 1, webkitGetUserMedia: 3 };
   for (const name of FN) {
     const impl = Object.prototype.hasOwnProperty.call(__navData, name) && typeof __navData[name] === "function"
       ? __navData[name]
       : (FN_IMPL[name] || (() => undefined));
-    def(name, { value: impl, writable: true, enumerable: true, configurable: true });
+    // One distinct function per operation (shared stubs would report each other's names) with
+    // Chrome 156's arity and receiver check.
+    const operation = ({[name](...args) {
+      if (this !== navigator) throw new TypeError("Illegal invocation");
+      return Reflect.apply(impl, this, args);
+    }})[name];
+    Object.defineProperty(operation, "length", { value: FN_LENGTH[name] || 0, configurable: true });
+    def(name, { value: operation, writable: true, enumerable: true, configurable: true });
   }
   function Navigator() { throw new TypeError("Illegal constructor"); }
   Navigator.prototype = navProto;
@@ -7872,6 +7889,8 @@ try {
 // removes only that pending callback (not clearTimeout — rAF ids are their own namespace).
 let __rafClock = null, __rafId = 0, __rafScheduled = false;
 let __rafQueue = [], __frameSteps = [];
+// Post-animation-frame rendering steps (resize then intersection observations, observers.js).
+const __renderingSteps = [];
 // Rendering frames are engine tasks; page replacement of setTimeout cannot stall them.
 const __frameTimer = globalThis.setTimeout;
 // Update-the-rendering order: queued engine steps (scroll events) run before
@@ -7891,6 +7910,7 @@ const __scheduleFrame = () => {
     __rafQueue = [];
     __rafScheduled = false;
     for (let i = 0; i < batch.length; i++) { try { batch[i].fn(ts); } catch (e) {} }
+    for (let i = 0; i < __renderingSteps.length; i++) { try { __renderingSteps[i](ts); } catch (e) {} }
     if (__frameSteps.length) __scheduleFrame();
   }, 16);
 };
@@ -8452,138 +8472,6 @@ globalThis.fetch = async (input, init = undefined) => {
   const request = new __FetchRequest(input, init);
   return __fetchFromSource(request, {...__requestInit(request), destination:""}, ops.op_document_request_url());
 };
-// XMLHttpRequest over fetch (async; resolves in the event loop). Exposes the
-// EventTarget surface (`addEventListener`/`removeEventListener`/`dispatchEvent`) as well
-// as the `on*` props: real code wires the request via `req.addEventListener('load'/
-// 'readystatechange', …)` (Google's home-page bundle does), and a stub with only `on*`
-// crashed with "req.addEventListener is not a function", aborting the module.
-const __xhrContexts = new WeakMap();
-const __xhrGetContext = WeakMap.prototype.get, __xhrSetContext = WeakMap.prototype.set;
-const __xhrContext = (receiver) => {
-  const context = __baseApply(__xhrGetContext, __xhrContexts, [receiver]);
-  if (!context) throw new __exceptionTypeError("Illegal invocation");
-  return context;
-};
-globalThis.XMLHttpRequest = class XMLHttpRequest {
-  constructor() {
-    __baseApply(__xhrSetContext, __xhrContexts, [this, {source: () => ops.op_document_request_url(), base: () => __baseApply(__baseURI,__document,[])}]);
-    this.readyState = 0; this.status = 0; this.statusText = ""; this.responseText = ""; this.response = "";
-    this.responseType = ""; this.responseURL = ""; this.withCredentials = false; this.timeout = 0;
-    // Real XHR exposes an XMLHttpRequestUpload EventTarget; collectors sometimes wire
-    // `xhr.upload.onprogress`, and a missing `.upload` throws on assignment.
-    this.upload = { onprogress: null, onload: null, onerror: null, onloadend: null,
-      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } };
-    this._h = {};       // request headers
-    this._l = {};       // event listeners by type
-    this._rh = "";      // raw response headers (for get*ResponseHeader)
-    this._ct = "";      // response content-type
-    this._aborted = false;
-  }
-  open(method, url) { const context = __xhrContext(this); this._m = method || "GET"; this._u = new globalThis.URL(String(url), context.base()).href; this._aborted = false; this._setState(1); }
-  setRequestHeader(k, v) { __xhrContext(this); this._h[String(k)] = String(v); }
-  // Anti-bot/analytics code inspects response headers (e.g. a token-echo or a
-  // cache/CSP header); expose both accessors over the one header op_fetch returns.
-  getResponseHeader(k) {
-    __xhrContext(this);
-    const want = String(k).toLowerCase();
-    if (want === "content-type") return this._ct || null;
-    return null;
-  }
-  getAllResponseHeaders() { __xhrContext(this); return this._rh; }
-  abort() {
-    __xhrContext(this);
-    this._aborted = true;
-    if (this.readyState > 0 && this.readyState < 4) { this._setState(4); this._emit("abort"); this._emit("loadend"); }
-    this.status = 0;
-  }
-  addEventListener(type, fn) { __xhrContext(this); if (typeof fn === "function") (this._l[type] = this._l[type] || []).push(fn); }
-  removeEventListener(type, fn) { __xhrContext(this); const a = this._l[type]; if (a) { const i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); } }
-  dispatchEvent(ev) { __xhrContext(this); this._emit(ev && ev.type, ev); return true; }
-  // Fire an event to both the matching `on*` property and any addEventListener handlers.
-  _emit(type, ev) {
-    if (!type) return;
-    const e = ev || { type, target: this, currentTarget: this };
-    const on = this["on" + type];
-    if (typeof on === "function") { try { on.call(this, e); } catch (_e) {} }
-    for (const fn of (this._l[type] || []).slice()) { try { fn.call(this, e); } catch (_e) {} }
-  }
-  _setState(s) { this.readyState = s; this._emit("readystatechange"); }
-  // Marshal the raw body into the value `response` should hold for the requested
-  // responseType. `responseText` is only defined for "" / "text" (spec), but we keep
-  // it populated for lenient callers.
-  _finishResponse(text) {
-    this.responseText = text;
-    const t = this.responseType;
-    if (t === "json") { try { this.response = JSON.parse(text || "null"); } catch (_e) { this.response = null; } }
-    else if (t === "arraybuffer") { try { this.response = new globalThis.TextEncoder().encode(text).buffer; } catch (_e) { this.response = null; } }
-    else if (t === "blob") { try { this.response = new globalThis.Blob([text], { type: this._ct }); } catch (_e) { this.response = null; } }
-    else { this.response = text; }
-  }
-  send(body = undefined) {
-    const context = __xhrContext(this);
-    const self = this;
-    self._emit("loadstart");
-    __fetchFromSource(this._u, { method: this._m, body, headers: self._h,
-      credentials: this.withCredentials ? "include" : "same-origin" }, context.source())
-      .then(async (r) => {
-        if (self._aborted) return;
-        self.status = r.status;
-        self.statusText = r.status === 200 ? "OK" : "";
-        self.responseURL = self._u ? String(self._u) : "";
-        self._ct = (r.headers && r.headers.get && r.headers.get("content-type")) || "";
-        self._rh = self._ct ? ("content-type: " + self._ct + "\r\n") : "";
-        // HEADERS_RECEIVED → LOADING → DONE, like a real transfer (some collectors
-        // gate on readyState 2/3 transitions, not only 4).
-        self._setState(2);
-        self._setState(3);
-        self._finishResponse(await r.text());
-        self._setState(4);
-        self._emit("load");
-        self._emit("loadend");
-      })
-      .catch(() => { if (self._aborted) return; self._setState(4); self._emit("error"); self._emit("loadend"); });
-  }
-};
-// XHR readyState constants (both on the instance-facing class and its prototype), as
-// real code branches on `XMLHttpRequest.DONE` / `this.HEADERS_RECEIVED`.
-Object.defineProperty(globalThis, "XMLHttpRequest", { enumerable: false });
-Object.defineProperty(XMLHttpRequest.prototype, Symbol.toStringTag, {
-  value: "XMLHttpRequest", writable: false, enumerable: false, configurable: true,
-});
-for (const [name, value] of Object.entries({ UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 })) {
-  for (const target of [XMLHttpRequest, XMLHttpRequest.prototype])
-    Object.defineProperty(target, name, { value, writable: false, enumerable: true, configurable: false });
-}
-for (const name of ["abort", "getAllResponseHeaders", "getResponseHeader", "open", "send", "setRequestHeader"])
-  Object.defineProperty(XMLHttpRequest.prototype, name, { enumerable: true });
-// Observers: no live mutation notifications over the static tree → no-op stubs. Each must be a
-// DISTINCT constructor: real Chrome has three separate classes, so `IntersectionObserver ===
-// ResizeObserver` is false and each `.name` is its own — collapsing them onto one object is a
-// trivial `===` / `.name` fingerprint tell. IntersectionObserver additionally fires ONE initial
-// async entry per observed element (Chrome does this even for an off-screen/zero-size node, with
-// isIntersecting:false), so visibility-gated init isn't silently dead.
-function __mkObserver(name, withEntries) {
-  const C = { [name]: class { constructor(cb) { this._cb = cb; this._dead = false; } unobserve() {} takeRecords() { return []; }
-    disconnect() { this._dead = true; }
-    observe(el) {
-      if (!withEntries || typeof this._cb !== "function") return;
-      const cb = this._cb, self = this;
-      setTimeout(() => {
-        // Chrome delivers the initial entry asynchronously; disconnect() before it fires
-        // cancels it. Honour that so a page that observes-then-disconnects sees no callback.
-        if (self._dead) return;
-        try {
-        let box = { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
-        try { if (el && el.getBoundingClientRect) box = el.getBoundingClientRect(); } catch (e) {}
-        cb([{ target: el, isIntersecting: false, intersectionRatio: 0, boundingClientRect: box,
-          intersectionRect: { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 },
-          rootBounds: null, time: (globalThis.performance && performance.now) ? performance.now() : 0 }], self);
-      } catch (e) {} }, 0);
-    } } }[name];
-  return C;
-}
-globalThis.IntersectionObserver = __mkObserver("IntersectionObserver", true);
-globalThis.ResizeObserver = __mkObserver("ResizeObserver", false);
 // V8 clones preserve cycles and built-in types. Supported native keys use a
 // private host serializer; no page hook receives their material.
 // ArrayBuffer ownership transfers are validated and detached by the native bridge.
@@ -8813,23 +8701,6 @@ ops.op_set_host_capabilities({
   createEmptyFormFile:()=>__createPrivateFile({bytes:new __fileBytes(),type:"application/octet-stream"},"",__fileNow()),
   snapshotFormFile:receiver=>{const file=__fileStates.get(receiver),blob=__blobStates.get(receiver);return file&&blob?{name:file.name,lastModified:file.lastModified,type:blob.type,bytes:new __fileBytes(blob.bytes)}:null;}
 });
-if (typeof globalThis.FileReader === "undefined") {
-  globalThis.FileReader = class FileReader {
-    constructor() { this.result = null; this.onload = null; this.onerror = null; this.onloadend = null; }
-    readAsText(blob) { this._read(blob, (s) => s); }
-    readAsDataURL(blob) { this._read(blob, (s) => "data:" + (blob.type || "") + ";base64," + btoa(s)); }
-    readAsArrayBuffer(blob) { this._read(blob, (s) => new TextEncoder().encode(s).buffer); }
-    _read(blob, map) {
-      const self = this;
-      Promise.resolve(blob && typeof blob.text === "function" ? blob.text() : "").then((s) => {
-        self.result = map(s);
-        const ev = { target: self };
-        if (typeof self.onload === "function") self.onload(ev);
-        if (typeof self.onloadend === "function") self.onloadend(ev);
-      });
-    }
-  };
-}
 // The canonical binding owns native custom-element construction, registry state
 // and lifecycle reactions in every Window realm.
 // (CSSStyleSheet, document.adoptedStyleSheets, and the HTML*Element constructor
@@ -9269,25 +9140,6 @@ if (typeof globalThis.BroadcastChannel === "undefined") {
   Object.defineProperty(BroadcastChannel.prototype,Symbol.toStringTag,{value:"BroadcastChannel",configurable:true});
   for(const name of ["name","onmessage","onmessageerror","postMessage","close"]){const descriptor=Object.getOwnPropertyDescriptor(BroadcastChannel.prototype,name);Object.defineProperty(BroadcastChannel.prototype,name,{...descriptor,enumerable:true});}
 }
-// WebSocket — no live socket headless. Stay CONNECTING forever (never open, never
-// close): apps connect in the background and render regardless, so this can't hang a
-// render NOR trigger a reconnect loop (which firing onclose would).
-if (typeof globalThis.WebSocket === "undefined") {
-  globalThis.WebSocket = class WebSocket {
-    constructor(url) {
-      this.url = String(url);
-      this.readyState = 0; // CONNECTING, and it stays there
-      this.onopen = this.onmessage = this.onerror = this.onclose = null;
-      this.bufferedAmount = 0;
-    }
-    send() {}
-    close() { this.readyState = 3; if (typeof this.onclose === "function") try { this.onclose({ type: "close", code: 1000, wasClean: true }); } catch (_e) {} }
-    addEventListener(t, fn) { this["on" + t] = fn; }
-    removeEventListener() {}
-    dispatchEvent() { return true; }
-  };
-  Object.assign(globalThis.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
-}
 if (typeof globalThis.btoa === "undefined") {
   const __B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   globalThis.btoa = (s) => {
@@ -9384,14 +9236,6 @@ if (typeof globalThis.ReadableStream === "undefined") {
     }
   };
 }
-// History API (single virtual entry; updates location.href).
-globalThis.history = {
-  state: null,
-  length: 1,
-  pushState(s, _t, u) { this.state = s; if (u != null) globalThis.location.href = String(u); },
-  replaceState(s, _t, u) { this.state = s; if (u != null) globalThis.location.href = String(u); },
-  back() {}, forward() {}, go() {},
-};
 // requestIdleCallback must invoke the callback with an IdleDeadline ({didTimeout, timeRemaining()});
 // the bare shim passed nothing, so `deadline.timeRemaining()` threw — a correctness bug + tell.
 globalThis.requestIdleCallback = (fn) => globalThis.setTimeout(() => {
@@ -9477,6 +9321,12 @@ if (typeof globalThis.URL === "undefined") {
   globalThis.URL.revokeObjectURL = () => {};
 }
 __BodyParamsString=URLSearchParams.prototype.toString;
+"##,
+    include_str!("event_handler_attributes.js"),
+    include_str!("xhr.js"),
+    include_str!("file_reader.js"),
+    include_str!("websocket.js"),
+    r##"
 // Object-URL registry + download capture. The common client-side export pattern is
 // `URL.createObjectURL(blob)` → set it on a `<a download href=…>` → `link.click()`. A real
 // createObjectURL (keyed store) lets us recover the blob bytes when the anchor is clicked,
@@ -9553,42 +9403,9 @@ __BodyParamsString=URLSearchParams.prototype.toString;
   }
 })();
 
-// location — back it with a real URL so setting `location.href` (done at install time,
-// and by history.pushState/replaceState) UPDATES pathname/search/hash/host/origin too.
-// browser_env.js ships a plain static object whose href is just a string field, so
-// pathname stayed "/" regardless of the page URL — and a client router that reads
-// `usePathname()`/`useSearchParams()` (Next's app router, route guards) then misroutes:
-// the payroll login page rendered "Redirecting…" instead of the form because the auth
-// guard saw pathname "/" (a protected route) rather than "/login". Defined AFTER the URL
-// polyfill so `new URL` is available. Components are live getters over the backing URL.
-(() => {
-  if (ops.op_native_location_installed()) return;
-  const LocationURL=globalThis.URL,locations=__interfaceMap("Location.URL");
-  let url=null;
-  const reparse=(value,base)=>{try{url=new LocationURL(__String(value),base);}catch(_){}};
-  reparse((globalThis.location&&globalThis.location.href)||"http://localhost/");
-  const location={};
-  locations.set(location,{__proto__:null,owner:globalThis,
-    read:name=>url?url[name]:"",
-    write(name,value){if(name==="href")reparse(value,url?url.href:undefined);else if(url){try{url[name]=value;}catch(_){}}if(url)ops.op_script_navigation_admitted(url.href);}});
-  const state=receiver=>{
-    const value=locations.get(receiver);
-    if(!value)throw new __exceptionTypeError("Illegal invocation");
-    if(!ops.op_windows_same_origin(value.owner))throw new DOMException("Cross-origin Location access","SecurityError");
-    return value;
-  };
-  for(const name of ["href","protocol","host","hostname","port","pathname","search","hash","origin"]){
-    const descriptor={__proto__:null,enumerable:true,configurable:false,
-      get:__documentFunction(function(){return state(this).read(name);},"get "+name,0)};
-    if(name!=="origin")descriptor.set=__documentFunction(function(value){state(this).write(name,value);},"set "+name,1);
-    Object.defineProperty(location,name,descriptor);
-  }
-  for(const name of ["assign","replace","toString","reload"]){
-    const callback=__documentFunction(function(value){const record=state(this);if(name==="toString")return record.read("href");if(name!=="reload"){if(!arguments.length)throw new __exceptionTypeError("A URL is required");record.write("href",value);}},name,name==="assign"||name==="replace"?1:0);
-    Object.defineProperty(location,name,{__proto__:null,value:callback,writable:false,enumerable:true});
-  }
-  globalThis.location=location;
-})();
+"##,
+    include_str!("window_location.js"),
+    r##"
 
 // Document metadata is live and owned by Document.prototype; native body/head
 // accessors keep their original tree callbacks. location remains an own property
@@ -9603,8 +9420,6 @@ __defineDocumentAccessor("documentURI", state => state.inactive ? state.url : st
 (() => {
   const d = globalThis.document;
   if (!d) return;
-  try { Object.defineProperty(d, "location", {configurable: true, enumerable: true,
-    get() {return __documentState(this).window.location;}}); } catch (_) {}
   try { if (typeof d.hasFocus !== "function") d.hasFocus = () => true; } catch (_) {}
   try { if (typeof d.open !== "function") d.open = () => d; } catch (_) {}
   try { if (typeof d.close !== "function") d.close = () => {}; } catch (_) {}
@@ -9623,7 +9438,9 @@ __defineDocumentAccessor("documentURI", state => state.inactive ? state.url : st
     FILTER_ACCEPT: 1, FILTER_REJECT: 2, FILTER_SKIP: 3,
   };
   const ACCEPT = 1, REJECT = 2;
-  d.createTreeWalker = function (root, whatToShow, filter) {
+  // createTreeWalker(root, optional whatToShow, optional filter).length === 1.
+  d.createTreeWalker = function (root) {
+    const whatToShow = arguments[1], filter = arguments[2];
     const show = whatToShow == null ? 0xffffffff : whatToShow >>> 0;
     const accept = (n) => {
       const t = n.nodeType || 1;
@@ -9678,7 +9495,8 @@ __defineDocumentAccessor("documentURI", state => state.inactive ? state.url : st
   };
   // NodeIterator (same filter model, linear) — some libs use it instead of TreeWalker.
   if (typeof d.createNodeIterator !== "function") {
-    d.createNodeIterator = function (root, whatToShow, filter) {
+    d.createNodeIterator = function (root) {
+      const whatToShow = arguments[1], filter = arguments[2];
       const tw = d.createTreeWalker(root, whatToShow, filter);
       return { nextNode: () => tw.nextNode(), previousNode: () => null, detach() {} };
     };
@@ -9736,21 +9554,10 @@ __defineDocumentAccessor("documentURI", state => state.inactive ? state.url : st
     width: __iw, height: __ih, scale: 1, offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0,
     addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
   });
-  // PerformanceObserver — analytics / experiment code (e.g. Wikipedia's header
-  // enrollments) `new PerformanceObserver(...)` at load; an undefined ref throws
-  // inside a Promise and rejects the chain, killing the dependent script.
-  set("PerformanceObserver", class PerformanceObserver {
-    constructor(cb) { this._cb = cb; }
-    observe() {} disconnect() {} takeRecords() { return []; }
-  });
-  // Real Chrome exposes a populated static list here; an empty array is a tell.
-  try {
-    globalThis.PerformanceObserver.supportedEntryTypes = [
-      "element", "event", "first-input", "largest-contentful-paint", "layout-shift",
-      "longtask", "mark", "measure", "navigation", "paint", "resource", "visibility-state",
-    ];
-  } catch (_e) {}
 })();
+"##,
+    include_str!("window_viewport.js"),
+    r##"
 
 // `Node.prototype.replaceChild(new, old)` — jQuery's `replaceWith`/`domManip` call
 // it; the DOM binding omits it. All wrapped elements share one template prototype,
@@ -11175,6 +10982,12 @@ __G.domSig = (() => {
         Object.defineProperty(properties, Symbol.toStringTag, {value:"WindowProperties",configurable:true});
         Object.setPrototypeOf(W.prototype, properties);
         Object.defineProperty(W.prototype, Symbol.toStringTag, {value:"Window",configurable:true});
+        // Window inherits from EventTarget and carries the FileSystem constants; instanceof
+        // follows the real prototype chain instead of a predicate.
+        Object.setPrototypeOf(W, ET);
+        delete W[Symbol.hasInstance];
+        for (const [name, value] of [["TEMPORARY", 0], ["PERSISTENT", 1]])
+          for (const object of [W, W.prototype]) Object.defineProperty(object, name, {value, writable:false, enumerable:true, configurable:false});
         if (Object.hasOwn(globalThis, Symbol.toStringTag)) delete globalThis[Symbol.toStringTag];
         if (Object.getPrototypeOf(globalThis) !== W.prototype) Object.setPrototypeOf(globalThis, W.prototype);
       } else if (Object.getPrototypeOf(globalThis) !== ET.prototype) {
@@ -11285,29 +11098,6 @@ __G.domSig = (() => {
     lifecycleEvent(globalThis, "pageshow");
   };
   ops.op_set_host_capabilities({documentLoading:()=>{__G.initialLoading=true;__G.setDocumentReadyState("loading");},markDocumentInteractive:__markDocumentInteractive,dispatchDocumentInteractive,dispatchDocumentComplete});
-  // A native-reporting getter (its source reads "[native code]" via the trap above).
-  const nativeGetter = (val) => { const g = function () { return val; }; mark(g); return g; };
-  // Insert a correctly-named host prototype between `obj` and its current prototype, carrying
-  // native accessor getters for `keys` (values snapshotted from the instance). Own data props
-  // are LEFT in place — reads still hit them; the deep-probe's chain walk (which skips own
-  // props) finds the native getter. `dropOwn` removes named own props (needed for `webdriver`,
-  // whose tamper check fires on ANY own descriptor).
-  const hostInterface = (obj, ctorName, keys, dropOwn) => {
-    if (!obj) return;
-    const ctor = ({ [ctorName]: function () {} })[ctorName]; // .name === ctorName
-    const proto = Object.create(Object.getPrototypeOf(obj) || Object.prototype);
-    Object.defineProperty(proto, "constructor", { value: ctor, configurable: true });
-    try { ctor.prototype = proto; } catch (e) {} // a function's own `prototype` is writable but non-configurable
-    mark(ctor, ctorName);
-    tag(proto, ctorName);
-    G[ctorName] = G[ctorName] || ctor; // expose the constructor (real browsers do)
-    for (const k of keys) {
-      let val; try { val = obj[k]; } catch (e) { val = undefined; }
-      Object.defineProperty(proto, k, { get: nativeGetter(val), enumerable: true, configurable: true });
-    }
-    for (const k of (dropOwn || [])) { try { delete obj[k]; } catch (e) {} }
-    Object.setPrototypeOf(obj, proto);
-  };
 
   // NB: navigator is now a full `Navigator` instance built earlier — zero own props, all 84
   // members (incl. userAgent/platform/webdriver) as native-marked getters on `Navigator.prototype`
@@ -11315,13 +11105,6 @@ __G.domSig = (() => {
   // GONE — it replaced the real 84-member prototype with a thin 13-getter one (a structural tell).
   // `webdriver` is already a native getter returning false with no own property.
 
-  // screen → Screen.prototype (6 native getters); reserve OS chrome so avail<full (screen-no-os-chrome).
-  guard(() => {
-    const scr = G.screen;
-    if (scr) {
-      hostInterface(scr, "Screen", ["width", "height", "availWidth", "availHeight", "colorDepth", "pixelDepth"]);
-    }
-  });
 
   // WebGL identity uses the host adapter, alongside its pixel executor. Extension
   // and limit compatibility still belongs to the emulated WebGL layer below.
@@ -11831,11 +11614,6 @@ __G.domSig = (() => {
 
   // window / history / console brands (WINDOW_BRANDS: note console's brand is lowercase).
   guard(() => { if(G.Window?.prototype)tag(G.Window.prototype,"Window"); });
-  guard(() => {
-    G.history = G.history || { length: 1, state: null, scrollRestoration: "auto",
-      back() {}, forward() {}, go() {}, pushState() {}, replaceState() {} };
-    tag(G.history, "History");
-  });
   guard(() => { if (G.console) { tag(G.console, "console"); ["log", "info", "warn", "error", "debug"].forEach((m) => mark(G.console[m], m)); } });
   guard(() => {
     const object = G.performance;
@@ -12073,17 +11851,6 @@ __G.domSig = (() => {
     delete permissions.query; Object.setPrototypeOf(permissions, proto); G.Permissions = Permissions;
   });
 
-  // window.location must class-tag as "[object Location]". The vendored location is a plain
-  // object (Object.prototype.toString → the wrong tag, e.g. "[object DOMImplementation]" or
-  // "[object Object]"), a trivial `Object.prototype.toString.call(location)` bot tell. Tag it
-  // (and its prototype, so a page that reads the tag off the proto also sees Location).
-  guard(() => {
-    const loc = G.location; if (!loc || typeof loc !== "object") return;
-    const tagLocation = (o) => { try { Object.defineProperty(o, Symbol.toStringTag, { value: "Location", configurable: true }); } catch (e) {} };
-    tagLocation(loc);
-    const p = Object.getPrototypeOf(loc);
-    if (p && p !== Object.prototype) tagLocation(p);
-  });
 
   // offsetWidth / offsetHeight via the host's real font measurer (op_measure_text, system fonts).
   // A no-layout DOM reports neither, so a font-detection probe (span metrics per font-family) sees
@@ -12128,8 +11895,7 @@ __G.domSig = (() => {
       const last = segs[segs.length - 1]; if (!(last in o)) o[last] = function () {}; };
     ["Object.groupBy", "Promise.withResolvers", "Array.fromAsync", "Uint8Array.fromBase64",
      "IDBObjectStore.prototype.getAllRecords", "Document.prototype.activeViewTransition",
-     "PerformanceResourceTiming.prototype.contentEncoding", "Map.prototype.getOrInsert",
-     "HTMLMediaElement.prototype.loading"].forEach(ns);
+     "PerformanceResourceTiming.prototype.contentEncoding", "Map.prototype.getOrInsert"].forEach(ns);
     if (!("Temporal" in G)) G.Temporal = {};
     if (!("Sanitizer" in G)) G.Sanitizer = function Sanitizer() {};
     if (typeof Math.sumPrecise !== "function") Math.sumPrecise = function sumPrecise() { return 0; };
@@ -12455,6 +12221,8 @@ __G.domSig = (() => {
 
 })();
 "##,
+    include_str!("observers.js"),
+    include_str!("interface_shapes.js"),
     include_str!("user_activation.js"),
     include_str!("host_input.js"),
     r##"

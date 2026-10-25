@@ -69,7 +69,9 @@ use form_submission::{op_form_data_entries, op_form_data_event, op_form_data_fin
 mod user_activation;
 pub use user_activation::NavigationActivationSnapshot;
 use user_activation::{
-    op_user_activation_install, op_user_activation_navigator, op_user_activation_read,
+    host_user_activation, op_host_close_request, op_host_light_dismiss, op_host_modal_backdrop,
+    op_host_user_activation, op_user_activation_install, op_user_activation_navigator,
+    op_user_activation_read, op_user_activation_snapshot,
 };
 
 struct OwnedRuntime(JsRuntime, bool, ActivationKey);
@@ -403,6 +405,14 @@ fn op_document_feature_enabled(
     scope: &mut v8::PinScope,
     document: v8::Local<v8::Object>,
     #[string] feature: &str,
+) -> bool {
+    document_feature_enabled(scope, document, feature)
+}
+
+pub(crate) fn document_feature_enabled(
+    scope: &mut v8::PinScope,
+    document: v8::Local<v8::Object>,
+    feature: &str,
 ) -> bool {
     let Some(context) = document.get_creation_context(scope) else {
         return false;
@@ -4219,6 +4229,8 @@ struct WindowMessage {
     origin: String,
     target_origin: MessageTargetOrigin,
     data: crate::crypto_clone::CloneSnapshot,
+    /// The sender's UserActivation snapshot bits, or -1 when not included.
+    activation: i32,
 }
 enum MessageTargetOrigin {
     Any,
@@ -4604,8 +4616,21 @@ fn op_window_post_message<'s>(
     message: v8::Local<'s, v8::Value>,
     #[string] target_origin: &str,
     transfer: Option<v8::Local<'s, v8::Value>>,
+    include_activation: bool,
 ) -> Result<(), JsErrorBox> {
-    queue_window_message(scope, window, message, target_origin, transfer)
+    queue_window_message(
+        scope,
+        window,
+        message,
+        target_origin,
+        transfer,
+        include_activation,
+    )
+}
+
+/// The entered window's UserActivation snapshot bits for an outgoing message.
+pub(crate) fn activation_snapshot_bits(context: v8::Local<v8::Context>) -> i32 {
+    user_activation::snapshot_bits(context)
 }
 
 fn admit_window_snapshot(scope: &mut v8::PinScope, size: usize) -> Result<(), JsErrorBox> {
@@ -4631,9 +4656,15 @@ fn queue_window_message<'s>(
     message: v8::Local<'s, v8::Value>,
     target_origin: &str,
     transfer: Option<v8::Local<'s, v8::Value>>,
+    include_activation: bool,
 ) -> Result<(), JsErrorBox> {
     let source = v8::Global::new(scope, scope.get_entered_or_microtask_context());
     let source = v8::Local::new(scope, source);
+    let activation = if include_activation {
+        user_activation::snapshot_bits(source)
+    } else {
+        -1
+    };
     let target = window
         .get_creation_context(scope)
         .ok_or_else(|| JsErrorBox::generic("message target is not a Window"))?;
@@ -4698,6 +4729,7 @@ fn queue_window_message<'s>(
         let origin = v8::String::new(scope, &origin).unwrap();
         let source_window = source.global(scope);
         let failed = v8::Boolean::new(scope, failed);
+        let activation = v8::Integer::new(scope, activation);
         // Queue the JS timer immediately for synchronous run_with_dom callers;
         // listener delivery remains asynchronous and sees an actual clone.
         call_frame_helper(
@@ -4709,6 +4741,7 @@ fn queue_window_message<'s>(
                 origin.into(),
                 port_array.into(),
                 failed.into(),
+                activation.into(),
             ],
         )
         .ok_or_else(|| JsErrorBox::generic("message dispatch unavailable"))?;
@@ -4720,6 +4753,7 @@ fn queue_window_message<'s>(
         origin,
         target_origin: expected,
         data,
+        activation,
     };
     JsRuntime::op_state_from(scope)
         .borrow_mut()
@@ -6945,15 +6979,6 @@ fn op_window_media_state(scope: &mut v8::PinScope, window: v8::Local<v8::Object>
     }
 }
 
-// Transient activation belongs to this document's native context, never guest flags.
-struct HostUserActivation(std::time::Instant);
-
-fn host_user_activation(context: v8::Local<v8::Context>) -> bool {
-    context
-        .get_slot::<HostUserActivation>()
-        .is_some_and(|activation| activation.0.elapsed() < std::time::Duration::from_secs(5))
-}
-
 #[op2(nofast)]
 fn op_script_navigation_admitted(scope: &mut v8::PinScope, #[string] target: String) {
     script_navigation::record(
@@ -6961,16 +6986,6 @@ fn op_script_navigation_admitted(scope: &mut v8::PinScope, #[string] target: Str
         scope.get_current_context(),
         target,
     );
-}
-
-#[op2(fast)]
-fn op_host_user_activation(scope: &mut v8::PinScope) {
-    let context = scope.get_current_context();
-    if context.get_slot::<HostInputDriver>().is_some()
-        && context.get_slot::<FrameRetired>().is_none()
-    {
-        context.set_slot(Rc::new(HostUserActivation(std::time::Instant::now())));
-    }
 }
 
 struct HostInputDriver {
@@ -7068,6 +7083,10 @@ deno_core::extension!(
         op_event_trust,
         op_set_host_input_driver,
         op_host_user_activation,
+        op_host_close_request,
+        op_host_light_dismiss,
+        op_host_modal_backdrop,
+        op_user_activation_snapshot,
         op_user_activation_install,
         op_user_activation_navigator,
         op_user_activation_read,
@@ -8847,6 +8866,8 @@ if (typeof globalThis.FileReader === "undefined") {
 // BroadcastChannel dispatch build events via this so `ev instanceof MessageEvent` holds and the
 // event carries data/origin/source/ports like Chrome. Defined before the ports that use it.
 const __messageEventState = __interfaceMap("MessageEvent");
+// Assigned by user_activation.js: snapshot construction and the UserActivation brand.
+let __userActivationSnapshot = null, __userActivationBrand = null;
 const __messageState = event => {
   const state = __messageEventState.get(event);
   if (!state) throw new TypeError("Illegal invocation");
@@ -8867,13 +8888,21 @@ globalThis.MessageEvent = class MessageEvent extends Event {
       lastEventId: init.lastEventId === undefined ? "" : __messageString(init.lastEventId),
       source: init.source == null ? null : init.source,
       ports: Object.freeze(init.ports === undefined ? [] : Array.from(init.ports)),
+      userActivation: null,
     });
+    const userActivation = init.userActivation;
+    if (userActivation !== undefined && userActivation !== null) {
+      if (!__userActivationBrand(userActivation))
+        throw new TypeError("Failed to construct 'MessageEvent': Failed to read the 'userActivation' property from 'MessageEventInit': Failed to convert value to 'UserActivation'.");
+      __messageEventState.get(this).userActivation = userActivation;
+    }
   }
   get data() { return __messageState(this).data; }
   get origin() { return __messageState(this).origin; }
   get lastEventId() { return __messageState(this).lastEventId; }
   get source() { return __messageState(this).source; }
   get ports() { return __messageState(this).ports; }
+  get userActivation() { return __messageState(this).userActivation; }
   initMessageEvent(type, bubbles = false, cancelable = false, data = null, origin = "", lastEventId = "", source = null, ports = []) {
     const state = __messageState(this);
     if (!arguments.length) throw new TypeError("A type is required");
@@ -8883,7 +8912,7 @@ globalThis.MessageEvent = class MessageEvent extends Event {
     state.source = source; state.ports = Object.freeze(Array.from(ports));
   }
 };
-for (const name of ["data", "origin", "lastEventId", "source", "ports", "initMessageEvent"]) {
+for (const name of ["data", "origin", "lastEventId", "source", "ports", "userActivation", "initMessageEvent"]) {
   const descriptor = Object.getOwnPropertyDescriptor(MessageEvent.prototype, name);
   Object.defineProperty(MessageEvent.prototype, name, {...descriptor, enumerable: true});
 }
@@ -8969,8 +8998,11 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
   if (arguments.length === 0) throw new __exceptionTypeError("A message is required");
   const receiver=this==null?__postingWindow:this;
   if(!ops.op_surf_is_window(receiver))throw new __exceptionTypeError("Illegal invocation");
+  let includeActivation=false;
   if(targetOrigin===null || typeof targetOrigin==="object") {
-    const options=targetOrigin||{}, origin=options.targetOrigin;
+    const options=targetOrigin||{};
+    includeActivation=!!options.includeUserActivation;
+    const origin=options.targetOrigin;
     targetOrigin=origin===undefined?"/":origin;
     transfer=options.transfer;
   }
@@ -8981,7 +9013,7 @@ globalThis.postMessage = ({postMessage(message, targetOrigin = "/", transfer) {
     try {ops.op_surf_url_parse(targetOrigin,"");}
     catch(_){throw new __postingException("Invalid target origin","SyntaxError");}
   }
-  ops.op_window_post_message(receiver, message, targetOrigin, transferList);
+  ops.op_window_post_message(receiver, message, targetOrigin, transferList, includeActivation);
 }}).postMessage;
 const __windowPostMessageNative=globalThis.postMessage, __windowPostingApply=Reflect.apply;
 ops.op_set_host_capabilities({postWindowMessage:(target,message,origin,transfer)=>__windowPostingApply(__windowPostMessageNative,target,[message,origin,transfer])});
@@ -9017,11 +9049,11 @@ __G.windowView = (target) => {
   return view;
 };
 const __hostMessageEvent=globalThis.MessageEvent, __hostMessageSchedule=globalThis.setTimeout;
-const __deliverWindowMessage = (message, sender, origin, ports, failed) => {
+const __deliverWindowMessage = (message, sender, origin, ports, failed, activation) => {
   "use strict";
   const source = __G.windowView(sender);
   __hostMessageSchedule(() => {
-    const event = __hostPortMessage(failed ? "messageerror" : "message", message, ports, source, origin);
+    const event = __hostPortMessage(failed ? "messageerror" : "message", message, ports, source, origin, activation);
     ops.op_event_trust(event, -1);
     ops.op_dispatch_host_event(event, globalThis);
   }, 0);
@@ -13073,6 +13105,7 @@ fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(),
     let port_array = v8::Array::new_with_elements(scope, &port_values);
     let origin = v8::String::new(scope, &item.origin).unwrap();
     let failed = v8::Boolean::new(scope, failed);
+    let activation = v8::Integer::new(scope, item.activation);
     call_frame_helper(
         scope,
         "deliverWindowMessage",
@@ -13082,6 +13115,7 @@ fn deliver_window_message(rt: &mut JsRuntime, item: WindowMessage) -> Result<(),
             origin.into(),
             port_array.into(),
             failed.into(),
+            activation.into(),
         ],
     )
     .ok_or("message dispatch failed")?;

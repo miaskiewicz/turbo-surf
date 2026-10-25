@@ -1,0 +1,2571 @@
+{
+  "browser": "Chrome/156.0.8078.47",
+  "v8": "15.6.75.19",
+  "casesSha256": "de0d0559f85f87b31ec060f6d6cf743746171f5fa3afa2b7027042cac1673157",
+  "collectorSha256": "79226be5ddec9c5d3dadc0adc0e479e16d99aa7861ad83870ed96a5ecd7f0210",
+  "headless": true,
+  "flags": [
+    "--remote-debugging-port=0",
+    "--user-data-dir=<fresh-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
+    "--headless=new",
+    "about:blank"
+  ],
+  "errors": [],
+  "result": [
+    {
+      "id": "shape",
+      "values": [
+        {
+          "inputPicker": {
+            "kind": "function",
+            "get": null,
+            "set": null,
+            "name": "showPicker",
+            "length": 0,
+            "e": true,
+            "c": true,
+            "w": true
+          },
+          "selectPicker": {
+            "kind": "function",
+            "get": null,
+            "set": null,
+            "name": "showPicker",
+            "length": 0,
+            "e": true,
+            "c": true,
+            "w": true
+          },
+          "textareaPicker": null,
+          "messageActivation": {
+            "kind": "accessor",
+            "get": [
+              "get userActivation",
+              0
+            ],
+            "set": null,
+            "e": true,
+            "c": true,
+            "w": null
+          },
+          "requestFullscreen": {
+            "kind": "function",
+            "get": null,
+            "set": null,
+            "name": "requestFullscreen",
+            "length": 0,
+            "e": true,
+            "c": true,
+            "w": true
+          },
+          "htmlRequestFullscreen": null,
+          "webkitRequestFullscreen": {
+            "kind": "function",
+            "get": null,
+            "set": null,
+            "name": "webkitRequestFullscreen",
+            "length": 0,
+            "e": true,
+            "c": true,
+            "w": true
+          },
+          "webkitRequestFullScreen": {
+            "kind": "function",
+            "get": null,
+            "set": null,
+            "name": "webkitRequestFullScreen",
+            "length": 0,
+            "e": true,
+            "c": true,
+            "w": true
+          },
+          "onfullscreenchange": {
+            "kind": "accessor",
+            "get": [
+              "get onfullscreenchange",
+              0
+            ],
+            "set": [
+              "set onfullscreenchange",
+              1
+            ],
+            "e": true,
+            "c": true,
+            "w": null
+          },
+          "onfullscreenerror": {
+            "kind": "accessor",
+            "get": [
+              "get onfullscreenerror",
+              0
+            ],
+            "set": [
+              "set onfullscreenerror",
+              1
+            ],
+            "e": true,
+            "c": true,
+            "w": null
+          },
+          "onwebkitfullscreenchange": {
+            "kind": "accessor",
+            "get": [
+              "get onwebkitfullscreenchange",
+              0
+            ],
+            "set": [
+              "set onwebkitfullscreenchange",
+              1
+            ],
+            "e": true,
+            "c": true,
+            "w": null
+          },
+          "onwebkitfullscreenerror": {
+            "kind": "accessor",
+            "get": [
+              "get onwebkitfullscreenerror",
+              0
+            ],
+            "set": [
+              "set onwebkitfullscreenerror",
+              1
+            ],
+            "e": true,
+            "c": true,
+            "w": null
+          },
+          "documentOnfullscreenchange": {
+            "kind": "accessor",
+            "get": [
+              "get onfullscreenchange",
+              0
+            ],
+            "set": [
+              "set onfullscreenchange",
+              1
+            ],
+            "e": true,
+            "c": true,
+            "w": null
+          },
+          "documentOnfullscreenerror": {
+            "kind": "accessor",
+            "get": [
+              "get onfullscreenerror",
+              0
+            ],
+            "set": [
+              "set onfullscreenerror",
+              1
+            ],
+            "e": true,
+            "c": true,
+            "w": null
+          },
+          "exitFullscreen": {
+            "kind": "function",
+            "get": null,
+            "set": null,
+            "name": "exitFullscreen",
+            "length": 0,
+            "e": true,
+            "c": true,
+            "w": true
+          },
+          "fullscreenElement": {
+            "kind": "accessor",
+            "get": [
+              "get fullscreenElement",
+              0
+            ],
+            "set": [
+              "set fullscreenElement",
+              1
+            ],
+            "e": true,
+            "c": true,
+            "w": null
+          },
+          "shadowFullscreenElement": {
+            "kind": "accessor",
+            "get": [
+              "get fullscreenElement",
+              0
+            ],
+            "set": [
+              "set fullscreenElement",
+              1
+            ],
+            "e": true,
+            "c": true,
+            "w": null
+          }
+        },
+        {
+          "inputBrand": [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          "selectBrand": [
+            "TypeError",
+            "Illegal invocation"
+          ],
+          "requestBrand": [
+            "reject",
+            "TypeError",
+            "Failed to execute 'requestFullscreen' on 'Element': Illegal invocation"
+          ],
+          "requestText": [
+            "reject",
+            "TypeError",
+            "Failed to execute 'requestFullscreen' on 'Element': Illegal invocation"
+          ],
+          "navigationUI": [
+            "reject",
+            "TypeError",
+            "Failed to execute 'requestFullscreen' on 'Element': Failed to read the 'navigationUI' property from 'FullscreenOptions': The provided value 'bogus' is not a valid enum value of type FullscreenNavigationUI."
+          ],
+          "primitiveOptions": [
+            "reject",
+            "TypeError",
+            "Failed to execute 'requestFullscreen' on 'Element': The provided value is not of type 'FullscreenOptions'."
+          ],
+          "screenOption": [
+            "reject",
+            "TypeError",
+            "Failed to execute 'requestFullscreen' on 'Element': Failed to read the 'screen' property from 'FullscreenOptions': Failed to convert value to 'Screen'."
+          ],
+          "plain": [
+            "reject",
+            "TypeError",
+            "Permissions check failed"
+          ],
+          "constructed": null,
+          "constructedInit": true,
+          "log": []
+        }
+      ]
+    },
+    {
+      "id": "picker-no-activation",
+      "values": [
+        {
+          "text": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "date": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "color": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "file": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "checkbox": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "hidden": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "range": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "button": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "dtext": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "rtext": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "rcheckbox": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "rdate": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "rcolor": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "rfile": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "dfile": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "dcolor": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "dhidden": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "ftext": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "fselect": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() cannot be used on immutable controls."
+          ],
+          "select": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() requires user activation."
+          ],
+          "dselect": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() cannot be used on immutable controls."
+          ],
+          "multi": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() requires user activation."
+          ],
+          "listed": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "nonetext": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "noneselect": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() requires user activation."
+          ],
+          "detachedInput": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "detachedSelect": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() requires user activation."
+          ],
+          "detachedDisabled": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "act": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-date",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "before": [
+            true,
+            true
+          ],
+          "first": "undefined",
+          "middle": [
+            false,
+            true
+          ],
+          "second": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "after": [
+            false,
+            true
+          ],
+          "active": "go",
+          "open": true,
+          "later": [
+            false,
+            true
+          ],
+          "openLater": true,
+          "log": [
+            [
+              "focus",
+              "go",
+              true,
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-color",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "before": [
+            true,
+            true
+          ],
+          "first": "undefined",
+          "middle": [
+            false,
+            true
+          ],
+          "second": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "after": [
+            false,
+            true
+          ],
+          "active": "go",
+          "open": true,
+          "later": [
+            false,
+            true
+          ],
+          "openLater": true,
+          "log": [
+            [
+              "focus",
+              "go",
+              true,
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-file",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "before": [
+            true,
+            true
+          ],
+          "first": "undefined",
+          "middle": [
+            false,
+            true
+          ],
+          "second": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "after": [
+            false,
+            true
+          ],
+          "active": "go",
+          "open": false,
+          "later": [
+            false,
+            true
+          ],
+          "openLater": false,
+          "log": [
+            [
+              "focus",
+              "go",
+              true,
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-text",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "before": [
+            true,
+            true
+          ],
+          "first": "undefined",
+          "middle": [
+            false,
+            true
+          ],
+          "second": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "after": [
+            false,
+            true
+          ],
+          "active": "go",
+          "open": false,
+          "later": [
+            false,
+            true
+          ],
+          "openLater": false,
+          "log": [
+            [
+              "focus",
+              "go",
+              true,
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-checkbox",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "before": [
+            true,
+            true
+          ],
+          "first": "undefined",
+          "middle": [
+            false,
+            true
+          ],
+          "second": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "after": [
+            false,
+            true
+          ],
+          "active": "go",
+          "open": false,
+          "later": [
+            false,
+            true
+          ],
+          "openLater": false,
+          "log": [
+            [
+              "focus",
+              "go",
+              true,
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-select",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "before": [
+            true,
+            true
+          ],
+          "first": "undefined",
+          "middle": [
+            false,
+            true
+          ],
+          "second": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "after": [
+            false,
+            true
+          ],
+          "active": "go",
+          "open": true,
+          "later": [
+            false,
+            true
+          ],
+          "openLater": false,
+          "log": [
+            [
+              "focus",
+              "go",
+              true,
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "picker-activation-hidden",
+      "values": [
+        {
+          "disabled": [
+            "InvalidStateError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() cannot be used on immutable controls."
+          ],
+          "afterDisabled": [
+            true,
+            true
+          ],
+          "select": [
+            "NotSupportedError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() requires the select is rendered."
+          ],
+          "afterSelect": [
+            true,
+            true
+          ],
+          "date": "undefined",
+          "afterDate": [
+            false,
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "id": "picker-frames",
+      "values": [
+        {
+          "t": [
+            "SecurityError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': showPicker() called from cross-origin iframe."
+          ],
+          "d": [
+            "SecurityError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': showPicker() called from cross-origin iframe."
+          ],
+          "c": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "f": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "x": [
+            "SecurityError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': showPicker() called from cross-origin iframe."
+          ],
+          "s": [
+            "SecurityError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() called from cross-origin iframe."
+          ],
+          "y": [
+            "SecurityError",
+            "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() called from cross-origin iframe."
+          ],
+          "act": [
+            false,
+            false
+          ],
+          "enabled": false,
+          "fullscreen": [
+            "TypeError",
+            "Disallowed by permissions policy"
+          ]
+        },
+        {
+          "top": [
+            true,
+            true
+          ],
+          "same": [
+            true,
+            true
+          ],
+          "sameText": "undefined",
+          "sameColor": [
+            "NotAllowedError",
+            "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+          ],
+          "sameAfter": [
+            false,
+            true
+          ],
+          "topAfter": [
+            false,
+            true
+          ],
+          "cross": {
+            "t": [
+              "SecurityError",
+              "Failed to execute 'showPicker' on 'HTMLInputElement': showPicker() called from cross-origin iframe."
+            ],
+            "d": [
+              "SecurityError",
+              "Failed to execute 'showPicker' on 'HTMLInputElement': showPicker() called from cross-origin iframe."
+            ],
+            "c": [
+              "NotAllowedError",
+              "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+            ],
+            "f": [
+              "NotAllowedError",
+              "Failed to execute 'showPicker' on 'HTMLInputElement': HTMLInputElement::showPicker() requires user activation."
+            ],
+            "x": [
+              "SecurityError",
+              "Failed to execute 'showPicker' on 'HTMLInputElement': showPicker() called from cross-origin iframe."
+            ],
+            "s": [
+              "SecurityError",
+              "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() called from cross-origin iframe."
+            ],
+            "y": [
+              "SecurityError",
+              "Failed to execute 'showPicker' on 'HTMLSelectElement': showPicker() called from cross-origin iframe."
+            ],
+            "act": [
+              false,
+              false
+            ],
+            "enabled": false,
+            "fullscreen": [
+              "TypeError",
+              "Disallowed by permissions policy"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "fullscreen-no-activation",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "settled": [
+            "reject",
+            "TypeError",
+            "Permissions check failed"
+          ],
+          "state": {
+            "element": null,
+            "fullscreen": false,
+            "webkit": null,
+            "webkitIs": false,
+            "matches": 0,
+            "act": [
+              false,
+              false
+            ],
+            "log": [
+              [
+                "returned",
+                true
+              ],
+              "sync",
+              "settled",
+              [
+                "fullscreenerror",
+                "box",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          }
+        },
+        {
+          "detached": [
+            "reject",
+            "TypeError",
+            "Element is not connected"
+          ],
+          "dialog": [
+            "reject",
+            "TypeError",
+            "Dialog elements are invalid"
+          ],
+          "rect": [
+            "reject",
+            "TypeError",
+            "Element is not an HTML or SVG element"
+          ],
+          "math": [
+            "reject",
+            "TypeError",
+            "Element is not an HTML or SVG element"
+          ],
+          "detachedBadUI": [
+            "reject",
+            "TypeError",
+            "Failed to execute 'requestFullscreen' on 'Element': Failed to read the 'navigationUI' property from 'FullscreenOptions': The provided value 'x' is not a valid enum value of type FullscreenNavigationUI."
+          ],
+          "hide": [
+            "reject",
+            "TypeError",
+            "Permissions check failed"
+          ],
+          "log": [
+            [
+              "fullscreenerror",
+              "document",
+              true,
+              false,
+              false,
+              true,
+              true
+            ],
+            [
+              "fullscreenerror",
+              "DIALOG",
+              true,
+              false,
+              false,
+              true,
+              true
+            ],
+            [
+              "fullscreenerror",
+              "rect",
+              true,
+              false,
+              false,
+              true,
+              true
+            ],
+            [
+              "fullscreenerror",
+              "math",
+              true,
+              false,
+              false,
+              true,
+              true
+            ],
+            [
+              "fullscreenerror",
+              "box",
+              true,
+              false,
+              false,
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "exit": [
+            "reject",
+            "TypeError",
+            "Failed to execute 'exitFullscreen' on 'Document': Document not active"
+          ],
+          "webkitExit": "undefined",
+          "webkitRequest": "undefined",
+          "log": [],
+          "act": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fullscreen-activation",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "settled": [
+            "ok",
+            "undefined"
+          ],
+          "state": {
+            "element": "box",
+            "fullscreen": true,
+            "webkit": "box",
+            "webkitIs": true,
+            "matches": 1,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              "requested",
+              "resolved"
+            ]
+          },
+          "sizeChanged": true,
+          "matchesScreen": false,
+          "displayMode": true,
+          "boxMatches": true,
+          "childMatches": false,
+          "sizeLater": true,
+          "matchesScreenLater": false
+        },
+        {
+          "settled": [
+            "reject",
+            "TypeError",
+            "Permissions check failed"
+          ],
+          "state": {
+            "element": "box",
+            "fullscreen": true,
+            "webkit": "box",
+            "webkitIs": true,
+            "matches": 1,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "box",
+                true,
+                false,
+                false,
+                true,
+                true
+              ],
+              [
+                "fullscreenerror",
+                "child",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          },
+          "stack": [
+            true,
+            false
+          ]
+        },
+        {
+          "settled": [
+            "reject",
+            "TypeError",
+            "Permissions check failed"
+          ],
+          "state": {
+            "element": "box",
+            "fullscreen": true,
+            "webkit": "box",
+            "webkitIs": true,
+            "matches": 1,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenerror",
+                "other",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          }
+        },
+        {
+          "settled": [
+            "ok",
+            "undefined"
+          ],
+          "state": {
+            "element": null,
+            "fullscreen": false,
+            "webkit": null,
+            "webkitIs": false,
+            "matches": 0,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "box",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          },
+          "again": [
+            "reject",
+            "TypeError",
+            "Failed to execute 'exitFullscreen' on 'Document': Document not active"
+          ],
+          "final": {
+            "element": null,
+            "fullscreen": false,
+            "webkit": null,
+            "webkitIs": false,
+            "matches": 0,
+            "act": [
+              false,
+              true
+            ],
+            "log": []
+          },
+          "sizeRestored": true
+        },
+        {
+          "settled": [
+            "ok",
+            "undefined"
+          ],
+          "removed": {
+            "element": null,
+            "fullscreen": false,
+            "webkit": null,
+            "webkitIs": false,
+            "matches": 0,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "box",
+                true,
+                false,
+                false,
+                true,
+                true
+              ],
+              "removed"
+            ]
+          },
+          "later": {
+            "element": null,
+            "fullscreen": false,
+            "webkit": null,
+            "webkitIs": false,
+            "matches": 0,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "document",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          }
+        },
+        {
+          "settled": [
+            "ok",
+            "undefined"
+          ],
+          "state": {
+            "element": "box",
+            "fullscreen": true,
+            "webkit": "box",
+            "webkitIs": true,
+            "matches": 1,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "box",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          }
+        },
+        true,
+        {
+          "element": "box",
+          "fullscreen": true,
+          "webkit": "box",
+          "webkitIs": true,
+          "matches": 1,
+          "act": [
+            false,
+            true
+          ],
+          "log": [
+            [
+              "keydown",
+              "BODY",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "keyup",
+              "BODY",
+              true,
+              true,
+              false,
+              true,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fullscreen-errors",
+      "values": [
+        [
+          false,
+          false
+        ],
+        {
+          "detached": [
+            "reject",
+            "TypeError",
+            "Element is not connected"
+          ],
+          "afterDetached": [
+            true,
+            true
+          ],
+          "dialog": [
+            "reject",
+            "TypeError",
+            "Dialog elements are invalid"
+          ],
+          "afterDialog": [
+            true,
+            true
+          ],
+          "popover": [
+            "ok",
+            "undefined"
+          ],
+          "afterPopover": [
+            false,
+            true
+          ],
+          "popoverOpen": false,
+          "rect": [
+            "reject",
+            "TypeError",
+            "Element is not an HTML or SVG element"
+          ],
+          "afterRect": [
+            false,
+            true
+          ],
+          "log": [
+            [
+              "fullscreenerror",
+              "document",
+              true,
+              false,
+              false,
+              true,
+              true
+            ],
+            [
+              "fullscreenerror",
+              "dialog",
+              true,
+              false,
+              false,
+              true,
+              true
+            ],
+            [
+              "fullscreenchange",
+              "pop",
+              true,
+              false,
+              false,
+              true,
+              true
+            ],
+            [
+              "fullscreenerror",
+              "rect",
+              true,
+              false,
+              false,
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "svg": [
+            "ok",
+            "undefined"
+          ],
+          "svgState": {
+            "element": "svg",
+            "fullscreen": true,
+            "webkit": "svg",
+            "webkitIs": true,
+            "matches": 2,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "svg",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          },
+          "exit": [
+            "ok",
+            "undefined"
+          ]
+        },
+        {
+          "math": [
+            "reject",
+            "TypeError",
+            "Element is not an HTML or SVG element"
+          ],
+          "mathState": {
+            "element": "pop",
+            "fullscreen": true,
+            "webkit": "pop",
+            "webkitIs": true,
+            "matches": 1,
+            "act": [
+              true,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "svg",
+                true,
+                false,
+                false,
+                true,
+                true
+              ],
+              [
+                "fullscreenerror",
+                "math",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          },
+          "exit": [
+            "ok",
+            "undefined"
+          ]
+        },
+        {
+          "twice": [
+            [
+              "ok",
+              "undefined"
+            ],
+            [
+              "reject",
+              "TypeError",
+              "Permissions check failed"
+            ]
+          ],
+          "state": {
+            "element": "box",
+            "fullscreen": true,
+            "webkit": "box",
+            "webkitIs": true,
+            "matches": 1,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "pop",
+                true,
+                false,
+                false,
+                true,
+                true
+              ],
+              [
+                "fullscreenerror",
+                "box",
+                true,
+                false,
+                false,
+                true,
+                true
+              ],
+              [
+                "fullscreenchange",
+                "box",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          },
+          "exit": [
+            "ok",
+            "undefined"
+          ],
+          "final": {
+            "element": null,
+            "fullscreen": false,
+            "webkit": null,
+            "webkitIs": false,
+            "matches": 0,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "box",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "fullscreen-frames",
+      "values": [
+        [
+          false,
+          true
+        ],
+        {
+          "activation": [
+            [
+              true,
+              true
+            ],
+            [
+              true,
+              true
+            ],
+            [
+              true,
+              true
+            ]
+          ],
+          "deniedDetached": [
+            "reject",
+            "TypeError",
+            "Element is not connected"
+          ],
+          "denied": [
+            "reject",
+            "TypeError",
+            "Disallowed by permissions policy"
+          ],
+          "afterDenied": [
+            [
+              true,
+              true
+            ],
+            true
+          ],
+          "allowed": [
+            "ok",
+            "undefined"
+          ],
+          "top": {
+            "element": "allowed",
+            "fullscreen": true,
+            "webkit": "allowed",
+            "webkitIs": true,
+            "matches": 1,
+            "act": [
+              false,
+              true
+            ],
+            "log": [
+              [
+                "fullscreenchange",
+                "allowed",
+                true,
+                false,
+                false,
+                true,
+                true
+              ]
+            ]
+          },
+          "child": "y",
+          "exit": [
+            "ok",
+            "undefined"
+          ],
+          "final": [
+            null,
+            null
+          ],
+          "log": [
+            [
+              "fullscreenchange",
+              "allowed",
+              true,
+              false,
+              false,
+              true,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "escape-modal-no-activation",
+      "values": [
+        [
+          true,
+          [
+            false,
+            false
+          ]
+        ],
+        {
+          "open": false,
+          "returnValue": "",
+          "act": [
+            false,
+            false
+          ],
+          "log": [
+            [
+              "keydown",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "cancel",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "keyup",
+              "BODY",
+              true,
+              true,
+              false,
+              true,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "escape-modal-prevent-no-activation",
+      "values": [
+        true,
+        {
+          "open": false,
+          "act": [
+            false,
+            false
+          ],
+          "log": [
+            [
+              "keydown",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "cancel",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "escape-modal-prevent-with-activation",
+      "values": [
+        true,
+        {
+          "open": true,
+          "act": [
+            true,
+            true
+          ],
+          "log": [
+            [
+              "keydown",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "cancel",
+              "d",
+              true,
+              true,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "open": false,
+          "act": [
+            true,
+            true
+          ],
+          "log": [
+            [
+              "keydown",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "cancel",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        false
+      ]
+    },
+    {
+      "id": "escape-modal-opened-after-activation",
+      "values": [
+        true,
+        [
+          true,
+          [
+            true,
+            true
+          ]
+        ],
+        {
+          "open": true,
+          "act": [
+            true,
+            true
+          ],
+          "log": [
+            [
+              "keydown",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "cancel",
+              "d",
+              true,
+              true,
+              false,
+              false,
+              false
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "escape-keydown-prevented",
+      "values": [
+        true,
+        {
+          "open": true,
+          "log": [
+            [
+              "beforetoggle",
+              "d",
+              true,
+              true,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "keydown",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "escape-two-modals",
+      "values": [
+        [
+          true,
+          true
+        ],
+        {
+          "a": false,
+          "c": false,
+          "log": [
+            [
+              "cancel",
+              "c",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "cancel",
+              "a",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "c",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "a",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "escape-closedby",
+      "values": [
+        [
+          true,
+          "none"
+        ],
+        {
+          "none": true,
+          "log": [],
+          "nonmodalClosedBy": "none"
+        },
+        {
+          "nonmodal": true,
+          "log": [
+            [
+              "close",
+              "none",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "request": false,
+          "log": [
+            [
+              "close",
+              "nonmodal",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "cancel",
+              "request",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "request",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "any": false,
+          "log": [
+            [
+              "cancel",
+              "any",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "any",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "escape-popovers",
+      "values": [
+        [
+          true,
+          true,
+          2
+        ],
+        {
+          "auto": false,
+          "manual": true,
+          "log": [
+            [
+              "toggle",
+              "manual",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "auto",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "beforetoggle",
+              "auto",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "auto",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "auto": false,
+          "nested": false,
+          "manual": true,
+          "log": [
+            [
+              "toggle",
+              "auto",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "nested",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "beforetoggle",
+              "nested",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "beforetoggle",
+              "auto",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "nested",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "auto",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "auto": false,
+          "manual": true,
+          "log": []
+        },
+        {
+          "hint": false,
+          "manual": true,
+          "log": [
+            [
+              "toggle",
+              "hint",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "beforetoggle",
+              "hint",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "hint",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "escape-dialog-and-popover",
+      "values": [
+        [
+          true,
+          true
+        ],
+        {
+          "dialog": false,
+          "popover": false,
+          "log": [
+            [
+              "toggle",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "beforetoggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "cancel",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "beforetoggle",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "dialog": false,
+          "popover": false,
+          "log": []
+        }
+      ]
+    },
+    {
+      "id": "light-dismiss-dialog",
+      "values": [
+        [
+          true,
+          "any"
+        ],
+        {
+          "open": true,
+          "log": [
+            [
+              "pointerdown",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "mousedown",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "pointerup",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "mouseup",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "click",
+              "inner",
+              true,
+              true,
+              false,
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "open": false,
+          "log": [
+            [
+              "pointerdown",
+              "outside",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "mousedown",
+              "outside",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "pointerup",
+              "outside",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "mouseup",
+              "outside",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "cancel",
+              "d",
+              true,
+              true,
+              false,
+              false,
+              false
+            ],
+            [
+              "click",
+              "outside",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "close",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "open": false,
+          "log": [
+            [
+              "pointerdown",
+              "d",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "mousedown",
+              "d",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "pointerup",
+              "d",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "mouseup",
+              "d",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "cancel",
+              "d",
+              true,
+              true,
+              false,
+              false,
+              false
+            ],
+            [
+              "close",
+              "d",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "open": true,
+          "closedBy": "closerequest",
+          "log": [
+            [
+              "pointerdown",
+              "r",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "mousedown",
+              "r",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "pointerup",
+              "r",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "mouseup",
+              "r",
+              true,
+              true,
+              false,
+              true,
+              true
+            ],
+            [
+              "click",
+              "r",
+              true,
+              true,
+              false,
+              true,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "light-dismiss-dialog-prevented",
+      "values": [
+        true,
+        {
+          "open": true,
+          "log": [
+            [
+              "cancel",
+              "d",
+              true,
+              true,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "open": true,
+          "log": [
+            [
+              "cancel",
+              "d",
+              true,
+              true,
+              false,
+              false,
+              false
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "light-dismiss-popover",
+      "values": [
+        [
+          true,
+          true
+        ],
+        {
+          "p": true,
+          "m": true,
+          "log": [
+            [
+              "toggle",
+              "m",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "p": false,
+          "m": true,
+          "log": [
+            [
+              "beforetoggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            [
+              "toggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "p": true,
+          "log": [
+            [
+              "beforetoggle",
+              "p",
+              true,
+              true,
+              false,
+              false,
+              true
+            ],
+            [
+              "toggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "p": false,
+          "log": [
+            [
+              "beforetoggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              true
+            ],
+            [
+              "toggle",
+              "p",
+              true,
+              false,
+              false,
+              false,
+              true
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "message-activation",
+      "values": [
+        [
+          [
+            false,
+            false,
+            false,
+            "[object UserActivation]"
+          ],
+          null
+        ],
+        {
+          "own": [
+            [
+              true,
+              true,
+              false,
+              "[object UserActivation]"
+            ],
+            null,
+            null,
+            null,
+            [
+              true,
+              true,
+              false,
+              "[object UserActivation]"
+            ]
+          ],
+          "port": [
+            false
+          ],
+          "badInit": [
+            "TypeError",
+            "Failed to construct 'MessageEvent': Failed to read the 'userActivation' property from 'MessageEventInit': Failed to convert value to 'UserActivation'."
+          ],
+          "nullInit": null,
+          "getterOnSnapshot": [
+            false,
+            true,
+            false,
+            true
+          ],
+          "frame": {
+            "ua": [
+              false,
+              true
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

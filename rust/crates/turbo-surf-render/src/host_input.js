@@ -125,7 +125,14 @@
   let hovered = null,
     cursorX = 0,
     cursorY = 0;
+  const closeRequest = ops.op_host_close_request,
+    lightDismiss = ops.op_host_light_dismiss,
+    backdropOf = ops.op_host_modal_backdrop,
+    openDialog = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "open").get;
   function fire(target, name, type, init = {}) {
+    return !canceled.call(trusted(target, name, type, init));
+  }
+  function trusted(target, name, type, init) {
     const event = new events[name](type, init);
     // Only this captured embedder driver can notify activation. Dispatching an
     // identically named guest event never reaches this capability.
@@ -136,7 +143,7 @@
     )
       activate();
     dispatch(event, target);
-    return !canceled.call(event);
+    return event;
   }
   function element(selector) {
     const result = query(selector);
@@ -294,8 +301,12 @@
         continue;
       }
       if (step.click) {
-        const target = element(step.click);
-        targetCenter(target);
+        const intended = element(step.click);
+        targetCenter(intended);
+        // A topmost modal dialog makes the rest of the page inert: the hit lands on its
+        // ::backdrop, so pointer input targets that dialog, outside its border box.
+        const backdrop = backdropOf(intended);
+        const target = backdrop ?? intended;
         const init = {
           clientX: cursorX,
           clientY: cursorY,
@@ -307,14 +318,24 @@
           pointerType: "mouse",
           isPrimary: true,
         };
+        const down = trusted(target, "PointerEvent", "pointerdown", {
+          ...init,
+          buttons: 1,
+          pressure: 0.5,
+        });
+        lightDismiss(down, backdrop !== null);
         if (
-          fire(target, "PointerEvent", "pointerdown", { ...init, buttons: 1, pressure: 0.5 }) &&
+          !canceled.call(down) &&
           fire(target, "MouseEvent", "mousedown", { ...init, buttons: 1 })
         )
           focus.call(target);
-        fire(target, "PointerEvent", "pointerup", init);
+        const up = trusted(target, "PointerEvent", "pointerup", init);
         fire(target, "MouseEvent", "mouseup", init);
-        fire(target, "PointerEvent", "click", init);
+        // Chrome runs light dismiss after mouseup, before click.
+        lightDismiss(up, backdrop !== null);
+        // A backdrop the release closed is gone: Chrome fires no click for it.
+        if (backdrop === null || apply(openDialog, backdrop, []))
+          fire(target, "PointerEvent", "click", init);
         continue;
       }
       const target = apply(activeElement, document, []);
@@ -327,6 +348,8 @@
           keyCode = key === "Enter" ? 13 : key === "Tab" ? 9 : key === "Escape" ? 27 : 0;
         const init = { key, code: key, keyCode, bubbles: true, cancelable: true, composed: true };
         const down = fire(target, "KeyboardEvent", "keydown", init);
+        // An uncanceled Esc keydown is a close request for the window's close watchers.
+        if (down && key === "Escape") closeRequest();
         if (
           down &&
           key === "Enter" &&

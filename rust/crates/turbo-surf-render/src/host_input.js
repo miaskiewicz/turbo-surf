@@ -349,7 +349,16 @@
         const init = { key, code: key, keyCode, bubbles: true, cancelable: true, composed: true };
         const down = fire(target, "KeyboardEvent", "keydown", init);
         // An uncanceled Esc keydown is a close request for the window's close watchers.
-        if (down && key === "Escape") closeRequest();
+        // The close watcher's cancel/close and the dialog's focus fixup run synchronously;
+        // its close event is a queued task, which (like a real keyboard's inter-event gap)
+        // drains before keyup. keyup then targets whatever now holds focus.
+        if (down && key === "Escape") {
+          closeRequest();
+          await wait(0);
+          if (run !== activeRun) return;
+          fire(apply(activeElement, document, []), "KeyboardEvent", "keyup", init);
+          continue;
+        }
         if (
           down &&
           key === "Enter" &&

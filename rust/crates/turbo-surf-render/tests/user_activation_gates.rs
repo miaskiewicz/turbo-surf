@@ -34,9 +34,12 @@ const KNOWN_GAPS: &[&str] = &[
     // viewport is fixed, so innerWidth/innerHeight never change.
     "fullscreen-activation/1/sizeChanged = false",
     "fullscreen-activation/1/sizeLater = false",
-    "fullscreen-activation/1/matchesScreenLater = false",
     // Chrome dispatches the dialog `close` event before already-queued toggle tasks
     // during Esc processing (batch-1 leaves close-vs-task order unpinned).
+    // Closing a modal dialog whose focused control had no prior focus to restore leaves
+    // ACTIVE on that control; Chrome resets focus to <body> because the closed dialog is
+    // no longer focusable. The following keyup then targets the control, not <body>.
+    r#"escape-modal-no-activation/1/log/3/1 = "inner""#,
     r#"escape-dialog-and-popover/1/log/5/0 = "toggle""#,
     r#"escape-dialog-and-popover/1/log/5/1 = "p""#,
     r#"escape-dialog-and-popover/1/log/6/1 = "d""#,

@@ -5,8 +5,8 @@
   const Native = globalThis.__invokerNative; delete globalThis.__invokerNative;
   const g = globalThis, ns = g[Symbol.for('ts')], make = ns.makeNativeFunction, StringValue = String;
   const reference = ns.elementReference, retarget = ns.retargetEventSource;
-  const dialogSteps = ns.dialogCommandSteps;
-  delete ns.elementReference; delete ns.retargetEventSource; delete ns.dialogCommandSteps;
+  const dialogSteps = ns.dialogCommandSteps, resolve = ns.resolveReferenceTarget;
+  delete ns.elementReference; delete ns.retargetEventSource; delete ns.dialogCommandSteps; delete ns.resolveReferenceTarget;
   const accessor = (proto, name) => Object.getOwnPropertyDescriptor(proto, name).get;
   const nodeType = accessor(g.Node.prototype, 'nodeType'), namespace = accessor(g.Element.prototype, 'namespaceURI');
   const localName = accessor(g.Element.prototype, 'localName'), parentNode = accessor(g.Node.prototype, 'parentNode');
@@ -78,7 +78,8 @@
   const shadowIncludingDescendant = (node, ancestor) => { for (let current = node; current;) { if (current === ancestor) return true; current = parentNode.call(current) || shadowHost(current); } return false; };
   // https://html.spec.whatwg.org/#popover-target-attribute-activation-behavior
   function popoverTargetActivation(node, eventTarget) {
-    const popover = reference.read(node, 'popovertarget');
+    // ID and explicit references to a shadow host continue through its reference target.
+    const popover = resolve(reference.read(node, 'popovertarget'));
     if (popover === null || namespace.call(popover) !== HTML || popoverOf.call(popover) === null) return;
     if (shadowIncludingDescendant(eventTarget, popover) && popover !== node && shadowIncludingDescendant(popover, node)) return;
     Native('popover', popover, targetAction(node), node);
@@ -96,7 +97,7 @@
       if (type === 'reset') reset.call(formOf.call(node));
       if (type !== 'button') return;
     }
-    const target = reference.read(node, 'commandfor'), command = commandState(node);
+    const target = resolve(reference.read(node, 'commandfor')), command = commandState(node);
     if (target !== null && command !== '' && validCommand(target, command)) {
       const event = new CommandEvent('command', { cancelable: true, composed: true, command, source: node });
       if (!Native('dispatch', target, event) || !connected.call(target) || command.slice(0, 2) === '--') return;

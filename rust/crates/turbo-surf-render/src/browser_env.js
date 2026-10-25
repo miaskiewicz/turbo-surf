@@ -63,6 +63,7 @@
     if (name === 'border-radius'){ var r=val.split('/')[0].trim().split(/\s+/); var c=box4(r); emit('border-top-left-radius',c[0]); emit('border-top-right-radius',c[1]); emit('border-bottom-right-radius',c[2]); emit('border-bottom-left-radius',c[3]); return; }
     // two-axis shorthands
     if (name === 'gap'){ emit('row-gap', p[0]); emit('column-gap', p[1]||p[0]); return; }
+    if (name === 'interest-delay'){ emit('interest-delay-start', p[0]); emit('interest-delay-end', p[1]||p[0]); return; }
     if (name === 'overflow'){ emit('overflow-x', p[0]); emit('overflow-y', p[1]||p[0]); return; }
     if (name === 'place-items' || name === 'place-content' || name === 'place-self'){ var base=name.split('-')[1]; emit('align-'+base, p[0]); emit('justify-'+base, p[1]||p[0]); return; }
     // flex: grow [shrink] [basis]

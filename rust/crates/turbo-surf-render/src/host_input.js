@@ -44,6 +44,51 @@
       setSelectionRange: prototype.setSelectionRange,
     };
   }
+  // A file chooser's selection: genuine Files in a new FileList, like Chrome's own.
+  const FileInterface = globalThis.File,
+    TransferInterface = globalThis.DataTransfer;
+  const own = (object, name) =>
+    object ? Object.getOwnPropertyDescriptor(object, name) : undefined;
+  const inputFiles = own(HTMLInputElement.prototype, "files");
+  const inputMultiple = own(HTMLInputElement.prototype, "multiple")?.get;
+  const inputDisabled = own(HTMLInputElement.prototype, "disabled")?.get;
+  const transferItems = own(TransferInterface?.prototype, "items")?.get;
+  const transferFiles = own(TransferInterface?.prototype, "files")?.get;
+  const addItem = globalThis.DataTransferItemList?.prototype.add;
+  const decode = globalThis.atob,
+    charCode = String.prototype.charCodeAt;
+  function bytesOf(base64) {
+    const text = decode(String(base64 ?? ""));
+    const bytes = new Uint8Array(text.length);
+    for (let index = 0; index < text.length; index++) bytes[index] = apply(charCode, text, [index]);
+    return bytes;
+  }
+  function chooseFiles(target, files) {
+    if (!inputFiles || !transferItems || !addItem || typeof FileInterface !== "function")
+      throw new Error("File selection is unavailable in this realm");
+    let list = null;
+    try {
+      list = apply(inputFiles.get, target, []);
+    } catch {}
+    if (list === null || !apply(connected, target, []) || apply(inputDisabled, target, []))
+      throw new Error("File selection requires a connected, enabled file input");
+    if (!Array.isArray(files) || !files.length)
+      throw new TypeError("File selection requires at least one file");
+    if (files.length > 1 && !apply(inputMultiple, target, []))
+      throw new Error("A file input without multiple accepts one file");
+    const data = new TransferInterface(),
+      items = apply(transferItems, data, []);
+    for (const file of files) {
+      const options = { __proto__: null, type: String(file.type ?? "") };
+      if (file.lastModified != null) options.lastModified = Number(file.lastModified);
+      apply(addItem, items, [
+        new FileInterface([bytesOf(file.base64)], String(file.name), options),
+      ]);
+    }
+    apply(inputFiles.set, target, [apply(transferFiles, data, [])]);
+    fire(target, "Event", "input", { bubbles: true, composed: true });
+    fire(target, "Event", "change", { bubbles: true });
+  }
   function editingControl(target) {
     try {
       return controlValues[apply(controlTag, target, [])] || null;
@@ -256,6 +301,10 @@
       }
       if (step.focus) {
         focus.call(element(step.focus));
+        continue;
+      }
+      if (step.files) {
+        chooseFiles(element(step.files.selector), step.files.files);
         continue;
       }
       if (step.move) {

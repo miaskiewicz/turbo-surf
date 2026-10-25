@@ -69,6 +69,12 @@ pub fn capture_popover_scheduler(scope: &mut v8::PinScope) {
     html_popover::capture_scheduler(scope);
 }
 
+/// Capture the embedder's `File` interface once the runtime has installed it, before
+/// page script: FileList selections, file form entries and DataTransfer use it.
+pub fn capture_file_host(scope: &mut v8::PinScope) {
+    file_inputs::capture_host(scope);
+}
+
 pub fn clear_context_capabilities(scope: &mut v8::PinScope) {
     let _isolate = activate_isolate(scope);
     let contexts = DOM_CONTEXTS
@@ -123,6 +129,8 @@ pub use document_xpath::is_native_xpath_object;
 mod dom_mutations;
 #[path = "element_relations.rs"]
 mod element_relations;
+#[path = "file_inputs.rs"]
+mod file_inputs;
 #[path = "html_dialog.rs"]
 mod html_dialog;
 #[path = "html_invokers.rs"]
@@ -7048,6 +7056,7 @@ fn install_with_tree(scope: &mut v8::PinScope, tree: Tree) {
     run_js(scope, include_str!("form_collections.js"));
     html_invokers::install(scope);
     input_members::install(scope);
+    file_inputs::install(scope);
     select_element::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
@@ -9406,3 +9415,7 @@ mod form_outputs_tests;
 #[cfg(test)]
 #[path = "html_dialog_tests.rs"]
 mod html_dialog_tests;
+
+#[cfg(test)]
+#[path = "file_inputs_tests.rs"]
+mod file_inputs_tests;

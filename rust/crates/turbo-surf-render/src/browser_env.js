@@ -978,17 +978,25 @@ if(typeof __ns.makeNativeFunction==='function'){
     // Live input/textarea values have a dirty flag, separate from their defaults.
     // Hidden/button values remain reflected attributes as required by HTML.
     var controlValues = new WeakMap();
+    // The file state's filename value mode (file_inputs.js) registers once, privately.
+    var fileControls = null;
+    __ns.registerFileControls = function(hooks){ fileControls = hooks; delete __ns.registerFileControls; };
+    var fileValueDelete = WeakMap.prototype.delete, fileValueApply = Reflect.apply;
+    __ns.resetControlValue = function(element){ fileValueApply(fileValueDelete, controlValues, [element]); };
     var isTextarea = function(el){ return String(el.tagName).toUpperCase() === 'TEXTAREA'; };
     var reflectedValue = function(el){ return /^(hidden|button|submit|reset|image|checkbox|radio)$/.test(el.type || ''); };
     var defaultValueOf = function(el){ return isTextarea(el) ? el.textContent || '' : el.getAttribute('value') || ''; };
     var valDesc = { configurable: true,
       get: function(){
+        var file = fileControls ? fileControls.value(this) : undefined;
+        if (file !== undefined) return file;
         if (controlValues.has(this) && !reflectedValue(this)) return validForType(this, controlValues.get(this));
         var value = defaultValueOf(this);
         if (!isTextarea(this) && /^(checkbox|radio)$/.test(this.type || '') && !this.hasAttribute('value')) return 'on';
         return validForType(this, value);
       },
       set: function(v){
+        if (fileControls && fileControls.setValue(this, v)) return;
         var oldValue=selectionApply(valDesc.get,this,[]);
         v = v == null ? '' : String(v);
         if (reflectedValue(this)) this.setAttribute('value', v);
@@ -1006,7 +1014,9 @@ if(typeof __ns.makeNativeFunction==='function'){
     __ns.formControlChecked=function(element){return checkedNative(0,element);};
     // `type` defaults to 'text' for <input> — React's isTextInputElement keys on it to pick the
     // input/change handling path; undefined would route changes to the select/checkbox path.
-    var mkTypeDesc = function(def){ return { configurable: true, get: function(){ return (this.getAttribute('type') || def).toLowerCase(); }, set: function(v){ this.setAttribute('type', v); } }; };
+    // An <input> type outside the known states (e.g. 'file ') is the Text state.
+    var inputTypeStates = /^(hidden|text|search|tel|url|email|password|date|month|week|time|datetime-local|number|range|color|checkbox|radio|file|submit|image|reset|button)$/;
+    var mkTypeDesc = function(def){ return { configurable: true, get: function(){ var t = (this.getAttribute('type') || def).toLowerCase(); return def === 'text' && !inputTypeStates.test(t) ? 'text' : t; }, set: function(v){ this.setAttribute('type', v); } }; };
     // `form` → the nearest ancestor <form> (userEvent fires submit on a submit-button's form).
     var formDesc = { configurable: true, get: function(){ return this.closest ? this.closest('form') : null; } };
     var controlSelections=new WeakMap(),selectionApply=Reflect.apply,selectionGet=WeakMap.prototype.get,selectionSet=WeakMap.prototype.set;
@@ -1233,6 +1243,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     var formValueText=__ns.domAccessor('textContent',false,'Node');
     __ns.formControlValue=function(element){
       var tag=formValueApply(sheetTagName,element,[]),type=formValueApply(sheetGetAttribute,element,['type'])||'text';
+      var file=fileControls?fileControls.value(element):undefined;if(file!==undefined)return file;
       if(tag==='SELECT'){var chosen=selection.selectionOf(element);return chosen.length?chosen[0].value:'';}
       if(formValueApply(formValueHas,controlValues,[element])&&!/^(hidden|button|submit|reset|image|checkbox|radio)$/.test(type))return formValueApply(formValueGet,controlValues,[element]);
       return tag==='TEXTAREA'?formValueApply(formValueText,element,[]):formValueApply(sheetGetAttribute,element,['value'])||'';
@@ -1241,6 +1252,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     __ns.formSelectedOptions=function(element){return selection.selectionOf(element);};
     __ns.formResetControl=function(element){
       formValueApply(resetControlDelete,controlValues,[element]);
+      if(fileControls)fileControls.reset(element);
       if(formValueApply(sheetTagName,element,[])==='INPUT')checkedNative(2,element);
       if(formValueApply(sheetTagName,element,[])==='SELECT'){
         var options=optionsOf(element);for(var index=0;index<options.length;index++)formValueApply(resetControlDelete,selection.optionStates,[options[index]]);
@@ -1254,7 +1266,7 @@ if(typeof __ns.makeNativeFunction==='function'){
       for(var index=0;index<pending.length;index++){
         var pair=pending[index];source=pair[0];clone=pair[1];
         if (controlValues.has(source)) clone.value = controlValues.get(source);
-        if(cloneApply(cloneNodeType,source,[])===1&&formValueApply(sheetTagName,source,[])==='INPUT'){if(checkedNative(3,source))checkedNative(1,clone,checkedNative(0,source));checkedNative(4,clone);}
+        if(cloneApply(cloneNodeType,source,[])===1&&formValueApply(sheetTagName,source,[])==='INPUT'){if(checkedNative(3,source))checkedNative(1,clone,checkedNative(0,source));checkedNative(4,clone);if(fileControls)fileControls.clone(source,clone);}
         if (selection.optionStates.has(source)) selection.optionStates.set(clone, selection.optionStates.get(source));
         if (selection.emptySelects.has(source)) selection.emptySelects.add(clone);
         if(deep){

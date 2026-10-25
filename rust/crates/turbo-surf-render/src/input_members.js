@@ -11,6 +11,7 @@
   const isFiniteNumber = Number.isFinite, isNaNValue = Number.isNaN, floor = Math.floor, absolute = Math.abs;
   const dateTime = Date.prototype.getTime, regexTest = RegExp.prototype.test, replaceText = String.prototype.replace;
   const sliceText = String.prototype.slice, padText = String.prototype.padStart, charCode = String.prototype.charCodeAt;
+  const splitText = String.prototype.split, joinRows = Array.prototype.join;
   const getAttribute = Element.prototype.getAttribute, setAttribute = Element.prototype.setAttribute, removeAttribute = Element.prototype.removeAttribute;
   const inputPrototype = g.HTMLInputElement.prototype, textareaPrototype = g.HTMLTextAreaElement.prototype;
   const checkInput = ns.domAccessor('nodeType', false, 'HTML:input'), checkTextarea = ns.domAccessor('nodeType', false, 'HTML:textarea');
@@ -489,6 +490,19 @@
     if (name === 'textarea') return apply(replaceText, value, [/\r\n?/g, '\n']);
     if (name !== 'input') return undefined;
     type = typeOf(element);
+    // Text-like states strip line breaks; url and email also trim ASCII whitespace,
+    // each comma-separated address for email[multiple].
+    if (type === 'text' || type === 'search' || type === 'tel' || type === 'password') return apply(replaceText, value, [/[\r\n]/g, '']);
+    if (type === 'url' || type === 'email') {
+      value = apply(replaceText, value, [/[\r\n]/g, '']);
+      const trim = (text) => apply(replaceText, text, [/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '']);
+      if (type === 'email' && attr(element, 'multiple') !== null) {
+        const parts = apply(splitText, value, [',']);
+        for (let index = 0; index < parts.length; index++) parts[index] = trim(parts[index]);
+        return apply(joinRows, parts, [',']);
+      }
+      return trim(value);
+    }
     if (type === 'number') return isNaNValue(parseDouble(value)) ? '' : value;
     if (type === 'color') return test(/^#[0-9a-fA-F]{6}$/, value) ? lowerAscii(value) : '#000000';
     if (type === 'range') {

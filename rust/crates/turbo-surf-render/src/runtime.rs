@@ -6902,6 +6902,7 @@ fn install_environment<'s>(
         {
             crate::browser_env::capture_popover_scheduler(scope);
             crate::browser_env::capture_window_event_interfaces(scope);
+            crate::browser_env::capture_file_host(scope);
             #[cfg(turbo_surf_native_proxy)]
             install_code_generation_authorization(scope)?;
             return Ok(());
@@ -12152,7 +12153,7 @@ __G.domSig = (() => {
       "KeyboardEvent PointerEvent TouchEvent WheelEvent FocusEvent InputEvent UIEvent DragEvent ClipboardEvent " +
       "AnimationEvent TransitionEvent ProgressEvent MessageEvent CloseEvent ErrorEvent PopStateEvent HashChangeEvent " +
       "StorageEvent PageTransitionEvent BeforeUnloadEvent GamepadEvent SubmitEvent FormDataEvent " +
-      "AbortSignal EventTarget FileReader FileList File FormData ReadableStream WritableStream TransformStream " +
+      "AbortSignal EventTarget FileReader File FormData ReadableStream WritableStream TransformStream " +
       "TextEncoder TextDecoder TextEncoderStream TextDecoderStream CompressionStream DecompressionStream " +
       "BroadcastChannel MessageChannel MessagePort WebSocket XMLHttpRequestUpload XMLSerializer XPathEvaluator " +
       "XPathResult NodeIterator TreeWalker MutationRecord PerformanceEntry PerformanceMark PerformanceMeasure " +
@@ -12215,7 +12216,7 @@ __G.domSig = (() => {
       "ChapterInformation CharacterBoundsUpdateEvent Clipboard ClipboardChangeEvent ClipboardItem " +
       "CloseWatcher ConstantSourceNode ContentVisibilityAutoStateChangeEvent ConvolverNode " +
       "CookieStoreManager CrashReportContext CreateMonitor Credential CredentialsContainer CropTarget " +
-      "DOMError DataTransfer DataTransferItem DataTransferItemList DelegatedInkTrailPresenter " +
+      "DOMError DelegatedInkTrailPresenter " +
       "DeviceMotionEvent DeviceMotionEventAcceleration DeviceMotionEventRotationRate " +
       "DeviceOrientationEvent DevicePosture DigitalCredential DocumentPictureInPicture " +
       "DocumentPictureInPictureEvent EditContext EventSource External FederatedCredential Fence " +

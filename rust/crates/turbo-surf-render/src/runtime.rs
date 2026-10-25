@@ -9213,6 +9213,16 @@ if (typeof globalThis.CSS === "undefined") {
     },
     escape: cssEscape,
   };
+  // CSS Typed OM numeric factories (CSS.px() …) come from the binding; Chrome's namespace
+  // lists its operations in code-unit order.
+  const factories = globalThis[Symbol.for("ts")]?.typedOmFactories?.();
+  if (factories) {
+    const members = [["escape", globalThis.CSS.escape], ["supports", globalThis.CSS.supports], ...factories].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    const namespace = {};
+    for (const [name, value] of members) Object.defineProperty(namespace, name, { value, writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(namespace, Symbol.toStringTag, { value: "CSS", configurable: true });
+    Object.defineProperty(globalThis, "CSS", { value: namespace, writable: true, enumerable: false, configurable: true });
+  }
 }
 // Encoding/crypto/base64 web globals deno_core doesn't ship but app bundles use.
 // WHATWG encodings use a native incremental decoder, including BOM/fatal state.

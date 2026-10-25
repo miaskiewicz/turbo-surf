@@ -21,6 +21,10 @@ mod window_proxy;
 mod microtask_queue;
 use microtask_queue::op_install_microtask_queue;
 
+#[path = "observable.rs"]
+mod observable;
+use observable::{op_report_exception, op_value_is_promise};
+
 #[path = "compression_dictionary.rs"]
 mod compression_dictionary;
 use compression_dictionary::{
@@ -7098,6 +7102,8 @@ deno_core::extension!(
         crate::web_streams_backend::op_web_abort_dispatch,
         op_event_callback,
         op_install_microtask_queue,
+        op_report_exception,
+        op_value_is_promise,
         op_frame_cookie_get,
         op_document_location_url,
         op_frame_request_partition,
@@ -9236,6 +9242,10 @@ if (typeof globalThis.CSS === "undefined") {
  };
  for(const [ctor,name] of [[TextEncoder,"TextEncoder"],[TextDecoder,"TextDecoder"]])Object.defineProperty(ctor.prototype,Symbol.toStringTag,{value:name,configurable:true});
 }
+"##,
+    include_str!("blob_text_stream.js"),
+    include_str!("observable.js"),
+    r##"
 // The host installs native WebCrypto after the DOM environment is initialized.
 // Channels in a realm deliver asynchronously through native EventTarget dispatch.
 if (typeof globalThis.BroadcastChannel === "undefined") {
@@ -12245,7 +12255,7 @@ __G.domSig = (() => {
       "MediaStreamTrackProcessor MediaStreamTrackVideoStats MimeType MimeTypeArray NavigationActivation " +
       "NavigationCurrentEntryChangeEvent NavigationDestination NavigationPrecommitController " +
       "NavigationPreloadManager NavigatorLogin NavigatorManagedData NetworkInformation " +
-      "NotRestoredReasonDetails NotRestoredReasons OTPCredential Observable OpaqueRange OrientationSensor " +
+      "NotRestoredReasonDetails NotRestoredReasons OTPCredential OpaqueRange OrientationSensor " +
       "Origin OverconstrainedError PageRevealEvent PageSwapEvent PannerNode PasswordCredential " +
       "PaymentAddress PaymentManager PaymentMethodChangeEvent PaymentRequest PaymentRequestUpdateEvent " +
       "PaymentResponse PerformanceElementTiming PerformanceEventTiming PerformanceLongAnimationFrameTiming " +
@@ -12279,7 +12289,7 @@ __G.domSig = (() => {
       "SpeechRecognition SpeechRecognitionErrorEvent SpeechRecognitionEvent SpeechRecognitionPhrase " +
       "SpeechSynthesis SpeechSynthesisErrorEvent SpeechSynthesisEvent SpeechSynthesisUtterance " +
       "SpeechSynthesisVoice StorageBucket StorageBucketManager StylePropertyMap StylePropertyMapReadOnly " +
-      "Subscriber Summarizer SyncManager TaskAttributionTiming TaskController TaskPriorityChangeEvent " +
+      "Summarizer SyncManager TaskAttributionTiming TaskController TaskPriorityChangeEvent " +
       "TaskSignal TextEvent TextFormat TextFormatUpdateEvent TextTrackCueList TextUpdateEvent " +
       "TimelineTrigger TimelineTriggerRange TimelineTriggerRangeList Touch TouchList TrackEvent Translator " +
       "URLPattern USB USBAlternateInterface USBConfiguration USBConnectionEvent USBDevice USBEndpoint " +

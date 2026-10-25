@@ -155,6 +155,15 @@
   if (typeof g.getComputedStyle === 'undefined') g.getComputedStyle = function computeStyle(el){
     return computeStyleSnapshot(el,new computedSnapshotMap());
   };
+  // Page-replaceable numeric and string intrinsics never participate in this read.
+  var cssZoomFround=Math.fround,cssZoomExec=RegExp.prototype.exec,cssZoomTrim=String.prototype.trim;
+  function computedZoom(value, inherited){
+    var text = typeof value === 'string' ? cssApply(cssFontLower,cssApply(cssZoomTrim,value,[]),[]) : '';
+    if (text === 'inherit') return inherited() || '1';
+    var calc = cssApply(cssZoomExec,/^calc\((.*)\)$/,[text]); if (calc) text = calc[1];
+    var match = cssApply(cssZoomExec,/^([0-9.e+-]+)(%?)$/,[text]), factor = match ? cssZoomFround(cssFontNumber(match[1]) / (match[2] ? 100 : 1)) : 1;
+    return !(factor > 0) || !cssFontFinite(factor) ? '1' : cssFontString(cssFontNumber(cssApply(cssFontPrecision,factor,[6])));
+  }
   function computeStyleSnapshot(el,snapshots){
     var cached=el&&computedSnapshotGet(snapshots,el);if(cached)return cached;
     // Percentage lookup may visit several ancestors before font inheritance asks
@@ -256,6 +265,8 @@
     }
     if (decl.visibility == null) decl.visibility = '';
     if (decl.opacity == null) decl.opacity = '';
+    // `zoom` is not inherited; it computes to its factor, with normal and 0 as 1.
+    decl.zoom = connected ? computedZoom(decl.zoom, function(){ return inheritedValue('zoom'); }) : '';
     // Used-value resolution for percentage width/height. A no-layout env returns a raw "50%"
     // verbatim, but a containing-block percentage has a well-defined used value in normal flow
     // (pct * the containing block's content width/height), which a real browser reports in px.

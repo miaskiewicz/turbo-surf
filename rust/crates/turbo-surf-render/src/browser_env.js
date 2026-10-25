@@ -401,7 +401,6 @@
     g.Event = Event;
     function mkSub(extra){ return function(type, init = {}){ if (arguments.length === 0) throw new TypeError('Event requires a type'); init = init || {}; Event.call(this, type, init); if (extra) extra(this, init); for (var k in init){ if (!(k in this)) this[k] = init[k]; } }; }
     function sub(name, extra){ var C = mkSub(extra); Object.defineProperty(C, 'name', {value: name, configurable: true}); C.prototype = Object.create(Event.prototype); C.prototype.constructor = C; Object.defineProperty(C.prototype,Symbol.toStringTag,{value:name,configurable:true});g[name] = C; }
-    sub('CustomEvent', function(self, init){ self.detail = init.detail === undefined ? null : init.detail; });
     sub('MessageEvent',function(self,init){self.data=init.data===undefined?null:init.data;self.origin=init.origin===undefined?'':eventString(init.origin);self.lastEventId=init.lastEventId===undefined?'':eventString(init.lastEventId);self.source=init.source||null;self.ports=init.ports||[];});
     // UI input interfaces keep Web-IDL state private; arbitrary dictionary keys
     // never become instance properties and inherited getters retain their brand.
@@ -467,10 +466,40 @@
     ['wheelDelta','wheelDeltaX','wheelDeltaY'].forEach(function(name){member(WheelEvent.prototype,name,{get:Object.getOwnPropertyDescriptor({get [name](){var state=stateOf(wheelStates,this);return -3*(name==='wheelDeltaX'?state.deltaX:state.deltaY);}},name).get});});
     ['DOM_DELTA_PIXEL','DOM_DELTA_LINE','DOM_DELTA_PAGE'].forEach(function(name,value){[WheelEvent,WheelEvent.prototype].forEach(function(object){Object.defineProperty(object,name,{value:value,enumerable:true});});});
     tagEvent(WheelEvent,'WheelEvent');g.WheelEvent=WheelEvent;
+    // Dictionary-member events (CustomEvent, PopStateEvent, HashChangeEvent): private state
+    // behind readonly getters, like the UI family above.
+    var customStates=new WeakMap(), popStates=new WeakMap(), hashStates=new WeakMap();
+    class CustomEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};customStates.set(this,{detail:init.detail===undefined?null:init.detail});}
+    }
+    readonly(CustomEvent.prototype,customStates,['detail']);
+    member(CustomEvent.prototype,'initCustomEvent',{value:function initCustomEvent(type,bubbles=false,cancelable=false,detail=null){var state=stateOf(customStates,this);if(!arguments.length)throw new TypeError('A type is required');if(eventRecord(this).dispatching)return;Event.prototype.initEvent.call(this,type,bubbles,cancelable);state.detail=detail;}});
+    tagEvent(CustomEvent,'CustomEvent');
+    class PopStateEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};popStates.set(this,{state:init.state===undefined?null:init.state,hasUAVisualTransition:!!init.hasUAVisualTransition});}
+    }
+    readonly(PopStateEvent.prototype,popStates,['state','hasUAVisualTransition']);tagEvent(PopStateEvent,'PopStateEvent');
+    class HashChangeEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};hashStates.set(this,{oldURL:stringValue(init.oldURL),newURL:stringValue(init.newURL)});}
+    }
+    readonly(HashChangeEvent.prototype,hashStates,['oldURL','newURL']);tagEvent(HashChangeEvent,'HashChangeEvent');
+    // ProgressEvent (FileReader/XHR) and CloseEvent (WebSocket).
+    var progressStates=new WeakMap(), closeStates=new WeakMap();
+    // ProgressEventInit loaded/total are restricted doubles in Chrome 156.
+    var restrictedDouble=function(value,name){value=numberValue(value);if(!isFinite(value))throw new TypeError("Failed to construct 'ProgressEvent': Failed to read the '"+name+"' property from 'ProgressEventInit': The provided double value is non-finite.");return value;};
+    class ProgressEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};progressStates.set(this,{lengthComputable:!!init.lengthComputable,loaded:restrictedDouble(init.loaded,'loaded'),total:restrictedDouble(init.total,'total')});}
+    }
+    readonly(ProgressEvent.prototype,progressStates,['lengthComputable','loaded','total']);tagEvent(ProgressEvent,'ProgressEvent');
+    class CloseEvent extends Event {
+      constructor(type,init={}){if(!arguments.length)throw new TypeError('A type is required');super(type,init);init=init||{};closeStates.set(this,{wasClean:!!init.wasClean,code:intValue(init.code)&65535,reason:stringValue(init.reason)});}
+    }
+    readonly(CloseEvent.prototype,closeStates,['wasClean','code','reason']);tagEvent(CloseEvent,'CloseEvent');
     // Use the native class bridge for actual implementations, preserving private
     // records and subclass new.target rather than replacing Function.toString.
-    [UIEvent,MouseEvent,KeyboardEvent,InputEvent,FocusEvent,PointerEvent,WheelEvent].forEach(function(implementation){var name=implementation.name,constructor=__ns.makeNativeFunction?__ns.makeNativeFunction(implementation,name,1,true,true):implementation;constructor.prototype=implementation.prototype;Object.defineProperty(constructor.prototype,'constructor',{value:constructor,writable:true,configurable:true});Object.defineProperty(constructor,'prototype',{writable:false});Object.keys(implementation).forEach(function(key){Object.defineProperty(constructor,key,Object.getOwnPropertyDescriptor(implementation,key));});g[name]=constructor;});
+    [UIEvent,MouseEvent,KeyboardEvent,InputEvent,FocusEvent,PointerEvent,WheelEvent,CustomEvent,PopStateEvent,HashChangeEvent,ProgressEvent,CloseEvent].forEach(function(implementation){var name=implementation.name,constructor=__ns.makeNativeFunction?__ns.makeNativeFunction(implementation,name,1,true,true):implementation;constructor.prototype=implementation.prototype;Object.defineProperty(constructor.prototype,'constructor',{value:constructor,writable:true,configurable:true});Object.defineProperty(constructor,'prototype',{writable:false});Object.keys(implementation).forEach(function(key){Object.defineProperty(constructor,key,Object.getOwnPropertyDescriptor(implementation,key));});Object.defineProperty(g,name,{value:constructor,writable:true,configurable:true,enumerable:false});});
     [MouseEvent,KeyboardEvent,InputEvent,FocusEvent].forEach(function(implementation){Object.setPrototypeOf(g[implementation.name],g.UIEvent);});
+    [CustomEvent,PopStateEvent,HashChangeEvent,ProgressEvent,CloseEvent].forEach(function(implementation){Object.setPrototypeOf(g[implementation.name],Event);});
     [PointerEvent,WheelEvent].forEach(function(implementation){Object.setPrototypeOf(g[implementation.name],g.MouseEvent);});
     sub('CompositionEvent'); sub('DragEvent'); sub('TouchEvent'); sub('ClipboardEvent');
     g.document.createEvent = function(){ return new Event('', {}); };
@@ -548,7 +577,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     'CharacterData','Attr','DocumentType','CDATASection','ProcessingInstruction','NodeList','HTMLCollection',
     'DOMTokenList','NamedNodeMap','CSSStyleDeclaration','CSSRule','StyleSheet','MediaList',
     'DOMStringMap','MutationRecord','MediaQueryList','DOMRect','DOMRectReadOnly','DOMPoint'];
-  ctors.forEach(function(n){ if (typeof g[n] === "undefined") { var f = function(){}; f.prototype = {}; try { Object.defineProperty(f, "name", { value: n, configurable: true }); } catch(e){} g[n] = f; } });
+  ctors.forEach(function(n){ if (typeof g[n] === "undefined") { var f = function(){}; f.prototype = {}; try { Object.defineProperty(f, "name", { value: n, configurable: true }); } catch(e){} Object.defineProperty(g, n, { value: f, writable: true, configurable: true, enumerable: false }); } });
   // EventTarget must be a REAL subclassable base. Apps + libraries write
   // `class Foo extends EventTarget { … this.addEventListener(…) }` (event buses, modal
   // managers, state stores — Nike's global-nav modal manager does exactly this); with an
@@ -1167,16 +1196,19 @@ if(typeof __ns.makeNativeFunction==='function'){
     }
     var protoFor = {};
     var defType = { HTMLInputElement:'text', HTMLButtonElement:'submit' };
+    var controlStrings = { HTMLInputElement:['name','placeholder','accept','min','max','step','pattern','autocomplete'], HTMLTextAreaElement:['name','placeholder','autocomplete'], HTMLSelectElement:['name','autocomplete'], HTMLButtonElement:['name'] };
+    var controlBooleans = { HTMLInputElement:[['disabled','disabled'],['multiple','multiple'],['required','required'],['readOnly','readonly']], HTMLTextAreaElement:[['disabled','disabled'],['required','required'],['readOnly','readonly']], HTMLSelectElement:[['disabled','disabled'],['multiple','multiple'],['required','required']], HTMLButtonElement:[['disabled','disabled']], HTMLOptionElement:[['disabled','disabled']] };
     ['HTMLInputElement','HTMLTextAreaElement','HTMLSelectElement','HTMLOptionElement','HTMLButtonElement','HTMLLabelElement','HTMLCanvasElement'].forEach(function(n){ if (typeof g[n] !== 'function') g[n] = function(){}; var p = Object.create(baseProto); try {
       var defineControl=function(name,descriptor){Object.defineProperty(p,name,Object.assign({},descriptor,{enumerable:true}));};
-      defineControl('value',valDesc);if(n==='HTMLInputElement'){defineControl('checked',checkedDesc);defineControl('defaultChecked',defaultCheckedDesc);}defineControl('form',formDesc);
+      if(n!=='HTMLLabelElement')defineControl('value',valDesc);if(n==='HTMLInputElement'){defineControl('checked',checkedDesc);defineControl('defaultChecked',defaultCheckedDesc);}defineControl('form',formDesc);
       if (defType[n]) defineControl('type',mkTypeDesc(defType[n]));
       // Reflected IDL string attributes: a library setting `input.name = 'x'` (e.g. react-number-
       // format, MUI) must show up as the `name` content attribute (toHaveAttribute, [name] selectors).
-      (n==='HTMLButtonElement'?['name']:['name','placeholder','accept','min','max','step','pattern','autocomplete']).forEach(function(a){ Object.defineProperty(p, a, { configurable: true, enumerable:true, get: function(){ return this.getAttribute(a) || ''; }, set: function(v){ this.setAttribute(a, v == null ? '' : String(v)); } }); });
+      // Each interface gets only the members Chrome 156 exposes on it (control_prototypes_probe.js).
+      (controlStrings[n]||[]).forEach(function(a){ Object.defineProperty(p, a, { configurable: true, enumerable:true, get: function(){ return this.getAttribute(a) || ''; }, set: function(v){ this.setAttribute(a, v == null ? '' : String(v)); } }); });
       // Reflected BOOLEAN IDL attributes (presence): el.disabled = true -> the `disabled` content
       // attribute; reading returns hasAttribute. Tests read el.disabled / [disabled] / multiple.
-      (n==='HTMLButtonElement'?[['disabled','disabled']]:[['disabled','disabled'],['multiple','multiple'],['required','required'],['readOnly','readonly']]).forEach(function(pair){ Object.defineProperty(p, pair[0], { configurable: true, enumerable:true, get: function(){ return this.hasAttribute(pair[1]); }, set: function(v){ if (v) this.setAttribute(pair[1], ''); else this.removeAttribute(pair[1]); } }); });
+      (controlBooleans[n]||[]).forEach(function(pair){ Object.defineProperty(p, pair[0], { configurable: true, enumerable:true, get: function(){ return this.hasAttribute(pair[1]); }, set: function(v){ if (v) this.setAttribute(pair[1], ''); else this.removeAttribute(pair[1]); } }); });
       if (n === 'HTMLInputElement' || n === 'HTMLTextAreaElement') {
         defineControl('defaultValue',defaultValueDesc);
         defineControl('selectionStart',selStartDesc);defineControl('selectionEnd',selEndDesc);defineControl('selectionDirection',selDirDesc);
@@ -1585,7 +1617,7 @@ if(typeof __ns.makeNativeFunction==='function'){
         var seed = __cvSeed(this, activeCtx(this), 'toDataURL:'+mime);
         return 'data:' + mime + ';base64,' + __cvB64(__cvBytes(seed, 54));
       };
-      cp.toBlob = function(cb, type){
+      cp.toBlob = function(cb){ var type = arguments[1]; // toBlob(callback, optional type, optional quality).length === 1
         if (!cb) return;
         var mime = (typeof type === 'string' && type) ? type : 'image/png';
         var bytes = __cvBytes(__cvSeed(this, activeCtx(this), 'toBlob:'+mime), 64);
@@ -2282,7 +2314,7 @@ if(typeof __ns.makeNativeFunction==='function'){
           var delegate=descriptor[kind];if(typeof delegate!=='function')return;
           descriptor[kind]=__ns.makeNativeFunction(function(){reflectedApply(check,this,[]);return reflectedApply(delegate,this,arguments);},kind==='get'?'get '+name:kind==='set'?'set '+name:name,delegate.length);
         });
-        Object.defineProperty(proto,name,descriptor);
+        descriptor.enumerable=true;Object.defineProperty(proto,name,descriptor);
       });
     });
     var reflectedOwners={src:['HTMLScriptElement','HTMLImageElement','HTMLIFrameElement','HTMLMediaElement','HTMLInputElement','HTMLEmbedElement','HTMLSourceElement','HTMLTrackElement'],href:['HTMLAnchorElement','HTMLAreaElement','HTMLBaseElement','HTMLLinkElement'],rel:['HTMLAnchorElement','HTMLAreaElement','HTMLLinkElement'],as:['HTMLLinkElement'],media:['HTMLLinkElement','HTMLStyleElement','HTMLSourceElement'],type:['HTMLInputElement','HTMLButtonElement','HTMLScriptElement','HTMLLinkElement','HTMLStyleElement','HTMLEmbedElement','HTMLObjectElement','HTMLSourceElement'],valueAsNumber:['HTMLInputElement'],sheet:['HTMLStyleElement','HTMLLinkElement']};

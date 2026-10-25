@@ -7725,25 +7725,36 @@ try {
 // frame an identical timestamp. requestAnimationFrame returns an integer id; cancelAnimationFrame
 // removes only that pending callback (not clearTimeout — rAF ids are their own namespace).
 let __rafClock = null, __rafId = 0, __rafScheduled = false;
-let __rafQueue = [];
+let __rafQueue = [], __frameSteps = [];
+// Rendering frames are engine tasks; page replacement of setTimeout cannot stall them.
+const __frameTimer = globalThis.setTimeout;
+// Update-the-rendering order: queued engine steps (scroll events) run before
+// the frame's animation callbacks, and callbacks they request join this frame.
+const __scheduleFrame = () => {
+  if (__rafScheduled) return;
+  __rafScheduled = true;
+  __frameTimer(() => {
+    const floor = __perfNow();
+    __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
+    if (__rafClock < floor) __rafClock = floor;
+    const ts = Math.round(__rafClock * 10) / 10; // one timestamp for the whole frame
+    const steps = __frameSteps;
+    __frameSteps = [];
+    for (let i = 0; i < steps.length; i++) { try { steps[i](); } catch (e) {} }
+    const batch = __rafQueue;
+    __rafQueue = [];
+    __rafScheduled = false;
+    for (let i = 0; i < batch.length; i++) { try { batch[i].fn(ts); } catch (e) {} }
+    if (__frameSteps.length) __scheduleFrame();
+  }, 16);
+};
 globalThis.requestAnimationFrame = (fn) => {
   const id = ++__rafId;
-  __rafQueue.push({ id, fn });
-  if (!__rafScheduled) {
-    __rafScheduled = true;
-    globalThis.setTimeout(() => {
-      const floor = __perfNow();
-      __rafClock = __rafClock == null ? floor : __rafClock + 16.6 + (Math.random() * 0.8 - 0.4);
-      if (__rafClock < floor) __rafClock = floor;
-      const ts = Math.round(__rafClock * 10) / 10; // one timestamp for the whole frame
-      const batch = __rafQueue;
-      __rafQueue = [];
-      __rafScheduled = false;
-      for (const cb of batch) { try { cb.fn(ts); } catch (e) {} }
-    }, 16);
-  }
+  __rafQueue[__rafQueue.length] = { id, fn };
+  __scheduleFrame();
   return id;
 };
+ops.op_capture_frame_scheduler((step) => { __frameSteps[__frameSteps.length] = step; __scheduleFrame(); });
 globalThis.cancelAnimationFrame = (id) => { __rafQueue = __rafQueue.filter((c) => c.id !== id); };
 // Native V8 jobs share the real Promise/observer microtask checkpoint and the
 // host watchdog. Their callbacks retain private realm ownership until delivery.

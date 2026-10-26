@@ -1254,9 +1254,10 @@ async fn inline_classic_and_module_execution_do_not_dispatch_load_events() {
 }
 
 /// Two securitypolicyviolation events, the second queued from inside the first listener,
-/// with guest overrides of the constructor and timers in place, read after a `wait_ms`
-/// page timer. The second violation task is delivered in real time, so a short wait (or
-/// a loaded host, turbo-surf#37) reads before it arrives.
+/// with guest overrides of the constructor and timers in place. The second violation task
+/// is delivered in real time, so the probe waits for both events (the session budget is
+/// the cap) and then `wait_ms` more for a third that must not come; a fixed wait alone
+/// read before the second arrived on a loaded host (turbo-surf#37).
 async fn reentrant_csp_event_rows(wait_ms: u32) -> Value {
     let headers = vec![("Content-Security-Policy".into(), "style-src 'none'".into())];
     let mut page = PageSession::open_with_response_headers(
@@ -1264,7 +1265,7 @@ async fn reentrant_csp_event_rows(wait_ms: u32) -> Value {
         "https://events.test/",
         "",
         "",
-        5000,
+        60_000,
         "",
         Default::default(),
         &headers,
@@ -1274,14 +1275,17 @@ async fn reentrant_csp_event_rows(wait_ms: u32) -> Value {
     let probe = r#"(async()=>{
       const timer=setTimeout, originalCtor=SecurityPolicyViolationEvent;
       const div=document.querySelector('div'),rows=[];
+      let both;const arrived=new Promise(resolve=>both=resolve);
       globalThis.SecurityPolicyViolationEvent=()=>{throw Error('guest constructor');};
       globalThis.setTimeout=()=>{throw Error('guest timer');};
       globalThis.clearTimeout=()=>{throw Error('guest cancellation');};
       document.addEventListener('securitypolicyviolation',event=>{
         rows.push([event instanceof originalCtor,event.isTrusted,event.target===div]);
+        if(rows.length===2)both();
         if(rows.length===1){div.setAttribute('style','color:blue');throw Error('listener failure');}
       });
       div.setAttribute('style','color:red');
+      await arrived;
       await new Promise(resolve=>timer(resolve,WAIT));
       return rows;
     })()"#
@@ -1300,7 +1304,6 @@ async fn csp_event_tasks_release_before_reentrant_guest_dispatch_and_survive_ove
 /// turbo-surf#37: the same rows when the second task is slower than the page timer, as on
 /// a loaded host (deterministically: a 1 ms timer).
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#37: fails until the probe waits for the events"]
 async fn reentrant_csp_event_tasks_arrive_on_a_slow_host() {
     assert_eq!(
         reentrant_csp_event_rows(1).await,

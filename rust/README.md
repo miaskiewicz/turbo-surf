@@ -6,9 +6,11 @@ so the browserless crawler is Rust too. The only piece that *must* stay JS is th
 process); it's a thin shim over the napi addon — all the muscle is Rust.
 
 turbo-dom is consumed through the public `turbo-dom-parser` alias and its pure-Rust
-`rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The development
-workspace resolves registry `turbo-dom`0.5.7 from tagged merge
-`5ec17065`, including [PR15](https://github.com/miaskiewicz/turbo-dom/pull/15)
+`rtdom::Tree` (handle-based `u32` DOM, no napi/wasm boundary). The workspace
+requires `turbo-dom` 0.6 (the consolidation release, published with
+turbo-dom-layout / -raster / -browser-env 0.6.0; until then the pre-publish
+`[patch.crates-io]` table resolves them from a turbo-dom Git rev). Since 0.5.7
+(tagged merge `5ec17065`) it carries [PR15](https://github.com/miaskiewicz/turbo-dom/pull/15)
 and PR13/PR14 custom states, checkedness and detached contextual fragments.
 The release also repairs scalar/original-UTF16
 attribute case modifiers and measured HTML name/type defaults; the shared native
@@ -57,8 +59,11 @@ turbo-html2pdf-core 0.3.9, relocated verbatim into turbo-dom) for native live-tr
 box geometry, transforms, element scroll metrics and point-hit regions: its live-DOM
 input (`turbo_dom_layout::live`) styles the page's own composed tree in place from the
 rules surf matched per tree scope, and its `cssom_view` modules (moved from this crate)
-compute the CSSOM-View answers. It reads private actual CSSOM state without guest
-getters or HTML rewriting. Supported
+compute the CSSOM-View answers. Each read lays out the DOM as it is at that read:
+a capture that a mutation outdated (the tree's version moved) is taken again rather
+than laid out stale. Installed fonts come from turbo-dom-layout's process-wide
+`FontRegistry::system(SystemFontPolicy::Html)`. It reads private actual CSSOM state
+without guest getters or HTML rewriting. Supported
 contracts and remaining inline/caret/scroll/layout limits are recorded in
 [LIVE-GEOMETRY.md](../harness/detection/LIVE-GEOMETRY.md).
 

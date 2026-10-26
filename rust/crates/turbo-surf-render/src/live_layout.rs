@@ -299,7 +299,7 @@ mod tests {
     use turbo_dom_layout::{FontRegistry, ImageCtx, NoImages};
 
     // Adapted@S4: every test layout goes through the composed live path (rules
-    // prepared by surf's scoped matcher) instead of the copier's legacy cascade.
+    // prepared by surf's scoped matcher), as production layout does.
     fn snapshot(tree: &Tree, id: u32, css: &str) -> LayoutSnapshot {
         let input = capture_tree(tree, id).unwrap();
         let fonts = FontRegistry::new();

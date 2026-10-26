@@ -15,7 +15,7 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const page = readFileSync(here("../fixtures/screenshot_image_formats.html"), "utf8");
 const executablePath = process.env.TURBO_SURF_CHROME_PATH;
 if (!executablePath) throw new Error("set TURBO_SURF_CHROME_PATH to the Chrome binary");
-const viewport = { width: 520, height: 90 };
+const viewport = { width: 680, height: 90 };
 
 // Decode an 8-bit, non-interlaced RGB/RGBA PNG (what Chrome's screenshots are) to RGBA rows.
 function decodePng(png) {

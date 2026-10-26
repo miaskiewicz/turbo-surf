@@ -1,11 +1,11 @@
-//! turbo-surf#30: screenshots paint BMP, ICO/CUR (the largest entry, BMP- or PNG-encoded)
-//! and — under the default `avif` feature, which this crate forwards to turbo-dom-raster —
-//! AVIF images with Chrome 156's pixels, sampled at each image's centre and an inset
-//! corner (`fixture-gen/screenshot-image-formats-chrome.mjs`; the page comes from
-//! turbo-surf-render's `fixture-gen/make-image-format-cases.py`). The image bytes reach
-//! the raster as `data:` sources: turbo-dom-raster decodes an `<img src="data:…">` itself
-//! (turbo-dom#60), so the screenshot tool's empty asset map paints them, exactly as a map
-//! that carries the same bytes under each `src` does.
+//! turbo-surf#30 / #43: screenshots paint BMP, ICO/CUR (the largest entry, BMP- or
+//! PNG-encoded) and — under the default `avif` and `jxl` features, which this crate forwards
+//! to turbo-dom-raster — AVIF and JPEG XL images with Chrome 156's pixels, sampled at each
+//! image's centre and an inset corner (`fixture-gen/screenshot-image-formats-chrome.mjs`;
+//! the page comes from turbo-surf-render's `fixture-gen/make-image-format-cases.py`). The
+//! image bytes reach the raster as `data:` sources: turbo-dom-raster decodes an
+//! `<img src="data:…">` itself (turbo-dom#60), so the screenshot tool's empty asset map
+//! paints them, exactly as a map that carries the same bytes under each `src` does.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use turbo_dom_raster as raster;
@@ -17,8 +17,11 @@ fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-#[test]
-fn screenshots_paint_bmp_ico_and_avif_like_chrome156() {
+/// Screenshot the control page (with an empty and with a full asset map) and compare the
+/// samples whose id `select` accepts. `decoded(id)` says whether this build decodes the
+/// format: a format it does not decode paints the placeholder and must never show Chrome's
+/// pixels.
+fn mismatches(select: fn(&str) -> bool, decoded: fn(&str) -> bool) -> Vec<String> {
     let control: Value = serde_json::from_str(CONTROL).unwrap();
     assert!(control["browser"]
         .as_str()
@@ -39,7 +42,7 @@ fn screenshots_paint_bmp_ico_and_avif_like_chrome156() {
             (src.to_string(), bytes)
         })
         .collect();
-    assert_eq!(assets.len(), 6);
+    assert_eq!(assets.len(), 8);
     let mut mismatches = Vec::new();
     // `image_urls` skips `data:` sources (nothing to fetch), so callers hand over no bytes.
     for (map, assets) in [
@@ -51,6 +54,9 @@ fn screenshots_paint_bmp_ico_and_avif_like_chrome156() {
         assert_eq!((shot.width, shot.height), (viewport.width, viewport.height));
         for sample in control["samples"].as_array().unwrap() {
             let id = sample["id"].as_str().unwrap();
+            if !select(id) {
+                continue;
+            }
             let (x, y) = (sample["x"].as_u64().unwrap(), sample["y"].as_u64().unwrap());
             let at = ((y * u64::from(shot.width) + x) * 4) as usize;
             let got = &shot.rgba[at..at + 4];
@@ -60,24 +66,44 @@ fn screenshots_paint_bmp_ico_and_avif_like_chrome156() {
                 .iter()
                 .map(|v| v.as_u64().unwrap() as u8)
                 .collect();
-            // AVIF is lossy: Chrome's and rav1d's YUV->RGB conversions may round apart by a step.
-            let avif = id.starts_with("avif");
-            let tolerance = if avif { 2 } else { 0 };
+            // AVIF is lossy: Chrome's and rav1d's YUV->RGB conversions may round apart by a
+            // step. A translucent image's composite over the canvas may round apart by one.
+            let tolerance = if id.starts_with("avif") || id.ends_with("-alpha") {
+                2
+            } else {
+                0
+            };
             let close = got
                 .iter()
                 .zip(&chrome)
                 .all(|(a, b)| a.abs_diff(*b) <= tolerance);
-            match (avif && !cfg!(feature = "avif"), close) {
-                // Without the decoder an AVIF paints as the placeholder, never Chrome's pixels.
-                (true, true) => {
-                    mismatches.push(format!("{map}: {id} ({x},{y}): painted without `avif`"))
-                }
-                (false, false) => mismatches.push(format!(
+            match (decoded(id), close) {
+                // Without the decoder the image paints as the placeholder, never Chrome's pixels.
+                (false, true) => mismatches.push(format!(
+                    "{map}: {id} ({x},{y}): painted without its decoder feature"
+                )),
+                (true, false) => mismatches.push(format!(
                     "{map}: {id} ({x},{y}): expected {chrome:?}, got {got:?}"
                 )),
                 _ => {}
             }
         }
     }
-    assert!(mismatches.is_empty(), "{mismatches:#?}");
+    mismatches
+}
+
+#[test]
+fn screenshots_paint_bmp_ico_and_avif_like_chrome156() {
+    let found = mismatches(
+        |id| !id.starts_with("jxl"),
+        |id| !id.starts_with("avif") || cfg!(feature = "avif"),
+    );
+    assert!(found.is_empty(), "{found:#?}");
+}
+
+#[test]
+#[ignore = "turbo-surf#43: fails until the fix"]
+fn screenshots_paint_jpeg_xl_like_chrome156() {
+    let found = mismatches(|id| id.starts_with("jxl"), |_| true);
+    assert!(found.is_empty(), "{found:#?}");
 }

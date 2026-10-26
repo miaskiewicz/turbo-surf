@@ -1,7 +1,7 @@
 {
   "browser": "Chrome/156.0.8078.4",
   "probeSha256": "e3d35d5df512ac3e408d9c67eff16526cefeaa6cb5740fb80d82a656302bfb78",
-  "casesSha256": "b553a53db68419903dd39f310ebaeb7c1c69cd4137af33d83bf69df1b8e2e4cf",
+  "casesSha256": "a6831a63e214ccaf8b7d169ae3b1fbd66990658464c78e2b2e1418e809c4d9c6",
   "collectorSha256": "4e73ff27394fedadbb74e1bd60d0975a19106b20968681d4fc870f343e15e860",
   "errors": [],
   "result": {
@@ -33,6 +33,8 @@
       "cur": [true, 24, 24],
       "avif": [true, 64, 40],
       "avif-alpha": [true, 40, 64],
+      "jxl": [true, 64, 40],
+      "jxl-alpha": [true, 40, 64],
       "tiff": [true, 0, 0],
       "svg-base64": [true, 40, 30],
       "svg-percent-encoded": [true, 50, 20],
@@ -82,6 +84,8 @@
       "cur": ["load", true, 24, 24],
       "avif": ["load", true, 64, 40],
       "avif-alpha": ["load", true, 40, 64],
+      "jxl": ["load", true, 64, 40],
+      "jxl-alpha": ["load", true, 40, 64],
       "tiff": ["error", true, 0, 0],
       "svg-base64": ["load", true, 40, 30],
       "svg-percent-encoded": ["load", true, 50, 20],

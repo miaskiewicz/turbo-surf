@@ -1,7 +1,7 @@
 //! turbo-surf#30: live `<img>` loads decide success and `naturalWidth`/`naturalHeight`
 //! with turbo-dom-layout's shared image layer (`image::decode_data_url` for every `data:`
 //! form, `image::probe_natural` / the raster probe for the bytes), checked per format
-//! against a Chrome 156 control: PNG/JPEG/GIF/WebP/BMP/ICO/CUR/AVIF sizes, SVG natural
+//! against a Chrome 156 control: PNG/JPEG/GIF/WebP/BMP/ICO/CUR/AVIF/JPEG XL sizes, SVG natural
 //! sizes (served as `image/svg+xml` only), percent-encoded and raw `data:` URLs, wrong
 //! MIME types, truncated bodies and HTTP error statuses. The cases are built by
 //! `fixture-gen/make-image-format-cases.py`; the control by

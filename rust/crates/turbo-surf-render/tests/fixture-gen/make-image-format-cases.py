@@ -2,8 +2,8 @@
 """Writes tests/fixtures/image_formats_cases.json for tests/image_formats.rs (turbo-surf#30).
 
 Every image is built here from first principles (PNG/BMP/ICO/CUR by hand, AVIF/JPEG/GIF/
-WebP/TIFF by ImageMagick 7 with the HEIC/AVIF delegate), so the cases need no copied
-fixtures. `data` cases are `<img>` sources (base64, percent-encoded and raw `data:` URLs,
+WebP/TIFF by ImageMagick 7 with the HEIC/AVIF delegate, JPEG XL pinned below), so the cases
+need no copied fixtures. `data` cases are `<img>` sources (base64, percent-encoded and raw `data:` URLs,
 correct and wrong MIME types, truncated bodies); `http` cases are served by the test's
 local server (Playwright routes in the Chrome collector) with the given status and
 Content-Type. Regenerate, then recapture the control (html-image-formats-chrome.mjs):
@@ -87,6 +87,17 @@ WEBP = magick(["-size", "7x6", "xc:#ff0000"], "webp")
 SOF = marker(JPEG, b"\xff\xc0", b"\xff\xc1", b"\xff\xc2")
 SOS = marker(JPEG, b"\xff\xda")
 NS = "xmlns='http://www.w3.org/2000/svg'"
+# JPEG XL (turbo-surf#43): ImageMagick here has no JPEG XL coder, so the two images are
+# zune-jpegxl 0.4.0 lossless encodes (`JxlSimpleEncoder`, 8-bit) of a solid 64x40 #ff0000
+# RGB and a solid 40x64 rgba(0,0,255,128) image, pinned as bytes (193 and 200 bytes).
+JXL = base64.b64decode(
+    "/wo4AX6ASAgCAQDQAksYm5xxhAM4gAM4IErAOQUBACBEgAgQASJAhP/37/nvoTHnnGvtc2+SJAkBVVVVVVXV////c+/r"
+    "7u7uhv/37/nvoTHnnGvtc2+SJAkBVVVVVVXV////c+/r7u7uhv/37/nvoTHnnGvtc2+SJAkBVVVVVVXV////c+/r7u7u"
+    "hv/37/nvoTHnnGvtc2+SJAkBVVVVVVXV////c+/r7u7uPgDHBwD43/B5+AMA/G/4XH0AgP8NHw==")
+JXL_ALPHA = base64.b64decode(
+    "/wr4AU6AlQgIEADsAksYm5xxhAM4gAM4IErAOQUBACBEgAgQASJAhP/37/nvoTHnnGvtc2+SJAkBVVVVVVXV////c+/r"
+    "7u7uhv/37/nvoTHnnGvtc2+SJAkBVVVVVVXV////c+/r7u7uhv/37/nvoTHnnGvtc2+SJAkBVVVVVVXV////c+/r7u7u"
+    "hv/37/nvoTHnnGvtc2+SJAkBVVVVVVXV////c+/r7u7uPgDHBwD43/B59AMA/G/4XH0AgP8NnwcAAMD/hg8=")
 
 DATA = [
     ("png", b64("image/png", RED)),
@@ -116,6 +127,8 @@ DATA = [
     ("cur", b64("image/x-icon", icon([(24, 24, icon_bmp(24, 24))], kind=2))),
     ("avif", b64("image/avif", magick(["-size", "64x40", "xc:#ff0000", "-depth", "8"], "avif"))),
     ("avif-alpha", b64("image/avif", magick(["-size", "40x64", "xc:rgba(0,0,255,0.5)", "-depth", "8"], "avif"))),
+    ("jxl", b64("image/jxl", JXL)),
+    ("jxl-alpha", b64("image/jxl", JXL_ALPHA)),
     ("tiff", b64("image/tiff", magick(["-size", "30x20", "xc:#00ff00"], "tiff"))),
     ("svg-base64", b64("image/svg+xml", SVG)),
     ("svg-percent-encoded", "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2250%22%20height%3D%2220%22%3E%3C%2Fsvg%3E"),
@@ -169,11 +182,12 @@ with open(OUT, "w") as file:
     file.write("\n")
 
 # The screenshot page (turbo-surf-mcp tests/screenshot_image_formats.rs): the decodable
-# BMP/ICO/CUR/AVIF cases as absolutely positioned <img>s over a cyan canvas, painted by
-# turbo-dom-raster with the features surf ships (BMP/ICO always, AVIF under `avif`).
+# BMP/ICO/CUR/AVIF/JPEG XL cases as absolutely positioned <img>s over a cyan canvas, painted
+# by turbo-dom-raster with the features surf ships (BMP/ICO always, AVIF under `avif`, JPEG
+# XL under `jxl`).
 SHOT = os.path.join(HERE, "..", "..", "..", "turbo-surf-mcp", "tests", "fixtures",
                     "screenshot_image_formats.html")
-SHOT_IDS = ["bmp", "ico-bmp-sizes", "ico-png", "cur", "avif", "avif-alpha"]
+SHOT_IDS = ["bmp", "ico-bmp-sizes", "ico-png", "cur", "avif", "avif-alpha", "jxl", "jxl-alpha"]
 os.makedirs(os.path.dirname(SHOT), exist_ok=True)
 with open(SHOT, "w") as file:
     file.write("<!doctype html><html><head><style>body{margin:0;background:#00ffff}"

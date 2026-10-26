@@ -105,13 +105,12 @@ uses typed rules and a transitive variable/declaration proof for bounded static
 geometry. Unknown or potentially geometry-changing uses still reject. Retained
 descriptor blocks alone do not implement CSS property registration or transitions.
 
-Known throws (turbo-surf#31): `getBoundingClientRect()` and `elementFromPoint()`
-still throw for table rows and row groups, and for every element of a page with an
-absolutely positioned inline such as the common `.sr-only` span; Chrome answers all
-of them. The causes are in turbo-dom-layout (row fragments without used-box metrics,
-no row-group fragment, no blockification of positioned inlines);
-`rust/crates/turbo-surf-render/tests/live_geometry_throws.rs` pins them against a
-Chrome 156 control until that fix lands.
+Table rows and row groups, and pages with an absolutely positioned inline such as the
+common `.sr-only` span, no longer throw (turbo-surf#31, fixed in turbo-dom-layout:
+row/row-group boxes with used-box metrics, blockified positioned inlines, per-element
+inline failures); `rust/crates/turbo-surf-render/tests/live_geometry_throws.rs` holds
+every read to its Chrome 156 control with no known gaps. A loaded `<img>` lays out at its
+natural size (turbo-surf#39), which `img.width`/`height`/`x`/`y` read (turbo-dom#26).
 
 The reusable `*-chrome-control.mjs` runners serve independent authored localhost
 fixtures. The older controls retain their original Chrome155.0.8059.79 metadata;

@@ -71,7 +71,12 @@
   identical measurements).
 - Flaky tests made deterministic: the smoke-release interrupt control waits for the
   fake executable instead of a fixed 5 s (#34); the credentialless partition control
-  no longer times the host with a 5 s budget (#35).
+  no longer times the host with a 5 s budget (#35); the reentrant CSP event test awaits
+  both events instead of a 50 ms timer (#37, plus a slow-host variant). Audit of the
+  remaining 5 s session budgets: the 40 that bound real localhost work, and the host-side
+  caps on server effects, are generous caps now (60 s / 30 s), and fixed waits for
+  real-time deliveries (storage events, BroadcastChannel, CSP task capacity) are
+  condition waits.
 - turbo-dom crates repinned to the P5b binding fixes (turbo-dom#20 `Option()` and
   HTMLOptionsCollection accessor definitions, #32 image accessors); the interceptor
   runtime control has no known gaps left.

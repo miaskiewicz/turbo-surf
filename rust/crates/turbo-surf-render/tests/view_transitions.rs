@@ -2,14 +2,15 @@
 //! against the vendored Chrome 156 control (turbo-test scripts/view-transitions-chrome-control.mjs).
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
-const PROBE: &str = include_str!("../src/view_transitions_probe.js");
-const HIDDEN: &str = include_str!("../src/view_transitions_hidden_probe.js");
+const PROBE: &str = test_support::VIEW_TRANSITIONS_PROBE_JS;
+const HIDDEN: &str = test_support::VIEW_TRANSITIONS_HIDDEN_PROBE_JS;
 
 fn control() -> Value {
     let control: Value =
-        serde_json::from_str(include_str!("../src/view_transitions_chrome156.json")).unwrap();
+        serde_json::from_str(test_support::VIEW_TRANSITIONS_CHROME156_JSON).unwrap();
     assert_eq!(control["browser"], "Chrome/156.0.8078.47");
     // The saved control is only valid for the exact probe bytes Chrome executed.
     assert_eq!(

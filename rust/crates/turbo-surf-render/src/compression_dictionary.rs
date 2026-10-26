@@ -20,7 +20,7 @@ fn context<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
 ) -> Option<v8::Local<'s, v8::Context>> {
-    if !crate::browser_env::valid_native_geometry_receiver(scope, document.into(), 9)
+    if !crate::live_layout_dom::valid_receiver(scope, document.into(), 9)
         || !crate::browser_env::node_has_window_owner(scope, document)
         || !crate::browser_env::is_light_document_node(scope, document)
     {
@@ -65,7 +65,7 @@ pub(super) fn op_dictionary_links<'s>(
     root: v8::Local<v8::Object>,
 ) -> Result<v8::Local<'s, v8::Array>, super::JsErrorBox> {
     let links = if context(scope, document).is_some() {
-        crate::browser_env::native_compression_dictionary_links(scope, root)
+        crate::compression_dictionary_dom::links(scope, root)
             .map_err(super::JsErrorBox::range_error)?
     } else {
         Vec::new()

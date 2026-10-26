@@ -5653,6 +5653,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "turbo-dom-browser-env"
+version = "0.6.0"
+source = "git+https://github.com/miaskiewicz/turbo-dom?rev=2c3bcef50210c889b00139dba6c354c8539aadb2#2c3bcef50210c889b00139dba6c354c8539aadb2"
+dependencies = [
+ "cssparser 0.37.0",
+ "lightningcss",
+ "psl",
+ "serde",
+ "serde_json",
+ "turbo-dom",
+ "turbo-dom-v8",
+ "url",
+]
+
+[[package]]
 name = "turbo-dom-v8"
 version = "150.4.0"
 source = "git+https://github.com/miaskiewicz/turbo-dom?rev=e9b36c8733ef1cf1073f7053a8c5931381c978c5#e9b36c8733ef1cf1073f7053a8c5931381c978c5"
@@ -5990,6 +6005,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "turbo-dom",
+ "turbo-dom-browser-env",
  "turbo-html2pdf-core",
  "turbo-surf-core",
  "turbo-surf-deno-core",
@@ -7097,11 +7113,6 @@ checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]
-
-[[patch.unused]]
-name = "turbo-dom-browser-env"
-version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=2c3bcef50210c889b00139dba6c354c8539aadb2#2c3bcef50210c889b00139dba6c354c8539aadb2"
 
 [[patch.unused]]
 name = "turbo-surf-deno-bench-util"

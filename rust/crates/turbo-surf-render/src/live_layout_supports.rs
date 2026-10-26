@@ -63,7 +63,7 @@ fn evaluate(condition: &SupportsCondition<'_>) -> Result<bool, String> {
 }
 
 fn zoom(value: &str) -> bool {
-    if crate::browser_env::css_zoom_value(value).is_some() || css_wide(value) {
+    if turbo_dom_browser_env::css_values::zoom_value(value).is_some() || css_wide(value) {
         return true;
     }
     Property::parse_string(PropertyId::from("zoom"), value, ParserOptions::default()).is_ok_and(

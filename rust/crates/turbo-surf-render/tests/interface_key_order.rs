@@ -5,13 +5,13 @@
 //! key_order_chrome156.json captured by harness/detection/api-shape.mjs.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
-const PROBE: &str = include_str!("../src/key_order_probe.js");
+const PROBE: &str = test_support::KEY_ORDER_PROBE_JS;
 
 fn oracle() -> Value {
-    let fixture: Value =
-        serde_json::from_str(include_str!("../src/key_order_chrome156.json")).unwrap();
+    let fixture: Value = serde_json::from_str(test_support::KEY_ORDER_CHROME156_JSON).unwrap();
     assert_eq!(fixture["browser"], "Chrome/156.0.8078.47");
     assert_eq!(fixture["v8"], "15.6.75.19");
     assert_eq!(

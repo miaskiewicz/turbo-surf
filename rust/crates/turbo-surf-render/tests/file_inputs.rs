@@ -2,11 +2,12 @@
 //! against the vendored binding's source-pinned Chrome 156 control.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
-const PROBE: &str = include_str!("../src/file_inputs_probe.js");
-const CASES: &str = include_str!("../src/file_inputs_cases.json");
-const CONTROL: &str = include_str!("../src/file_inputs_chrome156.json");
+const PROBE: &str = test_support::FILE_INPUTS_PROBE_JS;
+const CASES: &str = test_support::FILE_INPUTS_CASES_JSON;
+const CONTROL: &str = test_support::FILE_INPUTS_CHROME156_JSON;
 
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`
 /// prefixes. These are the binding's own pinned gaps (Rusty V8 reports

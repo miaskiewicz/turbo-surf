@@ -1,3 +1,4 @@
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::run_with_dom;
 
 #[test]
@@ -36,11 +37,11 @@ fn rectangle_clone_preserves_exact_values_kind_aliases_and_private_ownership() {
 
 #[test]
 fn live_css_adoption_matches_independent_chrome_observable_array_control() {
-    let probe = include_str!("../src/css_adoption_probe.js")
+    let probe = test_support::CSS_ADOPTION_PROBE_JS
         .trim()
         .trim_end_matches(';');
     let expected: serde_json::Value =
-        serde_json::from_str(include_str!("../src/css_adoption_chrome155.json")).unwrap();
+        serde_json::from_str(test_support::CSS_ADOPTION_CHROME155_JSON).unwrap();
     let actual = run_with_dom(
         "<!doctype html><html><head></head><body></body></html>",
         &format!("JSON.stringify({probe})"),
@@ -88,11 +89,11 @@ fn real_live_element_geometry_tracks_cssom_adoption_mutations_and_private_owners
 
 #[test]
 fn adopted_sheet_shadow_ownership_brand_and_integrity_match_chrome() {
-    let probe = include_str!("../src/css_adoption_ownership_probe.js")
+    let probe = test_support::CSS_ADOPTION_OWNERSHIP_PROBE_JS
         .trim()
         .trim_end_matches(';');
     let expected: serde_json::Value =
-        serde_json::from_str(include_str!("../src/css_adoption_ownership_chrome155.json")).unwrap();
+        serde_json::from_str(test_support::CSS_ADOPTION_OWNERSHIP_CHROME155_JSON).unwrap();
     let actual = run_with_dom(
         "<!doctype html><html><head></head><body></body></html>",
         &format!("JSON.stringify({probe})"),
@@ -106,11 +107,11 @@ fn adopted_sheet_shadow_ownership_brand_and_integrity_match_chrome() {
 
 #[test]
 fn genuine_native_document_implementation_matches_chrome_independent_factories_and_errors() {
-    let probe = include_str!("../src/dom_implementation_probe.js")
+    let probe = test_support::DOM_IMPLEMENTATION_PROBE_JS
         .trim()
         .trim_end_matches(';');
     let expected: serde_json::Value =
-        serde_json::from_str(include_str!("../src/dom_implementation_chrome155.json")).unwrap();
+        serde_json::from_str(test_support::DOM_IMPLEMENTATION_CHROME155_JSON).unwrap();
     let actual = run_with_dom(
         "<!doctype html><html><head></head><body></body></html>",
         &format!("JSON.stringify({probe})"),

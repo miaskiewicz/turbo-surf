@@ -9,7 +9,7 @@ use turbo_html2pdf_core::{ComputedStyle, StyledNode};
 pub(crate) fn factor(style: &ComputedStyle) -> f32 {
     style
         .get("zoom")
-        .and_then(crate::browser_env::css_zoom_value)
+        .and_then(turbo_dom_browser_env::css_values::zoom_value)
         .map(|(_, factor)| factor)
         .filter(|factor| *factor > 0.0 && factor.is_finite())
         .unwrap_or(1.0)

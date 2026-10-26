@@ -6,6 +6,12 @@ license.workspace = true
 repository.workspace = true
 description = "turbo-surf JS-execution tier (tier 3): deno_core isolate + rtdom↔V8 DOM binding"
 
+[features]
+# Interceptor should-throw mode read from the V8 frame instead of the turbo-dom-v8
+# fork accessor. Only for native V8 SDKs without the fork fix (the engine-154/155
+# overlay enables it); see turbo-dom-browser-env's README.
+native-sdk-frame-read = ["turbo-dom-browser-env/native-sdk-frame-read"]
+
 [dependencies]
 deno_core = { package = "turbo-surf-deno-core", version = "=0.412.1" }
 # Official native WebCrypto and its lazy Web IDL/console dependencies share the
@@ -27,6 +33,9 @@ deno_error = "=0.7.1"
 # would make the DOM handles incompatible with the runtime's context.
 v8 = { package = "turbo-surf-deno-v8", version = "=0.4.1" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
+# The rtdom↔V8 DOM binding (window, document, CSSOM, forms, events). host-internals
+# gives surf's native layout capture and resource discovery host-only document access.
+turbo-dom-browser-env = { version = "0.6.0", features = ["host-internals"] }
 # Public live-tree snapshots preserve source provenance without HTML serialization.
 # Published0.3.8 includes the composed-layout and shared-font producer fixes.
 turbo-html2pdf-core = { version = "0.3.9" }
@@ -51,7 +60,7 @@ base64 = "0.22"
 sha2 = "0.10"
 # Resource loads decode actual image bytes before reporting dimensions/load success.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-# The canonical DOM binding validates CSS grammar before building its CSSOM facade.
+# Scoped sheet preparation, @supports/media evaluation and neutral CSS parsing.
 lightningcss = { version = "1.0.0-alpha.71", default-features = false }
 cssparser = "0.37"
 # For the async `RecaptchaEngine` trait impl (same trait style as turbo-surf-core).
@@ -67,6 +76,8 @@ httpdate = "1"
 cc = "1"
 
 [dev-dependencies]
+# Probe/control data of the binding's Chrome-parity files for the integration tests.
+turbo-dom-browser-env = { version = "0.6.0", features = ["host-internals", "test-support"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }
 
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

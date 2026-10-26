@@ -5542,7 +5542,7 @@ fn retire_frame_tree_impl<'s>(
                 fetch_streams::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
                 storage_events::retire(context);
-                crate::browser_env::retire_native_document(scope, context);
+                turbo_dom_browser_env::host_internals::retire_context(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
                 #[cfg(turbo_surf_native_proxy)]

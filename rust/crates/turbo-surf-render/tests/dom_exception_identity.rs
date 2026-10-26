@@ -9,24 +9,11 @@ mod binding_control;
 
 #[tokio::test(flavor = "current_thread")]
 async fn every_dom_exception_is_the_realm_interface_like_chrome156() {
-    // Known gap (turbo-surf#42): the binding's modules raise the DOMException they captured
-    // at install, and surf installs its own DOMException afterwards. Their exceptions are
-    // instances of neither realm's interface, and as plain objects to surf's serializer
-    // they clone to `{}`.
-    let gaps = [
-        (
-            "decode",
-            serde_json::json!([false, false, false, "EncodingError", 0]),
-        ),
-        ("decodeClone", serde_json::json!([false, null, null])),
-        ("childDecode", serde_json::json!([false, false])),
-    ];
-    binding_control::matches_control_with_gaps(
+    binding_control::matches_control(
         include_str!("fixtures/dom_exception_identity_probe.js"),
         include_bytes!("fixtures/dom_exception_identity_cases.json"),
         include_str!("fixtures/dom_exception_identity_chrome156.json"),
         |case| case["url"].as_str().unwrap(),
-        &gaps,
     )
     .await;
 }

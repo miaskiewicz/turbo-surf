@@ -6,7 +6,7 @@
 //! carries own properties.
 #[path = "support/binding_control.rs"]
 mod binding_control;
-use binding_control::{matches_control, matches_control_with_gaps, sha};
+use binding_control::{matches_control, sha};
 use serde_json::Value;
 use turbo_dom_browser_env::test_support;
 
@@ -23,23 +23,11 @@ async fn image_state_through_the_surf_loader_matches_chrome156() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn src_and_decode_are_prototype_members_that_load_like_chrome156() {
-    // Known gap (turbo-surf#42): the binding's decode() rejects with the DOMException it
-    // captured at install, and surf installs its own DOMException afterwards, so the
-    // EncodingError is not `instanceof DOMException` (name/message match).
-    let encoding = serde_json::json!([
-        "throw",
-        "EncodingError",
-        "The source image cannot be decoded.",
-        false
-    ]);
-    let broken = serde_json::json!({"event": "error", "decoded": encoding, "complete": true,
-        "naturalWidth": 0, "naturalHeight": 0, "currentSrc": true, "own": []});
-    matches_control_with_gaps(
+    matches_control(
         include_str!("fixtures/html_image_members_probe.js"),
         include_bytes!("fixtures/html_image_members_cases.json"),
         include_str!("fixtures/html_image_members_chrome156.json"),
         |case| case["url"].as_str().unwrap(),
-        &[("decodeEmpty", encoding.clone()), ("createdBroken", broken)],
     )
     .await;
 }

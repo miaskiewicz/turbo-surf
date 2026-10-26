@@ -12,7 +12,7 @@ async fn computed_defaults_and_titles_through_a_surf_session_match_chrome156() {
         test_support::COMPUTED_DEFAULTS_PROBE_JS,
         test_support::COMPUTED_DEFAULTS_CASES_JSON,
         test_support::COMPUTED_DEFAULTS_CHROME156_JSON,
-        |case| case["documentBase"].as_str().unwrap(),
+        |case| case["documentBase"].as_str().unwrap_or("http://localhost/"),
     )
     .await;
 }

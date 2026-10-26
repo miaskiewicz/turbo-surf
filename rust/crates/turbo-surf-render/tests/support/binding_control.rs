@@ -10,6 +10,51 @@ pub fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// Run `probe` in `page` and parse its JSON result. A probe that asks for user activation
+/// (`__cdpGesture()`, the Chrome collector's trusted CDP click, then `__cdpGestureDone()`)
+/// gets a trusted host click from surf's input driver each time it asks.
+pub async fn run_probe(page: &mut PageSession, probe: &str) -> Value {
+    let probe = probe.trim_end().trim_end_matches(';');
+    if !probe.contains("__cdpGesture") {
+        return serde_json::from_str(&page.eval_json_expression(probe).await.unwrap()).unwrap();
+    }
+    // The probe's synchronous part runs here, under the session budget; page.eval below
+    // drains the page's tasks and timers (the probe's own short waits) on each call.
+    page.eval_expression(&format!(
+        "(()=>{{globalThis.__cdpGesture=()=>{{globalThis.__surfGesture=true}};globalThis.__surfProbe=null;\
+         Promise.resolve({probe}).then(value=>{{globalThis.__surfProbe=JSON.stringify(value)}},\
+         error=>{{globalThis.__surfProbe=JSON.stringify({{probeError:String(error)}})}});return true}})()"
+    ))
+    .await
+    .unwrap();
+    // A generous cap, not a timing.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let mut state = Value::Null;
+    while std::time::Instant::now() < deadline {
+        state = serde_json::from_str(
+            &page
+                .eval("globalThis.__RESULT=JSON.stringify([globalThis.__surfProbe, globalThis.__surfGesture===true])")
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        if let Some(result) = state[0].as_str() {
+            return serde_json::from_str(result).unwrap();
+        }
+        if state[1] == true {
+            page.input(&serde_json::json!([{"click": "body"}]))
+                .await
+                .unwrap();
+            page.eval("globalThis.__surfGesture=false;__cdpGestureDone();globalThis.__RESULT=''")
+                .await
+                .unwrap();
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+    panic!("probe never settled: {state}");
+}
+
 /// Run `probe` on every case page and require the Chrome control's result exactly.
 pub async fn matches_control(probe: &str, cases: &[u8], control: &str, base: fn(&Value) -> &str) {
     matches_control_with_gaps(probe, cases, control, base, &[]).await;
@@ -43,18 +88,14 @@ pub async fn matches_control_with_gaps(
     assert_eq!(cases.len(), expected.len());
     for (case, expected) in cases.iter().zip(expected) {
         assert_eq!(case["id"], expected["id"]);
-        // A generous cap, not a timing: the probes are in-isolate but lay out live.
+        // A generous cap, not a timing: the probes are in-isolate but lay out live, and the
+        // largest (computed_defaults' pseudo-element tables) take ~45 s of a debug build on a
+        // host at load average 200.
         let mut page =
-            PageSession::open(case["html"].as_str().unwrap(), base(case), "", "", 60_000)
+            PageSession::open(case["html"].as_str().unwrap(), base(case), "", "", 180_000)
                 .await
                 .unwrap();
-        let actual: Value = serde_json::from_str(
-            &page
-                .eval_json_expression(probe.trim_end().trim_end_matches(';'))
-                .await
-                .unwrap(),
-        )
-        .unwrap();
+        let actual = run_probe(&mut page, probe).await;
         let expected = expected["result"].as_object().unwrap();
         for (name, pinned) in gaps {
             assert_eq!(

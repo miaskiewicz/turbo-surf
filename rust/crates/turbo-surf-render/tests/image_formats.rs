@@ -17,23 +17,11 @@ const CASES: &str = include_str!("fixtures/image_formats_cases.json");
 const CONTROL: &str = include_str!("fixtures/image_formats_chrome156.json");
 
 /// Known gaps of the shared probe (turbo-dom-layout `probe_natural`), pinned to surf's
-/// value per section and id. Blink reports a size only once its decoder has read past the
-/// header — a JPEG's `SOS`, a GIF's first image descriptor, a WebP's complete frame
-/// header (the PNG rule, the first `IDAT`, already matches) — while the probe sizes these
-/// truncated bodies from the header alone; and Blink rejects an `image/svg+xml` document
-/// whose root `<svg>` is not in the SVG namespace, which usvg parses (turbo-dom#59).
-const GAPS: &[(&str, &str, &str)] = &[
-    ("parsed", "jpeg-sof-only", "[true,5,4]"),
-    ("parsed", "jpeg-before-sos", "[true,5,4]"),
-    ("parsed", "gif-screen-only", "[true,6,5]"),
-    ("parsed", "webp-header", "[true,7,6]"),
-    ("parsed", "svg-no-namespace", "[true,40,30]"),
-    ("created", "jpeg-sof-only", r#"["load",true,5,4]"#),
-    ("created", "jpeg-before-sos", r#"["load",true,5,4]"#),
-    ("created", "gif-screen-only", r#"["load",true,6,5]"#),
-    ("created", "webp-header", r#"["load",true,7,6]"#),
-    ("created", "svg-no-namespace", r#"["load",true,40,30]"#),
-];
+/// value per section and id; each must still differ from Chrome. None are left: since
+/// turbo-dom#59 the probe reports a size only where Blink's decoders do (a JPEG's `SOS`, a
+/// GIF's first image descriptor, a WebP's complete frame header) and rejects an
+/// `image/svg+xml` root outside the SVG namespace.
+const GAPS: &[(&str, &str, &str)] = &[];
 
 fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))

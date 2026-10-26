@@ -14,6 +14,20 @@
   stylesheet loads before its script, so parser images load and fire `load`/`error`
   (they never loaded there). Remaining gap: a parser `data:` image is still pending
   at the script's first read (Chrome decodes it synchronously).
+- `HTMLImageElement` is entirely the binding's (turbo-dom#23): surf's plain-function
+  `globalThis.Image`, its `src` setter and `decode()` overrides are gone, so `Image` is
+  the native legacy factory (`new`-only, `length` 0, NewTarget-aware) and `decode()`
+  settles with the image's load state. Loads start from the document's mutation
+  consumer, so a detached image loads like Chrome — `new Image().src = …`,
+  `setAttribute("src")` on a created image, detached `innerHTML` /
+  `insertAdjacentHTML` / `createContextualFragment` images (they never loaded) — while
+  images of inert documents (template contents, `DOMParser`, `createHTMLDocument`)
+  no longer load, and removing `src` resets the natural size to 0x0. Chrome 156
+  control: `tests/fixtures/html_image_loads_chrome156.json`; the binding's
+  `HTML_IMAGE_*` (factory/own/decode) and `CUSTOM_ELEMENTS_DEFINED_*` controls also run
+  through `PageSession`. Known gaps (pinned): no `srcset` candidate selection; the
+  binding's `decode()` EncodingError is not `instanceof` surf's `DOMException`; parsed
+  `is=` elements read `:defined` once a session has opened.
 - The font-run geometry Chrome collector reads its fonts only from the pinned
   turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its
   three controls are recaptured on Chrome for Testing 156 (`*-chrome156.json`,

@@ -357,8 +357,13 @@ SERP in one baseline while another fails effective consent dismissal. The later
   PNG/JPEG/GIF/WebP images are fetched as bytes and decoded before success/dimensions are
   exposed. Each image's state reaches the binding's `HTMLImageElement.prototype`
   accessors (`complete`, `naturalWidth`, `naturalHeight`, `currentSrc`) through the
-  document's private `imageHost` record; `src` and `decode()` are prototype members too,
-  so an `<img>` has no own properties, as in Chrome. A `render(html, base, script)`
+  document's private `imageHost` record. The binding owns the rest of the element (the
+  reflected `src`, `decode()` and the native `Image()` factory), so an `<img>` has no own
+  properties, as in Chrome. Loads start from the document's mutation consumer: a
+  `src`/`srcset` change on any `<img>` the document owns, connected or not
+  (`new Image().src = …`), and images a tree inserts (detached `innerHTML`, contextual
+  fragments); images of inert documents (template contents, `DOMParser`,
+  `createHTMLDocument`) never load. A `render(html, base, script)`
   starts the parser's image and stylesheet loads before its script runs; a parser
   `data:` image is still pending at the script's first read (Chrome has decoded it
   already). SVG/AVIF, responsive image selection, CSS image/font initiation, incremental

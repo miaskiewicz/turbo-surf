@@ -9978,26 +9978,11 @@ function __loadImage(el, win = globalThis) {
   })());
   return state.promise;
 }
-// src and decode() stay on HTMLImageElement.prototype, as in Chrome: an image never
-// carries own properties, however it was created or inserted. Assigning src starts a
-// load (the binding's reflected setter runs first and keeps its receiver check).
-const __imagePrototype = HTMLImageElement.prototype;
-const __imageSourceDescriptor = Object.getOwnPropertyDescriptor(__imagePrototype,"src");
-const __imageNaturalWidth = Object.getOwnPropertyDescriptor(__imagePrototype,"naturalWidth").get;
-const __imageSetSource = __imageSourceDescriptor.set;
-Object.defineProperty(__imagePrototype,"src",{...__imageSourceDescriptor,set:__G.makeNativeFunction(function(value){__resourceListApply(__imageSetSource,this,[value]);__loadImage(this,globalThis);},"set src",1)});
-Object.defineProperty(__imagePrototype,"decode",{value:__G.makeNativeFunction(function(){
-  // A promise-returning operation reports a bad receiver as a rejection.
-  try{__resourceListApply(__imageNaturalWidth,this,[]);}catch(_){return Promise.reject(new TypeError("Failed to execute 'decode' on 'HTMLImageElement': Illegal invocation"));}
-  return __resourceThen(__loadImage(this,globalThis),()=>{if(!__resourceListApply(__imageNaturalWidth,this,[]))throw new DOMException("The source image cannot be decoded.","EncodingError");});
-},"decode",0),writable:true,enumerable:true,configurable:true});
-const __createResourceElement = document.createElement.bind(document);
-globalThis.Image = function Image(width,height) {
-  const el=__createResourceElement("img");
-  if(width!=null)el.width=width;if(height!=null)el.height=height;
-  return el;
-};
-globalThis.Image.prototype=globalThis.HTMLImageElement.prototype;
+// The binding owns HTMLImageElement entirely (turbo-dom#23): the prototype's reflected
+// src, decode() settling with imageHost, and the native Image() factory. Loads start
+// from the document's mutation consumer below (a src/srcset record on any <img> this
+// document owns, connected or not, and images inserted into its trees), and from
+// loadDocumentResources for parser images, so no image carries own properties.
 __G.loadDocumentResources = function(doc = __document, win = globalThis, before = null) {
   if(doc!==__document || __documentType.call(doc)!==9)throw new TypeError("Resource loading requires the owning native Document");
   __discoverDictionaries();
@@ -10291,8 +10276,39 @@ function __containsInsertedResource(node) {
   return kind === "LINK" || kind === "IMG" || kind === "STYLE" ||
     kind !== "" && __resourceApply(__resourceElementQuery,node,["link,img,style"]) !== null;
 }
+const __imageMutationAttributes = {__proto__: null, src:true, srcset:true};
+const __resourceElementQueryAll = Element.prototype.querySelectorAll;
+const __resourceFragmentQueryAll = DocumentFragment.prototype.querySelectorAll;
+// An <img> this document owns starts (or restarts) its load when its src or srcset
+// changes, or when a tree inserts it, whether or not it is connected: Chrome loads
+// `new Image().src = …`, detached innerHTML and createContextualFragment images alike.
+// Images of other documents (template contents, DOMParser and createHTMLDocument
+// documents) never load; __loadImage keeps an unchanged src's load.
+function __ownedImage(node) {
+  return __resourceElementKind(node)==="IMG" && __resourceNativeOwner(node)===__document;
+}
+function __startInsertedImages(node) {
+  const type=__resourceApply(__documentType,node,[]);
+  if(type!==1 && type!==11)return;
+  if(__ownedImage(node))__loadImage(node,globalThis);
+  const images=__resourceApply(type===1?__resourceElementQueryAll:__resourceFragmentQueryAll,node,["img"]);
+  const length=__resourceListApply(__resourceListLength,images,[]);
+  for(let index=0;index<length;index++){
+    const image=__resourceListApply(__resourceListItem,images,[index]);
+    if(__ownedImage(image))__loadImage(image,globalThis);
+  }
+}
+function __imageMutation(event) {
+  if (event.type === "attributes") {
+    if (event.attributeNamespace===null && __imageMutationAttributes[event.attributeName] && __ownedImage(event.target))
+      __loadImage(event.target,globalThis);
+  } else if (event.type === "childList") {
+    for (let index=0; index<event.added.length; index++) __startInsertedImages(event.added[index]);
+  }
+}
 function __resourceMutation(event) {
   if(event.type==="childList")for(let index=0;index<event.removed.length;index++)__dictionaryRemoved(event.removed[index]);
+  __imageMutation(event);
   let connected = false, relevant = false;
   for (let index = 0; index < event.ancestors.length; index++) {
     const ancestor=event.ancestors[index];

@@ -1,57 +1,14 @@
-//! turbo-surf#32: HTMLImageElement load state through surf's real image loader.
-//! The binding owns the prototype accessors (complete/naturalWidth/naturalHeight/
-//! currentSrc) and its Chrome 156 control; surf publishes each load through the
-//! document's private `imageHost` record and keeps `src`/`decode()` on the prototype,
-//! so no image ever carries own properties.
+//! turbo-surf#32 / turbo-dom#23: HTMLImageElement load state through surf's real image
+//! loader. The binding owns the element (the prototype accessors complete/naturalWidth/
+//! naturalHeight/currentSrc, the reflected src, decode() and the native Image() factory)
+//! and its Chrome 156 control; surf starts loads from the document's mutation consumer
+//! and publishes each one through the private `imageHost` record, so no image ever
+//! carries own properties.
+#[path = "support/binding_control.rs"]
+mod binding_control;
+use binding_control::{matches_control, matches_control_with_gaps, sha};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use turbo_dom_browser_env::test_support;
-use turbo_surf_render::PageSession;
-
-fn sha(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
-/// Run `probe` on every case page and require the Chrome control's result exactly.
-async fn matches_control(probe: &str, cases: &[u8], control: &str, base: fn(&Value) -> &str) {
-    let control: Value = serde_json::from_str(control).unwrap();
-    assert!(control["browser"]
-        .as_str()
-        .unwrap()
-        .starts_with("Chrome/156."));
-    assert_eq!(control["errors"], serde_json::json!([]));
-    assert_eq!(
-        control["probeSha256"],
-        sha(probe.as_bytes()),
-        "stale probe control"
-    );
-    assert_eq!(control["casesSha256"], sha(cases), "stale cases control");
-    let cases: Value = serde_json::from_slice(cases).unwrap();
-    let cases = cases.as_array().unwrap();
-    let expected = control["result"].as_array().unwrap();
-    assert_eq!(cases.len(), expected.len());
-    for (case, expected) in cases.iter().zip(expected) {
-        assert_eq!(case["id"], expected["id"]);
-        let mut page = PageSession::open(case["html"].as_str().unwrap(), base(case), "", "", 10000)
-            .await
-            .unwrap();
-        let actual: Value = serde_json::from_str(
-            &page
-                .eval_json_expression(probe.trim_end().trim_end_matches(';'))
-                .await
-                .unwrap(),
-        )
-        .unwrap();
-        let expected = expected["result"].as_object().unwrap();
-        let mismatches: Vec<_> = expected
-            .iter()
-            .filter(|(name, value)| actual.get(name.as_str()) != Some(value))
-            .map(|(name, value)| format!("{name}: expected {value}, got {}", actual[name.as_str()]))
-            .collect();
-        assert!(mismatches.is_empty(), "{}: {mismatches:#?}", case["id"]);
-        assert_eq!(actual.as_object().unwrap().len(), expected.len());
-    }
-}
 
 #[tokio::test(flavor = "current_thread")]
 async fn image_state_through_the_surf_loader_matches_chrome156() {
@@ -66,11 +23,43 @@ async fn image_state_through_the_surf_loader_matches_chrome156() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn src_and_decode_are_prototype_members_that_load_like_chrome156() {
-    matches_control(
+    // Known gap: the binding's decode() rejects with the DOMException it captured at
+    // install, and surf installs its own DOMException afterwards, so the EncodingError
+    // is not `instanceof DOMException` (name/message match). Spec'd for turbo-dom: use
+    // the realm's registered DOMException (`register_dom_exception`).
+    let encoding = serde_json::json!([
+        "throw",
+        "EncodingError",
+        "The source image cannot be decoded.",
+        false
+    ]);
+    let broken = serde_json::json!({"event": "error", "decoded": encoding, "complete": true,
+        "naturalWidth": 0, "naturalHeight": 0, "currentSrc": true, "own": []});
+    matches_control_with_gaps(
         include_str!("fixtures/html_image_members_probe.js"),
         include_bytes!("fixtures/html_image_members_cases.json"),
         include_str!("fixtures/html_image_members_chrome156.json"),
         |case| case["url"].as_str().unwrap(),
+        &[("decodeEmpty", encoding.clone()), ("createdBroken", broken)],
+    )
+    .await;
+}
+
+/// turbo-dom#23 (surf side): loads start from the document's mutation consumer, so an
+/// image loads whenever its src changes or a tree inserts it, connected or not
+/// (`new Image().src`, detached innerHTML, contextual fragments), never in an inert
+/// document, and a src change or removal restarts or clears its state like Chrome.
+#[tokio::test(flavor = "current_thread")]
+async fn images_load_from_mutations_connected_or_not_like_chrome156() {
+    // Known gap: surf selects no srcset candidate (only src is fetched), so a
+    // srcset-only image stays a never-loading, complete 0x0 image.
+    let srcset = serde_json::json!([[], true, 0, 0, []]);
+    matches_control_with_gaps(
+        include_str!("fixtures/html_image_loads_probe.js"),
+        include_bytes!("fixtures/html_image_loads_cases.json"),
+        include_str!("fixtures/html_image_loads_chrome156.json"),
+        |case| case["url"].as_str().unwrap(),
+        &[("srcset", srcset)],
     )
     .await;
 }

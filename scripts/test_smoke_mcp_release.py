@@ -18,6 +18,9 @@ SPEC.loader.exec_module(SMOKE)
 VERSION = "0.5.4"
 COMMIT = "a" * 40
 URL = "http://127.0.0.1:12345/portable"
+# Upper bound for a fake that should finish promptly (never a timing assumption: an
+# idle host takes well under a second, a loaded CI host may take many).
+SAFETY_SECONDS = 120
 
 
 def replies():
@@ -34,12 +37,17 @@ def validate(rows):
     SMOKE.verify_protocol("".join(json.dumps(row) + "\n" for row in rows), VERSION, URL)
 
 
-FAKE = r'''import json, os, subprocess, sys, time, urllib.request
+FAKE = r'''import os, sys, time
 mode = sys.argv[1] if len(sys.argv) > 1 else "good"
 if mode == "wait":
-    open(os.environ["SMOKE_TEST_MARKER"], "w").write(str(os.getpid()))
-    time.sleep(60)
+    # Publish the marker atomically, before any heavier import: the interrupt control
+    # waits for it instead of guessing how long interpreter startup takes.
+    with open(os.environ["SMOKE_TEST_MARKER"] + ".tmp", "w") as marker:
+        marker.write(str(os.getpid()))
+    os.replace(os.environ["SMOKE_TEST_MARKER"] + ".tmp", os.environ["SMOKE_TEST_MARKER"])
+    time.sleep(600)
     sys.exit(1)
+import json, subprocess, urllib.request
 rows = [json.loads(line) for line in sys.stdin if line.strip()]
 url = rows[1]["params"]["arguments"]["url"]
 with urllib.request.urlopen(url, timeout=5) as response:
@@ -122,7 +130,7 @@ class ProcessTests(unittest.TestCase):
         self.marker = self.root / "marker"
         SMOKE.STOP = None
 
-    def run_fake(self, mode, timeout=5):
+    def run_fake(self, mode, timeout=SAFETY_SECONDS):
         with patch.dict(os.environ, {"SMOKE_TEST_MARKER": str(self.marker)}):
             return SMOKE.smoke([sys.executable, self.fake, mode], VERSION, COMMIT, self.root / "work", self.root / "proof", timeout=timeout)
 
@@ -173,12 +181,18 @@ class ProcessTests(unittest.TestCase):
         with patch.dict(os.environ, {"SMOKE_TEST_MARKER": str(self.marker)}):
             child = subprocess.Popen([sys.executable, "-B", str(helper), "--binary", str(executable), "--expected-version", VERSION, "--source-commit", COMMIT, "--work", str(self.root / "work"), "--output", str(self.root / "proof")], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            deadline = time.monotonic() + 5
-            while not self.marker.exists() and child.poll() is None and time.monotonic() < deadline:
+            # Interrupt only once the fake is running, however long two interpreter
+            # startups take on a loaded host; a helper that exits first fails at once
+            # with its own output. The cap only keeps a broken run from hanging.
+            deadline = time.monotonic() + SAFETY_SECONDS
+            while not self.marker.exists():
+                if child.poll() is not None:
+                    self.fail(("helper exited before the fake started", child.returncode, *child.communicate()))
+                if time.monotonic() > deadline:
+                    self.fail("fake executable never started")
                 time.sleep(0.02)
-            self.assertTrue(self.marker.exists(), "fake executable never started")
             child.send_signal(signal.SIGINT)
-            stdout, stderr = child.communicate(timeout=15)
+            stdout, stderr = child.communicate(timeout=SAFETY_SECONDS)
             self.assertEqual(child.returncode, 130, (stdout, stderr))
             receipt = json.loads((self.root / "proof" / "initialize.json").read_text())
             self.assertEqual(receipt["interruptedSignal"], signal.SIGINT)
@@ -187,6 +201,8 @@ class ProcessTests(unittest.TestCase):
             if child.poll() is None:
                 child.kill()
                 child.wait(timeout=5)
+            for stream in (child.stdout, child.stderr):
+                stream.close()
 
 
 class _GitCheckoutCase(unittest.TestCase):

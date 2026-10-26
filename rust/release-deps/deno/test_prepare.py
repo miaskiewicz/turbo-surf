@@ -360,6 +360,42 @@ class EmbeddedSourceContracts(unittest.TestCase):
         self.assertEqual(render, expected)
 
 
+class PatchedSourceContracts(unittest.TestCase):
+    """deno_crypto is the upstream archive plus a committed patch, never a vendored tree."""
+
+    def test_only_deno_crypto_is_patched_and_its_patch_and_pins_exist(self):
+        pins = json.loads((ROOT / "source-pins.json").read_text())["packages"]
+        patched = {p.upstream: p.patch for p in prepare.PACKAGES if p.patch}
+        self.assertEqual(patched, {"deno_crypto": "deno_crypto.patch"})
+        self.assertTrue((prepare.PATCHES / "deno_crypto.patch").is_file())
+        self.assertEqual({name for name, pin in pins.items() if "patchedFiles" in pin}, {"deno_crypto"})
+        files = pins["deno_crypto"]["patchedFiles"]
+        # The patch adds the license and the clone helper to the upstream archive.
+        self.assertIn("LICENSE.md", files)
+        self.assertIn("clone_key.rs", files)
+        self.assertFalse((ROOT.parents[1] / "vendor").exists())
+
+    def test_patch_is_applied_in_place_and_failures_are_fatal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "patches").mkdir()
+            (root / "patches" / "x.patch").write_text(
+                "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+                "--- /dev/null\n+++ b/LICENSE.md\n@@ -0,0 +1 @@\n+MIT\n")
+            target = root / "src"
+            target.mkdir()
+            (target / "a.txt").write_text("old\n")
+            with patch.object(prepare, "PATCHES", root / "patches"):
+                prepare.apply_patch(target, "x.patch")
+                self.assertEqual(prepare.tree(target), {
+                    "LICENSE.md": hashlib.sha256(b"MIT\n").hexdigest(),
+                    "a.txt": hashlib.sha256(b"new\n").hexdigest()})
+                (target / "a.txt").write_text("drifted\n")
+                (target / "LICENSE.md").unlink()
+                with self.assertRaises(prepare.subprocess.CalledProcessError):
+                    prepare.apply_patch(target, "x.patch")
+
+
 class CandidateTreeContracts(unittest.TestCase):
     MANIFEST = '''[package]
 name = "turbo-surf-deno-web"

@@ -270,11 +270,11 @@ def commit_matches(expected):
         raise ValueError("Checkout differs from approved source commit")
     dirty = subprocess.check_output([
         "git", "status", "--porcelain", "--untracked-files=all", "--",
-        "rust/release-deps", "rust/vendor/deno_crypto",
+        "rust/release-deps",
         ".github/workflows/release-dependencies.yml",
     ], cwd=REPO, text=True)
     if dirty.strip():
-        raise ValueError("Release tooling or pinned vendor checkout is dirty")
+        raise ValueError("Release tooling checkout is dirty")
 
 
 def candidates(roots):

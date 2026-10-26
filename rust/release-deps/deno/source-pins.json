@@ -41,7 +41,7 @@
           }
         ]
       },
-      "reviewedVendorFiles": {
+      "patchedFiles": {
         ".cargo_vcs_info.json": "732323aba7f8031be27fb292fc31980c57f0a4e527c2713cf3a74379945773db",
         "00_crypto.js": "c0400a2298b3cce374917bb363a941d0e6be4acbce4ea8585419b415d16b1575",
         "Cargo.lock": "2ae96fe09d13060660470940e1b75dde1cf057377c2f55d97b469415597278d5",

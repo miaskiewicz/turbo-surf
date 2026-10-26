@@ -1,16 +1,18 @@
 # Hardened native WebCrypto provider
 
-This directory preserves the complete published MIT-licensed
-`deno_crypto` **0.273.0** source, with a narrowly scoped browser embedding patch.
-The source archive is
+turbo-surf's `turbo-surf-deno-crypto` distribution is the complete published
+MIT-licensed `deno_crypto` **0.273.0** source with a narrowly scoped browser
+embedding patch. No patched source tree is committed: only the patch, the pins
+and the generator. The source archive is
 [`deno_crypto-0.273.0.crate`](https://static.crates.io/crates/deno_crypto/deno_crypto-0.273.0.crate).
 Its SHA-256 is
 `d9931d22328961b9a9c8d3b666a27312c1f3ddcc7ea78d8610ddfbc934ac61a0`.
 The archive records upstream commit
 [`0c071246a412575e07423263404a5d13e7ed6aa2`](https://github.com/denoland/deno/tree/0c071246a412575e07423263404a5d13e7ed6aa2/ext/crypto).
-The [Deno MIT license](deno_crypto/LICENSE.md) is retained.
+The Deno MIT license is retained (the patch adds it as `LICENSE.md`).
 
-`deno_crypto.patch` is the complete difference from the published archive:
+[`patches/deno_crypto.patch`](patches/deno_crypto.patch) is the complete
+difference from the published archive:
 
 - Native result objects and arrays use `CreateDataProperty`, preventing inherited
   page setters from receiving private key material or replacing native metadata.
@@ -37,29 +39,30 @@ bytes when importing a non-extractable AES key. The fixed regression observes
 zero setter calls and zero material bytes. This is a provider construction
 boundary, independent of Google detection.
 
-Reproduce and verify without modifying the package cache:
+## Reproduce and verify
+
+[`prepare.py`](prepare.py) is the generator: it unpacks the checksum-pinned
+archive (from Cargo's cache or a private `--archive-dir`, never modifying the
+cache), applies the patch with `patch -p1`, and requires the result to equal the
+`patchedFiles` tree pinned in [`source-pins.json`](source-pins.json) before it
+renames the package and adds the embedded-source table:
 
 ```sh
-python3 rust/vendor/update-deno-crypto.py --check
+python3 rust/release-deps/deno/prepare.py \
+  --archive-dir .native-builds/release-deno-upstream-archives --download \
+  --output .native-builds/release-deno-candidates
 ```
 
-The helper finds the exact archive in Cargo's cache. Pass `--archive PATH` if it
-is elsewhere; `--write` rebuilds the vendored source from that hash-verified
-archive and the committed patch. No registry source files or SDK source files
-are modified.
+To change the patch, edit an unpacked archive, regenerate
+`patches/deno_crypto.patch` with `diff -ruN` against the pristine archive, update
+`patchedFiles` (SHA-256 per file) and re-run the command above plus
+`python3 -m unittest discover -s rust/release-deps/deno -p 'test_*.py'`.
 
-The render crate now consumes the named registry package
-`turbo-surf-deno-crypto` at exact upstream version 0.273.0 through its unchanged
+The render crate consumes the named package `turbo-surf-deno-crypto` (0.273.1,
+the reviewed distribution of upstream 0.273.0) through its unchanged
 `deno_crypto` Rust alias. The matching Deno core, WebIDL and web extension
-packages share the named Deno/V8 family, preserving native types and op
-registration without a root Cargo
-patch. The complete thirteen-package release graph and seven direct aliases are
-listed in [the engine dependency table](../README.md#registry-dependency-identity).
-
-The files in this vendor directory remain licensed reproduction inputs, not the
-runtime dependency selected by a workspace path patch. The
-[distribution generator](../release-deps/deno/README.md) verifies those inputs
-and the original archive before preparing registry metadata. Actual packaged and
-registry consumers must retain the private-key setter and native snapshot
-controls; matching package names or a successful upload alone is not that proof.
-Do not silently fall back to unpatched upstream `deno_crypto`.
+packages share the named Deno family on turbo-dom's `turbo-dom-v8` fork,
+preserving native types and op registration. Actual packaged and registry
+consumers must retain the private-key setter and native snapshot controls;
+matching package names or a successful upload alone is not that proof. Do not
+silently fall back to unpatched upstream `deno_crypto`.

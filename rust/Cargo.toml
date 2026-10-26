@@ -1,6 +1,5 @@
 [workspace]
 resolver = "2"
-exclude = ["vendor/deno_crypto", "vendor/rusty_v8"]
 members = [
     "crates/turbo-surf-core",
     "crates/turbo-surf-napi",

@@ -24,8 +24,8 @@ cd "$repo"
 branch=${CANDIDATE_BRANCH:-consolidation/deno-candidates}
 remote=${CANDIDATE_REMOTE:-origin}
 source_commit=$(git rev-parse HEAD)
-if [[ -n "$(git status --porcelain --untracked-files=all -- rust/release-deps rust/vendor/deno_crypto)" ]]; then
-    echo "Release tooling or reviewed vendor source is dirty; commit it first." >&2; exit 1
+if [[ -n "$(git status --porcelain --untracked-files=all -- rust/release-deps)" ]]; then
+    echo "Release tooling (incl. deno/patches) is dirty; commit it first." >&2; exit 1
 fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/turbo-surf-deno-candidates.XXXXXX")
 [[ -n "$work" && -d "$work" ]] || { echo "mktemp failed" >&2; exit 1; }

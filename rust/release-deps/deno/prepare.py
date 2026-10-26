@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import tomllib
@@ -15,17 +16,19 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-SURF = ROOT.parents[2]
 # `version` is the upstream archive identity; `publish` is the distribution's own
-# version. The native V8 binding is not prepared here: turbo-dom publishes it as
-# `turbo-dom-v8` and the facade requires it from the registry.
-Package = namedtuple("Package", "upstream version name publish vendor")
+# version; `patch` names a reviewed patch under patches/ applied to the unpacked
+# upstream archive (the result must equal the pinned `patchedFiles` tree). The
+# native V8 binding is not prepared here: turbo-dom publishes it as `turbo-dom-v8`
+# and the facade requires it from the registry.
+Package = namedtuple("Package", "upstream version name publish patch")
+PATCHES = ROOT / "patches"
 PACKAGES = [
     Package("deno_v8", "0.4.0", "turbo-surf-deno-v8", "0.4.1", None),
     Package("serde_v8", "0.321.0", "turbo-surf-serde-v8", "0.321.1", None),
     Package("deno_core", "0.412.0", "turbo-surf-deno-core", "0.412.1", None),
     Package("deno_bench_util", "0.253.0", "turbo-surf-deno-bench-util", "0.253.1", None),
-    Package("deno_crypto", "0.273.0", "turbo-surf-deno-crypto", "0.273.1", "deno_crypto"),
+    Package("deno_crypto", "0.273.0", "turbo-surf-deno-crypto", "0.273.1", "deno_crypto.patch"),
     Package("deno_web", "0.290.0", "turbo-surf-deno-web", "0.290.1", None),
     Package("deno_webidl", "0.259.0", "turbo-surf-deno-webidl", "0.259.1", None),
 ]
@@ -288,6 +291,12 @@ pub const SOURCES: &[EmbeddedSource] = &[
         stream.write(LIB_SUFFIX)
 
 
+def apply_patch(target, name):
+    """Apply a reviewed patch in place (GNU/BSD `patch -p1`; no backups kept)."""
+    subprocess.run(["patch", "--batch", "--forward", "--quiet", "-p1", "-i", str(PATCHES / name)],
+                   cwd=target, check=True, stdout=subprocess.DEVNULL)
+
+
 def unpack(archive, destination, prefix):
     with tarfile.open(archive) as source:
         for member in source.getmembers():
@@ -304,25 +313,34 @@ def prepare(destination, cargo_home, archive_dir=None, download=False):
     if set(pins["packages"]) != {p.upstream for p in PACKAGES}:
         raise ValueError("Source pin package closure changed")
     receipt = {"packages": [], "scope": "Prepared sources only; not packaged, compiled, published or clean-registry-consumer verified."}
+    originals = {}
+    # Materialize every upstream source first: the patched deno_crypto tree also
+    # supplies the Deno MIT license for distributions whose archive has none.
     for package in PACKAGES:
-        old, version, new, publish, vendor = package
+        old, version, new, publish, patch = package
         pin = pins["packages"][old]
         if (pin["version"], pin["candidateName"], pin["publishVersion"]) != (version, new, publish):
             raise ValueError("Source pin package identity changed")
         if ("embeddedSources" in pin) != (old in EMBEDDED_LEAVES):
             raise ValueError("Embedded source pin closure changed")
+        if ("patchedFiles" in pin) != (patch is not None):
+            raise ValueError("Patched source pin closure changed")
         archive = source_archive(old, version, pin, cargo_home, archive_dir, download)
         target = destination / "packages" / new
         target.parent.mkdir(parents=True, exist_ok=True)
-        if vendor:
-            upstream = SURF / "rust/vendor" / vendor
-            if tree(upstream) != pin["reviewedVendorFiles"]:
-                raise ValueError(f"Reviewed vendor source changed: {old}")
-            shutil.copytree(upstream, target)
-        else:
-            unpack(archive, target.parent, f"{old}-{version}")
-            (target.parent / f"{old}-{version}").rename(target)
-        original = tree(target)
+        unpack(archive, target.parent, f"{old}-{version}")
+        (target.parent / f"{old}-{version}").rename(target)
+        if patch:
+            apply_patch(target, patch)
+            if tree(target) != pin["patchedFiles"]:
+                raise ValueError(f"Patched upstream source differs from its pins: {old}")
+        originals[old] = tree(target)
+    license_source = destination / "packages" / NAMES["deno_crypto"][1] / "LICENSE.md"
+    for package in PACKAGES:
+        old, version, new, publish, _ = package
+        pin = pins["packages"][old]
+        target = destination / "packages" / new
+        original = originals[old]
         # These are upstream packaging records, not the renamed distribution's
         # generated manifest/lock/VCS records. Preserve their exact bytes by name.
         for old_record, new_record in [
@@ -335,7 +353,7 @@ def prepare(destination, cargo_home, archive_dir=None, download=False):
                 reserved.rename(target / new_record)
         (target / "Cargo.toml").write_text(manifest((target / "Cargo.toml").read_text(), package))
         if not (target / "LICENSE").exists() and not (target / "LICENSE.md").exists():
-            shutil.copyfile(SURF / "rust/vendor/deno_crypto/LICENSE.md", target / "LICENSE.md")
+            shutil.copyfile(license_source, target / "LICENSE.md")
         if old in EMBEDDED_LEAVES:
             embedded_module(old, pin["embeddedSources"], target)
         final = tree(target)

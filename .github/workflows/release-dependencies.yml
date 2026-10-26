@@ -12,7 +12,6 @@ on:
     paths:
       - .github/workflows/release-dependencies.yml
       - rust/release-deps/**
-      - rust/vendor/deno_crypto/**
   push:
     branches: [codex/release-dependencies-v054]
   workflow_dispatch:

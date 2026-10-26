@@ -41,7 +41,9 @@ hashes are also predecessor evidence. The current
 follow-up also integrates default/zero iframe corrections and officially
 re-vendored computed-font resolution;
 the implementation and exact tested source are tracked in [PARITY-GAPS.md](./PARITY-GAPS.md).
-It copies the actual native DOM through public rtdom methods and assigns external
+It lays out the actual native DOM in place — turbo-dom-layout's live-DOM input
+(`turbo_dom_layout::live`) walks surf's composed tree under the source budgets and
+styles it from surf's pre-matched rules, with no copy — and assigns external
 source identities. Native CSSOM exports supply current inline, linked, imported
 and adopted rules, media and disabled state. The bridge does not serialize or
 rewrite HTML, add identity attributes, or call page-owned text/style/layout getters.
@@ -216,8 +218,10 @@ Remaining bounds:
 - Full fixed-position/containing-block and layout-unit arithmetic behavior. Returned
   rectangles are not quantized after layout to conceal differences.
 - Remaining stylesheet at-rules and full selector/CSS parsing behavior. Property
-  conditions use genuine private grammar; public CSS.supports now uses private native grammar and selector-capability checks.
+  conditions use genuine private grammar; public CSS.supports now uses private native grammar, and `selector()`
+  conditions use turbo-dom's selector engine (`parse_for_supports`, one unforgiving complex selector, as Chrome 156).
 
 Regression source is `rust/crates/turbo-surf-render/tests/live_geometry_contracts.rs`;
-the `live_layout*` modules also test actual source provenance, rules, media,
-transform metrics, overflow and inverse hit regions without V8.
+the `live_layout*` modules (and turbo-dom-layout's `live` / `cssom_view` modules, which
+hold the pure geometry since the consolidation) also test actual source provenance,
+rules, media, transform metrics, overflow and inverse hit regions without V8.

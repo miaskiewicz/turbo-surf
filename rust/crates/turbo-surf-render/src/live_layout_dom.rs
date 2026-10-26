@@ -12,12 +12,15 @@ use turbo_dom_browser_env::host_internals::{
 
 pub(crate) struct NativeLayoutInput<'s> {
     pub(crate) owner_context: Option<v8::Local<'s, v8::Context>>,
+    /// A wrapper owned by the captured document: layout re-enters that document to
+    /// style its live tree (the capture records provenance only, no copy).
+    pub(crate) document: v8::Local<'s, v8::Object>,
     pub(crate) tree: LiveTreeInput,
     pub(crate) handle: Handle,
     pub(crate) connected: bool,
     pub(crate) browsing_context: bool,
     pub(crate) sheets: Vec<SheetSnapshot>,
-    pub(crate) range: Option<Vec<crate::live_layout_range::Selection>>,
+    pub(crate) range: Option<Vec<turbo_dom_layout::cssom_view::range::Selection>>,
 }
 
 pub(crate) fn capture<'s>(
@@ -130,20 +133,10 @@ fn capture_kind<'s>(
     let tree_profile =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::TreeSnapshot);
     let tree = with_tree(|tree| {
-        if connected && browsing_context {
-            capture_composed_tree(tree, document_id, composed.then(|| graph.clone()))
+        if composed {
+            capture_composed_tree(tree, document_id, graph.clone())
         } else {
-            Ok(LiveTreeInput {
-                document_id,
-                tree_version: tree.version,
-                nodes: Vec::new(),
-                identities: Vec::new(),
-                svg_viewports: Vec::new(),
-                original_text: std::collections::HashMap::new(),
-                composition: None,
-                quirks: false,
-                body: None,
-            })
+            Ok(LiveTreeInput::empty(document_id, tree.version))
         }
     })
     .ok_or("native layout document is unavailable")??;
@@ -152,6 +145,7 @@ fn capture_kind<'s>(
     if !connected || !browsing_context {
         return Ok(NativeLayoutInput {
             owner_context,
+            document: receiver,
             tree,
             handle,
             connected,
@@ -200,6 +194,7 @@ fn capture_kind<'s>(
     }
     Ok(NativeLayoutInput {
         owner_context,
+        document: receiver,
         tree,
         handle,
         connected,
@@ -271,9 +266,9 @@ fn capture_range<'s>(
     }
     input.range = Some(
         with_tree(|tree| {
-            crate::live_layout_range::select(
+            turbo_dom_layout::cssom_view::range::select(
                 tree,
-                input.tree.document_id,
+                input.tree.document_id(),
                 (start_handle, start_offset),
                 (end_handle, end_offset),
             )
@@ -438,6 +433,7 @@ mod tests {
         let membership = |tree: &Tree| {
             Composition::scopes(tree)
                 .unwrap()
+                .graph
                 .scopes
                 .into_iter()
                 .filter(|(node, _)| matches!(tree.local_name(*node), Some("style" | "link")))

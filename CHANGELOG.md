@@ -14,11 +14,27 @@
   `turbo_dom_browser_env::test_support`; Node detection tests locate the package via
   `cargo metadata`. New forwarding feature `native-sdk-frame-read` on
   render/mcp/napi/py (enabled by the engine-154/155 native-SDK overlay).
-- turbo-dom git pin moved to `7dfc1d9` (turbo-dom#18 S3a: Chrome-correct selector
+- turbo-dom git pin moved to `6b58d7b` (turbo-dom#18 S3a: Chrome-correct selector
   escapes, non-ASCII idents, `*|p`, `:empty`, `:read-only`/`:read-write`,
-  `:nth-child(An+B of S)`, `:link`/`:any-link`). TEMPORARY forwarding feature
-  `selector-dual` on render/view/page/mcp/napi/py for turbo-dom's dual-engine
-  consolidation gate; never enabled in published builds, removed with S3b.
+  `:nth-child(An+B of S)`, `:link`/`:any-link`; S2/S3b: turbo-dom-layout styles a
+  turbo-dom `Tree` and matches with turbo-dom's selector engine). The static
+  screenshot tier treats `t:*` elements as unknown inline elements, as Chrome does
+  (no surf fixture contains one).
+- Native live layout no longer copies the DOM: the live-tree copier
+  (`live_layout.rs`), the composed styler (`style_composed_tree`) and the separate
+  `collect_styles` walk are gone. turbo-dom-layout's live-DOM input
+  (`turbo_dom_layout::live`) captures the composed tree's provenance under the same
+  budgets and errors (pinned by `live_layout_budget_tests.rs`) and styles the live
+  tree from surf's pre-matched scoped rules; zoom scaling and style collection share
+  one post-cascade walk. The pure CSSOM-View modules (`live_layout_{metrics,hit,scroll,
+  visibility,inline,text,range}.rs` and the composition graph) moved to
+  turbo-dom-layout's `cssom_view`. No output change.
+- `@supports selector(…)` and `CSS.supports("selector(…)")` use turbo-dom's selector
+  engine (one unforgiving complex selector), matching Chrome 156: `*|p`, `|p`,
+  `[*|title]`, escapes, `:hover`, `::before`, `:link`, `:empty`, `:host`, `::slotted()`
+  and `:nth-child(… of S)` are now supported, `ns|p` and `:is(:bogus)` are not
+  (control `harness/detection/fixtures/css-supports-chrome156.json`, which replaces the
+  Chrome 155 one).
 - The interceptor ShouldThrowOnError fix is active: strict `[[Set]]`/`[[Delete]]` and
   `Object.defineProperty` on interceptor-backed collections (`document.all`,
   `<select>`, `select.options`) throw Chrome's TypeError, sloppy writes and the

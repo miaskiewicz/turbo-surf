@@ -37,14 +37,14 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   binding fixes land there, never as copies here. `turbo-surf-render` uses it with
   feature `host-internals` for surf's native services over its documents
   (`src/live_layout_dom.rs` layout capture, `src/compression_dictionary_dom.rs`
-  link discovery); integration tests read probe/control data from
+  link discovery); native live layout runs turbo-dom-layout's live-DOM input
+  (`turbo_dom_layout::live`, no tree copy) and its `cssom_view` geometry modules, while
+  surf keeps media/supports evaluation, scoped-sheet preparation, `zoom` and the
+  neutral/resource admission policy; integration tests read probe/control data from
   `turbo_dom_browser_env::test_support` (dev feature `test-support`), and Node
   detection tests locate the resolved package via `cargo metadata`
   (`harness/detection/binding-files.mjs`). `native-sdk-frame-read` on
   render/mcp/napi/py forwards to the crate for the engine-154/155 native-SDK overlay.
-  `selector-dual` on render/view/page/mcp/napi/py is a TEMPORARY consolidation gate
-  (turbo-dom `docs/selector-dual-gate.md`): it forwards to turbo-dom / turbo-dom-browser-env
-  and must never be enabled in a published build (removed at the end of S3b).
 
 ## Embedded Deno extension sources
 

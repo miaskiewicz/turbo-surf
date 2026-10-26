@@ -115,73 +115,11 @@ fn property(name: &str, value: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// `selector(…)`: supported when turbo-dom's selector engine (the one the DOM APIs
+/// and every native cascade use) parses it as one unforgiving complex selector, as
+/// Chrome does (`harness/detection/fixtures/css-supports-chrome156.json`).
 fn selector(source: &str) -> bool {
-    use lightningcss::rules::CssRule;
-    use lightningcss::stylesheet::StyleSheet;
-    let text = format!("{source}{{}}");
-    let Ok(sheet) = StyleSheet::parse(&text, ParserOptions::default()) else {
-        return false;
-    };
-    let [CssRule::Style(style)] = sheet.rules.0.as_slice() else {
-        return false;
-    };
-    if style.selectors.0.len() != 1 || !selector_components(&style.selectors.0[0]) {
-        return false;
-    }
-    // Validate with the actual native DOM matcher as well as the CSS grammar.
-    let tree = turbo_dom_parser::rtdom::Tree::parse("<div></div>");
-    tree.matches_checked(tree.root(), source).is_ok()
-}
-
-fn selector_components(selector: &lightningcss::selector::Selector<'_>) -> bool {
-    selector_components_relative(selector, false)
-}
-
-fn selector_components_relative(
-    selector: &lightningcss::selector::Selector<'_>,
-    relative: bool,
-) -> bool {
-    use lightningcss::selector::{Combinator, Component, PseudoClass};
-    selector.iter_raw_match_order().all(|part| match part {
-        Component::Is(values) | Component::Where(values) | Component::Negation(values) => {
-            values.iter().all(selector_components)
-        }
-        Component::Has(values) => values
-            .iter()
-            .all(|value| selector_components_relative(value, true)),
-        Component::Scope => relative,
-        Component::Host(Some(value)) | Component::Slotted(value) => selector_components(value),
-        Component::Host(None) => true,
-        Component::NonTSPseudoClass(
-            PseudoClass::ReadOnly(prefix) | PseudoClass::ReadWrite(prefix),
-        ) => prefix.contains(lightningcss::vendor_prefix::VendorPrefix::None),
-        Component::NonTSPseudoClass(value) => matches!(
-            value,
-            PseudoClass::Checked
-                | PseudoClass::Disabled
-                | PseudoClass::Enabled
-                | PseudoClass::Required
-                | PseudoClass::Optional
-        ),
-        Component::Combinator(value) => matches!(
-            value,
-            Combinator::Child
-                | Combinator::Descendant
-                | Combinator::NextSibling
-                | Combinator::LaterSibling
-                | Combinator::SlotAssignment
-        ),
-        Component::Root
-        | Component::Empty
-        | Component::Nth(_)
-        | Component::ExplicitUniversalType
-        | Component::LocalName(_)
-        | Component::ID(_)
-        | Component::Class(_)
-        | Component::AttributeInNoNamespaceExists { .. }
-        | Component::AttributeInNoNamespace { .. } => true,
-        _ => false,
-    })
+    turbo_dom_parser::rtdom::query::parse_for_supports(source).is_ok()
 }
 
 fn css_wide(value: &str) -> bool {
@@ -226,5 +164,24 @@ mod tests {
         assert!(matches("(width: 2px) and").is_err());
         assert_eq!(matches("selector(div > .x)"), Ok(true));
         assert_eq!(matches("selector(:bogus)"), Ok(false));
+        // Changed@S4 (Chrome 156 control css-supports-chrome156.json): the any-namespace
+        // type selector, escapes and Chrome's other valid selectors are supported;
+        // forgiving lists are evaluated unforgivingly.
+        for source in [
+            "selector(*|p)",
+            r"selector(.\31 23)",
+            r"selector(\64iv > .x)",
+            "selector(:hover)",
+            "selector(::before)",
+        ] {
+            assert_eq!(matches(source), Ok(true), "{source}");
+        }
+        for source in [
+            "selector(ns|p)",
+            "selector(:is(:bogus))",
+            "selector(div, span)",
+        ] {
+            assert_eq!(matches(source), Ok(false), "{source}");
+        }
     }
 }

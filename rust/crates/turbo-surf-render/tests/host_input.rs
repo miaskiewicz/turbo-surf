@@ -470,6 +470,54 @@ async fn typing_replaces_live_control_selections_and_preserves_cancellation() {
     page.close();
 }
 
+// Typing goes through the binding's trusted InsertText path: value ranges follow the
+// edit and no select event fires (the API value setter would collapse the range and
+// setSelectionRange would fire select for every character).
+#[tokio::test(flavor = "current_thread")]
+async fn typing_keeps_value_ranges_and_fires_no_select_events() {
+    let mut page = PageSession::open(
+        "<body><input id=q value='hello world'><textarea id=t>hello world</textarea></body>",
+        "https://example.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval(r#"
+      globalThis.log=[];globalThis.ranges={};
+      for(const id of ['q','t']){
+        const control=document.getElementById(id);
+        for(const type of ['select','selectionchange'])control.addEventListener(type,()=>log.push(id+':'+type));
+        control.focus();control.setSelectionRange(2,5);ranges[id]=control.createValueRange(6,11);
+      }
+    "#).await.unwrap();
+    page.eval("new Promise(resolve=>setTimeout(resolve,0)).then(()=>{log.length=0;})")
+        .await
+        .unwrap();
+    for selector in ["#q", "#t"] {
+        page.input(&json!([{"focus":selector},{"type":"XY"}]))
+            .await
+            .unwrap();
+    }
+    page.eval("new Promise(resolve=>setTimeout(resolve,0))")
+        .await
+        .unwrap();
+    assert_eq!(
+        page.eval_json_expression("['q','t'].map(id=>{const c=document.getElementById(id);return [c.value,c.selectionStart,c.selectionEnd,ranges[id].startOffset,ranges[id].endOffset];})")
+            .await
+            .unwrap(),
+        "[[\"heXY world\",4,4,5,10],[\"heXY world\",4,4,5,10]]"
+    );
+    assert_eq!(
+        page.eval_json_expression("log.filter(entry=>entry.endsWith(':select'))")
+            .await
+            .unwrap(),
+        "[]"
+    );
+    page.close();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn input_guard_preserves_selection_utf16_and_multiple_typing_chunks() {
     let mut page = PageSession::open(

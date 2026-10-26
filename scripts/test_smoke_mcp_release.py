@@ -272,7 +272,7 @@ class LicenseCheckoutTests(_GitCheckoutCase):
     def setUp(self):
         super().setUp()
         mit = "27d70e62f016d41bc5d379a420e277cee423d0148d3bd083061044a1a54a2fe2"
-        notices = "cd4183df9fc32fd278134e4f5b562d9a68de3d48ccb40bf3da846871b1ff7804"
+        notices = "f393d755bb37318e64013479e93d54b17ab17a5efa34e92c979a04df1b124ca3"
         for name in self.PATHS:
             self.read_asset(Path(name), mit if name.endswith("LICENSE") else notices)
         self.assertEqual(len(self.assets), 13)

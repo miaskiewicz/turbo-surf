@@ -43,7 +43,7 @@ turbo-surf-deno-crypto = { git = "https://github.com/miaskiewicz/turbo-surf", re
 turbo-surf-deno-web = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
 turbo-surf-deno-webidl = { git = "https://github.com/miaskiewicz/turbo-surf", rev = "9f5fdd72342f0a3afd91fafe1148ee7f477362ba" }
 turbo-dom-v8 = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "e9b36c8733ef1cf1073f7053a8c5931381c978c5" }
-turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "5561a5f34a6ade476ec11bc509b30f53bd46e876" }
-turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "5561a5f34a6ade476ec11bc509b30f53bd46e876" }
-turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "5561a5f34a6ade476ec11bc509b30f53bd46e876" }
-turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "5561a5f34a6ade476ec11bc509b30f53bd46e876" }
+turbo-dom = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "be87ef2e742e4f4a38432cc77ff3d11d7eeb9c08" }
+turbo-dom-layout = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "be87ef2e742e4f4a38432cc77ff3d11d7eeb9c08" }
+turbo-dom-raster = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "be87ef2e742e4f4a38432cc77ff3d11d7eeb9c08" }
+turbo-dom-browser-env = { git = "https://github.com/miaskiewicz/turbo-dom", rev = "be87ef2e742e4f4a38432cc77ff3d11d7eeb9c08" }

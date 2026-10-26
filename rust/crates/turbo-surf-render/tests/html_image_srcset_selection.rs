@@ -171,18 +171,10 @@ async fn image_sources_are_selected_and_sized_like_chrome156() {
     assert!(mismatches.is_empty(), "{mismatches:#?}");
 }
 
-/// turbo-dom#71, surf's mutation consumer: a `<picture>`'s image reselects (and loads the
-/// new choice) when a `<source>` attribute changes, a `<source>` is inserted and one is
-/// removed, against `fixtures/html_picture_mutations_chrome156.json`
-/// (`fixture-gen/html-picture-mutations-chrome.mjs`).
-#[tokio::test(flavor = "current_thread")]
-async fn picture_sources_reselect_on_mutations_like_chrome156() {
-    const PROBE: &str = include_str!("fixtures/html_picture_mutations_probe.js");
-    const CASES: &str = include_str!("fixtures/html_picture_mutations_cases.json");
-    let control: Value = serde_json::from_str(include_str!(
-        "fixtures/html_picture_mutations_chrome156.json"
-    ))
-    .unwrap();
+/// Run a page control (probe + one case + Chrome result) whose page the local server
+/// answers at `/page/` with its images, and require the Chrome result exactly.
+async fn page_control(probe: &str, cases: &str, control: &str) {
+    let control: Value = serde_json::from_str(control).unwrap();
     assert!(control["browser"]
         .as_str()
         .unwrap()
@@ -190,15 +182,13 @@ async fn picture_sources_reselect_on_mutations_like_chrome156() {
     assert_eq!(control["errors"], serde_json::json!([]));
     assert_eq!(
         control["probeSha256"],
-        binding_control::sha(PROBE.as_bytes())
+        binding_control::sha(probe.as_bytes())
     );
     assert_eq!(
         control["casesSha256"],
-        binding_control::sha(CASES.as_bytes())
+        binding_control::sha(cases.as_bytes())
     );
-    let cases: Value = serde_json::from_str(CASES).unwrap();
-    // Every candidate here is 1x, so the choice does not depend on the viewport or the
-    // devicePixelRatio the other test of this binary sets.
+    let cases: Value = serde_json::from_str(cases).unwrap();
     let html = cases[0]["html"].as_str().unwrap().to_string();
     let origin = serve(html.clone(), true).await;
     let mut page =
@@ -207,10 +197,41 @@ async fn picture_sources_reselect_on_mutations_like_chrome156() {
             .unwrap();
     let actual: Value = serde_json::from_str(
         &page
-            .eval_json_expression(PROBE.trim_end().trim_end_matches(';'))
+            .eval_json_expression(probe.trim_end().trim_end_matches(';'))
             .await
             .unwrap(),
     )
     .unwrap();
     assert_eq!(actual, control["result"][0]["result"]);
+}
+
+/// turbo-dom#71, surf's mutation consumer: a `<picture>`'s image reselects (and loads the
+/// new choice) when a `<source>` attribute changes, a `<source>` is inserted and one is
+/// removed, against `fixtures/html_picture_mutations_chrome156.json`
+/// (`fixture-gen/html-picture-mutations-chrome.mjs`). Every candidate here is 1x, so the
+/// choice does not depend on the viewport or the devicePixelRatio the other test sets.
+#[tokio::test(flavor = "current_thread")]
+async fn picture_sources_reselect_on_mutations_like_chrome156() {
+    page_control(
+        include_str!("fixtures/html_picture_mutations_probe.js"),
+        include_str!("fixtures/html_picture_mutations_cases.json"),
+        include_str!("fixtures/html_picture_mutations_chrome156.json"),
+    )
+    .await;
+}
+
+/// turbo-surf#49: a relevant mutation restarts the load and fires load again even when the
+/// selected source stays the same (src set to its own value, an <img> srcset set while a
+/// <source> wins, a losing <source> removed); moving a loaded image or an unrelated
+/// attribute does not. Control: `fixtures/html_image_restart_chrome156.json`
+/// (`fixture-gen/html-image-restart-chrome.mjs`).
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#49: fails until the fix"]
+async fn relevant_mutations_restart_the_load_like_chrome156() {
+    page_control(
+        include_str!("fixtures/html_image_restart_probe.js"),
+        include_str!("fixtures/html_image_restart_cases.json"),
+        include_str!("fixtures/html_image_restart_chrome156.json"),
+    )
+    .await;
 }

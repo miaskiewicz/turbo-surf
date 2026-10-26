@@ -165,8 +165,6 @@
       "harness/detection/sanitizer-*-probe.js",
       "harness/detection/sanitizer-declarative-scripts.html",
       "harness/detection/fixtures/sanitizer-chrome156.json",
-      "rust/vendor/**",
-      "rust/crates/turbo-surf-render/src/vendor/deno_extensions/**",
       "rust/crates/turbo-surf-render/src/document_xpath.js",
       "rust/crates/turbo-surf-render/src/event_listeners.js",
       "rust/crates/turbo-surf-render/src/range_contents.js",

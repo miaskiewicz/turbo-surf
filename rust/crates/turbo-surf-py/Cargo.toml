@@ -15,14 +15,14 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization — OFF by default so the published wheels
-# never pull wgpu / a C-Metal toolchain. See turbo-surf-raster's `gpu-metal`.
-gpu-metal = ["turbo-surf-raster/gpu-metal"]
-# CoreText/CoreGraphics canvas-text raster (macOS only). See turbo-surf-raster's `coretext`.
-coretext = ["turbo-surf-raster/coretext"]
+# never pull wgpu / a C-Metal toolchain. See turbo-dom-raster's `gpu-metal`.
+gpu-metal = ["turbo-dom-raster/gpu-metal"]
+# CoreText/CoreGraphics canvas-text raster (macOS only). See turbo-dom-raster's `coretext`.
+coretext = ["turbo-dom-raster/coretext"]
 
 [dependencies]
 turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.5" }
-turbo-surf-raster = { path = "../turbo-surf-raster", version = "0.5.5" }
+turbo-dom-raster = "0.6.0"
 turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.5" }
 turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.5.5" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }

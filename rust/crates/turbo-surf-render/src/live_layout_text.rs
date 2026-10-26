@@ -1,7 +1,7 @@
 //! Document caret candidates use actual native font/run boxes, then source queries.
 use crate::live_layout_scroll::{scroll_translation, SourceStyles};
 use std::collections::BTreeMap;
-use turbo_html2pdf_core::layout_snapshot::{LayoutSnapshot, Point, Rect, SourceId};
+use turbo_dom_layout::layout_snapshot::{LayoutSnapshot, Point, Rect, SourceId};
 
 fn distance(point: [f64; 2], rect: Rect) -> [f64; 2] {
     let gap = |value: f64, start: f32, length: f32| {
@@ -134,7 +134,7 @@ pub(crate) fn caret(
 
 pub(crate) fn run_rect(
     snapshot: &LayoutSnapshot,
-    run: &turbo_html2pdf_core::layout_snapshot::SnapshotTextRun,
+    run: &turbo_dom_layout::layout_snapshot::SnapshotTextRun,
 ) -> Option<Rect> {
     let mut left = f32::INFINITY;
     let mut right = f32::NEG_INFINITY;

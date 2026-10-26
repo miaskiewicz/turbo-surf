@@ -72,18 +72,23 @@ pub const SOURCES: &[EmbeddedSource];
 
 Preparation checks the official `lib.rs` declaration hash, the source inventory
 (kind and file, in order), every file's SHA-256/length/ASCII and the license
-against `embeddedSources` in `source-pins.json`; these pins equal the bytes
-turbo-surf-render vendors today (a unit test cross-checks them while that copy
-exists). Embedders can therefore substitute these bytes for upstream's build-path
-sources without vendoring them.
+against `embeddedSources` in `source-pins.json`. turbo-surf-render consumes these
+tables directly (`src/deno_extension_sources.rs`) and re-checks every source and
+license against its own reviewed `SOURCE_PINS`; `test_prepare.py` asserts both pin
+sets agree. Embedders can therefore substitute these bytes for upstream's
+build-path sources without vendoring them.
 
 ## Reproduce source candidates
 
-`source-pins.json` binds exact published archive hashes, every reviewed local
-crypto source file and the embedded-source inventories. The local vendor source
-(`rust/vendor/deno_crypto`) contains the existing crypto security/clone fixes.
-Original archive packaging records are retained under `UPSTREAM-*` names. MIT
-license files are preserved or copied from the reviewed Deno license.
+`source-pins.json` binds exact published archive hashes, the embedded-source
+inventories and, for deno_crypto, every file of the patched source
+(`patchedFiles`). deno_crypto is not vendored: preparation unpacks the pinned
+upstream `deno_crypto-0.273.0.crate` and applies the committed
+[`patches/deno_crypto.patch`](patches/deno_crypto.patch) (the crypto
+security/clone fixes, see [DENO_CRYPTO.md](DENO_CRYPTO.md)); the result must equal
+`patchedFiles` exactly. Original archive packaging records are retained under
+`UPSTREAM-*` names. MIT license files are preserved or copied from the Deno
+license the patch adds to deno_crypto.
 
 From the repository root, choose a fresh private destination:
 
@@ -100,7 +105,7 @@ python3 -m unittest discover -s rust/release-deps/deno -p 'test_*.py'
 An existing verified Cargo archive may be read or copied into the private archive
 directory. CI can fetch missing exact HTTPS archives there using `--download`.
 Every archive is checked against its committed SHA-256 before extraction; changed
-archives, source links and unexpected vendor changes are rejected. No archive
+archives, source links and patch results that differ from the pins are rejected. No archive
 is written into Cargo's cache.
 
 `rust/release-deps/push-candidates.sh` publishes nothing: it commits the prepared

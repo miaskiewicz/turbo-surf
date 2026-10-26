@@ -3,7 +3,7 @@ use lightningcss::properties::{animation::AnimationName, font::FontFamily, Prope
 use lightningcss::rules::{font_face::FontFaceProperty, keyframes::KeyframesName, CssRule};
 use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleSheet};
 use lightningcss::traits::ToCss;
-use turbo_html2pdf_core::{ComputedStyle, StyledNode};
+use turbo_dom_layout::{ComputedStyle, StyledNode};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Definition {
@@ -133,8 +133,8 @@ pub(crate) fn validate(
         let StyledNode::Element(element) = node else {
             continue;
         };
-        if turbo_html2pdf_core::layout::value::display_of(&element.style)
-            == turbo_html2pdf_core::layout::value::Display::None
+        if turbo_dom_layout::layout::value::display_of(&element.style)
+            == turbo_dom_layout::layout::value::Display::None
         {
             continue;
         }

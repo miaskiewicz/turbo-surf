@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import tarfile
 import tempfile
 import tomllib
@@ -22,7 +23,7 @@ archive_spec.loader.exec_module(archive_check)
 tree_spec = importlib.util.spec_from_file_location("deno_candidate_tree", ROOT / "candidate_tree.py")
 candidate_tree = importlib.util.module_from_spec(tree_spec)
 tree_spec.loader.exec_module(candidate_tree)
-RENDER_VENDOR = ROOT.parents[1] / "crates/turbo-surf-render/src/vendor/deno_extensions"
+RENDER_PINS = ROOT.parents[1] / "crates/turbo-surf-render/src/deno_extension_sources_tests.rs"
 
 
 class ArchiveContracts(unittest.TestCase):
@@ -343,20 +344,56 @@ class EmbeddedSourceContracts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "source bytes"):
                 prepare.embedded_module("deno_x", pin, target)
 
-    @unittest.skipUnless((RENDER_VENDOR / "pins.json").is_file(), "render vendor copy retired")
-    def test_pins_match_the_bytes_surf_vendors_today(self):
-        # Byte-identity with turbo-surf-render's vendored copy, while it exists.
-        render = {p["alias"]: p for p in json.loads((RENDER_VENDOR / "pins.json").read_text())["packages"]}
+    def test_pins_match_the_reviewed_render_pins(self):
+        # turbo-surf-render re-checks the distributions' embedded tables against its
+        # own reviewed SOURCE_PINS / LICENSE_SHA256; both pin sets must agree.
+        text = RENDER_PINS.read_text()
+        render = [(s, h, int(n)) for s, h, n in re.findall(r'\("(ext:[^"]+)", "([0-9a-f]{64})", (\d+)\),', text)]
+        license_pin = re.search(r'const LICENSE_SHA256: &str = "([0-9a-f]{64})";', text)[1]
         pins = json.loads((ROOT / "source-pins.json").read_text())["packages"]
-        self.assertEqual(set(render), prepare.EMBEDDED_LEAVES)
-        for old, package in render.items():
+        expected = []
+        for old in ["deno_web", "deno_webidl", "deno_crypto"]:
             embedded = pins[old]["embeddedSources"]
-            self.assertEqual({k: embedded[k] for k in ("declarationSha256", "licenseFile", "licenseSha256")},
-                             {k: package[k] for k in ("declarationSha256", "licenseFile", "licenseSha256")})
-            self.assertEqual(embedded["sources"], [{k: row[k] for k in ("kind", "file", "sha256", "bytes")} for row in package["sources"]])
-            self.assertEqual([row["specifier"] for row in package["sources"]], [f"ext:{old}/{row['file']}" for row in embedded["sources"]])
-            for row in embedded["sources"] + [{"file": embedded["licenseFile"], "sha256": embedded["licenseSha256"]}]:
-                self.assertEqual(hashlib.sha256((RENDER_VENDOR / old / row["file"]).read_bytes()).hexdigest(), row["sha256"])
+            self.assertEqual(embedded["licenseSha256"], license_pin)
+            expected += [(f"ext:{old}/{row['file']}", row["sha256"], row["bytes"]) for row in embedded["sources"]]
+        self.assertEqual(set(pins) & prepare.EMBEDDED_LEAVES, {"deno_web", "deno_webidl", "deno_crypto"})
+        self.assertEqual(render, expected)
+
+
+class PatchedSourceContracts(unittest.TestCase):
+    """deno_crypto is the upstream archive plus a committed patch, never a vendored tree."""
+
+    def test_only_deno_crypto_is_patched_and_its_patch_and_pins_exist(self):
+        pins = json.loads((ROOT / "source-pins.json").read_text())["packages"]
+        patched = {p.upstream: p.patch for p in prepare.PACKAGES if p.patch}
+        self.assertEqual(patched, {"deno_crypto": "deno_crypto.patch"})
+        self.assertTrue((prepare.PATCHES / "deno_crypto.patch").is_file())
+        self.assertEqual({name for name, pin in pins.items() if "patchedFiles" in pin}, {"deno_crypto"})
+        files = pins["deno_crypto"]["patchedFiles"]
+        # The patch adds the license and the clone helper to the upstream archive.
+        self.assertIn("LICENSE.md", files)
+        self.assertIn("clone_key.rs", files)
+        self.assertFalse((ROOT.parents[1] / "vendor").exists())
+
+    def test_patch_is_applied_in_place_and_failures_are_fatal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "patches").mkdir()
+            (root / "patches" / "x.patch").write_text(
+                "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+                "--- /dev/null\n+++ b/LICENSE.md\n@@ -0,0 +1 @@\n+MIT\n")
+            target = root / "src"
+            target.mkdir()
+            (target / "a.txt").write_text("old\n")
+            with patch.object(prepare, "PATCHES", root / "patches"):
+                prepare.apply_patch(target, "x.patch")
+                self.assertEqual(prepare.tree(target), {
+                    "LICENSE.md": hashlib.sha256(b"MIT\n").hexdigest(),
+                    "a.txt": hashlib.sha256(b"new\n").hexdigest()})
+                (target / "a.txt").write_text("drifted\n")
+                (target / "LICENSE.md").unlink()
+                with self.assertRaises(prepare.subprocess.CalledProcessError):
+                    prepare.apply_patch(target, "x.patch")
 
 
 class CandidateTreeContracts(unittest.TestCase):

@@ -31,9 +31,10 @@ or a workflow ships a mismatched version. Bump to the SAME `X.Y.Z`:
   `--skip-existing`s the old wheel and goes green without publishing anything)
 - `README.md` status line
 - Root npm lockfile version and its root package version
-- All nine workspace package versions in `rust/Cargo.lock`
+- All eight workspace package versions in `rust/Cargo.lock`
 - The standalone `rust/release-deps/surf-consumer/Cargo.toml` package and its
-  six exact Surf dependency requirements
+  five exact Surf dependency requirements (its turbo-dom / turbo-dom-raster pins
+  must equal the locked versions; `scripts/check-versions.py` checks both)
 
 Compiled core/MCP constants and NAPI/Python version functions use
 `env!("CARGO_PKG_VERSION")`; they follow the workspace version automatically.
@@ -59,7 +60,11 @@ changelog entries and unrelated dependency versions must retain their own versio
 3. Complete the [actual packaged-consumer procedure](./rust/release-deps/surf-consumer/README.md).
    Publish and verify the named dependencies first (turbo-dom-v8 from turbo-dom,
    then the twelve here: seven Deno-family 0.x.1 + five transport); the Surf product
-   tags do not publish those dependencies. Then verify all six Surf distributions
+   tags do not publish those dependencies. turbo-dom, turbo-dom-layout,
+   turbo-dom-raster and turbo-dom-browser-env are likewise published first from
+   turbo-dom; drop the pre-publish `[patch.crates-io]` table in `rust/Cargo.toml`
+   and re-lock with a targeted `cargo update -p` for those crates and the Deno
+   family. Then verify all five Surf library distributions
    in one normal invocation, with Cargo compilation verification enabled and no
    directory-source replacement:
 
@@ -67,7 +72,7 @@ changelog entries and unrelated dependency versions must retain their own versio
    CARGO_HOME="$RELEASE_CARGO_HOME" CARGO_TARGET_DIR="$PACKAGE_TARGET" \
      cargo package --locked --manifest-path rust/Cargo.toml \
      -p turbo-surf-core -p turbo-surf-view -p turbo-surf-page \
-     -p turbo-surf-render -p turbo-surf-raster -p turbo-surf-mcp
+     -p turbo-surf-render -p turbo-surf-mcp
    ```
 
    Use a fresh Cargo home and the integrated registry dependency graph, retaining
@@ -106,7 +111,7 @@ changelog entries and unrelated dependency versions must retain their own versio
    runs the same four builds and assembled-tarball smoke without publishing,
    including when dispatched against a tag. The Rust crates workflow instead
    treats manual dispatch as publication: select the exact matching `v*` tag;
-   it checks release metadata and uses `cargo publish --locked` for all six crates.
+   it checks release metadata and uses `cargo publish --locked` for all five crates.
    Do not dispatch that workflow as a dry run. Every Python platform job installs its
    exact wheel outside the checkout and requires all ten existing offline smoke
    tests to pass without skips. The sdist job builds a wheel from the actual
@@ -127,7 +132,7 @@ changelog entries and unrelated dependency versions must retain their own versio
    - Fetch `turbo-surf@X.Y.Z` from npm, verify its integrity and all four platform
      binaries, and smoke the installed launcher on a compatible host. A local
      `npm pack --dry-run` or `npm view ... version` alone is insufficient.
-   - Fetch all six `X.Y.Z` crate archives and checksums and repeat the consumer
+   - Fetch all five `X.Y.Z` crate archives and checksums and repeat the consumer
      test using a new empty Cargo home, no root patches or source replacement.
    - Fetch the exact PyPI wheels and sdist, verify their hashes and versions,
      and install/test the matching-platform wheel. PyPI's `--skip-existing` is
@@ -206,17 +211,20 @@ Surf distributions and a clean consumer without workspace patches. An npm binary
 built from a patched workspace does not establish registry compatibility.
 
 The reviewed `deno_crypto`0.273.0 source includes the licensed, reproducible
-hardening patch in [`rust/vendor/DENO_CRYPTO.md`](./rust/vendor/DENO_CRYPTO.md).
+hardening patch documented in
+[`rust/release-deps/deno/DENO_CRYPTO.md`](./rust/release-deps/deno/DENO_CRYPTO.md).
 The upstream provider's inherited object setters can expose non-extractable key
 bytes during construction. Registry consumers must resolve a distributable
 hardened provider or an upstream release containing the fix before publishing
 Surf crates; silently falling back to the unpatched registry crate is unsafe.
-Check the source archive/patch with `python3 rust/vendor/update-deno-crypto.py --check`.
+`rust/release-deps/deno/prepare.py` applies `patches/deno_crypto.patch` to the
+checksum-pinned upstream archive and rejects any result that differs from the
+pinned file tree; no patched source is committed.
 
-The DOM and layout release prerequisites are now satisfied. All six DOM consumers
-resolve registry turbo-dom0.5.7, published from tagged merge
+Historical (0.5.x): the DOM and layout release prerequisites were satisfied by
+registry turbo-dom0.5.7, published from tagged merge
 `5ec170654313bfdc8ab59db78b6e848e85f6f265` after all open producer PRs merged.
-Render and raster resolve registry turbo-html2pdf-core0.3.8, published from
+and registry turbo-html2pdf-core0.3.8, published from
 `9591fe69e304e89ba4899fcc54c637059f2b121d`, including composed layout and shared
 font programs. The lockfile verifies checksums
 `4c759ebdc434d90ce8ba1301ff94a5b17553b61c594de60118e0af8d337f25e4`
@@ -225,15 +233,19 @@ respectively. The initial DOM/layout-only update changed these two records.
 The subsequent named dependency integration replaces twelve runtime packages at
 their existing versions and preserves all other lock records apart from the
 core/render dependency references. The previously tested Git candidates remain
-dated provenance, not current dependency metadata.
+dated provenance, not current dependency metadata. Since the turbo-dom
+consolidation, layout comes from `turbo-dom-layout` 0.6.0 and the screenshot tier
+from `turbo-dom-raster` 0.6.0 (both published from turbo-dom); turbo-surf no
+longer depends on turbo-html2pdf.
 
-The reviewed stock RustyV8150.4.0 source includes native weak-handle teardown
-hardening. That ownership fix is required by the retained regression; silently
-resolving the unpatched upstream crate would lose it. The release graph must use
-the reviewed named V8 distribution and its matching transitive deno_v8/deno_core
-packages.
-See [rust/vendor/RUSTY_V8.md](./rust/vendor/RUSTY_V8.md). Workspace binary tests
-cannot substitute for clean downstream package tests.
+The V8 binding is turbo-dom's `turbo-dom-v8` 150.4.0, a generated fork of
+RustyV8150.4.0 (patches + pins + generator in turbo-dom's
+`crates/turbo-dom-v8`) carrying the native weak-handle teardown hardening and the
+interceptor ShouldThrowOnError fix. Those ownership fixes are required by the
+retained regressions; silently resolving the unpatched upstream crate would lose
+them. The release graph must use exactly one `turbo-dom-v8` through the matching
+turbo-surf-deno-v8 0.4.1 / deno_core 0.412.1 packages (`scripts/check-single-v8.sh`).
+Workspace binary tests cannot substitute for clean downstream package tests.
 
 All thirteen named dependency distributions are now published and payload-verified
 by [the exact reviewed dependency run](https://github.com/miaskiewicz/turbo-surf/actions/runs/39590311206).

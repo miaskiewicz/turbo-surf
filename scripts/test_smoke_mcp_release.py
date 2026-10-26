@@ -234,56 +234,6 @@ class _GitCheckoutCase(unittest.TestCase):
         return {name: (output / name).read_bytes() for name in self.assets}
 
 
-class EmbeddedSourceCheckoutTests(_GitCheckoutCase):
-    """Real Git checkout conversion must preserve every pinned runtime asset."""
-
-    ASSET_DIR = Path("rust/crates/turbo-surf-render/src/vendor/deno_extensions")
-    ATTRIBUTE_RULE = "rust/crates/turbo-surf-render/src/vendor/deno_extensions/** -text -whitespace"
-
-    def setUp(self):
-        super().setUp()
-        pins = json.loads((self.source / self.ASSET_DIR / "pins.json").read_bytes())
-        for package in pins["packages"]:
-            folder = self.ASSET_DIR / package["alias"]
-            for row in package["sources"]:
-                self.read_asset(folder / row["file"], row["sha256"])
-            self.read_asset(folder / package["licenseFile"], package["licenseSha256"])
-        self.read_asset(self.ASSET_DIR / "pins.json")
-        self.assertEqual(len(self.assets), 32)
-        actual = {path.relative_to(self.source).as_posix() for path in (self.source / self.ASSET_DIR).rglob("*") if path.is_file()}
-        self.assertEqual(set(self.assets), actual)
-        self.assertEqual(sum(name.endswith(".js") for name in self.assets), 28)
-        self.assertEqual(sum(name.endswith("/LICENSE.md") for name in self.assets), 3)
-        self.write_assets()
-
-    def test_windows_checkout_preserves_all_pinned_extension_bytes(self):
-        self.assertIn(self.ATTRIBUTE_RULE.encode(), self.attributes.splitlines())
-        actual = self.checkout(self.attributes)
-        self.assertEqual(actual, self.assets)
-        values = self.git("check-attr", "-z", "text", "whitespace", "--", *self.assets).decode().split("\0")
-        self.assertEqual(values[-1], "")
-        rows = [values[index:index + 3] for index in range(0, len(values) - 1, 3)]
-        self.assertEqual(len(rows), 64)
-        self.assertEqual({row[0] for row in rows}, set(self.assets))
-        self.assertTrue(all(row[1] in ("text", "whitespace") and row[2] == "unset" for row in rows))
-
-    def test_missing_nested_rule_reproduces_windows_byte_drift(self):
-        attributes = b"".join(line for line in self.attributes.splitlines(keepends=True) if line.rstrip(b"\r\n") != self.ATTRIBUTE_RULE.encode())
-        actual = self.checkout(attributes)
-        changed = {name for name in self.assets if actual[name] != self.assets[name]}
-        self.assertEqual(changed, set(self.assets))
-        for name, data in self.assets.items():
-            self.assertEqual(actual[name], data.replace(b"\n", b"\r\n"), name)
-
-    def test_windows_checkout_with_crlf_attributes_preserves_all_bytes(self):
-        self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
-        self.test_windows_checkout_preserves_all_pinned_extension_bytes()
-
-    def test_missing_nested_rule_with_crlf_attributes_reproduces_drift(self):
-        self.attributes = self.attributes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
-        self.test_missing_nested_rule_reproduces_windows_byte_drift()
-
-
 class LicenseCheckoutTests(_GitCheckoutCase):
     """Shipping MIT and notice copies retain the canonical full bytes."""
 
@@ -295,7 +245,6 @@ class LicenseCheckoutTests(_GitCheckoutCase):
         'rust/crates/turbo-surf-page/LICENSE',
         'rust/crates/turbo-surf-view/LICENSE',
         'rust/crates/turbo-surf-render/LICENSE',
-        'rust/crates/turbo-surf-raster/LICENSE',
         'rust/crates/turbo-surf-transform/LICENSE',
         'rust/crates/turbo-surf-napi/LICENSE',
         'rust/crates/turbo-surf-py/LICENSE',
@@ -310,7 +259,7 @@ class LicenseCheckoutTests(_GitCheckoutCase):
         notices = "cd4183df9fc32fd278134e4f5b562d9a68de3d48ccb40bf3da846871b1ff7804"
         for name in self.PATHS:
             self.read_asset(Path(name), mit if name.endswith("LICENSE") else notices)
-        self.assertEqual(len(self.assets), 14)
+        self.assertEqual(len(self.assets), 13)
         for name, data in self.assets.items():
             self.assertEqual(data, self.assets["LICENSE" if name.endswith("LICENSE") else "THIRD_PARTY_NOTICES.md"], name)
         self.rules = {("/" + name + " -text -whitespace").encode() for name in self.PATHS}
@@ -322,7 +271,7 @@ class LicenseCheckoutTests(_GitCheckoutCase):
         values = self.git("check-attr", "-z", "text", "whitespace", "--", *self.assets).decode().split("\0")
         self.assertEqual(values[-1], "")
         rows = [values[index:index + 3] for index in range(0, len(values) - 1, 3)]
-        self.assertEqual(len(rows), 28)
+        self.assertEqual(len(rows), 26)
         self.assertEqual({row[0] for row in rows}, set(self.assets))
         self.assertTrue(all(row[1] in ("text", "whitespace") and row[2] == "unset" for row in rows))
 
@@ -343,7 +292,7 @@ class LicenseCheckoutTests(_GitCheckoutCase):
 
     def notices_check(self, attributes):
         manifests = sorted(self.source.glob("rust/crates/turbo-surf-*/Cargo.toml"))
-        self.assertEqual(len(manifests), 9)
+        self.assertEqual(len(manifests), 8)
         support = [Path("scripts/sync-third-party-notices.py")] + [path.relative_to(self.source) for path in manifests]
         for name in support:
             destination = self.repo / name

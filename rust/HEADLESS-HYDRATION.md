@@ -119,7 +119,7 @@ SERP in one baseline while another fails effective consent dismissal. The later
   composition. Non-extractable key material never crosses a page cloning hook;
   the private V8 serializer carries native key handles out of band. The original
   inherited-setter leak and graph/permission/realm behavior have regressions.
-  See [`vendor/DENO_CRYPTO.md`](./vendor/DENO_CRYPTO.md) for the reproducible patch.
+  See [`release-deps/deno/DENO_CRYPTO.md`](./release-deps/deno/DENO_CRYPTO.md) for the reproducible patch.
 - SHA256/384/512 resource integrity is checked against decoded response bytes
   before fetch/script/module/frame/style consumption. Module entry integrity does
   not become the hash for imported dependencies. Native CORP and active HTTPS
@@ -1366,7 +1366,8 @@ sizes 0. Single-site, unbounded; lower ROI than the general engine features abov
 ### Nike — Emotion CSS-in-JS WORKS; barren = consent overlay + weak overlay chrome + images-behind-modal
 - Nike's styling is **258 inline `<style>` blocks / 991 `.css-xxxxx` Emotion rules** (not
   external). CSS-in-JS is **already supported** — proved by a committed harness
-  (`turbo-surf-raster/tests/screenshot.rs::css_in_js_inline_style_blocks_apply`: hashed classes +
+  (`turbo-surf-raster/tests/screenshot.rs::css_in_js_inline_style_blocks_apply`, now
+  turbo-dom's `turbo-dom-raster`: hashed classes +
   `>` combinator + `@media` all cascade). So barrenness is NOT a cascade gap.
 - Nike serves a **cookie-consent wall** (Portuguese, geo/bot-triggered). Chromium shows it as a
   styled white card over the nav+hero; turbo shows the consent TEXT unstyled → the overlay
@@ -1433,8 +1434,9 @@ browser comparison; this is not a claim of complete Sanitizer API coverage.
 
 The binding uses weak native lookups with private V8 Document/subtree edges.
 Crypto's native objects trace their actual JavaScript edges through cppgc. The
-workspace consumes a reproducible Rusty V8 150.4.0 ownership teardown fix; see
-[`vendor/RUSTY_V8.md`](./vendor/RUSTY_V8.md). This does not upgrade the default
+workspace consumes a reproducible Rusty V8 150.4.0 ownership teardown fix through
+turbo-dom's generated `turbo-dom-v8` fork (patches + pins + generator in turbo-dom's
+`crates/turbo-dom-v8`). This does not upgrade the default
 engine to Chrome 155.
 
 MutationObserver records are native semantic batches delivered through a V8

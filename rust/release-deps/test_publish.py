@@ -266,12 +266,13 @@ class PublicationControls(unittest.TestCase):
             with self.subTest(retired=retired), self.assertRaisesRegex(ValueError, "original runtime"):
                 publish.require_deno_runtime(graph(("turbo-dom-v8", "150.4.0", registry), (retired, "1.0.0", registry)))
 
-    def test_commit_guard_no_longer_tracks_the_rusty_v8_vendor_copy(self):
+    def test_commit_guard_tracks_release_tooling_without_vendor_copies(self):
         with patch.object(publish.subprocess, "check_output", side_effect=["1" * 40 + "\n", ""]) as output:
             publish.commit_matches("1" * 40)
         paths = output.call_args_list[1].args[0]
-        self.assertIn("rust/vendor/deno_crypto", paths)
-        self.assertNotIn("rust/vendor/rusty_v8", paths)
+        # The deno_crypto patch lives under rust/release-deps/deno/patches.
+        self.assertIn("rust/release-deps", paths)
+        self.assertFalse(any(path.startswith("rust/vendor") for path in paths))
 
 
 if __name__ == "__main__":

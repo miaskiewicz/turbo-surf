@@ -9,8 +9,8 @@ use lightningcss::properties::{Property, PropertyId};
 use lightningcss::rules::CssRule;
 use lightningcss::selector::{Combinator, Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+use turbo_dom_layout::layout_snapshot::SourceId;
 use turbo_dom_parser::rtdom::{tree::Handle, Tree};
-use turbo_html2pdf_core::layout_snapshot::SourceId;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Target {
@@ -20,7 +20,7 @@ pub(crate) struct Target {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScopedRule {
     pub(crate) depth: u32,
-    pub(crate) declarations: Vec<turbo_html2pdf_core::style::Declaration>,
+    pub(crate) declarations: Vec<turbo_dom_layout::style::Declaration>,
     pub(crate) targets: Vec<Target>,
 }
 
@@ -174,7 +174,7 @@ fn shadow_selector(selector: &Selector<'_>) -> bool {
 
 fn declarations(
     block: &DeclarationBlock<'_>,
-) -> Result<Vec<turbo_html2pdf_core::style::Declaration>, String> {
+) -> Result<Vec<turbo_dom_layout::style::Declaration>, String> {
     use lightningcss::stylesheet::PrinterOptions;
     let mut result = Vec::new();
     for (important, properties) in [
@@ -216,7 +216,7 @@ fn declarations(
             };
             if let Some(value) = wide {
                 for id in PropertyId::Font.longhands().unwrap_or_default() {
-                    result.push(turbo_html2pdf_core::style::Declaration {
+                    result.push(turbo_dom_layout::style::Declaration {
                         property: lightningcss::traits::ToCss::to_css_string(
                             &id,
                             PrinterOptions::default(),
@@ -240,14 +240,14 @@ fn declarations(
                     .map_err(|error| {
                         format!("native CSS declaration serialization failed: {error:?}")
                     })?;
-                result.extend(turbo_html2pdf_core::style::parse_declarations(&text));
+                result.extend(turbo_dom_layout::style::parse_declarations(&text));
             }
         }
     }
     Ok(result)
 }
 
-fn inline_declarations(text: &str) -> Result<Vec<turbo_html2pdf_core::style::Declaration>, String> {
+fn inline_declarations(text: &str) -> Result<Vec<turbo_dom_layout::style::Declaration>, String> {
     let block = DeclarationBlock::parse_string(
         text,
         ParserOptions {
@@ -413,7 +413,7 @@ pub(crate) fn ua_rules(
 ) -> Result<Vec<crate::live_stylesheets::ActiveRule>, String> {
     let css = format!(
         "{} {} slot{{display:contents}}",
-        turbo_html2pdf_core::style::user_agent_css(),
+        turbo_dom_layout::style::user_agent_css(),
         crate::live_layout::LIVE_UA
     );
     let parsed = StyleSheet::parse(&css, ParserOptions::default())
@@ -448,8 +448,8 @@ pub(crate) fn ua_rules(
 pub(crate) fn style_composed_tree(
     input: &crate::live_layout::LiveTreeInput,
     rules: &[crate::live_stylesheets::ActiveRule],
-) -> Result<Vec<turbo_html2pdf_core::StyledNode>, String> {
-    use turbo_html2pdf_core::style::{CascadeOrigin, MatchedDeclaration};
+) -> Result<Vec<turbo_dom_layout::StyledNode>, String> {
+    use turbo_dom_layout::style::{CascadeOrigin, MatchedDeclaration};
     let graph = input
         .composition
         .as_ref()
@@ -499,11 +499,11 @@ pub(crate) fn style_composed_tree(
     impl Styler<'_> {
         fn nodes(
             &self,
-            nodes: &[turbo_html2pdf_core::Node],
+            nodes: &[turbo_dom_layout::Node],
             path: &[usize],
-            parent: &turbo_html2pdf_core::ComputedStyle,
-        ) -> Result<Vec<turbo_html2pdf_core::StyledNode>, String> {
-            use turbo_html2pdf_core::{Node, StyledNode};
+            parent: &turbo_dom_layout::ComputedStyle,
+        ) -> Result<Vec<turbo_dom_layout::StyledNode>, String> {
+            use turbo_dom_layout::{Node, StyledNode};
             let mut result = Vec::with_capacity(nodes.len());
             for (index, node) in nodes.iter().enumerate() {
                 let mut path = path.to_vec();
@@ -528,7 +528,7 @@ pub(crate) fn style_composed_tree(
                             .ok_or("native composed source depth unavailable")?;
                         let mut declarations = Vec::new();
                         for declaration in
-                            turbo_html2pdf_core::style::presentational_declarations(element)
+                            turbo_dom_layout::style::presentational_declarations(element)
                         {
                             declarations.push(MatchedDeclaration {
                                 declaration,
@@ -566,13 +566,11 @@ pub(crate) fn style_composed_tree(
                                 });
                             }
                         }
-                        let style = turbo_html2pdf_core::style::resolve_matched_style(
-                            parent,
-                            &declarations,
-                        );
+                        let style =
+                            turbo_dom_layout::style::resolve_matched_style(parent, &declarations);
                         let children = self.nodes(&element.children, &path, &style)?;
                         result.push(StyledNode::Element(
-                            turbo_html2pdf_core::style::StyledElement {
+                            turbo_dom_layout::style::StyledElement {
                                 tag: element.tag.clone(),
                                 attrs: element.attrs.clone(),
                                 style,
@@ -593,7 +591,7 @@ pub(crate) fn style_composed_tree(
     .nodes(
         &input.nodes,
         &[],
-        &turbo_html2pdf_core::ComputedStyle::default(),
+        &turbo_dom_layout::ComputedStyle::default(),
     )
 }
 

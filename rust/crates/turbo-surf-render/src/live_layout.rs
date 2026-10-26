@@ -1,13 +1,11 @@
 //! Native live-tree input for the public layout/provenance seam. No serializer,
 //! selectors, guest properties or identity attributes participate in this copy.
 use std::collections::HashMap;
+use turbo_dom_layout::layout_snapshot::{LayoutSnapshot, SnapshotInputs, SourceId, SourceIdentity};
+use turbo_dom_layout::style::LeveledRule;
+use turbo_dom_layout::{Attr, Cascade, Diagnostics, Element, Node, Tag};
 use turbo_dom_parser::rtdom::tree::{Handle, NodeType};
 use turbo_dom_parser::rtdom::{NodeRef, Tree};
-use turbo_html2pdf_core::layout_snapshot::{
-    LayoutSnapshot, SnapshotInputs, SourceId, SourceIdentity,
-};
-use turbo_html2pdf_core::style::LeveledRule;
-use turbo_html2pdf_core::{Attr, Cascade, Diagnostics, Element, Node, Tag};
 
 const MAX_NODES: usize = 50_000;
 const MAX_DEPTH: usize = 256;
@@ -216,12 +214,12 @@ pub(crate) const LIVE_UA: &str = concat!(
 );
 
 pub(crate) fn live_cascade(css: &str, width: f32, height: f32) -> Cascade {
-    turbo_html2pdf_core::set_media_viewport_height(height);
+    turbo_dom_layout::set_media_viewport_height(height);
     let mut cascade =
-        turbo_html2pdf_core::build_cascade_with_width(css, "", Default::default(), width);
+        turbo_dom_layout::build_cascade_with_width(css, "", Default::default(), width);
     let start = cascade.rules.len();
     cascade.rules.extend(
-        turbo_html2pdf_core::style::parse_stylesheet(LIVE_UA)
+        turbo_dom_layout::style::parse_stylesheet(LIVE_UA)
             .rules
             .into_iter()
             .enumerate()
@@ -242,7 +240,7 @@ pub(crate) fn layout(
     diagnostics: &mut Diagnostics,
 ) -> Result<LayoutSnapshot, String> {
     let cascade = live_cascade(css, inputs.width, inputs.height);
-    turbo_html2pdf_core::layout_snapshot::snapshot_live_tree(
+    turbo_dom_layout::layout_snapshot::snapshot_live_tree(
         &input.nodes,
         &input.identities,
         &cascade,
@@ -299,7 +297,7 @@ pub(crate) fn layout_active_rules_resolved(
     let mut cascade = live_cascade("", inputs.width, inputs.height);
     for rule in &qualified {
         let text = &rule.text;
-        let sheet = turbo_html2pdf_core::style::parse_stylesheet(text);
+        let sheet = turbo_dom_layout::style::parse_stylesheet(text);
         if !sheet.at_rules.is_empty() {
             return Err(
                 "native live layout requires privately resolved conditional CSS rules".into(),
@@ -316,7 +314,7 @@ pub(crate) fn layout_active_rules_resolved(
     let mut styled = if input.composition.is_some() {
         crate::live_layout_scoped::style_composed_tree(input, &qualified)?
     } else {
-        turbo_html2pdf_core::style_tree(&input.nodes, &cascade)
+        turbo_dom_layout::style_tree(&input.nodes, &cascade)
     };
     crate::live_layout_zoom::apply(&mut styled);
     crate::live_layout_resources::validate(&styled, rules)?;
@@ -325,34 +323,33 @@ pub(crate) fn layout_active_rules_resolved(
         .original_text
         .iter()
         .map(
-            |(source_id, units)| turbo_html2pdf_core::layout_snapshot::SourceTextUnits {
+            |(source_id, units)| turbo_dom_layout::layout_snapshot::SourceTextUnits {
                 source_id: *source_id,
                 units,
             },
         )
         .collect();
-    let options = turbo_html2pdf_core::layout_snapshot::NativeTextOptions {
+    let options = turbo_dom_layout::layout_snapshot::NativeTextOptions {
         original_text: &original,
         svg_viewports: &input.svg_viewports,
         layout_scale,
     };
-    let snapshot =
-        turbo_html2pdf_core::layout_snapshot::snapshot_html_styled_tree_with_native_text(
-            &styled,
-            &input.identities,
-            &options,
-            inputs,
-            diagnostics,
-        )
-        .map_err(|error| error.to_string())?;
+    let snapshot = turbo_dom_layout::layout_snapshot::snapshot_html_styled_tree_with_native_text(
+        &styled,
+        &input.identities,
+        &options,
+        inputs,
+        diagnostics,
+    )
+    .map_err(|error| error.to_string())?;
     Ok((snapshot, styles))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use turbo_html2pdf_core::layout_snapshot::GeometryKind;
-    use turbo_html2pdf_core::{FontRegistry, ImageCtx, NoImages};
+    use turbo_dom_layout::layout_snapshot::GeometryKind;
+    use turbo_dom_layout::{FontRegistry, ImageCtx, NoImages};
 
     fn snapshot(tree: &Tree, id: u32, css: &str) -> LayoutSnapshot {
         let input = capture_tree(tree, id).unwrap();
@@ -378,7 +375,7 @@ mod tests {
     fn border(
         snapshot: &LayoutSnapshot,
         id: SourceId,
-    ) -> &turbo_html2pdf_core::layout_snapshot::SnapshotFragment {
+    ) -> &turbo_dom_layout::layout_snapshot::SnapshotFragment {
         snapshot
             .source(id)
             .unwrap()

@@ -105,7 +105,7 @@ pub(crate) fn validate(
     }
     let mut pending = input.nodes.iter().collect::<Vec<_>>();
     while let Some(node) = pending.pop() {
-        if let turbo_html2pdf_core::Node::Element(element) = node {
+        if let turbo_dom_layout::Node::Element(element) = node {
             for attr in element.attrs.iter().filter(|attr| attr.name == "style") {
                 let block = DeclarationBlock::parse_string(&attr.value, ParserOptions::default())
                     .map_err(|_| "native layout cannot parse inline at-rule dependency")?;

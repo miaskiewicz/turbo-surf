@@ -2262,7 +2262,7 @@ fn op_browser_device_memory(major: u32) -> u32 {
 }
 
 // Process-global text-measurement hook. The render crate has no font/layout stack, so the host
-// (napi/mcp, which own turbo-surf-raster) injects a real advance-width measurer. ENV_BOOTSTRAP's
+// (napi/mcp, which own turbo-dom-raster) injects a real advance-width measurer. ENV_BOOTSTRAP's
 // offsetWidth/offsetHeight read it so a font-detection probe sees per-family metric differences a
 // no-layout DOM otherwise can't produce. Same host-injection pattern as `set_fingerprint`.
 type MeasureFn = Box<dyn Fn(&str, &str, f64) -> (f64, f64) + Send + Sync>;

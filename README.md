@@ -459,22 +459,26 @@ Native WebCrypto uses a reproducibly hardened Deno provider and genuine Rust
 X-Wing keys for Chrome 155's `MLKEM768-X25519`. Key permissions and private native
 cloning have adversarial regression coverage; the covered localhost algorithm
 queries and KEM roundtrips match Chrome 155. The render crate's `deno_crypto`
-alias resolves `turbo-surf-deno-crypto` 0.273.0, preserving the reviewed hardening
-and native clone API through its matching Deno/V8 registry graph. See the
-[provider provenance](rust/vendor/DENO_CRYPTO.md) and the
+alias resolves `turbo-surf-deno-crypto` 0.273.1 (upstream 0.273.0 plus the reviewed
+patch), preserving the reviewed hardening and native clone API through its
+matching Deno/V8 registry graph. See the
+[provider provenance](rust/release-deps/deno/DENO_CRYPTO.md) and the
 [itemized browser parity backlog](harness/detection/PARITY-GAPS.md) for remaining
 behavior and validation limits.
 
 Deno Web, WebIDL and Crypto JavaScript is compiled into the render crate in both
 stock and native SDK builds; no runtime opt-in or build-machine Cargo source tree
 is required. The [crate-local source manifest and reproducer](rust/crates/turbo-surf-render/DENO-EXTENSIONS.md)
-retain all 28 exact licensed modules. CI verifies their published archive bytes;
-installed-artifact JavaScript tests remain a separate portability gate.
+documents the 28 exact licensed modules, taken from the Deno distributions'
+`embedded_sources` tables (nothing vendored); the render tests check every module's
+SHA-256 and length against reviewed pins. Installed-artifact JavaScript tests remain
+a separate portability gate.
 
 The default render tier's `deno_core` alias resolves
-`turbo-surf-deno-core` 0.412.0. Its `v8` alias resolves the facade
-`turbo-surf-deno-v8` 0.4.0, backed by the teardown-hardened
-`turbo-surf-v8` 150.4.0 binding (native engine 15.0.245.2, corresponding to
+`turbo-surf-deno-core` 0.412.1. Its `v8` alias resolves the facade
+`turbo-surf-deno-v8` 0.4.1, backed by turbo-dom's teardown- and
+interceptor-hardened `turbo-dom-v8` 150.4.0 fork, the only V8 in the graph
+(native engine 15.0.245.2, corresponding to
 Chrome 150). Numeric versions and official native archive identities retain their
 upstream meanings; package renaming does not upgrade the engine. The harness
 records actual engine/template versions separately from the Chrome 155 identity. The TLS

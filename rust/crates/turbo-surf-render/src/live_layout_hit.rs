@@ -2,7 +2,7 @@
 //! per-owner scroll projection. Text hit regions need native cluster provenance.
 use crate::live_layout_scroll::{scroll_translation, SourceStyles};
 use std::collections::{BTreeMap, BTreeSet};
-use turbo_html2pdf_core::layout_snapshot::{GeometryKind, LayoutSnapshot, Rect, SourceId};
+use turbo_dom_layout::layout_snapshot::{GeometryKind, LayoutSnapshot, Rect, SourceId};
 pub(crate) fn contains(
     rect: Rect,
     matrix: [f64; 6],
@@ -38,7 +38,7 @@ pub(crate) fn property<'a>(
         id = source.parent?;
     }
 }
-fn clip_axis(style: &turbo_html2pdf_core::ComputedStyle, name: &str) -> bool {
+fn clip_axis(style: &turbo_dom_layout::ComputedStyle, name: &str) -> bool {
     crate::live_layout_scroll::overflow(style, name) != "visible"
 }
 pub(crate) fn elements_at_point(

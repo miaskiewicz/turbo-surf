@@ -1,8 +1,6 @@
 //! CSSOM measurements obtained from actual native source fragments. Missing
 //! inline/caret provenance is an explicit error, never a synthetic zero box.
-use turbo_html2pdf_core::layout_snapshot::{
-    GeometryKind, LayoutSnapshot, Rect, SourceId, SourceKind,
-};
+use turbo_dom_layout::layout_snapshot::{GeometryKind, LayoutSnapshot, Rect, SourceId, SourceKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub(crate) struct ClientMetrics {
@@ -238,7 +236,7 @@ pub(crate) fn offset_position(
         .find(|fragment| fragment.kind == GeometryKind::BorderBox)
         .ok_or("native offset requires inline border provenance")?;
     let used = border.used_box.ok_or("native offset used box missing")?;
-    if used.position == turbo_html2pdf_core::layout::value::Position::Fixed {
+    if used.position == turbo_dom_layout::layout::value::Position::Fixed {
         return Ok(OffsetPosition {
             left: offset_integer(border.rect.x)?,
             top: offset_integer(border.rect.y)?,
@@ -265,7 +263,7 @@ pub(crate) fn offset_position(
             .get("transform")
             .is_some_and(|value| value != "none")
             && !is_inline_fragment(snapshot, parent);
-        let table = used.position == turbo_html2pdf_core::layout::value::Position::Static
+        let table = used.position == turbo_dom_layout::layout::value::Position::Static
             && matches!(parent_style.tag.as_str(), "table" | "td" | "th");
         // Blink's WebKit extension: offsetParent also stops at a zoom change.
         let zoomed = parent_style.zoom != style.zoom;
@@ -319,9 +317,9 @@ pub(crate) fn offset_position(
 mod tests {
     use super::*;
     use crate::live_layout::{capture_tree, layout};
+    use turbo_dom_layout::layout_snapshot::SnapshotInputs;
+    use turbo_dom_layout::{Diagnostics, FontRegistry, ImageCtx, NoImages};
     use turbo_dom_parser::rtdom::Tree;
-    use turbo_html2pdf_core::layout_snapshot::SnapshotInputs;
-    use turbo_html2pdf_core::{Diagnostics, FontRegistry, ImageCtx, NoImages};
     fn capture(html: &str) -> (Tree, LayoutSnapshot) {
         let tree = Tree::parse(html);
         let input = capture_tree(&tree, 1).unwrap();

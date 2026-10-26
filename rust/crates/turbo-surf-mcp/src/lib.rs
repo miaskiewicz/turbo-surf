@@ -15,6 +15,7 @@ use std::sync::OnceLock;
 use turbo_dom_parser::rtdom::serialize::serialize_inner;
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
+use turbo_dom_raster as raster;
 use turbo_surf_core::challenge::{self, ChallengeSolver, SolveContext};
 use turbo_surf_core::consent;
 use turbo_surf_core::cookies::CookieJar;
@@ -24,7 +25,6 @@ use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
 use turbo_surf_core::request_context::{ClientHints, Destination, RequestContext, RequestMode};
 use turbo_surf_core::robots::{RobotsCache, RobotsFetcher};
 use turbo_surf_page::{batch as batch_urls, TurboNavigator};
-use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType, TextMode};
 

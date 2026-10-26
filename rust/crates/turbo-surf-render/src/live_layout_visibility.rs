@@ -1,8 +1,8 @@
 //! CSSOM View `checkVisibility()` over resolved flat-tree styles. Box presence is
 //! decided by the caller from the actual layout snapshot.
 use crate::live_layout_scroll::SourceStyles;
-use turbo_html2pdf_core::layout_snapshot::{Rect, SourceId};
-use turbo_html2pdf_core::ComputedStyle;
+use turbo_dom_layout::layout_snapshot::{Rect, SourceId};
+use turbo_dom_layout::ComputedStyle;
 
 pub(crate) const OPACITY: u32 = 1;
 pub(crate) const VISIBILITY: u32 = 2;
@@ -91,9 +91,9 @@ pub(crate) fn check(
 mod tests {
     use super::*;
     use crate::live_layout::{capture_tree, layout_rules_resolved, source_id};
+    use turbo_dom_layout::layout_snapshot::SnapshotInputs;
+    use turbo_dom_layout::{Diagnostics, FontRegistry, ImageCtx, NoImages};
     use turbo_dom_parser::rtdom::Tree;
-    use turbo_html2pdf_core::layout_snapshot::SnapshotInputs;
-    use turbo_html2pdf_core::{Diagnostics, FontRegistry, ImageCtx, NoImages};
 
     fn styles(html: &str) -> (SourceStyles, Tree) {
         let tree = Tree::parse(html);

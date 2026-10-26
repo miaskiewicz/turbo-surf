@@ -362,7 +362,7 @@ fn export<'s>(
 pub(crate) fn wrap_elements<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
-    ids: &[turbo_html2pdf_core::layout_snapshot::SourceId],
+    ids: &[turbo_dom_layout::layout_snapshot::SourceId],
     kind: u8,
 ) -> Result<v8::Local<'s, v8::Array>, String> {
     let _dom = DomScope::for_object(scope, document);

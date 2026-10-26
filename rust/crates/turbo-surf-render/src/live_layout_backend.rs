@@ -5,8 +5,8 @@ use crate::live_layout_metrics::{ClientMetrics, OffsetSize};
 use deno_core::{op2, v8};
 use deno_error::JsErrorBox;
 use serde::Serialize;
-use turbo_html2pdf_core::layout_snapshot::SnapshotInputs;
-use turbo_html2pdf_core::{Diagnostics, FontRegistry, ImageCtx, NoImages};
+use turbo_dom_layout::layout_snapshot::SnapshotInputs;
+use turbo_dom_layout::{Diagnostics, FontRegistry, ImageCtx, NoImages};
 
 // FontFace bytes and shaping caches are thread-safe and contain no V8 roots.
 // Loading every installed font per isolate thread multiplies native memory.
@@ -51,19 +51,19 @@ struct CacheKey {
     inline_policy: Vec<(u32, String)>,
 }
 struct LayoutView {
-    snapshot: turbo_html2pdf_core::layout_snapshot::LayoutSnapshot,
+    snapshot: turbo_dom_layout::layout_snapshot::LayoutSnapshot,
     styles: crate::live_layout_scroll::SourceStyles,
-    omitted: std::collections::HashSet<turbo_html2pdf_core::layout_snapshot::SourceId>,
+    omitted: std::collections::HashSet<turbo_dom_layout::layout_snapshot::SourceId>,
     quirks: bool,
-    body: Option<turbo_html2pdf_core::layout_snapshot::SourceId>,
+    body: Option<turbo_dom_layout::layout_snapshot::SourceId>,
 }
 impl LayoutView {
-    fn zoom(&self, id: turbo_html2pdf_core::layout_snapshot::SourceId) -> f32 {
+    fn zoom(&self, id: turbo_dom_layout::layout_snapshot::SourceId) -> f32 {
         self.styles.get(&id).map_or(1.0, |entry| entry.zoom)
     }
     /// CSSOM View: the standards root and the quirks-mode body report the
     /// viewport's client size (excluding scrollbars), never their own box.
-    fn viewport_client(&self, id: turbo_html2pdf_core::layout_snapshot::SourceId) -> bool {
+    fn viewport_client(&self, id: turbo_dom_layout::layout_snapshot::SourceId) -> bool {
         if self.quirks {
             self.body == Some(id)
         } else {
@@ -73,7 +73,7 @@ impl LayoutView {
     /// Whether an element's scroll APIs address the viewport (the scrolling
     /// element): the standards root, or a quirks body that is not itself a
     /// scroll container.
-    fn addresses_viewport(&self, id: turbo_html2pdf_core::layout_snapshot::SourceId) -> bool {
+    fn addresses_viewport(&self, id: turbo_dom_layout::layout_snapshot::SourceId) -> bool {
         use crate::live_layout_scroll as scrolling;
         if self.quirks {
             self.body == Some(id) && !scrolling::element_scroller(&self.styles, id)
@@ -174,7 +174,7 @@ fn frame_content_size<'s>(
         .iter()
         .find_map(|&index| {
             let fragment = &view.snapshot.fragments()[index];
-            (fragment.kind == turbo_html2pdf_core::layout_snapshot::GeometryKind::BorderBox)
+            (fragment.kind == turbo_dom_layout::layout_snapshot::GeometryKind::BorderBox)
                 .then_some(fragment.used_box)
                 .flatten()
         })
@@ -242,7 +242,7 @@ fn measure<'s>(
         }
         geometry
     };
-    let rect = |r: turbo_html2pdf_core::layout_snapshot::Rect| [r.x, r.y, r.width, r.height];
+    let rect = |r: turbo_dom_layout::layout_snapshot::Rect| [r.x, r.y, r.width, r.height];
     Ok(Geometry {
         bounds: rect(geometry.bounds),
         rects: geometry.rects.into_iter().map(rect).collect(),
@@ -286,7 +286,7 @@ fn adjust_int(value: i32, zoom: f32) -> i32 {
 }
 fn element_geometry(
     view: &LayoutView,
-    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+    id: turbo_dom_layout::layout_snapshot::SourceId,
 ) -> Result<crate::live_layout_metrics::ElementGeometry, String> {
     if view.omitted.contains(&id)
         || view
@@ -414,7 +414,7 @@ fn resolve(
 #[derive(Default)]
 struct ScrollState {
     values: std::cell::RefCell<
-        std::collections::BTreeMap<turbo_html2pdf_core::layout_snapshot::SourceId, [f64; 2]>,
+        std::collections::BTreeMap<turbo_dom_layout::layout_snapshot::SourceId, [f64; 2]>,
     >,
 }
 fn scroll_state(context: v8::Local<v8::Context>) -> std::rc::Rc<ScrollState> {
@@ -469,7 +469,7 @@ struct ScrollView<'s> {
     context: v8::Local<'s, v8::Context>,
     viewport: std::rc::Rc<Viewport>,
     view: std::rc::Rc<LayoutView>,
-    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+    id: turbo_dom_layout::layout_snapshot::SourceId,
 }
 fn scroll_view<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -510,10 +510,10 @@ fn scroll_view<'s>(
 fn scroller(
     view: &LayoutView,
     viewport: &Viewport,
-    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+    id: turbo_dom_layout::layout_snapshot::SourceId,
 ) -> Result<
     (
-        turbo_html2pdf_core::layout_snapshot::SourceId,
+        turbo_dom_layout::layout_snapshot::SourceId,
         crate::live_layout_scroll::ScrollMetrics,
     ),
     String,
@@ -540,7 +540,7 @@ fn viewport_scroller(
     viewport: &Viewport,
 ) -> Result<
     (
-        turbo_html2pdf_core::layout_snapshot::SourceId,
+        turbo_dom_layout::layout_snapshot::SourceId,
         crate::live_layout_scroll::ScrollMetrics,
     ),
     String,
@@ -556,11 +556,8 @@ fn snap(viewport: &Viewport, value: f64) -> f64 {
 }
 /// Clamp retained state to the current extent, then apply requested positions.
 fn apply_scroll(
-    values: &mut std::collections::BTreeMap<
-        turbo_html2pdf_core::layout_snapshot::SourceId,
-        [f64; 2],
-    >,
-    key: turbo_html2pdf_core::layout_snapshot::SourceId,
+    values: &mut std::collections::BTreeMap<turbo_dom_layout::layout_snapshot::SourceId, [f64; 2]>,
+    key: turbo_dom_layout::layout_snapshot::SourceId,
     metrics: &crate::live_layout_scroll::ScrollMetrics,
     viewport: &Viewport,
     target: [Option<f64>; 2],
@@ -763,7 +760,7 @@ fn scroll_into_view<'s>(
     }
     Ok(result.into())
 }
-fn scroll_root(view: &LayoutView) -> Option<turbo_html2pdf_core::layout_snapshot::SourceId> {
+fn scroll_root(view: &LayoutView) -> Option<turbo_dom_layout::layout_snapshot::SourceId> {
     view.styles
         .iter()
         .find(|(_, entry)| entry.parent.is_none())
@@ -772,11 +769,11 @@ fn scroll_root(view: &LayoutView) -> Option<turbo_html2pdf_core::layout_snapshot
 /// Ancestor scrolling boxes along the containing-block chain, then the viewport.
 fn into_view_scrollers(
     view: &LayoutView,
-    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+    id: turbo_dom_layout::layout_snapshot::SourceId,
     nearest: bool,
-) -> Result<Vec<turbo_html2pdf_core::layout_snapshot::SourceId>, String> {
+) -> Result<Vec<turbo_dom_layout::layout_snapshot::SourceId>, String> {
     use crate::live_layout_scroll as scrolling;
-    use turbo_html2pdf_core::layout::value::Position;
+    use turbo_dom_layout::layout::value::Position;
     let source = view
         .snapshot
         .source(id)
@@ -786,7 +783,7 @@ fn into_view_scrollers(
         .iter()
         .map(|&i| &view.snapshot.fragments()[i])
         .find(|fragment| {
-            fragment.kind == turbo_html2pdf_core::layout_snapshot::GeometryKind::BorderBox
+            fragment.kind == turbo_dom_layout::layout_snapshot::GeometryKind::BorderBox
         })
         .or_else(|| {
             view.snapshot
@@ -798,7 +795,7 @@ fn into_view_scrollers(
         .ok_or("native scroll requires placed source provenance")?;
     let position = fragment.used_box.map(|used| used.position);
     let ancestors = &fragment.source_ancestors;
-    let positioned = |ancestor: &turbo_html2pdf_core::layout_snapshot::SourceId, fixed: bool| {
+    let positioned = |ancestor: &turbo_dom_layout::layout_snapshot::SourceId, fixed: bool| {
         view.styles.get(ancestor).is_some_and(|entry| {
             entry.style.get("display") != Some("contents")
                 && entry.style.get("position").is_some_and(|value| {
@@ -843,9 +840,9 @@ fn into_view_scrollers(
 /// its scrollport (padding box) and the rectangle's local bounding box.
 fn scroller_space(
     view: &LayoutView,
-    id: turbo_html2pdf_core::layout_snapshot::SourceId,
+    id: turbo_dom_layout::layout_snapshot::SourceId,
     world: [f64; 4],
-    offsets: &std::collections::BTreeMap<turbo_html2pdf_core::layout_snapshot::SourceId, [f64; 2]>,
+    offsets: &std::collections::BTreeMap<turbo_dom_layout::layout_snapshot::SourceId, [f64; 2]>,
 ) -> Result<([f64; 4], [f64; 4]), String> {
     let source = view
         .snapshot
@@ -856,7 +853,7 @@ fn scroller_space(
         .iter()
         .map(|&i| &view.snapshot.fragments()[i])
         .find(|fragment| {
-            fragment.kind == turbo_html2pdf_core::layout_snapshot::GeometryKind::BorderBox
+            fragment.kind == turbo_dom_layout::layout_snapshot::GeometryKind::BorderBox
         })
         .ok_or("native scroll requires inline border provenance")?;
     let used = fragment.used_box.ok_or("native scroll used box missing")?;
@@ -917,7 +914,7 @@ fn scroller_space(
 
 /// Whether an element has a layout box (Blink's layout object): display:none
 /// subtrees, display:contents and unassigned slottables have none.
-fn has_box(view: &LayoutView, id: turbo_html2pdf_core::layout_snapshot::SourceId) -> bool {
+fn has_box(view: &LayoutView, id: turbo_dom_layout::layout_snapshot::SourceId) -> bool {
     view.snapshot
         .source(id)
         .is_some_and(|source| !source.excluded_from_layout)
@@ -992,7 +989,7 @@ fn input_size<'s>(
         .iter()
         .find_map(|&index| {
             let fragment = &view.snapshot.fragments()[index];
-            (fragment.kind == turbo_html2pdf_core::layout_snapshot::GeometryKind::BorderBox)
+            (fragment.kind == turbo_dom_layout::layout_snapshot::GeometryKind::BorderBox)
                 .then_some(fragment.used_box)
                 .flatten()
         })
@@ -1361,9 +1358,8 @@ fn range_geometry<'s>(
         }
     }
     let bounds = crate::live_layout_metrics::bounding_box(&rects);
-    let values = |rect: turbo_html2pdf_core::layout_snapshot::Rect| {
-        [rect.x, rect.y, rect.width, rect.height]
-    };
+    let values =
+        |rect: turbo_dom_layout::layout_snapshot::Rect| [rect.x, rect.y, rect.width, rect.height];
     Ok(RangeGeometry {
         bounds: values(bounds),
         rects: rects.into_iter().map(values).collect(),

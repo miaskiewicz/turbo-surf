@@ -3430,6 +3430,28 @@ async fn op_load_image(
     }
 }
 
+/// A `data:` image source decoded synchronously (turbo-surf#38): Chrome loads a data:
+/// image the moment its source is set, so its state is final before any script reads it.
+#[op2]
+#[serde]
+fn op_decode_data_image(#[string] url: String) -> ImageOut {
+    let size = turbo_dom_layout::image::decode_data_url(&url)
+        .and_then(|data| natural_image_size(&data.bytes, &data.mime));
+    match size {
+        Some((width, height)) => ImageOut {
+            url,
+            status: 200,
+            width,
+            height,
+            ok: true,
+        },
+        None => ImageOut {
+            url,
+            ..Default::default()
+        },
+    }
+}
+
 /// Whether an `<img>` response decodes, and its `naturalWidth`/`naturalHeight`, as Chrome
 /// 156 decides them (turbo-surf#30, `tests/fixtures/image_formats_chrome156.json`): the
 /// shared turbo-dom-layout probe sizes every raster format Chrome shows (PNG, JPEG, GIF,
@@ -7253,6 +7275,7 @@ deno_core::extension!(
         fetch_streams::op_fetch_read,
         op_fetch,
         op_load_image,
+        op_decode_data_image,
         op_dictionary_active,
         op_dictionary_headers,
         op_dictionary_links,
@@ -9981,7 +10004,15 @@ async function __loadSheetImports(sheet, source, win, depth = 0) {
   }
 }
 function __imageSource(src, source) {try{return new URL(src,source).href;}catch(_){return src;}}
-function __loadImage(el, win = globalThis) {
+function __imageLoaded(el, src, result, url) {
+  const loaded = !!(result && result.ok);
+  ops.op_live_image_loaded(el,src,loaded?result.width:0,loaded?result.height:0);
+  __imageHost.setState(el,loaded?{complete:true,naturalWidth:result.width,naturalHeight:result.height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
+  return loaded;
+}
+// `parser`: a document-scan (parser) image, whose broken data: source is already
+// complete at the first script read; a script-set one stays pending until its error.
+function __loadImage(el, win = globalThis, parser = false) {
   const src = __resourceAttribute.call(el,"src") || "";
   const previous = __resources.get(el);
   if (previous && previous.src === src) return previous.promise;
@@ -9990,20 +10021,23 @@ function __loadImage(el, win = globalThis) {
   if (!src) {__imageHost.setState(el,null);return state.promise=Promise.resolve();}
   const doc = __resourceNativeOwner(el);
   const source = __resourceNativeBase(el);
-  __imageHost.setState(el,{complete:false,naturalWidth:0,naturalHeight:0,currentSrc:__imageSource(src,source)});
+  const currentSrc = __imageSource(src,source);
+  // turbo-surf#38: a data: image is decoded synchronously, as Chrome loads it the moment
+  // its source is set; its load/error event still fires as a later task.
+  const data = /^data:/i.test(currentSrc);
+  const decoded = data && ops.op_csp_request(doc,currentSrc,"img-src","") ? ops.op_decode_data_image(currentSrc) : null;
+  if (decoded && decoded.ok || data && parser) __imageLoaded(el,src,decoded,currentSrc);
+  else __imageHost.setState(el,{complete:false,naturalWidth:0,naturalHeight:0,currentSrc});
   state.promise = __trackResource((async () => {
-    let result;
+    let result = decoded;
     const url = new URL(src, source).href, start = __resourceNow(win);
     try {
       await 0;
-      if (ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc)}));
+      if (!data && ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc)}));
     } catch (_) {}
     __recordResource(win, url, "img", start);
     if (__resources.get(el) !== state) return;
-    const loaded = !!(result && result.ok);
-    ops.op_live_image_loaded(el,src,loaded?result.width:0,loaded?result.height:0);
-    __imageHost.setState(el,loaded?{complete:true,naturalWidth:result.width,naturalHeight:result.height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
-    __fireResourceEvent(el, loaded ? "load" : "error", win);
+    __fireResourceEvent(el, __imageLoaded(el,src,result,url) ? "load" : "error", win);
   })());
   return state.promise;
 }
@@ -10032,7 +10066,7 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
     }
     const tag=__resourceTagName.call(el);
     if(tag==="SCRIPT"||__resourceLocalName.call(el)==="script")continue;
-    if (tag==="IMG") {__loadImage(el,win);continue;}
+    if (tag==="IMG") {__loadImage(el,win,true);continue;}
     if(tag==="STYLE"){
       const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
       const source=__resourceText.call(el);let state=__resources.get(el);

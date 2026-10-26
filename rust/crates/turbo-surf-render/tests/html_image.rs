@@ -69,7 +69,6 @@ async fn images_load_from_mutations_connected_or_not_like_chrome156() {
 /// images alike); a broken script-set one stays pending until its error event, while a
 /// broken parser one is already complete at the first script read.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#38: fails until data: images decode synchronously"]
 async fn data_images_decode_synchronously_like_chrome156() {
     matches_control(
         include_str!("fixtures/html_image_sync_probe.js"),
@@ -85,7 +84,6 @@ async fn data_images_decode_synchronously_like_chrome156() {
 /// synchronously (complete with its natural size on the first read; its load event still
 /// fires later), as for an inline script at the end of the body in Chrome.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#38: fails until data: images decode synchronously"]
 async fn parser_images_load_before_a_render_script_like_chrome156() {
     let probe = include_str!("fixtures/html_image_render_probe.js");
     let page = include_str!("fixtures/html_image_render_page.html");

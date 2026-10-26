@@ -374,9 +374,10 @@ SERP in one baseline while another fails effective consent dismissal. The later
   binding's `imageHost.setLayoutQuery` (turbo-dom#26: the pixel-snapped, zoom-adjusted
   content box and the untransformed border-box document position; not rendered → the
   attribute or natural size, 0). A `render(html, base, script)`
-  starts the parser's image and stylesheet loads before its script runs; a parser
-  `data:` image is still pending at the script's first read (Chrome has decoded it
-  already). Responsive image selection, CSS image/font initiation, incremental
+  starts the parser's image and stylesheet loads before its script runs, and a `data:`
+  image is decoded synchronously when its source is set, so the first script read sees
+  it complete with its natural size, as in Chrome (turbo-surf#38); its `load`/`error`
+  event still fires as a later task. Responsive image selection, CSS image/font initiation, incremental
   parsing and complete browser async-script scheduling remain outside this resource loader.
   Image, linked/imported stylesheet and classic-script fetches record their actual duration
   in the performance resource timeline; unavailable wire sizes and transport phases remain zero.

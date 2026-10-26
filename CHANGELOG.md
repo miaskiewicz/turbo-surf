@@ -12,8 +12,13 @@
   receiver with Blink's TypeError and an undecodable image with an `EncodingError`
   `DOMException`. `render(html, base, script)` now starts the parser's image and
   stylesheet loads before its script, so parser images load and fire `load`/`error`
-  (they never loaded there). Remaining gap: a parser `data:` image is still pending
-  at the script's first read (Chrome decodes it synchronously).
+  (they never loaded there).
+- `data:` images decode synchronously (#38): like Chrome, an image whose source is a
+  `data:` URL is complete with its natural size the moment the source is set (parser
+  images at the first script read, `new Image().src`, fragment-parsed and connected
+  images); its `load`/`error` event still fires as a later task, and a broken script-set
+  one stays pending until that `error`. Chrome 156 controls
+  `html_image_render_chrome156.json` (now exact) and `html_image_sync_chrome156.json`.
 - `HTMLImageElement` is entirely the binding's (turbo-dom#23): surf's plain-function
   `globalThis.Image`, its `src` setter and `decode()` overrides are gone, so `Image` is
   the native legacy factory (`new`-only, `length` 0, NewTarget-aware) and `decode()`

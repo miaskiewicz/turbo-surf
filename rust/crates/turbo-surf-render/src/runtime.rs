@@ -9887,6 +9887,9 @@ const __resources = new WeakMap();
 const __resourcePromises = new Set();
 const __resourceSheetConstructor = CSSStyleSheet;
 const __resourceSheetRules = ops.op_interface_record_get(document).cssHost.readRules;
+// Image load state is published to the binding's HTMLImageElement.prototype accessors
+// (complete/naturalWidth/naturalHeight/currentSrc); page JS cannot reach this record.
+const __imageHost = ops.op_interface_record_get(document).imageHost;
 const __resourceStyleRequests = new WeakMap();
 const __resourceCSSHosts = new WeakMap();
 const __resourceCompatMode=Object.getOwnPropertyDescriptor(Document.prototype,"compatMode").get;
@@ -9949,15 +9952,17 @@ async function __loadSheetImports(sheet, source, win, depth = 0) {
     } catch (_) { if(!recorded)__recordResource(win, url, "css", start); }
   }
 }
+function __imageSource(src, source) {try{return new URL(src,source).href;}catch(_){return src;}}
 function __loadImage(el, win = globalThis) {
-  const src = el.getAttribute("src") || "";
+  const src = __resourceAttribute.call(el,"src") || "";
   const previous = __resources.get(el);
   if (previous && previous.src === src) return previous.promise;
-  const state = {src,complete:!src,width:0,height:0,currentSrc:"",promise:null};
+  const state = {src,promise:null};
   __resources.set(el,state);
-  if (!src) return Promise.resolve();
+  if (!src) {__imageHost.setState(el,null);return state.promise=Promise.resolve();}
   const doc = __resourceNativeOwner(el);
   const source = __resourceNativeBase(el);
+  __imageHost.setState(el,{complete:false,naturalWidth:0,naturalHeight:0,currentSrc:__imageSource(src,source)});
   state.promise = __trackResource((async () => {
     let result;
     const url = new URL(src, source).href, start = __resourceNow(win);
@@ -9967,29 +9972,28 @@ function __loadImage(el, win = globalThis) {
     } catch (_) {}
     __recordResource(win, url, "img", start);
     if (__resources.get(el) !== state) return;
-    state.complete=true;
-    if (result && result.ok) {state.width=result.width;state.height=result.height;state.currentSrc=result.url;}
-    __fireResourceEvent(el, result && result.ok ? "load" : "error", win);
+    const loaded = !!(result && result.ok);
+    __imageHost.setState(el,loaded?{complete:true,naturalWidth:result.width,naturalHeight:result.height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
+    __fireResourceEvent(el, loaded ? "load" : "error", win);
   })());
   return state.promise;
 }
-function __patchImage(el, win = globalThis) {
-  if (el.__tcImagePatched) return;
-  el.__tcImagePatched=true;
-  for (const [name, key, fallback] of [["complete","complete",true],["naturalWidth","width",0],["naturalHeight","height",0],["currentSrc","currentSrc",""]]) {
-    Object.defineProperty(el,name,{configurable:true,get(){const state=__resources.get(this);return state?state[key]:fallback;}});
-  }
-  Object.defineProperty(el,"src",{configurable:true,get(){const src=this.getAttribute("src")||"";try{return src?new URL(src,(this.ownerDocument&&this.ownerDocument.URL)||win.location.href).href:"";}catch(_){return src;}},set(value){this.setAttribute("src",String(value));__loadImage(this,win);}});
-  el.decode=function(){return __loadImage(this,win).then(()=>{if(!this.naturalWidth){const error=new Error("The source image cannot be decoded");error.name="EncodingError";throw error;}});};
-}
+// src and decode() stay on HTMLImageElement.prototype, as in Chrome: an image never
+// carries own properties, however it was created or inserted. Assigning src starts a
+// load (the binding's reflected setter runs first and keeps its receiver check).
+const __imagePrototype = HTMLImageElement.prototype;
+const __imageSourceDescriptor = Object.getOwnPropertyDescriptor(__imagePrototype,"src");
+const __imageNaturalWidth = Object.getOwnPropertyDescriptor(__imagePrototype,"naturalWidth").get;
+const __imageSetSource = __imageSourceDescriptor.set;
+Object.defineProperty(__imagePrototype,"src",{...__imageSourceDescriptor,set:__G.makeNativeFunction(function(value){__resourceListApply(__imageSetSource,this,[value]);__loadImage(this,globalThis);},"set src",1)});
+Object.defineProperty(__imagePrototype,"decode",{value:__G.makeNativeFunction(function(){
+  // A promise-returning operation reports a bad receiver as a rejection.
+  try{__resourceListApply(__imageNaturalWidth,this,[]);}catch(_){return Promise.reject(new TypeError("Failed to execute 'decode' on 'HTMLImageElement': Illegal invocation"));}
+  return __resourceThen(__loadImage(this,globalThis),()=>{if(!__resourceListApply(__imageNaturalWidth,this,[]))throw new DOMException("The source image cannot be decoded.","EncodingError");});
+},"decode",0),writable:true,enumerable:true,configurable:true});
 const __createResourceElement = document.createElement.bind(document);
-document.createElement = function(tag, options) {
-  const el=__createResourceElement(tag,options);
-  if (String(tag).toLowerCase()==="img") __patchImage(el);
-  return el;
-};
 globalThis.Image = function Image(width,height) {
-  const el=document.createElement("img");
+  const el=__createResourceElement("img");
   if(width!=null)el.width=width;if(height!=null)el.height=height;
   return el;
 };
@@ -10014,7 +10018,7 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
     }
     const tag=__resourceTagName.call(el);
     if(tag==="SCRIPT"||__resourceLocalName.call(el)==="script")continue;
-    if (tag==="IMG") {__patchImage(el,win);__loadImage(el,win);continue;}
+    if (tag==="IMG") {__loadImage(el,win);continue;}
     if(tag==="STYLE"){
       const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
       const source=__resourceText.call(el);let state=__resources.get(el);

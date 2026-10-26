@@ -7,12 +7,12 @@ repository.workspace = true
 description = "turbo-surf JS-execution tier (tier 3): deno_core isolate + rtdom↔V8 DOM binding"
 
 [dependencies]
-deno_core = { package = "turbo-surf-deno-core", version = "=0.412.0" }
+deno_core = { package = "turbo-surf-deno-core", version = "=0.412.1" }
 # Official native WebCrypto and its lazy Web IDL/console dependencies share the
 # existing deno_core/V8 facade; they do not replace the rtdom DOM globals.
-deno_crypto = { package = "turbo-surf-deno-crypto", version = "=0.273.0" }
-deno_web = { package = "turbo-surf-deno-web", version = "=0.290.0" }
-deno_webidl = { package = "turbo-surf-deno-webidl", version = "=0.259.0" }
+deno_crypto = { package = "turbo-surf-deno-crypto", version = "=0.273.1" }
+deno_web = { package = "turbo-surf-deno-web", version = "=0.290.1" }
+deno_webidl = { package = "turbo-surf-deno-webidl", version = "=0.259.1" }
 # X-Wing uses the same reviewed primitives already pulled in by deno_crypto.
 fips203 = "=0.4.3"
 x25519-dalek = "=2.0.1"
@@ -23,9 +23,10 @@ subtle = "2"
 # pinned to the version deno_core 0.412 resolves so the types unify.
 deno_error = "=0.7.1"
 # Use deno_core's facade for the binding's bare `v8` imports as well. The facade's
-# V8 backend uses official rusty_v8 150.4; mixing in a second native V8 library
-# would make the DOM handles incompatible with the runtime's context.
-v8 = { package = "turbo-surf-deno-v8", version = "=0.4.0" }
+# V8 backend is turbo-dom's rusty_v8 150.4 fork (`turbo-dom-v8 ~150.4`); mixing in a
+# second native V8 library would make the DOM handles incompatible with the
+# runtime's context (scripts/check-single-v8.sh guards the graph).
+v8 = { package = "turbo-surf-deno-v8", version = "=0.4.1" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
 # Public live-tree snapshots preserve source provenance without HTML serialization.
 # Published0.3.8 includes the composed-layout and shared-font producer fixes.

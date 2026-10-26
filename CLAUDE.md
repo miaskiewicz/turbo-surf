@@ -42,6 +42,9 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   detection tests locate the resolved package via `cargo metadata`
   (`harness/detection/binding-files.mjs`). `native-sdk-frame-read` on
   render/mcp/napi/py forwards to the crate for the engine-154/155 native-SDK overlay.
+  `selector-dual` on render/view/page/mcp/napi/py is a TEMPORARY consolidation gate
+  (turbo-dom `docs/selector-dual-gate.md`): it forwards to turbo-dom / turbo-dom-browser-env
+  and must never be enabled in a published build (removed at the end of S3b).
 
 ## The gates
 

@@ -10,6 +10,10 @@ description = "turbo-surf tier 2: Page over the turbo-dom Rust parser + Navigato
 default = ["impersonate"]
 # Forward turbo-surf-core's BoringSSL Chrome-fingerprint client. See its net.rs.
 impersonate = ["turbo-surf-core/impersonate"]
+# TEMPORARY consolidation gate (turbo-dom docs/selector-dual-gate.md): forward turbo-dom's
+# `selector-dual` (frozen B-main selector engine run next to the current one). Never
+# enable it in a published or production build; removed in the last S3b commit.
+selector-dual = ["turbo-dom-parser/selector-dual"]
 
 [dependencies]
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.5" }

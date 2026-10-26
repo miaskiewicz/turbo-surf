@@ -14,6 +14,11 @@
   `turbo_dom_browser_env::test_support`; Node detection tests locate the package via
   `cargo metadata`. New forwarding feature `native-sdk-frame-read` on
   render/mcp/napi/py (enabled by the engine-154/155 native-SDK overlay).
+- turbo-dom git pin moved to `7dfc1d9` (turbo-dom#18 S3a: Chrome-correct selector
+  escapes, non-ASCII idents, `*|p`, `:empty`, `:read-only`/`:read-write`,
+  `:nth-child(An+B of S)`, `:link`/`:any-link`). TEMPORARY forwarding feature
+  `selector-dual` on render/view/page/mcp/napi/py for turbo-dom's dual-engine
+  consolidation gate; never enabled in published builds, removed with S3b.
 - The interceptor ShouldThrowOnError fix is active: strict `[[Set]]`/`[[Delete]]` and
   `Object.defineProperty` on interceptor-backed collections (`document.all`,
   `<select>`, `select.options`) throw Chrome's TypeError, sloppy writes and the

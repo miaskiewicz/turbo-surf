@@ -33,7 +33,7 @@ deno_error = "=0.7.1"
 # second native V8 library would make the DOM handles incompatible with the
 # runtime's context (scripts/check-single-v8.sh guards the graph).
 v8 = { package = "turbo-surf-deno-v8", version = "=0.4.1" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.6" }
 # The rtdom↔V8 DOM binding (window, document, CSSOM, forms, events). host-internals
 # gives surf's native layout capture and resource discovery host-only document access.
 turbo-dom-browser-env = { version = "0.6.0", features = ["host-internals"] }

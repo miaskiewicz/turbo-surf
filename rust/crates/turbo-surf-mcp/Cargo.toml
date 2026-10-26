@@ -43,7 +43,7 @@ turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.5" }
 turbo-surf-page = { path = "../turbo-surf-page", version = "0.5.5" }
 turbo-dom-raster = "0.6.0"
 turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.5" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.6" }
 async-trait = "0.1"
 base64 = "0.22"
 futures-util = "0.3"

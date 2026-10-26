@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import tarfile
 import tempfile
 import tomllib
@@ -22,7 +23,7 @@ archive_spec.loader.exec_module(archive_check)
 tree_spec = importlib.util.spec_from_file_location("deno_candidate_tree", ROOT / "candidate_tree.py")
 candidate_tree = importlib.util.module_from_spec(tree_spec)
 tree_spec.loader.exec_module(candidate_tree)
-RENDER_VENDOR = ROOT.parents[1] / "crates/turbo-surf-render/src/vendor/deno_extensions"
+RENDER_PINS = ROOT.parents[1] / "crates/turbo-surf-render/src/deno_extension_sources_tests.rs"
 
 
 class ArchiveContracts(unittest.TestCase):
@@ -343,20 +344,20 @@ class EmbeddedSourceContracts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "source bytes"):
                 prepare.embedded_module("deno_x", pin, target)
 
-    @unittest.skipUnless((RENDER_VENDOR / "pins.json").is_file(), "render vendor copy retired")
-    def test_pins_match_the_bytes_surf_vendors_today(self):
-        # Byte-identity with turbo-surf-render's vendored copy, while it exists.
-        render = {p["alias"]: p for p in json.loads((RENDER_VENDOR / "pins.json").read_text())["packages"]}
+    def test_pins_match_the_reviewed_render_pins(self):
+        # turbo-surf-render re-checks the distributions' embedded tables against its
+        # own reviewed SOURCE_PINS / LICENSE_SHA256; both pin sets must agree.
+        text = RENDER_PINS.read_text()
+        render = [(s, h, int(n)) for s, h, n in re.findall(r'\("(ext:[^"]+)", "([0-9a-f]{64})", (\d+)\),', text)]
+        license_pin = re.search(r'const LICENSE_SHA256: &str = "([0-9a-f]{64})";', text)[1]
         pins = json.loads((ROOT / "source-pins.json").read_text())["packages"]
-        self.assertEqual(set(render), prepare.EMBEDDED_LEAVES)
-        for old, package in render.items():
+        expected = []
+        for old in ["deno_web", "deno_webidl", "deno_crypto"]:
             embedded = pins[old]["embeddedSources"]
-            self.assertEqual({k: embedded[k] for k in ("declarationSha256", "licenseFile", "licenseSha256")},
-                             {k: package[k] for k in ("declarationSha256", "licenseFile", "licenseSha256")})
-            self.assertEqual(embedded["sources"], [{k: row[k] for k in ("kind", "file", "sha256", "bytes")} for row in package["sources"]])
-            self.assertEqual([row["specifier"] for row in package["sources"]], [f"ext:{old}/{row['file']}" for row in embedded["sources"]])
-            for row in embedded["sources"] + [{"file": embedded["licenseFile"], "sha256": embedded["licenseSha256"]}]:
-                self.assertEqual(hashlib.sha256((RENDER_VENDOR / old / row["file"]).read_bytes()).hexdigest(), row["sha256"])
+            self.assertEqual(embedded["licenseSha256"], license_pin)
+            expected += [(f"ext:{old}/{row['file']}", row["sha256"], row["bytes"]) for row in embedded["sources"]]
+        self.assertEqual(set(pins) & prepare.EMBEDDED_LEAVES, {"deno_web", "deno_webidl", "deno_crypto"})
+        self.assertEqual(render, expected)
 
 
 class CandidateTreeContracts(unittest.TestCase):

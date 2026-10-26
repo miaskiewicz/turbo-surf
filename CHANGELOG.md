@@ -114,9 +114,18 @@
   `host_input`'s interruption tests run only the interrupted operation under their tiny
   budget (new `#[doc(hidden)] PageSession::set_execution_budget_for_testing`) and check
   the session afterwards under a 60 s cap (#47).
-- turbo-dom crates repinned to turbo-dom refactor be87ef2 (P5b-X4/W3/X5/W4/W5: layout
-  turbo-dom#28, #41, #48-#53, #55, #56, #62-#65, #69, #70; dialog/top layer,
-  `::before`/`::after`; raster `data:` images, AVIF orientation, JPEG XL, clip:rect). Screenshots paint `<img src="data:…">`
+- turbo-dom crates repinned to turbo-dom refactor 8965838 (P5b-X4/W3/X5/W4/W5/X6/X7/W6 and
+  the core coverage slice: layout turbo-dom#28, #41, #48-#53, #55, #56, #62-#65, #69, #70,
+  #75-#78, #86, #88, #93; dialog/top layer, fullscreen, `::before`/`::after`, composed
+  events across shadow trees, `<track>`, CE reactions on adoption; raster `data:` images,
+  AVIF orientation, JPEG XL, clip:rect, truncated images; the realm DOMException (#42),
+  parsed `is=` state after a GC (#41), base-URL reflection, `<picture>` / `srcset` selection;
+  selector/parser fixes #91 #92 #96 #98). The pins this closes are dropped
+  (`custom_elements_defined`, `dom_exception_identity`, `html_image`, `image_formats`,
+  `pointer_capture`); the binding's new controls run through `PageSession`
+  (`binding_dom_controls.rs`, the async `fullscreen` case of `computed_defaults.rs` with a
+  trusted host click per `__cdpGesture()`); a child frame's `HTMLTrackElement` key order is
+  pinned as turbo-dom#99. Screenshots paint `<img src="data:…">`
   without a caller asset map (turbo-dom#60, verified by the screenshot control with an
   empty map — the screenshot tool's real input); live loads size JPEG XL.
 - turbo-dom crates repinned to the P5b binding fixes (turbo-dom#20 `Option()` and

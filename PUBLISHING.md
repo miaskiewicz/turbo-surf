@@ -149,10 +149,12 @@ resolves them from Git through `[patch.crates-io]`: turbo-dom, turbo-dom-layout,
 turbo-dom-raster and turbo-dom-browser-env at a turbo-dom commit, turbo-dom-v8 at
 its turbo-dom candidate commit and the seven Deno-family 0.x.1 candidates at one
 `consolidation/deno-candidates` commit. A tag must not ship that graph:
-`rust-crates-publish.yml`'s tag-only `release-guard` job runs
+`rust-crates-publish.yml`'s tag-only `release-guard` job, and the tag-push `validate`
+job of `release.yml` (npm) and `release-py.yml` (PyPI), run
 `rust/release-deps/release_guard.py` (no `[patch]` table or `[[patch.unused]]`
 record, no Git/path source in `rust/Cargo.lock`, every prerequisite locked from
-crates.io at a version the sparse index lists unyanked) before anything publishes.
+crates.io at a version the sparse index lists unyanked) before anything builds or
+publishes.
 
 1. Wait for the prerequisites, in this order, each listed on crates.io before the
    next: turbo-dom's `v0.6.0` tag (turbo-dom-v8 150.4.0, turbo-dom, turbo-dom-layout,

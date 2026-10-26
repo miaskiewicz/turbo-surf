@@ -47,6 +47,10 @@ jobs:
                   raise SystemExit('Release tag must exactly match ' + expected)
           print('Release source:', os.environ['GITHUB_SHA'], 'version:', version)
           PYCODE
+      - name: Release guard (no [patch] table, no git sources, prerequisites on crates.io)
+        if: github.event_name == 'push'
+        working-directory: rust
+        run: python3 -B release-deps/release_guard.py
 
   # ---------------------------------------------------------------------------
   # 1. Build abi3 wheels across platforms + an sdist.

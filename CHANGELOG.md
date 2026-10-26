@@ -102,6 +102,9 @@
   and `frame_gc_contracts` use 60 s session caps, the opaque-srcdoc probe waits up to
   60 s for its frame's message (control recaptured on Chrome 156), and the frame
   lifetime test awaits its probe instead of reading it before the frames loaded (#46).
+  `host_input`'s interruption tests run only the interrupted operation under their tiny
+  budget (new `#[doc(hidden)] PageSession::set_execution_budget_for_testing`) and check
+  the session afterwards under a 60 s cap (#47).
 - turbo-dom crates repinned to turbo-dom refactor be87ef2 (P5b-X4/W3/X5/W4/W5: layout
   turbo-dom#28, #41, #48-#53, #55, #56, #62-#65, #69, #70; dialog/top layer,
   `::before`/`::after`; raster `data:` images, AVIF orientation, JPEG XL, clip:rect). Screenshots paint `<img src="data:…">`

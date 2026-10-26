@@ -205,6 +205,57 @@ class ProcessTests(unittest.TestCase):
                 stream.close()
 
 
+class _LateReapedLeader:
+    """A group leader that has exited but whose first poll() still says "running": the
+    leader exits between group_alive's reap and its killpg probe (turbo-surf#45)."""
+
+    def __init__(self):
+        self.child = subprocess.Popen(["true"], start_new_session=True)
+        self.pid = self.child.pid
+        self.polls = 0
+        self.returncode = None
+        # Wait until the leader is a zombie: the only member of its own group.
+        deadline = time.monotonic() + SAFETY_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(self.pid, 0)
+            except PermissionError:
+                return
+            time.sleep(0.01)
+        raise AssertionError("leader never became a zombie")
+
+    def poll(self):
+        self.polls += 1
+        if self.polls == 1:
+            return None
+        self.returncode = self.child.poll()
+        return self.returncode
+
+    def wait(self, timeout=None):
+        self.returncode = self.child.wait(timeout=timeout)
+        return self.returncode
+
+
+@unittest.skipIf(sys.platform != "darwin", "macOS reports EPERM for a zombie-only process group")
+class ZombieGroupTests(unittest.TestCase):
+    @unittest.expectedFailure  # turbo-surf#45: fails until the fix
+    def test_group_alive_treats_a_zombie_only_group_as_gone(self):
+        leader = _LateReapedLeader()
+        try:
+            self.assertFalse(SMOKE.group_alive(leader))
+        finally:
+            leader.wait(timeout=5)
+
+    @unittest.expectedFailure  # turbo-surf#45: fails until the fix
+    def test_retire_finishes_when_the_leader_becomes_a_zombie(self):
+        leader = _LateReapedLeader()
+        try:
+            SMOKE.retire(leader)
+            self.assertEqual(leader.returncode, 0)
+        finally:
+            leader.wait(timeout=5)
+
+
 class _GitCheckoutCase(unittest.TestCase):
     def setUp(self):
         self.source = Path(__file__).resolve().parents[1]

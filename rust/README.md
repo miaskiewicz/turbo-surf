@@ -54,8 +54,11 @@ the root npm test command checks versions, the addon/shim and detection harness 
 
 The render tier consumes `turbo-dom-layout` 0.6.0 (the layout half of
 turbo-html2pdf-core 0.3.9, relocated verbatim into turbo-dom) for native live-tree
-box geometry, transforms, element scroll metrics and point-hit regions. It reads
-private actual CSSOM state without guest getters or HTML rewriting. Supported
+box geometry, transforms, element scroll metrics and point-hit regions: its live-DOM
+input (`turbo_dom_layout::live`) styles the page's own composed tree in place from the
+rules surf matched per tree scope, and its `cssom_view` modules (moved from this crate)
+compute the CSSOM-View answers. It reads private actual CSSOM state without guest
+getters or HTML rewriting. Supported
 contracts and remaining inline/caret/scroll/layout limits are recorded in
 [LIVE-GEOMETRY.md](../harness/detection/LIVE-GEOMETRY.md).
 

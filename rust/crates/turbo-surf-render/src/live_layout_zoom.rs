@@ -2,7 +2,9 @@
 //! is multiplied by its effective zoom: the product of computed zoom factors
 //! along the flat tree. Layout therefore runs in zoomed pixels, while CSSOM
 //! offset/client/scroll metrics convert back through the element's own zoom.
-use turbo_dom_layout::{ComputedStyle, StyledNode};
+use turbo_dom_layout::cssom_view::scroll::{SourceStyle, SourceStyles};
+use turbo_dom_layout::layout_snapshot::SourceId;
+use turbo_dom_layout::{ComputedStyle, StyledElement, StyledNode};
 
 /// The computed zoom factor of one element: invalid, CSS-wide and zero values
 /// compute to 1 (an `inherit` was already replaced by the parent's value).
@@ -15,21 +17,53 @@ pub(crate) fn factor(style: &ComputedStyle) -> f32 {
         .unwrap_or(1.0)
 }
 
-/// Scale each zoomed element's used lengths in place, in flat-tree order.
-pub(crate) fn apply(nodes: &mut [StyledNode]) {
-    walk(nodes, 1.0);
+/// Scale each zoomed element's used lengths in place, in flat-tree order, and
+/// collect every element's used style, flat source parent, tag and effective zoom
+/// (the post-cascade hook of the live layout: one walk).
+pub(crate) fn apply(nodes: &mut [StyledNode], document: u32) -> SourceStyles {
+    let mut styles = SourceStyles::new();
+    walk(nodes, (None, 1.0), document, &mut styles);
+    styles
 }
 
-fn walk(nodes: &mut [StyledNode], parent: f32) {
+fn walk(
+    nodes: &mut [StyledNode],
+    (parent, zoom): (Option<SourceId>, f32),
+    document: u32,
+    out: &mut SourceStyles,
+) {
     for node in nodes {
         let StyledNode::Element(element) = node else {
             continue;
         };
-        let effective = parent * factor(&element.style);
+        let effective = zoom * factor(&element.style);
         if effective != 1.0 {
             element.style = scaled(&element.style, effective);
         }
-        walk(&mut element.children, effective);
+        let id = element
+            .source
+            .map(|handle| turbo_dom_layout::live::source_id(document, handle));
+        if let Some(id) = id {
+            out.insert(id, source_style(element, parent, effective));
+        }
+        walk(
+            &mut element.children,
+            (id.or(parent), effective),
+            document,
+            out,
+        );
+    }
+}
+
+fn source_style(element: &StyledElement, parent: Option<SourceId>, zoom: f32) -> SourceStyle {
+    SourceStyle {
+        style: element.style.clone(),
+        parent,
+        zoom,
+        tag: match &element.tag {
+            turbo_dom_layout::Tag::Html(tag) => tag.clone(),
+            turbo_dom_layout::Tag::Marker(_) => String::new(),
+        },
     }
 }
 
@@ -278,7 +312,9 @@ mod tests {
             children: vec![child, StyledNode::Text("10px".into())],
             source: None,
         })];
-        apply(&mut nodes);
+        let styles = apply(&mut nodes, 1);
+        // Synthetic elements have no source: nothing is collected for them.
+        assert!(styles.is_empty());
         let parent = nodes[0].as_element().unwrap();
         assert_eq!(parent.style.get("font-size"), Some("32px"));
         assert_eq!(parent.style.get("font-family"), Some("a10px"));
@@ -287,5 +323,35 @@ mod tests {
         let child = parent.children[0].as_element().unwrap();
         assert_eq!(child.style.get("width"), Some("60px"));
         assert_eq!(child.style.get("font-size"), Some("96px"));
+    }
+
+    #[test]
+    fn the_hook_walk_collects_flat_parents_tags_and_effective_zoom() {
+        let tree = turbo_dom_parser::rtdom::Tree::parse("<div></div><p></p>");
+        let [div, p] = ["div", "p"].map(|tag| tree.query_selector(tag).unwrap());
+        let element = |tag: &str, source, zoom: &str, children| {
+            StyledNode::Element(StyledElement {
+                tag: turbo_dom_layout::Tag::Html(tag.into()),
+                attrs: Vec::new(),
+                style: ComputedStyle::from_pairs([("zoom", zoom), ("width", "10px")]),
+                children,
+                source,
+            })
+        };
+        // An unsourced (anonymous) element passes its parent through.
+        let anonymous = element("span", None, "1", vec![element("p", Some(p), "3", vec![])]);
+        let mut nodes = vec![element("div", Some(div), "2", vec![anonymous])];
+        let styles = apply(&mut nodes, 4);
+        let id = |node| turbo_dom_layout::live::source_id(4, node);
+        assert_eq!(styles.len(), 2);
+        let outer = &styles[&id(div)];
+        assert_eq!(
+            (outer.parent, outer.zoom, outer.tag.as_str()),
+            (None, 2.0, "div")
+        );
+        assert_eq!(outer.style.get("width"), Some("20px"));
+        let inner = &styles[&id(p)];
+        assert_eq!((inner.parent, inner.zoom), (Some(id(div)), 6.0));
+        assert_eq!(inner.style.get("width"), Some("60px"));
     }
 }

@@ -55,7 +55,7 @@ fn capture(tree: &Tree) -> Result<LiveTreeInput, String> {
 }
 
 fn capture_with(tree: &Tree, overrides: &[(Handle, &str)]) -> Result<LiveTreeInput, String> {
-    capture_composed_tree(tree, DOCUMENT, Some(graph(tree, overrides)))
+    capture_composed_tree(tree, DOCUMENT, graph(tree, overrides))
 }
 
 fn error(result: Result<LiveTreeInput, String>) -> String {
@@ -67,7 +67,6 @@ fn layout(
     input: &LiveTreeInput,
     rules: &[ActiveRule],
 ) -> Result<LayoutSnapshot, String> {
-    let _ = tree;
     let fonts = FontRegistry::new();
     let images = ImageCtx {
         resolver: &NoImages,
@@ -79,8 +78,15 @@ fn layout(
         fonts: &fonts,
         images: &images,
     };
-    layout_active_rules_resolved(input, rules, 1.0, &inputs, &mut Diagnostics::default())
-        .map(|(snapshot, _)| snapshot)
+    layout_active_rules_resolved(
+        tree,
+        input,
+        rules,
+        1.0,
+        &inputs,
+        &mut Diagnostics::default(),
+    )
+    .map(|(snapshot, _)| snapshot)
 }
 
 fn body(tree: &Tree) -> Handle {
@@ -114,7 +120,7 @@ const EMPTY_DOCUMENT_NODES: usize = 3;
 fn node_budget_counts_comments_doctypes_and_processing_instructions_before_filtering() {
     let mut tree = Tree::parse("");
     assert_eq!(
-        capture(&tree).unwrap().identities.len(),
+        capture(&tree).unwrap().capture.identities.len(),
         EMPTY_DOCUMENT_NODES
     );
     let body = body(&tree);
@@ -129,7 +135,7 @@ fn node_budget_counts_comments_doctypes_and_processing_instructions_before_filte
     }
     // Exactly at the budget: only the three elements are layout sources.
     let input = capture(&tree).unwrap();
-    assert_eq!(input.identities.len(), EMPTY_DOCUMENT_NODES);
+    assert_eq!(input.capture.identities.len(), EMPTY_DOCUMENT_NODES);
     let comment = tree.create_comment("");
     tree.append_child(body, comment);
     assert_eq!(error(capture(&tree)), NODE_BUDGET);
@@ -147,7 +153,7 @@ fn node_budget_counts_text_and_elements_alike() {
             tree.append_child(body, span);
         }
     }
-    assert_eq!(capture(&tree).unwrap().identities.len(), NODES);
+    assert_eq!(capture(&tree).unwrap().capture.identities.len(), NODES);
     text(&mut tree, body, "");
     assert_eq!(error(capture(&tree)), NODE_BUDGET);
 }
@@ -162,6 +168,7 @@ fn depth_budget_allows_elements_at_depth_256_and_text_below_them() {
     let input = capture(&tree).unwrap();
     let path = |node| {
         input
+            .capture
             .identities
             .iter()
             .find(|identity| identity.id == id(node))
@@ -189,7 +196,7 @@ fn text_budget_is_measured_on_the_lossy_utf8_conversion() {
     text(&mut tree, body, &"x".repeat(rest % 2));
     let input = capture(&tree).unwrap();
     // The original code units survive alongside the scalar copy.
-    assert_eq!(input.original_text.get(&id(node)).unwrap(), &lone);
+    assert_eq!(input.capture.original_text.get(&id(node)).unwrap(), &lone);
     let extra = text(&mut tree, body, "x");
     assert_eq!(error(capture(&tree)), TEXT_BUDGET);
     tree.remove_child(body, extra);
@@ -322,8 +329,12 @@ fn namespace_rejection_covers_mathml_and_null_namespace_elements_but_not_svg() {
     let svg = tree.query_selector("svg").unwrap();
     let g = tree.query_selector("g").unwrap();
     // Only the outermost svg is a viewport.
-    assert_eq!(input.svg_viewports, vec![id(svg)]);
-    assert!(input.identities.iter().any(|identity| identity.id == id(g)));
+    assert_eq!(input.capture.svg_viewports, vec![id(svg)]);
+    assert!(input
+        .capture
+        .identities
+        .iter()
+        .any(|identity| identity.id == id(g)));
     assert_eq!(
         error(capture(&Tree::parse("<math><mi>x</mi></math>"))),
         NAMESPACE

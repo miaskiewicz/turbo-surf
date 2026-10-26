@@ -9,20 +9,11 @@ use lightningcss::properties::{Property, PropertyId};
 use lightningcss::rules::CssRule;
 use lightningcss::selector::{Combinator, Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
-use turbo_dom_layout::layout_snapshot::SourceId;
 use turbo_dom_parser::rtdom::{tree::Handle, Tree};
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Target {
-    pub(crate) source: SourceId,
-    pub(crate) specificity: (u32, u32, u32),
-}
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ScopedRule {
-    pub(crate) depth: u32,
-    pub(crate) declarations: Vec<turbo_dom_layout::style::Declaration>,
-    pub(crate) targets: Vec<Target>,
-}
+/// A rule matched against one original tree scope: turbo-dom-layout's live-DOM
+/// input applies its declarations to its targets at the scope's depth.
+pub(crate) use turbo_dom_layout::live::{MatchedTarget as Target, PreMatched as ScopedRule};
 
 pub(crate) fn prepare_sheet(
     tree: &Tree,
@@ -247,7 +238,9 @@ fn declarations(
     Ok(result)
 }
 
-fn inline_declarations(text: &str) -> Result<Vec<turbo_dom_layout::style::Declaration>, String> {
+pub(crate) fn inline_declarations(
+    text: &str,
+) -> Result<Vec<turbo_dom_layout::style::Declaration>, String> {
     let block = DeclarationBlock::parse_string(
         text,
         ParserOptions {
@@ -406,6 +399,8 @@ impl Matcher<'_> {
     }
 }
 
+/// The UA stylesheet (turbo-dom-layout's + surf's live supplement + `slot`) matched
+/// in every tree scope of `graph`.
 pub(crate) fn ua_rules(
     tree: &Tree,
     document: u32,
@@ -443,157 +438,6 @@ pub(crate) fn ua_rules(
         }
     }
     Ok(result)
-}
-
-pub(crate) fn style_composed_tree(
-    input: &crate::live_layout::LiveTreeInput,
-    rules: &[crate::live_stylesheets::ActiveRule],
-) -> Result<Vec<turbo_dom_layout::StyledNode>, String> {
-    use turbo_dom_layout::style::{CascadeOrigin, MatchedDeclaration};
-    let graph = input
-        .composition
-        .as_ref()
-        .ok_or("native composed style graph unavailable")?;
-    let mut declarations = std::collections::HashMap::<SourceId, Vec<MatchedDeclaration>>::new();
-    let mut count = 0usize;
-    for (origin, rules) in [
-        (CascadeOrigin::UserAgent, graph.ua_rules.as_slice()),
-        (CascadeOrigin::Author, rules),
-    ] {
-        for (order, rule) in rules.iter().enumerate() {
-            let scoped = rule
-                .scoped
-                .as_ref()
-                .ok_or("native stylesheet scope provenance missing")?;
-            for target in &scoped.targets {
-                for declaration in &scoped.declarations {
-                    count += 1;
-                    if count > 500_000 {
-                        return Err("native scoped declaration budget exceeded".into());
-                    }
-                    declarations
-                        .entry(target.source)
-                        .or_default()
-                        .push(MatchedDeclaration {
-                            declaration: declaration.clone(),
-                            origin,
-                            scope_depth: scoped.depth,
-                            inline: false,
-                            specificity: target.specificity,
-                            order,
-                        });
-                }
-            }
-        }
-    }
-    let identities = input
-        .identities
-        .iter()
-        .map(|source| (source.path.clone(), source.id))
-        .collect::<std::collections::HashMap<_, _>>();
-    struct Styler<'a> {
-        graph: &'a Composition,
-        identities: &'a std::collections::HashMap<Vec<usize>, SourceId>,
-        declarations: &'a std::collections::HashMap<SourceId, Vec<MatchedDeclaration>>,
-    }
-    impl Styler<'_> {
-        fn nodes(
-            &self,
-            nodes: &[turbo_dom_layout::Node],
-            path: &[usize],
-            parent: &turbo_dom_layout::ComputedStyle,
-        ) -> Result<Vec<turbo_dom_layout::StyledNode>, String> {
-            use turbo_dom_layout::{Node, StyledNode};
-            let mut result = Vec::with_capacity(nodes.len());
-            for (index, node) in nodes.iter().enumerate() {
-                let mut path = path.to_vec();
-                path.push(index);
-                match node {
-                    Node::Text(text) => result.push(StyledNode::Text(text.as_str().into())),
-                    Node::Element(element) => {
-                        let source = *self
-                            .identities
-                            .get(&path)
-                            .ok_or("native composed source identity unavailable")?;
-                        let handle = Handle::from_raw(source.0 as u32);
-                        let root = self
-                            .graph
-                            .scopes
-                            .get(&handle)
-                            .ok_or("native composed source scope unavailable")?;
-                        let depth = *self
-                            .graph
-                            .depths
-                            .get(root)
-                            .ok_or("native composed source depth unavailable")?;
-                        let mut declarations = Vec::new();
-                        for declaration in
-                            turbo_dom_layout::style::presentational_declarations(element)
-                        {
-                            declarations.push(MatchedDeclaration {
-                                declaration,
-                                origin: CascadeOrigin::Author,
-                                scope_depth: depth,
-                                inline: false,
-                                specificity: (0, 0, 0),
-                                order: 0,
-                            });
-                        }
-                        declarations.extend(
-                            self.declarations
-                                .get(&source)
-                                .into_iter()
-                                .flatten()
-                                .cloned()
-                                .map(|mut d| {
-                                    d.order += 1;
-                                    d
-                                }),
-                        );
-                        if let Some(style) = element
-                            .attrs
-                            .iter()
-                            .find(|attribute| attribute.name == "style")
-                        {
-                            for declaration in inline_declarations(&style.value)? {
-                                declarations.push(MatchedDeclaration {
-                                    declaration,
-                                    origin: CascadeOrigin::Author,
-                                    scope_depth: depth,
-                                    inline: true,
-                                    specificity: (0, 0, 0),
-                                    order: usize::MAX,
-                                });
-                            }
-                        }
-                        let style =
-                            turbo_dom_layout::style::resolve_matched_style(parent, &declarations);
-                        let children = self.nodes(&element.children, &path, &style)?;
-                        result.push(StyledNode::Element(
-                            turbo_dom_layout::style::StyledElement {
-                                tag: element.tag.clone(),
-                                attrs: element.attrs.clone(),
-                                style,
-                                children,
-                                source: None,
-                            },
-                        ));
-                    }
-                }
-            }
-            Ok(result)
-        }
-    }
-    Styler {
-        graph,
-        identities: &identities,
-        declarations: &declarations,
-    }
-    .nodes(
-        &input.nodes,
-        &[],
-        &turbo_dom_layout::ComputedStyle::default(),
-    )
 }
 
 #[cfg(test)]

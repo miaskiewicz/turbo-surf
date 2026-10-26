@@ -20,6 +20,15 @@
   turbo-dom `Tree` and matches with turbo-dom's selector engine). The static
   screenshot tier treats `t:*` elements as unknown inline elements, as Chrome does
   (no surf fixture contains one).
+- Native live layout no longer copies the DOM: the live-tree copier
+  (`live_layout.rs`), the composed styler (`style_composed_tree`) and the separate
+  `collect_styles` walk are gone. turbo-dom-layout's live-DOM input
+  (`turbo_dom_layout::live`) captures the composed tree's provenance under the same
+  budgets and errors (pinned by `live_layout_budget_tests.rs`) and styles the live
+  tree from surf's pre-matched scoped rules; zoom scaling and style collection share
+  one post-cascade walk. The pure CSSOM-View modules (`live_layout_{metrics,hit,scroll,
+  visibility,inline,text,range}.rs` and the composition graph) moved to
+  turbo-dom-layout's `cssom_view`. No output change.
 - The interceptor ShouldThrowOnError fix is active: strict `[[Set]]`/`[[Delete]]` and
   `Object.defineProperty` on interceptor-backed collections (`document.all`,
   `<select>`, `select.options`) throw Chrome's TypeError, sloppy writes and the

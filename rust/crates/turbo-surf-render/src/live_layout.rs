@@ -1,207 +1,82 @@
-//! Native live-tree input for the public layout/provenance seam. No serializer,
-//! selectors, guest properties or identity attributes participate in this copy.
-use std::collections::HashMap;
-use turbo_dom_layout::layout_snapshot::{LayoutSnapshot, SnapshotInputs, SourceId, SourceIdentity};
-use turbo_dom_layout::style::LeveledRule;
-use turbo_dom_layout::{Attr, Cascade, Diagnostics, Element, Node, Tag};
-use turbo_dom_parser::rtdom::tree::{Handle, NodeType};
-use turbo_dom_parser::rtdom::{NodeRef, Tree};
+//! Native live-tree input for the public layout/provenance seam: turbo-dom-layout's
+//! live-DOM input (`turbo_dom_layout::live`) styles and lays out the page's own tree
+//! as surf composes it. No serializer, guest properties or identity attributes
+//! participate, and the tree is never copied.
+use turbo_dom_layout::layout_snapshot::{LayoutSnapshot, SnapshotInputs};
+use turbo_dom_layout::live::{LiveCapture, LiveOptions, LiveStyle, LiveTree, OriginRules};
+use turbo_dom_layout::style::CascadeOrigin;
+use turbo_dom_layout::Diagnostics;
+use turbo_dom_parser::rtdom::tree::Handle;
+use turbo_dom_parser::rtdom::Tree;
 
-const MAX_NODES: usize = 50_000;
-const MAX_DEPTH: usize = 256;
-const MAX_TEXT_BYTES: usize = 2_000_000;
+pub(crate) use turbo_dom_layout::live::source_id;
 
 pub(crate) struct LiveTreeInput {
-    pub(crate) document_id: u32,
-    pub(crate) tree_version: u64,
-    pub(crate) nodes: Vec<Node>,
-    pub(crate) identities: Vec<SourceIdentity>,
-    pub(crate) svg_viewports: Vec<SourceId>,
-    pub(crate) original_text: HashMap<SourceId, Vec<u16>>,
+    /// Identities, SVG viewports, original text, quirks mode, `document.body` and the
+    /// tree version, recorded under the source budgets at capture time.
+    pub(crate) capture: LiveCapture,
     pub(crate) composition: Option<crate::live_layout_composed::Composition>,
-    /// BackCompat documents address viewport metrics through their body.
-    pub(crate) quirks: bool,
-    /// The document's body element (`document.body`), when it is an HTML body.
-    pub(crate) body: Option<SourceId>,
 }
 
-pub(crate) fn source_id(document_id: u32, handle: Handle) -> SourceId {
-    SourceId((u64::from(document_id) << 32) | u64::from(handle.raw()))
+impl LiveTreeInput {
+    /// The inert input of a disconnected or non-browsing-context document.
+    pub(crate) fn empty(document_id: u32, tree_version: u64) -> Self {
+        Self {
+            capture: LiveCapture::empty(document_id, tree_version),
+            composition: None,
+        }
+    }
+    pub(crate) fn document_id(&self) -> u32 {
+        self.capture.document
+    }
 }
 
+/// A light-DOM composition of `tree` (every node's composed children are its tree
+/// children) with the per-scope UA rules: the test-only stand-in for the
+/// browsing-context capture in `live_layout_dom`.
+#[cfg(test)]
+pub(crate) fn light_composition(
+    tree: &Tree,
+    document_id: u32,
+) -> Result<crate::live_layout_composed::Composition, String> {
+    let mut graph = crate::live_layout_composed::Composition::scopes(tree)?;
+    let mut pending = vec![tree.root()];
+    while let Some(node) = pending.pop() {
+        let children = tree.children(node);
+        for &child in &children {
+            graph.parents.insert(child, node);
+        }
+        pending.extend(children.iter().copied());
+        graph.children.insert(node, children);
+    }
+    graph.ua_rules = crate::live_layout_scoped::ua_rules(tree, document_id, &graph)?;
+    Ok(graph)
+}
+
+/// Adapted@S4: the non-composed test capture is the composed capture of the light
+/// tree (`light_composition`).
 #[cfg(test)]
 pub(crate) fn capture_tree(tree: &Tree, document_id: u32) -> Result<LiveTreeInput, String> {
-    capture_composed_tree(tree, document_id, None)
+    capture_composed_tree(tree, document_id, light_composition(tree, document_id)?)
 }
 
+/// Capture the composed tree's layout provenance under the source budgets.
 pub(crate) fn capture_composed_tree(
     tree: &Tree,
     document_id: u32,
-    composition: Option<crate::live_layout_composed::Composition>,
+    composition: crate::live_layout_composed::Composition,
 ) -> Result<LiveTreeInput, String> {
-    let mut copy = Copier {
-        composition: composition.as_ref(),
-        document_id,
-        identities: Vec::new(),
-        svg_viewports: Vec::new(),
-        original_text: HashMap::new(),
-        nodes_left: MAX_NODES,
-        text_left: MAX_TEXT_BYTES,
-        attributes_left: MAX_TEXT_BYTES,
-    };
-    let nodes = copy.children(NodeRef::new(tree, tree.root()), &[], false)?;
-    Ok(LiveTreeInput {
-        document_id,
-        tree_version: tree.version,
-        nodes,
-        identities: copy.identities,
-        svg_viewports: copy.svg_viewports,
-        original_text: copy.original_text,
-        composition,
-        quirks: tree.compat_mode() == "BackCompat",
-        body: document_body(tree).map(|handle| source_id(document_id, handle)),
+    let children = |node: Handle| composition.children_of(node);
+    let capture = turbo_dom_layout::live::capture(&LiveTree {
+        tree,
+        document: document_id,
+        children: &children,
     })
-}
-
-/// `document.body`: the first body or frameset child of the HTML root element.
-fn document_body(tree: &Tree) -> Option<Handle> {
-    const HTML: Option<&str> = Some("http://www.w3.org/1999/xhtml");
-    let html = NodeRef::new(tree, tree.root())
-        .children()
-        .into_iter()
-        .find(|node| node.node_type() == NodeType::Element)
-        .filter(|node| {
-            node.local_name() == Some("html") && tree.namespace_uri(node.handle()) == HTML
-        })?;
-    html.children()
-        .into_iter()
-        .find(|node| {
-            node.node_type() == NodeType::Element
-                && matches!(node.local_name(), Some("body" | "frameset"))
-                && tree.namespace_uri(node.handle()) == HTML
-        })
-        .filter(|node| node.local_name() == Some("body"))
-        .map(|node| node.handle())
-}
-
-struct Copier<'a> {
-    composition: Option<&'a crate::live_layout_composed::Composition>,
-    document_id: u32,
-    identities: Vec<SourceIdentity>,
-    svg_viewports: Vec<SourceId>,
-    original_text: HashMap<SourceId, Vec<u16>>,
-    nodes_left: usize,
-    text_left: usize,
-    attributes_left: usize,
-}
-
-impl Copier<'_> {
-    fn children(
-        &mut self,
-        parent: NodeRef,
-        path: &[usize],
-        in_svg: bool,
-    ) -> Result<Vec<Node>, String> {
-        if path.len() > MAX_DEPTH {
-            return Err("native layout source exceeds depth budget".into());
-        }
-        let mut nodes = Vec::new();
-        let children = match self.composition {
-            Some(graph) => graph
-                .children
-                .get(&parent.handle())
-                .cloned()
-                .unwrap_or_default(),
-            None => parent
-                .children()
-                .into_iter()
-                .map(|node| node.handle())
-                .collect(),
-        };
-        for handle in children {
-            let child = NodeRef::new(parent.tree(), handle);
-            let mut child_path = path.to_vec();
-            child_path.push(nodes.len());
-            if let Some(node) = self.node(child, &child_path, in_svg)? {
-                nodes.push(node);
-            }
-        }
-        Ok(nodes)
-    }
-
-    fn node(
-        &mut self,
-        node: NodeRef,
-        path: &[usize],
-        in_svg: bool,
-    ) -> Result<Option<Node>, String> {
-        self.nodes_left = self
-            .nodes_left
-            .checked_sub(1)
-            .ok_or("native layout source exceeds node budget")?;
-        let value = match node.node_type() {
-            NodeType::Element => Node::Element(self.element(node, path, in_svg)?),
-            NodeType::Text => Node::Text(self.text(node)?),
-            _ => return Ok(None), // Comments/doctype/PI have no CSS layout boxes.
-        };
-        self.identities.push(SourceIdentity {
-            id: source_id(self.document_id, node.handle()),
-            path: path.to_vec(),
-        });
-        Ok(Some(value))
-    }
-
-    fn element(&mut self, node: NodeRef, path: &[usize], in_svg: bool) -> Result<Element, String> {
-        let namespace = node.tree().namespace_uri(node.handle());
-        let svg = namespace == Some("http://www.w3.org/2000/svg");
-        if namespace != Some("http://www.w3.org/1999/xhtml") && !svg {
-            return Err("native live layout does not yet support this element namespace".into());
-        }
-        if svg && node.local_name() == Some("svg") && !in_svg {
-            self.svg_viewports
-                .push(source_id(self.document_id, node.handle()));
-        }
-        let mut attrs = Vec::new();
-        for (name, value) in node.attributes() {
-            let length = name
-                .len()
-                .checked_add(value.len())
-                .ok_or("native layout attribute size overflow")?;
-            self.attributes_left = self
-                .attributes_left
-                .checked_sub(length)
-                .ok_or("native layout source exceeds attribute budget")?;
-            attrs.push(Attr { name, value });
-        }
-        if let Some(applied) = self
-            .composition
-            .and_then(|graph| graph.inline_overrides.get(&node.handle()))
-        {
-            if let Some(attribute) = attrs.iter_mut().find(|attribute| attribute.name == "style") {
-                attribute.value.clone_from(applied);
-            }
-        }
-        Ok(Element {
-            tag: Tag::Html(node.local_name().unwrap_or("").to_owned()),
-            attrs,
-            children: self.children(node, path, in_svg || svg)?,
-        })
-    }
-
-    fn text(&mut self, node: NodeRef) -> Result<String, String> {
-        let units = node
-            .tree()
-            .node_value_utf16(node.handle())
-            .unwrap_or_default();
-        let text = String::from_utf16_lossy(&units);
-        self.original_text
-            .insert(source_id(self.document_id, node.handle()), units);
-        self.text_left = self
-            .text_left
-            .checked_sub(text.len())
-            .ok_or("native layout source exceeds text budget")?;
-        Ok(text)
-    }
+    .map_err(|error| error.to_string())?;
+    Ok(LiveTreeInput {
+        capture,
+        composition: Some(composition),
+    })
 }
 
 // This is a UA-origin supplement, not author CSS or a DOM rewrite. Universal
@@ -213,41 +88,75 @@ pub(crate) const LIVE_UA: &str = concat!(
     "head,style,script,title,meta,link,base,noscript{display:none}",
 );
 
-pub(crate) fn live_cascade(css: &str, width: f32, height: f32) -> Cascade {
+/// The continuous-media viewport this thread's layout resolves `vw`/`vh` and
+/// layout-side media against (the live CSS was already resolved by surf).
+fn live_viewport(width: f32, height: f32) {
     turbo_dom_layout::set_media_viewport_height(height);
-    let mut cascade =
-        turbo_dom_layout::build_cascade_with_width(css, "", Default::default(), width);
-    let start = cascade.rules.len();
-    cascade.rules.extend(
-        turbo_dom_layout::style::parse_stylesheet(LIVE_UA)
-            .rules
-            .into_iter()
-            .enumerate()
-            .map(|(i, rule)| LeveledRule {
-                level: 0,
-                order: start + i,
-                rule,
-            }),
-    );
-    cascade
+    turbo_dom_layout::set_media_viewport_width(width);
+}
+
+/// The prepared rules of `css` in the document scope, as an author stylesheet.
+#[cfg(test)]
+pub(crate) fn test_rules(
+    tree: &Tree,
+    input: &LiveTreeInput,
+    css: &str,
+) -> Result<Vec<crate::live_stylesheets::ActiveRule>, String> {
+    use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleSheet};
+    let graph = input
+        .composition
+        .as_ref()
+        .ok_or("test input has no composition")?;
+    let parsed = StyleSheet::parse(css, ParserOptions::default())
+        .map_err(|error| format!("test CSS parse failed: {error:?}"))?;
+    let mut rules = Vec::new();
+    for rule in &parsed.rules.0 {
+        let text = lightningcss::traits::ToCss::to_css_string(rule, PrinterOptions::default())
+            .map_err(|error| format!("test CSS serialization failed: {error:?}"))?;
+        let mut sheet = crate::live_stylesheets::SheetSnapshot {
+            cycle: false,
+            disabled: false,
+            media: String::new(),
+            rules: vec![crate::live_stylesheets::RuleSnapshot {
+                kind: if matches!(rule, lightningcss::rules::CssRule::Style(_)) {
+                    1
+                } else {
+                    0
+                },
+                css_text: text.clone(),
+                prelude: None,
+                rules: None,
+                media: String::new(),
+                style_sheet: None,
+                scoped: None,
+            }],
+        };
+        crate::live_layout_scoped::prepare_sheet(
+            tree,
+            input.document_id(),
+            tree.root(),
+            graph,
+            &mut sheet,
+        )?;
+        rules.push(crate::live_stylesheets::ActiveRule {
+            text,
+            scoped: sheet.rules.remove(0).scoped,
+            resource: None,
+        });
+    }
+    Ok(rules)
 }
 
 #[cfg(test)]
 pub(crate) fn layout(
+    tree: &Tree,
     input: &LiveTreeInput,
     css: &str,
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
 ) -> Result<LayoutSnapshot, String> {
-    let cascade = live_cascade(css, inputs.width, inputs.height);
-    turbo_dom_layout::layout_snapshot::snapshot_live_tree(
-        &input.nodes,
-        &input.identities,
-        &cascade,
-        inputs,
-        diagnostics,
-    )
-    .map_err(|error| error.to_string())
+    let rules = test_rules(tree, input, css)?;
+    Ok(layout_active_rules_resolved(tree, input, &rules, 2.0, inputs, diagnostics)?.0)
 }
 
 /// Build each qualified active rule independently to preserve CSSOM source order
@@ -255,102 +164,142 @@ pub(crate) fn layout(
 /// deliberately not used by this live API.
 #[cfg(test)]
 pub(crate) fn layout_rules(
+    tree: &Tree,
     input: &LiveTreeInput,
     rules: &[String],
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
 ) -> Result<LayoutSnapshot, String> {
-    Ok(layout_rules_resolved(input, rules, 2.0, inputs, diagnostics)?.0)
+    Ok(layout_rules_resolved(tree, input, rules, 2.0, inputs, diagnostics)?.0)
 }
 
 #[cfg(test)]
 pub(crate) fn layout_rules_resolved(
+    tree: &Tree,
     input: &LiveTreeInput,
     rules: &[String],
     layout_scale: f32,
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
-) -> Result<(LayoutSnapshot, crate::live_layout_scroll::SourceStyles), String> {
-    let active = rules
-        .iter()
-        .map(|text| crate::live_stylesheets::ActiveRule {
-            text: text.clone(),
-            scoped: None,
-            resource: None,
-        })
-        .collect::<Vec<_>>();
-    layout_active_rules_resolved(input, &active, layout_scale, inputs, diagnostics)
+) -> Result<
+    (
+        LayoutSnapshot,
+        turbo_dom_layout::cssom_view::scroll::SourceStyles,
+    ),
+    String,
+> {
+    let mut active = Vec::new();
+    for text in rules {
+        let prepared = test_rules(tree, input, text);
+        match prepared {
+            Ok(mut prepared) if prepared.len() == 1 => active.push(prepared.remove(0)),
+            _ => active.push(crate::live_stylesheets::ActiveRule {
+                text: text.clone(),
+                scoped: None,
+                resource: None,
+            }),
+        }
+    }
+    layout_active_rules_resolved(tree, input, &active, layout_scale, inputs, diagnostics)
 }
+
 pub(crate) fn layout_active_rules_resolved(
+    tree: &Tree,
     input: &LiveTreeInput,
     rules: &[crate::live_stylesheets::ActiveRule],
     layout_scale: f32,
     inputs: &SnapshotInputs,
     diagnostics: &mut Diagnostics,
-) -> Result<(LayoutSnapshot, crate::live_layout_scroll::SourceStyles), String> {
-    crate::live_layout_neutral::validate(input, rules)?;
+) -> Result<
+    (
+        LayoutSnapshot,
+        turbo_dom_layout::cssom_view::scroll::SourceStyles,
+    ),
+    String,
+> {
+    crate::live_layout_neutral::validate(tree, input, rules)?;
     let qualified = rules
         .iter()
         .filter(|rule| rule.resource.is_none())
-        .cloned()
         .collect::<Vec<_>>();
-    let mut cascade = live_cascade("", inputs.width, inputs.height);
+    live_viewport(inputs.width, inputs.height);
     for rule in &qualified {
-        let text = &rule.text;
-        let sheet = turbo_dom_layout::style::parse_stylesheet(text);
-        if !sheet.at_rules.is_empty() {
+        if !turbo_dom_layout::style::parse_stylesheet(&rule.text)
+            .at_rules
+            .is_empty()
+        {
             return Err(
                 "native live layout requires privately resolved conditional CSS rules".into(),
             );
         }
-        for rule in sheet.rules {
-            cascade.rules.push(LeveledRule {
-                level: 1,
-                order: cascade.rules.len(),
-                rule,
-            });
-        }
     }
-    let mut styled = if input.composition.is_some() {
-        crate::live_layout_scoped::style_composed_tree(input, &qualified)?
-    } else {
-        turbo_dom_layout::style_tree(&input.nodes, &cascade)
+    let graph = input
+        .composition
+        .as_ref()
+        .ok_or("native composed style graph unavailable")?;
+    let origins = [
+        OriginRules {
+            origin: CascadeOrigin::UserAgent,
+            rules: graph
+                .ua_rules
+                .iter()
+                .map(|rule| rule.scoped.as_ref())
+                .collect(),
+        },
+        OriginRules {
+            origin: CascadeOrigin::Author,
+            rules: qualified.iter().map(|rule| rule.scoped.as_ref()).collect(),
+        },
+    ];
+    let children = |node: Handle| graph.children_of(node);
+    let scope_depth = |node: Handle| {
+        let root = graph
+            .scopes
+            .get(&node)
+            .ok_or("native composed source scope unavailable")?;
+        graph
+            .depths
+            .get(root)
+            .copied()
+            .ok_or_else(|| "native composed source depth unavailable".to_string())
     };
-    crate::live_layout_zoom::apply(&mut styled);
-    crate::live_layout_resources::validate(&styled, rules)?;
-    let styles = crate::live_layout_scroll::collect_styles(input, &styled);
-    let original: Vec<_> = input
-        .original_text
-        .iter()
-        .map(
-            |(source_id, units)| turbo_dom_layout::layout_snapshot::SourceTextUnits {
-                source_id: *source_id,
-                units,
-            },
-        )
-        .collect();
-    let options = turbo_dom_layout::layout_snapshot::NativeTextOptions {
-        original_text: &original,
-        svg_viewports: &input.svg_viewports,
-        layout_scale,
+    let inline_override = |node: Handle| graph.inline_overrides.get(&node).map(String::as_str);
+    let style = LiveStyle {
+        tree: LiveTree {
+            tree,
+            document: input.document_id(),
+            children: &children,
+        },
+        origins: &origins,
+        scope_depth: &scope_depth,
+        inline_override: &inline_override,
+        inline_declarations: &crate::live_layout_scoped::inline_declarations,
     };
-    let snapshot = turbo_dom_layout::layout_snapshot::snapshot_html_styled_tree_with_native_text(
-        &styled,
-        &input.identities,
-        &options,
+    let document = input.document_id();
+    turbo_dom_layout::live::snapshot(
+        &style,
+        &input.capture,
+        &LiveOptions { layout_scale },
+        |styled| {
+            let styles = crate::live_layout_zoom::apply(styled, document);
+            crate::live_layout_resources::validate(styled, rules)?;
+            Ok(styles)
+        },
         inputs,
         diagnostics,
     )
-    .map_err(|error| error.to_string())?;
-    Ok((snapshot, styles))
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use turbo_dom_layout::layout_snapshot::GeometryKind;
+    use turbo_dom_layout::layout_snapshot::{GeometryKind, SourceId};
+    use turbo_dom_layout::live::{MAX_DEPTH, MAX_TEXT_BYTES};
     use turbo_dom_layout::{FontRegistry, ImageCtx, NoImages};
 
+    // Adapted@S4: every test layout goes through the composed live path (rules
+    // prepared by surf's scoped matcher) instead of the copier's legacy cascade.
     fn snapshot(tree: &Tree, id: u32, css: &str) -> LayoutSnapshot {
         let input = capture_tree(tree, id).unwrap();
         let fonts = FontRegistry::new();
@@ -359,6 +308,7 @@ mod tests {
             body_height: None,
         };
         layout(
+            tree,
             &input,
             css,
             &SnapshotInputs {
@@ -387,15 +337,18 @@ mod tests {
     }
 
     #[test]
-    fn actual_tree_ids_attributes_and_script_style_nodes_survive_the_native_copy() {
+    fn actual_tree_ids_attributes_and_script_style_nodes_survive_the_native_capture() {
         let tree = Tree::parse("<!doctype html><html><head><style>div{width:40px;height:20px}</style><script>let x=1;</script></head><body><!-- hi --><div data-cid='fake'>hello</div></body></html>");
         let input = capture_tree(&tree, 7).unwrap();
-        assert_eq!(input.document_id, 7);
-        assert_eq!(input.tree_version, tree.version);
-        assert_eq!(
-            input.nodes[0].as_element().unwrap().tag,
-            Tag::Html("html".into())
-        );
+        assert_eq!(input.document_id(), 7);
+        assert_eq!(input.capture.tree_version, tree.version);
+        // The doctype is not a source: <html> is the first kept child.
+        let html = tree.query_selector("html").unwrap();
+        assert!(input
+            .capture
+            .identities
+            .iter()
+            .any(|identity| identity.id == source_id(7, html) && identity.path == [0]));
         let div = tree.query_selector("div").unwrap();
         let snap = snapshot(&tree, 7, "div{width:40px;height:20px}");
         assert_eq!(border(&snap, source_id(7, div)).rect.width, 40.0);
@@ -416,9 +369,10 @@ mod tests {
         tree.append_child(body, first);
         tree.set_attribute(second, "style", "height:50px");
         let after = capture_tree(&tree, 8).unwrap();
-        assert!(after.tree_version > before.tree_version);
+        assert!(after.capture.tree_version > before.capture.tree_version);
         let id = source_id(8, first);
         let old_path = before
+            .capture
             .identities
             .iter()
             .find(|s| s.id == id)
@@ -426,6 +380,7 @@ mod tests {
             .path
             .clone();
         let new_path = after
+            .capture
             .identities
             .iter()
             .find(|s| s.id == id)
@@ -481,7 +436,8 @@ mod tests {
             "#x{width:30px}".into(),
             "#x{width:40px}".into(),
         ];
-        let snapshot = layout_rules(&input, &rules, &inputs, &mut Diagnostics::default()).unwrap();
+        let snapshot =
+            layout_rules(&tree, &input, &rules, &inputs, &mut Diagnostics::default()).unwrap();
         assert_eq!(
             border(&snapshot, source_id(1, tree.query_selector("#x").unwrap()))
                 .rect
@@ -489,6 +445,7 @@ mod tests {
             40.0
         );
         assert!(layout_rules(
+            &tree,
             &input,
             &["@media screen {#x{width:70px}}".into()],
             &inputs,
@@ -500,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn source_copy_refuses_unimplemented_namespace_and_excess_depth_or_text() {
+    fn source_capture_refuses_unimplemented_namespace_and_excess_depth_or_text() {
         let tree = Tree::parse("<math><mi>x</mi></math>");
         assert!(capture_tree(&tree, 1).err().unwrap().contains("namespace"));
         let html = format!(
@@ -508,14 +465,119 @@ mod tests {
             "<div>".repeat(MAX_DEPTH + 2),
             "</div>".repeat(MAX_DEPTH + 2)
         );
-        assert!(capture_tree(&Tree::parse(&html), 1)
-            .err()
-            .unwrap()
-            .contains("depth"));
+        // Adapted@S4: like a browsing-context capture, the test capture builds the
+        // scope graph first, and its depth budget reports before the source walk's
+        // (live_layout_budget_tests pins the walk's own depth error).
+        assert_eq!(
+            capture_tree(&Tree::parse(&html), 1).err().unwrap(),
+            "native layout scope graph exceeds source budget"
+        );
         let html = format!("<div>{}</div>", "x".repeat(MAX_TEXT_BYTES + 1));
         assert!(capture_tree(&Tree::parse(&html), 1)
             .err()
             .unwrap()
             .contains("text budget"));
+    }
+
+    /// Stays in surf at S4 (its module moved to turbo-dom-layout's cssom_view): the
+    /// Chrome control is turbo-surf's harness fixture.
+    #[test]
+    fn scroll_extent_uses_actual_overflow_padding_margins_transforms_and_nested_clips() {
+        use turbo_dom_layout::cssom_view::scroll::scroll_metrics;
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../harness/detection/fixtures/scroll-layout-chrome155.json"
+        ))
+        .unwrap();
+        let cases = [
+            (
+                "padded",
+                "padding:5px;border:2px solid;overflow:auto",
+                "width:180px;height:140px",
+            ),
+            (
+                "visible",
+                "padding:5px;border:2px solid;overflow:visible",
+                "width:180px;height:140px",
+            ),
+            (
+                "hidden",
+                "padding:5px;border:2px solid;overflow:hidden",
+                "width:180px;height:140px",
+            ),
+            (
+                "negative",
+                "padding:5px;border:2px solid;position:relative;overflow:auto",
+                "position:absolute;left:-50px;top:-40px;width:20px;height:20px",
+            ),
+            (
+                "absolute",
+                "padding:5px;border:2px solid;position:relative;overflow:auto",
+                "position:absolute;left:120px;top:90px;width:30px;height:20px",
+            ),
+            (
+                "transform",
+                "padding:5px;border:2px solid;overflow:auto",
+                "width:50px;height:30px;transform:translate(120px,90px)",
+            ),
+            (
+                "margin",
+                "padding:5px;border:2px solid;overflow:auto",
+                "width:180px;height:140px;margin:10px",
+            ),
+            ("scaledContainer","padding:5px;border:2px solid;overflow:auto;transform:scale(2);transform-origin:0 0","width:180px;height:140px"),
+            ("transformedNegative","padding:5px;border:2px solid;overflow:auto","width:180px;height:140px;transform:translate(-100px,-80px)"),
+            (
+                "nestedclip",
+                "padding:5px;border:2px solid;overflow:auto",
+                "width:50px;height:30px;overflow:hidden",
+            ),
+        ];
+        let mut mismatches = Vec::new();
+        for (index, (name, outer, inner)) in cases.into_iter().enumerate() {
+            let nested = if name == "nestedclip" {
+                "<div style='width:250px;height:220px'></div>"
+            } else {
+                ""
+            };
+            let tree=Tree::parse(&format!("<html><body style='margin:0'><div id=box style='width:100px;height:80px;{outer}'><div style='{inner}'>{nested}</div></div></body></html>"));
+            let input = capture_tree(&tree, 1).unwrap();
+            let fonts = FontRegistry::new();
+            let images = ImageCtx {
+                resolver: &NoImages,
+                body_height: None,
+            };
+            let (snapshot, styles) = layout_rules_resolved(
+                &tree,
+                &input,
+                &[],
+                2.0,
+                &SnapshotInputs {
+                    width: 800.0,
+                    height: 600.0,
+                    fonts: &fonts,
+                    images: &images,
+                },
+                &mut Diagnostics::default(),
+            )
+            .unwrap();
+            let actual = scroll_metrics(
+                &snapshot,
+                &styles,
+                source_id(1, tree.query_selector("#box").unwrap()),
+            )
+            .unwrap();
+            let expected = &oracle["result"][index]["before"];
+            let expected = (
+                expected["width"].as_i64().unwrap() as i32,
+                expected["height"].as_i64().unwrap() as i32,
+            );
+            if (actual.width, actual.height) != expected {
+                mismatches.push(format!(
+                    "{name}: native={:?} Chrome={expected:?}",
+                    (actual.width, actual.height)
+                ));
+            }
+        }
+        assert!(mismatches.is_empty(), "{}", mismatches.join("; "));
     }
 }

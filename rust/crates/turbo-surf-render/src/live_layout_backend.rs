@@ -150,7 +150,7 @@ fn frame_content_size<'s>(
     host: v8::Local<'s, v8::Object>,
     depth: usize,
 ) -> Result<[f32; 2], String> {
-    let input = crate::live_layout_dom::capture(scope, host)?;
+    let mut input = crate::live_layout_dom::capture(scope, host)?;
     if !input.connected || !input.browsing_context {
         return Ok([0.0; 2]);
     }
@@ -158,7 +158,7 @@ fn frame_content_size<'s>(
         .owner_context
         .ok_or("frame layout owner unavailable")?;
     let viewport = viewport_at_depth(scope, context, depth)?;
-    let view = resolve(scope, &input, viewport.as_ref())?;
+    let view = resolve(scope, &mut input, viewport.as_ref())?;
     let id = crate::live_layout::source_id(input.tree.document_id(), input.handle);
     let source = view
         .snapshot
@@ -207,7 +207,7 @@ fn measure<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<Geometry, String> {
-    let input = crate::live_layout_dom::capture(scope, receiver)?;
+    let mut input = crate::live_layout_dom::capture(scope, receiver)?;
     let geometry = if !input.connected || !input.browsing_context {
         turbo_dom_layout::cssom_view::metrics::empty_geometry()
     } else {
@@ -215,7 +215,7 @@ fn measure<'s>(
             .owner_context
             .ok_or("native layout owner realm unavailable")?;
         let viewport = viewport(scope, context)?;
-        let snapshot = resolve(scope, &input, viewport.as_ref())?;
+        let snapshot = resolve(scope, &mut input, viewport.as_ref())?;
         let id = crate::live_layout::source_id(input.tree.document_id(), input.handle);
         let mut geometry = element_geometry(&snapshot, id)?;
         unzoom_metrics(&mut geometry, snapshot.zoom(id));
@@ -303,11 +303,45 @@ fn element_geometry(
         result => result,
     }
 }
-fn resolve(
-    scope: &mut v8::PinScope<'_, '_>,
-    input: &crate::live_layout_dom::NativeLayoutInput<'_>,
+/// How many times one read captures again before reporting a tree that keeps
+/// changing under its own capture.
+const RECAPTURE_LIMIT: usize = 4;
+
+/// Geometry reflects the DOM as it is when the read lays it out, as in Chrome: a
+/// capture that a mutation outdated (the live tree's version moved past the
+/// capture's) is taken again from the same receiver rather than laid out — or
+/// served from a cache entry keyed on its old version — stale.
+fn refresh<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    input: &mut crate::live_layout_dom::NativeLayoutInput<'s>,
+) -> Result<(), String> {
+    #[cfg(test)]
+    recapture_tests::after_capture(scope);
+    for _ in 0..RECAPTURE_LIMIT {
+        if crate::live_layout_dom::is_current(scope, input)? {
+            return Ok(());
+        }
+        let fresh = crate::live_layout_dom::recapture(scope, input)?;
+        // The viewport and owner realm were resolved for the captured document.
+        if fresh.tree.document_id() != input.tree.document_id()
+            || !fresh.connected
+            || !fresh.browsing_context
+        {
+            return Err("native layout source left its document after its capture".into());
+        }
+        *input = fresh;
+        #[cfg(test)]
+        recapture_tests::after_capture(scope);
+    }
+    Err("native layout tree kept changing during its capture".into())
+}
+fn resolve<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    input: &mut crate::live_layout_dom::NativeLayoutInput<'s>,
     viewport: &Viewport,
 ) -> Result<std::rc::Rc<LayoutView>, String> {
+    refresh(scope, input)?;
+    let input = &*input;
     let (tree, sheets) = (&input.tree, input.sheets.as_slice());
     let key_timer =
         crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::RulesKey);
@@ -357,13 +391,13 @@ fn resolve(
     } else {
         let layout_timer =
             crate::layout_profile::Timer::new(scope, crate::layout_profile::Stage::Layout);
-        // Layout reads the live tree it captured: re-enter that document. Nothing
-        // between the capture and here mutates it (stylesheet export and rule
-        // activation are read-only), so the capture's provenance still describes it.
+        // Layout reads the live tree it captured: re-enter that document. `refresh`
+        // made the capture current and nothing since mutates the tree (rule
+        // activation is read-only), so the capture's provenance still describes it.
         let _dom = turbo_dom_browser_env::host_internals::enter_document_of(scope, input.document);
         let (snapshot, styles) = turbo_dom_browser_env::host_internals::with_tree(|live| {
             if live.version != tree.capture.tree_version {
-                return Err(String::from("native layout tree changed after its capture"));
+                return Err(String::from("native layout tree changed during layout"));
             }
             crate::live_layout::layout_active_rules_resolved(
                 live,
@@ -498,7 +532,7 @@ fn scroll_view<'s>(
     {
         return Ok(None);
     }
-    let input = crate::live_layout_dom::capture(scope, receiver)?;
+    let mut input = crate::live_layout_dom::capture(scope, receiver)?;
     if !input.connected || !input.browsing_context {
         return Ok(None);
     }
@@ -510,7 +544,7 @@ fn scroll_view<'s>(
         Err(error) if error == VIEWPORT_PENDING => return Ok(None),
         result => result?,
     };
-    let view = resolve(scope, &input, viewport.as_ref())?;
+    let view = resolve(scope, &mut input, viewport.as_ref())?;
     let id = crate::live_layout::source_id(input.tree.document_id(), input.handle);
     Ok((!view.omitted.contains(&id)).then_some(ScrollView {
         context,
@@ -1185,7 +1219,7 @@ fn hit<'s>(
     document: v8::Local<'s, v8::Object>,
     point: [f64; 2],
 ) -> Result<v8::Local<'s, v8::Array>, String> {
-    let input = crate::live_layout_dom::capture_document(scope, document)?;
+    let mut input = crate::live_layout_dom::capture_document(scope, document)?;
     if !input.browsing_context {
         return Ok(v8::Array::new(scope, 0));
     }
@@ -1193,7 +1227,7 @@ fn hit<'s>(
         .owner_context
         .ok_or("native layout owner realm unavailable")?;
     let viewport = viewport(scope, context)?;
-    let snapshot = resolve(scope, &input, viewport.as_ref())?;
+    let snapshot = resolve(scope, &mut input, viewport.as_ref())?;
     let state = scroll_state(context);
     let ids = turbo_dom_layout::cssom_view::hit::elements_at_point(
         &snapshot.snapshot,
@@ -1235,7 +1269,7 @@ fn offset<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
-    let input = crate::live_layout_dom::capture(scope, receiver)?;
+    let mut input = crate::live_layout_dom::capture(scope, receiver)?;
     let position = if !input.connected || !input.browsing_context {
         turbo_dom_layout::cssom_view::metrics::OffsetPosition {
             left: 0,
@@ -1247,7 +1281,7 @@ fn offset<'s>(
             .owner_context
             .ok_or("native layout owner realm unavailable")?;
         let viewport = viewport(scope, context)?;
-        let snapshot = resolve(scope, &input, viewport.as_ref())?;
+        let snapshot = resolve(scope, &mut input, viewport.as_ref())?;
         let id = crate::live_layout::source_id(input.tree.document_id(), input.handle);
         if snapshot.omitted.contains(&id) {
             turbo_dom_layout::cssom_view::metrics::OffsetPosition {
@@ -1318,15 +1352,19 @@ fn range_geometry<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<RangeGeometry, String> {
-    let input = crate::live_layout_dom::capture(scope, receiver)?;
-    let selections = input.range.as_ref().ok_or("Illegal invocation")?;
+    let mut input = crate::live_layout_dom::capture(scope, receiver)?;
+    if input.range.is_none() {
+        return Err("Illegal invocation".into());
+    }
     let mut rects = Vec::new();
     if input.connected && input.browsing_context {
         let context = input
             .owner_context
             .ok_or("native Range owner realm unavailable")?;
         let viewport = viewport(scope, context)?;
-        let view = resolve(scope, &input, viewport.as_ref())?;
+        let view = resolve(scope, &mut input, viewport.as_ref())?;
+        // A re-capture selected the Range's boundaries in the current tree.
+        let selections = input.range.as_ref().ok_or("Illegal invocation")?;
         let state = scroll_state(context);
         let offsets = state.values.borrow();
         for selection in selections {
@@ -1401,7 +1439,7 @@ fn caret_at_point<'s>(
     document: v8::Local<'s, v8::Object>,
     point: [f64; 2],
 ) -> Result<v8::Local<'s, v8::Value>, String> {
-    let input = crate::live_layout_dom::capture_document(scope, document)?;
+    let mut input = crate::live_layout_dom::capture_document(scope, document)?;
     if !input.browsing_context {
         return Ok(v8::null(scope).into());
     }
@@ -1409,7 +1447,7 @@ fn caret_at_point<'s>(
         .owner_context
         .ok_or("native caret owner realm unavailable")?;
     let viewport = viewport(scope, context)?;
-    let view = resolve(scope, &input, viewport.as_ref())?;
+    let view = resolve(scope, &mut input, viewport.as_ref())?;
     let state = scroll_state(context);
     let endpoint = turbo_dom_layout::cssom_view::text::caret(
         &view.snapshot,
@@ -1458,7 +1496,7 @@ fn caret_geometry<'s>(
     node: v8::Local<'s, v8::Object>,
     offset: usize,
 ) -> Result<[f32; 4], String> {
-    let input = crate::live_layout_dom::capture(scope, node)?;
+    let mut input = crate::live_layout_dom::capture(scope, node)?;
     if !input.connected || !input.browsing_context {
         return Ok([0.0; 4]);
     }
@@ -1466,7 +1504,7 @@ fn caret_geometry<'s>(
         .owner_context
         .ok_or("native caret owner realm unavailable")?;
     let viewport = viewport(scope, context)?;
-    let view = resolve(scope, &input, viewport.as_ref())?;
+    let view = resolve(scope, &mut input, viewport.as_ref())?;
     let source = crate::live_layout::source_id(input.tree.document_id(), input.handle);
     let _current = view
         .snapshot
@@ -1634,5 +1672,107 @@ mod startup_tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+#[cfg(test)]
+mod recapture_tests {
+    use super::v8;
+    use std::cell::RefCell;
+
+    thread_local! {
+        /// A script run between a geometry read's capture and its layout, and how
+        /// many more times it runs.
+        static AFTER_CAPTURE: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn after_capture(scope: &mut v8::PinScope<'_, '_>) {
+        let source = AFTER_CAPTURE.with(|hook| {
+            let mut hook = hook.borrow_mut();
+            let (source, runs) = hook.as_mut()?;
+            let source = source.clone();
+            *runs -= 1;
+            if *runs == 0 {
+                *hook = None;
+            }
+            Some(source)
+        });
+        let Some(source) = source else {
+            return;
+        };
+        let source = v8::String::new(scope, &source).unwrap();
+        v8::Script::compile(scope, source, None)
+            .and_then(|script| script.run(scope))
+            .expect("the after-capture mutation failed");
+    }
+
+    fn mutate_after_capture(source: &str, runs: usize) {
+        AFTER_CAPTURE.with(|hook| *hook.borrow_mut() = Some((source.to_owned(), runs)));
+    }
+
+    fn pending() -> bool {
+        AFTER_CAPTURE.with(|hook| hook.borrow().is_some())
+    }
+
+    const PAGE: &str =
+        "<!doctype html><body style=margin:0><div id=a style=width:10px;height:10px></div>";
+    const WIDEN: &str =
+        "document.getElementById('a').setAttribute('style','width:50px;height:10px')";
+    const WIDTH: &str =
+        "globalThis.__RESULT=document.getElementById('a').getBoundingClientRect().width";
+
+    async fn page() -> crate::PageSession {
+        crate::PageSession::open(PAGE, "https://recapture.test/", "", "", 5000)
+            .await
+            .unwrap()
+    }
+
+    /// Before S5 this read failed ("native layout tree changed after its capture").
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_mutation_between_capture_and_layout_is_laid_out_fresh() {
+        let mut page = page().await;
+        mutate_after_capture(WIDEN, 1);
+        assert_eq!(page.eval(WIDTH).await.unwrap(), "50");
+        assert!(!pending());
+        page.close();
+    }
+
+    /// Before S5 this read returned the cached layout of the outdated capture (10).
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_stale_capture_is_not_served_from_the_layout_cache() {
+        let mut page = page().await;
+        assert_eq!(page.eval(WIDTH).await.unwrap(), "10");
+        mutate_after_capture(WIDEN, 1);
+        assert_eq!(page.eval(WIDTH).await.unwrap(), "50");
+        assert!(!pending());
+        page.close();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_tree_that_keeps_changing_under_its_capture_is_reported() {
+        let mut page = page().await;
+        mutate_after_capture(
+            "document.getElementById('a').appendChild(document.createElement('span'))",
+            usize::MAX,
+        );
+        let error = page.eval(WIDTH).await.unwrap_err();
+        assert!(
+            error.contains("native layout tree kept changing during its capture"),
+            "{error}"
+        );
+        AFTER_CAPTURE.with(|hook| *hook.borrow_mut() = None);
+        page.close();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_source_removed_after_its_capture_is_reported() {
+        let mut page = page().await;
+        mutate_after_capture("document.getElementById('a').remove()", 1);
+        let error = page.eval(WIDTH).await.unwrap_err();
+        assert!(
+            error.contains("native layout source left its document after its capture"),
+            "{error}"
+        );
+        page.close();
     }
 }

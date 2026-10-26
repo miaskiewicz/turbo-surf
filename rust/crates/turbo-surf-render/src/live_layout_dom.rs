@@ -10,7 +10,17 @@ use turbo_dom_browser_env::host_internals::{
     is_connected, with_tree, wrap, Handle, Tree,
 };
 
+/// The receiver a capture was taken from, so a stale capture can be taken again.
+#[derive(Clone, Copy)]
+enum CaptureSource<'s> {
+    /// [`capture`]: an element, a text node or a Range.
+    Node(v8::Local<'s, v8::Object>),
+    /// [`capture_document`]: a document or shadow root.
+    Document(v8::Local<'s, v8::Object>),
+}
+
 pub(crate) struct NativeLayoutInput<'s> {
+    source: CaptureSource<'s>,
     pub(crate) owner_context: Option<v8::Local<'s, v8::Context>>,
     /// A wrapper owned by the captured document: layout re-enters that document to
     /// style its live tree (the capture records provenance only, no copy).
@@ -27,19 +37,42 @@ pub(crate) fn capture<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<NativeLayoutInput<'s>, String> {
-    if let Some(handle) = handle_of(scope, receiver) {
+    let mut input = if let Some(handle) = handle_of(scope, receiver) {
         let _dom = enter_document_of(scope, receiver);
         let text = with_tree(|tree| tree.node_type_id(handle) == 3).unwrap_or(false);
         capture_kind(scope, receiver, if text { 0 } else { 1 })
     } else {
         capture_range(scope, receiver)
-    }
+    }?;
+    input.source = CaptureSource::Node(receiver);
+    Ok(input)
 }
 pub(crate) fn capture_document<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<NativeLayoutInput<'s>, String> {
-    capture_kind(scope, receiver, 9)
+    let mut input = capture_kind(scope, receiver, 9)?;
+    input.source = CaptureSource::Document(receiver);
+    Ok(input)
+}
+/// Whether the captured document's live tree is still at the capture's version.
+pub(crate) fn is_current(
+    scope: &mut v8::PinScope<'_, '_>,
+    input: &NativeLayoutInput<'_>,
+) -> Result<bool, String> {
+    let _dom = enter_document_of(scope, input.document);
+    with_tree(|tree| tree.version == input.tree.capture.tree_version)
+        .ok_or_else(|| String::from("native layout document is unavailable"))
+}
+/// Capture the same receiver again, through the same entry point.
+pub(crate) fn recapture<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    input: &NativeLayoutInput<'s>,
+) -> Result<NativeLayoutInput<'s>, String> {
+    match input.source {
+        CaptureSource::Node(receiver) => capture(scope, receiver),
+        CaptureSource::Document(receiver) => capture_document(scope, receiver),
+    }
 }
 fn capture_kind<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -144,6 +177,7 @@ fn capture_kind<'s>(
     let owner_context = current_document_context(scope);
     if !connected || !browsing_context {
         return Ok(NativeLayoutInput {
+            source: CaptureSource::Node(receiver),
             owner_context,
             document: receiver,
             tree,
@@ -193,6 +227,7 @@ fn capture_kind<'s>(
         }
     }
     Ok(NativeLayoutInput {
+        source: CaptureSource::Node(receiver),
         owner_context,
         document: receiver,
         tree,

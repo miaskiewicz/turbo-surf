@@ -6,26 +6,24 @@ use deno_error::JsErrorBox;
 use serde::Serialize;
 use turbo_dom_layout::cssom_view::metrics::{ClientMetrics, OffsetSize};
 use turbo_dom_layout::layout_snapshot::SnapshotInputs;
+use turbo_dom_layout::text::SystemFontPolicy;
 use turbo_dom_layout::{Diagnostics, FontRegistry, ImageCtx, NoImages};
 
 // FontFace bytes and shaping caches are thread-safe and contain no V8 roots.
-// Loading every installed font per isolate thread multiplies native memory.
-static SYSTEM_FONTS: std::sync::OnceLock<FontRegistry> = std::sync::OnceLock::new();
+// Loading every installed font per isolate thread multiplies native memory, so
+// live layout shares turbo-dom-layout's process-wide HTML-policy registry.
+fn system_fonts() -> &'static std::sync::OnceLock<FontRegistry> {
+    FontRegistry::system_cell(SystemFontPolicy::Html)
+}
 
 // Native font discovery is process startup work, not part of a trusted input turn.
 // Geometry installation primes this same immutable registry before page execution.
 pub(crate) fn initialize_system_fonts() -> &'static FontRegistry {
-    SYSTEM_FONTS.get_or_init(load_system_fonts)
-}
-
-fn load_system_fonts() -> FontRegistry {
-    let mut registry = FontRegistry::new();
-    registry.load_system_fonts_for_html();
-    registry
+    FontRegistry::system(SystemFontPolicy::Html)
 }
 
 pub(crate) async fn initialize_system_fonts_async() -> Result<(), String> {
-    if SYSTEM_FONTS.get().is_some() {
+    if system_fonts().get().is_some() {
         return Ok(());
     }
     // Cold discovery must leave a current-thread runtime free to retire pooled
@@ -1568,18 +1566,18 @@ mod startup_tests {
 
     fn cold_session_startup() {
         assert!(
-            SYSTEM_FONTS.get().is_none(),
+            system_fonts().get().is_none(),
             "subprocess font cache was warm"
         );
         let (started, initialization_started) = std::sync::mpsc::sync_channel(1);
         let (release, released) = std::sync::mpsc::sync_channel(1);
         let initializer = std::thread::spawn(move || {
-            SYSTEM_FONTS.get_or_init(|| {
+            system_fonts().get_or_init(|| {
                 started.send(()).unwrap();
                 released.recv_timeout(Duration::from_secs(2)).expect(
                     "PageSession blocked its current-thread network driver during font startup",
                 );
-                load_system_fonts()
+                FontRegistry::load_system(SystemFontPolicy::Html)
             });
         });
         initialization_started.recv().unwrap();
@@ -1611,7 +1609,7 @@ mod startup_tests {
                 page.close();
             });
         initializer.join().unwrap();
-        assert!(SYSTEM_FONTS.get().is_some());
+        assert!(system_fonts().get().is_some());
     }
 
     #[test]

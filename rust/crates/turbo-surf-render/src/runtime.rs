@@ -10004,19 +10004,98 @@ async function __loadSheetImports(sheet, source, win, depth = 0) {
   }
 }
 function __imageSource(src, source) {try{return new URL(src,source).href;}catch(_){return src;}}
-function __imageLoaded(el, src, result, url) {
+// turbo-surf#40: HTML's source selection (the srcset attribute's candidates, measured
+// against Chrome 156 in tests/fixtures/html_image_srcset_chrome156.json).
+const __srcsetSpace = (c) => c === " " || c === "\t" || c === "\n" || c === "\f" || c === "\r";
+const __srcsetFloat = /^-?(\d+(\.\d+)?|\.\d+)(e[+-]?\d+)?$/i, __srcsetInteger = /^\d+$/;
+// The "parse a srcset attribute" algorithm: [{url, w, x}] for every valid candidate.
+function __srcsetCandidates(text) {
+  const out = [];
+  let i = 0;
+  while (i < text.length) {
+    while (i < text.length && (__srcsetSpace(text[i]) || text[i] === ",")) i++;
+    if (i >= text.length) break;
+    const start = i;
+    while (i < text.length && !__srcsetSpace(text[i])) i++;
+    let url = text.slice(start, i);
+    const descriptors = [];
+    if (url.endsWith(",")) url = url.replace(/,+$/, "");
+    else {
+      let token = "", parens = false;
+      for (; i < text.length; i++) {
+        const c = text[i];
+        if (!parens && __srcsetSpace(c)) { if (token) descriptors.push(token); token = ""; continue; }
+        if (!parens && c === ",") { i++; break; }
+        if (c === "(") parens = true; else if (c === ")") parens = false;
+        token += c;
+      }
+      if (token) descriptors.push(token);
+    }
+    let w = null, x = null, h = null, error = false;
+    for (const descriptor of descriptors) {
+      const kind = descriptor.slice(-1), value = descriptor.slice(0, -1);
+      if (kind === "w" && w === null && x === null && __srcsetInteger.test(value)) { w = Number(value); error ||= w <= 0; }
+      else if (kind === "x" && w === null && x === null && h === null && __srcsetFloat.test(value)) { x = Number(value); error ||= x < 0; }
+      else if (kind === "h" && h === null && x === null && __srcsetInteger.test(value)) { h = Number(value); error ||= h <= 0; }
+      else error = true;
+    }
+    if (h !== null && w === null) error = true;
+    if (!error && url) out.push({ url, w, x });
+  }
+  return out;
+}
+// The `sizes` source size in CSS px: the first entry whose media condition matches (an
+// absolute or viewport-relative length), else 100vw.
+function __imageSourceSize(el, win) {
+  const viewport = Number(win.innerWidth) || 0;
+  const sizes = __resourceAttribute.call(el, "sizes");
+  if (sizes !== null) for (const entry of sizes.split(",")) {
+    const match = entry.trim().match(/^(.*?)\s*(\d*\.?\d+)(px|vw|em|rem)$/i);
+    if (!match) continue;
+    const unit = match[3].toLowerCase(), value = Number(match[2]);
+    const length = unit === "vw" ? value * viewport / 100 : unit === "px" ? value : value * 16;
+    let matches = !match[1];
+    try { matches ||= win.matchMedia(match[1]).matches; } catch (_) {}
+    if (matches) return length;
+  }
+  return viewport;
+}
+// The source an <img> loads ({url: raw attribute value, density}) and the name live
+// layout keys its box's image by (src, else the first srcset candidate). Chrome 156's
+// selection (no cached candidate): candidates sorted by density, src the 1x one unless
+// srcset has a 1x, the first whose density reaches devicePixelRatio, else the densest.
+function __imageChoice(el, win) {
+  const src = __resourceAttribute.call(el, "src") || "";
+  const srcset = __resourceAttribute.call(el, "srcset");
+  const parsed = srcset ? __srcsetCandidates(srcset) : [];
+  const key = src.trim() ? src : parsed.length ? parsed[0].url : "";
+  if (!parsed.length) return { url: src, density: 1, key };
+  const size = parsed.some((c) => c.w !== null) ? __imageSourceSize(el, win) : 0;
+  let candidates = parsed.map((c) => ({ url: c.url, density: c.w !== null ? c.w / size : c.x !== null ? c.x : 1 }));
+  if (src && !candidates.some((c) => c.density === 1)) candidates.push({ url: src, density: 1 });
+  candidates.sort((a, b) => a.density - b.density);
+  candidates = candidates.filter((c, index) => index === 0 || c.density !== candidates[index - 1].density);
+  const ratio = Number(win.devicePixelRatio) || 1;
+  const pick = candidates.find((c) => c.density >= ratio) || candidates[candidates.length - 1];
+  return { ...pick, key };
+}
+function __imageLoaded(el, choice, result, url) {
   const loaded = !!(result && result.ok);
-  ops.op_live_image_loaded(el,src,loaded?result.width:0,loaded?result.height:0);
-  __imageHost.setState(el,loaded?{complete:true,naturalWidth:result.width,naturalHeight:result.height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
+  // A density-descriptor image reports (and lays out at) its size over that density.
+  const width = loaded ? Math.floor(result.width / choice.density) : 0;
+  const height = loaded ? Math.floor(result.height / choice.density) : 0;
+  ops.op_live_image_loaded(el,choice.key,width,height);
+  __imageHost.setState(el,loaded?{complete:true,naturalWidth:width,naturalHeight:height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
   return loaded;
 }
 // `parser`: a document-scan (parser) image, whose broken data: source is already
 // complete at the first script read; a script-set one stays pending until its error.
 function __loadImage(el, win = globalThis, parser = false) {
-  const src = __resourceAttribute.call(el,"src") || "";
+  const choice = __imageChoice(el, win), src = choice.url;
+  const selection = src + "\n" + choice.density;
   const previous = __resources.get(el);
-  if (previous && previous.src === src) return previous.promise;
-  const state = {src,promise:null};
+  if (previous && previous.src === selection) return previous.promise;
+  const state = {src:selection,promise:null};
   __resources.set(el,state);
   if (!src) {__imageHost.setState(el,null);return state.promise=Promise.resolve();}
   const doc = __resourceNativeOwner(el);
@@ -10026,7 +10105,7 @@ function __loadImage(el, win = globalThis, parser = false) {
   // its source is set; its load/error event still fires as a later task.
   const data = /^data:/i.test(currentSrc);
   const decoded = data && ops.op_csp_request(doc,currentSrc,"img-src","") ? ops.op_decode_data_image(currentSrc) : null;
-  if (decoded && decoded.ok || data && parser) __imageLoaded(el,src,decoded,currentSrc);
+  if (decoded && decoded.ok || data && parser) __imageLoaded(el,choice,decoded,currentSrc);
   else __imageHost.setState(el,{complete:false,naturalWidth:0,naturalHeight:0,currentSrc});
   state.promise = __trackResource((async () => {
     let result = decoded;
@@ -10037,7 +10116,7 @@ function __loadImage(el, win = globalThis, parser = false) {
     } catch (_) {}
     __recordResource(win, url, "img", start);
     if (__resources.get(el) !== state) return;
-    __fireResourceEvent(el, __imageLoaded(el,src,result,url) ? "load" : "error", win);
+    __fireResourceEvent(el, __imageLoaded(el,choice,result,url) ? "load" : "error", win);
   })());
   return state.promise;
 }
@@ -10339,7 +10418,7 @@ function __containsInsertedResource(node) {
   return kind === "LINK" || kind === "IMG" || kind === "STYLE" ||
     kind !== "" && __resourceApply(__resourceElementQuery,node,["link,img,style"]) !== null;
 }
-const __imageMutationAttributes = {__proto__: null, src:true, srcset:true};
+const __imageMutationAttributes = {__proto__: null, src:true, srcset:true, sizes:true};
 const __resourceElementQueryAll = Element.prototype.querySelectorAll;
 const __resourceFragmentQueryAll = DocumentFragment.prototype.querySelectorAll;
 // An <img> this document owns starts (or restarts) its load when its src or srcset

@@ -11,7 +11,7 @@
       const url = (x) => "/c/" + id + "/" + x + ".png";
       const img = document.createElement("img");
       const row = () => {
-        const chosen = (img.currentSrc.match(/\/(\w)\.png$/) || [, img.currentSrc])[1];
+        const chosen = (img.currentSrc.match(/\/(\w)\.png$/) || [undefined, img.currentSrc])[1];
         done([chosen, img.naturalWidth, img.naturalHeight, img.complete]);
       };
       img.addEventListener("load", row, { once: true });
@@ -25,7 +25,7 @@
     noDescriptor: (u) => [["srcset", u("r")]],
     densities: (u) => [["srcset", u("r") + " 1x, " + u("b") + " 2x, " + u("g") + " 3x"]],
     densitiesUnordered: (u) => [["srcset", u("g") + " 3x, " + u("r") + " 1x, " + u("b") + " 2x"]],
-    geometricMean: (u) => [["srcset", u("r") + " 1x, " + u("b") + " 1.5x, " + u("g") + " 2.5x"]],
+    firstReaching: (u) => [["srcset", u("r") + " 1x, " + u("b") + " 1.5x, " + u("g") + " 2.5x"]],
     belowRatio: (u) => [["srcset", u("r") + " 0.5x, " + u("b") + " 1.5x"]],
     allBelow: (u) => [["srcset", u("r") + " 1.2x, " + u("b") + " 1.8x"]],
     srcIs1x: (u) => [

@@ -49,7 +49,6 @@ async fn src_and_decode_are_prototype_members_that_load_like_chrome156() {
 /// (`new Image().src`, detached innerHTML, contextual fragments), never in an inert
 /// document, and a src change or removal restarts or clears its state like Chrome.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#40: fails until surf selects srcset candidates"]
 async fn images_load_from_mutations_connected_or_not_like_chrome156() {
     matches_control(
         include_str!("fixtures/html_image_loads_probe.js"),
@@ -65,7 +64,6 @@ async fn images_load_from_mutations_connected_or_not_like_chrome156() {
 /// default 100vw), `src` as the 1x candidate — and reports its density-corrected natural
 /// size, as Chrome 156 does over the same uncached candidates.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#40: fails until surf selects srcset candidates"]
 async fn srcset_candidates_are_selected_like_chrome156() {
     use base64::Engine;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

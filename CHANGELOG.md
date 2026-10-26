@@ -65,6 +65,12 @@
   `live_geometry_throws.rs` has no known gaps), and getComputedStyle reports the UA
   `display`/`position`/`visibility` with no injected `<title>` (#36 items 1-2,
   `computed_defaults.rs`).
+- `srcset` is honoured (#40): an `<img>` loads the candidate Chrome 156 picks — density
+  and `w` descriptors (`sizes`, default 100vw), `src` as the 1x candidate, the first
+  candidate whose density reaches `devicePixelRatio`, else the densest — and reports its
+  natural size divided by that density; a `sizes` change reselects. `<picture>` is not
+  selected yet. Chrome 156 control `html_image_srcset_chrome156.json` (uncached HTTP
+  candidates at devicePixelRatio 2).
 - The font-run geometry Chrome collector reads its fonts only from the pinned
   turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its
   three controls are recaptured on Chrome for Testing 156 (`*-chrome156.json`,

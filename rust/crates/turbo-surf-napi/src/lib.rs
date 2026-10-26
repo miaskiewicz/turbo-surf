@@ -22,11 +22,11 @@ use std::sync::Arc;
 use turbo_dom_parser::rtdom::serialize::serialize_inner;
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
+use turbo_dom_raster as raster;
 use turbo_surf_core::crawl::{crawl as run_crawl, CrawlOptions, Record};
 use turbo_surf_core::net::{build_client, fetch_html as net_fetch, FetchOptions};
 use turbo_surf_core::request_context::{ClientHints, Destination, RequestContext, RequestMode};
 use turbo_surf_page::TurboNavigator;
-use turbo_surf_raster as raster;
 use turbo_surf_view as view;
 
 /// Install process-global render hooks once, then ensure the V8 platform. The render crate has no

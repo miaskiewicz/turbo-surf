@@ -26,7 +26,7 @@ use pyo3::types::PyBytes;
 use serde_json::Value;
 use turbo_dom_parser::rtdom::serialize::serialize_inner;
 use turbo_dom_parser::rtdom::Tree;
-use turbo_surf_raster as raster;
+use turbo_dom_raster as raster;
 use turbo_surf_view as view;
 use view::{Field, FieldType, QueryType};
 

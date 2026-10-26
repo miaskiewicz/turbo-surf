@@ -2,7 +2,7 @@
 //! is multiplied by its effective zoom: the product of computed zoom factors
 //! along the flat tree. Layout therefore runs in zoomed pixels, while CSSOM
 //! offset/client/scroll metrics convert back through the element's own zoom.
-use turbo_html2pdf_core::{ComputedStyle, StyledNode};
+use turbo_dom_layout::{ComputedStyle, StyledNode};
 
 /// The computed zoom factor of one element: invalid, CSS-wide and zero values
 /// compute to 1 (an `inherit` was already replaced by the parent's value).
@@ -260,14 +260,14 @@ mod tests {
             assert_eq!(factor(&style(value)), expected, "{value}");
         }
         assert_eq!(factor(&ComputedStyle::default()), 1.0);
-        let child = StyledNode::Element(turbo_html2pdf_core::StyledElement {
-            tag: turbo_html2pdf_core::Tag::Html("div".into()),
+        let child = StyledNode::Element(turbo_dom_layout::StyledElement {
+            tag: turbo_dom_layout::Tag::Html("div".into()),
             attrs: Vec::new(),
             style: ComputedStyle::from_pairs([("zoom", "3"), ("width", "10px")]),
             children: Vec::new(),
         });
-        let mut nodes = vec![StyledNode::Element(turbo_html2pdf_core::StyledElement {
-            tag: turbo_html2pdf_core::Tag::Html("div".into()),
+        let mut nodes = vec![StyledNode::Element(turbo_dom_layout::StyledElement {
+            tag: turbo_dom_layout::Tag::Html("div".into()),
             attrs: Vec::new(),
             style: ComputedStyle::from_pairs([
                 ("zoom", "2"),

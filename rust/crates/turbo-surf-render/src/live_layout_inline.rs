@@ -3,7 +3,7 @@
 use crate::live_layout_metrics::{ClientMetrics, ElementGeometry, OffsetSize};
 use crate::live_layout_scroll::SourceStyles;
 use std::collections::BTreeMap;
-use turbo_html2pdf_core::layout_snapshot::{LayoutSnapshot, Rect, SourceId};
+use turbo_dom_layout::layout_snapshot::{LayoutSnapshot, Rect, SourceId};
 
 fn check_style(styles: &SourceStyles, id: SourceId) -> Result<(), String> {
     let style = &styles

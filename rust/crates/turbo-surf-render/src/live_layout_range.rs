@@ -1,9 +1,9 @@
 //! Native DOM boundary ordering retains child offsets, including non-layout nodes.
 use crate::live_layout::source_id;
 use std::collections::HashMap;
+use turbo_dom_layout::layout_snapshot::SourceId;
 use turbo_dom_parser::rtdom::tree::Handle;
 use turbo_dom_parser::rtdom::Tree;
-use turbo_html2pdf_core::layout_snapshot::SourceId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Selection {

@@ -2,8 +2,8 @@
 //! Clipping and scroll state remain separate from immutable layout provenance.
 use crate::live_layout::LiveTreeInput;
 use std::collections::BTreeMap;
-use turbo_html2pdf_core::layout_snapshot::{GeometryKind, LayoutSnapshot, SourceId};
-use turbo_html2pdf_core::{ComputedStyle, StyledNode};
+use turbo_dom_layout::layout_snapshot::{GeometryKind, LayoutSnapshot, SourceId};
+use turbo_dom_layout::{ComputedStyle, StyledNode};
 
 pub(crate) struct SourceStyle {
     pub(crate) style: ComputedStyle,
@@ -40,7 +40,7 @@ pub(crate) fn collect_styles(input: &LiveTreeInput, styled: &[StyledNode]) -> So
                             parent: parent.0,
                             zoom,
                             tag: match &element.tag {
-                                turbo_html2pdf_core::Tag::Html(tag) => tag.clone(),
+                                turbo_dom_layout::Tag::Html(tag) => tag.clone(),
                                 _ => String::new(),
                             },
                         },
@@ -172,7 +172,7 @@ pub(crate) fn scroll_metrics(
             "native scroll degenerate-container relative transform provenance pending".into(),
         );
     }
-    let projected = |fragment: &turbo_html2pdf_core::layout_snapshot::SnapshotFragment| {
+    let projected = |fragment: &turbo_dom_layout::layout_snapshot::SnapshotFragment| {
         let points = fragment.quad.map(|point| {
             let x = f64::from(point.x) - matrix[4];
             let y = f64::from(point.y) - matrix[5];
@@ -241,8 +241,8 @@ pub(crate) fn scroll_metrics(
         // Flow content's ending padding/margin contributes to scroll containers,
         // while out-of-flow boxes and transforms contribute only their edges.
         if let Some(metrics) = fragment.used_box {
-            if metrics.position != turbo_html2pdf_core::layout::value::Position::Absolute
-                && metrics.position != turbo_html2pdf_core::layout::value::Position::Fixed
+            if metrics.position != turbo_dom_layout::layout::value::Position::Absolute
+                && metrics.position != turbo_dom_layout::layout::value::Position::Fixed
             {
                 if !blocked_x && permits_scroll(x) {
                     right =
@@ -271,7 +271,7 @@ pub(crate) fn scroll_metrics(
 /// viewport.
 fn contained(
     styles: &SourceStyles,
-    fragment: &turbo_html2pdf_core::layout_snapshot::SnapshotFragment,
+    fragment: &turbo_dom_layout::layout_snapshot::SnapshotFragment,
     id: SourceId,
 ) -> bool {
     let Some(start) = fragment
@@ -337,8 +337,8 @@ pub(crate) fn scroll_translation(
     let position = fragment
         .used_box
         .map(|used| used.position)
-        .unwrap_or(turbo_html2pdf_core::layout::value::Position::Static);
-    use turbo_html2pdf_core::layout::value::Position;
+        .unwrap_or(turbo_dom_layout::layout::value::Position::Static);
+    use turbo_dom_layout::layout::value::Position;
     if position == Position::Fixed {
         return Ok([0.0; 2]);
     }
@@ -470,7 +470,7 @@ pub(crate) fn viewport_metrics(
             continue;
         }
         let own = fragment.source_id.unwrap_or(root);
-        use turbo_html2pdf_core::layout::value::Position;
+        use turbo_dom_layout::layout::value::Position;
         let position = fragment.used_box.map(|used| used.position);
         if position == Some(Position::Fixed)
             || fixed_ancestor(styles, &fragment.source_ancestors, own)
@@ -597,9 +597,9 @@ pub(crate) fn expose(
 mod tests {
     use super::*;
     use crate::live_layout::{capture_tree, layout_rules_resolved, source_id};
+    use turbo_dom_layout::layout_snapshot::SnapshotInputs;
+    use turbo_dom_layout::{Diagnostics, FontRegistry, ImageCtx, NoImages};
     use turbo_dom_parser::rtdom::Tree;
-    use turbo_html2pdf_core::layout_snapshot::SnapshotInputs;
-    use turbo_html2pdf_core::{Diagnostics, FontRegistry, ImageCtx, NoImages};
     #[test]
     fn scroll_extent_uses_actual_overflow_padding_margins_transforms_and_nested_clips() {
         let oracle: serde_json::Value = serde_json::from_str(include_str!(

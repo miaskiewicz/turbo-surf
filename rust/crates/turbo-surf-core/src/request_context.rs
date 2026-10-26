@@ -523,9 +523,42 @@ fn hint_value(name: &str, profile: &Profile) -> Option<String> {
     Some(value)
 }
 
+/// The image `Accept` for a client whose screenshot raster paints AVIF and/or JPEG XL only
+/// when built with those decoders (turbo-surf#43): `None` when it paints both, so the
+/// request keeps Chrome's measured image `Accept`; otherwise only the types it paints
+/// (PNG/JPEG/GIF/WebP/SVG plus the built ones), so a content-negotiating CDN falls back to
+/// a format that does not paint as a placeholder.
+pub fn paintable_image_accept(avif: bool, jxl: bool) -> Option<String> {
+    if avif && jxl {
+        return None;
+    }
+    let jxl = if jxl { "image/jxl," } else { "" };
+    let avif = if avif { "image/avif," } else { "" };
+    Some(format!(
+        "{jxl}{avif}image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paintable_image_accept_drops_only_the_unpainted_types() {
+        assert_eq!(paintable_image_accept(true, true), None);
+        assert_eq!(
+            paintable_image_accept(true, false).as_deref(),
+            Some("image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8")
+        );
+        assert_eq!(
+            paintable_image_accept(false, true).as_deref(),
+            Some("image/jxl,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8")
+        );
+        assert_eq!(
+            paintable_image_accept(false, false).as_deref(),
+            Some("image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8")
+        );
+    }
 
     #[test]
     fn browser_pool_does_not_depend_on_a_parked_previous_runtime() {

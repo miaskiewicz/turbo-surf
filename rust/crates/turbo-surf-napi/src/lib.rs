@@ -1031,21 +1031,11 @@ pub async fn fetch_bytes(
     cookies: Option<String>,
 ) -> Result<Buffer> {
     let mut headers = std::collections::BTreeMap::new();
-    if !(cfg!(feature = "avif") && cfg!(feature = "jxl")) {
-        let jxl = if cfg!(feature = "jxl") {
-            "image/jxl,"
-        } else {
-            ""
-        };
-        let avif = if cfg!(feature = "avif") {
-            "image/avif,"
-        } else {
-            ""
-        };
-        headers.insert(
-            "accept".to_string(),
-            format!("{jxl}{avif}image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8"),
-        );
+    if let Some(accept) = turbo_surf_core::request_context::paintable_image_accept(
+        cfg!(feature = "avif"),
+        cfg!(feature = "jxl"),
+    ) {
+        headers.insert("accept".to_string(), accept);
     }
     let RequestState {
         client_hints,

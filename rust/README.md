@@ -46,8 +46,9 @@ restore the caller before yielding.
 
 Native layout/paint, canvas rasterization and system text measurement (optional
 Metal WebGL and CoreText) live in turbo-dom's `turbo-dom-raster` 0.6.0 crate, which
-mcp/napi/py depend on (forwarding its `gpu-metal` / `coretext` features); the
-layout engine is `turbo-dom-layout` 0.6.0. turbo-surf no longer depends on
+mcp/napi/py depend on (forwarding its `gpu-metal` / `coretext` features, and its
+`avif` / `jxl` image decoders, which are on by default); the layout engine is
+`turbo-dom-layout` 0.6.0. turbo-surf no longer depends on
 turbo-html2pdf.
 
 `cargo test --workspace` runs the offline engine suite. Required gates also include

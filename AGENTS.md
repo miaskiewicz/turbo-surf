@@ -24,7 +24,8 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   in-process addon), `turbo-surf-py` (PyO3 binding → PyPI wheels), `turbo-surf-mcp` (the stdio MCP
   **binary** the launcher spawns). The synthetic screenshot tier (layout+paint,
   canvas raster, `measure_text`) is turbo-dom's `turbo-dom-raster` crate, used by
-  mcp/napi/py; the V8 binding is turbo-dom's `turbo-dom-v8` fork (one V8 in the
+  mcp/napi/py with its AVIF / JPEG XL decoders on (default `avif` / `jxl` features,
+  like Chrome 156); the V8 binding is turbo-dom's `turbo-dom-v8` fork (one V8 in the
   graph: `scripts/check-single-v8.sh`).
 - **JS surface:** `cli.js` + `index.js` (the launcher), `harness/` (benchmarks),
   `rust/playwright-shim/` (a drop-in `@playwright/test` façade over the

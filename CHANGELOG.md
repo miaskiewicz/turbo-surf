@@ -30,9 +30,13 @@
   no longer load, and removing `src` resets the natural size to 0x0. Chrome 156
   control: `tests/fixtures/html_image_loads_chrome156.json`; the binding's
   `HTML_IMAGE_*` (factory/own/decode) and `CUSTOM_ELEMENTS_DEFINED_*` controls also run
-  through `PageSession`. Known gaps (pinned): no `srcset` candidate selection; the
-  binding's `decode()` EncodingError is not `instanceof` surf's `DOMException`; parsed
-  `is=` elements read `:defined` once a session has opened.
+  through `PageSession`. Known gaps (pinned): the binding's `decode()` EncodingError is
+  not `instanceof` surf's `DOMException` (#42; `dom_exception_identity.rs` pins it
+  against a new Chrome 156 control, and the fix needs turbo-dom-browser-env's
+  DOMException to brand-check across realms and expose its state to serializers so surf
+  can drop its own); parsed `is=` elements read `:defined` once a session has opened
+  (#41: turbo-dom's storage collection, which surf runs after a V8 GC, rebuilds
+  parser-created elements without their creation-time `is` state — a turbo-dom fix).
 - Live `<img>` loads decode like Chrome 156 (#30): success and `naturalWidth` /
   `naturalHeight` come from turbo-dom-layout's shared probe (`probe_natural` and its
   raster probe) instead of a full `image` crate decode, and every `data:` form goes
@@ -91,7 +95,14 @@
   remaining 5 s session budgets: the 40 that bound real localhost work, and the host-side
   caps on server effects, are generous caps now (60 s / 30 s), and fixed waits for
   real-time deliveries (storage events, BroadcastChannel, CSP task capacity) are
-  condition waits.
+  condition waits. The child-supervision "retired collector leader" test retires the
+  leader once it has reported its helper instead of racing a 1 s deadline against two
+  Node startups (#44).
+- turbo-dom crates repinned to turbo-dom refactor 5561a5f (P5b-X4/W3/X5/W4: layout
+  turbo-dom#28, #48-#50, #53, #56; dialog/top layer, `::before`/`::after`; raster
+  `data:` images, AVIF orientation, JPEG XL). Screenshots paint `<img src="data:…">`
+  without a caller asset map (turbo-dom#60, verified by the screenshot control with an
+  empty map — the screenshot tool's real input); live loads size JPEG XL.
 - turbo-dom crates repinned to the P5b binding fixes (turbo-dom#20 `Option()` and
   HTMLOptionsCollection accessor definitions, #32 image accessors); the interceptor
   runtime control has no known gaps left.

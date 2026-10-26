@@ -179,6 +179,30 @@ pub(super) fn capture_interfaces(scope: &mut v8::PinScope) {
     }
 }
 
+/// Private Range record accessors for the selection module: (live record, static record).
+pub(super) fn accessors<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+) -> Option<(v8::Local<'s, v8::Function>, v8::Local<'s, v8::Function>)> {
+    let accessor = scope.get_current_context().get_slot::<RangeAccessor>()?;
+    let accessor = super::dom_ownership::local(scope, &accessor.0);
+    let static_accessor = v8::Function::new(scope, static_record)?;
+    Some((accessor, static_accessor))
+}
+
+/// Install the selection's Range::UpdateSelectionIfAddedToSelection hook.
+pub(super) fn set_selection_sync(scope: &mut v8::PinScope, hook: v8::Local<v8::Function>) {
+    let Some(updater) = scope
+        .get_current_context()
+        .get_slot::<RangeExceptionUpdater>()
+    else {
+        return;
+    };
+    let function = super::dom_ownership::local(scope, &updater.0);
+    let receiver = v8::undefined(scope);
+    let constructor = v8::undefined(scope);
+    function.call(scope, receiver.into(), &[constructor.into(), hook.into()]);
+}
+
 pub(super) fn clear_context(context: v8::Local<v8::Context>) {
     context.remove_slot::<RangeAccessor>();
     context.remove_slot::<RangeExceptionUpdater>();

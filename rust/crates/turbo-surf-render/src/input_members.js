@@ -1,8 +1,8 @@
 // HTMLInputElement / HTMLTextAreaElement members that need no layout or file host: limited
 // integer reflection, IDL-only indeterminate state, list, and Blink-exact stepping and typed
-// value conversion. width/height (layout boxes), files/webkitEntries (FileList) and
-// createValueRange (OpaqueRange geometry) are deliberately absent; showPicker() is the
-// activation-gated member in user_activation_gates.js.
+// value conversion. width/height (layout boxes) and files/webkitEntries (FileList) live in
+// other modules; showPicker() is activation-gated in user_activation_gates.js; selection
+// members and createValueRange (OpaqueRange) live in selection.js.
 (function () {
   'use strict';
   const g = globalThis, ns = g[Symbol.for('ts')], native = ns.makeNativeFunction;

@@ -143,6 +143,9 @@ mod element_relations;
 mod file_inputs;
 #[path = "focus_group.rs"]
 mod focus_group;
+#[path = "editing.rs"]
+mod editing;
+pub use editing::editing_user_input;
 #[path = "html_dialog.rs"]
 mod html_dialog;
 #[path = "typed_om.rs"]
@@ -3484,6 +3487,7 @@ fn el_focus(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: 
     }
     dispatch_synthetic(scope, h, "focus", false, false);
     dispatch_synthetic(scope, h, "focusin", true, false);
+    selection::focused(scope, args.this());
 }
 fn el_blur(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
     let _dom = DomScope::for_object(scope, args.this());
@@ -7206,6 +7210,8 @@ fn install_with_tree(scope: &mut v8::PinScope, mut tree: Tree) {
     form_pseudo::install(scope);
     user_activation_gates::install(scope);
     view_transitions::install(scope);
+    selection::install(scope);
+    editing::install(scope);
     let key = v8::String::new(scope, "__captureFormDataEvent").unwrap();
     if let Some(callback) = global
         .get(scope, key.into())
@@ -7361,6 +7367,8 @@ const BOOTSTRAP: &str = include_str!("browser_env.js");
 mod range_contents;
 #[path = "range_live.rs"]
 mod range_live;
+#[path = "selection.rs"]
+mod selection;
 
 /// Reclaim native tree records only after their actual owner Document is collected.
 /// Call at a host execution/GC boundary; this never clears a retained document.
@@ -9568,7 +9576,6 @@ mod form_outputs_tests;
 #[path = "html_dialog_tests.rs"]
 mod html_dialog_tests;
 #[cfg(test)]
-#[cfg(test)]
 #[path = "sanitizer_tests.rs"]
 mod sanitizer_tests;
 #[cfg(test)]
@@ -9593,3 +9600,7 @@ mod key_order_tests;
 #[cfg(test)]
 #[path = "view_transitions_tests.rs"]
 mod view_transitions_tests;
+
+#[cfg(test)]
+#[path = "editing_tests.rs"]
+mod editing_tests;

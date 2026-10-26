@@ -33,6 +33,9 @@ pub(super) fn attribute_changed<'s>(
     if name == "interestfor" {
         interest_invokers::attribute_changed(scope, element);
     }
+    if name == "type" {
+        selection::type_changed(scope, element);
+    }
     if !name.starts_with("aria-") && !matches!(name, "popovertarget" | "commandfor" | "interestfor")
     {
         return;

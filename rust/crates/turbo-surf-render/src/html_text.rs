@@ -55,10 +55,10 @@ impl TextOutput {
 fn parent(tree: &Tree, node: Handle) -> Option<Handle> {
     tree.parent(node).or_else(|| tree.shadow_host(node))
 }
-fn tag(tree: &Tree, node: Handle) -> &str {
+pub(super) fn tag(tree: &Tree, node: Handle) -> &str {
     tree.local_name(node).unwrap_or("")
 }
-fn display(tree: &Tree, node: Handle, style: &HashMap<String, String>) -> String {
+pub(super) fn display(tree: &Tree, node: Handle, style: &HashMap<String, String>) -> String {
     if let Some(value) = style.get("display") {
         return value.clone();
     }
@@ -79,7 +79,7 @@ fn display(tree: &Tree, node: Handle, style: &HashMap<String, String>) -> String
     }
     .into()
 }
-fn closed_details_child(tree: &Tree, node: Handle) -> bool {
+pub(super) fn closed_details_child(tree: &Tree, node: Handle) -> bool {
     let Some(owner) = tree.parent(node) else {
         return false;
     };
@@ -111,7 +111,7 @@ fn rendered(tree: &Tree, mut node: Handle, policy: &StylePolicy) -> bool {
     }
     true
 }
-fn whitespace(tree: &Tree, mut node: Handle, style: &HashMap<String, String>) -> String {
+pub(super) fn whitespace(tree: &Tree, mut node: Handle, style: &HashMap<String, String>) -> String {
     if let Some(value) = style.get("white-space") {
         return value.clone();
     }

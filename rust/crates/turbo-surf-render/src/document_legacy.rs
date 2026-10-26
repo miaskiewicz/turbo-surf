@@ -99,22 +99,27 @@ fn supported<'s>(
     )?;
     Some(result.is_true())
 }
-fn all_index_setter<'s, 'i>(
+// Stock rusty_v8 types the setter/definer return slot `ReturnValue<()>`;
+// source-built engines (V8 15.4+, turbo-surf native156) type it
+// `ReturnValue<Boolean>`. These interceptors never write the slot, so the
+// generic payload satisfies either ABI with binding-quirks' reject()/
+// should_throw semantics unchanged.
+fn all_index_setter<'s, 'i, T>(
     scope: &mut v8::PinScope<'s, 'i>,
     index: u32,
     _value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    _rv: v8::ReturnValue<()>,
+    _rv: v8::ReturnValue<T>,
 ) -> v8::Intercepted {
     reject(scope, &args, &index_message(index, "set"));
     v8::Intercepted::kYes
 }
-fn all_index_definer<'s, 'i>(
+fn all_index_definer<'s, 'i, T>(
     scope: &mut v8::PinScope<'s, 'i>,
     index: u32,
     descriptor: &v8::PropertyDescriptor,
     args: v8::PropertyCallbackArguments<'s>,
-    _rv: v8::ReturnValue<()>,
+    _rv: v8::ReturnValue<T>,
 ) -> v8::Intercepted {
     // Blink refuses an indexed accessor definition before consulting setter support.
     let operation = if descriptor.has_get() || descriptor.has_set() {
@@ -154,24 +159,24 @@ fn all_named_mutation<'s>(
     let text = name.to_rust_string_lossy(scope);
     Some(reject(scope, args, &named_message(&text, operation)))
 }
-fn all_named_setter<'s, 'i>(
+fn all_named_setter<'s, 'i, T>(
     scope: &mut v8::PinScope<'s, 'i>,
     name: v8::Local<'s, v8::Name>,
     _value: v8::Local<'s, v8::Value>,
     args: v8::PropertyCallbackArguments<'s>,
-    _rv: v8::ReturnValue<()>,
+    _rv: v8::ReturnValue<T>,
 ) -> v8::Intercepted {
     match all_named_mutation(scope, name, &args, "set") {
         None => v8::Intercepted::kNo,
         Some(_) => v8::Intercepted::kYes,
     }
 }
-fn all_named_definer<'s, 'i>(
+fn all_named_definer<'s, 'i, T>(
     scope: &mut v8::PinScope<'s, 'i>,
     name: v8::Local<'s, v8::Name>,
     _descriptor: &v8::PropertyDescriptor,
     args: v8::PropertyCallbackArguments<'s>,
-    _rv: v8::ReturnValue<()>,
+    _rv: v8::ReturnValue<T>,
 ) -> v8::Intercepted {
     match all_named_mutation(scope, name, &args, "define") {
         None => v8::Intercepted::kNo,

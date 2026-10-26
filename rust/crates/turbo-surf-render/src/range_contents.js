@@ -37,6 +37,11 @@
     deleteData = descriptor(Text.prototype, "deleteData").value,
     fragment = descriptor(Document.prototype, "createDocumentFragment").value;
   const fail = name => { throw new Exception("Invalid Range operation", name); };
+  // Selection hooks: Blink pushes boundary changes of the document's cached selection range
+  // back into the frame selection (Range::UpdateSelectionIfAddedToSelection).
+  // The hook is installed privately by the selection module through the returned updater.
+  let selectionSync = null;
+  const sync = state => { if (selectionSync !== null) selectionSync(state); };
   const required = (args, count) => {
     if (args.length < count) throw new TypeErrorClass("Insufficient Range arguments");
   };
@@ -234,12 +239,24 @@
       }
     }
   }
+  // Blink's ProcessContents collapses an extract/delete range before moving any node, through
+  // setStart (which updates a selection holding this range) and a direct end assignment.
+  function collapseFirst(state) {
+    if (state.startContainer === state.endContainer) return;
+    const shared = common(state.startContainer, state.endContainer);
+    const highest = node => { if (node === shared) return null; while (parent(node) !== shared) node = parent(node); return node; };
+    const start = highest(state.startContainer), end = highest(state.endContainer);
+    if (start) { state.startContainer = shared; state.startOffset = index(start) + 1; sync(state); }
+    else if (end) { state.startContainer = shared; state.startOffset = index(end); sync(state); }
+    state.endContainer = state.startContainer; state.endOffset = state.startOffset;
+  }
   function contents(state, mode) {
     const document = type(state.startContainer) === 9 ? state.startContainer : owner(state.startContainer),
       target = mode === "delete" ? null : apply(fragment, document, []);
     if (collapsed(state)) return target;
     const rows = plans(state), point = collapsePoint(state);
     if (mode !== "delete") checkDoctypes(rows);
+    if (mode !== "clone") collapseFirst(state);
     execute(rows, target, mode);
     if (mode !== "clone") collapseAt(state, point.node, point.offset);
     return target;
@@ -303,12 +320,13 @@
       const state = record(this); return common(state.startContainer, state.endContainer);
     }, "get commonAncestorContainer", 0), enumerable: true, configurable: true,
   });
-  method("setStart", 2, function (node, offset) { required(arguments, 2); type(node); boundary(this, node, (+offset) >>> 0, true); });
-  method("setEnd", 2, function (node, offset) { required(arguments, 2); type(node); boundary(this, node, (+offset) >>> 0, false); });
+  method("setStart", 2, function (node, offset) { required(arguments, 2); type(node); boundary(this, node, (+offset) >>> 0, true); sync(this); });
+  method("setEnd", 2, function (node, offset) { required(arguments, 2); type(node); boundary(this, node, (+offset) >>> 0, false); sync(this); });
   function around(state, node, after, start) {
     type(node); const container = parent(node);
     if (!container) fail("InvalidNodeTypeError");
     boundary(state, container, index(node) + (after ? 1 : 0), start);
+    sync(state);
   }
   method("setStartBefore", 1, function (node) { required(arguments, 1); around(this, node, false, true); });
   method("setStartAfter", 1, function (node) { required(arguments, 1); around(this, node, true, true); });
@@ -316,6 +334,7 @@
   method("setEndAfter", 1, function (node) { required(arguments, 1); around(this, node, true, false); });
   method("collapse", 0, function (start = false) {
     collapseAt(this, start ? this.startContainer : this.endContainer, start ? this.startOffset : this.endOffset);
+    sync(this);
   });
   function select(state, node) {
     type(node); const container = parent(node);
@@ -323,10 +342,11 @@
     state.startContainer = state.endContainer = container;
     state.startOffset = index(node); state.endOffset = state.startOffset + 1;
   }
-  method("selectNode", 1, function (node) { required(arguments, 1); select(this, node); });
+  method("selectNode", 1, function (node) { required(arguments, 1); select(this, node); sync(this); });
   method("selectNodeContents", 1, function (node) {
     required(arguments, 1); type(node); validate(node, 0);
     this.startContainer = this.endContainer = node; this.startOffset = 0; this.endOffset = length(node);
+    sync(this);
   });
   method("compareBoundaryPoints", 2, function (how, other) {
     required(arguments, 2); how = (+how) & 65535; other = record(other);
@@ -373,7 +393,7 @@
     const selected = contents(this, "extract");
     let child;
     while ((child = first(node))) apply(remove, node, [child]);
-    insertNode(this, node); apply(append, node, [selected]); select(this, node);
+    insertNode(this, node); apply(append, node, [selected]); select(this, node); sync(this);
   });
   function text(rows) {
     let result = "";
@@ -402,5 +422,8 @@
     for (const target of [LocalRange, LocalRange.prototype])
       if (!Object.hasOwn(target, name)) define(target, name, {value, enumerable: true, configurable: true});
   }
-  return function (constructor) { Exception = constructor; };
+  return function (constructor, hook) {
+    if (constructor !== undefined) Exception = constructor;
+    if (typeof hook === "function") selectionSync = hook;
+  };
 });

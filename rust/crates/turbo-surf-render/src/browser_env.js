@@ -1079,7 +1079,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     function selectionState(element){var state=selectionApply(selectionGet,controlSelections,[element]);if(!state){state={start:0,end:0,direction:'none'};selectionApply(selectionSet,controlSelections,[element,state]);}return state;}
     function selectionRequire(element){if(!selectionAvailable(element))throw new selectionException('The input type does not support selection','InvalidStateError');}
     function selectionUpdate(element,start,end,direction){var length=selectionValue(element).length;end=Math.min(end,length);start=Math.min(start,end);var state=selectionState(element);state.start=start;state.end=end;state.direction=direction==='forward'||direction==='backward'?direction:'none';}
-    function selectionValueChanged(element,oldValue,newValue){if(oldValue!==newValue&&selectionAvailable(element))selectionUpdate(element,newValue.length,newValue.length,'none');}
+    function selectionValueChanged(element,oldValue,newValue){if(__ns.controlValueChanged){__ns.controlValueChanged(element,oldValue,newValue);return;}if(oldValue!==newValue&&selectionAvailable(element))selectionUpdate(element,newValue.length,newValue.length,'none');}
     var selStartDesc={configurable:true,get:function(){return selectionAvailable(this)?selectionState(this).start:null;},set:function(value){selectionRequire(this);var state=selectionState(this),start=value===null?0:+value>>>0;selectionUpdate(this,start,Math.max(start,state.end),state.direction);}};
     var selEndDesc={configurable:true,get:function(){return selectionAvailable(this)?selectionState(this).end:null;},set:function(value){selectionRequire(this);var state=selectionState(this),end=value===null?0:+value>>>0;selectionUpdate(this,Math.min(state.start,end),end,state.direction);}};
     var selDirDesc={configurable:true,get:function(){return selectionAvailable(this)?selectionState(this).direction:null;},set:function(value){selectionRequire(this);var state=selectionState(this);selectionUpdate(this,state.start,state.end,value===null?'none':selectionText(value));}};
@@ -1797,38 +1797,7 @@ if(typeof __ns.makeNativeFunction==='function'){
     if (!d.writeln) d.writeln = function(){ docWrite(Array.prototype.join.call(arguments, '') + '\n'); };
   }
   if (g.__addGetElems) { g.__addGetElems(d); try { delete g.__addGetElems; } catch(e){} }
-  // ---- Selection (one live instance per document) ---------------------------------------------
-  (function(){
-    var ranges = [];
-    var firing = false;
-    function fireSelectionChange(){ if(firing) return; firing=true; try { var ev = new g.Event('selectionchange');eventRecord(ev).trusted=true;if (d.dispatchEvent) d.dispatchEvent(ev); } catch(e){} firing=false; }
-    var sel = {
-      get rangeCount(){ return ranges.length; },
-      get anchorNode(){ return ranges.length?ranges[0].startContainer:null; },
-      get anchorOffset(){ return ranges.length?ranges[0].startOffset:0; },
-      get focusNode(){ return ranges.length?ranges[0].endContainer:null; },
-      get focusOffset(){ return ranges.length?ranges[0].endOffset:0; },
-      get isCollapsed(){ return ranges.length?ranges[0].collapsed:true; },
-      get type(){ return ranges.length?(ranges[0].collapsed?'Caret':'Range'):'None'; },
-      getRangeAt:function(i){ if(i>=ranges.length) throw new Error('IndexSizeError'); return ranges[i]; },
-      addRange:function(r){ ranges=[r]; fireSelectionChange(); },
-      removeAllRanges:function(){ if(ranges.length){ ranges=[]; fireSelectionChange(); } else ranges=[]; },
-      empty:function(){ this.removeAllRanges(); },
-      removeRange:function(r){ var i=ranges.indexOf(r); if(i>=0){ ranges.splice(i,1); fireSelectionChange(); } },
-      collapse:function(node,offset){ if(!node){ this.removeAllRanges(); return; } var r=d.createRange(); r.setStart(node,offset|0); r.collapse(true); ranges=[r]; fireSelectionChange(); },
-      collapseToStart:function(){ if(ranges.length){ ranges[0].collapse(true); fireSelectionChange(); } },
-      collapseToEnd:function(){ if(ranges.length){ ranges[0].collapse(false); fireSelectionChange(); } },
-      extend:function(node,offset){ if(!ranges.length){ this.collapse(node,offset); return; } ranges[0].setEnd(node,offset|0); fireSelectionChange(); },
-      setBaseAndExtent:function(an,ao,fn,fo){ var r=d.createRange(); if(__cmp(an,ao|0,fn,fo|0)<=0){ r.setStart(an,ao|0); r.setEnd(fn,fo|0); } else { r.setStart(fn,fo|0); r.setEnd(an,ao|0); } ranges=[r]; fireSelectionChange(); },
-      selectAllChildren:function(node){ var r=d.createRange(); r.selectNodeContents(node); ranges=[r]; fireSelectionChange(); },
-      containsNode:function(node, partial){ if(!ranges.length) return false; var r=ranges[0]; var a=r.comparePoint(node,0), b=r.comparePoint(node,(node.nodeType===3?(node.data||'').length:(node.childNodes?node.childNodes.length:0))); return partial ? (a<=0&&b>=0) : (a===0&&b===0); },
-      deleteFromDocument:function(){ if(ranges.length) ranges[0].deleteContents(); },
-      modify:function(){},
-      toString:function(){ return ranges.length?ranges[0].toString():''; },
-    };
-    d.getSelection = function(){ return sel; };
-    if (!g.getSelection) g.getSelection = function(){ return sel; };
-  })();
+  // Selection lives in selection.js (installed natively after the form-control modules).
 
   // ── <iframe> second realm (bridged, same-isolate) ───────────────────────────────
   // A real cross-origin iframe hosts its OWN window/document realm and talks to the

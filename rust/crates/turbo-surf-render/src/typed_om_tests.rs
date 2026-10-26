@@ -7,6 +7,8 @@ fn run_probe(html: &str, probe: &str) -> serde_json::Value {
     v8::scope!(let scope,isolate);
     let context = v8::Context::new(scope, Default::default());
     let scope = &mut v8::ContextScope::new(scope, context);
+    // Pin the UA font to the macOS Chrome 156 control's capture ("Times"/16px), as
+    // css_live_tests does, so computed font-family is identical on every host.
     assert!(set_computed_font_defaults(context, "Times", 16.0));
     install_independent_html(scope, html);
     v8::tc_scope!(let scope,scope);

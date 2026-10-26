@@ -74,3 +74,37 @@ async fn src_and_decode_are_prototype_members_that_load_like_chrome156() {
     )
     .await;
 }
+
+/// turbo-surf#32 item 2: render()'s script runs over the parsed document, so parser
+/// images have started loading (and data: images finished) by the time its timers
+/// read them, as for an inline script at the end of the body in Chrome.
+#[tokio::test(flavor = "current_thread")]
+async fn parser_images_load_before_a_render_script_like_chrome156() {
+    let probe = include_str!("fixtures/html_image_render_probe.js");
+    let page = include_str!("fixtures/html_image_render_page.html");
+    let control: Value =
+        serde_json::from_str(include_str!("fixtures/html_image_render_chrome156.json")).unwrap();
+    assert!(control["browser"]
+        .as_str()
+        .unwrap()
+        .starts_with("Chrome/156."));
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(control["probeSha256"], sha(probe.as_bytes()));
+    assert_eq!(control["pageSha256"], sha(page.as_bytes()));
+    let html = turbo_surf_render::render_page(page, "https://html-image.test/", probe)
+        .await
+        .unwrap();
+    let title = html
+        .split_once("<title>")
+        .and_then(|(_, rest)| rest.split_once("</title>"))
+        .map(|(title, _)| title.replace("&quot;", "\""))
+        .unwrap();
+    let actual: Value = serde_json::from_str(&title).unwrap();
+    let expected = &control["result"];
+    assert_eq!(actual["late"], expected["late"]);
+    assert_eq!(actual["own"], expected["own"]);
+    // Known gap: Chrome decodes a parser data: image synchronously, so the script
+    // already reads it complete; surf's loader is asynchronous and still pending.
+    assert_eq!(actual["early"], serde_json::json!([false, 0, 0]));
+    assert_ne!(actual["early"], expected["early"]);
+}

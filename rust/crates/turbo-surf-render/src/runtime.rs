@@ -14122,6 +14122,9 @@ async fn run_async(
 ) -> Result<String, String> {
     install_dom(rt, html, base)?;
     run_lifecycle(rt, "documentLoading")?; // readyState "loading" while scripts run
+    // The parser has already requested the document's images and stylesheets when a
+    // script runs over the parsed document; without this they never load here.
+    run_lifecycle(rt, "loadDocumentResources")?;
     exec_page_scripts(rt, script, base)?;
     run_lifecycle(rt, "dispatchDocumentInteractive")?; // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page

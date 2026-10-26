@@ -14,12 +14,17 @@ name = "turbo_surf_py"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["avif"]
+default = ["avif", "jxl"]
 # AVIF screenshot pixels (turbo-surf#30): turbo-dom-raster's pure-Rust rav1d decoder
 # (BSD-2-Clause, no assembly, no C toolchain). ON by default: live loads already size
 # AVIF and image requests advertise `image/avif` as Chrome does, so CDNs serve it.
 # Without it an AVIF lays out at its real size and paints as the placeholder.
 avif = ["turbo-dom-raster/avif"]
+# JPEG XL screenshot pixels (turbo-surf#43): turbo-dom-raster's pure-Rust jxl-oxide decoder
+# (MIT OR Apache-2.0, single-threaded). ON by default: Chrome 156 decodes JPEG XL, live
+# loads size it and image requests advertise `image/jxl` as Chrome does, so CDNs serve it.
+# Without it a JPEG XL lays out at its real size and paints as the placeholder.
+jxl = ["turbo-dom-raster/jxl"]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization — OFF by default so the published wheels
 # never pull wgpu / a C-Metal toolchain. See turbo-dom-raster's `gpu-metal`.
 gpu-metal = ["turbo-dom-raster/gpu-metal"]

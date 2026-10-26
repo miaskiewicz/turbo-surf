@@ -84,7 +84,7 @@ lifecycle remain separate coverage work.
 
 Live hydration loads linked/imported stylesheets, enforces inline style CSP against native
 attributes, and protects opaque stylesheet rules from script access. Same-origin cross-realm
-CSS getters share private interface brands. It sizes PNG/JPEG/GIF/WebP/BMP/ICO/AVIF and `image/svg+xml` image resources (any `data:`
+CSS getters share private interface brands. It sizes PNG/JPEG/GIF/WebP/BMP/ICO/AVIF/JPEG XL and `image/svg+xml` image resources (any `data:`
 form) with load/error events like Chrome and selects `srcset` candidates like Chrome;
 `<picture>` sources and CSS image/font resource loading are incomplete. CSSOM changes made with
 `insertRule` do not alter

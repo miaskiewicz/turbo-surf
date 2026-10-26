@@ -194,8 +194,8 @@ fn to_assets(images: std::collections::HashMap<String, Buffer>) -> raster::Image
 
 /// PNG screenshot of `html` with caller-fetched `external_css` and `images` (a
 /// map from each `imageUrls` ref to its fetched bytes). PNG/JPEG/GIF/WebP/SVG/BMP/ICO
-/// (and, with the default `avif` feature, AVIF) images are painted into their layout
-/// box; others fall back to a placeholder.
+/// (and, with the default `avif` / `jxl` features, AVIF / JPEG XL) images are painted
+/// into their layout box; others fall back to a placeholder.
 #[napi]
 pub fn screenshot_with_assets(
     html: String,
@@ -1017,11 +1017,12 @@ pub async fn fetch_html(url: String) -> Result<String> {
 /// resources — images for `screenshotWithAssets` — that a `fetchHtml` string
 /// would corrupt. Uses the shared pooled client; non-HTML content types allowed.
 ///
-/// Sends Chrome's image `Accept` (the image destination's, `image/avif` first) when
-/// the addon is built with its default `avif` feature, which paints AVIF. Without it
-/// the request advertises only formats the screenshot raster paints (PNG/JPEG/WebP/
-/// GIF/SVG), so a content-negotiating CDN (`f_auto` on Nike/Cloudinary/etc.) falls
-/// back to WebP instead of serving AVIF that would paint as a placeholder.
+/// Sends Chrome's image `Accept` (the image destination's: `image/jxl,image/avif,…`)
+/// when the addon is built with its default `avif` and `jxl` features, which paint
+/// AVIF and JPEG XL. Without one of them the request advertises only formats the
+/// screenshot raster paints (PNG/JPEG/WebP/GIF/SVG, plus whichever of JPEG XL / AVIF is
+/// built), so a content-negotiating CDN (`f_auto` on Nike/Cloudinary/etc.) falls back
+/// to WebP instead of serving an image that would paint as a placeholder.
 #[napi]
 pub async fn fetch_bytes(
     url: String,
@@ -1030,10 +1031,20 @@ pub async fn fetch_bytes(
     cookies: Option<String>,
 ) -> Result<Buffer> {
     let mut headers = std::collections::BTreeMap::new();
-    if !cfg!(feature = "avif") {
+    if !(cfg!(feature = "avif") && cfg!(feature = "jxl")) {
+        let jxl = if cfg!(feature = "jxl") {
+            "image/jxl,"
+        } else {
+            ""
+        };
+        let avif = if cfg!(feature = "avif") {
+            "image/avif,"
+        } else {
+            ""
+        };
         headers.insert(
             "accept".to_string(),
-            "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8".to_string(),
+            format!("{jxl}{avif}image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8"),
         );
     }
     let RequestState {

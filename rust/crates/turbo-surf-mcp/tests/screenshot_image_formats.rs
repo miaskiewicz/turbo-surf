@@ -102,8 +102,7 @@ fn screenshots_paint_bmp_ico_and_avif_like_chrome156() {
 }
 
 #[test]
-#[ignore = "turbo-surf#43: fails until the fix"]
 fn screenshots_paint_jpeg_xl_like_chrome156() {
-    let found = mismatches(|id| id.starts_with("jxl"), |_| true);
+    let found = mismatches(|id| id.starts_with("jxl"), |_| cfg!(feature = "jxl"));
     assert!(found.is_empty(), "{found:#?}");
 }

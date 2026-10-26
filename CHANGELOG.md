@@ -54,6 +54,15 @@
   ICO/CUR paint through the repinned raster. napi `fetchBytes` sends Chrome's image
   `Accept` again when built with `avif`. Chrome 156 control:
   `turbo-surf-mcp/tests/fixtures/screenshot_image_formats_chrome156.json`.
+- Screenshots paint JPEG XL (#43): the MCP binary, the napi addon and the Python wheel
+  forward a new default-on `jxl` feature to turbo-dom-raster (jxl-oxide 0.12.6, pure Rust,
+  single-threaded, MIT OR Apache-2.0; notice added to `THIRD_PARTY_NOTICES.md`). Chrome 156
+  decodes JPEG XL, its image `Accept` starts with `image/jxl` (which surf sends), and live
+  loads size JPEG XL since the turbo-dom 5561a5f repin (turbo-dom#45), so without the
+  feature a served JPEG XL painted as a placeholder. napi `fetchBytes` advertises
+  `image/jxl` / `image/avif` only when the addon paints them. Chrome 156 controls: the JPEG
+  XL rows of `image_formats_chrome156.json` (live loads) and
+  `screenshot_image_formats_chrome156.json` (pixels).
 - `img.width`/`height`/`x`/`y` read surf's live layout (turbo-dom#26): surf answers the
   binding's `imageHost.setLayoutQuery` from a new native op (content box pixel-snapped
   and zoom-adjusted, border-box document position; null without a box), and live layout

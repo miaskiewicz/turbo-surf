@@ -17,7 +17,7 @@ path = "src/main.rs"
 [features]
 # The pinned Chrome 154 transport includes real Chromium trust-anchor IDs.
 # The reviewed named registry dependencies preserve this API; see PUBLISHING.md.
-default = ["impersonate", "avif"]
+default = ["impersonate", "avif", "jxl"]
 # Build the MCP binary with a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint
 # (BoringSSL, via turbo-surf-core's `impersonate`). Needs a C toolchain (cmake/nasm) at
 # build time. ON by default (anti-bot). See turbo-surf-core/src/net.rs.
@@ -30,6 +30,11 @@ trust-anchors = ["turbo-surf-core/trust-anchors"]
 # AVIF and image requests advertise `image/avif` as Chrome does, so CDNs serve it.
 # Without it an AVIF lays out at its real size and paints as the placeholder.
 avif = ["turbo-dom-raster/avif"]
+# JPEG XL screenshot pixels (turbo-surf#43): turbo-dom-raster's pure-Rust jxl-oxide decoder
+# (MIT OR Apache-2.0, single-threaded). ON by default: Chrome 156 decodes JPEG XL, live
+# loads size it and image requests advertise `image/jxl` as Chrome does, so CDNs serve it.
+# Without it a JPEG XL lays out at its real size and paints as the placeholder.
+jxl = ["turbo-dom-raster/jxl"]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization for the render tier's toDataURL — genuine
 # GPU pixels instead of tiny-skia's software raster. OFF by default (macOS-only, pulls wgpu +
 # a C/Metal toolchain); enable where a real GPU is present. See turbo-dom-raster's `gpu-metal`.

@@ -2991,7 +2991,7 @@ pub fn tools() -> Value {
              snapshot — native layout+paint, no browser. Honors CSS \
              position/z-index stacking. Fetches the page's external <link> \
              stylesheets and its <img>/background-image bytes (via the session \
-             client, so impersonation + cookies apply); PNG/JPEG/GIF/WebP/SVG/BMP/ICO/AVIF \
+             client, so impersonation + cookies apply); PNG/JPEG/GIF/WebP/SVG/BMP/ICO/AVIF/JPEG XL \
              images are painted, others fall back to a placeholder. Args: format (png|svg), \
              snapshot? (dom_history index), width?/height? (override viewport), \
              external_css? (default true), images? (default true), \

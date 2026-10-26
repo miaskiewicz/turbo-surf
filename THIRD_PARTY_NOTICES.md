@@ -419,3 +419,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## jxl-oxide 0.12.6 and its crates (MIT option)
+
+The screenshot raster's JPEG XL decoder (turbo-dom-raster's `jxl` feature, on by default in
+the MCP binary, the napi addon and the Python wheel) links
+[jxl-oxide](https://github.com/tirr-c/jxl-oxide) 0.12.6 and its crates jxl-bitstream 1.1.0,
+jxl-coding 1.0.1, jxl-color 0.11.0, jxl-frame 0.13.3, jxl-grid 0.6.2, jxl-image 0.13.0,
+jxl-jbr 0.2.1, jxl-modular 0.11.3, jxl-oxide-common 1.0.0, jxl-render 0.12.4,
+jxl-threadpool 1.0.0 and jxl-vardct 0.11.1 (each `MIT OR Apache-2.0`). The license below is
+each crates.io package's `LICENSE-MIT`, SHA-256
+`23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3`:
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.

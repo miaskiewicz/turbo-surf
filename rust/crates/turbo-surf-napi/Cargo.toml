@@ -10,7 +10,7 @@ description = "turbo-surf napi-rs addon — in-process bridge from the Rust core
 crate-type = ["cdylib"]
 
 [features]
-default = ["impersonate", "avif"]
+default = ["impersonate", "avif", "jxl"]
 # Forward turbo-surf-core's BoringSSL Chrome-fingerprint client (dev/harness use
 # of the impersonation path). See turbo-surf-core/src/net.rs.
 impersonate = ["turbo-surf-core/impersonate", "turbo-surf-page/impersonate"]
@@ -19,6 +19,11 @@ impersonate = ["turbo-surf-core/impersonate", "turbo-surf-page/impersonate"]
 # AVIF and image requests advertise `image/avif` as Chrome does, so CDNs serve it.
 # Without it an AVIF lays out at its real size and paints as the placeholder.
 avif = ["turbo-dom-raster/avif"]
+# JPEG XL screenshot pixels (turbo-surf#43): turbo-dom-raster's pure-Rust jxl-oxide decoder
+# (MIT OR Apache-2.0, single-threaded). ON by default: Chrome 156 decodes JPEG XL, live
+# loads size it and image requests advertise `image/jxl` as Chrome does, so CDNs serve it.
+# Without it a JPEG XL lays out at its real size and paints as the placeholder.
+jxl = ["turbo-dom-raster/jxl"]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization (off by default; see turbo-dom-raster).
 gpu-metal = ["turbo-dom-raster/gpu-metal"]
 # CoreText/CoreGraphics canvas-text raster (macOS only). See turbo-dom-raster's `coretext`.

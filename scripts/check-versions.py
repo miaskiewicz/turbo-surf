@@ -31,11 +31,13 @@ def check_versions(root: Path) -> str:
     )
     consumer = tomllib.loads((root / "rust/release-deps/surf-consumer/Cargo.toml").read_text())
     check(consumer["package"]["version"], "Packaged consumer")
-    for name in ("core", "view", "page", "render", "raster", "mcp"):
+    def requirement(name):
+        dependency = consumer["dependencies"].get(name)
+        return dependency.get("version") if isinstance(dependency, dict) else dependency
+
+    for name in ("core", "view", "page", "render", "mcp"):
         dependency_name = f"turbo-surf-{name}"
-        dependency = consumer["dependencies"].get(dependency_name)
-        requirement = dependency.get("version") if isinstance(dependency, dict) else dependency
-        check(requirement, f"Packaged consumer: {dependency_name}", f"={version}")
+        check(requirement(dependency_name), f"Packaged consumer: {dependency_name}", f"={version}")
     members = set()
     for member in workspace["workspace"]["members"]:
         path = root / "rust" / member / "Cargo.toml"
@@ -55,6 +57,12 @@ def check_versions(root: Path) -> str:
             locked_members.add(crate["name"])
     if locked_members != members:
         raise ValueError(f"Rust lockfile missing workspace packages: {members - locked_members}")
+    # The packaged consumer pins the turbo-dom crates exactly as the workspace locks them.
+    for name, dependency_name in (("turbo-dom", "turbo-dom-parser"), ("turbo-dom-raster", "turbo-dom-raster")):
+        locked = [crate["version"] for crate in rust_lock["package"] if crate["name"] == name]
+        if len(locked) != 1:
+            raise ValueError(f"Rust lockfile must contain exactly one {name}, found {locked}")
+        check(requirement(dependency_name), f"Packaged consumer: {dependency_name}", "=" + locked[0])
     if f"Status: **v{version} " not in (root / "README.md").read_text():
         raise ValueError(f"README status must report v{version}")
     if f"## [{version}]" not in (root / "CHANGELOG.md").read_text():

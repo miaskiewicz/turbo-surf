@@ -1,9 +1,11 @@
 # Publish the turbo-surf Rust library crates to crates.io on a v* tag (mirrors
 # turbo-dom's publish-crate job). Requires repo secret CARGO_REGISTRY_TOKEN.
 # Published in dependency order so each dependent's version dep is already live:
-#   core → view → page → render → raster → mcp.
+#   core → view → page → render → mcp.
+# turbo-dom-raster / -layout / -browser-env and turbo-dom-v8 are published first
+# from the turbo-dom repository.
 # NAPI and transform remain unpublished workspace implementation crates; npm ships
-# the standalone MCP binary. Before tagging, verify all six actual distributions
+# the standalone MCP binary. Before tagging, verify all five actual distributions
 # together and run the clean consumer documented in rust/release-deps/surf-consumer.
 name: rust-crates-publish
 
@@ -52,11 +54,6 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - run: cargo publish --locked -p turbo-surf-render
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      # turbo-surf-raster deps turbo-html2pdf-core (crates.io) + tiny-skia/ttf-parser;
-      # must publish before turbo-surf-mcp, which now depends on it.
-      - run: cargo publish --locked -p turbo-surf-raster
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - run: cargo publish --locked -p turbo-surf-mcp

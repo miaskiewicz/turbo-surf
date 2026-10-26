@@ -383,7 +383,8 @@ SERP in one baseline while another fails effective consent dismissal. The later
   descriptors against `sizes`, `src` as the 1x candidate) and the natural size is
   `imageHost.naturalSize` of the decoded candidate; a `<source>` attribute change, or a
   `<source>` inserted into or removed from the `<picture>`, reselects. A relevant mutation
-  that keeps the same choice does not restart the load (Chrome fires `load` again); CSS
+  that keeps the same choice does not restart the load (Chrome fires `load` again,
+  turbo-surf#49); CSS
   image/font initiation, incremental
   parsing and complete browser async-script scheduling remain outside this resource loader.
   Image, linked/imported stylesheet and classic-script fetches record their actual duration

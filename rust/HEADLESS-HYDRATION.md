@@ -52,7 +52,7 @@ Requirements and where each stands:
 | Requirement | Status |
 |---|---|
 | Real V8 isolate, host heap unreachable from guest (+ runaway budget) | ✅ deno_core + watchdog |
-| Native DOM bound to `rtdom::Tree` (`document`/Element — jQuery/React run) | ✅ `browser_env` (vendored from turbo-test); partial Web IDL coverage |
+| Native DOM bound to `rtdom::Tree` (`document`/Element — jQuery/React run) | ✅ `browser_env` (the `turbo-dom-browser-env` crate); partial Web IDL coverage |
 | `window`/`navigator`/`location`/`localStorage`/`console` + Event classes | ✅ binding + env bootstrap |
 | Timers (setTimeout/rAF/queueMicrotask) | Fast virtual scheduling by default; opt-in real-time Window/frame deadlines through PageSessionOptions before hydration; individual Window timer tasks finish their microtask checkpoints, with measured per-Window nesting clamps; broader cadence/task-source parity remains open |
 | Promise / `async`-`await` / microtask resolution (event loop) | ✅ `render_html_async` |

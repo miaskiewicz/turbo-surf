@@ -1,7 +1,7 @@
 //! Render-tier integration tests. These drive deno_core (which boots V8 its own
-//! way), so they live in a SEPARATE test binary from the lib unit tests — the
-//! vendored `browser_env_upstream.rs` smoke test boots a standalone V8 platform in
-//! the lib binary, and the two platform initializations must not share a process.
+//! way), so they live in a SEPARATE test binary from the lib unit tests, keeping
+//! each V8 platform initialization in its own process (the binding's standalone-V8
+//! tests run in the turbo-dom-browser-env crate).
 
 use turbo_surf_render::{
     render_html, render_html_async, render_hydrate, render_hydrate_with_budget, render_page,

@@ -146,15 +146,16 @@ place, and the render returns the hydrated HTML (the Lane B contract).
 
 - Boots a **`deno_core` V8 isolate** (true isolate — host heap unreachable from
   guest; a runaway-execution **budget** watchdog terminates a wedged script).
-- **The DOM is a native `rtdom`↔V8 binding** — `browser_env`, vendored from
-  [turbo-test](../../turbo-test) (its battle-tested binding that runs React +
-  Testing Library). A JS DOM node is a V8 object holding a turbo-dom handle in an
-  internal field; methods/accessors are native callbacks straight onto `Tree`. No
-  JS-DOM-in-JS-VM indirection. See [`src/browser_env.rs`](crates/turbo-surf-render/src/browser_env.rs)
-  for the vendor/sync story: the one-command script copies committed canonical
-  Rust/JS/CSS grammar and generates the surf adapter from
-  `scripts/browser-env-adapter.rs.in`. Seeded installation delegates to the
-  canonical API; surf additions remain outside the upstream binding.
+- **The DOM is a native `rtdom`↔V8 binding** — `browser_env` from the
+  [`turbo-dom-browser-env`](https://github.com/miaskiewicz/turbo-dom) crate (the
+  battle-tested binding turbo-test also runs React + Testing Library on; it moved
+  there from turbo-test). A JS DOM node is a V8 object holding a turbo-dom handle in
+  an internal field; methods/accessors are native callbacks straight onto `Tree`. No
+  JS-DOM-in-JS-VM indirection. turbo-surf-render depends on it (feature
+  `host-internals`) and keeps no copy: page loads use its `install_html` /
+  `install_independent_*` / `document_html`, and surf's native services over its
+  documents (`src/live_layout_dom.rs`, `src/compression_dictionary_dom.rs`) use its
+  host-only `host_internals`. Binding changes land in turbo-dom.
 - The runtime in [`src/runtime.rs`](crates/turbo-surf-render/src/runtime.rs) grafts
   that binding onto deno_core's context, then layers the non-DOM `window` env a real
   page needs (`navigator`, `location`, virtual timers + real microtasks, `fetch`/XHR

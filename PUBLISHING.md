@@ -57,8 +57,8 @@ changelog entries and unrelated dependency versions must retain their own versio
    separate. When reusing a prior result, retain a bridge proving its actual
    compiled inputs and resolved feature graph still match.
 3. Complete the [actual packaged-consumer procedure](./rust/release-deps/surf-consumer/README.md).
-   Publish and verify the named dependencies first (turbo-dom-v8 from turbo-dom,
-   then the twelve here: seven Deno-family 0.x.1 + five transport); the Surf product
+   Publish and verify the named dependencies first (turbo-dom-v8 and
+   turbo-dom-browser-env from turbo-dom, then the twelve here: seven Deno-family 0.x.1 + five transport); the Surf product
    tags do not publish those dependencies. Then verify all six Surf distributions
    in one normal invocation, with Cargo compilation verification enabled and no
    directory-source replacement:

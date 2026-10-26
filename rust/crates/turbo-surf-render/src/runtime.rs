@@ -1,5 +1,5 @@
 //! Render runtime (tier 3). Page JS runs on a `deno_core` V8 isolate. The DOM is
-//! a real rtdom↔V8 binding ([`crate::browser_env`], vendored from turbo-test) so
+//! a real rtdom↔V8 binding ([`crate::browser_env`], the turbo-dom-browser-env crate) so
 //! jQuery / React / hand-rolled bundles see a genuine `document`/Element. deno_core
 //! supplies the rest: the async event loop, `fetch`/cookies over the tier-1 net
 //! stack (`#[op2]` ops below), virtual timers, and the runaway-execution budget.
@@ -8067,7 +8067,7 @@ globalThis.requestAnimationFrame = (fn) => {
   return id;
 };
 ops.op_capture_frame_scheduler((step) => { __frameSteps[__frameSteps.length] = step; __scheduleFrame(); });
-// The vendored binding's view-transition rendering seam. A page here is never hidden: the
+// The binding's view-transition rendering seam. A page here is never hidden: the
 // engine has no tab or occlusion model and reports document.visibilityState "visible".
 ops.op_capture_view_transition_host((command, argument) => {
   if (command === "frame") { __viewTransitionSteps[__viewTransitionSteps.length] = argument; __scheduleFrame(); }
@@ -8121,8 +8121,8 @@ ops.op_set_host_capabilities({
   runLocalTimers:max=>__runLocalTimers(max)
 });
 // NOTE: getElementsByTagName/ClassName/Name, lastChild/previous*/nextElementSibling,
-// and document.write/writeln are provided by the vendored binding (browser_env.js,
-// turbo-test ≥ 71477ba) — real-world bundles (jQuery's load-time support probe,
+// and document.write/writeln are provided by the binding (turbo-dom-browser-env's
+// browser_env.js, since turbo-test 71477ba) — real-world bundles (jQuery's load-time support probe,
 // document.write-driven pages) depend on them. They live upstream, not here.
 //
 // Runtime document state stays outside the native node. Use the native brand
@@ -8697,7 +8697,7 @@ globalThis.fetch = async (input, init = undefined) => {
     return clone(value,receiver,transfer===undefined?undefined:sequence(transfer));
   }}).structuredClone,"structuredClone",1);
 }
-// NOTE: getComputedStyle is provided by the vendored browser_env.js (a jsdom-style
+// NOTE: getComputedStyle is provided by the binding's browser_env.js (a jsdom-style
 // getComputedStyle the Playwright shim's cssValue/visibility reads). Do NOT redefine
 // IT here — ENV_BOOTSTRAP runs AFTER the binding, so an override would clobber the
 // real one and break the shim.
@@ -8903,7 +8903,7 @@ ops.op_set_host_capabilities({
 // idiom — delivery routes through the virtual timer queue (setTimeout 0) so the hydration/
 // interaction pump drains it. Setting `onmessage` implies `start()` (Chrome); the addEventListener
 // path queues until start().
-// MessageEvent — a REAL constructor (the vendored binding ships only a hollow `function(){}`
+// MessageEvent — a REAL constructor (the binding ships only a hollow `function(){}`
 // stub, so `new MessageEvent('message',{data}).data` was undefined). Our postMessage / port /
 // BroadcastChannel dispatch build events via this so `ev instanceof MessageEvent` holds and the
 // event carries data/origin/source/ports like Chrome. Defined before the ports that use it.
@@ -9032,7 +9032,7 @@ const __streamTransferFactory =
 // its own scheduler by posting to the window and running work in the `message` handler —
 // a bare `postMessage(...)` call (window.postMessage) with no shim throws
 // "postMessage is not a function" and aborts the VM before any token path runs. The
-// vendored binding supplies window `addEventListener`/`dispatchEvent`; we only add the
+// binding supplies window `addEventListener`/`dispatchEvent`; we only add the
 // poster. MessageEvent is a bare stub here, so build a plain event carrying the fields
 // collectors read (data/origin/source/ports).
 const __postingWindow=globalThis, __postingException=DOMException;
@@ -9108,7 +9108,7 @@ for (const __on of ["onmessage", "onerror", "onmessageerror", "ononline", "onoff
   try { if (globalThis[__on] === undefined) globalThis[__on] = null; } catch (_e) {}
 }
 // document.contentType — real Chrome reports "text/html" for an HTML document; the
-// reCAPTCHA VM reads it. The vendored binding doesn't expose it, so add an own accessor.
+// reCAPTCHA VM reads it. The binding doesn't expose it, so add an own accessor.
 try {
   if (globalThis.document && globalThis.document.contentType === undefined) {
     Object.defineProperty(globalThis.document, "contentType", { configurable: true, get() { return "text/html"; } });

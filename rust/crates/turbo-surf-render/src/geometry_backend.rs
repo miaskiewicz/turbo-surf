@@ -55,7 +55,7 @@ fn op_capture_frame_scheduler<'s>(
     Ok(())
 }
 /// Trusted bootstrap hands the realm's view-transition rendering seam (frame steps after
-/// animation callbacks, rendering suppression, page visibility) to the vendored binding.
+/// animation callbacks, rendering suppression, page visibility) to the binding.
 #[op2(fast, reentrant)]
 fn op_capture_view_transition_host<'s>(
     scope: &mut v8::PinScope<'s, '_>,

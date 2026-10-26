@@ -39,7 +39,6 @@ async fn track_elements_match_chrome156() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#48: fails until the fix"]
 async fn adoption_reactions_match_chrome156() {
     binding_control::matches_control(
         test_support::DOM_ADOPTION_REACTIONS_PROBE_JS,

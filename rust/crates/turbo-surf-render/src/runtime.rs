@@ -8193,11 +8193,15 @@ const __documentState = (receiver) => {
   if (__parsedDocumentStates.has(receiver)) return __parsedDocumentStates.get(receiver);
   return ops.op_document_runtime_state(receiver);
 };
+// The native accessor resolves a document through its own realm's copy of this function.
+// A document of this realm that no initializer registered (the binding's inert template
+// contents owner, turbo-dom#29) is an inert document like a parsed one: no window
+// (defaultView null), URL about:blank, as in Chrome.
 const __documentStateFor = (receiver) => {
   if (__documentApply(__documentType,receiver,[]) !== 9) throw new TypeError("Illegal invocation");
   if (receiver === __document) return __documentRuntimeState;
-  if (__parsedDocumentStates.has(receiver)) return __parsedDocumentStates.get(receiver);
-  throw new TypeError("Illegal invocation");
+  if (!__parsedDocumentStates.has(receiver)) __registerInertDocument(receiver,"about:blank","text/html");
+  return __parsedDocumentStates.get(receiver);
 };
 ops.op_set_document_runtime_state_accessor(__documentStateFor);
 delete __G.documentStateFor;

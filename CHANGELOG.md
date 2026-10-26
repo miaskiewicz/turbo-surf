@@ -97,10 +97,14 @@
   real-time deliveries (storage events, BroadcastChannel, CSP task capacity) are
   condition waits. The child-supervision "retired collector leader" test retires the
   leader once it has reported its helper instead of racing a 1 s deadline against two
-  Node startups (#44).
-- turbo-dom crates repinned to turbo-dom refactor 5561a5f (P5b-X4/W3/X5/W4: layout
-  turbo-dom#28, #48-#50, #53, #56; dialog/top layer, `::before`/`::after`; raster
-  `data:` images, AVIF orientation, JPEG XL). Screenshots paint `<img src="data:…">`
+  Node startups (#44). The smoke-release helper treats a process group of zombies
+  (macOS answers `killpg` with EPERM, not ESRCH) as gone (#45). `csp_document_policy`
+  and `frame_gc_contracts` use 60 s session caps, the opaque-srcdoc probe waits up to
+  60 s for its frame's message (control recaptured on Chrome 156), and the frame
+  lifetime test awaits its probe instead of reading it before the frames loaded (#46).
+- turbo-dom crates repinned to turbo-dom refactor be87ef2 (P5b-X4/W3/X5/W4/W5: layout
+  turbo-dom#28, #41, #48-#53, #55, #56, #62-#65, #69, #70; dialog/top layer,
+  `::before`/`::after`; raster `data:` images, AVIF orientation, JPEG XL, clip:rect). Screenshots paint `<img src="data:…">`
   without a caller asset map (turbo-dom#60, verified by the screenshot control with an
   empty map — the screenshot tool's real input); live loads size JPEG XL.
 - turbo-dom crates repinned to the P5b binding fixes (turbo-dom#20 `Option()` and

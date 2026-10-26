@@ -1,7 +1,7 @@
 {
-  "browser": "Chrome/155.0.8059.80",
-  "v8": "15.5.35.23",
-  "collectorNode": "v22.22.3",
+  "browser": "Chrome/156.0.8078.4",
+  "v8": "15.6.75",
+  "collectorNode": "v26.11.0",
   "mode": "headed-direct-cdp",
   "flags": [
     "--remote-debugging-port=0",
@@ -12,7 +12,7 @@
     "--disable-component-extensions-with-background-pages",
     "about:blank"
   ],
-  "recordedAt": "2026-10-17T13:38:56.303Z",
+  "recordedAt": "2026-10-26T09:14:07.244Z",
   "producer": {
     "repository": "miaskiewicz/turbo-html2pdf",
     "commit": "2eac7f64142d8e6bde37f7ae46006c991b6f2347"
@@ -20,7 +20,7 @@
   "probeKind": "font-runs",
   "probeSha256": "7a2528d731bd0b21172285e577b2aa169e912825e9fea2b19658683963c86210",
   "socketHelperSha256": "0ab10b0e21e1c8385ce29dd1df131c24f587121c6222eb00201935496116e7c2",
-  "collectorSha256": "7493fb498c256128f5fd38f081251888b9f9c838d9b77663e8c634f1b874efb2",
+  "collectorSha256": "78f08a0786097f7a78037c20aa24a6ce597bf2c4756908a9696a52d14c21d2a1",
   "htmlSha256": "166a4ec3cb90d525f7f744c7616c01b36bebd6dcecd486c8f5be14ccc0a7b3da",
   "fonts": [
     {

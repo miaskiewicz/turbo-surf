@@ -49,16 +49,17 @@ node harness/detection/font-run-geometry-chrome-control.mjs \
   --producer /path/to/turbo-html2pdf --out /private/tmp/font-run-oracle.json
 ```
 
-Use Node22 or newer and a fresh output path. The producer checkout must contain
-commit2eac7f6; the collector verifies its pinned font bytes before serving them.
-It launches fresh normal headed Chrome with the established direct-CDP policy,
+Use Node22 or newer and a fresh output path. The producer is any turbo-html2pdf
+clone that contains commit 2eac7f6: the collector serves each font from that
+commit's blob (`git show`), never from the working tree, so clones at or after
+0.6.0 (whose bundled fonts moved to turbo-dom-layout) work too. It launches fresh normal headed Chrome with the established direct-CDP policy,
 records actual selected fonts, source/font hashes and natural/emulated device
 scales, and closes the browser/server afterward. Optional `--headless` records a
 separate mode with potentially different metrics; it cannot replace the headed
-oracle. The saved [control](./fixtures/font-run-geometry-chrome155.json) preserves
+oracle. The saved [control](./fixtures/font-run-geometry-chrome156.json) preserves
 all measured values, including unequal widths for adjacent partial intervals.
 
-The sibling [Range transform control](./fixtures/range-transform-stages-chrome155.json)
+The sibling [Range transform control](./fixtures/range-transform-stages-chrome156.json)
 separates body-margin, padding, absolute/fixed positioning, nested rotation,
 transform origins and identity/integer-translation stages:
 

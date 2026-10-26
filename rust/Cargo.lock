@@ -5500,7 +5500,7 @@ dependencies = [
 [[package]]
 name = "turbo-dom"
 version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=eb2ba1d84c0e65126f5b86a7efc1b272873c636c#eb2ba1d84c0e65126f5b86a7efc1b272873c636c"
+source = "git+https://github.com/miaskiewicz/turbo-dom?rev=955392152cd1ab476db197f8169283475467c963#955392152cd1ab476db197f8169283475467c963"
 dependencies = [
  "cssparser 0.37.0",
  "html5ever",
@@ -5509,12 +5509,13 @@ dependencies = [
  "rustc-hash 2.1.2",
  "smallvec",
  "smol_str",
+ "unicode-bidi",
 ]
 
 [[package]]
 name = "turbo-dom-browser-env"
 version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=eb2ba1d84c0e65126f5b86a7efc1b272873c636c#eb2ba1d84c0e65126f5b86a7efc1b272873c636c"
+source = "git+https://github.com/miaskiewicz/turbo-dom?rev=955392152cd1ab476db197f8169283475467c963#955392152cd1ab476db197f8169283475467c963"
 dependencies = [
  "cssparser 0.37.0",
  "lightningcss",
@@ -5529,7 +5530,7 @@ dependencies = [
 [[package]]
 name = "turbo-dom-layout"
 version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=eb2ba1d84c0e65126f5b86a7efc1b272873c636c#eb2ba1d84c0e65126f5b86a7efc1b272873c636c"
+source = "git+https://github.com/miaskiewicz/turbo-dom?rev=955392152cd1ab476db197f8169283475467c963#955392152cd1ab476db197f8169283475467c963"
 dependencies = [
  "core-foundation",
  "core-text",
@@ -5549,7 +5550,7 @@ dependencies = [
 [[package]]
 name = "turbo-dom-raster"
 version = "0.6.0"
-source = "git+https://github.com/miaskiewicz/turbo-dom?rev=eb2ba1d84c0e65126f5b86a7efc1b272873c636c#eb2ba1d84c0e65126f5b86a7efc1b272873c636c"
+source = "git+https://github.com/miaskiewicz/turbo-dom?rev=955392152cd1ab476db197f8169283475467c963#955392152cd1ab476db197f8169283475467c963"
 dependencies = [
  "base64",
  "core-foundation",
@@ -5986,6 +5987,12 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "unicode-bidi"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 
 [[package]]
 name = "unicode-bidi-mirroring"

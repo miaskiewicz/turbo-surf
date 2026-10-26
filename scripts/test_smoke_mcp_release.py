@@ -214,15 +214,9 @@ class _LateReapedLeader:
         self.pid = self.child.pid
         self.polls = 0
         self.returncode = None
-        # Wait until the leader is a zombie: the only member of its own group.
-        deadline = time.monotonic() + SAFETY_SECONDS
-        while time.monotonic() < deadline:
-            try:
-                os.killpg(self.pid, 0)
-            except PermissionError:
-                return
-            time.sleep(0.01)
-        raise AssertionError("leader never became a zombie")
+        # Wait until the leader has exited, without reaping it: a zombie, the only member
+        # of its own group.
+        os.waitid(os.P_PID, self.pid, os.WEXITED | os.WNOWAIT)
 
     def poll(self):
         self.polls += 1
@@ -238,7 +232,6 @@ class _LateReapedLeader:
 
 @unittest.skipIf(sys.platform != "darwin", "macOS reports EPERM for a zombie-only process group")
 class ZombieGroupTests(unittest.TestCase):
-    @unittest.expectedFailure  # turbo-surf#45: fails until the fix
     def test_group_alive_treats_a_zombie_only_group_as_gone(self):
         leader = _LateReapedLeader()
         try:
@@ -246,7 +239,6 @@ class ZombieGroupTests(unittest.TestCase):
         finally:
             leader.wait(timeout=5)
 
-    @unittest.expectedFailure  # turbo-surf#45: fails until the fix
     def test_retire_finishes_when_the_leader_becomes_a_zombie(self):
         leader = _LateReapedLeader()
         try:

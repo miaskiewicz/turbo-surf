@@ -51,16 +51,27 @@ def interrupted(number, _frame):
             pass
 
 
+def signal_group(child, number):
+    """killpg the owned group; False once nothing in it can be signalled. macOS raises
+    EPERM, not ESRCH, for a group whose members are all zombies: the leader exited after
+    our last reap, or exited descendants wait for launchd (turbo-surf#45). A group with a
+    running member always accepts the signal, so EPERM leaves it alive only while the
+    leader still runs."""
+    try:
+        os.killpg(child.pid, number)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return child.poll() is None
+
+
 def group_alive(child):
     # Reap an exited leader before probing its remaining owned group.
     child.poll()
     if os.name == "nt":
         return child.poll() is None
-    try:
-        os.killpg(child.pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
+    return signal_group(child, 0)
 
 
 def retire(child):
@@ -72,11 +83,7 @@ def retire(child):
         child.wait(timeout=10)
         return
     for number, grace in [(signal.SIGINT, 2), (signal.SIGTERM, 2), (signal.SIGKILL, 2)]:
-        if not group_alive(child):
-            break
-        try:
-            os.killpg(child.pid, number)
-        except ProcessLookupError:
+        if not group_alive(child) or not signal_group(child, number):
             break
         deadline = time.monotonic() + grace
         while group_alive(child) and time.monotonic() < deadline:

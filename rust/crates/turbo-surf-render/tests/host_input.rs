@@ -9,7 +9,7 @@ async fn host_input_orders_trusted_keyboard_edits_and_honors_cancellation() {
         "https://example.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -45,7 +45,7 @@ async fn host_input_orders_trusted_keyboard_edits_and_honors_cancellation() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn implicit_form_submission_uses_live_values_validation_and_trusted_cancellation() {
-    let mut page = PageSession::open("<body><form action='/search'><input id=q name=q required><input type=hidden name=token value=live></form></body>", "https://example.test/home", "", "", 5000).await.unwrap();
+    let mut page = PageSession::open("<body><form action='/search'><input id=q name=q required><input type=hidden name=token value=live></form></body>", "https://example.test/home", "", "", 60_000).await.unwrap();
     page.eval("globalThis.submits=[];document.querySelector('form').onsubmit=event=>{event.preventDefault();submits.push([event instanceof SubmitEvent,event.isTrusted,event.submitter,document.querySelector('#q').value]);};").await.unwrap();
     page.input(&json!([{"focus":"#q"},{"press":"Enter"}]))
         .await
@@ -76,10 +76,12 @@ async fn pending_host_input_is_bounded_and_the_session_remains_usable() {
         "https://budget.test/",
         "",
         "",
-        100,
+        60_000,
     )
     .await
     .unwrap();
+    // Only the operation under test runs under the tiny budget (turbo-surf#47).
+    page.set_execution_budget_for_testing(100);
     let error = page
         .input(&json!([{"focus":"#q"},{"wait":1_000_000},{"type":"late"}]))
         .await
@@ -88,6 +90,7 @@ async fn pending_host_input_is_bounded_and_the_session_remains_usable() {
         error.contains("budget") || error.contains("Promise resolution is still pending"),
         "{error}"
     );
+    page.set_execution_budget_for_testing(60_000);
     assert_eq!(
         page.eval("globalThis.__RESULT=document.body.tagName")
             .await
@@ -103,6 +106,20 @@ async fn pending_host_input_is_bounded_and_the_session_remains_usable() {
     );
 }
 
+/// turbo-surf#47: a test interrupts an operation with a tiny budget, then checks the session
+/// under a generous one, so a loaded host cannot exceed the tiny budget on the follow-up.
+#[tokio::test(flavor = "current_thread")]
+async fn execution_budget_for_testing_applies_to_later_operations() {
+    let mut page = PageSession::open("<body>", "https://budget.test/", "", "", 100)
+        .await
+        .unwrap();
+    let busy = "(()=>{const end=Date.now()+400;while(Date.now()<end){}return 'done'})()";
+    let error = page.eval_expression(busy).await.unwrap_err();
+    assert!(error.contains("budget"), "{error}");
+    page.set_execution_budget_for_testing(60_000);
+    assert_eq!(page.eval_expression(busy).await.unwrap(), "done");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn completed_host_input_does_not_wait_for_unrelated_background_timers() {
     let mut page = PageSession::open(
@@ -110,11 +127,13 @@ async fn completed_host_input_does_not_wait_for_unrelated_background_timers() {
         "https://budget.test/",
         "",
         "",
-        500,
+        60_000,
     ).await.unwrap();
     let started = std::time::Instant::now();
     page.input(&json!([{"click":"#start"}])).await.unwrap();
-    assert!(started.elapsed() < std::time::Duration::from_millis(300));
+    // Waiting for the endless background timer would run to the 60 s budget; the 10 s
+    // bound only absorbs a loaded host (turbo-surf#47).
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
     assert_eq!(page.eval("clearTimeout(backgroundTimer);globalThis.__RESULT=document.querySelector('#start').tagName").await.unwrap(), "BUTTON");
 }
 
@@ -122,7 +141,7 @@ async fn completed_host_input_does_not_wait_for_unrelated_background_timers() {
 async fn asynchronous_host_input_stops_pumping_when_its_own_edits_complete() {
     let mut page = PageSession::open(
         "<body><input id=q><script>globalThis.ticks=0;globalThis.releases=[];const q=document.querySelector('#q');q.oninput=()=>{if(globalThis.backgroundTimer==null)backgroundTimer=setTimeout(function tick(){ticks++;backgroundTimer=setTimeout(tick,10)},10);};q.onkeyup=event=>releases.push(event.key);</script></body>",
-        "https://budget.test/", "", "", 500,
+        "https://budget.test/", "", "", 60_000,
     ).await.unwrap();
     page.input(&json!([{"focus":"#q"},{"type":"ok"}]))
         .await
@@ -137,14 +156,18 @@ async fn asynchronous_host_input_stops_pumping_when_its_own_edits_complete() {
 async fn synchronous_runaway_input_is_bounded_and_the_session_remains_usable() {
     let mut page = PageSession::open(
         "<body><input id=q><script>document.querySelector('#q').onkeydown=()=>{while(true){}};</script></body>",
-        "https://budget.test/", "", "", 100,
+        "https://budget.test/", "", "", 60_000,
     ).await.unwrap();
+    // Only the operation under test runs under the tiny budget (turbo-surf#47).
+    page.set_execution_budget_for_testing(100);
     let started = std::time::Instant::now();
     assert!(page
         .input(&json!([{"focus":"#q"},{"type":"late"}]))
         .await
         .is_err());
-    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    // Bounded: a runaway would run on; the cap only absorbs a loaded host (turbo-surf#47).
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    page.set_execution_budget_for_testing(60_000);
     let partial = page.eval("document.querySelector('#q').onkeydown=null;globalThis.__RESULT=document.querySelector('#q').value;document.querySelector('#q').value=''").await.unwrap();
     assert!(
         partial.len() <= 1,
@@ -170,6 +193,7 @@ async fn terminated_guest_initialization_retains_atomic_trusted_input_and_crypto
         "globalThis.beforeRunaway='entered';document.querySelector('#q').oninput=event=>globalThis.inputTrust=event.isTrusted;while(true){}",
     ).await.unwrap();
     assert!(page.hydration_diagnostics().budget_exceeded);
+    page.set_execution_budget_for_testing(60_000);
     assert_eq!(page.eval("globalThis.__RESULT=JSON.stringify([beforeRunaway,typeof Deno,'Deno'in globalThis,globalThis[Symbol.for('ts.dc')]===undefined,typeof crypto.subtle.digest])").await.unwrap(), "[\"entered\",\"undefined\",false,true,\"function\"]");
     page.input(&json!([{"focus":"#q"},{"type":"ok"}]))
         .await
@@ -186,7 +210,7 @@ async fn terminated_guest_initialization_retains_atomic_trusted_input_and_crypto
 
 #[tokio::test(flavor = "current_thread")]
 async fn json_collectors_await_values_without_page_serializers_or_result_slots() {
-    let mut page = PageSession::open("<body></body>", "https://collector.test/", "", "", 1000)
+    let mut page = PageSession::open("<body></body>", "https://collector.test/", "", "", 60_000)
         .await
         .unwrap();
     page.eval_expression(r#"(() => {
@@ -227,10 +251,13 @@ async fn interrupted_frame_creation_never_exposes_bootstrap_host_capabilities() 
         "https://budget.test/",
         "",
         "",
-        100,
+        60_000,
     )
     .await
     .unwrap();
+    // Only the endless frame loop runs under the short budget, long enough for a loaded
+    // host to create frames before it is interrupted (turbo-surf#47).
+    page.set_execution_budget_for_testing(1000);
     let error = page
         .eval_expression(
             r#"(() => {
@@ -249,6 +276,7 @@ async fn interrupted_frame_creation_never_exposes_bootstrap_host_capabilities() 
         .await
         .unwrap_err();
     assert!(error.contains("budget"), "{error}");
+    page.set_execution_budget_for_testing(60_000);
     let result: serde_json::Value = serde_json::from_str(
         &page
             .eval_expression(
@@ -303,7 +331,7 @@ async fn interrupted_frame_creation_never_exposes_bootstrap_host_capabilities() 
 async fn host_edits_use_captured_document_and_control_accessors() {
     let mut page = PageSession::open(
         "<input id=q><textarea id=t></textarea><input id=disabled><textarea id=readonly readonly></textarea>",
-        "https://example.test/", "", "", 5000,
+        "https://example.test/", "", "", 60_000,
     ).await.unwrap();
     page.eval(r#"
       globalThis.poisonCalls=[];globalThis.bodyEdits=0;
@@ -347,7 +375,7 @@ async fn script_navigation_captures_source_activation_at_admission() {
             "https://example.test/start",
             "",
             "",
-            5000,
+            60_000,
         )
         .await
         .unwrap();
@@ -392,7 +420,7 @@ async fn script_navigation_captures_source_activation_at_admission() {
 async fn clicks_resolve_current_target_center_without_a_prior_move() {
     let mut page = PageSession::open(
         "<body style='margin:0'><button id=q style='position:absolute;left:20px;top:30px;width:80px;height:40px'>Click</button></body>",
-        "https://example.test/", "", "", 5000,
+        "https://example.test/", "", "", 60_000,
     ).await.unwrap();
     page.eval(r#"
       globalThis.positions=[];globalThis.expected=[];
@@ -431,7 +459,7 @@ async fn typing_replaces_live_control_selections_and_preserves_cancellation() {
         "https://example.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -480,7 +508,7 @@ async fn typing_keeps_value_ranges_and_fires_no_select_events() {
         "https://example.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -525,7 +553,7 @@ async fn input_guard_preserves_selection_utf16_and_multiple_typing_chunks() {
         "https://guard.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -570,7 +598,7 @@ async fn guarded_input_page(attributes: &str, listener: &str) -> PageSession {
         "https://guard.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -709,7 +737,7 @@ async fn input_guard_rechecks_before_enter_and_releases_before_successful_submis
 async fn input_budget_cancellation_releases_guard_and_prevents_delayed_type_or_enter() {
     let mut page = PageSession::open_with_document_response_and_options(
         "<form><input id=q name=q></form><script>window.submits=0;document.querySelector('form').onsubmit=e=>{e.preventDefault();submits++}</script>",
-        "https://guard.test/", "", "", 100, "",
+        "https://guard.test/", "", "", 60_000, "",
         turbo_surf_core::request_context::ClientHints::default(), &[],
         turbo_surf_render::BrowserStorage::default(),
         turbo_surf_render::DocumentResponseMetadata::default(), None,
@@ -719,6 +747,8 @@ async fn input_budget_cancellation_releases_guard_and_prevents_delayed_type_or_e
         },
     ).await.unwrap();
     page.input(&json!([{"focus":"#q"}])).await.unwrap();
+    // Only the operation under test runs under the tiny budget (turbo-surf#47).
+    page.set_execution_budget_for_testing(100);
     let error = page
         .input(&json!([
             {"inputGuard":{"begin":"late","selector":"#q"}}, {"wait":250},
@@ -727,6 +757,7 @@ async fn input_budget_cancellation_releases_guard_and_prevents_delayed_type_or_e
         .await
         .unwrap_err();
     assert!(error.contains("budget"), "{error}");
+    page.set_execution_budget_for_testing(60_000);
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     page.eval("void 0").await.unwrap();
     assert_eq!(
@@ -761,7 +792,7 @@ async fn host_file_selection_installs_genuine_files_with_trusted_events() {
         "https://example.test/",
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();

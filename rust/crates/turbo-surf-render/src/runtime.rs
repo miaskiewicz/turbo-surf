@@ -15411,6 +15411,12 @@ impl PageSession {
         serde_json::json!({"hostContexts":frames.contexts.len(),"retiredHostContexts":retired,"queuedWindowMessages":frames.messages.len(),"queuedWindowBytes":frames.messages.iter().map(|message|message.data.size_bytes()).sum::<usize>()})
     }
 
+    /// Replace the execution budget of later operations (turbo-surf#47): a test that has
+    /// exercised an interruption under a tiny budget checks the session under a generous one.
+    #[doc(hidden)]
+    pub fn set_execution_budget_for_testing(&mut self, budget_ms: u64) {
+        self.budget_ms = budget_ms;
+    }
     #[doc(hidden)]
     pub fn set_window_message_limits_for_testing(&mut self, max_messages: usize, max_bytes: usize) {
         self.rt

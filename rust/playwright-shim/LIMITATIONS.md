@@ -85,8 +85,8 @@ lifecycle remain separate coverage work.
 Live hydration loads linked/imported stylesheets, enforces inline style CSP against native
 attributes, and protects opaque stylesheet rules from script access. Same-origin cross-realm
 CSS getters share private interface brands. It sizes PNG/JPEG/GIF/WebP/BMP/ICO/AVIF/JPEG XL and `image/svg+xml` image resources (any `data:`
-form) with load/error events like Chrome and selects `srcset` candidates like Chrome;
-`<picture>` sources and CSS image/font resource loading are incomplete. Known gaps: a
+form) with load/error events like Chrome and selects `<picture>` / `srcset` / `sizes`
+sources like Chrome (the binding's selection); CSS image/font resource loading is incomplete. Known gaps: a
 DOMException raised by a binding module (e.g. `img.decode()`'s `EncodingError`) is not
 `instanceof DOMException` and `structuredClone`s to `{}` (turbo-surf#42), and a parser-created
 `is=` element can match `:defined` once a GC has run turbo-dom's storage collection

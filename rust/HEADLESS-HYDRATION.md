@@ -377,10 +377,14 @@ SERP in one baseline while another fails effective consent dismissal. The later
   starts the parser's image and stylesheet loads before its script runs, and a `data:`
   image is decoded synchronously when its source is set, so the first script read sees
   it complete with its natural size, as in Chrome (turbo-surf#38); its `load`/`error`
-  event still fires as a later task. `srcset` sources are selected like Chrome
-  (turbo-surf#40: density and `w` descriptors against `sizes`, `src` as the 1x candidate,
-  the first candidate reaching `devicePixelRatio`, density-corrected natural size);
-  `<picture>`/`<source>` selection, CSS image/font initiation, incremental
+  event still fires as a later task. The source is the one turbo-dom-browser-env's
+  `imageHost.selectSource` picks for the window's viewport and `devicePixelRatio`
+  (turbo-dom#71: `<picture>` sources by `media` and `type`, `srcset` density and `w`
+  descriptors against `sizes`, `src` as the 1x candidate) and the natural size is
+  `imageHost.naturalSize` of the decoded candidate; a `<source>` attribute change, or a
+  `<source>` inserted into or removed from the `<picture>`, reselects. A relevant mutation
+  that keeps the same choice does not restart the load (Chrome fires `load` again); CSS
+  image/font initiation, incremental
   parsing and complete browser async-script scheduling remain outside this resource loader.
   Image, linked/imported stylesheet and classic-script fetches record their actual duration
   in the performance resource timeline; unavailable wire sizes and transport phases remain zero.

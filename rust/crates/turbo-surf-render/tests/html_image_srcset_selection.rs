@@ -121,7 +121,6 @@ fn the_png_server_answers_the_control_sizes() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-dom#71: fails until the fix"]
 async fn image_sources_are_selected_and_sized_like_chrome156() {
     let cases: Value = serde_json::from_slice(test_support::HTML_IMAGE_SRCSET_CASES_JSON).unwrap();
     assert_eq!(cases["viewport"], serde_json::json!([1024, 768]));
@@ -170,4 +169,48 @@ async fn image_sources_are_selected_and_sized_like_chrome156() {
     }
     turbo_surf_render::set_fingerprint("{}");
     assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+/// turbo-dom#71, surf's mutation consumer: a `<picture>`'s image reselects (and loads the
+/// new choice) when a `<source>` attribute changes, a `<source>` is inserted and one is
+/// removed, against `fixtures/html_picture_mutations_chrome156.json`
+/// (`fixture-gen/html-picture-mutations-chrome.mjs`).
+#[tokio::test(flavor = "current_thread")]
+async fn picture_sources_reselect_on_mutations_like_chrome156() {
+    const PROBE: &str = include_str!("fixtures/html_picture_mutations_probe.js");
+    const CASES: &str = include_str!("fixtures/html_picture_mutations_cases.json");
+    let control: Value = serde_json::from_str(include_str!(
+        "fixtures/html_picture_mutations_chrome156.json"
+    ))
+    .unwrap();
+    assert!(control["browser"]
+        .as_str()
+        .unwrap()
+        .starts_with("Chrome/156."));
+    assert_eq!(control["errors"], serde_json::json!([]));
+    assert_eq!(
+        control["probeSha256"],
+        binding_control::sha(PROBE.as_bytes())
+    );
+    assert_eq!(
+        control["casesSha256"],
+        binding_control::sha(CASES.as_bytes())
+    );
+    let cases: Value = serde_json::from_str(CASES).unwrap();
+    // Every candidate here is 1x, so the choice does not depend on the viewport or the
+    // devicePixelRatio the other test of this binary sets.
+    let html = cases[0]["html"].as_str().unwrap().to_string();
+    let origin = serve(html.clone(), true).await;
+    let mut page =
+        turbo_surf_render::PageSession::open(&html, &format!("{origin}/page/"), "", "", 60_000)
+            .await
+            .unwrap();
+    let actual: Value = serde_json::from_str(
+        &page
+            .eval_json_expression(PROBE.trim_end().trim_end_matches(';'))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(actual, control["result"][0]["result"]);
 }

@@ -81,8 +81,12 @@
 - `srcset` is honoured (#40): an `<img>` loads the candidate Chrome 156 picks — density
   and `w` descriptors (`sizes`, default 100vw), `src` as the 1x candidate, the first
   candidate whose density reaches `devicePixelRatio`, else the densest — and reports its
-  natural size divided by that density; a `sizes` change reselects. `<picture>` is not
-  selected yet. Chrome 156 control `html_image_srcset_chrome156.json` (uncached HTTP
+  natural size divided by that density; a `sizes` change reselects. Since the turbo-dom
+  1b6c9fa repin the loader uses the binding's selection instead (turbo-dom#71:
+  `imageHost.selectSource` / `naturalSize`, incl. `<picture>` sources by media and type);
+  `<source>` changes and insertions/removals reselect (`html_image_srcset_selection.rs`:
+  the binding's 95-case `HTML_IMAGE_SRCSET_*` control at devicePixelRatio 1 and 2 and a
+  `<picture>` mutation control). Chrome 156 control `html_image_srcset_chrome156.json` (uncached HTTP
   candidates at devicePixelRatio 2).
 - The font-run geometry Chrome collector reads its fonts only from the pinned
   turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its

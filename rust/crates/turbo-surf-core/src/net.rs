@@ -1997,11 +1997,33 @@ pub async fn fetch_stream(
 /// a `String` would corrupt the bytes. Auto-follows redirects (cap 20) over the
 /// shared client with the same headers/cookies as [`fetch_html`]; the byte cap
 /// applies and Set-Cookie is ingested. No content-type gate (the caller asks for
-/// an image on purpose).
+/// an image on purpose); [`fetch_typed_bytes`] also returns the `Content-Type`.
 pub async fn fetch_bytes(
     url: &str,
-    mut opts: FetchOptions<'_>,
+    opts: FetchOptions<'_>,
 ) -> Result<(String, Vec<u8>, u16), HttpError> {
+    fetch_typed_bytes(url, opts)
+        .await
+        .map(|fetched| (fetched.final_url, fetched.bytes, fetched.status))
+}
+
+/// A [`fetch_typed_bytes`] response: raw bytes plus what a resource loader decides with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedBytes {
+    pub final_url: String,
+    pub bytes: Vec<u8>,
+    pub status: u16,
+    /// The final response's `Content-Type` header ("" when absent). An `<img>` load
+    /// needs it: browsers decode SVG only when it is served as `image/svg+xml`, while
+    /// raster formats are sniffed from their bytes.
+    pub content_type: String,
+}
+
+/// [`fetch_bytes`], also returning the final response's `Content-Type`.
+pub async fn fetch_typed_bytes(
+    url: &str,
+    mut opts: FetchOptions<'_>,
+) -> Result<FetchedBytes, HttpError> {
     let max_bytes = opts.max_bytes.unwrap_or(DEFAULT_MAX_BYTES);
     if opts.redirect.is_some()
         || opts.max_redirects.is_some()
@@ -2017,13 +2039,19 @@ pub async fn fetch_bytes(
         let redirects = opts.max_redirects.unwrap_or(20);
         let (res, final_url, _) = follow_manually_response(&mut opts, url, redirects).await?;
         let status = res.status().as_u16();
+        let content_type = header_value(&res, "content-type");
         let cache_store = res.extensions().get::<PendingStore>().cloned();
         let bytes = read_capped(res, max_bytes).await?;
         if let Some(mut pending) = cache_store {
             pending.entry.body = bytes[pending.skip_prefix.min(bytes.len())..].to_vec();
             pending.cache.store(pending.entry);
         }
-        return Ok((final_url, bytes, status));
+        return Ok(FetchedBytes {
+            final_url,
+            bytes,
+            status,
+            content_type,
+        });
     }
     let cl = match opts.client {
         Some(c) => c.clone(),
@@ -2046,8 +2074,14 @@ pub async fn fetch_bytes(
     let final_url = final_url(&res);
     ingest_set_cookie(&mut opts, &res, &final_url);
     let status = res.status().as_u16();
+    let content_type = header_value(&res, "content-type");
     let bytes = read_capped(res, max_bytes).await?;
-    Ok((final_url, bytes, status))
+    Ok(FetchedBytes {
+        final_url,
+        bytes,
+        status,
+        content_type,
+    })
 }
 
 #[cfg(test)]
@@ -2576,6 +2610,44 @@ mod io_tests {
         assert_eq!(
             *seen.lock().unwrap(),
             vec![(url(p, "/r"), false), (url(p, "/dest"), true)]
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_bytes_report_the_final_content_type_on_both_paths() {
+        let p = spawn().await;
+        let direct = fetch_typed_bytes(&url(p, "/json"), FetchOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                direct.status,
+                direct.bytes.as_slice(),
+                direct.content_type.as_str()
+            ),
+            (200, b"{}".as_slice(), "application/json")
+        );
+        // The manual-follow path (a request policy) reports the redirect target's type.
+        let allow = |_: &str, _: bool| true;
+        let followed = fetch_typed_bytes(
+            &url(p, "/r"),
+            FetchOptions {
+                request_policy: Some(&allow),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(followed.final_url.ends_with("/dest"));
+        assert_eq!(followed.content_type, "text/html");
+        let auto = fetch_typed_bytes(&url(p, "/r"), FetchOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            fetch_bytes(&url(p, "/r"), FetchOptions::default())
+                .await
+                .unwrap(),
+            (auto.final_url, auto.bytes, auto.status)
         );
     }
 

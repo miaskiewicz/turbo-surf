@@ -354,8 +354,14 @@ SERP in one baseline while another fails effective consent dismissal. The later
   defaults and does not preserve every live control value across a new runtime.
 - Live hydration advances the document through loading/interactive/complete, runs deferred
   scripts before DOMContentLoaded, and waits for image/resource loads before window load.
-  PNG/JPEG/GIF/WebP images are fetched as bytes and decoded before success/dimensions are
-  exposed. Each image's state reaches the binding's `HTMLImageElement.prototype`
+  Images are fetched as bytes (`data:` URLs through the Fetch data: URL processor: base64,
+  percent-encoded and raw payloads) and sized by turbo-dom-layout's shared image probe:
+  PNG/JPEG/GIF/WebP/BMP/ICO/CUR/AVIF from their bytes whatever the declared type or HTTP
+  status (EXIF orientation applied), SVG only when served as `image/svg+xml` (its natural
+  size from the root's `width`/`height`/`viewBox`, as Chrome); TIFF and any undecodable
+  body fail with `error` (turbo-surf#30, `tests/image_formats.rs` against a Chrome 156
+  control). Remaining gaps: a header-only JPEG/GIF/WebP body loads where Chrome waits for
+  the first scan/frame, and an SVG root outside the SVG namespace loads. Each image's state reaches the binding's `HTMLImageElement.prototype`
   accessors (`complete`, `naturalWidth`, `naturalHeight`, `currentSrc`) through the
   document's private `imageHost` record. The binding owns the rest of the element (the
   reflected `src`, `decode()` and the native `Image()` factory), so an `<img>` has no own
@@ -366,7 +372,7 @@ SERP in one baseline while another fails effective consent dismissal. The later
   `createHTMLDocument`) never load. A `render(html, base, script)`
   starts the parser's image and stylesheet loads before its script runs; a parser
   `data:` image is still pending at the script's first read (Chrome has decoded it
-  already). SVG/AVIF, responsive image selection, CSS image/font initiation, incremental
+  already). Responsive image selection, CSS image/font initiation, incremental
   parsing and complete browser async-script scheduling remain outside this resource loader.
   Image, linked/imported stylesheet and classic-script fetches record their actual duration
   in the performance resource timeline; unavailable wire sizes and transport phases remain zero.

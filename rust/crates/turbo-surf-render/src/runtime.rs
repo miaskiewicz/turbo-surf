@@ -49,7 +49,7 @@ use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
 #[path = "fetch_streams.rs"]
 pub(crate) mod fetch_streams;
-use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
+use turbo_surf_core::net::{fetch_html, fetch_typed_bytes, FetchOptions, FetchedBytes};
 use turbo_surf_core::request_context::{
     ClientHints, Credentials, Destination, RequestContext, RequestMode,
 };
@@ -3395,37 +3395,61 @@ async fn op_load_image(
         jar: Some(&mut local),
         ..Default::default()
     };
-    let response = if let Some(data) = target.strip_prefix("data:") {
-        use base64::Engine;
-        data.split_once(",")
-            .filter(|(kind, _)| kind.ends_with(";base64"))
-            .and_then(|(_, data)| base64::engine::general_purpose::STANDARD.decode(data).ok())
-            .map(|bytes| (target.clone(), bytes, 200))
+    // data: URLs go through the Fetch data: URL processor (base64, percent-encoded and
+    // raw payloads) and keep their MIME type, like a network response's Content-Type.
+    let response = if target
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
+    {
+        turbo_dom_layout::image::decode_data_url(&target).map(|data| FetchedBytes {
+            final_url: target.clone(),
+            bytes: data.bytes,
+            status: 200,
+            content_type: data.mime,
+        })
     } else {
-        fetch_bytes(&target, opts).await.ok()
+        fetch_typed_bytes(&target, opts).await.ok()
     };
     jar.borrow_mut().merge_request_changes(local);
-    let Some((url, bytes, status)) = response else {
+    let Some(response) = response else {
         return ImageOut::default();
     };
-    let image = (200..300)
-        .contains(&status)
-        .then(|| image::load_from_memory(&bytes).ok())
-        .flatten();
-    match image {
-        Some(image) => ImageOut {
-            url,
-            status,
-            width: image.width(),
-            height: image.height(),
+    match natural_image_size(&response.bytes, &response.content_type) {
+        Some((width, height)) => ImageOut {
+            url: response.final_url,
+            status: response.status,
+            width,
+            height,
             ok: true,
         },
         None => ImageOut {
-            url,
-            status,
+            url: response.final_url,
+            status: response.status,
             ..Default::default()
         },
     }
+}
+
+/// Whether an `<img>` response decodes, and its `naturalWidth`/`naturalHeight`, as Chrome
+/// 156 decides them (turbo-surf#30, `tests/fixtures/image_formats_chrome156.json`): the
+/// shared turbo-dom-layout probe sizes every raster format Chrome shows (PNG, JPEG, GIF,
+/// WebP, BMP, ICO/CUR, AVIF; EXIF orientation applied) from its bytes whatever the
+/// declared type or HTTP status, while SVG is decoded only when served as
+/// `image/svg+xml` and an `image/svg+xml` response is never sniffed as a raster.
+fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32)> {
+    use turbo_dom_layout::{image, svg};
+    let essence = content_type.split(';').next().unwrap_or("").trim();
+    let natural = if essence.eq_ignore_ascii_case("image/svg+xml") {
+        svg::is_svg(bytes)
+            .then(|| image::probe_natural(bytes))
+            .flatten()
+    } else {
+        // The raster sniff alone: probe_natural would try SVG markup first.
+        image::sniff(bytes)
+            .and_then(|_| image::probe(bytes))
+            .map(|intrinsic| intrinsic.displayed(true))
+    }?;
+    Some((natural.width, natural.height))
 }
 
 // Each frame owns its native tree and JS browser APIs in its own V8 context.

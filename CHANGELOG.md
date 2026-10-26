@@ -28,6 +28,19 @@
   through `PageSession`. Known gaps (pinned): no `srcset` candidate selection; the
   binding's `decode()` EncodingError is not `instanceof` surf's `DOMException`; parsed
   `is=` elements read `:defined` once a session has opened.
+- Live `<img>` loads decode like Chrome 156 (#30): success and `naturalWidth` /
+  `naturalHeight` come from turbo-dom-layout's shared probe (`probe_natural` and its
+  raster probe) instead of a full `image` crate decode, and every `data:` form goes
+  through `decode_data_url` (percent-encoded and raw `image/svg+xml`, whitespace /
+  unpadded / percent-escaped base64; it was `;base64` only). Newly loading: BMP, ICO/CUR
+  (the largest entry), AVIF, SVG served as `image/svg+xml` (Chrome's natural sizes, e.g.
+  300x150 for a sizeless root), truncated or corrupt-IDAT bodies with a readable header,
+  and image bodies of HTTP error responses; SVG under any other type and raster bytes
+  labelled `image/svg+xml` now fail. `turbo_surf_core::net::fetch_typed_bytes` also
+  returns the response's Content-Type. Chrome 156 control:
+  `tests/fixtures/image_formats_chrome156.json` (49 rows differed before; 10 pinned
+  probe gaps remain: header-only JPEG/GIF/WebP and a namespace-less SVG root load). The
+  render crate no longer depends on the `image` crate.
 - The font-run geometry Chrome collector reads its fonts only from the pinned
   turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its
   three controls are recaptured on Chrome for Testing 156 (`*-chrome156.json`,

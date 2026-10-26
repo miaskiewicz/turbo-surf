@@ -33,6 +33,9 @@ gpu-metal = ["turbo-surf-raster/gpu-metal"]
 # match a real Mac Chrome instead of the tiny-skia glyph trace. OFF by default; macOS system
 # frameworks only. See turbo-surf-raster's `coretext`.
 coretext = ["turbo-surf-raster/coretext"]
+# Forward turbo-surf-render's native-sdk-frame-read (the engine-154/155 native-SDK
+# overlay enables it; see turbo-dom-browser-env's README).
+native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 
 [dependencies]
 turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.5" }

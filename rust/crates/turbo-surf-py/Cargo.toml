@@ -19,6 +19,9 @@ crate-type = ["cdylib", "rlib"]
 gpu-metal = ["turbo-surf-raster/gpu-metal"]
 # CoreText/CoreGraphics canvas-text raster (macOS only). See turbo-surf-raster's `coretext`.
 coretext = ["turbo-surf-raster/coretext"]
+# Forward turbo-surf-render's native-sdk-frame-read (the engine-154/155 native-SDK
+# overlay enables it; see turbo-dom-browser-env's README).
+native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 
 [dependencies]
 turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.5" }

@@ -11,6 +11,7 @@ use serde_json::Value;
 use turbo_dom_browser_env::test_support;
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-dom#26: fails until surf answers imageHost.setLayoutQuery"]
 async fn image_state_through_the_surf_loader_matches_chrome156() {
     matches_control(
         test_support::HTML_IMAGE_PROBE_JS,

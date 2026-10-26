@@ -3,11 +3,10 @@
 //! Chrome 156 never throws for any of them (tests/fixtures/live_geometry_throws_*;
 //! collector tests/fixture-gen/live-geometry-throws-chrome.mjs).
 //!
-//! The throws come from turbo-dom-layout, not from surf's glue: table rows get a box
-//! fragment without used-box metrics, table row groups get no fragment at all (so
-//! the glue's inline fallback rejects their decorated or empty cells), and an
-//! absolutely positioned inline is not blockified, which fails the whole snapshot.
-//! Until the layout fix lands they are pinned here exactly, so it shows up.
+//! The throws came from turbo-dom-layout, not from surf's glue: table rows got a box
+//! fragment without used-box metrics, table row groups got no fragment at all, and an
+//! absolutely positioned inline was not blockified, which failed the whole snapshot.
+//! turbo-dom-layout fixed all three (P5b-W1); any new throw fails this test.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use turbo_surf_render::PageSession;
@@ -16,24 +15,11 @@ const PROBE: &str = include_str!("fixtures/live_geometry_throws_probe.js");
 const CASES: &[u8] = include_bytes!("fixtures/live_geometry_throws_cases.json");
 const CONTROL: &str = include_str!("fixtures/live_geometry_throws_chrome156.json");
 
-const ROW_METRICS: &str = "native live layout used box metrics are missing";
-const GROUP_DECORATED: &str = "native decorated inline border production is pending";
-const GROUP_EMPTY: &str = "native empty inline placement is pending";
-const POSITIONED_INLINE: &str =
-    "native ordinary inline absolute/fixed/sticky positioning is unsupported";
 /// (case, element label or "*" for every element, message): getBoundingClientRect
 /// and the elementFromPoint read both throw it; getComputedStyle never throws.
-const KNOWN_GAPS: &[(&str, &str, &str)] = &[
-    ("table", "TBODY", GROUP_DECORATED),
-    ("table", "TR", ROW_METRICS),
-    ("table-decorated", "TBODY", GROUP_DECORATED),
-    ("table-decorated", "TR", ROW_METRICS),
-    ("table-decorated", "TR", ROW_METRICS),
-    ("table-shadow-cell", "TBODY", GROUP_EMPTY),
-    ("table-shadow-cell", "TR", ROW_METRICS),
-    ("sr-only", "*", POSITIONED_INLINE),
-    ("sr-only-inline", "*", POSITIONED_INLINE),
-];
+/// Empty since turbo-dom-layout's P5b-W1 fixes (row and row-group boxes with used box
+/// metrics, blockified positioned inlines, per-element inline failures).
+const KNOWN_GAPS: &[(&str, &str, &str)] = &[];
 
 fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))

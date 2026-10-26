@@ -265,6 +265,7 @@ mod tests {
             attrs: Vec::new(),
             style: ComputedStyle::from_pairs([("zoom", "3"), ("width", "10px")]),
             children: Vec::new(),
+            source: None,
         });
         let mut nodes = vec![StyledNode::Element(turbo_dom_layout::StyledElement {
             tag: turbo_dom_layout::Tag::Html("div".into()),
@@ -275,6 +276,7 @@ mod tests {
                 ("--gap", "1px"),
             ]),
             children: vec![child, StyledNode::Text("10px".into())],
+            source: None,
         })];
         apply(&mut nodes);
         let parent = nodes[0].as_element().unwrap();

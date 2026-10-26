@@ -6,12 +6,6 @@ license.workspace = true
 repository.workspace = true
 description = "turbo-surf tier 2 views: text / xpath / query over the turbo-dom Tree"
 
-[features]
-# TEMPORARY consolidation gate (turbo-dom docs/selector-dual-gate.md): forward turbo-dom's
-# `selector-dual` (frozen B-main selector engine run next to the current one). Never
-# enable it in a published or production build; removed in the last S3b commit.
-selector-dual = ["turbo-dom-parser/selector-dual"]
-
 [dependencies]
 turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
 # default-features off (see turbo-surf-render): keep the `impersonate` BoringSSL

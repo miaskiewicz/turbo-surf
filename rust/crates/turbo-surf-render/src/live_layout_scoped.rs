@@ -509,7 +509,7 @@ pub(crate) fn style_composed_tree(
                 let mut path = path.to_vec();
                 path.push(index);
                 match node {
-                    Node::Text(text) => result.push(StyledNode::Text(text.clone())),
+                    Node::Text(text) => result.push(StyledNode::Text(text.as_str().into())),
                     Node::Element(element) => {
                         let source = *self
                             .identities
@@ -575,6 +575,7 @@ pub(crate) fn style_composed_tree(
                                 attrs: element.attrs.clone(),
                                 style,
                                 children,
+                                source: None,
                             },
                         ));
                     }

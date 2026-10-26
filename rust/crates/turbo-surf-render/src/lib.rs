@@ -31,6 +31,8 @@ mod integrity;
 mod layout_profile;
 mod live_layout;
 mod live_layout_backend;
+#[cfg(test)]
+mod live_layout_budget_tests;
 mod live_layout_composed;
 mod live_layout_dom;
 mod live_layout_hit;

@@ -86,7 +86,12 @@
   `imageHost.selectSource` / `naturalSize`, incl. `<picture>` sources by media and type);
   `<source>` changes and insertions/removals reselect (`html_image_srcset_selection.rs`:
   the binding's 95-case `HTML_IMAGE_SRCSET_*` control at devicePixelRatio 1 and 2 and a
-  `<picture>` mutation control). Chrome 156 control `html_image_srcset_chrome156.json` (uncached HTTP
+  `<picture>` mutation control). A relevant mutation restarts the load and fires `load`
+  again even when the choice is unchanged (#49; `src` set to its own value, an `<img>`
+  `srcset` under a winning `<source>`, a losing `<source>` removed), while moving a loaded
+  image does not (`html_image_restart_chrome156.json`). The binding's template-contents
+  document is an inert document, so `defaultView` is `null` there instead of throwing
+  (#48). Chrome 156 control `html_image_srcset_chrome156.json` (uncached HTTP
   candidates at devicePixelRatio 2).
 - The font-run geometry Chrome collector reads its fonts only from the pinned
   turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its

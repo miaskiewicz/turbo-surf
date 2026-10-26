@@ -382,9 +382,9 @@ SERP in one baseline while another fails effective consent dismissal. The later
   (turbo-dom#71: `<picture>` sources by `media` and `type`, `srcset` density and `w`
   descriptors against `sizes`, `src` as the 1x candidate) and the natural size is
   `imageHost.naturalSize` of the decoded candidate; a `<source>` attribute change, or a
-  `<source>` inserted into or removed from the `<picture>`, reselects. A relevant mutation
-  that keeps the same choice does not restart the load (Chrome fires `load` again,
-  turbo-surf#49); CSS
+  `<source>` inserted into or removed from the `<picture>`, reselects. Every such relevant
+  mutation (and a `src`/`srcset`/`sizes` set, even to the same value) restarts the load and
+  fires `load` again like Chrome, while moving a loaded image does not (turbo-surf#49); CSS
   image/font initiation, incremental
   parsing and complete browser async-script scheduling remain outside this resource loader.
   Image, linked/imported stylesheet and classic-script fetches record their actual duration

@@ -226,7 +226,6 @@ async fn picture_sources_reselect_on_mutations_like_chrome156() {
 /// attribute does not. Control: `fixtures/html_image_restart_chrome156.json`
 /// (`fixture-gen/html-image-restart-chrome.mjs`).
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "turbo-surf#49: fails until the fix"]
 async fn relevant_mutations_restart_the_load_like_chrome156() {
     page_control(
         include_str!("fixtures/html_image_restart_probe.js"),

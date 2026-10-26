@@ -10031,11 +10031,14 @@ function __imageLoaded(el, choice, result, url) {
 }
 // `parser`: a document-scan (parser) image, whose broken data: source is already
 // complete at the first script read; a script-set one stays pending until its error.
-function __loadImage(el, win = globalThis, parser = false) {
+// `restart`: a relevant mutation (HTML "update the image data": a src/srcset/sizes set, a
+// <picture> source change), which reloads and fires load again even when the selected
+// source is unchanged (turbo-surf#49); an insertion keeps an unchanged selection's load.
+function __loadImage(el, win = globalThis, parser = false, restart = false) {
   const choice = __imageChoice(el, win), src = choice.url;
   const selection = src + "\n" + choice.density;
   const previous = __resources.get(el);
-  if (previous && previous.src === selection) return previous.promise;
+  if (previous && previous.src === selection && !restart) return previous.promise;
   const state = {src:selection,promise:null};
   __resources.set(el,state);
   if (!src) {__imageHost.setState(el,null);return state.promise=Promise.resolve();}
@@ -10392,14 +10395,14 @@ function __reselectPicture(picture) {
   const length=__resourceListApply(__resourceListLength,images,[]);
   for(let index=0;index<length;index++){
     const image=__resourceListApply(__resourceListItem,images,[index]);
-    if(__ownedImage(image))__loadImage(image,globalThis);
+    if(__ownedImage(image))__loadImage(image,globalThis,false,true);
   }
 }
 function __imageMutation(event) {
   if (event.type === "attributes") {
     if (event.attributeNamespace!==null) return;
     if (__imageMutationAttributes[event.attributeName] && __ownedImage(event.target))
-      __loadImage(event.target,globalThis);
+      __loadImage(event.target,globalThis,false,true);
     else if (__sourceMutationAttributes[event.attributeName] && __resourceElementKind(event.target)==="SOURCE")
       __reselectPicture(__resourceApply(__resourceParentNode,event.target,[]));
   } else if (event.type === "childList") {

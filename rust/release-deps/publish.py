@@ -24,21 +24,25 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent.parent
+# The native V8 binding (turbo-dom-v8) is an external prerequisite published from
+# the turbo-dom repository; the facade requires it from the registry.
 ORDER = [
-    ("turbo-surf-v8", "150.4.0", "deno"),
-    ("turbo-surf-deno-v8", "0.4.0", "deno"),
-    ("turbo-surf-serde-v8", "0.321.0", "deno"),
-    ("turbo-surf-deno-core", "0.412.0", "deno"),
-    ("turbo-surf-deno-bench-util", "0.253.0", "deno"),
-    ("turbo-surf-deno-crypto", "0.273.0", "deno"),
-    ("turbo-surf-deno-webidl", "0.259.0", "deno"),
-    ("turbo-surf-deno-web", "0.290.0", "deno"),
+    ("turbo-surf-deno-v8", "0.4.1", "deno"),
+    ("turbo-surf-serde-v8", "0.321.1", "deno"),
+    ("turbo-surf-deno-core", "0.412.1", "deno"),
+    ("turbo-surf-deno-bench-util", "0.253.1", "deno"),
+    ("turbo-surf-deno-crypto", "0.273.1", "deno"),
+    ("turbo-surf-deno-webidl", "0.259.1", "deno"),
+    ("turbo-surf-deno-web", "0.290.1", "deno"),
     ("turbo-surf-btls-sys", "0.5.6", "transport"),
     ("turbo-surf-btls", "0.5.6", "transport"),
     ("turbo-surf-tokio-btls", "0.5.6", "transport"),
     ("turbo-surf-wreq", "0.16.1", "transport"),
     ("turbo-surf-wreq-util", "0.2.0", "transport"),
 ]
+NATIVE_V8 = ("turbo-dom-v8", "150.4.")
+RETIRED_RUNTIMES = {"v8", "v8x", "turbo-surf-v8", "deno_v8", "deno_core", "serde_v8", "deno_crypto",
+                    "deno_web", "deno_webidl", "deno_bench_util"}
 GENERATED = {"Cargo.lock", ".cargo_vcs_info.json"}
 TRANSIENT = {429, 500, 502, 503, 504}
 
@@ -266,7 +270,7 @@ def commit_matches(expected):
         raise ValueError("Checkout differs from approved source commit")
     dirty = subprocess.check_output([
         "git", "status", "--porcelain", "--untracked-files=all", "--",
-        "rust/release-deps", "rust/vendor/rusty_v8", "rust/vendor/deno_crypto",
+        "rust/release-deps", "rust/vendor/deno_crypto",
         ".github/workflows/release-dependencies.yml",
     ], cwd=REPO, text=True)
     if dirty.strip():
@@ -385,6 +389,17 @@ def publish_package(package, runner, registry, output, deadline):
             "registryArchiveSha256": digest(downloaded), "exactPayloadVerified": True}
 
 
+def require_deno_runtime(graph):
+    """One registry turbo-dom-v8 150.4.x and no original/retired runtime crate."""
+    names = {p["name"] for p in graph["packages"]}
+    if RETIRED_RUNTIMES & names:
+        raise ValueError("Real registry consumer selected an original runtime fork")
+    native = [p for p in graph["packages"] if p["name"] == NATIVE_V8[0]]
+    if (len(native) != 1 or not native[0]["version"].startswith(NATIVE_V8[1]) or
+            native[0].get("source") != "registry+https://github.com/rust-lang/crates.io-index"):
+        raise ValueError("Real registry consumer must link exactly one registry turbo-dom-v8 150.4")
+
+
 def publish(plan_path, expected, expected_plan_sha, output):
     commit_matches(expected)
     if digest(plan_path) != expected_plan_sha:
@@ -431,8 +446,8 @@ def publish(plan_path, expected, expected_plan_sha, output):
                 if kind == family and (name not in found or found[name]["version"] != version or
                                        found[name].get("source") != "registry+https://github.com/rust-lang/crates.io-index"):
                     raise ValueError("Real registry consumer dependency identity differs")
-            if family == "deno" and {"v8", "deno_v8", "deno_core", "serde_v8", "deno_crypto", "deno_web", "deno_webidl", "deno_bench_util"} & found.keys():
-                raise ValueError("Real registry consumer selected an original runtime fork")
+            if family == "deno":
+                require_deno_runtime(graph)
         commit_matches(expected)
         if digest(Path(__file__)) != plan["toolSha256"]:
             raise ValueError("Release helper changed during publication")

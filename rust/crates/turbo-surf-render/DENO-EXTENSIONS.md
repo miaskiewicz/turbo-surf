@@ -56,6 +56,22 @@ python3 rust/crates/turbo-surf-render/scripts/vendor-deno-extension-sources.py \
   --archive-dir /absolute/path/to/registry-archives --check
 ```
 
+Candidate mode: while a PR `[patch.crates-io]`-selects unpublished candidate
+distributions (Git `rev` or path sources, e.g. the `consolidation/deno-candidates`
+branch from `rust/release-deps/push-candidates.sh`), `--check` reads each
+candidate's sources (located with `cargo metadata --offline --locked`, or
+`--candidate-dir PREPARED_TREE`) instead of a registry archive. JS, license,
+declaration inventory and generated table must still match `pins.json`
+byte-for-byte; the candidate `lib.rs` may differ from the pinned declaration only by
+the appended `pub mod embedded_sources;` line. Only the lock checksum is skipped
+(Git/path sources have none). A registry-sourced version that differs from the
+pins still fails until `pins.json` is updated after publication.
+
+The candidate distributions (0.x.1) also expose the same bytes as a library API,
+`deno_web::embedded_sources` / `deno_webidl::embedded_sources` /
+`deno_crypto::embedded_sources` (`SOURCES`, `EXTENSION`, `LICENSE`), so the
+integration step can drop this vendored copy.
+
 `--write` reproduces the generated subtree and Rust table for a reviewed change.
 Do not hand-edit those outputs or Cargo registry/cache files. A dependency update
 requires reviewing its complete declared source inventory and updating the pins;

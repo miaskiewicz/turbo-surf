@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Re-vendored the turbo-test DOM binding from turbo-test `cb5c64e` (v0.4.8; was
+  `602b267`) with the existing `vendor-browser-env.sh`, whose file list gains the
+  selection, editing and EditContext modules. This brings the genuine Selection API
+  (`Selection`, text-control selection, `createValueRange`/OpaqueRange), the editing
+  engine (`execCommand`/`queryCommand*`, contenteditable/designMode, `EditContext`,
+  `ariaNotify`) and the `scroll-behavior`/`scroll-snap-*` CSSOM keyword properties.
+  The 0.5.5 entry listed editing and Selection, but the binding vendored in 0.5.5
+  (`602b267`) did not contain them yet.
+- `document.getSelection` is now the binding's `Document.prototype` member over
+  per-document state, no longer a creation-context delegate: a retired (navigated)
+  or parsed document returns `null`, as in Chrome, instead of the old document's
+  selection object.
+- Host typing replaces a text control's selection through the binding's trusted
+  InsertText path: live value ranges follow the edit and no `select` event fires
+  per typed character.
+
 ## [0.5.5] — 2026-10-25 — Chrome-156 parity batch + re-version
 
 Lands the Chrome-156 parity batch tracked in [issue #28](https://github.com/miaskiewicz/turbo-surf/issues/28):

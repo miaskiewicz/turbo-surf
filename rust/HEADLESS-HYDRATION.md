@@ -69,7 +69,9 @@ its 10 quotes — see `crates/turbo-surf-render/tests/render.rs`.
 
 **October19 trusted input follow-up:** the private driver captures native current
 layout geometry for target centers, replaces live input/textarea selections and
-preserves cancellation. Geometry setup initializes the unchanged shared system
+preserves cancellation. Replacement goes through the binding's trusted typing entry
+(`replaceControlSelection`, Blink's InsertText): value ranges follow the edit and
+selectionchange fires, never select. Geometry setup initializes the unchanged shared system
 font registry before guest execution; cold discovery is an engine startup cost
 rather than a later input-budget cost. The detection example applies actual
 readiness checks, real dwell/character cadence and per-step snapshots. The

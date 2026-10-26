@@ -1321,7 +1321,9 @@ now fixed:
    has no AVIF decoder → every hero/product image silently dropped. Fix: `fetch_bytes`
    (napi) now sends an image `Accept` **without** `image/avif`
    (`image/webp,image/png,image/jpeg,…`), so the CDN falls back to WebP, which turbo
-   decodes. General: fixes every `f_auto`/Cloudinary site.
+   decodes. General: fixes every `f_auto`/Cloudinary site. (P5b, turbo-surf#30: the
+   screenshot raster now decodes AVIF under the default `avif` feature, so `fetchBytes`
+   sends Chrome's image `Accept` again; only an addon built without it keeps this one.)
 2. **`width:100%` collapse.** Even fetched, the images were 0×0 — `size_replaced`
    resolved `%` against a 0 basis (html2pdf 0.2.10 fix). Together the Ronaldo hero,
    Mercurial boots, and tennis imagery now render (verified).

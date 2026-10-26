@@ -193,8 +193,9 @@ fn to_assets(images: std::collections::HashMap<String, Buffer>) -> raster::Image
 }
 
 /// PNG screenshot of `html` with caller-fetched `external_css` and `images` (a
-/// map from each `imageUrls` ref to its fetched bytes). PNG/JPEG images are
-/// painted into their layout box; others fall back to a placeholder.
+/// map from each `imageUrls` ref to its fetched bytes). PNG/JPEG/GIF/WebP/SVG/BMP/ICO
+/// (and, with the default `avif` feature, AVIF) images are painted into their layout
+/// box; others fall back to a placeholder.
 #[napi]
 pub fn screenshot_with_assets(
     html: String,
@@ -1016,11 +1017,11 @@ pub async fn fetch_html(url: String) -> Result<String> {
 /// resources — images for `screenshotWithAssets` — that a `fetchHtml` string
 /// would corrupt. Uses the shared pooled client; non-HTML content types allowed.
 ///
-/// Advertises only the raster image formats turbo can decode (PNG/JPEG/WebP/GIF/
-/// SVG) — crucially **not** `image/avif`. Content-negotiating CDNs (`f_auto` on
-/// Nike/Cloudinary/etc.) serve AVIF to a Chrome UA that accepts it; turbo has no
-/// AVIF decoder, so those images would silently drop. Omitting AVIF makes the CDN
-/// fall back to WebP, which turbo does decode.
+/// Sends Chrome's image `Accept` (the image destination's, `image/avif` first) when
+/// the addon is built with its default `avif` feature, which paints AVIF. Without it
+/// the request advertises only formats the screenshot raster paints (PNG/JPEG/WebP/
+/// GIF/SVG), so a content-negotiating CDN (`f_auto` on Nike/Cloudinary/etc.) falls
+/// back to WebP instead of serving AVIF that would paint as a placeholder.
 #[napi]
 pub async fn fetch_bytes(
     url: String,
@@ -1029,10 +1030,12 @@ pub async fn fetch_bytes(
     cookies: Option<String>,
 ) -> Result<Buffer> {
     let mut headers = std::collections::BTreeMap::new();
-    headers.insert(
-        "accept".to_string(),
-        "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8".to_string(),
-    );
+    if !cfg!(feature = "avif") {
+        headers.insert(
+            "accept".to_string(),
+            "image/webp,image/png,image/jpeg,image/gif,image/svg+xml,*/*;q=0.8".to_string(),
+        );
+    }
     let RequestState {
         client_hints,
         storage,

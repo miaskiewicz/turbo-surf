@@ -167,3 +167,19 @@ cases = {
 with open(OUT, "w") as file:
     json.dump(cases, file, indent=1)
     file.write("\n")
+
+# The screenshot page (turbo-surf-mcp tests/screenshot_image_formats.rs): the decodable
+# BMP/ICO/CUR/AVIF cases as absolutely positioned <img>s over a cyan canvas, painted by
+# turbo-dom-raster with the features surf ships (BMP/ICO always, AVIF under `avif`).
+SHOT = os.path.join(HERE, "..", "..", "..", "turbo-surf-mcp", "tests", "fixtures",
+                    "screenshot_image_formats.html")
+SHOT_IDS = ["bmp", "ico-bmp-sizes", "ico-png", "cur", "avif", "avif-alpha"]
+os.makedirs(os.path.dirname(SHOT), exist_ok=True)
+with open(SHOT, "w") as file:
+    file.write("<!doctype html><html><head><style>body{margin:0;background:#00ffff}"
+               "img{position:absolute;top:10px}</style></head><body>")
+    sources = dict(DATA)
+    for index, name in enumerate(SHOT_IDS):
+        file.write('<img data-id="%s" style="left:%dpx" src="%s">'
+                   % (name, 10 + index * 80, html.escape(sources[name])))
+    file.write("</body></html>\n")

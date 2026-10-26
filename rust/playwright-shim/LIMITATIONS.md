@@ -28,8 +28,8 @@ surfaces remain unavailable or approximate:
   is supported via a *synthetic* native layout+paint (see below) — a
   representative render, not a browser-faithful capture. It fetches the page's
   external `<link>` stylesheets and cascades them (`{externalCss:false}` opts
-  out), fetches + paints `<img>`/`background-image` bytes (PNG/JPEG/GIF/WebP +
-  SVG; `{images:false}` opts out, unknown formats fall back to a placeholder),
+  out), fetches + paints `<img>`/`background-image` bytes (PNG/JPEG/GIF/WebP/BMP/ICO/
+  AVIF + SVG; `{images:false}` opts out, unknown formats fall back to a placeholder),
   models
   `position:absolute/fixed/relative` + `z-index` for block flow (painted
   back-to-front per CSS stacking order), propagates the root/body background, and

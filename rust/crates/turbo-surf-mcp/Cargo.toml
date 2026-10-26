@@ -17,7 +17,7 @@ path = "src/main.rs"
 [features]
 # The pinned Chrome 154 transport includes real Chromium trust-anchor IDs.
 # The reviewed named registry dependencies preserve this API; see PUBLISHING.md.
-default = ["impersonate"]
+default = ["impersonate", "avif"]
 # Build the MCP binary with a real Chrome TLS/JA3/JA4 + HTTP-2 fingerprint
 # (BoringSSL, via turbo-surf-core's `impersonate`). Needs a C toolchain (cmake/nasm) at
 # build time. ON by default (anti-bot). See turbo-surf-core/src/net.rs.
@@ -25,6 +25,11 @@ impersonate = ["turbo-surf-core/impersonate"]
 # Compatibility alias for the Chrome 154 impersonation profile, which already
 # emits real trust-anchor IDs from its Chromium root store.
 trust-anchors = ["turbo-surf-core/trust-anchors"]
+# AVIF screenshot pixels (turbo-surf#30): turbo-dom-raster's pure-Rust rav1d decoder
+# (BSD-2-Clause, no assembly, no C toolchain). ON by default: live loads already size
+# AVIF and image requests advertise `image/avif` as Chrome does, so CDNs serve it.
+# Without it an AVIF lays out at its real size and paints as the placeholder.
+avif = ["turbo-dom-raster/avif"]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization for the render tier's toDataURL — genuine
 # GPU pixels instead of tiny-skia's software raster. OFF by default (macOS-only, pulls wgpu +
 # a C/Metal toolchain); enable where a real GPU is present. See turbo-dom-raster's `gpu-metal`.
@@ -56,3 +61,6 @@ url = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }
+# tests/screenshot_image_formats.rs: decode the screenshot PNG and pin its Chrome control.
+turbo-dom-layout = "0.6.0"
+sha2 = "0.10"

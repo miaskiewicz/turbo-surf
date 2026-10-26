@@ -612,7 +612,7 @@ an `expect(locator)` chain is batched into one crossing).
 layout+paint of the current HTML — no browser, no Chromium. It's *reasonably
 representative*, not pixel-faithful (`position`/`z-index` are honored via CSS
 stacking order; `<img>` + `background-image` are fetched and painted —
-PNG/JPEG/GIF/WebP + SVG, unknown formats fall back to a placeholder). `full_page`
+PNG/JPEG/GIF/WebP/BMP/ICO/AVIF + SVG, unknown formats fall back to a placeholder). `full_page`
 grows to the content height. Runs only when asked, over any HTML snapshot; the
 viewport is configurable. See the `screenshot` MCP tool + `screenshot`/`screenshotSvg`
 napi functions.

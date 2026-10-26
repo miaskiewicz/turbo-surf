@@ -41,6 +41,14 @@
   `tests/fixtures/image_formats_chrome156.json` (49 rows differed before; 10 pinned
   probe gaps remain: header-only JPEG/GIF/WebP and a namespace-less SVG root load). The
   render crate no longer depends on the `image` crate.
+- Screenshots paint AVIF (#30): the MCP binary, the napi addon and the Python wheel
+  forward a new default-on `avif` feature to turbo-dom-raster (rav1d, pure Rust,
+  BSD-2-Clause — notice added to `THIRD_PARTY_NOTICES.md`; +1.4 MB napi, ~4 s release
+  compile). Live loads already size AVIF and image requests advertise `image/avif` as
+  Chrome does, so CDNs serve it; without the feature it painted as a placeholder. BMP and
+  ICO/CUR paint through the repinned raster. napi `fetchBytes` sends Chrome's image
+  `Accept` again when built with `avif`. Chrome 156 control:
+  `turbo-surf-mcp/tests/fixtures/screenshot_image_formats_chrome156.json`.
 - The font-run geometry Chrome collector reads its fonts only from the pinned
   turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its
   three controls are recaptured on Chrome for Testing 156 (`*-chrome156.json`,

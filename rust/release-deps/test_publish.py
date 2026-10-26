@@ -231,10 +231,12 @@ class PublicationControls(unittest.TestCase):
 
     def test_fixed_order_contains_all_normal_and_dev_edges(self):
         order = {name: index for index, (name, _, _) in enumerate(publish.ORDER)}
-        self.assertEqual(len(order), 13)
-        for dependency, dependent in [("turbo-surf-v8", "turbo-surf-deno-v8"),
-                                      ("turbo-surf-deno-v8", "turbo-surf-serde-v8"),
+        self.assertEqual(len(order), 12)
+        self.assertNotIn("turbo-surf-v8", order)
+        for dependency, dependent in [("turbo-surf-deno-v8", "turbo-surf-serde-v8"),
                                       ("turbo-surf-serde-v8", "turbo-surf-deno-core"),
+                                      ("turbo-surf-deno-v8", "turbo-surf-deno-core"),
+                                      ("turbo-surf-deno-core", "turbo-surf-deno-crypto"),
                                       ("turbo-surf-deno-core", "turbo-surf-deno-bench-util"),
                                       ("turbo-surf-deno-bench-util", "turbo-surf-deno-webidl"),
                                       ("turbo-surf-deno-webidl", "turbo-surf-deno-web"),
@@ -243,6 +245,33 @@ class PublicationControls(unittest.TestCase):
                                       ("turbo-surf-tokio-btls", "turbo-surf-wreq"),
                                       ("turbo-surf-wreq", "turbo-surf-wreq-util")]:
             self.assertLess(order[dependency], order[dependent])
+
+    def test_deno_order_matches_prepared_publish_versions(self):
+        spec = importlib.util.spec_from_file_location("deno_prepare_for_order", ROOT / "deno/prepare.py")
+        prepare = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(prepare)
+        self.assertEqual({(n, v) for n, v, family in publish.ORDER if family == "deno"},
+                         {(p.name, p.publish) for p in prepare.PACKAGES})
+
+    def test_registry_consumer_requires_one_registry_turbo_dom_v8(self):
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        def graph(*packages):
+            return {"packages": [{"name": n, "version": v, "source": s} for n, v, s in packages]}
+        publish.require_deno_runtime(graph(("turbo-dom-v8", "150.4.0", registry), ("turbo-surf-deno-v8", "0.4.1", registry)))
+        for packages in [[], [("turbo-dom-v8", "150.5.0", registry)], [("turbo-dom-v8", "150.4.0", "git+https://x")],
+                         [("turbo-dom-v8", "150.4.0", registry), ("turbo-dom-v8", "150.4.1", registry)]]:
+            with self.subTest(packages=packages), self.assertRaisesRegex(ValueError, "exactly one"):
+                publish.require_deno_runtime(graph(*packages))
+        for retired in ["turbo-surf-v8", "v8", "v8x", "deno_core"]:
+            with self.subTest(retired=retired), self.assertRaisesRegex(ValueError, "original runtime"):
+                publish.require_deno_runtime(graph(("turbo-dom-v8", "150.4.0", registry), (retired, "1.0.0", registry)))
+
+    def test_commit_guard_no_longer_tracks_the_rusty_v8_vendor_copy(self):
+        with patch.object(publish.subprocess, "check_output", side_effect=["1" * 40 + "\n", ""]) as output:
+            publish.commit_matches("1" * 40)
+        paths = output.call_args_list[1].args[0]
+        self.assertIn("rust/vendor/deno_crypto", paths)
+        self.assertNotIn("rust/vendor/rusty_v8", paths)
 
 
 if __name__ == "__main__":

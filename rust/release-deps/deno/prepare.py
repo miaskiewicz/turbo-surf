@@ -6,28 +6,44 @@ import hashlib
 import json
 import re
 import shutil
-import subprocess
 import tarfile
 import tempfile
 import tomllib
 import urllib.request
+from collections import namedtuple
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
 SURF = ROOT.parents[2]
+# `version` is the upstream archive identity; `publish` is the distribution's own
+# version. The native V8 binding is not prepared here: turbo-dom publishes it as
+# `turbo-dom-v8` and the facade requires it from the registry.
+Package = namedtuple("Package", "upstream version name publish vendor")
 PACKAGES = [
-    ("v8", "150.4.0", "turbo-surf-v8", "rusty_v8"),
-    ("deno_v8", "0.4.0", "turbo-surf-deno-v8", None),
-    ("serde_v8", "0.321.0", "turbo-surf-serde-v8", None),
-    ("deno_core", "0.412.0", "turbo-surf-deno-core", None),
-    ("deno_bench_util", "0.253.0", "turbo-surf-deno-bench-util", None),
-    ("deno_crypto", "0.273.0", "turbo-surf-deno-crypto", "deno_crypto"),
-    ("deno_web", "0.290.0", "turbo-surf-deno-web", None),
-    ("deno_webidl", "0.259.0", "turbo-surf-deno-webidl", None),
+    Package("deno_v8", "0.4.0", "turbo-surf-deno-v8", "0.4.1", None),
+    Package("serde_v8", "0.321.0", "turbo-surf-serde-v8", "0.321.1", None),
+    Package("deno_core", "0.412.0", "turbo-surf-deno-core", "0.412.1", None),
+    Package("deno_bench_util", "0.253.0", "turbo-surf-deno-bench-util", "0.253.1", None),
+    Package("deno_crypto", "0.273.0", "turbo-surf-deno-crypto", "0.273.1", "deno_crypto"),
+    Package("deno_web", "0.290.0", "turbo-surf-deno-web", "0.290.1", None),
+    Package("deno_webidl", "0.259.0", "turbo-surf-deno-webidl", "0.259.1", None),
 ]
-NAMES = {old: (version, new) for old, version, new, _ in PACKAGES}
+NAMES = {p.upstream: (p.publish, p.name) for p in PACKAGES}
+# Upstream `v8` (rusty_v8) edges become this registry requirement, never a path.
+NATIVE = ("v8", "turbo-dom-v8", "~150.4")
 V8_DEFAULT_LEAVES = {"deno_bench_util", "deno_crypto", "deno_webidl", "deno_web"}
+EMBEDDED_LEAVES = {"deno_crypto", "deno_web", "deno_webidl"}
+# The facade's optional second backend is unused by every consumer; 0.4.1 drops
+# it so no lock file lists a second native engine. Features that only forwarded
+# to it (`quickjs` in serde_v8/deno_core) would otherwise fail resolution.
+FACADE_PASSTHROUGHS = ["simdutf", "use_custom_libcxx", "v8_enable_pointer_compression",
+                       "v8_enable_sandbox", "v8_enable_v8_checks"]
+QUICKJS_FORWARDS = {"serde_v8": ["v8/quickjs"], "deno_core": ["v8/quickjs", "serde_v8/quickjs"]}
+SOURCE_KINDS = {"js": "Js", "esm": "Esm", "lazy_loaded_js": "LazyJs", "lazy_loaded_esm": "LazyEsm"}
+EMBEDDED_MODULE = "embedded_sources.rs"
+LIB_SUFFIX = ("\n// turbo-surf distribution: compile-time copies of this extension's JavaScript.\n"
+              "pub mod embedded_sources;\n")
 
 
 def digest(path):
@@ -93,6 +109,10 @@ def replace_field(body, key, value):
     return re.sub(pattern, lambda _: replacement, body) if re.search(pattern, body) else body + replacement + "\n"
 
 
+def remove_field(body, key):
+    return re.sub(rf"(?m)^{re.escape(key)} = .*\n", "", body)
+
+
 def backend_features(parsed, old):
     if old not in V8_DEFAULT_LEAVES:
         return ""
@@ -107,7 +127,34 @@ def backend_features(parsed, old):
     return '\n[features]\ndefault = ["v8"]\nv8 = ["deno_core/v8"]\n'
 
 
-def manifest(source, old, version, new):
+def facade_features(features):
+    """Drop the second backend from the facade's reviewed feature surface."""
+    expected = {"default": ["v8"], "v8": ["dep:rusty_v8"],
+                "quickjs": ["dep:v8x_backend", "v8x_backend/quickjs"],
+                **{name: [f"rusty_v8?/{name}", f"v8x_backend?/{name}"] for name in FACADE_PASSTHROUGHS}}
+    if features != expected:
+        raise ValueError("Upstream facade features changed; review backend forwarding")
+    return {"default": ["v8"], "v8": ["dep:rusty_v8"],
+            **{name: [f"rusty_v8?/{name}"] for name in FACADE_PASSTHROUGHS}}
+
+
+def rewrite_features(features, old):
+    if old == "deno_v8":
+        return facade_features(features)
+    if old in QUICKJS_FORWARDS:
+        if features.get("quickjs") != QUICKJS_FORWARDS[old]:
+            raise ValueError("Upstream quickjs forwarding changed; review backend forwarding")
+        return {key: value for key, value in features.items() if key != "quickjs"}
+    return features
+
+
+def feature_table(features):
+    key = lambda name: name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else json.dumps(name)
+    return "".join(f"{key(name)} = {json.dumps(value)}\n" for name, value in features.items()) + "\n"
+
+
+def manifest(source, package):
+    old, version, new, publish = package.upstream, package.version, package.name, package.publish
     parsed = tomllib.loads(source)
     if (parsed["package"]["name"], parsed["package"]["version"]) != (old, version):
         raise ValueError("Unexpected upstream manifest identity")
@@ -115,26 +162,130 @@ def manifest(source, old, version, new):
     for index in range(1, len(sections), 2):
         header, body = sections[index:index + 2]
         if header == "[package]\n":
-            # The fork must retain its license in the actual archive; upstream
-            # V8's broad exclusion otherwise filters this source file out.
-            body = body.replace('    "LICENSE*",\n', '')
             body = replace_field(body, "name", new)
+            body = replace_field(body, "version", publish)
             body = replace_field(body, "repository", "https://github.com/miaskiewicz/turbo-surf")
             description = parsed["package"].get("description", old)
             body = replace_field(body, "description", f"turbo-surf reviewed distribution of {old}: {description}")
+        elif header == "[features]\n":
+            body = feature_table(rewrite_features(tomllib.loads(body), old))
         match = re.search(r"(?:^|\.)(?:dev-|build-)?dependencies\.([^\]]+)\]", header[1:])
         if match:
             alias = match[1].strip('"')
             fields = tomllib.loads(body)
             upstream = fields.get("package", alias)
-            if upstream in NAMES:
-                required, package = NAMES[upstream]
-                body = replace_field(body, "package", package)
+            if upstream == "v8x":
+                if old != "deno_v8" or alias != "v8x_backend" or fields.get("optional") is not True:
+                    raise ValueError("Unexpected second native backend edge")
+                sections[index] = body = ""
+            elif upstream == NATIVE[0]:
+                if old != "deno_v8" or alias != "rusty_v8" or fields.get("default-features") is not False:
+                    raise ValueError("Unexpected native V8 edge")
+                body = replace_field(body, "package", NATIVE[1])
+                body = replace_field(body, "version", NATIVE[2])
+                body = remove_field(body, "path")
+            elif upstream in NAMES:
+                required, renamed = NAMES[upstream]
+                body = replace_field(body, "package", renamed)
                 body = replace_field(body, "version", "=" + required)
-                body = replace_field(body, "path", "../" + package)
+                body = replace_field(body, "path", "../" + renamed)
         sections[index + 1] = body
     result = "".join(sections) + backend_features(parsed, old)
     return result + "\n[package.metadata.turbo-surf-upstream]\n" + f"name = {json.dumps(old)}\nversion = {json.dumps(version)}\nrepository = {json.dumps(parsed['package']['repository'])}\n"
+
+
+def declared_sources(declaration):
+    """The extension!() source lists, in declaration order (as deno_core embeds them)."""
+    result = []
+    for kind, listing in re.findall(r"(lazy_loaded_js|lazy_loaded_esm|esm|js)\s*=\s*\[([^]]*)\]", declaration, re.S):
+        result.extend((kind, name) for name in re.findall(r'"([^"\n]+\.js)"', listing))
+    return result
+
+
+def embedded_module(old, pin, target):
+    """Generate the public compile-time source table from the reviewed declaration."""
+    lib = target / "lib.rs"
+    if digest(lib) != pin["declarationSha256"]:
+        raise ValueError(f"Official extension declaration changed: {old}")
+    if digest(target / pin["licenseFile"]) != pin["licenseSha256"]:
+        raise ValueError(f"Upstream license changed: {old}")
+    sources = pin["sources"]
+    if declared_sources(lib.read_text()) != [(row["kind"], row["file"]) for row in sources]:
+        raise ValueError(f"Official extension source inventory changed: {old}")
+    if (target / EMBEDDED_MODULE).exists():
+        raise ValueError(f"Upstream already has {EMBEDDED_MODULE}: {old}")
+    rows = []
+    for row in sources:
+        data = (target / row["file"]).read_bytes()
+        if not data.isascii() or len(data) != row["bytes"] or hashlib.sha256(data).hexdigest() != row["sha256"]:
+            raise ValueError(f"Official extension source bytes changed: {old}/{row['file']}")
+        rows.append(f'    EmbeddedSource {{ extension: EXTENSION, kind: SourceKind::{SOURCE_KINDS[row["kind"]]}, '
+                    f'specifier: "ext:{old}/{row["file"]}", code: deno_core::ascii_str_include!("{row["file"]}"), '
+                    f'sha256: "{row["sha256"]}", bytes: {row["bytes"]} }},')
+    module = f'''// Generated by turbo-surf rust/release-deps/deno/prepare.py; do not edit.
+// Exact published Deno JS, Copyright 2018-2026 the Deno authors, MIT.
+//! Compile-time copies of the JavaScript declared by the `{old}` extension.
+//!
+//! Upstream extension declarations may resolve their sources from the build
+//! machine's checkout at runtime. Embedders that must not depend on those paths
+//! can substitute these exact published bytes, in declaration order, without
+//! vendoring the files themselves.
+
+/// Which `deno_core::Extension` source list a file belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SourceKind {{
+    /// `Extension::js_files`
+    Js,
+    /// `Extension::esm_files`
+    Esm,
+    /// `Extension::lazy_loaded_js_files`
+    LazyJs,
+    /// `Extension::lazy_loaded_esm_files`
+    LazyEsm,
+}}
+
+/// One extension source, compiled into the binary and checked to be ASCII.
+#[derive(Clone, Copy)]
+pub struct EmbeddedSource {{
+    /// The `deno_core::Extension::name` that declares this source.
+    pub extension: &'static str,
+    /// The source list this file belongs to.
+    pub kind: SourceKind,
+    /// The `ext:` module specifier the extension registers.
+    pub specifier: &'static str,
+    /// The exact published source text.
+    pub code: deno_core::FastStaticString,
+    /// SHA-256 of `code`, pinned at preparation time.
+    pub sha256: &'static str,
+    /// Length of `code` in bytes.
+    pub bytes: usize,
+}}
+
+impl EmbeddedSource {{
+    /// The equivalent `deno_core` source entry, backed by the embedded bytes.
+    pub const fn file_source(&self) -> deno_core::ExtensionFileSource {{
+        deno_core::ExtensionFileSource::new(self.specifier, self.code)
+    }}
+}}
+
+/// The extension these sources belong to.
+pub const EXTENSION: &str = "{old}";
+
+/// The upstream license covering these sources.
+pub const LICENSE: &str = include_str!("{pin["licenseFile"]}");
+
+/// SHA-256 of [`LICENSE`].
+pub const LICENSE_SHA256: &str = "{pin["licenseSha256"]}";
+
+/// Every source the extension declares, in declaration order.
+#[rustfmt::skip]
+pub const SOURCES: &[EmbeddedSource] = &[
+{chr(10).join(rows)}
+];
+'''
+    (target / EMBEDDED_MODULE).write_text(module)
+    with lib.open("a") as stream:
+        stream.write(LIB_SUFFIX)
 
 
 def unpack(archive, destination, prefix):
@@ -150,11 +301,16 @@ def unpack(archive, destination, prefix):
 
 def prepare(destination, cargo_home, archive_dir=None, download=False):
     pins = json.loads((ROOT / "source-pins.json").read_text())
+    if set(pins["packages"]) != {p.upstream for p in PACKAGES}:
+        raise ValueError("Source pin package closure changed")
     receipt = {"packages": [], "scope": "Prepared sources only; not packaged, compiled, published or clean-registry-consumer verified."}
-    for old, version, new, vendor in PACKAGES:
+    for package in PACKAGES:
+        old, version, new, publish, vendor = package
         pin = pins["packages"][old]
-        if pin["version"] != version or pin["candidateName"] != new:
+        if (pin["version"], pin["candidateName"], pin["publishVersion"]) != (version, new, publish):
             raise ValueError("Source pin package identity changed")
+        if ("embeddedSources" in pin) != (old in EMBEDDED_LEAVES):
+            raise ValueError("Embedded source pin closure changed")
         archive = source_archive(old, version, pin, cargo_home, archive_dir, download)
         target = destination / "packages" / new
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -167,16 +323,6 @@ def prepare(destination, cargo_home, archive_dir=None, download=False):
             unpack(archive, target.parent, f"{old}-{version}")
             (target.parent / f"{old}-{version}").rename(target)
         original = tree(target)
-        if old == "v8":
-            test_patch = ROOT / "v8-teardown-tests.patch"
-            if digest(test_patch) != pin["releaseTestPatchSha256"]:
-                raise ValueError("Release teardown test patch changed")
-            subprocess.run(["patch", "-p1", "--batch", "--fuzz=0", "-i", str(test_patch)], cwd=target, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            if digest(target / "tests/test_api.rs") != pin["releaseTestFileSha256"]:
-                raise ValueError("Release teardown tests changed")
-            patched = tree(target)
-            if {name for name in original if original[name] != patched.get(name)} != {"tests/test_api.rs"} or set(original) != set(patched):
-                raise ValueError("Release test patch changed non-test source")
         # These are upstream packaging records, not the renamed distribution's
         # generated manifest/lock/VCS records. Preserve their exact bytes by name.
         for old_record, new_record in [
@@ -187,12 +333,16 @@ def prepare(destination, cargo_home, archive_dir=None, download=False):
             reserved = target / old_record
             if reserved.exists():
                 reserved.rename(target / new_record)
-        (target / "Cargo.toml").write_text(manifest((target / "Cargo.toml").read_text(), old, version, new))
+        (target / "Cargo.toml").write_text(manifest((target / "Cargo.toml").read_text(), package))
         if not (target / "LICENSE").exists() and not (target / "LICENSE.md").exists():
             shutil.copyfile(SURF / "rust/vendor/deno_crypto/LICENSE.md", target / "LICENSE.md")
+        if old in EMBEDDED_LEAVES:
+            embedded_module(old, pin["embeddedSources"], target)
         final = tree(target)
-        receipt["packages"].append({"upstreamName": old, "name": new, "version": version, "archiveSha256": pin["archiveSha256"], "inputFiles": original, "candidateFiles": final, "candidateBytes": sum(p.stat().st_size for p in target.rglob("*") if p.is_file())})
-    members = [f"packages/{new}" for _, _, new, _ in PACKAGES]
+        receipt["packages"].append({"upstreamName": old, "upstreamVersion": version, "name": new, "version": publish,
+                                    "archiveSha256": pin["archiveSha256"], "inputFiles": original, "candidateFiles": final,
+                                    "candidateBytes": sum(p.stat().st_size for p in target.rglob("*") if p.is_file())})
+    members = [f"packages/{p.name}" for p in PACKAGES]
     (destination / "Cargo.toml").write_text('[workspace]\nresolver = "2"\nmembers = ' + json.dumps(members, indent=2) + "\n")
     (destination / "prepared-source-identity.json").write_text(json.dumps(receipt, indent=2) + "\n")
 
@@ -220,7 +370,7 @@ def main():
                     raise ValueError(f"Prepared candidate differs: {name}")
         else:
             shutil.copytree(generated, args.output)
-    print("Prepared source candidates match pins." if args.check else "Prepared eight source candidates; no Cargo or publishing invoked.")
+    print("Prepared source candidates match pins." if args.check else f"Prepared {len(PACKAGES)} source candidates; no Cargo or publishing invoked.")
 
 
 if __name__ == "__main__":

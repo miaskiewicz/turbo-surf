@@ -29,6 +29,12 @@
   one post-cascade walk. The pure CSSOM-View modules (`live_layout_{metrics,hit,scroll,
   visibility,inline,text,range}.rs` and the composition graph) moved to
   turbo-dom-layout's `cssom_view`. No output change.
+- `@supports selector(…)` and `CSS.supports("selector(…)")` use turbo-dom's selector
+  engine (one unforgiving complex selector), matching Chrome 156: `*|p`, `|p`,
+  `[*|title]`, escapes, `:hover`, `::before`, `:link`, `:empty`, `:host`, `::slotted()`
+  and `:nth-child(… of S)` are now supported, `ns|p` and `:is(:bogus)` are not
+  (control `harness/detection/fixtures/css-supports-chrome156.json`, which replaces the
+  Chrome 155 one).
 - The interceptor ShouldThrowOnError fix is active: strict `[[Set]]`/`[[Delete]]` and
   `Object.defineProperty` on interceptor-backed collections (`document.all`,
   `<select>`, `select.options`) throw Chrome's TypeError, sloppy writes and the

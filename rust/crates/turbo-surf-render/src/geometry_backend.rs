@@ -84,6 +84,8 @@ deno_core::extension!(
         crate::live_layout_supports::op_native_css_supports,
         op_live_geometry_brand,
         crate::live_layout_backend::op_live_element_geometry,
+        crate::live_layout_backend::op_live_image_box,
+        crate::live_layout_backend::op_live_image_loaded,
         crate::live_layout_backend::op_live_element_scroll,
         crate::live_layout_backend::op_live_element_scroll_to,
         crate::live_layout_backend::op_live_viewport_offset,

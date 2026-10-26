@@ -9914,6 +9914,10 @@ const __resourceSheetRules = ops.op_interface_record_get(document).cssHost.readR
 // Image load state is published to the binding's HTMLImageElement.prototype accessors
 // (complete/naturalWidth/naturalHeight/currentSrc); page JS cannot reach this record.
 const __imageHost = ops.op_interface_record_get(document).imageHost;
+// width/height/x/y read the rendered box from surf's native live layout (turbo-dom#26):
+// null while the image is not being rendered; a layout this snapshot cannot supply reads
+// as not rendered (the attribute / natural size) rather than throwing from an IDL getter.
+__imageHost.setLayoutQuery(image=>{try{return ops.op_live_image_box(image);}catch(_){return null;}});
 const __resourceStyleRequests = new WeakMap();
 const __resourceCSSHosts = new WeakMap();
 const __resourceCompatMode=Object.getOwnPropertyDescriptor(Document.prototype,"compatMode").get;
@@ -9997,6 +10001,7 @@ function __loadImage(el, win = globalThis) {
     __recordResource(win, url, "img", start);
     if (__resources.get(el) !== state) return;
     const loaded = !!(result && result.ok);
+    ops.op_live_image_loaded(el,src,loaded?result.width:0,loaded?result.height:0);
     __imageHost.setState(el,loaded?{complete:true,naturalWidth:result.width,naturalHeight:result.height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
     __fireResourceEvent(el, loaded ? "load" : "error", win);
   })());

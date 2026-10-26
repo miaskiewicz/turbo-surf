@@ -369,7 +369,11 @@ SERP in one baseline while another fails effective consent dismissal. The later
   `src`/`srcset` change on any `<img>` the document owns, connected or not
   (`new Image().src = …`), and images a tree inserts (detached `innerHTML`, contextual
   fragments); images of inert documents (template contents, `DOMParser`,
-  `createHTMLDocument`) never load. A `render(html, base, script)`
+  `createHTMLDocument`) never load. A decoded image's natural size also sizes its replaced
+  box in live layout (turbo-surf#39), and `width`/`height`/`x`/`y` read that box through the
+  binding's `imageHost.setLayoutQuery` (turbo-dom#26: the pixel-snapped, zoom-adjusted
+  content box and the untransformed border-box document position; not rendered → the
+  attribute or natural size, 0). A `render(html, base, script)`
   starts the parser's image and stylesheet loads before its script runs; a parser
   `data:` image is still pending at the script's first read (Chrome has decoded it
   already). Responsive image selection, CSS image/font initiation, incremental

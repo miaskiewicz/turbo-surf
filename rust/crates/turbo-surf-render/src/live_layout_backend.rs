@@ -5,9 +5,10 @@ use deno_core::{op2, v8};
 use deno_error::JsErrorBox;
 use serde::Serialize;
 use turbo_dom_layout::cssom_view::metrics::{ClientMetrics, OffsetSize};
+use turbo_dom_layout::image::{ImageResolver, Intrinsic};
 use turbo_dom_layout::layout_snapshot::SnapshotInputs;
 use turbo_dom_layout::text::SystemFontPolicy;
-use turbo_dom_layout::{Diagnostics, FontRegistry, ImageCtx, NoImages};
+use turbo_dom_layout::{Diagnostics, FontRegistry, ImageCtx};
 
 // FontFace bytes and shaping caches are thread-safe and contain no V8 roots.
 // Loading every installed font per isolate thread multiplies native memory, so
@@ -47,6 +48,62 @@ struct CacheKey {
     rules: Vec<crate::live_stylesheets::ActiveRule>,
     composition: Vec<(u32, Vec<u32>)>,
     inline_policy: Vec<(u32, String)>,
+    /// The document's loaded-image epoch: a finished load resizes its replaced box.
+    images: u64,
+}
+/// Natural sizes of the images surf's loader has decoded, per document and raw `src`
+/// attribute (turbo-dom-layout names an `<img>` box's image by that string). Live layout
+/// sizes a replaced `<img>` from it as Chrome does once the image has loaded; until then
+/// (and for a broken image) the box has no intrinsic size.
+#[derive(Default)]
+struct LoadedImages {
+    epoch: u64,
+    sizes: std::rc::Rc<std::collections::HashMap<String, Intrinsic>>,
+}
+thread_local! {static LOADED_IMAGES:std::cell::RefCell<std::collections::HashMap<u32,LoadedImages>>=std::cell::RefCell::new(std::collections::HashMap::new());}
+struct LoadedImageResolver(std::rc::Rc<std::collections::HashMap<String, Intrinsic>>);
+impl ImageResolver for LoadedImageResolver {
+    fn resolve(&self, _name: &str) -> Option<&[u8]> {
+        None
+    }
+    fn intrinsic(&self, name: &str) -> Option<Intrinsic> {
+        self.0.get(name).copied()
+    }
+}
+fn loaded_images(document: u32) -> (u64, LoadedImageResolver) {
+    LOADED_IMAGES.with(|images| {
+        let images = images.borrow();
+        let entry = images.get(&document);
+        (
+            entry.map_or(0, |entry| entry.epoch),
+            LoadedImageResolver(entry.map_or_else(Default::default, |entry| entry.sizes.clone())),
+        )
+    })
+}
+/// Record the outcome of an `<img>` load (`src` is its raw attribute): a decoded image's
+/// natural size, or none for a broken one.
+#[op2(fast)]
+pub(crate) fn op_live_image_loaded(
+    scope: &mut v8::PinScope,
+    image: v8::Local<v8::Object>,
+    #[string] src: String,
+    width: u32,
+    height: u32,
+) {
+    let document = turbo_dom_browser_env::host_internals::document_id_of(scope, image) as u32;
+    let size = (width > 0 && height > 0).then(|| Intrinsic::new(width, height, true));
+    LOADED_IMAGES.with(|images| {
+        let mut images = images.borrow_mut();
+        let entry = images.entry(document).or_default();
+        if entry.sizes.get(&src) != size.as_ref() {
+            let sizes = std::rc::Rc::make_mut(&mut entry.sizes);
+            match size {
+                Some(size) => sizes.insert(src, size),
+                None => sizes.remove(&src),
+            };
+            entry.epoch += 1;
+        }
+    });
 }
 struct LayoutView {
     snapshot: turbo_dom_layout::layout_snapshot::LayoutSnapshot,
@@ -181,6 +238,75 @@ fn frame_content_size<'s>(
     // grid; transforms and border/padding remain outside that content surface.
     let snap = |value: f32| (value * viewport.layout_scale + 0.5).floor() / viewport.layout_scale;
     Ok([snap(used.content_width), snap(used.content_height)])
+}
+/// The rendered box an `<img>`'s `width`/`height`/`x`/`y` IDL attributes read (turbo-dom#26,
+/// the binding's `imageHost.setLayoutQuery`).
+#[derive(Serialize)]
+pub(crate) struct ImageBox {
+    width: i32,
+    height: i32,
+    x: i32,
+    y: i32,
+}
+/// `None` while the image is not being rendered (disconnected, no browsing context,
+/// `display:none` on it or an ancestor, `display:contents`); else Blink's answers: the
+/// content box pixel-snapped at its offset in the border box and adjusted for zoom
+/// (`AdjustForAbsoluteZoom::AdjustInt`), and the border box's untransformed document
+/// position truncated to an integer.
+#[op2(reentrant)]
+#[serde]
+pub(crate) fn op_live_image_box<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<ImageBox>, JsErrorBox> {
+    image_box(scope, receiver).map_err(JsErrorBox::generic)
+}
+fn image_box<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> Result<Option<ImageBox>, String> {
+    let mut input = crate::live_layout_dom::capture(scope, receiver)?;
+    if !input.connected || !input.browsing_context {
+        return Ok(None);
+    }
+    let context = input
+        .owner_context
+        .ok_or("native layout owner realm unavailable")?;
+    let viewport = viewport(scope, context)?;
+    let view = resolve(scope, &mut input, viewport.as_ref())?;
+    let id = crate::live_layout::source_id(input.tree.document_id(), input.handle);
+    let Some(source) = view.snapshot.source(id) else {
+        return Ok(None);
+    };
+    let contents = view
+        .styles
+        .get(&id)
+        .is_some_and(|entry| entry.style.get("display") == Some("contents"));
+    if source.excluded_from_layout || view.omitted.contains(&id) || contents {
+        return Ok(None);
+    }
+    let Some((rect, used)) = source.fragment_indices.iter().find_map(|&index| {
+        let fragment = &view.snapshot.fragments()[index];
+        (fragment.kind == turbo_dom_layout::layout_snapshot::GeometryKind::BorderBox)
+            .then_some(fragment.used_box.map(|used| (fragment.rect, used)))
+            .flatten()
+    }) else {
+        return Ok(None);
+    };
+    let zoom = view.zoom(id);
+    let snapped = |offset: f32, size: f32| (offset + size).round() as i32 - offset.round() as i32;
+    Ok(Some(ImageBox {
+        width: adjust_int(
+            snapped(used.border.left + used.padding.left, used.content_width),
+            zoom,
+        ),
+        height: adjust_int(
+            snapped(used.border.top + used.padding.top, used.content_height),
+            zoom,
+        ),
+        x: rect.x as i32,
+        y: rect.y as i32,
+    }))
 }
 #[derive(Serialize)]
 pub(crate) struct Geometry {
@@ -348,8 +474,9 @@ fn resolve<'s>(
     let profile = crate::layout_profile::LayoutProfile::current(scope);
     let rules = crate::live_stylesheets::active_rule_snapshots(sheets, viewport)?;
     let fonts = initialize_system_fonts();
+    let (image_epoch, resolver) = loaded_images(tree.document_id());
     let images = ImageCtx {
-        resolver: &NoImages,
+        resolver: &resolver,
         body_height: None,
     };
     let key = CacheKey {
@@ -374,6 +501,7 @@ fn resolve<'s>(
             rows.sort_by_key(|(handle, _)| *handle);
             rows
         }),
+        images: image_epoch,
     };
     let cached = LAYOUT_CACHE.with(|cache| {
         cache

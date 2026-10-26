@@ -49,6 +49,17 @@
   ICO/CUR paint through the repinned raster. napi `fetchBytes` sends Chrome's image
   `Accept` again when built with `avif`. Chrome 156 control:
   `turbo-surf-mcp/tests/fixtures/screenshot_image_formats_chrome156.json`.
+- `img.width`/`height`/`x`/`y` read surf's live layout (turbo-dom#26): surf answers the
+  binding's `imageHost.setLayoutQuery` from a new native op (content box pixel-snapped
+  and zoom-adjusted, border-box document position; null without a box), and live layout
+  sizes a loaded `<img>` from its natural size (#39: it laid out every image without one,
+  e.g. a `display:block` image as 1280x0). The binding's whole `HTML_IMAGE_*` control,
+  including its `dimensions` section, holds through `PageSession`.
+- Acceptance of the turbo-dom 5157913 fixes through `PageSession`: live geometry no
+  longer throws for table rows/row groups or positioned inlines (#31,
+  `live_geometry_throws.rs` has no known gaps), and getComputedStyle reports the UA
+  `display`/`position`/`visibility` with no injected `<title>` (#36 items 1-2,
+  `computed_defaults.rs`).
 - The font-run geometry Chrome collector reads its fonts only from the pinned
   turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its
   three controls are recaptured on Chrome for Testing 156 (`*-chrome156.json`,
@@ -60,10 +71,6 @@
   HTMLOptionsCollection accessor definitions, #32 image accessors); the interceptor
   runtime control has no known gaps left.
 
-### Known
-- Live geometry still throws for table rows/row groups and on pages with an
-  absolutely positioned inline (`.sr-only`) (#31); the cause is in turbo-dom-layout and
-  `tests/live_geometry_throws.rs` pins it against a Chrome 156 control.
 
 ## [0.6.0] — 2026-10-26 — turbo-dom consolidation
 

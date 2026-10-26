@@ -1,5 +1,5 @@
 //! File-state inputs, FileList and DataTransfer over the production File/Blob/FormData,
-//! against the vendored binding's source-pinned Chrome 156 control.
+//! against the binding's source-pinned Chrome 156 control.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use turbo_dom_browser_env::test_support;

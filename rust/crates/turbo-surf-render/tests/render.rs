@@ -114,7 +114,7 @@ fn internal_globals_are_off_window() {
     .unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     // The names we've moved must be gone from window own-prop NAMES + `in` checks — the
-    // turbo-surf-defined ones AND the (re-vendored) turbo-test binding's window internals.
+    // turbo-surf-defined ones AND the turbo-dom-browser-env binding's window internals.
     for n in [
         "__runTimers",
         "__hydrate",
@@ -125,7 +125,7 @@ fn internal_globals_are_off_window() {
         "__loadFrame",
         "__frameRealm",
         "__takeModuleScript",
-        // vendored (turbo-test browser_env) internals, now namespaced there too:
+        // binding (turbo-dom-browser-env) internals, now namespaced there too:
         "__makeFrameRealm",
         "__winListeners",
         "__ttEvent",
@@ -370,7 +370,7 @@ fn window_post_message_delivers_to_listeners() {
 
 // Canvas 2D readback is deterministic AND content-dependent: identical draws hash to the
 // same non-empty data URL, different draws to a different one (empty/constant output is a
-// canvas-fingerprint dead tell). Backed by the vendored turbo-test binding.
+// canvas-fingerprint dead tell). Backed by the turbo-dom-browser-env binding.
 #[test]
 fn canvas_to_data_url_is_deterministic_and_content_dependent() {
     let draw = |text: &str| {
@@ -1086,7 +1086,7 @@ async fn intersection_observer_disconnect_cancels_initial_entry() {
 // Page-load lifecycle: the main document/window must fire the real sequence — readyState
 // loading → interactive (+readystatechange, DOMContentLoaded) → complete (+readystatechange,
 // window load, pageshow) — in order, with DOMContentLoaded BEFORE load. A collector that gates
-// init on these otherwise never runs (the vendored readyState was a frozen 'complete', no events).
+// init on these otherwise never runs (the binding's readyState was a frozen 'complete', no events).
 #[tokio::test]
 async fn page_load_lifecycle_fires_in_order() {
     let script = r#"
@@ -1177,7 +1177,7 @@ fn human_input_edge_cases() {
 }
 
 // WebGL bridge with NO host executor installed: readPixels must fall back to the synthetic
-// vendored readback without throwing (the executor is optional; only present under gpu-metal).
+// binding's readback without throwing (the executor is optional; only present under gpu-metal).
 #[test]
 fn webgl_readpixels_falls_back_without_host_fn() {
     let _g = WEBGL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -1277,7 +1277,7 @@ fn script_synthesized_input_preserves_browser_event_trust_contract() {
         "isTrusted must be an own nonconfigurable accessor: {out}"
     );
     // The synthesized event's timeStamp must ride the hi-res clock (performance.now, origin-relative)
-    // — NOT the vendored `new Event()` default of Date.now() (a ~1.7e12 epoch). Assert it's an
+    // — NOT the binding's `new Event()` default of Date.now() (a ~1.7e12 epoch). Assert it's an
     // origin-relative magnitude (0 < ts < 1e6 ms ≈ under 16 min since timeOrigin), which cleanly
     // separates performance.now() from the epoch. (Fractionality is not asserted: on Chrome's 0.1ms
     // grid a hi-res stamp can legitimately land on an integer, so that would be a flaky proxy.)
@@ -2163,7 +2163,7 @@ async fn web_platform_globals_for_hydration() {
 }
 
 // Constructable stylesheets (emotion/MUI) + the extra HTML*Element constructors the
-// vendored browser_env's ctor list omits. A missing `CSSStyleSheet`/`HTMLDialogElement`
+// binding's ctor list omits. A missing `CSSStyleSheet`/`HTMLDialogElement`
 // reference aborted the chunk mid-hydration and blanked the whole tree.
 #[tokio::test]
 async fn constructable_stylesheet_and_extra_html_element_ctors() {
@@ -3486,7 +3486,7 @@ async fn esm_src_chunk_with_module_body_loads_and_resolves_imports() {
 // to this host's real Chrome/ANGLE-Metal profile — the GPU identity a fingerprinter reads
 // (UNMASKED_VENDOR/RENDERER via WEBGL_debug_renderer_info, VENDOR/RENDERER, MAX_TEXTURE_SIZE)
 // plus deterministic, content-dependent readback. A null context is a headless tell, and the
-// vendored default was SwiftShader ("ANGLE (Google, … SwiftShader)") — itself a headless/VM
+// binding's default was SwiftShader ("ANGLE (Google, … SwiftShader)") — itself a headless/VM
 // signal; we present the coherent Apple-Metal signature instead (see fix #3).
 #[test]
 fn webgl_does_not_invent_adapter_identity_without_host_metadata() {

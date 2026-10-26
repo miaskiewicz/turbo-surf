@@ -1,7 +1,7 @@
 //! Interface objects and prototypes of the whole Surf realm (binding, Deno web
 //! extensions and the render tier's own interfaces) list their keys in Chrome
 //! 156's order, with Chrome's non-configurable constants, in the top-level
-//! document and in child frames. The oracle is the vendored
+//! document and in child frames. The oracle is the binding's
 //! key_order_chrome156.json captured by harness/detection/api-shape.mjs.
 use serde_json::Value;
 use sha2::{Digest, Sha256};

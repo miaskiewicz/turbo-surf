@@ -1,4 +1,4 @@
-//! Web Animations on the real render runtime: the vendored live-timeline probe Chrome 156 ran
+//! Web Animations on the real render runtime: the binding's live-timeline probe Chrome 156 ran
 //! on its own frame clock, replayed against turbo-surf's rendering-frame scheduler.
 use serde_json::Value;
 use sha2::{Digest, Sha256};

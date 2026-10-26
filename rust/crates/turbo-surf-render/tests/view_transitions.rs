@@ -1,5 +1,5 @@
 //! Same-document and element-scoped View Transitions on the render tier's real frame loop,
-//! against the vendored Chrome 156 control (turbo-test scripts/view-transitions-chrome-control.mjs).
+//! against the binding's Chrome 156 control (turbo-test scripts/view-transitions-chrome-control.mjs).
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use turbo_dom_browser_env::test_support;

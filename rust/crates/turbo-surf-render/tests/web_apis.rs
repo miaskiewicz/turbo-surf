@@ -13,7 +13,7 @@ const CONTROL: &str =
 /// Measured Chrome behavior the engine does not reproduce, as `path = engine value`.
 ///
 /// - `click()`: an untrusted event reaching a `when()` listener is attributed to
-///   `dispatchEvent`; the vendored binding's `HTMLElement#click()` is not a frame
+///   `dispatchEvent`; the binding's `HTMLElement#click()` is not a frame
 ///   the Observable layer can see, so the inner context differs.
 /// - The render tier dispatches no `unhandledrejection` events, so the promises
 ///   AsyncIteratorClose leaves rejected are never reported.

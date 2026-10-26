@@ -91,13 +91,60 @@ class VendorTests(unittest.TestCase):
         def write_manifest(version='=0.259.0', name='turbo-surf-deno-webidl'):
             manifest.write_text('[dependencies]\ndeno_webidl = { package = '+json.dumps(name)+', version = '+json.dumps(version)+' }\n')
         write_manifest();lock=root/'rust/Cargo.lock'
-        lock.write_text('[[package]]\nname = "turbo-surf-deno-webidl"\nversion = "0.259.0"\nchecksum = '+json.dumps(package['archiveSha256'])+'\n')
+        lock.write_text('[[package]]\nname = "turbo-surf-deno-webidl"\nversion = "0.259.0"\nsource = '+json.dumps(vendor.REGISTRY)+'\nchecksum = '+json.dumps(package['archiveSha256'])+'\n')
         vendor.check_dependencies(root,[package])
         for version, name in [('=0.259.1','turbo-surf-deno-webidl'),('=0.259.0','other')]:
             write_manifest(version,name)
             with self.assertRaisesRegex(ValueError,'drift'): vendor.check_dependencies(root,[package])
         write_manifest();lock.write_text('package = []\n')
         with self.assertRaisesRegex(ValueError,'drift'): vendor.check_dependencies(root,[package])
+
+    def test_git_and_path_candidates_skip_only_the_checksum(self):
+        root, _, package, _ = self.fixture()
+        manifest = root/'rust/crates/turbo-surf-render/Cargo.toml';manifest.parent.mkdir(parents=True)
+        manifest.write_text('[dependencies]\ndeno_webidl = { package = "turbo-surf-deno-webidl", version = "=0.259.1" }\n')
+        lock = root/'rust/Cargo.lock'
+        git = 'git+https://github.com/miaskiewicz/turbo-surf?rev=abc#' + 'a' * 40
+        for source in [git, None]:
+            lock.write_text('[[package]]\nname = "turbo-surf-deno-webidl"\nversion = "0.259.1"\n' + ('source = ' + json.dumps(source) + '\n' if source else ''))
+            self.assertEqual(vendor.check_dependencies(root, [package]), {'turbo-surf-deno-webidl': ('0.259.1', source)})
+        # A registry release with a new version needs reviewed pins, not candidate mode.
+        lock.write_text('[[package]]\nname = "turbo-surf-deno-webidl"\nversion = "0.259.1"\nsource = ' + json.dumps(vendor.REGISTRY) + '\nchecksum = "' + '0' * 64 + '"\n')
+        with self.assertRaisesRegex(ValueError, 'drift'): vendor.check_dependencies(root, [package])
+        lock.write_text('[[package]]\nname = "turbo-surf-deno-webidl"\nversion = "0.259.1"\nsource = ' + json.dumps(git) + '\nchecksum = "' + '0' * 64 + '"\n')
+        with self.assertRaisesRegex(ValueError, 'drift'): vendor.check_dependencies(root, [package])
+
+    def candidate(self, root, suffix):
+        directory = root / 'candidate/packages/turbo-surf-deno-webidl';directory.mkdir(parents=True)
+        declaration = b'deno_core::extension!(deno_webidl, lazy_loaded_js = ["00_webidl.js"],);\n'
+        (directory/'lib.rs').write_bytes(declaration + suffix)
+        (directory/'LICENSE.md').write_bytes(b'MIT License\nFull license bytes\n')
+        (directory/'00_webidl.js').write_bytes(b'// exact upstream bytes\nconst value = 1;\n')
+        return directory
+
+    def test_candidate_sources_face_the_same_pins(self):
+        root, archive, package, source = self.fixture()
+        directory = self.candidate(root, vendor.CANDIDATE_LIB_SUFFIX)
+        published, table = vendor.reproduce([package], {package['package']: archive})
+        candidate, candidate_table = vendor.reproduce([package], {}, {package['package']: directory})
+        self.assertEqual(candidate, published)
+        self.assertEqual(candidate_table, table)
+        (directory/'00_webidl.js').write_bytes(source.replace(b'1', b'2'))
+        with self.assertRaisesRegex(ValueError, 'source bytes'): vendor.candidate_inputs(package, directory)
+
+    def test_candidate_declaration_may_differ_only_by_the_module_suffix(self):
+        root, _, package, _ = self.fixture()
+        for suffix in [b'\npub mod other;\n', vendor.CANDIDATE_LIB_SUFFIX + b'// more\n']:
+            directory = self.candidate(Path(tempfile.mkdtemp(dir=root)), suffix)
+            with self.assertRaisesRegex(ValueError, 'declaration'): vendor.candidate_inputs(package, directory)
+        linked = root / 'linked';linked.symlink_to(self.candidate(Path(tempfile.mkdtemp(dir=root)), b''), target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'directory'): vendor.candidate_inputs(package, linked)
+
+    def test_candidate_suffix_matches_the_distribution_generator(self):
+        generator = Path(__file__).resolve().parents[4] / 'rust/release-deps/deno/prepare.py'
+        spec = importlib.util.spec_from_file_location('deno_prepare_suffix', generator)
+        prepare = importlib.util.module_from_spec(spec);spec.loader.exec_module(prepare)
+        self.assertEqual(vendor.CANDIDATE_LIB_SUFFIX, prepare.LIB_SUFFIX.encode())
 
 
 if __name__ == '__main__':

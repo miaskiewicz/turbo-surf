@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Reproduce portable Deno extension JS from checksum-pinned published archives."""
+"""Reproduce portable Deno extension JS from checksum-pinned published archives.
+
+Candidate mode (pre-publication): when the render manifest and lockfile select a
+named distribution from a Git or path source (a `[patch.crates-io]` candidate),
+`--check` reads that candidate's sources instead of a registry archive. The JS
+and license bytes must still equal the pins; only the lock/archive checksum is
+skipped, because Git/path sources have none.
+"""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import subprocess
 import tarfile
 import tomllib
 
@@ -14,6 +22,11 @@ DESTINATION = ROOT / "rust/crates/turbo-surf-render/src/vendor/deno_extensions"
 PINS = DESTINATION / "pins.json"
 TABLE = ROOT / "rust/crates/turbo-surf-render/src/deno_extension_source_table.rs"
 KINDS = {"js": "Js", "esm": "Esm", "lazy_loaded_js": "LazyJs", "lazy_loaded_esm": "LazyEsm"}
+# Candidate distributions append exactly this module declaration to the official
+# lib.rs (rust/release-deps/deno/prepare.py LIB_SUFFIX); nothing else may differ.
+CANDIDATE_LIB_SUFFIX = ("\n// turbo-surf distribution: compile-time copies of this extension's JavaScript.\n"
+                        "pub mod embedded_sources;\n").encode()
+REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
 
 
 def digest(data):
@@ -23,6 +36,10 @@ def digest(data):
 def require(value, message):
     if not value:
         raise ValueError(message)
+
+
+def needed_files(package):
+    return ["lib.rs", package["licenseFile"], *[row["file"] for row in package["sources"]]]
 
 
 def archive_inputs(package, archive):
@@ -41,13 +58,33 @@ def archive_inputs(package, archive):
             entries[member.name] = member
             total += member.size
             require(0 <= member.size <= 8 * 1024**2 and total <= 64 * 1024**2, "Expanded archive exceeds bounds")
-        needed = ["lib.rs", package["licenseFile"], *[row["file"] for row in package["sources"]]]
         contents = {}
-        for relative in needed:
+        for relative in needed_files(package):
             entry = entries.get(prefix + "/" + relative)
             require(entry is not None and entry.isfile(), "Published source missing: " + relative)
             with tar.extractfile(entry) as stream:
                 contents[relative] = stream.read()
+    return verified_inputs(package, contents)
+
+
+def candidate_inputs(package, directory):
+    """Read a Git/path candidate checkout; its bytes face the same pins."""
+    directory = Path(directory)
+    require(not directory.is_symlink() and directory.is_dir(), "Candidate source must be a directory")
+    contents = {}
+    for relative in needed_files(package):
+        path = directory / relative
+        require(not path.is_symlink() and path.is_file(), "Candidate source missing: " + relative)
+        require(path.stat().st_size <= 8 * 1024**2, "Candidate source exceeds bounds")
+        contents[relative] = path.read_bytes()
+    declaration = contents["lib.rs"]
+    # The candidate's only lib.rs change is the appended embedded-source module.
+    if digest(declaration) != package["declarationSha256"] and declaration.endswith(CANDIDATE_LIB_SUFFIX):
+        contents["lib.rs"] = declaration[:-len(CANDIDATE_LIB_SUFFIX)]
+    return verified_inputs(package, contents)
+
+
+def verified_inputs(package, contents):
     require(digest(contents["lib.rs"]) == package["declarationSha256"], "Official extension declaration changed")
     require(digest(contents[package["licenseFile"]]) == package["licenseSha256"], "Upstream license changed")
     actual = []
@@ -62,20 +99,48 @@ def archive_inputs(package, archive):
 
 
 def check_dependencies(root, packages):
+    """Return {package: (version, source)} for every candidate-sourced extension."""
     manifest = tomllib.loads((root / "rust/crates/turbo-surf-render/Cargo.toml").read_text())
     lock = tomllib.loads((root / "rust/Cargo.lock").read_text())
+    candidates = {}
     for package in packages:
         selected = manifest["dependencies"][package["alias"]]
-        require(selected.get("package") == package["package"] and selected.get("version") == "=" + package["version"], "Render extension version/package drift")
+        require(isinstance(selected, dict) and selected.get("package") == package["package"], "Render extension version/package drift")
         locked = [row for row in lock["package"] if row["name"] == package["package"]]
-        require(len(locked) == 1 and locked[0]["version"] == package["version"] and locked[0].get("checksum") == package["archiveSha256"], "Locked extension archive drift")
+        require(len(locked) == 1 and selected.get("version") == "=" + locked[0]["version"], "Render extension version/package drift")
+        source = locked[0].get("source")
+        if source is None or source.startswith("git+"):
+            # A [patch] candidate (Git rev or local path): no archive checksum exists.
+            require("checksum" not in locked[0], "Locked extension archive drift")
+            candidates[package["package"]] = (locked[0]["version"], source)
+            continue
+        require(source == REGISTRY and locked[0]["version"] == package["version"] and locked[0].get("checksum") == package["archiveSha256"], "Locked extension archive drift")
+    return candidates
 
 
-def reproduce(packages, archives):
+def candidate_directories(root, candidates):
+    """Locate candidate manifests through Cargo's own resolution (offline)."""
+    output = subprocess.run(["cargo", "metadata", "--offline", "--locked", "--format-version", "1",
+                             "--manifest-path", str(root / "rust/Cargo.toml")],
+                            check=True, stdout=subprocess.PIPE, text=True).stdout
+    found = {}
+    for row in json.loads(output)["packages"]:
+        if row["name"] in candidates and row["version"] == candidates[row["name"]][0]:
+            require(row["name"] not in found, "Duplicate candidate package: " + row["name"])
+            found[row["name"]] = Path(row["manifest_path"]).parent
+    require(found.keys() == candidates.keys(), "Candidate sources are not available offline; build first or pass --candidate-dir")
+    return found
+
+
+def reproduce(packages, archives, candidates=None):
     expected, table, hashes = {}, [], []
     seen = set()
+    candidates = candidates or {}
     for package in packages:
-        content = archive_inputs(package, archives[package["package"]])
+        if package["package"] in candidates:
+            content = candidate_inputs(package, candidates[package["package"]])
+        else:
+            content = archive_inputs(package, archives[package["package"]])
         directory = package["alias"]
         expected[Path(directory) / package["licenseFile"]] = content[package["licenseFile"]]
         for row in package["sources"]:
@@ -103,6 +168,7 @@ def existing(directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive-dir", type=Path, help="Directory containing the three exact .crate archives; no downloads")
+    parser.add_argument("--candidate-dir", type=Path, help="Prepared candidate tree (packages/<name>/) for Git/path-sourced extensions; default: Cargo metadata")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--write", action="store_true")
@@ -111,9 +177,18 @@ def main():
     require(pins["schema"] == 1, "Unknown source pin schema")
     packages = pins["packages"]
     require(len(packages) == 3 and len({row["package"] for row in packages}) == 3, "Expected three official extensions")
-    check_dependencies(ROOT, packages)
+    candidate_versions = check_dependencies(ROOT, packages)
+    require(not candidate_versions or args.check, "Candidate sources are verified with --check only; --write reproduces published archives")
+    if not candidate_versions:
+        candidates = {}
+    elif args.candidate_dir:
+        candidates = {name: args.candidate_dir / "packages" / name for name in candidate_versions}
+    else:
+        candidates = candidate_directories(ROOT, candidate_versions)
     archives = {}
     for package in packages:
+        if package["package"] in candidates:
+            continue
         name = package["package"] + "-" + package["version"] + ".crate"
         if args.archive_dir:
             archive = args.archive_dir / name
@@ -123,7 +198,7 @@ def main():
             require(len(matches) == 1, "Pass --archive-dir containing " + name)
             archive = matches[0]
         archives[package["package"]] = archive
-    expected, table = reproduce(packages, archives)
+    expected, table = reproduce(packages, archives, candidates)
     expected[Path("pins.json")] = PINS.read_bytes()
     actual = existing(DESTINATION)
     require(not TABLE.is_symlink(), "Linked generated source table")
@@ -139,7 +214,8 @@ def main():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
         TABLE.write_bytes(table)
-    print("Verified exact published Deno extension sources and licenses: " + str(len(expected) - len(packages) - 1) + " modules")
+    origin = "candidate (" + ", ".join(sorted(candidates)) + ") and published" if candidates else "published"
+    print("Verified exact " + origin + " Deno extension sources and licenses: " + str(len(expected) - len(packages) - 1) + " modules")
 
 
 if __name__ == "__main__":

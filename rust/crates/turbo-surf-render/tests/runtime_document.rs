@@ -247,6 +247,44 @@ async fn retired_iframe_document_has_no_default_view_and_keeps_its_own_metadata(
     );
 }
 
+// getSelection is the binding's own Document.prototype member over per-document state,
+// not a creation-context delegate: like Chrome, a document without a browsing context
+// (retired by navigation, or parsed) has no selection.
+#[test]
+fn get_selection_is_inherited_native_and_per_document() {
+    let result = run_with_dom("<!doctype html><body><p id=a>hello</p></body>", r#"(() => {
+      const descriptor=Object.getOwnPropertyDescriptor(Document.prototype,'getSelection');
+      let invalid=false;try{descriptor.value.call({});}catch(error){invalid=error instanceof TypeError;}
+      const selection=document.getSelection();selection.selectAllChildren(document.getElementById('a'));
+      return JSON.stringify({own:Object.hasOwn(document,'getSelection'),native:Function.prototype.toString.call(descriptor.value)==='function getSelection() { [native code] }',
+        invalid,same:selection===getSelection(),brand:selection instanceof Selection,text:String(selection),
+        parsed:new DOMParser().parseFromString('<p>x</p>','text/html').getSelection()});
+    })()"#).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&result).unwrap(),
+        serde_json::json!({"own":false,"native":true,"invalid":true,"same":true,"brand":true,"text":"hello","parsed":null})
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn retired_iframe_document_has_no_selection() {
+    let mut page = PageSession::open(
+        "<html><body><iframe id='f' srcdoc='<p id=q>old</p>'></iframe></body></html>",
+        "https://example.test/",
+        "",
+        "",
+        5000,
+    )
+    .await
+    .unwrap();
+    page.eval("globalThis.oldFrameDocument=document.getElementById('f').contentDocument;globalThis.oldSelection=oldFrameDocument.getSelection();oldSelection.selectAllChildren(oldFrameDocument.getElementById('q'));globalThis.before=[String(oldSelection),oldSelection===document.getElementById('f').contentWindow.getSelection(),oldSelection!==document.getSelection()];document.getElementById('f').srcdoc='<p>new</p>';").await.unwrap();
+    let result = page.eval("globalThis.__RESULT=JSON.stringify({before,retired:oldFrameDocument.getSelection(),borrowed:Document.prototype.getSelection.call(oldFrameDocument),fresh:document.getElementById('f').contentDocument.getSelection()===document.getElementById('f').contentWindow.getSelection()})").await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&result).unwrap(),
+        serde_json::json!({"before":["old",true,true],"retired":null,"borrowed":null,"fresh":true})
+    );
+}
+
 #[tokio::test]
 async fn adopted_iframe_retires_its_context_and_reinsertion_gets_a_fresh_document() {
     let html = render_page(

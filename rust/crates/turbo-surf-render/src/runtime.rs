@@ -11998,8 +11998,11 @@ __G.domSig = (() => {
 
   // Keep creation-context delegates private: a retained Document must not resolve
   // these through a WindowProxy that may already point at a newer navigation.
+  // getSelection is not delegated: the binding (selection.js) defines it on
+  // Document.prototype over per-document native state, so a retained or inert
+  // document already gets its own answer (null without a browsing context).
   __documentRuntimeState.members = __newDocumentMembers();
-  for (const name of ["close", "open", "write", "writeln", "createEvent", "createNodeIterator", "createRange", "createTreeWalker", "elementFromPoint", "elementsFromPoint", "getSelection", "hasFocus", "implementation", "adoptedStyleSheets", "styleSheets", "contentType", "hidden", "visibilityState", "fullscreenElement"]) {
+  for (const name of ["close", "open", "write", "writeln", "createEvent", "createNodeIterator", "createRange", "createTreeWalker", "elementFromPoint", "elementsFromPoint", "hasFocus", "implementation", "adoptedStyleSheets", "styleSheets", "contentType", "hidden", "visibilityState", "fullscreenElement"]) {
     const descriptor = Object.getOwnPropertyDescriptor(__document, name);
     if (!descriptor || descriptor.configurable === false) continue;
     __documentRuntimeState.members.set(name, descriptor);

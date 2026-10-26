@@ -11,7 +11,7 @@ import subprocess
 import sys
 from prepare import verify_engine, verify_engine_patch
 from surf_workspace import prepare_workspace, cargo_arguments
-from release_aliases import sdk_config
+from release_aliases import sdk_config, frame_read_arguments
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('destination',type=Path)
@@ -143,4 +143,7 @@ if args.surf:
     workspace=prepare_workspace(source,root/'surf-workspace')
     arguments=cargo_arguments(args.surf,source,workspace)
     config=sdk_config(source,root,workspace)
-    sys.exit(subprocess.call(['cargo',arguments[0],'--config',str(config),*arguments[1:]],env=environment))
+    # Registry-named graphs also need the binding's native-SDK frame read: this
+    # SDK lacks turbo-dom-v8's accessor fix (forwarded by render/mcp/napi/py).
+    features=[] if config==root/'cargo-config.toml' else frame_read_arguments(arguments[1:],source)
+    sys.exit(subprocess.call(['cargo',arguments[0],'--config',str(config),*features,*arguments[1:]],env=environment))

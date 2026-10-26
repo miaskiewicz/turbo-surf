@@ -1,7 +1,7 @@
 {
-  "browser": "Chrome/155.0.8059.79",
-  "v8": "15.5.35.23",
-  "probeSha256": "426926abd3ae1baafd3f743a7c81f3fd45f8358f296775f914e37e13fcc60e7a",
+  "browser": "Chrome/156.0.8078.4",
+  "v8": "15.6.75",
+  "probeSha256": "cc47252d87c44df88bae04505e0260911c7c425baaef84d658779c84f7eb9923",
   "collectorSha256": "b13d2f18eba0accfb1bf4391b5970509bc95225c2dd6e5941e34596bbd3a7695",
   "flags": [
     "--remote-debugging-port=0",

@@ -920,6 +920,7 @@ node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-probe.
 node harness/detection/authored-dom-chrome.mjs harness/detection/csp-meta-probe.js harness/detection/fixtures/csp-meta-chrome155.json
 node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-order-probe.js harness/detection/fixtures/csp-base-order-chrome155.json
 node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-retired-probe.js harness/detection/fixtures/csp-base-retired-chrome155.json
+TURBO_SURF_CHROME_PATH=".../Google Chrome for Testing" node harness/detection/authored-dom-chrome.mjs harness/detection/csp-base-opaque-probe.js harness/detection/fixtures/csp-base-opaque-chrome156.json
 cargo test --manifest-path rust/Cargo.toml -p turbo-surf-render --test csp_document_policy
 ```
 

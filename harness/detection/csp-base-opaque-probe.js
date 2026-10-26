@@ -4,10 +4,11 @@
     const frame = document.createElement("iframe");
     if (opaque) frame.setAttribute("sandbox", "allow-scripts");
     const row = await new Promise((resolve) => {
+      // A generous cap, not a timing: the frame's message is awaited (turbo-surf#46).
       const timeout = setTimeout(() => {
         window.removeEventListener("message", receive);
         resolve({ timeout: true });
-      }, 2500);
+      }, 60000);
       function receive(event) {
         clearTimeout(timeout);
         window.removeEventListener("message", receive);

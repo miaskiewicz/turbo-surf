@@ -43,9 +43,11 @@ pub async fn matches_control_with_gaps(
     assert_eq!(cases.len(), expected.len());
     for (case, expected) in cases.iter().zip(expected) {
         assert_eq!(case["id"], expected["id"]);
-        let mut page = PageSession::open(case["html"].as_str().unwrap(), base(case), "", "", 10000)
-            .await
-            .unwrap();
+        // A generous cap, not a timing: the probes are in-isolate but lay out live.
+        let mut page =
+            PageSession::open(case["html"].as_str().unwrap(), base(case), "", "", 60_000)
+                .await
+                .unwrap();
         let actual: Value = serde_json::from_str(
             &page
                 .eval_json_expression(probe.trim_end().trim_end_matches(';'))

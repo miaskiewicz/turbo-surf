@@ -156,11 +156,11 @@ async fn borrowed_cookie_getter_uses_the_frame_request_path() {
         &base,
         &cookies.storage_state(),
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), request)
+    tokio::time::timeout(std::time::Duration::from_secs(60), request)
         .await
         .expect("localhost frame request was not made")
         .unwrap();

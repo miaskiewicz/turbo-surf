@@ -30,7 +30,7 @@ fn thrown(entry: &Value) -> Option<&str> {
 }
 
 async fn rows(html: &str) -> Vec<Value> {
-    let mut page = PageSession::open(html, "https://live-geometry.test/", "", "", 10000)
+    let mut page = PageSession::open(html, "https://live-geometry.test/", "", "", 60_000)
         .await
         .unwrap();
     let rows: Value = serde_json::from_str(

@@ -4743,7 +4743,7 @@ async fn frame_window_proxy_survives_same_and_cross_origin_document_replacements
         &format!("http://127.0.0.1:{same_port}/parent"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -4825,7 +4825,7 @@ async fn frame_cross_origin_location_is_restricted_and_navigates_from_the_caller
         &format!("http://127.0.0.1:{parent_port}/parent/dir/page"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();

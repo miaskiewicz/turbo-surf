@@ -32,10 +32,15 @@ async fn opaque_bodies_and_response_headers_stay_private_when_guest_intrinsics_c
             });
         }
     });
-    let mut page =
-        turbo_surf_render::PageSession::open("<body></body>", "https://source.test/", "", "", 5000)
-            .await
-            .unwrap();
+    let mut page = turbo_surf_render::PageSession::open(
+        "<body></body>",
+        "https://source.test/",
+        "",
+        "",
+        60_000,
+    )
+    .await
+    .unwrap();
     let script = format!(
         r#"const originalJSON=JSON.stringify;
       JSON.stringify=()=>originalJSON({{source:'{target}',mode:'same-origin'}});

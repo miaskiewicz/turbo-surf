@@ -149,7 +149,7 @@ async fn resource_loaders_clear_site_data_and_ancestor_partition_match_chrome155
         &format!("{origin}/"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();

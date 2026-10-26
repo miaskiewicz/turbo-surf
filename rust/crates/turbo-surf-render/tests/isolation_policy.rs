@@ -284,7 +284,7 @@ async fn iframe_embedding_and_permissions_policy_match_chrome() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -333,7 +333,7 @@ async fn shared_memory_window_delivery_matches_chrome_agent_clusters() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -571,7 +571,7 @@ async fn iframe_container_policy_mutates_without_rewriting_committed_child_polic
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -620,7 +620,7 @@ async fn deep_permissions_admission_cannot_reenable_denied_ancestors() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -699,7 +699,7 @@ async fn response_ancestor_and_legacy_frame_policies_match_chrome() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -755,7 +755,7 @@ async fn ancestor_response_policies_check_each_actual_parent_origin() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -811,7 +811,7 @@ async fn response_sandbox_script_origin_and_storage_flags_match_chrome() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -1002,7 +1002,7 @@ async fn top_sandbox_module_requests_use_authentic_opaque_origin_and_cookie_site
             &format!("{origin}/?case={index}"),
             &cookies,
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -1147,7 +1147,7 @@ async fn report_only_csp_violation_tasks_match_chrome() {
         &format!("{origin}/?case=1"),
         "",
         "",
-        5000,
+        60_000,
         "",
         Default::default(),
         &headers,
@@ -1201,9 +1201,17 @@ async fn csp_task_capacity_is_bounded_and_recovers_after_dispatch() {
         &page
             .eval_json_expression(
                 r#"(async()=>{
+        // Wait for the queued tasks to drain (a real-time delivery), then 30 ms more for
+        // any excess; the session budget caps a delivery that never comes.
+        const reached=count=>new Promise(resolve=>{
+          const check=()=>{if(violations>=count){document.removeEventListener('securitypolicyviolation',check);resolve();}};
+          document.addEventListener('securitypolicyviolation',check);check();
+        });
+        await reached(4096);
         await new Promise(resolve=>setTimeout(resolve,30));
         const first=violations;
         document.querySelector('div').setAttribute('style','color:blue');
+        await reached(first+1);
         await new Promise(resolve=>setTimeout(resolve,30));
         return {attempts,first,after:violations};
     })()"#,

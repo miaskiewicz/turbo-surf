@@ -47,8 +47,8 @@ fn embedded_font_block_inline_ranges_match_the_same_chrome_font_bytes() {
     assert_eq!(font_hash, expected["font"]["sha256"].as_str().unwrap());
     // Use the same public font selection path as native HTML layout, including
     // installed faces, so an accidental system-font substitution fails closed.
-    let mut fonts = turbo_dom_layout::FontRegistry::new();
-    fonts.load_system_fonts_for_html();
+    let fonts =
+        turbo_dom_layout::FontRegistry::system(turbo_dom_layout::text::SystemFontPolicy::Html);
     let face = fonts.select(&["IBM Plex Mono"], 400, false).unwrap();
     assert_eq!(format!("{:x}", Sha256::digest(face.data())), font_hash);
 

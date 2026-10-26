@@ -14,6 +14,12 @@ name = "turbo_surf_py"
 crate-type = ["cdylib", "rlib"]
 
 [features]
+default = ["avif"]
+# AVIF screenshot pixels (turbo-surf#30): turbo-dom-raster's pure-Rust rav1d decoder
+# (BSD-2-Clause, no assembly, no C toolchain). ON by default: live loads already size
+# AVIF and image requests advertise `image/avif` as Chrome does, so CDNs serve it.
+# Without it an AVIF lays out at its real size and paints as the placeholder.
+avif = ["turbo-dom-raster/avif"]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization — OFF by default so the published wheels
 # never pull wgpu / a C-Metal toolchain. See turbo-dom-raster's `gpu-metal`.
 gpu-metal = ["turbo-dom-raster/gpu-metal"]
@@ -24,11 +30,11 @@ coretext = ["turbo-dom-raster/coretext"]
 native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 
 [dependencies]
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.5" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.6.0" }
 turbo-dom-raster = "0.6.0"
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.5" }
-turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.5.5" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.6.0" }
+turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.6.0" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.6" }
 serde = "1"
 serde_json = "1"
 # A current-thread tokio runtime drives the async render tier from a sync Python

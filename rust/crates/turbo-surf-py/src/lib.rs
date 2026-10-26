@@ -137,8 +137,9 @@ fn image_urls(html: &str) -> Vec<String> {
 }
 
 /// PNG screenshot of `html` with caller-fetched `external_css` and `images` (a
-/// `{ref: bytes}` dict from `image_urls`). PNG/JPEG images are painted; others
-/// fall back to a placeholder. Returns PNG `bytes`.
+/// `{ref: bytes}` dict from `image_urls`). PNG/JPEG/GIF/WebP/SVG/BMP/ICO (and, with
+/// the default `avif` feature, AVIF) images are painted; others fall back to a
+/// placeholder. Returns PNG `bytes`.
 #[pyfunction]
 #[pyo3(signature = (html, external_css, images, width=None, height=None, full_page=false))]
 fn screenshot_with_assets<'py>(

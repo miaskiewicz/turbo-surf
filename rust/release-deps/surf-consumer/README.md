@@ -54,11 +54,11 @@ After successful verification, create a private directory source from the
 
 ```sh
 python3 -B rust/release-deps/stage.py --output "$RELEASE_STAGE" \
-  --candidate-archive "$ARCHIVES/turbo-surf-core-0.5.4.crate" \
-  --candidate-archive "$ARCHIVES/turbo-surf-view-0.5.4.crate" \
-  --candidate-archive "$ARCHIVES/turbo-surf-page-0.5.4.crate" \
-  --candidate-archive "$ARCHIVES/turbo-surf-render-0.5.4.crate" \
-  --candidate-archive "$ARCHIVES/turbo-surf-mcp-0.5.4.crate"
+  --candidate-archive "$ARCHIVES/turbo-surf-core-0.6.0.crate" \
+  --candidate-archive "$ARCHIVES/turbo-surf-view-0.6.0.crate" \
+  --candidate-archive "$ARCHIVES/turbo-surf-page-0.6.0.crate" \
+  --candidate-archive "$ARCHIVES/turbo-surf-render-0.6.0.crate" \
+  --candidate-archive "$ARCHIVES/turbo-surf-mcp-0.6.0.crate"
 ```
 
 Append one `--candidate-archive` for **each** of the thirteen actual dependency
@@ -116,7 +116,7 @@ PYO3_PYTHON="$BUILD_ENV/bin/python" "$BUILD_ENV/bin/maturin" build --release \
 ```
 
 Unpack and inspect the sdist before compiling it. Its pyproject and Cargo version
-must be0.5.4; Python source, all workspace/path dependencies needed for a source
+must be0.6.0; Python source, all workspace/path dependencies needed for a source
 build, and licenses/notices must be present. It must not require missing external
 checkout paths or workspace patches. Build a wheel **from that tarball**, outside
 the checkout, with a fresh Cargo home and no source replacements:
@@ -142,7 +142,7 @@ from pathlib import Path
 import turbo_surf as ts
 import turbo_surf._turbo_surf as native
 
-assert importlib.metadata.version('turbo-surf') == ts.version() == '0.5.4'
+assert importlib.metadata.version('turbo-surf') == ts.version() == '0.6.0'
 assert Path(native.__file__).is_file()
 html = '<title>Packaged wheel</title><body><div id="root">Before</div><a href="/next">Next</a></body>'
 assert ts.title(html) == 'Packaged wheel'
@@ -169,5 +169,5 @@ run all ten existing offline cases for **each** installed wheel:
 ```
 
 The version case binds the extension's actual version to installed distribution
-metadata; the explicit0.5.4 assertion above additionally checks release identity.
+metadata; the explicit0.6.0 assertion above additionally checks release identity.
 Keep the direct-wheel and source-tarball-rebuilt-wheel outcomes separate.

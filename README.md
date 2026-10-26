@@ -57,7 +57,7 @@ happy-dom). turbo-surf is unusual on four axes at once:
 See [CHANGELOG.md](./CHANGELOG.md) for what shipped and
 [rust/README.md](./rust/README.md) for the engine internals.
 
-Status: **v0.5.5 — Rust engine** ([npm](https://www.npmjs.com/package/turbo-surf)).
+Status: **v0.6.0 — Rust engine** ([npm](https://www.npmjs.com/package/turbo-surf)).
 A native Rust engine (9-crate workspace on the `turbo-dom` crate): hardened
 networking (cookies / `document.cookie` bridge / robots + crawl-delay / charset /
 size + redirect caps, HTTP/2 + a pooled client, 304 conditional cache), crawl
@@ -612,7 +612,7 @@ an `expect(locator)` chain is batched into one crossing).
 layout+paint of the current HTML — no browser, no Chromium. It's *reasonably
 representative*, not pixel-faithful (`position`/`z-index` are honored via CSS
 stacking order; `<img>` + `background-image` are fetched and painted —
-PNG/JPEG/GIF/WebP + SVG, unknown formats fall back to a placeholder). `full_page`
+PNG/JPEG/GIF/WebP/BMP/ICO/AVIF + SVG, unknown formats fall back to a placeholder). `full_page`
 grows to the content height. Runs only when asked, over any HTML snapshot; the
 viewport is configurable. See the `screenshot` MCP tool + `screenshot`/`screenshotSvg`
 napi functions.

@@ -354,8 +354,33 @@ SERP in one baseline while another fails effective consent dismissal. The later
   defaults and does not preserve every live control value across a new runtime.
 - Live hydration advances the document through loading/interactive/complete, runs deferred
   scripts before DOMContentLoaded, and waits for image/resource loads before window load.
-  PNG/JPEG/GIF/WebP images are fetched as bytes and decoded before success/dimensions are
-  exposed. SVG/AVIF, responsive image selection, CSS image/font initiation, incremental
+  Images are fetched as bytes (`data:` URLs through the Fetch data: URL processor: base64,
+  percent-encoded and raw payloads) and sized by turbo-dom-layout's shared image probe:
+  PNG/JPEG/GIF/WebP/BMP/ICO/CUR/AVIF from their bytes whatever the declared type or HTTP
+  status (EXIF orientation applied), SVG only when served as `image/svg+xml` (its natural
+  size from the root's `width`/`height`/`viewBox`, as Chrome); TIFF and any undecodable
+  body fail with `error` (turbo-surf#30, `tests/image_formats.rs` against a Chrome 156
+  control). Remaining gaps: a header-only JPEG/GIF/WebP body loads where Chrome waits for
+  the first scan/frame, and an SVG root outside the SVG namespace loads. Each image's state reaches the binding's `HTMLImageElement.prototype`
+  accessors (`complete`, `naturalWidth`, `naturalHeight`, `currentSrc`) through the
+  document's private `imageHost` record. The binding owns the rest of the element (the
+  reflected `src`, `decode()` and the native `Image()` factory), so an `<img>` has no own
+  properties, as in Chrome. Loads start from the document's mutation consumer: a
+  `src`/`srcset` change on any `<img>` the document owns, connected or not
+  (`new Image().src = …`), and images a tree inserts (detached `innerHTML`, contextual
+  fragments); images of inert documents (template contents, `DOMParser`,
+  `createHTMLDocument`) never load. A decoded image's natural size also sizes its replaced
+  box in live layout (turbo-surf#39), and `width`/`height`/`x`/`y` read that box through the
+  binding's `imageHost.setLayoutQuery` (turbo-dom#26: the pixel-snapped, zoom-adjusted
+  content box and the untransformed border-box document position; not rendered → the
+  attribute or natural size, 0). A `render(html, base, script)`
+  starts the parser's image and stylesheet loads before its script runs, and a `data:`
+  image is decoded synchronously when its source is set, so the first script read sees
+  it complete with its natural size, as in Chrome (turbo-surf#38); its `load`/`error`
+  event still fires as a later task. `srcset` sources are selected like Chrome
+  (turbo-surf#40: density and `w` descriptors against `sizes`, `src` as the 1x candidate,
+  the first candidate reaching `devicePixelRatio`, density-corrected natural size);
+  `<picture>`/`<source>` selection, CSS image/font initiation, incremental
   parsing and complete browser async-script scheduling remain outside this resource loader.
   Image, linked/imported stylesheet and classic-script fetches record their actual duration
   in the performance resource timeline; unavailable wire sizes and transport phases remain zero.
@@ -1304,7 +1329,9 @@ now fixed:
    has no AVIF decoder → every hero/product image silently dropped. Fix: `fetch_bytes`
    (napi) now sends an image `Accept` **without** `image/avif`
    (`image/webp,image/png,image/jpeg,…`), so the CDN falls back to WebP, which turbo
-   decodes. General: fixes every `f_auto`/Cloudinary site.
+   decodes. General: fixes every `f_auto`/Cloudinary site. (P5b, turbo-surf#30: the
+   screenshot raster now decodes AVIF under the default `avif` feature, so `fetchBytes`
+   sends Chrome's image `Accept` again; only an addon built without it keeps this one.)
 2. **`width:100%` collapse.** Even fetched, the images were 0×0 — `size_replaced`
    resolved `%` against a 0 basis (html2pdf 0.2.10 fix). Together the Ronaldo hero,
    Mercurial boots, and tennis imagery now render (verified).

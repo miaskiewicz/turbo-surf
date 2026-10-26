@@ -10,10 +10,15 @@ description = "turbo-surf napi-rs addon — in-process bridge from the Rust core
 crate-type = ["cdylib"]
 
 [features]
-default = ["impersonate"]
+default = ["impersonate", "avif"]
 # Forward turbo-surf-core's BoringSSL Chrome-fingerprint client (dev/harness use
 # of the impersonation path). See turbo-surf-core/src/net.rs.
 impersonate = ["turbo-surf-core/impersonate", "turbo-surf-page/impersonate"]
+# AVIF screenshot pixels (turbo-surf#30): turbo-dom-raster's pure-Rust rav1d decoder
+# (BSD-2-Clause, no assembly, no C toolchain). ON by default: live loads already size
+# AVIF and image requests advertise `image/avif` as Chrome does, so CDNs serve it.
+# Without it an AVIF lays out at its real size and paints as the placeholder.
+avif = ["turbo-dom-raster/avif"]
 # Real Apple-GPU (wgpu→Metal) canvas rasterization (off by default; see turbo-dom-raster).
 gpu-metal = ["turbo-dom-raster/gpu-metal"]
 # CoreText/CoreGraphics canvas-text raster (macOS only). See turbo-dom-raster's `coretext`.
@@ -25,13 +30,13 @@ native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi6", "tokio_rt"] }
 napi-derive = "2"
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.5" }
-turbo-surf-page = { path = "../turbo-surf-page", version = "0.5.5" }
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.5" }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.6.0" }
+turbo-surf-page = { path = "../turbo-surf-page", version = "0.6.0" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.6.0" }
 turbo-dom-raster = "0.6.0"
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.5" }
-turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.5.5" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.6.0" }
+turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.6.0" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.6" }
 serde = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["rt"] }

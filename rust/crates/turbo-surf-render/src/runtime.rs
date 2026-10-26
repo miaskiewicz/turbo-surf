@@ -49,7 +49,7 @@ use std::rc::Rc;
 use turbo_surf_core::cookies::CookieJar;
 #[path = "fetch_streams.rs"]
 pub(crate) mod fetch_streams;
-use turbo_surf_core::net::{fetch_bytes, fetch_html, FetchOptions};
+use turbo_surf_core::net::{fetch_html, fetch_typed_bytes, FetchOptions, FetchedBytes};
 use turbo_surf_core::request_context::{
     ClientHints, Credentials, Destination, RequestContext, RequestMode,
 };
@@ -3395,37 +3395,83 @@ async fn op_load_image(
         jar: Some(&mut local),
         ..Default::default()
     };
-    let response = if let Some(data) = target.strip_prefix("data:") {
-        use base64::Engine;
-        data.split_once(",")
-            .filter(|(kind, _)| kind.ends_with(";base64"))
-            .and_then(|(_, data)| base64::engine::general_purpose::STANDARD.decode(data).ok())
-            .map(|bytes| (target.clone(), bytes, 200))
+    // data: URLs go through the Fetch data: URL processor (base64, percent-encoded and
+    // raw payloads) and keep their MIME type, like a network response's Content-Type.
+    let response = if target
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
+    {
+        turbo_dom_layout::image::decode_data_url(&target).map(|data| FetchedBytes {
+            final_url: target.clone(),
+            bytes: data.bytes,
+            status: 200,
+            content_type: data.mime,
+        })
     } else {
-        fetch_bytes(&target, opts).await.ok()
+        fetch_typed_bytes(&target, opts).await.ok()
     };
     jar.borrow_mut().merge_request_changes(local);
-    let Some((url, bytes, status)) = response else {
+    let Some(response) = response else {
         return ImageOut::default();
     };
-    let image = (200..300)
-        .contains(&status)
-        .then(|| image::load_from_memory(&bytes).ok())
-        .flatten();
-    match image {
-        Some(image) => ImageOut {
+    match natural_image_size(&response.bytes, &response.content_type) {
+        Some((width, height)) => ImageOut {
+            url: response.final_url,
+            status: response.status,
+            width,
+            height,
+            ok: true,
+        },
+        None => ImageOut {
+            url: response.final_url,
+            status: response.status,
+            ..Default::default()
+        },
+    }
+}
+
+/// A `data:` image source decoded synchronously (turbo-surf#38): Chrome loads a data:
+/// image the moment its source is set, so its state is final before any script reads it.
+#[op2]
+#[serde]
+fn op_decode_data_image(#[string] url: String) -> ImageOut {
+    let size = turbo_dom_layout::image::decode_data_url(&url)
+        .and_then(|data| natural_image_size(&data.bytes, &data.mime));
+    match size {
+        Some((width, height)) => ImageOut {
             url,
-            status,
-            width: image.width(),
-            height: image.height(),
+            status: 200,
+            width,
+            height,
             ok: true,
         },
         None => ImageOut {
             url,
-            status,
             ..Default::default()
         },
     }
+}
+
+/// Whether an `<img>` response decodes, and its `naturalWidth`/`naturalHeight`, as Chrome
+/// 156 decides them (turbo-surf#30, `tests/fixtures/image_formats_chrome156.json`): the
+/// shared turbo-dom-layout probe sizes every raster format Chrome shows (PNG, JPEG, GIF,
+/// WebP, BMP, ICO/CUR, AVIF; EXIF orientation applied) from its bytes whatever the
+/// declared type or HTTP status, while SVG is decoded only when served as
+/// `image/svg+xml` and an `image/svg+xml` response is never sniffed as a raster.
+fn natural_image_size(bytes: &[u8], content_type: &str) -> Option<(u32, u32)> {
+    use turbo_dom_layout::{image, svg};
+    let essence = content_type.split(';').next().unwrap_or("").trim();
+    let natural = if essence.eq_ignore_ascii_case("image/svg+xml") {
+        svg::is_svg(bytes)
+            .then(|| image::probe_natural(bytes))
+            .flatten()
+    } else {
+        // The raster sniff alone: probe_natural would try SVG markup first.
+        image::sniff(bytes)
+            .and_then(|_| image::probe(bytes))
+            .map(|intrinsic| intrinsic.displayed(true))
+    }?;
+    Some((natural.width, natural.height))
 }
 
 // Each frame owns its native tree and JS browser APIs in its own V8 context.
@@ -7229,6 +7275,7 @@ deno_core::extension!(
         fetch_streams::op_fetch_read,
         op_fetch,
         op_load_image,
+        op_decode_data_image,
         op_dictionary_active,
         op_dictionary_headers,
         op_dictionary_links,
@@ -9887,6 +9934,13 @@ const __resources = new WeakMap();
 const __resourcePromises = new Set();
 const __resourceSheetConstructor = CSSStyleSheet;
 const __resourceSheetRules = ops.op_interface_record_get(document).cssHost.readRules;
+// Image load state is published to the binding's HTMLImageElement.prototype accessors
+// (complete/naturalWidth/naturalHeight/currentSrc); page JS cannot reach this record.
+const __imageHost = ops.op_interface_record_get(document).imageHost;
+// width/height/x/y read the rendered box from surf's native live layout (turbo-dom#26):
+// null while the image is not being rendered; a layout this snapshot cannot supply reads
+// as not rendered (the attribute / natural size) rather than throwing from an IDL getter.
+__imageHost.setLayoutQuery(image=>{try{return ops.op_live_image_box(image);}catch(_){return null;}});
 const __resourceStyleRequests = new WeakMap();
 const __resourceCSSHosts = new WeakMap();
 const __resourceCompatMode=Object.getOwnPropertyDescriptor(Document.prototype,"compatMode").get;
@@ -9949,51 +10003,128 @@ async function __loadSheetImports(sheet, source, win, depth = 0) {
     } catch (_) { if(!recorded)__recordResource(win, url, "css", start); }
   }
 }
-function __loadImage(el, win = globalThis) {
-  const src = el.getAttribute("src") || "";
+function __imageSource(src, source) {try{return new URL(src,source).href;}catch(_){return src;}}
+// turbo-surf#40: HTML's source selection (the srcset attribute's candidates, measured
+// against Chrome 156 in tests/fixtures/html_image_srcset_chrome156.json).
+const __srcsetSpace = (c) => c === " " || c === "\t" || c === "\n" || c === "\f" || c === "\r";
+const __srcsetFloat = /^-?(\d+(\.\d+)?|\.\d+)(e[+-]?\d+)?$/i, __srcsetInteger = /^\d+$/;
+// The "parse a srcset attribute" algorithm: [{url, w, x}] for every valid candidate.
+function __srcsetCandidates(text) {
+  const out = [];
+  let i = 0;
+  while (i < text.length) {
+    while (i < text.length && (__srcsetSpace(text[i]) || text[i] === ",")) i++;
+    if (i >= text.length) break;
+    const start = i;
+    while (i < text.length && !__srcsetSpace(text[i])) i++;
+    let url = text.slice(start, i);
+    const descriptors = [];
+    if (url.endsWith(",")) url = url.replace(/,+$/, "");
+    else {
+      let token = "", parens = false;
+      for (; i < text.length; i++) {
+        const c = text[i];
+        if (!parens && __srcsetSpace(c)) { if (token) descriptors.push(token); token = ""; continue; }
+        if (!parens && c === ",") { i++; break; }
+        if (c === "(") parens = true; else if (c === ")") parens = false;
+        token += c;
+      }
+      if (token) descriptors.push(token);
+    }
+    let w = null, x = null, h = null, error = false;
+    for (const descriptor of descriptors) {
+      const kind = descriptor.slice(-1), value = descriptor.slice(0, -1);
+      if (kind === "w" && w === null && x === null && __srcsetInteger.test(value)) { w = Number(value); error ||= w <= 0; }
+      else if (kind === "x" && w === null && x === null && h === null && __srcsetFloat.test(value)) { x = Number(value); error ||= x < 0; }
+      else if (kind === "h" && h === null && x === null && __srcsetInteger.test(value)) { h = Number(value); error ||= h <= 0; }
+      else error = true;
+    }
+    if (h !== null && w === null) error = true;
+    if (!error && url) out.push({ url, w, x });
+  }
+  return out;
+}
+// The `sizes` source size in CSS px: the first entry whose media condition matches (an
+// absolute or viewport-relative length), else 100vw.
+function __imageSourceSize(el, win) {
+  const viewport = Number(win.innerWidth) || 0;
+  const sizes = __resourceAttribute.call(el, "sizes");
+  if (sizes !== null) for (const entry of sizes.split(",")) {
+    const match = entry.trim().match(/^(.*?)\s*(\d*\.?\d+)(px|vw|em|rem)$/i);
+    if (!match) continue;
+    const unit = match[3].toLowerCase(), value = Number(match[2]);
+    const length = unit === "vw" ? value * viewport / 100 : unit === "px" ? value : value * 16;
+    let matches = !match[1];
+    try { matches ||= win.matchMedia(match[1]).matches; } catch (_) {}
+    if (matches) return length;
+  }
+  return viewport;
+}
+// The source an <img> loads ({url: raw attribute value, density}) and the name live
+// layout keys its box's image by (src, else the first srcset candidate). Chrome 156's
+// selection (no cached candidate): candidates sorted by density, src the 1x one unless
+// srcset has a 1x, the first whose density reaches devicePixelRatio, else the densest.
+function __imageChoice(el, win) {
+  const src = __resourceAttribute.call(el, "src") || "";
+  const srcset = __resourceAttribute.call(el, "srcset");
+  const parsed = srcset ? __srcsetCandidates(srcset) : [];
+  const key = src.trim() ? src : parsed.length ? parsed[0].url : "";
+  if (!parsed.length) return { url: src, density: 1, key };
+  const size = parsed.some((c) => c.w !== null) ? __imageSourceSize(el, win) : 0;
+  let candidates = parsed.map((c) => ({ url: c.url, density: c.w !== null ? c.w / size : c.x !== null ? c.x : 1 }));
+  if (src && !candidates.some((c) => c.density === 1)) candidates.push({ url: src, density: 1 });
+  candidates.sort((a, b) => a.density - b.density);
+  candidates = candidates.filter((c, index) => index === 0 || c.density !== candidates[index - 1].density);
+  const ratio = Number(win.devicePixelRatio) || 1;
+  const pick = candidates.find((c) => c.density >= ratio) || candidates[candidates.length - 1];
+  return { ...pick, key };
+}
+function __imageLoaded(el, choice, result, url) {
+  const loaded = !!(result && result.ok);
+  // A density-descriptor image reports (and lays out at) its size over that density.
+  const width = loaded ? Math.floor(result.width / choice.density) : 0;
+  const height = loaded ? Math.floor(result.height / choice.density) : 0;
+  ops.op_live_image_loaded(el,choice.key,width,height);
+  __imageHost.setState(el,loaded?{complete:true,naturalWidth:width,naturalHeight:height,currentSrc:result.url}:{complete:true,naturalWidth:0,naturalHeight:0,currentSrc:url});
+  return loaded;
+}
+// `parser`: a document-scan (parser) image, whose broken data: source is already
+// complete at the first script read; a script-set one stays pending until its error.
+function __loadImage(el, win = globalThis, parser = false) {
+  const choice = __imageChoice(el, win), src = choice.url;
+  const selection = src + "\n" + choice.density;
   const previous = __resources.get(el);
-  if (previous && previous.src === src) return previous.promise;
-  const state = {src,complete:!src,width:0,height:0,currentSrc:"",promise:null};
+  if (previous && previous.src === selection) return previous.promise;
+  const state = {src:selection,promise:null};
   __resources.set(el,state);
-  if (!src) return Promise.resolve();
+  if (!src) {__imageHost.setState(el,null);return state.promise=Promise.resolve();}
   const doc = __resourceNativeOwner(el);
   const source = __resourceNativeBase(el);
+  const currentSrc = __imageSource(src,source);
+  // turbo-surf#38: a data: image is decoded synchronously, as Chrome loads it the moment
+  // its source is set; its load/error event still fires as a later task.
+  const data = /^data:/i.test(currentSrc);
+  const decoded = data && ops.op_csp_request(doc,currentSrc,"img-src","") ? ops.op_decode_data_image(currentSrc) : null;
+  if (decoded && decoded.ok || data && parser) __imageLoaded(el,choice,decoded,currentSrc);
+  else __imageHost.setState(el,{complete:false,naturalWidth:0,naturalHeight:0,currentSrc});
   state.promise = __trackResource((async () => {
-    let result;
+    let result = decoded;
     const url = new URL(src, source).href, start = __resourceNow(win);
     try {
       await 0;
-      if (ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc)}));
+      if (!data && ops.op_csp_request(doc,url,"img-src","")) result = await ops.op_load_image(url, source,ops.op_csp_context(doc),JSON.stringify({...ops.op_document_cookie_site(doc),opaque_origin:ops.op_window_opaque(doc)}));
     } catch (_) {}
     __recordResource(win, url, "img", start);
     if (__resources.get(el) !== state) return;
-    state.complete=true;
-    if (result && result.ok) {state.width=result.width;state.height=result.height;state.currentSrc=result.url;}
-    __fireResourceEvent(el, result && result.ok ? "load" : "error", win);
+    __fireResourceEvent(el, __imageLoaded(el,choice,result,url) ? "load" : "error", win);
   })());
   return state.promise;
 }
-function __patchImage(el, win = globalThis) {
-  if (el.__tcImagePatched) return;
-  el.__tcImagePatched=true;
-  for (const [name, key, fallback] of [["complete","complete",true],["naturalWidth","width",0],["naturalHeight","height",0],["currentSrc","currentSrc",""]]) {
-    Object.defineProperty(el,name,{configurable:true,get(){const state=__resources.get(this);return state?state[key]:fallback;}});
-  }
-  Object.defineProperty(el,"src",{configurable:true,get(){const src=this.getAttribute("src")||"";try{return src?new URL(src,(this.ownerDocument&&this.ownerDocument.URL)||win.location.href).href:"";}catch(_){return src;}},set(value){this.setAttribute("src",String(value));__loadImage(this,win);}});
-  el.decode=function(){return __loadImage(this,win).then(()=>{if(!this.naturalWidth){const error=new Error("The source image cannot be decoded");error.name="EncodingError";throw error;}});};
-}
-const __createResourceElement = document.createElement.bind(document);
-document.createElement = function(tag, options) {
-  const el=__createResourceElement(tag,options);
-  if (String(tag).toLowerCase()==="img") __patchImage(el);
-  return el;
-};
-globalThis.Image = function Image(width,height) {
-  const el=document.createElement("img");
-  if(width!=null)el.width=width;if(height!=null)el.height=height;
-  return el;
-};
-globalThis.Image.prototype=globalThis.HTMLImageElement.prototype;
+// The binding owns HTMLImageElement entirely (turbo-dom#23): the prototype's reflected
+// src, decode() settling with imageHost, and the native Image() factory. Loads start
+// from the document's mutation consumer below (a src/srcset record on any <img> this
+// document owns, connected or not, and images inserted into its trees), and from
+// loadDocumentResources for parser images, so no image carries own properties.
 __G.loadDocumentResources = function(doc = __document, win = globalThis, before = null) {
   if(doc!==__document || __documentType.call(doc)!==9)throw new TypeError("Resource loading requires the owning native Document");
   __discoverDictionaries();
@@ -10014,7 +10145,7 @@ __G.loadDocumentResources = function(doc = __document, win = globalThis, before 
     }
     const tag=__resourceTagName.call(el);
     if(tag==="SCRIPT"||__resourceLocalName.call(el)==="script")continue;
-    if (tag==="IMG") {__patchImage(el,win);__loadImage(el,win);continue;}
+    if (tag==="IMG") {__loadImage(el,win,true);continue;}
     if(tag==="STYLE"){
       const sheet=__cssHost(doc).sheet(el);if(!sheet)continue;
       const source=__resourceText.call(el);let state=__resources.get(el);
@@ -10287,8 +10418,39 @@ function __containsInsertedResource(node) {
   return kind === "LINK" || kind === "IMG" || kind === "STYLE" ||
     kind !== "" && __resourceApply(__resourceElementQuery,node,["link,img,style"]) !== null;
 }
+const __imageMutationAttributes = {__proto__: null, src:true, srcset:true, sizes:true};
+const __resourceElementQueryAll = Element.prototype.querySelectorAll;
+const __resourceFragmentQueryAll = DocumentFragment.prototype.querySelectorAll;
+// An <img> this document owns starts (or restarts) its load when its src or srcset
+// changes, or when a tree inserts it, whether or not it is connected: Chrome loads
+// `new Image().src = …`, detached innerHTML and createContextualFragment images alike.
+// Images of other documents (template contents, DOMParser and createHTMLDocument
+// documents) never load; __loadImage keeps an unchanged src's load.
+function __ownedImage(node) {
+  return __resourceElementKind(node)==="IMG" && __resourceNativeOwner(node)===__document;
+}
+function __startInsertedImages(node) {
+  const type=__resourceApply(__documentType,node,[]);
+  if(type!==1 && type!==11)return;
+  if(__ownedImage(node))__loadImage(node,globalThis);
+  const images=__resourceApply(type===1?__resourceElementQueryAll:__resourceFragmentQueryAll,node,["img"]);
+  const length=__resourceListApply(__resourceListLength,images,[]);
+  for(let index=0;index<length;index++){
+    const image=__resourceListApply(__resourceListItem,images,[index]);
+    if(__ownedImage(image))__loadImage(image,globalThis);
+  }
+}
+function __imageMutation(event) {
+  if (event.type === "attributes") {
+    if (event.attributeNamespace===null && __imageMutationAttributes[event.attributeName] && __ownedImage(event.target))
+      __loadImage(event.target,globalThis);
+  } else if (event.type === "childList") {
+    for (let index=0; index<event.added.length; index++) __startInsertedImages(event.added[index]);
+  }
+}
 function __resourceMutation(event) {
   if(event.type==="childList")for(let index=0;index<event.removed.length;index++)__dictionaryRemoved(event.removed[index]);
+  __imageMutation(event);
   let connected = false, relevant = false;
   for (let index = 0; index < event.ancestors.length; index++) {
     const ancestor=event.ancestors[index];
@@ -14118,6 +14280,7 @@ async fn run_async(
 ) -> Result<String, String> {
     install_dom(rt, html, base)?;
     run_lifecycle(rt, "documentLoading")?; // readyState "loading" while scripts run
+    run_lifecycle(rt, "loadDocumentResources")?; // parser images/sheets load before scripts
     exec_page_scripts(rt, script, base)?;
     run_lifecycle(rt, "dispatchDocumentInteractive")?; // interactive + DOMContentLoaded
     drain_event_loop(rt).await?; // DCL handlers + promises/microtasks + fetch from the page

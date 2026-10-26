@@ -7,11 +7,11 @@ napi, no Node hosting Rust — same model as turbo-test).
 | Workflow | Publishes | Where | Trigger tag | Auth secret |
 |---|---|---|---|---|
 | `release.yml` | `turbo-surf` — builds the `turbo-surf-mcp` binary for every platform, drops them in `bin/`, publishes the launcher (`cli.js`/`index.js` + `bin/`) | npm | `v*` | `NPM_TOKEN` |
-| `rust-crates-publish.yml` | the Rust crates, in dep order: `core → view → page → render → raster → mcp` | crates.io | `v*` | `CARGO_REGISTRY_TOKEN` |
+| `rust-crates-publish.yml` | the five Rust library crates, in dep order: `core → view → page → render → mcp` (the screenshot tier is turbo-dom's `turbo-dom-raster`), after a tag-only `release-guard` job | crates.io | `v*` | `CARGO_REGISTRY_TOKEN` |
 | `release-py.yml` | `turbo-surf` — maturin abi3 wheels (CPython 3.8+) per platform + sdist, built from `rust/crates/turbo-surf-py/` | PyPI | `pyv*` | `PYPI_TOKEN` |
 
 The `v*` tag fires npm + crates; the **PyPI wheel ships on a SEPARATE `pyv*` tag**
-(e.g. `pyv0.5.4`) so it never fires on the npm/crates release. A tagged PyPI
+(e.g. `pyv0.6.0`) so it never fires on the npm/crates release. A tagged PyPI
 release fails if `PYPI_TOKEN` is absent; manual dispatch builds and tests without
 publishing. Cut BOTH tags at the same version for a full release.
 (The `turbo-surf-napi` cdylib + `turbo-surf-transform` crate are not published — napi
@@ -66,7 +66,8 @@ changelog entries and unrelated dependency versions must retain their own versio
    turbo-surf-deno-web 0.290.1, turbo-surf-deno-webidl 0.259.1) + five transport.
    The Surf product tags do not publish those dependencies. Then drop the
    pre-publish `[patch.crates-io]` table in `rust/Cargo.toml` and re-lock with a
-   targeted `cargo update -p` for the turbo-dom crates and the Deno family. Then
+   targeted `cargo update -p` for the turbo-dom crates and the Deno family (exact
+   commands: [v0.6.0 pre-tag steps](#v060-pre-tag-steps-turbo-dom-consolidation)). Then
    verify all five Surf library distributions
    in one normal invocation, with Cargo compilation verification enabled and no
    directory-source replacement:
@@ -140,6 +141,71 @@ changelog entries and unrelated dependency versions must retain their own versio
    - Fetch the exact PyPI wheels and sdist, verify their hashes and versions,
      and install/test the matching-platform wheel. PyPI's `--skip-existing` is
      retry behavior, not proof that an existing file has the reviewed payload.
+
+## v0.6.0 pre-tag steps (turbo-dom consolidation)
+
+Until the consolidation's prerequisites are on crates.io, `rust/Cargo.toml`
+resolves them from Git through `[patch.crates-io]`: turbo-dom, turbo-dom-layout,
+turbo-dom-raster and turbo-dom-browser-env at a turbo-dom commit, turbo-dom-v8 at
+its turbo-dom candidate commit and the seven Deno-family 0.x.1 candidates at one
+`consolidation/deno-candidates` commit. A tag must not ship that graph:
+`rust-crates-publish.yml`'s tag-only `release-guard` job, and the tag-push `validate`
+job of `release.yml` (npm) and `release-py.yml` (PyPI), run
+`rust/release-deps/release_guard.py` (no `[patch]` table or `[[patch.unused]]`
+record, no Git/path source in `rust/Cargo.lock`, every prerequisite locked from
+crates.io at a version the sparse index lists unyanked) before anything builds or
+publishes.
+
+1. Wait for the prerequisites, in this order, each listed on crates.io before the
+   next: turbo-dom's `v0.6.0` tag (turbo-dom-v8 150.4.0, turbo-dom, turbo-dom-layout,
+   turbo-dom-raster, turbo-dom-browser-env 0.6.0); then this repository's
+   `release-dependencies.yml` publish (it needs turbo-dom-v8 from the registry), which
+   publishes turbo-surf-deno-v8 0.4.1, turbo-surf-serde-v8 0.321.1,
+   turbo-surf-deno-core 0.412.1, turbo-surf-deno-bench-util 0.253.1,
+   turbo-surf-deno-crypto 0.273.1, turbo-surf-deno-web 0.290.1 and
+   turbo-surf-deno-webidl 0.259.1 (the five transport packages are already published
+   and stay as they are).
+2. In the release PR, delete the whole `[patch.crates-io]` table of `rust/Cargo.toml`
+   together with its "PRE-PUBLISH ONLY" comment block.
+3. Re-lock only those packages:
+
+   ```sh
+   cd rust
+   cargo update -p turbo-dom -p turbo-dom-layout -p turbo-dom-raster \
+     -p turbo-dom-browser-env -p turbo-dom-v8 \
+     -p turbo-surf-deno-v8 -p turbo-surf-serde-v8 -p turbo-surf-deno-core \
+     -p turbo-surf-deno-crypto -p turbo-surf-deno-web -p turbo-surf-deno-webidl
+   ```
+
+   Check the lockfile diff: those eleven records change only `source` (Git ->
+   `registry+https://github.com/rust-lang/crates.io-index`) and gain a `checksum`,
+   the `[[patch.unused]]` turbo-surf-deno-bench-util record disappears, and nothing
+   else changes. In particular the five transport packages (turbo-surf-btls-sys,
+   -btls, -tokio-btls, -wreq, -wreq-util) and their checksums stay untouched, and no
+   version moves (still turbo-dom 0.6.0, turbo-dom-v8 150.4.0, the 0.x.1 family):
+
+   ```sh
+   git diff -U0 Cargo.lock | grep '^[-+]' | grep -Ev '^(\+\+\+|---) |^[-+](source|checksum) = '
+   ```
+
+   prints only the removed `[[patch.unused]]` block. If Cargo also re-resolved an
+   unrelated edge (the 0.6.0 turbo-dom repin saw windows-only `windows-sys` edges of
+   errno/rustix/quinn-udp move), restore those lines and confirm the lock is still
+   valid with `cargo metadata --locked --format-version 1 >/dev/null`.
+4. The Deno extension pins stay unchanged: the registry 0.x.1 archives carry the
+   candidates' bytes, so `src/deno_extension_sources_tests.rs` `SOURCE_PINS` and
+   `rust/release-deps/deno/source-pins.json` are not edited.
+   `distribution_tables_match_the_reviewed_pins` (in `cargo test --workspace`) and
+   `python3 -B -m unittest discover -s rust/release-deps/deno -p 'test_*.py'` must
+   pass against the registry crates; `git diff --exit-code main --
+   rust/crates/turbo-surf-render/src/deno_extension_sources_tests.rs
+   rust/release-deps/deno/source-pins.json` stays clean.
+5. Verify: `python3 -B rust/release-deps/release_guard.py` (online) passes,
+   `python3 scripts/check-versions.py` reports 0.6.0, `bash
+   scripts/check-single-v8.sh` passes, `npm run check` is green, and the packaged
+   consumer of step 3 above passes against the registry graph.
+6. Commit `chore(release): v0.6.0 registry dependencies`, get the PR green, merge
+   with a merge commit and tag `v0.6.0` + `pyv0.6.0` on that merge SHA (step 4 above).
 
 Publishing is **outward-facing + irreversible** (npm + crates.io + PyPI versions
 can't be reused) — only cut a tag when a release is intended.

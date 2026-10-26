@@ -2,8 +2,13 @@
 # turbo-dom's publish-crate job). Requires repo secret CARGO_REGISTRY_TOKEN.
 # Published in dependency order so each dependent's version dep is already live:
 #   core → view → page → render → mcp.
-# turbo-dom-raster / -layout / -browser-env and turbo-dom-v8 are published first
-# from the turbo-dom repository.
+# The screenshot tier is turbo-dom's turbo-dom-raster (no Surf raster crate).
+# Prerequisites published first: turbo-dom-v8, turbo-dom, turbo-dom-layout,
+# turbo-dom-raster and turbo-dom-browser-env from the turbo-dom repository (v0.6.0
+# tag), then the seven Deno-family 0.x.1 crates from release-dependencies.yml.
+# The tag-only release-guard job refuses a tree that still patches them from Git
+# (rust/release-deps/release_guard.py: no [patch] table, no git/path sources, every
+# prerequisite locked from crates.io at a published, unyanked version).
 # NAPI and transform remain unpublished workspace implementation crates; npm ships
 # the standalone MCP binary. Before tagging, verify all five actual distributions
 # together and run the clean consumer documented in rust/release-deps/surf-consumer.
@@ -19,8 +24,21 @@ defaults:
     working-directory: rust
 
 jobs:
+  release-guard:
+    name: release guard
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: No [patch] table, no git sources, prerequisites on crates.io
+        run: python3 -B release-deps/release_guard.py
+
   publish-crates:
     name: publish-crates
+    needs: [release-guard]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -38,7 +38,9 @@ docs [`rust/README.md`](./rust/README.md) + [`rust/HEADLESS-HYDRATION.md`](./rus
   feature `host-internals` for surf's native services over its documents
   (`src/live_layout_dom.rs` layout capture, `src/compression_dictionary_dom.rs`
   link discovery); native live layout runs turbo-dom-layout's live-DOM input
-  (`turbo_dom_layout::live`, no tree copy) and its `cssom_view` geometry modules, while
+  (`turbo_dom_layout::live`, no tree copy; a read whose capture a DOM mutation outdated
+  captures again) and its `cssom_view` geometry modules over turbo-dom-layout's
+  process-wide `FontRegistry::system(SystemFontPolicy::Html)`, while
   surf keeps media/supports evaluation, scoped-sheet preparation, `zoom` and the
   neutral/resource admission policy; integration tests read probe/control data from
   `turbo_dom_browser_env::test_support` (dev feature `test-support`), and Node

@@ -1,0 +1,21 @@
+{
+  "browser": "Chrome/156.0.8078.4",
+  "probeSha256": "3316d2921102b3fbc35531deb282e4c072de904f7a0c3d79a7be605906bfd56b",
+  "casesSha256": "5d7b09cb50850ed8633f580b9fa38fef82f6fc025bd23f6fb7baa27da194cd61",
+  "collectorSha256": "e9d79d167aa7a8664dbbb2cd88202f94a753278b1561b01027d554cf2691445f",
+  "errors": [],
+  "result": [
+    {
+      "id": "html-image-sync",
+      "result": {
+        "early": [["png", true, 3, 2], ["broken", true, 0, 0], ["svg", true, 9, 4]],
+        "created": [true, 3, 2],
+        "createdSvg": [true, 9, 4],
+        "createdBroken": [false, 0, 0],
+        "innerHTML": [true, 3, 2],
+        "connected": [true, 9, 4],
+        "network": [false, 0]
+      }
+    }
+  ]
+}

@@ -2,6 +2,132 @@
 
 ## [Unreleased]
 
+### Fixed (turbo-dom consolidation P5b)
+- Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,
+  `naturalHeight` and `currentSrc` are `HTMLImageElement.prototype` accessors
+  (turbo-dom-browser-env), fed by surf's loader through the document's private
+  `imageHost` record; `src` and `decode()` are prototype members too, so an `<img>`
+  has no own properties (`__tcImagePatched`, own `src`/`decode`/state getters and
+  the own `document.createElement` override are gone). `decode()` rejects a bad
+  receiver with Blink's TypeError and an undecodable image with an `EncodingError`
+  `DOMException`. `render(html, base, script)` now starts the parser's image and
+  stylesheet loads before its script, so parser images load and fire `load`/`error`
+  (they never loaded there).
+- `data:` images decode synchronously (#38): like Chrome, an image whose source is a
+  `data:` URL is complete with its natural size the moment the source is set (parser
+  images at the first script read, `new Image().src`, fragment-parsed and connected
+  images); its `load`/`error` event still fires as a later task, and a broken script-set
+  one stays pending until that `error`. Chrome 156 controls
+  `html_image_render_chrome156.json` (now exact) and `html_image_sync_chrome156.json`.
+- `HTMLImageElement` is entirely the binding's (turbo-dom#23): surf's plain-function
+  `globalThis.Image`, its `src` setter and `decode()` overrides are gone, so `Image` is
+  the native legacy factory (`new`-only, `length` 0, NewTarget-aware) and `decode()`
+  settles with the image's load state. Loads start from the document's mutation
+  consumer, so a detached image loads like Chrome — `new Image().src = …`,
+  `setAttribute("src")` on a created image, detached `innerHTML` /
+  `insertAdjacentHTML` / `createContextualFragment` images (they never loaded) — while
+  images of inert documents (template contents, `DOMParser`, `createHTMLDocument`)
+  no longer load, and removing `src` resets the natural size to 0x0. Chrome 156
+  control: `tests/fixtures/html_image_loads_chrome156.json`; the binding's
+  `HTML_IMAGE_*` (factory/own/decode) and `CUSTOM_ELEMENTS_DEFINED_*` controls also run
+  through `PageSession`. Known gaps (pinned): no `srcset` candidate selection; the
+  binding's `decode()` EncodingError is not `instanceof` surf's `DOMException`; parsed
+  `is=` elements read `:defined` once a session has opened.
+- Live `<img>` loads decode like Chrome 156 (#30): success and `naturalWidth` /
+  `naturalHeight` come from turbo-dom-layout's shared probe (`probe_natural` and its
+  raster probe) instead of a full `image` crate decode, and every `data:` form goes
+  through `decode_data_url` (percent-encoded and raw `image/svg+xml`, whitespace /
+  unpadded / percent-escaped base64; it was `;base64` only). Newly loading: BMP, ICO/CUR
+  (the largest entry), AVIF, SVG served as `image/svg+xml` (Chrome's natural sizes, e.g.
+  300x150 for a sizeless root), truncated or corrupt-IDAT bodies with a readable header,
+  and image bodies of HTTP error responses; SVG under any other type and raster bytes
+  labelled `image/svg+xml` now fail. `turbo_surf_core::net::fetch_typed_bytes` also
+  returns the response's Content-Type. Chrome 156 control:
+  `tests/fixtures/image_formats_chrome156.json` (49 rows differed before; 10 pinned
+  probe gaps remain: header-only JPEG/GIF/WebP and a namespace-less SVG root load). The
+  render crate no longer depends on the `image` crate.
+- Screenshots paint AVIF (#30): the MCP binary, the napi addon and the Python wheel
+  forward a new default-on `avif` feature to turbo-dom-raster (rav1d, pure Rust,
+  BSD-2-Clause — notice added to `THIRD_PARTY_NOTICES.md`; +1.4 MB napi, ~4 s release
+  compile). Live loads already size AVIF and image requests advertise `image/avif` as
+  Chrome does, so CDNs serve it; without the feature it painted as a placeholder. BMP and
+  ICO/CUR paint through the repinned raster. napi `fetchBytes` sends Chrome's image
+  `Accept` again when built with `avif`. Chrome 156 control:
+  `turbo-surf-mcp/tests/fixtures/screenshot_image_formats_chrome156.json`.
+- `img.width`/`height`/`x`/`y` read surf's live layout (turbo-dom#26): surf answers the
+  binding's `imageHost.setLayoutQuery` from a new native op (content box pixel-snapped
+  and zoom-adjusted, border-box document position; null without a box), and live layout
+  sizes a loaded `<img>` from its natural size (#39: it laid out every image without one,
+  e.g. a `display:block` image as 1280x0). The binding's whole `HTML_IMAGE_*` control,
+  including its `dimensions` section, holds through `PageSession`.
+- Acceptance of the turbo-dom 5157913 fixes through `PageSession`: live geometry no
+  longer throws for table rows/row groups or positioned inlines (#31,
+  `live_geometry_throws.rs` has no known gaps), and getComputedStyle reports the UA
+  `display`/`position`/`visibility` with no injected `<title>` (#36 items 1-2,
+  `computed_defaults.rs`).
+- `srcset` is honoured (#40): an `<img>` loads the candidate Chrome 156 picks — density
+  and `w` descriptors (`sizes`, default 100vw), `src` as the 1x candidate, the first
+  candidate whose density reaches `devicePixelRatio`, else the densest — and reports its
+  natural size divided by that density; a `sizes` change reselects. `<picture>` is not
+  selected yet. Chrome 156 control `html_image_srcset_chrome156.json` (uncached HTTP
+  candidates at devicePixelRatio 2).
+- The font-run geometry Chrome collector reads its fonts only from the pinned
+  turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its
+  three controls are recaptured on Chrome for Testing 156 (`*-chrome156.json`,
+  identical measurements).
+- Flaky tests made deterministic: the smoke-release interrupt control waits for the
+  fake executable instead of a fixed 5 s (#34); the credentialless partition control
+  no longer times the host with a 5 s budget (#35); the reentrant CSP event test awaits
+  both events instead of a 50 ms timer (#37, plus a slow-host variant). Audit of the
+  remaining 5 s session budgets: the 40 that bound real localhost work, and the host-side
+  caps on server effects, are generous caps now (60 s / 30 s), and fixed waits for
+  real-time deliveries (storage events, BroadcastChannel, CSP task capacity) are
+  condition waits.
+- turbo-dom crates repinned to the P5b binding fixes (turbo-dom#20 `Option()` and
+  HTMLOptionsCollection accessor definitions, #32 image accessors); the interceptor
+  runtime control has no known gaps left.
+
+
+## [0.6.0] — 2026-10-26 — turbo-dom consolidation
+
+turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of
+vendored or sibling-repo copies. For users of the npm launcher, the MCP binary,
+the PyPI wheel and the five Rust crates nothing is renamed and no tool or API
+changes; the visible differences are the Chrome-correct selector fixes, `t:*` in
+static screenshots and the live-geometry re-capture listed below. Dependency map:
+
+| was | now |
+|---|---|
+| vendored turbo-test binding (`scripts/vendor-browser-env.sh`) | `turbo-dom-browser-env` 0.6.0 |
+| turbo-html2pdf-core 0.3.9 (layout) | `turbo-dom-layout` 0.6.0 |
+| `turbo-surf-raster` (this workspace) | `turbo-dom-raster` 0.6.0 (not published from here any more) |
+| `turbo-surf-v8` / vendored rusty_v8 | `turbo-dom-v8` 150.4.0 (one V8 in the graph) |
+| vendored Deno extension JS | the Deno family 0.x.1 `embedded_sources` |
+| turbo-dom 0.5.8 | turbo-dom 0.6.0 |
+
+Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
+`turbo-surf-raster` for screenshots. The workspace publishes core → view → page →
+render → mcp.
+
+### Changed (0.6.0 consolidation, final step)
+- Live geometry reads re-capture a stale capture: when the DOM changed between a
+  read's capture and its layout, surf now captures again and lays out the current
+  tree (as Chrome's layout reflects the current DOM) instead of failing with
+  "native layout tree changed after its capture", and a stale capture is no longer
+  answered from the layout cache of its old version. A tree that keeps changing
+  under its own capture, or a node that left its document, still reports an error.
+  No production path mutated there, so no corpus or test output changes.
+- Live layout's installed-font registry is turbo-dom-layout's process-wide
+  `FontRegistry::system(SystemFontPolicy::Html)` (one load per process, shared with
+  any other embedder); the faces and their order are unchanged.
+- turbo-dom crates pinned to the turbo-dom 0.6.0 consolidation head (S5a: one image
+  layer, legacy owned-node layout input removed, workspace lints); no surf API
+  change.
+- Release: `rust-crates-publish.yml` gains a tag-only `release-guard` job
+  (`rust/release-deps/release_guard.py`): no `[patch]` table, no Git/path sources,
+  and the turbo-dom crates + Deno family locked from crates.io at published
+  versions. PUBLISHING.md lists the exact pre-tag steps.
+
 ### Changed
 - The DOM binding is no longer vendored: `turbo-surf-render` depends on the
   `turbo-dom-browser-env` 0.6.0 crate (the same binding, moved from turbo-test
@@ -14,7 +140,7 @@
   `turbo_dom_browser_env::test_support`; Node detection tests locate the package via
   `cargo metadata`. New forwarding feature `native-sdk-frame-read` on
   render/mcp/napi/py (enabled by the engine-154/155 native-SDK overlay).
-- turbo-dom git pin moved to `6b58d7b` (turbo-dom#18 S3a: Chrome-correct selector
+- turbo-dom 0.6.0 (turbo-dom#18 S3a: Chrome-correct selector
   escapes, non-ASCII idents, `*|p`, `:empty`, `:read-only`/`:read-write`,
   `:nth-child(An+B of S)`, `:link`/`:any-link`; S2/S3b: turbo-dom-layout styles a
   turbo-dom `Tree` and matches with turbo-dom's selector engine). The static
@@ -41,9 +167,10 @@
   `Reflect` forms stay quiet (`tests/interceptor_mode_runtime.rs` against a Chrome 156
   control; raw V8 and accessor-vs-frame-read checks in
   `tests/interceptor_should_throw.rs` / `tests/interceptor_mode_agreement.rs`).
-- Re-vendored the turbo-test DOM binding from turbo-test `cb5c64e` (v0.4.8; was
-  `602b267`) with the existing `vendor-browser-env.sh`, whose file list gains the
-  selection, editing and EditContext modules. This brings the genuine Selection API
+- The DOM binding is turbo-test `cb5c64e`'s (v0.4.8; 0.5.5 vendored `602b267`),
+  first re-vendored with the old copy script, whose file list gained the
+  selection, editing and EditContext modules, then moved into
+  `turbo-dom-browser-env` unchanged. This brings the genuine Selection API
   (`Selection`, text-control selection, `createValueRange`/OpaqueRange), the editing
   engine (`execCommand`/`queryCommand*`, contenteditable/designMode, `EditContext`,
   `ariaNotify`) and the `scroll-behavior`/`scroll-snap-*` CSSOM keyword properties.
@@ -78,7 +205,8 @@
   `rust/release-deps/deno/prepare.py` from the pinned upstream archive plus
   `patches/deno_crypto.patch`.
 - Pre-publish only: `rust/Cargo.toml` `[patch.crates-io]` resolves the Deno
-  candidates and the turbo-dom crates from Git; it is removed at release.
+  candidates and the turbo-dom crates from Git; it is removed before the v0.6.0 tag
+  (PUBLISHING.md) and the release guard refuses a tag that still has it.
 
 ## [0.5.5] — 2026-10-25 — Chrome-156 parity batch + re-version
 

@@ -33,21 +33,21 @@ deno_error = "=0.7.1"
 # second native V8 library would make the DOM handles incompatible with the
 # runtime's context (scripts/check-single-v8.sh guards the graph).
 v8 = { package = "turbo-surf-deno-v8", version = "=0.4.1" }
-turbo-dom-parser = { package = "turbo-dom", version = "0.5.8" }
+turbo-dom-parser = { package = "turbo-dom", version = "0.6" }
 # The rtdom↔V8 DOM binding (window, document, CSSOM, forms, events). host-internals
 # gives surf's native layout capture and resource discovery host-only document access.
 turbo-dom-browser-env = { version = "0.6.0", features = ["host-internals"] }
 # Native layout engine (style cascade, box layout, fonts, layout snapshots). Public
 # live-tree snapshots preserve source provenance without HTML serialization. Default
-# features only (`bundled-fonts`); never `svg` or the PDF-side `xref`/`pdf-ua`/
-# `print-color` gates.
-turbo-dom-layout = { version = "0.6.0", features = ["serde"] }
+# features plus `svg-rasterize` (the shared SVG parser, for live `<img>` natural sizes —
+# turbo-surf#30); never `svg` or the PDF-side `xref`/`pdf-ua`/`print-color` gates.
+turbo-dom-layout = { version = "0.6.0", features = ["serde", "svg-rasterize"] }
 # default-features off: the render tier doesn't need the `impersonate` (BoringSSL)
 # fetch backend, so downstream non-binary consumers (the PyO3 wheel) avoid its
 # extra transport build. V8, native crypto and audio still require native toolchains.
 # The shipped mcp binary gets impersonate — it requests
 # `turbo-surf-core/impersonate` explicitly (its own default).
-turbo-surf-core = { path = "../turbo-surf-core", version = "0.5.5", default-features = false }
+turbo-surf-core = { path = "../turbo-surf-core", version = "0.6.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
@@ -61,8 +61,6 @@ rustfft = "=6.4.1"
 base64 = "0.22"
 # CSP hash-source checks operate on the parser's actual UTF-8 script text.
 sha2 = "0.10"
-# Resource loads decode actual image bytes before reporting dimensions/load success.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # Scoped sheet preparation, @supports/media evaluation and neutral CSS parsing.
 lightningcss = { version = "1.0.0-alpha.71", default-features = false }
 cssparser = "0.37"

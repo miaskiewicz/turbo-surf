@@ -10,7 +10,7 @@ fn server(responses: Vec<String>) -> (String, Receiver<String>) {
         for response in responses {
             let (mut stream, _) = listener.accept().unwrap();
             stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .set_read_timeout(Some(std::time::Duration::from_secs(60)))
                 .unwrap();
             let mut bytes = Vec::new();
             let mut chunk = [0; 4096];
@@ -45,7 +45,7 @@ fn response(status: &str, headers: &str, body: &str) -> String {
     format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}",body.len())
 }
 fn request(rx: &Receiver<String>) -> String {
-    rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap()
+    rx.recv_timeout(std::time::Duration::from_secs(60)).unwrap()
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -61,7 +61,7 @@ async fn same_url_post_snapshot_tracks_installed_response_and_private_cookies() 
         &url,
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();

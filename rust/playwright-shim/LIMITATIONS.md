@@ -28,8 +28,8 @@ surfaces remain unavailable or approximate:
   is supported via a *synthetic* native layout+paint (see below) — a
   representative render, not a browser-faithful capture. It fetches the page's
   external `<link>` stylesheets and cascades them (`{externalCss:false}` opts
-  out), fetches + paints `<img>`/`background-image` bytes (PNG/JPEG/GIF/WebP +
-  SVG; `{images:false}` opts out, unknown formats fall back to a placeholder),
+  out), fetches + paints `<img>`/`background-image` bytes (PNG/JPEG/GIF/WebP/BMP/ICO/
+  AVIF + SVG; `{images:false}` opts out, unknown formats fall back to a placeholder),
   models
   `position:absolute/fixed/relative` + `z-index` for block flow (painted
   back-to-front per CSS stacking order), propagates the root/body background, and
@@ -84,8 +84,9 @@ lifecycle remain separate coverage work.
 
 Live hydration loads linked/imported stylesheets, enforces inline style CSP against native
 attributes, and protects opaque stylesheet rules from script access. Same-origin cross-realm
-CSS getters share private interface brands. It decodes PNG/JPEG/GIF/WebP image resources with load/error events; responsive images,
-SVG/AVIF and CSS image/font resource loading are incomplete. CSSOM changes made with
+CSS getters share private interface brands. It sizes PNG/JPEG/GIF/WebP/BMP/ICO/AVIF and `image/svg+xml` image resources (any `data:`
+form) with load/error events like Chrome and selects `srcset` candidates like Chrome;
+`<picture>` sources and CSS image/font resource loading are incomplete. CSSOM changes made with
 `insertRule` do not alter
 serialized HTML and therefore are not automatically painted by snapshot screenshots.
 

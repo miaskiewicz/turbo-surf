@@ -6,6 +6,12 @@ name: release-dependencies
 # published first from the turbo-dom repository. Until that crate is on the
 # registry, the verify step (`cargo fetch` of the Deno candidates) is expected to
 # fail on pull requests: a documented pre-publication exception.
+#
+# Release order (PUBLISHING.md): run this workflow's publish only AFTER turbo-dom's
+# v0.6.0 tag has published turbo-dom-v8 150.4.0 (and the turbo-dom crates) and
+# crates.io lists them; then drop the Surf workspace's [patch.crates-io] table,
+# re-lock, and tag turbo-surf v0.6.0 + pyv0.6.0 (rust-crates-publish.yml's
+# release-guard refuses a tag whose Deno family is not on crates.io yet).
 
 on:
   pull_request:

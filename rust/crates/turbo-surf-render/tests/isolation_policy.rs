@@ -284,7 +284,7 @@ async fn iframe_embedding_and_permissions_policy_match_chrome() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -333,7 +333,7 @@ async fn shared_memory_window_delivery_matches_chrome_agent_clusters() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -365,12 +365,15 @@ async fn credentialless_cookie_and_dom_storage_partitions_match_chrome() {
         include_str!("../../../../harness/detection/policy-credentialless-child.js"),
     )
     .await;
+    // Four serial real iframe loads over localhost run beside the binary's other
+    // tests; the budget only stops a runaway probe and must not time the host
+    // (turbo-surf#35: 5 s failed 3/9 runs with three binaries running at once).
     let mut page = PageSession::open(
         "<!doctype html><body></body>",
         &format!("{origin}/?case=0"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();
@@ -568,7 +571,7 @@ async fn iframe_container_policy_mutates_without_rewriting_committed_child_polic
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -617,7 +620,7 @@ async fn deep_permissions_admission_cannot_reenable_denied_ancestors() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -696,7 +699,7 @@ async fn response_ancestor_and_legacy_frame_policies_match_chrome() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -752,7 +755,7 @@ async fn ancestor_response_policies_check_each_actual_parent_origin() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -808,7 +811,7 @@ async fn response_sandbox_script_origin_and_storage_flags_match_chrome() {
             &format!("{origin}/?case={index}"),
             "",
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -999,7 +1002,7 @@ async fn top_sandbox_module_requests_use_authentic_opaque_origin_and_cookie_site
             &format!("{origin}/?case={index}"),
             &cookies,
             "",
-            5000,
+            60_000,
             "",
             Default::default(),
             &headers,
@@ -1144,7 +1147,7 @@ async fn report_only_csp_violation_tasks_match_chrome() {
         &format!("{origin}/?case=1"),
         "",
         "",
-        5000,
+        60_000,
         "",
         Default::default(),
         &headers,
@@ -1198,9 +1201,17 @@ async fn csp_task_capacity_is_bounded_and_recovers_after_dispatch() {
         &page
             .eval_json_expression(
                 r#"(async()=>{
+        // Wait for the queued tasks to drain (a real-time delivery), then 30 ms more for
+        // any excess; the session budget caps a delivery that never comes.
+        const reached=count=>new Promise(resolve=>{
+          const check=()=>{if(violations>=count){document.removeEventListener('securitypolicyviolation',check);resolve();}};
+          document.addEventListener('securitypolicyviolation',check);check();
+        });
+        await reached(4096);
         await new Promise(resolve=>setTimeout(resolve,30));
         const first=violations;
         document.querySelector('div').setAttribute('style','color:blue');
+        await reached(first+1);
         await new Promise(resolve=>setTimeout(resolve,30));
         return {attempts,first,after:violations};
     })()"#,
@@ -1250,45 +1261,60 @@ async fn inline_classic_and_module_execution_do_not_dispatch_load_events() {
     assert_eq!(actual, control["result"]);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn csp_event_tasks_release_before_reentrant_guest_dispatch_and_survive_overrides() {
+/// Two securitypolicyviolation events, the second queued from inside the first listener,
+/// with guest overrides of the constructor and timers in place. The second violation task
+/// is delivered in real time, so the probe waits for both events (the session budget is
+/// the cap) and then `wait_ms` more for a third that must not come; a fixed wait alone
+/// read before the second arrived on a loaded host (turbo-surf#37).
+async fn reentrant_csp_event_rows(wait_ms: u32) -> Value {
     let headers = vec![("Content-Security-Policy".into(), "style-src 'none'".into())];
     let mut page = PageSession::open_with_response_headers(
         "<body><div></div></body>",
         "https://events.test/",
         "",
         "",
-        5000,
+        60_000,
         "",
         Default::default(),
         &headers,
     )
     .await
     .unwrap();
-    let actual: Value = serde_json::from_str(
-        &page
-            .eval_json_expression(
-                r#"(async()=>{
+    let probe = r#"(async()=>{
       const timer=setTimeout, originalCtor=SecurityPolicyViolationEvent;
       const div=document.querySelector('div'),rows=[];
+      let both;const arrived=new Promise(resolve=>both=resolve);
       globalThis.SecurityPolicyViolationEvent=()=>{throw Error('guest constructor');};
       globalThis.setTimeout=()=>{throw Error('guest timer');};
       globalThis.clearTimeout=()=>{throw Error('guest cancellation');};
       document.addEventListener('securitypolicyviolation',event=>{
         rows.push([event instanceof originalCtor,event.isTrusted,event.target===div]);
+        if(rows.length===2)both();
         if(rows.length===1){div.setAttribute('style','color:blue');throw Error('listener failure');}
       });
       div.setAttribute('style','color:red');
-      await new Promise(resolve=>timer(resolve,50));
+      await arrived;
+      await new Promise(resolve=>timer(resolve,WAIT));
       return rows;
-    })()"#,
-            )
-            .await
-            .unwrap(),
-    )
-    .unwrap();
+    })()"#
+        .replace("WAIT", &wait_ms.to_string());
+    serde_json::from_str(&page.eval_json_expression(&probe).await.unwrap()).unwrap()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn csp_event_tasks_release_before_reentrant_guest_dispatch_and_survive_overrides() {
     assert_eq!(
-        actual,
+        reentrant_csp_event_rows(50).await,
+        serde_json::json!([[true, true, true], [true, true, true]])
+    );
+}
+
+/// turbo-surf#37: the same rows when the second task is slower than the page timer, as on
+/// a loaded host (deterministically: a 1 ms timer).
+#[tokio::test(flavor = "current_thread")]
+async fn reentrant_csp_event_tasks_arrive_on_a_slow_host() {
+    assert_eq!(
+        reentrant_csp_event_rows(1).await,
         serde_json::json!([[true, true, true], [true, true, true]])
     );
 }

@@ -10,10 +10,10 @@ use turbo_surf_render::PageSession;
 const PROBE: &str = include_str!("fixtures/interceptor_mode_probe.js");
 const CONTROL: &str = include_str!("fixtures/interceptor_mode_chrome156.json");
 /// Measured divergences that are not about the interceptor mode, each asserted to
-/// still diverge so a fix shows up here: the binding's HTMLOptionsCollection
-/// rejects a quiet `Reflect.defineProperty` accessor definition with a TypeError
-/// (Chrome returns true; `<select>` itself already matches).
-const KNOWN_GAPS: &[&str] = &["optionsReflectDefineAccessor"];
+/// still diverge so a fix shows up here. None remain: the binding's
+/// HTMLOptionsCollection now treats a quiet `Reflect.defineProperty` accessor
+/// definition like Chrome (true, no effect; turbo-dom#20).
+const KNOWN_GAPS: &[&str] = &[];
 
 #[tokio::test(flavor = "current_thread")]
 async fn strict_and_sloppy_interceptor_writes_match_chrome156() {

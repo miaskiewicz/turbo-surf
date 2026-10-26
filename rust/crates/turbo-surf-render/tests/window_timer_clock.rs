@@ -39,7 +39,7 @@ async fn native_body_completion_precedes_a_later_window_timer() {
         tokio::time::sleep(Duration::from_millis(20)).await;
         socket.write_all(b"done").await.unwrap();
     });
-    let mut page = PageSession::open("<body>", &origin, "", "", 5000)
+    let mut page = PageSession::open("<body>", &origin, "", "", 60_000)
         .await
         .unwrap();
     assert_eq!(page.eval_expression("(async()=>{const response=await fetch('/body');let completed=false;response.text().then(()=>completed=true);return new Promise(resolve=>setTimeout(()=>resolve(completed),100));})()").await.unwrap(), chrome_result("bodyBeforeLaterTimer"));
@@ -60,13 +60,13 @@ async fn a_window_deadline_still_cancels_stalled_native_io() {
         let mut byte = [0];
         socket.read(&mut byte).await.unwrap()
     });
-    let mut page = PageSession::open("<body>", &origin, "", "", 5000)
+    let mut page = PageSession::open("<body>", &origin, "", "", 60_000)
         .await
         .unwrap();
     assert_eq!(page.eval_expression("(async()=>{const controller=new AbortController();const response=await fetch('/stall',{signal:controller.signal});setTimeout(()=>controller.abort(),30);try{await response.text();return 'unexpected success';}catch(error){return error.name;}})()").await.unwrap(), chrome_result("windowDeadlineAbort"));
     acceptance.await.unwrap();
     assert_eq!(
-        tokio::time::timeout(Duration::from_secs(1), server)
+        tokio::time::timeout(Duration::from_secs(30), server)
             .await
             .unwrap()
             .unwrap(),

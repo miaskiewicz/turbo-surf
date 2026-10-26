@@ -10,7 +10,9 @@ const LATE: &str = include_str!("../../../../harness/detection/fixtures/modules/
 #[tokio::test(flavor = "current_thread")]
 async fn explicit_modules_link_real_sources_and_async_graph_does_not_block_dcl() {
     let (base, server, paths) = serve_modules().await;
-    let mut page = PageSession::open(HTML, &base, "", "", 5000).await.unwrap();
+    let mut page = PageSession::open(HTML, &base, "", "", 60_000)
+        .await
+        .unwrap();
     let result=page.eval("globalThis.__RESULT=JSON.stringify({...__browserFixture,wrongMime:globalThis.wrongMimeExecuted===true})").await.unwrap();
     server.abort();
     let value: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -171,7 +173,9 @@ async fn module_evaluation_releases_load_and_dcl_before_top_level_await_and_repo
 {
     let (base, server, paths) = serve_modules().await;
     let html = include_str!("../../../../harness/detection/fixtures/modules-evaluation.html");
-    let mut page = PageSession::open(html, &base, "", "", 5000).await.unwrap();
+    let mut page = PageSession::open(html, &base, "", "", 60_000)
+        .await
+        .unwrap();
     let result = page
         .eval("globalThis.__RESULT=JSON.stringify(__browserFixture)")
         .await

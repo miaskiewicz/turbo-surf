@@ -1,11 +1,17 @@
 name: release-dependencies
 
+# Prepares, verifies and (on an approved commit) publishes the seven named Deno
+# distributions and the five transport distributions. The native V8 binding is
+# not built here: the Deno facade requires `turbo-dom-v8 ~150.4` from crates.io,
+# published first from the turbo-dom repository. Until that crate is on the
+# registry, the verify step (`cargo fetch` of the Deno candidates) is expected to
+# fail on pull requests: a documented pre-publication exception.
+
 on:
   pull_request:
     paths:
       - .github/workflows/release-dependencies.yml
       - rust/release-deps/**
-      - rust/vendor/rusty_v8/**
       - rust/vendor/deno_crypto/**
   push:
     branches: [codex/release-dependencies-v054]
@@ -84,7 +90,8 @@ jobs:
           python3 -B rust/release-deps/deno/prepare.py --archive-dir "$RELEASE_ROOT/upstream-archives" --download --output "$RELEASE_ROOT/deno"
           python3 -B rust/release-deps/deno/prepare.py --archive-dir "$RELEASE_ROOT/upstream-archives" --output "$RELEASE_ROOT/deno" --check
           python3 -B rust/release-deps/transport/prepare.py --fetch-sources "$RELEASE_ROOT/upstream-git" --output "$RELEASE_ROOT/transport"
-      - name: Verify all thirteen actual distributions and consumers
+      # Red until turbo-dom-v8 150.4.x is published from turbo-dom (see header).
+      - name: Verify all twelve actual distributions and consumers (requires published turbo-dom-v8)
         run: |
           python3 -B rust/release-deps/publish.py verify --expected-commit "$RELEASE_SOURCE_COMMIT" --deno "$RELEASE_ROOT/deno" --transport "$RELEASE_ROOT/transport" --output "$RELEASE_ROOT/verification"
           python3 - <<'PY'

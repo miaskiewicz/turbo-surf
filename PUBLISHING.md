@@ -57,7 +57,8 @@ changelog entries and unrelated dependency versions must retain their own versio
    separate. When reusing a prior result, retain a bridge proving its actual
    compiled inputs and resolved feature graph still match.
 3. Complete the [actual packaged-consumer procedure](./rust/release-deps/surf-consumer/README.md).
-   Publish and verify all thirteen named dependencies first; the Surf product
+   Publish and verify the named dependencies first (turbo-dom-v8 from turbo-dom,
+   then the twelve here: seven Deno-family 0.x.1 + five transport); the Surf product
    tags do not publish those dependencies. Then verify all six Surf distributions
    in one normal invocation, with Cargo compilation verification enabled and no
    directory-source replacement:
@@ -251,15 +252,21 @@ it does not verify per-platform binaries staged by release CI.
 ## Distributable dependency preparation
 
 [`rust/release-deps/`](./rust/release-deps/README.md) prepares five renamed
-transport packages and the eight-package Deno/V8/crypto closure, including the
-benchmark dependency needed to retain test type identity. Source and license
+transport packages and the seven-package Deno/crypto closure (0.x.1, upstream + 1
+patch), including the benchmark dependency needed to retain test type identity.
+The native V8 binding is the external prerequisite `turbo-dom-v8` 150.4.x,
+published from the turbo-dom repository before the Deno family; `turbo-surf-v8`
+is retired (its published versions stay untouched). Before release, consumer PRs
+`[patch.crates-io]` the candidates by Git `rev` from the orphan branch
+`consolidation/deno-candidates` (`rust/release-deps/push-candidates.sh`). Source and license
 checks, actual normalized archives, compilation/runtime controls and real
 published-consumer checks are distinct prerequisites. Preparing an archive with
 `--no-verify` is not a passing compile or registry verdict. None of these
 preparation tools silently publishes packages.
 
-`release-dependencies.yml` verifies all thirteen distributions before its
-separate publish step. It prepares hash-pinned sources, produces and compiles
+`release-dependencies.yml` verifies all twelve distributions before its
+separate publish step; its verify step stays red until turbo-dom-v8 is on
+crates.io (documented pre-publication exception). It prepares hash-pinned sources, produces and compiles
 actual normalized archives, runs both consumers and guards staged source bytes.
 Publication keeps Cargo verification enabled, handles registry propagation and
 quota responses, and compares existing versions against the reviewed payload.

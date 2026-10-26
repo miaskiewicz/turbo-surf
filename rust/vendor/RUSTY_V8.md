@@ -1,5 +1,12 @@
 # Native weak-handle teardown
 
+> **Consolidation status:** this vendored copy is being retired. The reviewed
+> source now ships as `turbo-dom-v8` 150.4.x from the turbo-dom repository, and
+> `rust/release-deps` no longer reads `rust/vendor/rusty_v8` (the Deno facade
+> 0.4.1 requires registry `turbo-dom-v8 ~150.4`; `turbo-surf-v8` is retired, its
+> published versions untouched). The directory is deleted in a later step;
+> the text below describes the 150.4.0 `turbo-surf-v8` release it produced.
+
 The default engine consumes the registry package `turbo-surf-v8` **150.4.0**,
 through the shared `turbo-surf-deno-v8` 0.4.0 facade. It retains the reviewed Rusty
 V8 teardown patch. The original upstream archive and revision, retained MIT

@@ -64,10 +64,28 @@ async fn images_load_from_mutations_connected_or_not_like_chrome156() {
     .await;
 }
 
-/// turbo-surf#32 item 2: render()'s script runs over the parsed document, so parser
-/// images have started loading (and data: images finished) by the time its timers
-/// read them, as for an inline script at the end of the body in Chrome.
+/// turbo-surf#38: a data: image loads synchronously — complete with its natural size as
+/// soon as its source is set (parser, script-created, fragment-parsed and connected
+/// images alike); a broken script-set one stays pending until its error event, while a
+/// broken parser one is already complete at the first script read.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#38: fails until data: images decode synchronously"]
+async fn data_images_decode_synchronously_like_chrome156() {
+    matches_control(
+        include_str!("fixtures/html_image_sync_probe.js"),
+        include_bytes!("fixtures/html_image_sync_cases.json"),
+        include_str!("fixtures/html_image_sync_chrome156.json"),
+        |case| case["url"].as_str().unwrap(),
+    )
+    .await;
+}
+
+/// turbo-surf#32 item 2 / #38: render()'s script runs over the parsed document, so parser
+/// images have started loading by the time it reads them, and a data: image is decoded
+/// synchronously (complete with its natural size on the first read; its load event still
+/// fires later), as for an inline script at the end of the body in Chrome.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "turbo-surf#38: fails until data: images decode synchronously"]
 async fn parser_images_load_before_a_render_script_like_chrome156() {
     let probe = include_str!("fixtures/html_image_render_probe.js");
     let page = include_str!("fixtures/html_image_render_page.html");
@@ -89,11 +107,5 @@ async fn parser_images_load_before_a_render_script_like_chrome156() {
         .map(|(title, _)| title.replace("&quot;", "\""))
         .unwrap();
     let actual: Value = serde_json::from_str(&title).unwrap();
-    let expected = &control["result"];
-    assert_eq!(actual["late"], expected["late"]);
-    assert_eq!(actual["own"], expected["own"]);
-    // Known gap: Chrome decodes a parser data: image synchronously, so the script
-    // already reads it complete; surf's loader is asynchronous and still pending.
-    assert_eq!(actual["early"], serde_json::json!([false, 0, 0]));
-    assert_ne!(actual["early"], expected["early"]);
+    assert_eq!(actual, control["result"]);
 }

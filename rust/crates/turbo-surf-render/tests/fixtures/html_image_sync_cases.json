@@ -1,0 +1,7 @@
+[
+  {
+    "id": "html-image-sync",
+    "url": "https://html-image.test/",
+    "html": "<!doctype html><body><img id=\"png\" src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAEUlEQVR4nGP4z8DwH4YZkDkAm34L9XKwuTwAAAAASUVORK5CYII=\"><img id=\"broken\" src=\"data:image/png;base64,AAAA\"><img id=\"svg\" src=\"data:image/svg+xml,&lt;svg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; width=&#x27;9&#x27; height=&#x27;4&#x27;&gt;&lt;/svg&gt;\"><script>window.early=Array.from(document.images,(i)=>[i.id,i.complete,i.naturalWidth,i.naturalHeight]);</script>"
+  }
+]

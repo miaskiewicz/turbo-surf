@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-26 — turbo-dom consolidation
+
+turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of
+vendored or sibling-repo copies. For users of the npm launcher, the MCP binary,
+the PyPI wheel and the five Rust crates nothing is renamed and no tool or API
+changes; the visible differences are the Chrome-correct selector fixes, `t:*` in
+static screenshots and the live-geometry re-capture listed below. Dependency map:
+
+| was | now |
+|---|---|
+| vendored turbo-test binding (`scripts/vendor-browser-env.sh`) | `turbo-dom-browser-env` 0.6.0 |
+| turbo-html2pdf-core 0.3.9 (layout) | `turbo-dom-layout` 0.6.0 |
+| `turbo-surf-raster` (this workspace) | `turbo-dom-raster` 0.6.0 (not published from here any more) |
+| `turbo-surf-v8` / vendored rusty_v8 | `turbo-dom-v8` 150.4.0 (one V8 in the graph) |
+| vendored Deno extension JS | the Deno family 0.x.1 `embedded_sources` |
+| turbo-dom 0.5.8 | turbo-dom 0.6.0 |
+
+Rust consumers: require `turbo-dom = "0.6"`; `turbo-dom-raster` replaces
+`turbo-surf-raster` for screenshots. The workspace publishes core → view → page →
+render → mcp.
+
+### Changed (0.6.0 consolidation, final step)
+- Live geometry reads re-capture a stale capture: when the DOM changed between a
+  read's capture and its layout, surf now captures again and lays out the current
+  tree (as Chrome's layout reflects the current DOM) instead of failing with
+  "native layout tree changed after its capture", and a stale capture is no longer
+  answered from the layout cache of its old version. A tree that keeps changing
+  under its own capture, or a node that left its document, still reports an error.
+  No production path mutated there, so no corpus or test output changes.
+- Live layout's installed-font registry is turbo-dom-layout's process-wide
+  `FontRegistry::system(SystemFontPolicy::Html)` (one load per process, shared with
+  any other embedder); the faces and their order are unchanged.
+- turbo-dom crates pinned to the turbo-dom 0.6.0 consolidation head (S5a: one image
+  layer, legacy owned-node layout input removed, workspace lints); no surf API
+  change.
+- Release: `rust-crates-publish.yml` gains a tag-only `release-guard` job
+  (`rust/release-deps/release_guard.py`): no `[patch]` table, no Git/path sources,
+  and the turbo-dom crates + Deno family locked from crates.io at published
+  versions. PUBLISHING.md lists the exact pre-tag steps.
+
 ### Changed
 - The DOM binding is no longer vendored: `turbo-surf-render` depends on the
   `turbo-dom-browser-env` 0.6.0 crate (the same binding, moved from turbo-test
@@ -14,7 +54,7 @@
   `turbo_dom_browser_env::test_support`; Node detection tests locate the package via
   `cargo metadata`. New forwarding feature `native-sdk-frame-read` on
   render/mcp/napi/py (enabled by the engine-154/155 native-SDK overlay).
-- turbo-dom git pin moved to `6b58d7b` (turbo-dom#18 S3a: Chrome-correct selector
+- turbo-dom 0.6.0 (turbo-dom#18 S3a: Chrome-correct selector
   escapes, non-ASCII idents, `*|p`, `:empty`, `:read-only`/`:read-write`,
   `:nth-child(An+B of S)`, `:link`/`:any-link`; S2/S3b: turbo-dom-layout styles a
   turbo-dom `Tree` and matches with turbo-dom's selector engine). The static
@@ -41,9 +81,10 @@
   `Reflect` forms stay quiet (`tests/interceptor_mode_runtime.rs` against a Chrome 156
   control; raw V8 and accessor-vs-frame-read checks in
   `tests/interceptor_should_throw.rs` / `tests/interceptor_mode_agreement.rs`).
-- Re-vendored the turbo-test DOM binding from turbo-test `cb5c64e` (v0.4.8; was
-  `602b267`) with the existing `vendor-browser-env.sh`, whose file list gains the
-  selection, editing and EditContext modules. This brings the genuine Selection API
+- The DOM binding is turbo-test `cb5c64e`'s (v0.4.8; 0.5.5 vendored `602b267`),
+  first re-vendored with the old copy script, whose file list gained the
+  selection, editing and EditContext modules, then moved into
+  `turbo-dom-browser-env` unchanged. This brings the genuine Selection API
   (`Selection`, text-control selection, `createValueRange`/OpaqueRange), the editing
   engine (`execCommand`/`queryCommand*`, contenteditable/designMode, `EditContext`,
   `ariaNotify`) and the `scroll-behavior`/`scroll-snap-*` CSSOM keyword properties.
@@ -78,7 +119,8 @@
   `rust/release-deps/deno/prepare.py` from the pinned upstream archive plus
   `patches/deno_crypto.patch`.
 - Pre-publish only: `rust/Cargo.toml` `[patch.crates-io]` resolves the Deno
-  candidates and the turbo-dom crates from Git; it is removed at release.
+  candidates and the turbo-dom crates from Git; it is removed before the v0.6.0 tag
+  (PUBLISHING.md) and the release guard refuses a tag that still has it.
 
 ## [0.5.5] — 2026-10-25 — Chrome-156 parity batch + re-version
 

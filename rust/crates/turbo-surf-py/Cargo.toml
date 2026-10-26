@@ -24,10 +24,10 @@ coretext = ["turbo-dom-raster/coretext"]
 native-sdk-frame-read = ["turbo-surf-render/native-sdk-frame-read"]
 
 [dependencies]
-turbo-surf-view = { path = "../turbo-surf-view", version = "0.5.5" }
+turbo-surf-view = { path = "../turbo-surf-view", version = "0.6.0" }
 turbo-dom-raster = "0.6.0"
-turbo-surf-render = { path = "../turbo-surf-render", version = "0.5.5" }
-turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.5.5" }
+turbo-surf-render = { path = "../turbo-surf-render", version = "0.6.0" }
+turbo-surf-transform = { path = "../turbo-surf-transform", version = "0.6.0" }
 turbo-dom-parser = { package = "turbo-dom", version = "0.6" }
 serde = "1"
 serde_json = "1"

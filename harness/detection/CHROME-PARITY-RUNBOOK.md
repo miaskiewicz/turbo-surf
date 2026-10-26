@@ -224,28 +224,15 @@ version are different identities. Keep `PARITY_BIN` pointing to the SDK155 execu
 
 Deno extension source embedding is automatic in both stock and native builds;
 it requires no comparison flag or environment variable. All 28 licensed
-Web/WebIDL/Crypto modules are crate-local compile-time inputs, so installed
-artifacts must not read build-machine Cargo paths. `npm test` runs six offline
-reproducer controls and, after Cargo has fetched the locked packages, verifies
-all generated sources against their exact published archives. Recheck directly
-from the repository root when diagnosing source or packaging drift:
-
-```sh
-python3 rust/crates/turbo-surf-render/scripts/vendor-deno-extension-sources.py --check
-```
-
-The helper uses `CARGO_HOME`'s archive cache without modifying it; pass
-`--archive-dir /absolute/path/to/archives` if the three checksum-pinned archives
-are elsewhere. See the [crate provenance](../../rust/crates/turbo-surf-render/DENO-EXTENSIONS.md).
-The embedded subtree is marked `-text -whitespace` in `.gitattributes`: its
-published source, license and pins bytes must survive Windows autocrlf checkout
-unchanged. The root MCP smoke controls exercise a real Git checkout of all 32
-assets and reproduce the old missing-rule failure. Existing worktrees with
-already-converted files need an explicit restore before rebuilding; fresh CI
-checkouts apply the rule automatically.
-Fourteen literal shipping MIT/notice paths are also byte-preserved. Root tests
+Web/WebIDL/Crypto modules are compile-time inputs taken from the Deno
+distributions' `embedded_sources` tables (no vendored copy), so installed
+artifacts must not read build-machine Cargo paths. `cargo test` (part of
+`npm test`) checks every embedded module's SHA-256 and length against the reviewed
+pins in `deno_extension_sources_tests.rs`. See the
+[crate provenance](../../rust/crates/turbo-surf-render/DENO-EXTENSIONS.md).
+Thirteen literal shipping MIT/notice paths are byte-preserved (`-text -whitespace`). Root tests
 reproduce their old Windows CRLF drift and require complete canonical bytes
-in fresh checkouts, including `rust/LICENSE` and all nine member license copies.
+in fresh checkouts, including `rust/LICENSE` and all eight member license copies.
 The unmodified notices checker also runs in controlled Windows-style checkouts;
 removing only the workspace license rule must reproduce its failure. Artifact
 audits still compare exact bytes; complete license text with altered line

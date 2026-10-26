@@ -1848,10 +1848,10 @@ source before the next consent/query run.
 The adversarial provider regression reproduced a leak of16 raw AES key bytes into
 a page-installed inherited `keyData` setter during non-extractable import. The
 licensed published deno_crypto0.273.0 source is now reproduced from its verified
-archive plus an auditable patch under `rust/vendor`: native data-property writes
+archive plus an auditable patch (now `rust/release-deps/deno/patches/deno_crypto.patch`): native data-property writes
 bypass inherited setters, and unregistered JS key snapshots are skipped entirely.
 The fixed regression sees zero setter calls and zero exposed bytes. An inherited
-Array index setter is also covered. See [provider provenance](../../rust/vendor/DENO_CRYPTO.md).
+Array index setter is also covered. See [provider provenance](../../rust/release-deps/deno/DENO_CRYPTO.md).
 
 The private V8 clone serializer carries genuine key handles out of band; it never
 exports material, calls page key properties or installs registry-symbol hooks.

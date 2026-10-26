@@ -21,7 +21,7 @@ const CONTROL: &str = include_str!("fixtures/image_formats_chrome156.json");
 /// header — a JPEG's `SOS`, a GIF's first image descriptor, a WebP's complete frame
 /// header (the PNG rule, the first `IDAT`, already matches) — while the probe sizes these
 /// truncated bodies from the header alone; and Blink rejects an `image/svg+xml` document
-/// whose root `<svg>` is not in the SVG namespace, which usvg parses.
+/// whose root `<svg>` is not in the SVG namespace, which usvg parses (turbo-dom#59).
 const GAPS: &[(&str, &str, &str)] = &[
     ("parsed", "jpeg-sof-only", "[true,5,4]"),
     ("parsed", "jpeg-before-sos", "[true,5,4]"),

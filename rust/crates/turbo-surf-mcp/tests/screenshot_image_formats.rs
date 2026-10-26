@@ -4,7 +4,7 @@
 //! corner (`fixture-gen/screenshot-image-formats-chrome.mjs`; the page comes from
 //! turbo-surf-render's `fixture-gen/make-image-format-cases.py`). The image bytes reach
 //! the raster as the caller-fetched asset map, as the `screenshot` tool hands them over
-//! (turbo-dom-raster paints an `<img src="data:…">` only from that map).
+//! (turbo-dom-raster paints an `<img src="data:…">` only from that map: turbo-dom#60).
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use turbo_dom_raster as raster;

@@ -23,10 +23,9 @@ async fn image_state_through_the_surf_loader_matches_chrome156() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn src_and_decode_are_prototype_members_that_load_like_chrome156() {
-    // Known gap: the binding's decode() rejects with the DOMException it captured at
-    // install, and surf installs its own DOMException afterwards, so the EncodingError
-    // is not `instanceof DOMException` (name/message match). Spec'd for turbo-dom: use
-    // the realm's registered DOMException (`register_dom_exception`).
+    // Known gap (turbo-surf#42): the binding's decode() rejects with the DOMException it
+    // captured at install, and surf installs its own DOMException afterwards, so the
+    // EncodingError is not `instanceof DOMException` (name/message match).
     let encoding = serde_json::json!([
         "throw",
         "EncodingError",
@@ -51,8 +50,8 @@ async fn src_and_decode_are_prototype_members_that_load_like_chrome156() {
 /// document, and a src change or removal restarts or clears its state like Chrome.
 #[tokio::test(flavor = "current_thread")]
 async fn images_load_from_mutations_connected_or_not_like_chrome156() {
-    // Known gap: surf selects no srcset candidate (only src is fetched), so a
-    // srcset-only image stays a never-loading, complete 0x0 image.
+    // Known gap (turbo-surf#40): surf selects no srcset candidate (only src is
+    // fetched), so a srcset-only image stays a never-loading, complete 0x0 image.
     let srcset = serde_json::json!([[], true, 0, 0, []]);
     matches_control_with_gaps(
         include_str!("fixtures/html_image_loads_probe.js"),

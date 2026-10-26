@@ -9,7 +9,7 @@ use turbo_dom_browser_env::test_support;
 
 #[tokio::test(flavor = "current_thread")]
 async fn defined_state_through_a_surf_session_matches_chrome156() {
-    // Known gap (pre-existing, reported with P5b-surf2): parser-created elements with an
+    // Known gap (turbo-surf#41): parser-created elements with an
     // `is` value (`<button is=x-btn>`, `<button is=x-none>`) read `:defined` once the
     // session has opened, although they are "undefined" throughout hydration (init
     // script, parser scripts, DOMContentLoaded, load); created and inserted ones are

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { cdpConnection } from "./cdp-connection.mjs";
 
@@ -40,3 +40,29 @@ test("closing a connection rejects pending commands; protocol errors stay errors
   connection.close();
   await assert.rejects(pending, /oracle closed/);
 });
+
+test(
+  "a command fails only after a generous 60 s cap (turbo-surf#50)",
+  { todo: "turbo-surf#50: fails until the fix" },
+  async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      const socket = { send: () => {} };
+      const connection = cdpConnection(socket, () => {});
+      let settled = null;
+      const pending = connection.call("Page.getFrameTree").then(
+        () => (settled = "resolved"),
+        (error) => (settled = error.message),
+      );
+      mock.timers.tick(59_999);
+      await Promise.resolve();
+      assert.equal(settled, null);
+      mock.timers.tick(1);
+      await pending;
+      assert.equal(settled, "CDP Page.getFrameTree timed out");
+      connection.close();
+    } finally {
+      mock.timers.reset();
+    }
+  },
+);

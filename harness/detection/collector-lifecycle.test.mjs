@@ -145,3 +145,42 @@ test("aborting target setup keeps its finally command catchable without dispatch
     await lifecycle.stopBrowser();
   }
 });
+
+test(
+  "a zombie-only browser group counts as retired; a live one's EPERM still fails (turbo-surf#50)",
+  { todo: "turbo-surf#50: fails until the fix" },
+  async () => {
+    // macOS answers kill(-pgid) with EPERM, not ESRCH, while the exited group's members wait
+    // to be reaped.
+    const eperm = () => {
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    };
+    const exited = collectorLifecycle({
+      signals: new EventEmitter(),
+      platform: "darwin",
+      graceMs: 1,
+      kill: eperm,
+    });
+    exited.own({ pid: 123, exitCode: 0, signalCode: null });
+    await exited.stopBrowser();
+    exited.dispose();
+    const signalled = collectorLifecycle({
+      signals: new EventEmitter(),
+      platform: "darwin",
+      graceMs: 1,
+      kill: eperm,
+    });
+    signalled.own({ pid: 124, exitCode: null, signalCode: "SIGTERM" });
+    await signalled.stopBrowser();
+    signalled.dispose();
+    const live = collectorLifecycle({
+      signals: new EventEmitter(),
+      platform: "darwin",
+      graceMs: 1,
+      kill: eperm,
+    });
+    live.own({ pid: 125, exitCode: null, signalCode: null });
+    await assert.rejects(live.stopBrowser(), /kill EPERM/);
+    live.dispose();
+  },
+);

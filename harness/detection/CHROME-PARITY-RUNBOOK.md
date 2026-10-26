@@ -471,10 +471,10 @@ parity_env "$PARITY_NODE" harness/detection/resource-scan-order-chrome.mjs "$PAR
 ```
 
 Review actual results/errors/version/source hashes before intentionally replacing
-`harness/detection/fixtures/resource-scan-order-chrome155.json`. Once accepted:
+`harness/detection/fixtures/resource-scan-order-chrome156.json`. Once accepted:
 
 ```sh
-cp "$PARITY_ORACLE" harness/detection/fixtures/resource-scan-order-chrome155.json
+cp "$PARITY_ORACLE" harness/detection/fixtures/resource-scan-order-chrome156.json
 parity_env "$PARITY_NODE" --test harness/detection/resource-scan-order-chrome.test.mjs
 parity_env cargo test --manifest-path rust/Cargo.toml -p turbo-surf-render --test resource_scan_order
 ```

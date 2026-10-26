@@ -5,7 +5,7 @@ import { extractResourceFixture, fixtureSource, sha256 } from "./resource-scan-o
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url));
 test("resource-order Chrome control pins its authored fixture and collection tools", () => {
-  const control = JSON.parse(read("harness/detection/fixtures/resource-scan-order-chrome155.json"));
+  const control = JSON.parse(read("harness/detection/fixtures/resource-scan-order-chrome156.json"));
   assert.equal(control.fixtureSource, fixtureSource);
   assert.equal(
     control.fixtureSha256,

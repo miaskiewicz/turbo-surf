@@ -1,6 +1,6 @@
 {
-  "browser": "Chrome/155.0.8059.85",
-  "v8": "15.5.35.25",
+  "browser": "Chrome/156.0.8078.4",
+  "v8": "15.6.75",
   "sourceHashes": {
     "window-timer-semantics-chrome.mjs": "b791e5dd27eae511ab6c54f0c9ff45954a483ff09c4abcff3e23783d26c545a9",
     "window-timer-semantics-probe.js": "1f0a569bb175d9d15958f4026aa18178fe97af849aeaf588345485beb029cbd6",
@@ -8,7 +8,7 @@
     "chrome-cdp-trace.mjs": "440965c5c029143c92058c21f6e125a83d3d91f55331a2e4df225019fdf7a55f",
     "observation-window.mjs": "e352eea8fe8d7760c949b49abf54e84f9582f891e9f7ea4edd7cbf493d4f0be8",
     "main-navigation.mjs": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",
-    "collector-lifecycle.mjs": "2bdf67c2680b1b7b7fad2c5cbe818995312d3108043b6485e7f334f8372ecd8f"
+    "collector-lifecycle.mjs": "acea3bf16b5940a3bef05aee1a21802b7cde897d359cd95c3d83abf2c948bd91"
   },
   "errors": [],
   "result": {
@@ -29,24 +29,30 @@
       "resetSource": "MessageChannel"
     },
     "timing": {
-      "direct": [0, 0, 0, 0, 0, 0, 4.599999964237213, 4.5, 4.5, 4.5, 4.5, 4.600000023841858],
+      "direct": [
+        0, 0, 0, 0, 0, 0, 4.599999964237213, 4.600000023841858, 4.600000023841858, 4.5,
+        4.599999964237213, 4.600000023841858
+      ],
       "promise": [
-        0, 0, 0, 0.09999996423721313, 0, 0, 4.5, 4.5, 4.600000023841858, 4.5, 4.5, 4.599999964237213
+        0, 0, 0, 0, 0, 0, 4.600000023841858, 4.600000023841858, 4.5, 4.599999964237213,
+        4.600000023841858, 4.5
       ],
       "queueMicrotask": [
-        0.10000002384185791, 0, 0, 0, 0, 0, 4.5, 4.5, 4.600000023841858, 4.5, 4.599999964237213, 4.5
+        0, 0, 0, 0, 0, 0, 4.5, 4.600000023841858, 4.599999964237213, 4.600000023841858,
+        4.399999976158142, 4.599999964237213
       ],
       "crossRealm": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       "crossRealmPromise": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      "crossRealmQueueMicrotask": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.10000002384185791],
+      "crossRealmQueueMicrotask": [0, 0, 0, 0, 0, 0, 0, 0, 0.09999996423721313, 0, 0, 0],
       "interval": [
-        0, 0, 0, 0, 0, 0, 4.599999964237213, 4.600000023841858, 3.399999976158142, 4.5, 3.5, 4.5
+        0, 0, 0, 0, 0, 0.10000002384185791, 4.399999976158142, 4.699999988079071, 3.300000011920929,
+        4.600000023841858, 3.399999976158142, 4.600000023841858
       ]
     },
     "pageState": {
       "visibility": "visible",
       "hidden": false,
-      "focused": false
+      "focused": true
     }
   },
   "scope": "Genuine localhost task semantics and observed nesting delays. Timing is not an execution-time guarantee."

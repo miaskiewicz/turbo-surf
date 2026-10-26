@@ -1,6 +1,6 @@
 {
-  "browser": "Chrome/155.0.8059.85",
-  "v8": "15.5.35.25",
+  "browser": "Chrome/156.0.8078.4",
+  "v8": "15.6.75",
   "scope": "Parser stylesheet order and script exclusion; SVG script execution is outside this control.",
   "fixtureSource": "rust/crates/turbo-surf-render/tests/resource_scan_order.rs",
   "fixtureSha256": "e063e83334fa5755f79cd510a3cf21bd0c8024d792189fc3c302c4116b73ffce",
@@ -8,7 +8,7 @@
   "inputStateSha256": "b3ff2009d74d1c2b92671c398f870a0138d7a84105a0a660e8082f88062922e1",
   "observationSha256": "e352eea8fe8d7760c949b49abf54e84f9582f891e9f7ea4edd7cbf493d4f0be8",
   "navigationSha256": "80854a5399aaeeb5bdf38b75f0679865a0c445429142dce173ad74002ccffe9e",
-  "lifecycleSha256": "2bdf67c2680b1b7b7fad2c5cbe818995312d3108043b6485e7f334f8372ecd8f",
+  "lifecycleSha256": "acea3bf16b5940a3bef05aee1a21802b7cde897d359cd95c3d83abf2c948bd91",
   "effectiveInputSha256": "090613d6430405193eca5a639cb044f855c9a5aa05520f28a541192079d56f82",
   "generatorSha256": "c7aecc22c262eb3d39b5e20013703b940b0a9fbde432e565c9ab140a605efe2a",
   "errors": [],

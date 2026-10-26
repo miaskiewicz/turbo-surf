@@ -1084,8 +1084,8 @@ rejections remain errors; interrupted operations are not silently discarded. See
 ### Regenerate the parser resource-order Chrome control
 
 ```sh
-node harness/detection/resource-scan-order-chrome.mjs harness/detection/fixtures/resource-scan-order-chrome155.json
-npx --no-install biome format --write harness/detection/fixtures/resource-scan-order-chrome155.json
+node harness/detection/resource-scan-order-chrome.mjs harness/detection/fixtures/resource-scan-order-chrome156.json
+npx --no-install biome format --write harness/detection/fixtures/resource-scan-order-chrome156.json
 ```
 
 This uses installed Chrome and the exact HTML fixture in the Rust resource-order

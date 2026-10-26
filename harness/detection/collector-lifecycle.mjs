@@ -15,7 +15,11 @@ export function collectorLifecycle({
       if (platform === "win32") browser.kill(signal);
       else kill(-browser.pid, signal);
     } catch (error) {
-      if (error.code !== "ESRCH") throw error;
+      if (error.code === "ESRCH") return;
+      // macOS answers EPERM, not ESRCH, while an exited group's members wait to be
+      // reaped: nothing is left to signal (turbo-surf#50). A live browser's EPERM is real.
+      const exited = browser.exitCode != null || browser.signalCode != null;
+      if (error.code !== "EPERM" || !exited) throw error;
     }
   };
   const stopBrowser = () => {

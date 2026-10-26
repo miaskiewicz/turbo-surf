@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Fixed (turbo-dom consolidation P5b)
+- Live render images match Chrome 156 (#32): `complete`, `naturalWidth`,
+  `naturalHeight` and `currentSrc` are `HTMLImageElement.prototype` accessors
+  (turbo-dom-browser-env), fed by surf's loader through the document's private
+  `imageHost` record; `src` and `decode()` are prototype members too, so an `<img>`
+  has no own properties (`__tcImagePatched`, own `src`/`decode`/state getters and
+  the own `document.createElement` override are gone). `decode()` rejects a bad
+  receiver with Blink's TypeError and an undecodable image with an `EncodingError`
+  `DOMException`. `render(html, base, script)` now starts the parser's image and
+  stylesheet loads before its script, so parser images load and fire `load`/`error`
+  (they never loaded there). Remaining gap: a parser `data:` image is still pending
+  at the script's first read (Chrome decodes it synchronously).
+- The font-run geometry Chrome collector reads its fonts only from the pinned
+  turbo-html2pdf commit's blobs, so it runs against turbo-html2pdf ≥ 0.6.0 (#33); its
+  three controls are recaptured on Chrome for Testing 156 (`*-chrome156.json`,
+  identical measurements).
+- Flaky tests made deterministic: the smoke-release interrupt control waits for the
+  fake executable instead of a fixed 5 s (#34); the credentialless partition control
+  no longer times the host with a 5 s budget (#35).
+- turbo-dom crates repinned to the P5b binding fixes (turbo-dom#20 `Option()` and
+  HTMLOptionsCollection accessor definitions, #32 image accessors); the interceptor
+  runtime control has no known gaps left.
+
+### Known
+- Live geometry still throws for table rows/row groups and on pages with an
+  absolutely positioned inline (`.sr-only`) (#31); the cause is in turbo-dom-layout and
+  `tests/live_geometry_throws.rs` pins it against a Chrome 156 control.
+
 ## [0.6.0] — 2026-10-26 — turbo-dom consolidation
 
 turbo-surf now builds on the published turbo-dom 0.6.0 crate family instead of

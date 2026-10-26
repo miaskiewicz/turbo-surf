@@ -105,9 +105,19 @@ uses typed rules and a transitive variable/declaration proof for bounded static
 geometry. Unknown or potentially geometry-changing uses still reject. Retained
 descriptor blocks alone do not implement CSS property registration or transitions.
 
+Known throws (turbo-surf#31): `getBoundingClientRect()` and `elementFromPoint()`
+still throw for table rows and row groups, and for every element of a page with an
+absolutely positioned inline such as the common `.sr-only` span; Chrome answers all
+of them. The causes are in turbo-dom-layout (row fragments without used-box metrics,
+no row-group fragment, no blockification of positioned inlines);
+`rust/crates/turbo-surf-render/tests/live_geometry_throws.rs` pins them against a
+Chrome 156 control until that fix lands.
+
 The reusable `*-chrome-control.mjs` runners serve independent authored localhost
 fixtures. The older controls retain their original Chrome155.0.8059.79 metadata;
-new shadow/scoped controls record Chrome155.0.8059.80. Both use V815.5.35.23.
+new shadow/scoped controls record Chrome155.0.8059.80. Both use V815.5.35.23. The
+three same-font controls (font runs, Range transforms, leading spaces) were
+recaptured on Chrome for Testing 156.0.8078.4 (V8 15.6.75) with identical values.
 Source/collector hashes pin the executed inputs; font-specific controls also
 record their measured font hashes. The earlier focused genuine-native155 cohort
 passes all75 tests, zero failures/skips: abstract Range3, custom elements10, GC4,

@@ -355,7 +355,13 @@ SERP in one baseline while another fails effective consent dismissal. The later
 - Live hydration advances the document through loading/interactive/complete, runs deferred
   scripts before DOMContentLoaded, and waits for image/resource loads before window load.
   PNG/JPEG/GIF/WebP images are fetched as bytes and decoded before success/dimensions are
-  exposed. SVG/AVIF, responsive image selection, CSS image/font initiation, incremental
+  exposed. Each image's state reaches the binding's `HTMLImageElement.prototype`
+  accessors (`complete`, `naturalWidth`, `naturalHeight`, `currentSrc`) through the
+  document's private `imageHost` record; `src` and `decode()` are prototype members too,
+  so an `<img>` has no own properties, as in Chrome. A `render(html, base, script)`
+  starts the parser's image and stylesheet loads before its script runs; a parser
+  `data:` image is still pending at the script's first read (Chrome has decoded it
+  already). SVG/AVIF, responsive image selection, CSS image/font initiation, incremental
   parsing and complete browser async-script scheduling remain outside this resource loader.
   Image, linked/imported stylesheet and classic-script fetches record their actual duration
   in the performance resource timeline; unavailable wire sizes and transport phases remain zero.

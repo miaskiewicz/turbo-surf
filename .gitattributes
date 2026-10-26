@@ -11,9 +11,6 @@ rust/crates/turbo-surf-render/tests/*.rs text eol=lf
 # Preserve exact published Deno JS, license and provenance bytes on every checkout.
 rust/crates/turbo-surf-render/src/vendor/deno_extensions/** -text -whitespace
 
-# Preserve the exact published MIT XPath provider and license bytes.
-rust/crates/turbo-surf-render/src/xpath_provider/xpath.js -text -whitespace
-rust/crates/turbo-surf-render/src/xpath_provider/LICENSE -text -whitespace
 /rust/LICENSE -text -whitespace
 
 # Preserve full shipping license/notice payloads exactly across platforms.
@@ -38,4 +35,3 @@ rust/crates/turbo-surf-py/python/turbo_surf/__init__.pyi text eol=lf
 
 # Unified diffs require a space prefix on empty context lines.
 harness/detection/engine-154/patches/*.patch -whitespace
-rust/crates/turbo-surf-render/src/*.html text eol=lf

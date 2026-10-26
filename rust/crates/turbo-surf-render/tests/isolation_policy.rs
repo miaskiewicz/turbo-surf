@@ -365,12 +365,15 @@ async fn credentialless_cookie_and_dom_storage_partitions_match_chrome() {
         include_str!("../../../../harness/detection/policy-credentialless-child.js"),
     )
     .await;
+    // Four serial real iframe loads over localhost run beside the binary's other
+    // tests; the budget only stops a runaway probe and must not time the host
+    // (turbo-surf#35: 5 s failed 3/9 runs with three binaries running at once).
     let mut page = PageSession::open(
         "<!doctype html><body></body>",
         &format!("{origin}/?case=0"),
         "",
         "",
-        5000,
+        60_000,
     )
     .await
     .unwrap();

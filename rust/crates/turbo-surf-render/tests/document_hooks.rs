@@ -19,7 +19,7 @@ const HEADLESS: &str =
 ///
 /// srcdoc and initial about:blank documents share their creator's origin, so in
 /// Chrome the srcdoc child's `document.domain = 'b.localhost'` relaxes the top
-/// document and the initial child too. The vendored binding records the relaxed
+/// document and the initial child too. The binding records the relaxed
 /// domain per Document and offers no host hook to share it.
 const KNOWN_GAPS: &[&str] = &[
     "domain-site-keyed/frames/initial/value/domain = \"a.b.localhost\"",

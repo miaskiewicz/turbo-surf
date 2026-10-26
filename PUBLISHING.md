@@ -24,7 +24,7 @@ or a workflow ships a mismatched version. Bump to the SAME `X.Y.Z`:
 
 - `package.json` → `"version"`
 - `rust/Cargo.toml` → `[workspace.package] version` **and** every crate's path-dep
-  `version = "X.Y.Z"` across all nine member manifests
+  `version = "X.Y.Z"` across all eight member manifests
 - `rust/crates/turbo-surf-napi/package.json`
 - `rust/crates/turbo-surf-py/pyproject.toml` → `version` (**maturin builds the PyPI
   wheel from THIS, not the workspace version** — if it lags, the publish job
@@ -58,13 +58,16 @@ changelog entries and unrelated dependency versions must retain their own versio
    separate. When reusing a prior result, retain a bridge proving its actual
    compiled inputs and resolved feature graph still match.
 3. Complete the [actual packaged-consumer procedure](./rust/release-deps/surf-consumer/README.md).
-   Publish and verify the named dependencies first (turbo-dom-v8 from turbo-dom,
-   then the twelve here: seven Deno-family 0.x.1 + five transport); the Surf product
-   tags do not publish those dependencies. turbo-dom, turbo-dom-layout,
-   turbo-dom-raster and turbo-dom-browser-env are likewise published first from
-   turbo-dom; drop the pre-publish `[patch.crates-io]` table in `rust/Cargo.toml`
-   and re-lock with a targeted `cargo update -p` for those crates and the Deno
-   family. Then verify all five Surf library distributions
+   Publish and verify the named dependencies first: from turbo-dom, turbo-dom-v8,
+   turbo-dom, turbo-dom-layout, turbo-dom-raster and turbo-dom-browser-env; then
+   the twelve here: the seven Deno-family 0.x.1 (turbo-surf-deno-v8 0.4.1,
+   turbo-surf-serde-v8 0.321.1, turbo-surf-deno-core 0.412.1,
+   turbo-surf-deno-bench-util 0.253.1, turbo-surf-deno-crypto 0.273.1,
+   turbo-surf-deno-web 0.290.1, turbo-surf-deno-webidl 0.259.1) + five transport.
+   The Surf product tags do not publish those dependencies. Then drop the
+   pre-publish `[patch.crates-io]` table in `rust/Cargo.toml` and re-lock with a
+   targeted `cargo update -p` for the turbo-dom crates and the Deno family. Then
+   verify all five Surf library distributions
    in one normal invocation, with Cargo compilation verification enabled and no
    directory-source replacement:
 

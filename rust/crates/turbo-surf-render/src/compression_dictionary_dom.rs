@@ -1,11 +1,12 @@
-//! Private composed resource enumeration over the public native Tree surface.
-use super::*;
+//! Private composed resource enumeration over the public native Tree surface,
+//! reached through the binding's host-only `host_internals` (never page JS).
+use turbo_dom_browser_env::host_internals::{enter_document_of, handle_of, with_tree, wrap};
 
 pub(crate) fn links<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<v8::Object>,
 ) -> Result<Vec<v8::Local<'s, v8::Object>>, &'static str> {
-    let _owner = DomScope::for_object(scope, document);
+    let _owner = enter_document_of(scope, document);
     let root = handle_of(scope, document).ok_or("Dictionary document unavailable")?;
     let handles = with_tree(|tree| {
         if !matches!(tree.node_type_id(root), 1 | 9 | 11) {
@@ -22,7 +23,7 @@ pub(crate) fn links<'s>(
             if tree.namespace_uri(node) == Some("http://www.w3.org/1999/xhtml")
                 && tree.local_name(node) == Some("link")
                 && tree.get_attribute(node, "rel").is_some_and(|rel| {
-                    rel.split(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{000c}'))
+                    rel.split([' ', '\t', '\n', '\r', '\u{000c}'])
                         .any(|token| token.eq_ignore_ascii_case("compression-dictionary"))
                 })
             {

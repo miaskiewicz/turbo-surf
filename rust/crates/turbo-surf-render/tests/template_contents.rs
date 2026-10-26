@@ -1,4 +1,5 @@
 //! Native template ownership, parsing, preparation and frame adoption controls.
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
 #[tokio::test(flavor = "current_thread")]
@@ -14,12 +15,12 @@ async fn native_template_ownership_and_lifecycle_match_independent_chrome() {
     .unwrap();
     for (probe, fixture) in [
         (
-            include_str!("../src/template_ownership_probe.js"),
-            include_str!("../src/template_ownership_chrome155.json"),
+            test_support::TEMPLATE_OWNERSHIP_PROBE_JS,
+            test_support::TEMPLATE_OWNERSHIP_CHROME155_JSON,
         ),
         (
-            include_str!("../src/template_lifecycle_probe.js"),
-            include_str!("../src/template_lifecycle_chrome155.json"),
+            test_support::TEMPLATE_LIFECYCLE_PROBE_JS,
+            test_support::TEMPLATE_LIFECYCLE_CHROME155_JSON,
         ),
     ] {
         let value = page

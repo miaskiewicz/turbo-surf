@@ -3,6 +3,23 @@
 ## [Unreleased]
 
 ### Changed
+- The DOM binding is no longer vendored: `turbo-surf-render` depends on the
+  `turbo-dom-browser-env` 0.6.0 crate (the same binding, moved from turbo-test
+  `cb5c64e` into turbo-dom) with feature `host-internals`. Deleted
+  `scripts/vendor-browser-env.sh`, `scripts/browser-env-adapter.rs.in`, the generated
+  adapter and the 398 files it copied; surf's native layout capture
+  (`live_layout_dom.rs`) and compression-dictionary discovery
+  (`compression_dictionary_dom.rs`) are ordinary modules over the crate's
+  `host_internals`. Integration tests read probe/control data from
+  `turbo_dom_browser_env::test_support`; Node detection tests locate the package via
+  `cargo metadata`. New forwarding feature `native-sdk-frame-read` on
+  render/mcp/napi/py (enabled by the engine-154/155 native-SDK overlay).
+- The interceptor ShouldThrowOnError fix is active: strict `[[Set]]`/`[[Delete]]` and
+  `Object.defineProperty` on interceptor-backed collections (`document.all`,
+  `<select>`, `select.options`) throw Chrome's TypeError, sloppy writes and the
+  `Reflect` forms stay quiet (`tests/interceptor_mode_runtime.rs` against a Chrome 156
+  control; raw V8 and accessor-vs-frame-read checks in
+  `tests/interceptor_should_throw.rs` / `tests/interceptor_mode_agreement.rs`).
 - Re-vendored the turbo-test DOM binding from turbo-test `cb5c64e` (v0.4.8; was
   `602b267`) with the existing `vendor-browser-env.sh`, whose file list gains the
   selection, editing and EditContext modules. This brings the genuine Selection API

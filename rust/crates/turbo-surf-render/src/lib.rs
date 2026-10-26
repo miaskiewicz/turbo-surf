@@ -1,9 +1,14 @@
 //! JS-execution tier (tier 3): a `deno_core` V8 isolate with a real rtdom↔V8 DOM
-//! binding ([`browser_env`], vendored from turbo-test) so page scripts hydrate
+//! binding ([`browser_env`], the `turbo-dom-browser-env` crate) so page scripts hydrate
 //! against a genuine `document`. [`runtime`] is the browser-environment runtime — it
 //! grafts the binding onto deno_core's context, installs the non-DOM `window` globals
 //! a real page needs (timers/fetch/URL/crypto/streams/…), and drives the event
 //! loop + hydration pump + execution budget.
+
+// The binding is a dependency (not a module): surf code names its items as
+// `crate::browser_env::*`; surf's native services over its documents
+// (live_layout_dom, compression_dictionary_dom) use its `host_internals`.
+use turbo_dom_browser_env::browser_env;
 
 mod audio_backend;
 mod audio_buffer;
@@ -11,7 +16,7 @@ mod audio_dsp;
 mod audio_effects;
 mod audio_fft;
 mod audio_timeline;
-mod browser_env;
+mod compression_dictionary_dom;
 mod context_ownership;
 mod crypto_backend;
 mod crypto_clone;
@@ -27,6 +32,7 @@ mod layout_profile;
 mod live_layout;
 mod live_layout_backend;
 mod live_layout_composed;
+mod live_layout_dom;
 mod live_layout_hit;
 mod live_layout_inline;
 mod live_layout_media;

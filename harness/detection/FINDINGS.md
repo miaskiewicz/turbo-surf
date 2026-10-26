@@ -1303,8 +1303,8 @@ retains its status, response HTML, runtime stack and preceding network records.
    reports 2 rules and the right last-rule class/selector; native reports 0 rules.
    `browser_env.js`'s CSSOM sheet starts with an empty rule array and does not parse
    textContent into rules. This is a demonstrated client error, not proof it is
-   the SERP rejection criterion. The binding is vendored: fix upstream turbo-test
-   and re-vendor rather than editing it here.
+   the SERP rejection criterion. The binding is upstream (then vendored from
+   turbo-test, now the turbo-dom-browser-env crate): fix it there, never here.
 2. **Cookie visibility defect fixed here.** `op_cookie_get` used the network header
    helper, exposing HttpOnly cookies through `document.cookie`; `op_cookie_set`
    accepted script overwrites/creation of HttpOnly records. The new separate

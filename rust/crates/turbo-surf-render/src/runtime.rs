@@ -1,5 +1,5 @@
 //! Render runtime (tier 3). Page JS runs on a `deno_core` V8 isolate. The DOM is
-//! a real rtdom↔V8 binding ([`crate::browser_env`], vendored from turbo-test) so
+//! a real rtdom↔V8 binding ([`crate::browser_env`], the turbo-dom-browser-env crate) so
 //! jQuery / React / hand-rolled bundles see a genuine `document`/Element. deno_core
 //! supplies the rest: the async event loop, `fetch`/cookies over the tier-1 net
 //! stack (`#[op2]` ops below), virtual timers, and the runaway-execution budget.
@@ -2318,14 +2318,14 @@ fn op_now_epoch() -> Result<f64, JsErrorBox> {
 // Host canvas rasterizer: replay a 2D draw list into real PNG bytes. Same injection
 // pattern as `set_measure_fn` — the crate that owns the raster/paint engine installs it,
 // so the render crate keeps no tiny-skia/font dep (matters for the PyO3 wheel build). Until
-// set, `toDataURL` keeps the vendored synthetic behavior.
+// set, `toDataURL` keeps the binding's synthetic behavior.
 type RasterFn = Box<dyn Fn(u32, u32, &str) -> Option<Vec<u8>> + Send + Sync>;
 static RASTER_PNG: std::sync::RwLock<Option<RasterFn>> = std::sync::RwLock::new(None);
 
 /// Install the host's canvas rasterizer: `(width, height, ops_json) -> PNG bytes`.
-/// `ops_json` is the recorded 2D display list (the vendored `ctx._ops`). Injected once at
+/// `ops_json` is the recorded 2D display list (the binding's `ctx._ops`). Injected once at
 /// startup by the crate that owns the raster engine (raster). Until set, `toDataURL` returns
-/// the vendored synthetic blob.
+/// the binding's synthetic blob.
 pub fn set_raster_fn(f: RasterFn) {
     if let Ok(mut g) = RASTER_PNG.write() {
         *g = Some(f);
@@ -2333,7 +2333,7 @@ pub fn set_raster_fn(f: RasterFn) {
 }
 
 // Rasterize a canvas draw list to a base64 PNG (no `data:` prefix), or "" when no host
-// rasterizer is installed (the JS override then falls back to the vendored blob). Never
+// rasterizer is installed (the JS override then falls back to the binding's blob). Never
 // throws across the boundary.
 #[op2]
 #[string]
@@ -2351,12 +2351,12 @@ fn op_raster_png(width: u32, height: u32, #[string] ops_json: &str) -> String {
 
 // Same rasterizer, RAW straight-alpha RGBA output (not PNG) — for getImageData, which returns
 // pixels with no encoder in the loop. So `fillRect(red); getImageData(...)` reads back the actual
-// rendered red (the vendored synthetic getImageData returned unrelated bytes — a broken-canvas
+// rendered red (the binding's synthetic getImageData returned unrelated bytes — a broken-canvas
 // tell). Raw pixels also mean solids/shapes match a real browser exactly (no PNG-encoder variance).
 static RASTER_RGBA: std::sync::RwLock<Option<RasterFn>> = std::sync::RwLock::new(None);
 
 /// Install the host's raw-RGBA canvas rasterizer: `(width, height, ops_json) -> RGBA8 bytes`
-/// (straight alpha, top-left origin, tightly packed). Until set, getImageData keeps the vendored
+/// (straight alpha, top-left origin, tightly packed). Until set, getImageData keeps the binding's
 /// behavior.
 pub fn set_raster_rgba_fn(f: RasterFn) {
     if let Ok(mut g) = RASTER_RGBA.write() {
@@ -2433,7 +2433,7 @@ fn op_webgl_readback(width: u32, height: u32, #[string] calls_json: &str) -> Str
 
 // Whether a host WebGL executor is installed. The op itself is always registered, so the JS
 // recorder can't infer presence from `typeof op`; it checks this so it only overrides the WebGL
-// context when a GPU backend exists (else the vendored synthetic context is left untouched).
+// context when a GPU backend exists (else the binding's synthetic context is left untouched).
 #[op2(fast)]
 fn op_webgl_available() -> bool {
     WEBGL_EXEC.read().map(|g| g.is_some()).unwrap_or(false)
@@ -5542,7 +5542,7 @@ fn retire_frame_tree_impl<'s>(
                 fetch_streams::retire_context(scope, context);
                 crate::message_ports::retire_context(scope, context);
                 storage_events::retire(context);
-                crate::browser_env::retire_native_document(scope, context);
+                turbo_dom_browser_env::host_internals::retire_context(context);
                 context.set_slot(Rc::new(FrameRetired));
                 crate::context_ownership::release_parent(scope, context);
                 #[cfg(turbo_surf_native_proxy)]
@@ -8067,7 +8067,7 @@ globalThis.requestAnimationFrame = (fn) => {
   return id;
 };
 ops.op_capture_frame_scheduler((step) => { __frameSteps[__frameSteps.length] = step; __scheduleFrame(); });
-// The vendored binding's view-transition rendering seam. A page here is never hidden: the
+// The binding's view-transition rendering seam. A page here is never hidden: the
 // engine has no tab or occlusion model and reports document.visibilityState "visible".
 ops.op_capture_view_transition_host((command, argument) => {
   if (command === "frame") { __viewTransitionSteps[__viewTransitionSteps.length] = argument; __scheduleFrame(); }
@@ -8121,8 +8121,8 @@ ops.op_set_host_capabilities({
   runLocalTimers:max=>__runLocalTimers(max)
 });
 // NOTE: getElementsByTagName/ClassName/Name, lastChild/previous*/nextElementSibling,
-// and document.write/writeln are provided by the vendored binding (browser_env.js,
-// turbo-test ≥ 71477ba) — real-world bundles (jQuery's load-time support probe,
+// and document.write/writeln are provided by the binding (turbo-dom-browser-env's
+// browser_env.js, since turbo-test 71477ba) — real-world bundles (jQuery's load-time support probe,
 // document.write-driven pages) depend on them. They live upstream, not here.
 //
 // Runtime document state stays outside the native node. Use the native brand
@@ -8697,7 +8697,7 @@ globalThis.fetch = async (input, init = undefined) => {
     return clone(value,receiver,transfer===undefined?undefined:sequence(transfer));
   }}).structuredClone,"structuredClone",1);
 }
-// NOTE: getComputedStyle is provided by the vendored browser_env.js (a jsdom-style
+// NOTE: getComputedStyle is provided by the binding's browser_env.js (a jsdom-style
 // getComputedStyle the Playwright shim's cssValue/visibility reads). Do NOT redefine
 // IT here — ENV_BOOTSTRAP runs AFTER the binding, so an override would clobber the
 // real one and break the shim.
@@ -8894,7 +8894,7 @@ ops.op_set_host_capabilities({
 // The canonical binding owns native custom-element construction, registry state
 // and lifecycle reactions in every Window realm.
 // (CSSStyleSheet, document.adoptedStyleSheets, and the HTML*Element constructor
-// family are all provided by the vendored browser_env binding.)
+// family are all provided by the turbo-dom-browser-env binding.)
 // MessagePort / MessageChannel — real classes (not object-literal stubs), so `port instanceof
 // MessagePort` holds and `port.addEventListener('message', fn)` works, not just `onmessage=`
 // (Chrome shape; the object-literal stub was a brand/instanceof tell). React 18's scheduler
@@ -8903,7 +8903,7 @@ ops.op_set_host_capabilities({
 // idiom — delivery routes through the virtual timer queue (setTimeout 0) so the hydration/
 // interaction pump drains it. Setting `onmessage` implies `start()` (Chrome); the addEventListener
 // path queues until start().
-// MessageEvent — a REAL constructor (the vendored binding ships only a hollow `function(){}`
+// MessageEvent — a REAL constructor (the binding ships only a hollow `function(){}`
 // stub, so `new MessageEvent('message',{data}).data` was undefined). Our postMessage / port /
 // BroadcastChannel dispatch build events via this so `ev instanceof MessageEvent` holds and the
 // event carries data/origin/source/ports like Chrome. Defined before the ports that use it.
@@ -9032,7 +9032,7 @@ const __streamTransferFactory =
 // its own scheduler by posting to the window and running work in the `message` handler —
 // a bare `postMessage(...)` call (window.postMessage) with no shim throws
 // "postMessage is not a function" and aborts the VM before any token path runs. The
-// vendored binding supplies window `addEventListener`/`dispatchEvent`; we only add the
+// binding supplies window `addEventListener`/`dispatchEvent`; we only add the
 // poster. MessageEvent is a bare stub here, so build a plain event carrying the fields
 // collectors read (data/origin/source/ports).
 const __postingWindow=globalThis, __postingException=DOMException;
@@ -9108,7 +9108,7 @@ for (const __on of ["onmessage", "onerror", "onmessageerror", "ononline", "onoff
   try { if (globalThis[__on] === undefined) globalThis[__on] = null; } catch (_e) {}
 }
 // document.contentType — real Chrome reports "text/html" for an HTML document; the
-// reCAPTCHA VM reads it. The vendored binding doesn't expose it, so add an own accessor.
+// reCAPTCHA VM reads it. The binding doesn't expose it, so add an own accessor.
 try {
   if (globalThis.document && globalThis.document.contentType === undefined) {
     Object.defineProperty(globalThis.document, "contentType", { configurable: true, get() { return "text/html"; } });
@@ -11183,7 +11183,7 @@ __G.domSig = (() => {
   mark(fetch, "fetch");
   mark(setInterval); mark(clearInterval);
   mark(cancelAnimationFrame, "cancelAnimationFrame"); // now its own fn, not a clearTimeout alias
-  // Event API: the vendored addEventListener/removeEventListener/dispatchEvent are `function`
+  // Event API: the binding's addEventListener/removeEventListener/dispatchEvent are `function`
   // shims — their `.toString()` leaks source AND they carry an own `prototype` (native methods
   // don't). WORSE, they sit as WINDOW OWN-PROPS: real Chrome inherits them from
   // EventTarget.prototype, so `window.hasOwnProperty('addEventListener')` is FALSE in Chrome but
@@ -11540,7 +11540,7 @@ __G.domSig = (() => {
     // REAL args (buffer bytes + shader source — captured at the live call site, so nothing is
     // lossy) into a batch, and on readPixels flush the batch to the host GPU executor
     // (op_webgl_readback) and fill the destination from genuine GPU pixels. Only installed when a
-    // host executor is present; otherwise the vendored synthetic context is left as-is. getShader/
+    // host executor is present; otherwise the binding's synthetic context is left as-is. getShader/
     // Program*Parameter report success so a page's compile/link checks pass. Returns real GPU
     // pixels for the common fingerprint draw (shaders + a vertex buffer + drawArrays + readPixels).
     const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -11567,7 +11567,7 @@ __G.domSig = (() => {
     const installWebglRecorder = (gl) => {
       const op = (ops && ops.op_webgl_readback) || null;
       // op_webgl_readback is ALWAYS registered, so `typeof op` can't tell whether a GPU executor
-      // is installed. Only override the (vendored synthetic) WebGL context when one actually is —
+      // is installed. Only override the binding's synthetic WebGL context when one actually is —
       // otherwise the default build would replace the context with recording stubs for nothing.
       const avail = ops && ops.op_webgl_available;
       if (!op || !avail || !avail()) return;
@@ -11671,7 +11671,7 @@ __G.domSig = (() => {
           // Give the context its OWN dedicated prototype carrying its methods, then wire it to
           // the named global constructor, so `gl instanceof WebGLRenderingContext` holds and
           // `WebGLRenderingContext.prototype.getParameter` resolves natively. We must NOT reuse
-          // the vendored context's shared fallback prototype (a generic object also backing
+          // the binding's context's shared fallback prototype (a generic object also backing
           // `location` etc.) as the constructor prototype — that would make `location instanceof
           // WebGLRenderingContext` true and collapse the webgl/webgl2 protos onto one, both worse
           // tells. The context methods are per-instance bound closures (they don't read `this`),
@@ -11706,12 +11706,12 @@ __G.domSig = (() => {
             }
           } catch (e) {}
         }
-        // 2D context: replace the vendored getImageData (an OWN instance method returning synthetic
+        // 2D context: replace the binding's getImageData (an OWN instance method returning synthetic
         // bytes — `fillRect(red); getImageData` read back NON-red, a broken-canvas tell) with one
         // that reads the ACTUAL rendered pixels back through the raw-RGBA rasterizer. Raw pixels
         // have no PNG encoder in the loop, so shapes/solids read back exactly like a real browser.
         if (k === "2d") {
-          // Class tag: real Chrome is "[object CanvasRenderingContext2D]"; the vendored ctx tagged
+          // Class tag: real Chrome is "[object CanvasRenderingContext2D]"; the binding's ctx tagged
           // as "[object DOMImplementation]" (its shared fallback proto) — a tell. Brand the instance
           // (not the shared proto — that would mistag every other object backed by it, incl.
           // `location`, like the WebGL-proto lesson).
@@ -11725,7 +11725,7 @@ __G.domSig = (() => {
               return { alpha: true, colorSpace: "srgb", colorType: "unorm8", desynchronized: false, toneMapping: { mode: "standard" }, willReadFrequently: false };
             } }).getContextAttributes, "getContextAttributes", 0);
           }
-          // measureText: the vendored width was a synthetic approximation (a font-metrics tell —
+          // measureText: the binding's width was a synthetic approximation (a font-metrics tell —
           // font-detection fingerprints compare measureText width across families). Route the WIDTH
           // through the host's real system-font measurer (op_measure_text), which measures the same
           // CoreText face Chrome does → width matches Chrome exactly. The bounding-box fields are
@@ -11798,10 +11798,10 @@ __G.domSig = (() => {
     };
     // Prototype-less native shape (native methods have no own `prototype`); getContext.length === 1.
     canvasProto.getContext = nativize(wrapped, "getContext", 1);
-    // Raster-backed toDataURL: replay the vendored 2D display list (ctx._ops) through the
-    // host rasterizer (op_raster_png) into a REAL PNG. The vendored stub returns a ~94-byte
+    // Raster-backed toDataURL: replay the binding's 2D display list (ctx._ops) through the
+    // host rasterizer (op_raster_png) into a REAL PNG. The binding's stub returns a ~94-byte
     // synthetic blob — an impossible size for rendered content, a canvas-fingerprint tell.
-    // Falls back to the vendored blob when no rasterizer is installed or on any error.
+    // Falls back to the binding's blob when no rasterizer is installed or on any error.
     const rasterOp = (ops && ops.op_raster_png) || null;
     const origToDataURL = canvasProto.toDataURL;
     if (typeof origToDataURL === "function") {
@@ -11810,7 +11810,7 @@ __G.domSig = (() => {
         requireCanvas(this);
         if (this.width === 0 || this.height === 0) return "data:,";
         // The raster op only encodes PNG. For a non-PNG request (e.g. the webp-support probe
-        // toDataURL('image/webp') or an explicit image/jpeg) defer to the vendored path, which
+        // toDataURL('image/webp') or an explicit image/jpeg) defer to the binding's path, which
         // labels the data URL with the requested MIME — returning PNG for a webp request would be
         // both wrong bytes and a tell.
         const mime = typeof type === "string" && type ? type.toLowerCase() : "image/png";
@@ -11897,7 +11897,7 @@ __G.domSig = (() => {
   guard(() => { if (G.CSS) mark(G.CSS.supports, "supports"); });
 
   // Constructed-object host interfaces we own in JS (brand + native method). The 9 rtdom-native
-  // element/Range/Text brands need vendored-binding work and stay as residual struct fails.
+  // element/Range/Text brands need binding work and stay as residual struct fails.
   const defClass = (name, method, ctorArgsOk) => guard(() => {
     let C = G[name];
     if (typeof C !== "function") { C = function () {}; Object.defineProperty(C, "name", { value: name, configurable: true }); G[name] = C; }
@@ -11927,7 +11927,7 @@ __G.domSig = (() => {
   // rtdom nodes/elements expose DISTINCT per-tag prototypes reachable from JS, so brand each
   // (Symbol.toStringTag on the tag's own prototype) and native-mark its checked method IN PLACE
   // (mark the existing function, never shadow it) — clears struct-brand-table + struct-method-not-native
-  // without touching the vendored DOM binding.
+  // without touching the DOM binding.
   guard(() => {
     const brandNode = (obj, name, method) => {
       if (!obj) return;
@@ -11973,7 +11973,7 @@ __G.domSig = (() => {
   guard(() => { ["fetch", "requestAnimationFrame", "queueMicrotask", "matchMedia"].forEach((n) => { if (typeof G[n] === "function") mark(G[n], n); }); });
 
   // Document encoding accessors — a real Chrome document reports characterSet/charset/
-  // inputEncoding = "UTF-8"; the vendored no-layout document leaves them undefined, a tell
+  // inputEncoding = "UTF-8"; the binding's no-layout document leaves them undefined, a tell
   // an anti-bot collector reads (`document.characterSet`). Define on the document's own
   // prototype so all documents (incl. child realms) inherit; skip if already present.
   guard(() => {

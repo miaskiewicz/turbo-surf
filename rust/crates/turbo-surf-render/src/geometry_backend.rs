@@ -25,7 +25,7 @@ fn op_live_geometry_brand<'s>(
     receiver: v8::Local<'s, v8::Value>,
     kind: u32,
 ) -> bool {
-    crate::browser_env::valid_native_geometry_receiver(scope, receiver, kind)
+    crate::live_layout_dom::valid_receiver(scope, receiver, kind)
 }
 fn frame_scheduler_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
     let name = v8::String::new(scope, "turbo-surf.frame.scheduler")?;
@@ -55,7 +55,7 @@ fn op_capture_frame_scheduler<'s>(
     Ok(())
 }
 /// Trusted bootstrap hands the realm's view-transition rendering seam (frame steps after
-/// animation callbacks, rendering suppression, page visibility) to the vendored binding.
+/// animation callbacks, rendering suppression, page visibility) to the binding.
 #[op2(fast, reentrant)]
 fn op_capture_view_transition_host<'s>(
     scope: &mut v8::PinScope<'s, '_>,

@@ -2,6 +2,7 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc::{channel, Receiver};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 fn server(responses: Vec<String>) -> (String, Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -53,12 +54,12 @@ fn request(rx: &Receiver<String>) -> String {
 async fn actual_formdata_interface_and_constructor_reentrancy_match_chrome() {
     for (probe, raw) in [
         (
-            include_str!("../src/formdata_event_probe.js"),
-            include_str!("../src/formdata_event_chrome155.json"),
+            test_support::FORMDATA_EVENT_PROBE_JS,
+            test_support::FORMDATA_EVENT_CHROME155_JSON,
         ),
         (
-            include_str!("../src/formdata_guards_probe.js"),
-            include_str!("../src/formdata_guards_chrome155.json"),
+            test_support::FORMDATA_GUARDS_PROBE_JS,
+            test_support::FORMDATA_GUARDS_CHROME155_JSON,
         ),
     ] {
         let control: serde_json::Value = serde_json::from_str(raw).unwrap();

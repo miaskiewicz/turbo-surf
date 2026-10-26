@@ -1,11 +1,12 @@
-//! Web Animations on the real render runtime: the vendored live-timeline probe Chrome 156 ran
+//! Web Animations on the real render runtime: the binding's live-timeline probe Chrome 156 ran
 //! on its own frame clock, replayed against turbo-surf's rendering-frame scheduler.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
-const PROBE: &str = include_str!("../src/animations_frames_probe.js");
-const CASES: &[u8] = include_bytes!("../src/animations_frames_cases.json");
+const PROBE: &str = test_support::ANIMATIONS_FRAMES_PROBE_JS;
+const CASES: &[u8] = test_support::ANIMATIONS_FRAMES_CASES_JSON;
 
 async fn observe(html: &str, expression: &str) -> Value {
     let mut page = PageSession::open(html, "http://127.0.0.1/", "", "", 20000)
@@ -22,7 +23,7 @@ async fn observe(html: &str, expression: &str) -> Value {
 #[tokio::test(flavor = "current_thread")]
 async fn animations_follow_the_frame_clock_like_chrome156() {
     let control: Value =
-        serde_json::from_str(include_str!("../src/animations_frames_chrome156.json")).unwrap();
+        serde_json::from_str(test_support::ANIMATIONS_FRAMES_CHROME156_JSON).unwrap();
     assert_eq!(control["browser"], "Chrome/156.0.8078.47");
     assert_eq!(control["errors"], serde_json::json!([]));
     assert_eq!(

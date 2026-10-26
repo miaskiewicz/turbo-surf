@@ -871,7 +871,8 @@ snapshots remain local; they can contain page memory.
 Keep unfinished source candidates and their exact patches, source hashes and test
 receipts under repository-local `.native-builds/recovery/`, which is ignored.
 Temporary-directory candidates can disappear across restarts. Save reviewed
-canonical changes in turbo-test before re-vendoring; preserve an unfinished source
+canonical binding changes in turbo-dom (`turbo-dom-browser-env`) and consume
+them as a dependency (no copies); preserve an unfinished source
 packet until its tested equivalent is committed. Raw live traces stay under the
 ignored artifacts directory. Remove obsolete owned build outputs after integration.
 

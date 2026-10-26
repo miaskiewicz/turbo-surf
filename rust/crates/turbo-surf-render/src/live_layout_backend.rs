@@ -152,7 +152,7 @@ fn frame_content_size<'s>(
     host: v8::Local<'s, v8::Object>,
     depth: usize,
 ) -> Result<[f32; 2], String> {
-    let input = crate::browser_env::capture_native_layout(scope, host)?;
+    let input = crate::live_layout_dom::capture(scope, host)?;
     if !input.connected || !input.browsing_context {
         return Ok([0.0; 2]);
     }
@@ -209,7 +209,7 @@ fn measure<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<Geometry, String> {
-    let input = crate::browser_env::capture_native_layout(scope, receiver)?;
+    let input = crate::live_layout_dom::capture(scope, receiver)?;
     let geometry = if !input.connected || !input.browsing_context {
         crate::live_layout_metrics::empty_geometry()
     } else {
@@ -485,7 +485,7 @@ fn scroll_view<'s>(
     {
         return Ok(None);
     }
-    let input = crate::browser_env::capture_native_layout(scope, receiver)?;
+    let input = crate::live_layout_dom::capture(scope, receiver)?;
     if !input.connected || !input.browsing_context {
         return Ok(None);
     }
@@ -745,7 +745,7 @@ fn scroll_into_view<'s>(
             }
         }
     }
-    let elements = crate::browser_env::wrap_native_layout_elements(scope, receiver, &changed, 1)?;
+    let elements = crate::live_layout_dom::wrap_elements(scope, receiver, &changed, 1)?;
     let result = v8::Object::new(scope);
     let null = v8::null(scope);
     if result.set_prototype(scope, null.into()) != Some(true) {
@@ -1164,7 +1164,7 @@ fn hit<'s>(
     document: v8::Local<'s, v8::Object>,
     point: [f64; 2],
 ) -> Result<v8::Local<'s, v8::Array>, String> {
-    let input = crate::browser_env::capture_native_document_layout(scope, document)?;
+    let input = crate::live_layout_dom::capture_document(scope, document)?;
     if !input.browsing_context {
         return Ok(v8::Array::new(scope, 0));
     }
@@ -1194,7 +1194,7 @@ fn hit<'s>(
     } else {
         ids
     };
-    crate::browser_env::wrap_native_layout_elements(scope, document, &ids, 1)
+    crate::live_layout_dom::wrap_elements(scope, document, &ids, 1)
 }
 
 #[op2(reentrant)]
@@ -1214,7 +1214,7 @@ fn offset<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
-    let input = crate::browser_env::capture_native_layout(scope, receiver)?;
+    let input = crate::live_layout_dom::capture(scope, receiver)?;
     let position = if !input.connected || !input.browsing_context {
         crate::live_layout_metrics::OffsetPosition {
             left: 0,
@@ -1248,7 +1248,7 @@ fn offset<'s>(
         }
     };
     let parent = if let Some(parent) = position.parent {
-        crate::browser_env::wrap_native_layout_elements(scope, receiver, &[parent], 1)?
+        crate::live_layout_dom::wrap_elements(scope, receiver, &[parent], 1)?
             .get_index(scope, 0)
             .ok_or("native offset parent interrupted")?
     } else {
@@ -1297,7 +1297,7 @@ fn range_geometry<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Result<RangeGeometry, String> {
-    let input = crate::browser_env::capture_native_layout(scope, receiver)?;
+    let input = crate::live_layout_dom::capture(scope, receiver)?;
     let selections = input.range.as_ref().ok_or("Illegal invocation")?;
     let mut rects = Vec::new();
     if input.connected && input.browsing_context {
@@ -1380,7 +1380,7 @@ fn caret_at_point<'s>(
     document: v8::Local<'s, v8::Object>,
     point: [f64; 2],
 ) -> Result<v8::Local<'s, v8::Value>, String> {
-    let input = crate::browser_env::capture_native_document_layout(scope, document)?;
+    let input = crate::live_layout_dom::capture_document(scope, document)?;
     if !input.browsing_context {
         return Ok(v8::null(scope).into());
     }
@@ -1399,7 +1399,7 @@ fn caret_at_point<'s>(
     let Some((source, offset, rect)) = endpoint else {
         return Ok(v8::null(scope).into());
     };
-    let node = crate::browser_env::wrap_native_layout_elements(scope, document, &[source], 3)?
+    let node = crate::live_layout_dom::wrap_elements(scope, document, &[source], 3)?
         .get_index(scope, 0)
         .ok_or("native caret source wrapping interrupted")?;
     let result = v8::Object::new(scope);
@@ -1437,7 +1437,7 @@ fn caret_geometry<'s>(
     node: v8::Local<'s, v8::Object>,
     offset: usize,
 ) -> Result<[f32; 4], String> {
-    let input = crate::browser_env::capture_native_layout(scope, node)?;
+    let input = crate::live_layout_dom::capture(scope, node)?;
     if !input.connected || !input.browsing_context {
         return Ok([0.0; 4]);
     }

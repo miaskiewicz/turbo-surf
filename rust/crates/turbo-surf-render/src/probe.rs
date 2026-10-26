@@ -349,5 +349,5 @@ fn extract_sink(html: &str, sink_id: &str) -> String {
 
 // Tests for `probe_globals` live in `tests/probe.rs`, a separate test process:
 // they boot a deno_core runtime (which initializes the V8 platform), and the
-// lib unit-test binary must stay deno_core-free so it never collides with
-// `browser_env`'s standalone-V8 smoke test (see browser_env.rs header).
+// lib unit-test binary stays deno_core-free so it never initializes a second V8
+// platform.

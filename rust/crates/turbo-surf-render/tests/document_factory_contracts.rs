@@ -1,3 +1,4 @@
+use turbo_dom_browser_env::test_support;
 use turbo_surf_render::PageSession;
 
 async fn assert_control(probe: &str, fixture: &str) {
@@ -21,8 +22,8 @@ async fn assert_control(probe: &str, fixture: &str) {
 #[tokio::test(flavor = "current_thread")]
 async fn document_factories_match_chrome_with_real_private_inert_runtime_state() {
     assert_control(
-        include_str!("../src/dom_implementation_probe.js"),
-        include_str!("../src/dom_implementation_chrome155.json"),
+        test_support::DOM_IMPLEMENTATION_PROBE_JS,
+        test_support::DOM_IMPLEMENTATION_CHROME155_JSON,
     )
     .await;
 }
@@ -30,8 +31,8 @@ async fn document_factories_match_chrome_with_real_private_inert_runtime_state()
 #[tokio::test(flavor = "current_thread")]
 async fn xml_local_names_and_namespaces_match_chrome_through_host_factory_ops() {
     assert_control(
-        include_str!("../src/xml_factory_elements_probe.js"),
-        include_str!("../src/xml_factory_elements_chrome155.json"),
+        test_support::XML_FACTORY_ELEMENTS_PROBE_JS,
+        test_support::XML_FACTORY_ELEMENTS_CHROME155_JSON,
     )
     .await;
 }

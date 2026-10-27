@@ -6415,4 +6415,109 @@ mod session_tool_tests {
             "{report}"
         );
     }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetch_markdown_tools_and_run_playwright_navigate_first() {
+        let base = spawn_site().await;
+        let mut s = Session::new();
+        let one = call(
+            &mut s,
+            "fetch_markdown",
+            json!({ "url": format!("{base}/search?m"), "links": true, "mode": "no-js" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.mode, "no-js");
+        assert_eq!(one["title"], "Search");
+        assert_eq!(one["markdown"], "/search?m\n\nhome");
+        assert_eq!(one["links"], json!([format!("{base}/")]));
+        let plain = call(&mut s, "fetch_markdown", json!({ "url": format!("{base}/post") }))
+            .await
+            .unwrap();
+        assert!(plain.get("links").is_none());
+        assert_eq!(
+            call(&mut s, "fetch_markdown", json!({})).await.unwrap_err(),
+            "fetch_markdown: missing 'url'"
+        );
+        let many = call(
+            &mut s,
+            "fetch_markdown_batch",
+            json!({ "urls": [format!("{base}/search?b"), "http://127.0.0.1:1/x"], "links": true, "concurrency": 0 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(many[0]["url"], format!("{base}/search?b"));
+        assert_eq!(many[0]["status"], 200);
+        assert_eq!(many[0]["title"], "Search");
+        assert_eq!(many[0]["links"], json!([format!("{base}/")]));
+        assert_eq!(many[1]["url"], "http://127.0.0.1:1/x");
+        assert!(many[1]["error"].as_str().is_some_and(|e| !e.is_empty()));
+        assert_eq!(
+            call(&mut s, "fetch_markdown_batch", json!({})).await.unwrap_err(),
+            "fetch_markdown_batch: missing 'urls' array"
+        );
+        // run_playwright navigates to `url` first, then runs the script on that page.
+        let run = call(
+            &mut s,
+            "run_playwright",
+            json!({ "url": format!("{base}/post"), "script": "console.log(document.title)" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run["ok"], true, "{run}");
+        assert_eq!(s.url, format!("{base}/post"));
+        assert_eq!(
+            call(&mut s, "run_playwright", json!({})).await.unwrap_err(),
+            "run_playwright: missing 'script'"
+        );
+    }
+
+    #[test]
+    fn strategy_validation_names_each_missing_piece() {
+        let mut s = Session::new();
+        let load = |s: &mut Session, strategy: Value| {
+            tool_search_load_strategy(s, &json!({ "strategy": strategy })).unwrap_err()
+        };
+        assert_eq!(
+            load(&mut s, json!({ "engine": " ", "query_url": "{query}" })),
+            "web_search_load_strategy: 'engine' must be non-empty"
+        );
+        assert_eq!(
+            load(&mut s, json!({ "engine": "e", "query_url": "https://e.test/" })),
+            "web_search_load_strategy: 'query_url' must contain '{query}'"
+        );
+        assert_eq!(
+            load(&mut s, json!({ "engine": "e", "query_url": "{query}" })),
+            "web_search_load_strategy: format 'html' requires result_container/title/link"
+        );
+        assert_eq!(
+            load(&mut s, json!({ "engine": "e", "query_url": "{query}", "format": "json" })),
+            "web_search_load_strategy: format 'json' requires 'json_path'"
+        );
+        assert_eq!(
+            load(
+                &mut s,
+                json!({ "engine": "e", "query_url": "{query}", "format": "json",
+                        "json_path": { "results": "r", "title": "", "url": "u" } })
+            ),
+            "web_search_load_strategy: 'json_path' needs results/title/url"
+        );
+        assert_eq!(
+            load(&mut s, json!({ "engine": "e", "query_url": "{query}", "format": "xml" })),
+            "web_search_load_strategy: unknown format 'xml' (html|json|structural)"
+        );
+        assert!(load(&mut s, json!({ "engine": 1 })).starts_with("web_search_load_strategy: invalid strategy ("));
+        assert_eq!(
+            tool_search_load_strategy(&mut s, &json!({})).unwrap_err(),
+            "web_search_load_strategy: missing 'strategy' object"
+        );
+        assert_eq!(
+            tool_search_load_strategy(
+                &mut s,
+                &json!({ "strategy": { "engine": "g2", "query_url": "{query}", "format": "structural" } })
+            )
+            .unwrap(),
+            json!({ "engine": "g2", "version": "", "ok": true })
+        );
+    }
 }

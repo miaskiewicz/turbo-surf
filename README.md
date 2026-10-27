@@ -803,6 +803,10 @@ gate, and runs the **Playwright shim** suites (`npm run test:playwright` =
 `register.mjs`, no Chromium). `npm run harness` / `crawl-bench` / `hotpath` run the
 benchmarks (install `playwright` + `crawlee` ad-hoc for the competitor engines).
 
+CI also gates line coverage (`cd rust && cargo tarpaulin`, `rust/tarpaulin.toml`) and
+cyclomatic complexity (`npm run complexity:rust` / `complexity:js`, cc <= 15 per function);
+see [`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md).
+
 ## License
 
 MIT

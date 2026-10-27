@@ -1,3 +1,5 @@
 /target
 **/node_modules
 crates/turbo-surf-napi/*.node
+# tarpaulin (LLVM engine) leaves build-script profiles in the working directory
+*.profraw

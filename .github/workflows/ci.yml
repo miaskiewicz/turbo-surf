@@ -51,3 +51,102 @@ jobs:
 
       - name: Test
         run: npm test
+
+  # ---- Line-coverage gate for the Rust workspace (rust/tarpaulin.toml: LLVM engine, fail-under) ----
+  # fail-under is the coverage measured when the gate landed (82.89%, see tarpaulin.toml and
+  # docs/QUALITY-GATES.md); the coverage phase raises it to >= 99.5. Never lower it to pass a
+  # change. macOS arm64 matches the platform the floor was measured on; the V8 archive is the
+  # same simdutf rusty_v8 release the `lint + test` job's build downloads.
+  coverage:
+    name: coverage (rust workspace, tarpaulin fail-under)
+    runs-on: macos-latest
+    timeout-minutes: 240
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: llvm-tools-preview
+      # turbo-surf-py (a workspace member) links libpython through pyo3.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-tarpaulin@0.37.5
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target/cov
+          key: coverage
+      - name: Install
+        run: npm ci
+      - name: cargo tarpaulin (fails below rust/tarpaulin.toml fail-under)
+        working-directory: rust
+        run: cargo tarpaulin --locked
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-rust
+          path: rust/target/cov/report/
+          if-no-files-found: ignore
+
+  # ---- Complexity: cyclomatic complexity <= 15 per function, no allow-list, no baseline ----
+  # EXPECTED RED until the post-coverage refactor: the functions above 15 when the gate landed
+  # are the refactor backlog (docs/QUALITY-GATES.md); refactoring waits until unit-test coverage
+  # is complete so it cannot break behaviour silently. Never raise the limit or skip a file to
+  # turn it green. Rust: turbo-html2pdf's tools/cc-check installed from its home at a pinned
+  # rev (not copied here) over every tracked .rs file; JS: oxlint's `complexity` rule
+  # (.oxlintrc.complexity.json) over cli.js, index.js and harness/.
+  # `continue-on-error` keeps the red jobs from failing the workflow while the backlog exists;
+  # the failing job and its step summary list every function over the limit. Drop
+  # `continue-on-error` (and make both checks required) once the backlog is cleared.
+  complexity-rust:
+    name: complexity / rust (cc <= 15)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      CC_CHECK_REV: 923c89f791f3a89cb089a59626a25cef0a9cbd5f
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cc-check
+          key: cc-check-${{ runner.os }}-${{ env.CC_CHECK_REV }}
+      - name: Install cc-check (turbo-html2pdf tools/cc-check @ CC_CHECK_REV)
+        run: |
+          if [ ! -x "$HOME/.cc-check/bin/cc-check" ]; then
+            cargo install --locked --root "$HOME/.cc-check" \
+              --git https://github.com/miaskiewicz/turbo-html2pdf --rev "$CC_CHECK_REV" cc-check
+          fi
+          echo "$HOME/.cc-check/bin" >> "$GITHUB_PATH"
+      - name: cc-check --max 15 (every tracked .rs file)
+        shell: bash  # -eo pipefail: tee must not mask the gate's exit code
+        run: npm run -s complexity:rust 2>&1 | tee complexity.txt
+      - name: List the functions over the limit (refactor backlog)
+        if: failure()
+        run: |
+          { echo '### Rust functions above cc 15'; echo '```'; grep 'cyclomatic complexity' complexity.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  complexity-js:
+    name: complexity / js (cc <= 15)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: oxlint complexity max 15 (cli.js, index.js, harness/)
+        shell: bash  # -eo pipefail: tee must not mask the gate's exit code
+        run: npm run -s complexity:js 2>&1 | tee complexity.txt
+      - name: List the functions over the limit (refactor backlog)
+        if: failure()
+        run: |
+          { echo '### JS functions above cc 15'; echo '```'; grep 'complexity of' complexity.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

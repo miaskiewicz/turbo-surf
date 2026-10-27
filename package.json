@@ -22,6 +22,8 @@
   ],
   "scripts": {
     "lint": "oxlint",
+    "complexity:rust": "git ls-files -z '*.rs' | xargs -0 cc-check --max 15",
+    "complexity:js": "npx --yes oxlint@1.87.0 -c .oxlintrc.complexity.json cli.js index.js harness",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "build:addon": "cd rust && cargo build --release -p turbo-surf-napi",

@@ -59,6 +59,14 @@ Chrome probes are skipped). `npm run check` runs the JS lint/format + the Rust g
 shim tests (`test:playwright` = `build:addon` then `test:shim` + `test:e2e`). Never
 bypass with `--no-verify`.
 
+CI also gates **line coverage** (`coverage` job: `cd rust && cargo tarpaulin`, reading
+`rust/tarpaulin.toml`; fail-under 83.15 (measured 83.19%), the floor measured when the gate landed, raised to
+>= 99.5 by the coverage phase) and **cyclomatic complexity**
+(`complexity / rust (cc <= 15)` and `complexity / js (cc <= 15)`: `npm run complexity:rust` /
+`complexity:js`, one limit, no allow-list; expected red until the post-coverage refactor, see
+[`docs/QUALITY-GATES.md`](./docs/QUALITY-GATES.md) for the commands, the floors and the
+backlog). Never lower a floor or raise the limit to pass a change.
+
 ## Testing rules
 
 - Rust: `cargo test` — `node:test`-style unit tests live in each crate; deno_core

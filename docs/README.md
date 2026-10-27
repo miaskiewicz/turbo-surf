@@ -9,6 +9,8 @@ anymore (the engine is Rust; its modules are crates). Start here:
 - [`../CHANGELOG.md`](../CHANGELOG.md) — what shipped.
 - [`../PUBLISHING.md`](../PUBLISHING.md) — how releases cut (npm launcher + crates).
 - [`../AGENTS.md`](../AGENTS.md) — working rules for contributors.
+- [`QUALITY-GATES.md`](./QUALITY-GATES.md) — the CI coverage and complexity gates, their
+  floors and the complexity refactor backlog.
 
 ## Engine (the Rust workspace)
 - [`../rust/README.md`](../rust/README.md) — the 9-crate workspace, the tiers

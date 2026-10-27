@@ -338,3 +338,131 @@ pub(crate) fn value_at(
     }
     Ok(previous_value)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ev(kind: &str, time: f64, value: f32) -> Event {
+        Event {
+            kind: kind.into(),
+            time,
+            value,
+            constant: 0.,
+            duration: 0.,
+            curve: vec![],
+        }
+    }
+
+    fn auto(events: Vec<Event>) -> Automation {
+        Automation {
+            events,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn validation_rejects_each_malformed_timeline() {
+        let err = |events: Vec<Event>| validate(&auto(events)).unwrap_err();
+        assert_eq!(
+            err((0..257).map(|i| ev("set", i as f64, 0.)).collect()),
+            "AudioParam event limit exceeded"
+        );
+        assert!(validate(&auto((0..256).map(|i| ev("set", i as f64, 0.)).collect())).is_ok());
+        for bad in [
+            ev("set", f64::NAN, 0.),
+            ev("set", -1., 0.),
+            ev("set", 0., f32::INFINITY),
+        ] {
+            assert_eq!(err(vec![bad]), "Invalid audio automation event");
+        }
+        assert_eq!(
+            err(vec![ev("set", 2., 0.), ev("set", 1., 0.)]),
+            "Invalid audio automation event"
+        );
+        assert_eq!(err(vec![ev("hold", 0., 0.)]), "Unknown audio automation event");
+        let mut target = ev("target", 0., 1.);
+        target.constant = -0.5;
+        assert_eq!(err(vec![target]), "Invalid target time constant");
+        let mut short = ev("curve", 0., 0.);
+        short.curve = vec![1.];
+        short.duration = 1.;
+        assert_eq!(err(vec![short]), "Invalid audio value curve");
+        let mut flat = ev("curve", 0., 0.);
+        flat.curve = vec![1., 2.];
+        assert_eq!(err(vec![flat]), "Invalid audio value curve");
+        let mut nan_curve = ev("curve", 0., 0.);
+        nan_curve.curve = vec![1., f32::NAN];
+        nan_curve.duration = 1.;
+        assert_eq!(err(vec![nan_curve]), "Invalid audio automation event");
+    }
+
+    #[test]
+    fn value_at_follows_the_web_audio_ramp_target_and_curve_formulas() {
+        let rate = 48000.;
+        // A first ramp starts from the intrinsic value at t=0.
+        let linear = auto(vec![ev("linear", 2., 10.)]);
+        assert_eq!(value_at(2., linear.clone(), 1., rate).unwrap(), 6.);
+        // Exponential: v0 * (v1/v0)^fraction; with a sign change it holds v0.
+        let expo = auto(vec![ev("set", 0., 1.), ev("exponential", 2., 4.)]);
+        assert!((value_at(0., expo, 1., rate).unwrap() - 2.).abs() < 1e-6);
+        let crossing = auto(vec![ev("set", 0., -1.), ev("exponential", 2., 4.)]);
+        assert_eq!(value_at(0., crossing, 1., rate).unwrap(), -1.);
+        // A later "set" holds the previous value until it starts.
+        let step = auto(vec![ev("set", 0., 3.), ev("set", 5., 9.)]);
+        assert_eq!(value_at(0., step.clone(), 4.9, rate).unwrap(), 3.);
+        assert_eq!(value_at(0., step, 5., rate).unwrap(), 9.);
+        // A curve interpolates linearly over its duration and clamps after it.
+        let mut curve = ev("curve", 1., 0.);
+        curve.curve = vec![0., 10., 20.];
+        curve.duration = 2.;
+        let curve = auto(vec![curve, ev("set", 10., 0.)]);
+        assert_eq!(value_at(0., curve.clone(), 2.5, rate).unwrap(), 15.);
+        assert_eq!(value_at(0., curve, 4., rate).unwrap(), 20.);
+        // A target that has been superseded by a later event uses the closed form.
+        let mut target = ev("target", 0., 0.);
+        target.constant = 1.;
+        let after = auto(vec![ev("set", 0., 1.), target, ev("set", 5., 7.)]);
+        let expected = (-4.9f64).exp() as f32;
+        let held = value_at(1., after.clone(), 4.9, rate).unwrap();
+        assert!((held - expected).abs() < 1e-5, "{held} vs {expected}");
+        // An active target is rendered sample by sample (the hold limit applies).
+        let mut active = ev("target", 0., 0.);
+        active.constant = 0.5;
+        let active = auto(vec![active]);
+        let v = value_at(1., active.clone(), 0.01, rate).unwrap();
+        assert!((v - (-0.02f64).exp() as f32).abs() < 1e-3, "{v}");
+        assert_eq!(
+            value_at(1., active, 6., rate).unwrap_err(),
+            "AudioParam hold evaluation limit exceeded"
+        );
+        for (time, r) in [(f64::NAN, rate), (-1., rate), (0., 2999.), (0., 768001.), (0., f64::INFINITY)] {
+            assert_eq!(
+                value_at(0., auto(vec![]), time, r).unwrap_err(),
+                "Invalid AudioParam hold time"
+            );
+        }
+        assert_eq!(value_at(5., auto(vec![]), 1., rate).unwrap(), 5.);
+    }
+
+    #[test]
+    fn rendered_ramps_handle_degenerate_spans_and_instant_targets() {
+        let rate = 3000.;
+        // Linear ramp onto the same instant: no division by zero, jumps to the end value.
+        let same = render(0., &auto(vec![ev("set", 0., 1.), ev("linear", 0., 5.)]), 4, rate)
+            .unwrap();
+        assert!(same.samples.iter().all(|v| v.is_finite()));
+        assert_eq!(*same.samples.last().unwrap(), 5.);
+        // Exponential across zero holds its start value until the end time.
+        let held = render(0., &auto(vec![ev("set", 0., -2.), ev("exponential", 1., 3.)]), 8, rate)
+            .unwrap();
+        assert_eq!(&held.samples[..8], &[-2.; 8]);
+        // A first ramp starts from the intrinsic value.
+        let ramp = render(4., &auto(vec![ev("linear", 1., 0.)]), 3001, rate).unwrap();
+        assert_eq!(ramp.samples[0], 4.);
+        assert!((ramp.samples[1500] - 2.).abs() < 1e-3);
+        // A zero time constant reaches the target immediately.
+        let instant = render(1., &auto(vec![ev("target", 0., 6.)]), 4, rate).unwrap();
+        assert_eq!(instant.samples, vec![6.; 4]);
+    }
+}

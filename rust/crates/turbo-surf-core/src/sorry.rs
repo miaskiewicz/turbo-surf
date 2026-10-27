@@ -866,4 +866,27 @@ mod tests {
             SolveError::Parse("sorry: no <form> on the /sorry page".into()).to_string()
         );
     }
+
+    #[test]
+    #[ignore = "turbo-surf#60: fails until the fix"]
+    fn unquoted_attribute_values_keep_slashes_like_chrome() {
+        // Chrome 156 getAttribute: an unquoted value ends at whitespace or `>` only.
+        assert_eq!(
+            attr_value("<form action=/save method=post>", "action").as_deref(),
+            Some("/save")
+        );
+        assert_eq!(
+            attr_value("<input name=continue value=https://g.test/search?q=1>", "value")
+                .as_deref(),
+            Some("https://g.test/search?q=1")
+        );
+        assert_eq!(attr_value("<input value=x/>", "value").as_deref(), Some("x/"));
+        let form = parse_sorry_form(
+            "https://g.test/sorry/index",
+            "<form action=/sorry/save><input name=continue value=https://g.test/s?q=1></form>",
+        )
+        .unwrap();
+        assert_eq!(form.action, "https://g.test/sorry/save");
+        assert_eq!(form.continue_url.as_deref(), Some("https://g.test/s?q=1"));
+    }
 }

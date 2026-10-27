@@ -160,6 +160,17 @@ fn solver_selection_chain_and_sidecar_protocol() {
         .unwrap();
     assert_eq!(token.cookies, vec![("_abck".to_string(), "A".to_string())]);
     assert_eq!(token.headers, vec![("x-kpsdk-ct".to_string(), "K".to_string())]);
+    assert_eq!(token.ttl, Duration::from_secs(30 * 60));
+    // Either half of the envelope alone is a token.
+    let cookies_only = rt
+        .block_on(sidecar(r#"cat >/dev/null; echo '{"cookies":{"c":"1"}}'"#, &ch, &ctx))
+        .unwrap();
+    assert_eq!(cookies_only.cookies, vec![("c".to_string(), "1".to_string())]);
+    assert!(cookies_only.headers.is_empty());
+    let headers_only = rt
+        .block_on(sidecar(r#"cat >/dev/null; echo '{"headers":{"h":"2"}}'"#, &ch, &ctx))
+        .unwrap();
+    assert!(headers_only.cookies.is_empty());
     assert_eq!(
         rt.block_on(sidecar("cat >/dev/null; echo '{}'", &ch, &ctx))
             .unwrap_err(),
@@ -206,14 +217,24 @@ fn solver_selection_chain_and_sidecar_protocol() {
         assert_eq!(select(s), Some("fallback"), "{s}");
     }
     std::env::remove_var("TURBO_SURF_BROWSER_CMD");
-    // Nothing configured → None; a real key is the auto pick.
+    // Nothing configured → None. An explicit hyper/scrapfly pick needs its own key;
+    // the auto pick prefers hyper.
     assert_eq!(select(""), None);
+    std::env::set_var("SCRAPFLY_API_KEY", "sk_real");
+    assert_eq!(select("hyper"), None);
+    assert_eq!(select("scrapfly"), Some("scrapfly"));
+    assert_eq!(select(""), Some("scrapfly"));
+    std::env::set_var("HYPER_API_KEY", "hk_real");
+    assert_eq!(select("scrapfly"), Some("scrapfly"));
+    assert_eq!(select(""), Some("hyper"));
+    std::env::remove_var("HYPER_API_KEY");
+    std::env::remove_var("SCRAPFLY_API_KEY");
 
     // `.env` (searched up to three parents) fills unset vars only: comments, blank
     // lines and lines without '=' are ignored, values are trimmed and unquoted.
     std::fs::write(
         dir.join("a/.env"),
-        "# solver config\n\n  HYPER_API_KEY = \"hk_real\"  \nNOT_AN_ASSIGNMENT\nSCRAPFLY_API_KEY=from_dotenv\n",
+        "# COMMENTED_OUT=1\n\n  HYPER_API_KEY = \"hk_real\"  \nNOT_AN_ASSIGNMENT\nSCRAPFLY_API_KEY=from_dotenv\n",
     )
     .unwrap();
     std::env::set_var("SCRAPFLY_API_KEY", "already-set");
@@ -224,6 +245,7 @@ fn solver_selection_chain_and_sidecar_protocol() {
         Ok("already-set")
     );
     assert!(std::env::var("NOT_AN_ASSIGNMENT").is_err());
+    assert!(std::env::var("# COMMENTED_OUT").is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

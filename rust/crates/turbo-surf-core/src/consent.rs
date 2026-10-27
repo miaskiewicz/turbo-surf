@@ -806,4 +806,14 @@ mod tests {
         let err = earn_consent_session(&mut jar, &form, "", 0.0).await.unwrap_err();
         assert!(err.starts_with("consent handshake: "), "{err}");
     }
+
+    #[test]
+    fn an_empty_form_before_the_accept_form_is_skipped() {
+        let html = "<form></form><form action='/save' method=post>\
+            <input name=set_aps value=true><input name=set_sc value=true></form>";
+        let form = parse_accept_form("https://consent.google.com/m", html).unwrap();
+        assert_eq!(form.action, "https://consent.google.com/save");
+        assert_eq!(form.method, "POST");
+        assert_eq!(form.fields.len(), 2);
+    }
 }
